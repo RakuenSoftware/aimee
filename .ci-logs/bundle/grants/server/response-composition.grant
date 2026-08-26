@@ -1,9 +1,0 @@
-version=1
-principal_class=1
-principal_ref=15
-uid=self
-executable=/usr/local/libexec/aimee-modules/aimee-module-response-composition
-publish=
-subscribe=
-request=
-serve=7937

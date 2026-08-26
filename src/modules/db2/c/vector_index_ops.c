@@ -75,6 +75,44 @@ void db2_vector_index_op_remove(int64_t point_id)
    aimee_pg_finalize(st);
 }
 
+void db2_vector_index_ops_remove_for_memory(int64_t memory_id, int64_t unit_point_offset,
+                                            int include_base)
+{
+   if (memory_id <= 0)
+      return;
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+
+   /* Set-based for the same reason the embedding reclamation is: enumerating
+    * unit ids into a fixed C buffer silently leaves the tail behind.
+    *
+    * The base arm matches memory_id as well as the record's own point id, so a
+    * row recorded against the memory is reclaimed even if its point id scheme
+    * differs. Unit-rebuild callers pass include_base=0: the record survives and
+    * its own pending/failed bookkeeping must not be discarded with its units. */
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       include_base
+           ? "DELETE FROM vector_index_ops WHERE point_id = :base OR memory_id = :mid"
+             " OR point_id IN (SELECT id + :off FROM memory_units WHERE memory_id = :umid)"
+           : "DELETE FROM vector_index_ops"
+             " WHERE point_id IN (SELECT id + :off FROM memory_units WHERE memory_id = :umid)",
+       err, sizeof(err));
+   if (!st)
+      return;
+   if (include_base)
+   {
+      aimee_pg_bind_int64(st, ":base", memory_id);
+      aimee_pg_bind_int64(st, ":mid", memory_id);
+   }
+   aimee_pg_bind_int64(st, ":off", unit_point_offset);
+   aimee_pg_bind_int64(st, ":umid", memory_id);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
 int db2_vector_index_ops_reset_stuck(int max_attempts)
 {
    if (max_attempts <= 0)
@@ -126,6 +164,51 @@ int db2_vector_index_ops_summary(int max_attempts, db2_vector_index_ops_summary_
       out->stuck_ops = aimee_pg_column_int64(st, 3);
    }
    aimee_pg_finalize(st);
+
+   /* Write-to-readable lag over rows that actually landed. Bounded to a recent
+    * window so a long-lived store's percentiles describe current behaviour
+    * rather than its whole history. Both timestamps are canonical UTC text. */
+   out->lag_p50_secs = -1.0;
+   out->lag_p90_secs = -1.0;
+   out->lag_p95_secs = -1.0;
+   out->lag_p99_secs = -1.0;
+   out->lag_max_secs = -1.0;
+   out->lag_samples = 0;
+   static const char *lag_sql =
+       "SELECT COUNT(*),"
+       " PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY lag),"
+       " PERCENTILE_CONT(0.9) WITHIN GROUP (ORDER BY lag),"
+       " PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY lag),"
+       " PERCENTILE_CONT(0.99) WITHIN GROUP (ORDER BY lag),"
+       " MAX(lag)"
+       " FROM (SELECT EXTRACT(EPOCH FROM (v.indexed_at::timestamp - m.created_at::timestamp))"
+       "              AS lag"
+       "         FROM vector_index_ops v JOIN memories m ON m.id = v.memory_id"
+       "        WHERE v.status = 'ok' AND v.indexed_at IS NOT NULL AND v.indexed_at <> ''"
+       "          AND m.created_at <> ''"
+       "          AND v.indexed_at::timestamp >= (CURRENT_TIMESTAMP - INTERVAL '7 days')) s"
+       " WHERE lag IS NOT NULL AND lag >= 0";
+   char lerr[256] = "";
+   aimee_pg_stmt_t *lst = aimee_pg_prepare(conn, lag_sql, lerr, sizeof(lerr));
+   if (lst)
+   {
+      if (aimee_pg_step(lst, lerr, sizeof(lerr)) == AIMEE_PG_ROW)
+      {
+         out->lag_samples = aimee_pg_column_int64(lst, 0);
+         if (out->lag_samples > 0)
+         {
+            out->lag_p50_secs = aimee_pg_column_double(lst, 1);
+            out->lag_p90_secs = aimee_pg_column_double(lst, 2);
+            out->lag_p95_secs = aimee_pg_column_double(lst, 3);
+            out->lag_p99_secs = aimee_pg_column_double(lst, 4);
+            out->lag_max_secs = aimee_pg_column_double(lst, 5);
+         }
+      }
+      aimee_pg_finalize(lst);
+   }
+   /* A lag query that cannot run leaves the -1 sentinels: the status counts
+    * above are still the answer, and an unmeasured lag reports as unmeasured
+    * rather than as zero. */
    return 0;
 }
 

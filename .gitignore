@@ -60,10 +60,14 @@ src/tests/fuzz_server_mgmt_read_config
 # Session state
 session-state.json
 
-# Per-project aimee state (local/environment-specific, never committed)
-.aimee/
-!.aimee/project.yaml  # aimee's own committed delegate-sandbox toolchain declaration
+# Per-project aimee state (local/environment-specific, never committed).
+# Keep aimee's own delegate-sandbox toolchain declaration visible to Git.
+/.aimee/*
+!/.aimee/project.yaml
 .aimee-rules
+
+# Local Compose overrides can contain enrollment material and credentials.
+/.env
 
 # IDE
 .idea/
@@ -228,6 +232,16 @@ scratchpad/
 .ship.sh
 .mt.tgz
 .mt.b64
+
+# Transient CI diagnostics, editor backups, and one-off remote deployment
+# handoffs. These are local debugging products, not source or durable evidence.
+/.ci-logs/
+*.bak
+/shipnow*.txt
+/installcmd*.txt
+/ic-*.txt
+/COST-FINDINGS.md
+/*.tgz
 
 # Benchmark scratch: analysis scripts and deploy helpers for the ponytail codex
 # comparison. These are working files for one investigation, not product code —

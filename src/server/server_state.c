@@ -205,10 +205,12 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
    double confidence = jo_num((cJSON *)req, "confidence", 1.0);
    const char *sid = jo_str((cJSON *)req, "session_id", "");
-
    memory_t out;
-   if (kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out) !=
-       0)
+   server_memory_scope_begin((cJSON *)req);
+   int store_rc =
+       kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out);
+   kb_client_memory_scope_context_clear();
+   if (store_rc != 0)
       return jo_err("failed to store memory");
 
    cJSON *resp = jo_ok();
@@ -326,9 +328,11 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.supersede session_id must be a string", NULL);
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "";
-
    memory_t mem;
-   if (kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem) != 0)
+   server_memory_scope_begin(req);
+   int supersede_rc = kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem);
+   kb_client_memory_scope_context_clear();
+   if (supersede_rc != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
@@ -380,7 +384,10 @@ cJSON *memory_delete_command(cJSON *req, const char *account)
                                     "memory.delete requires a positive integer id", NULL);
 
    memory_authority_t authority = server_account_memory_authority(account);
-   if (kb_client_memory_delete_as(id, authority) != 0)
+   server_memory_scope_begin(req);
+   int delete_rc = kb_client_memory_delete_as(id, authority);
+   kb_client_memory_scope_context_clear();
+   if (delete_rc != 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
@@ -414,10 +421,11 @@ cJSON *memory_get_command(cJSON *req)
     * reads exactly like "not in force". */
    cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
    const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
-
    memory_t m;
    kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
+   server_memory_scope_begin(req);
    int rc = kb_client_memory_get_as_of((int64_t)jid->valuedouble, as_of, &m, &verdict);
+   kb_client_memory_scope_context_clear();
 
    cJSON *resp;
    if (rc == 0)
@@ -674,21 +682,6 @@ int handle_curator_contradictions(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    free(json);
    if (!resp)
       return server_send_error(conn, "knowledge service /v1/contradictions failed", NULL);
-   return send_and_free(conn, resp);
-}
-
-int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Inbound push from aimee-kb: a source doc's derived curator artifacts were
-    * invalidated. The subscriber (this server) has now received the event. */
-   const char *source_kind = jo_str(req, "source_kind", "");
-   const char *source_id = jo_str(req, "source_id", "");
-   int stale = jo_int(req, "artifacts_stale", 0);
-   (void)source_kind;
-   (void)source_id;
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "received", stale);
    return send_and_free(conn, resp);
 }
 

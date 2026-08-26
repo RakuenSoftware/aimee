@@ -19,6 +19,7 @@
     "vault",
     "execution-policy",
     "audit",
+    "sandbox",
     "aimee"
   ],
   "optional": [
@@ -29,7 +30,6 @@
     "runtime-web",
     "control-web",
     "benchmarks",
-    "sandbox",
     "economizer",
     "postgres",
     "db2"

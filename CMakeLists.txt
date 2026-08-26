@@ -247,6 +247,7 @@ elseif(APPLE)
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_dispatch.c
+        ${AIMEE_SRC_DIR}/modules/tools/agent_tools_effect_contract.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
@@ -307,6 +308,7 @@ else()
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools.c
         ${AIMEE_SRC_DIR}/posix/agent_source_authority.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_dispatch.c
+        ${AIMEE_SRC_DIR}/modules/tools/agent_tools_effect_contract.c
         ${AIMEE_SRC_DIR}/modules/tools/agent_tools_anchored.c
         ${AIMEE_SRC_DIR}/posix/web_egress.c
         ${AIMEE_SRC_DIR}/posix/web_read.c
@@ -447,6 +449,8 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/admin_grant.c
     ${AIMEE_SRC_DIR}/modules/db2/c/oidc_jwks.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_edges.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_identity.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/fact_identity_unicode.c
     ${AIMEE_SRC_DIR}/modules/db2/c/fact_mutation.c
     ${AIMEE_SRC_DIR}/modules/db2/c/evidence_lifecycle.c
     ${AIMEE_SRC_DIR}/modules/db2/c/entity_profiles.c
@@ -615,6 +619,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_activation.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_context.c
@@ -655,6 +660,7 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/payload_rewrite.c
     ${AIMEE_SRC_DIR}/modules/guardrails/guardrails_semantic.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     # THE session worktree/branch key, shared with the thin client.
     ${AIMEE_SRC_DIR}/session_worktree_key.c
     ${AIMEE_SRC_DIR}/worktree_gc.c
@@ -954,6 +960,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/vault/vault_capability.c
     ${AIMEE_SRC_DIR}/server/server_vault.c
     ${AIMEE_SRC_DIR}/server/server_state.c
+    ${AIMEE_SRC_DIR}/server/server_state_freshness.c
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c
     ${AIMEE_SRC_DIR}/server/vault_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c
@@ -966,6 +973,8 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_state_audit.c
     ${AIMEE_SRC_DIR}/server/server_css_query.c
     ${AIMEE_SRC_DIR}/server/server_state.c
+    ${AIMEE_SRC_DIR}/server/server_state_freshness.c
+    ${AIMEE_SRC_DIR}/server/server_memory_review.c
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c
     ${AIMEE_SRC_DIR}/server/vault_audit_bridge.c
     ${AIMEE_SRC_DIR}/server/sandbox_audit_bridge.c
@@ -1178,6 +1187,7 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_gate.c
     ${AIMEE_SRC_DIR}/session_briefing.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
+    ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c

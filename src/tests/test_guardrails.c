@@ -3420,6 +3420,16 @@ static void test_verify_gate_push_registered_worktree_from_nonrepo_cwd(void)
    char wt_path[MAX_PATH_LEN];
    assert(worktree_sibling_path(maindir, sid, NULL, wt_path, sizeof(wt_path)) == 0);
 
+   /* Server-side provisioning is invisible to the source checkout too. The
+    * registry and checkout store are repository-local state, not user files. */
+   char status_cmd[1024], source_status[512] = "";
+   snprintf(status_cmd, sizeof(status_cmd),
+            "git -C '%s' status --porcelain=v1 --untracked-files=all", maindir);
+   FILE *status_fp = popen(status_cmd, "r");
+   assert(status_fp != NULL);
+   assert(fgets(source_status, sizeof(source_status), status_fp) == NULL);
+   assert(pclose(status_fp) == 0);
+
    char *wt_hash = verify_compute_file_hash(wt_path);
    assert(wt_hash != NULL);
 

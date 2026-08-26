@@ -553,8 +553,30 @@ static int rh_kb_search(const route_req_t *rq, char *resp, int cap)
 }
 static int rh_memory_recall(const route_req_t *rq, char *resp, int cap)
 {
-   return route_native_post(g_memory_recall_handler, rq->body, resp, cap,
-                            "memory recall is not available on this server");
+   /* Recall activation is session-local state in DB1.  The HTTP parser already
+    * captures the credential-bound aimee-session-id for this request; bind it
+    * around the synchronous native handler so the DB1 snapshot and subsequent
+    * activation record use the caller's conversation rather than a worker's
+    * process-derived fallback id. */
+   const char *sid = server_http_identity_session_hdr();
+   int bound = sid && sid[0];
+   /* session_id_set_override owns a 64-byte buffer. Reject rather than
+    * truncate, because two long caller ids that share a prefix must not share
+    * cooldown state. */
+   if (bound && (!is_safe_id(sid) || strlen(sid) >= 64))
+   {
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"invalid aimee-session-id\","
+               "\"type\":\"invalid_request_error\"}}");
+      return 400;
+   }
+   if (bound)
+      session_id_set_override(sid);
+   int status = route_native_post(g_memory_recall_handler, rq->body, resp, cap,
+                                  "memory recall is not available on this server");
+   if (bound)
+      session_id_clear_override();
+   return status;
 }
 static int rh_notes_search(const route_req_t *rq, char *resp, int cap)
 {
@@ -1661,6 +1683,9 @@ const http_route_t g_v1_routes[] = {
      * exposed here. (memory.recall above keeps its bespoke native handler.) */
     {"POST", "/v1/memory/search", NULL, RM_EXACT, "memory.search", 0, rh_dispatch_op},
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/review", NULL, RM_EXACT, "memory.review_list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/reject", NULL, RM_EXACT, "memory.reject", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/restore", NULL, RM_EXACT, "memory.restore", 0, rh_dispatch_op},
     {"GET", "/v1/memory/stats", NULL, RM_EXACT, "memory.stats", 0, rh_dispatch_op},
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
     {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
@@ -2314,6 +2339,8 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
  * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "memory.reject",
+                                             "memory.restore",
                                              "index.ingest",
                                              "work.add",
                                              "work.claim",

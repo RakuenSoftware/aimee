@@ -15,7 +15,41 @@
 
 static __thread db2_memory_scope_context_t s_memory_scope_context;
 
+/* Keep PostgreSQL RLS in lockstep with the in-process filter.  These values are
+ * derived by the trusted request boundary, never copied from an assertion or
+ * memory payload. */
+static void memory_scope_sync_pg(void)
+{
+   void *conn = db2_conn();
+   if (!conn)
+      return;
+   char err[MSQ_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT set_config('aimee.memory_workspace',?1,false),"
+                                          " set_config('aimee.memory_project',?2,false),"
+                                          " set_config('aimee.memory_scope_all',?3,false),"
+                                          " set_config('aimee.memory_scope_type',?4,false),"
+                                          " set_config('aimee.memory_scope_value',?5,false)",
+                                          err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_text(st, "?1", s_memory_scope_context.workspace);
+   aimee_pg_bind_text(st, "?2", s_memory_scope_context.project);
+   aimee_pg_bind_text(st, "?3", s_memory_scope_context.include_all ? "1" : "0");
+   aimee_pg_bind_text(st, "?4", s_memory_scope_context.scope_type);
+   aimee_pg_bind_text(st, "?5", s_memory_scope_context.scope_value);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+}
+
 void db2_memory_scope_context_set(const char *workspace, const char *project, int include_all)
+{
+   db2_memory_scope_context_set_exact(workspace, project, NULL, NULL, include_all);
+}
+
+void db2_memory_scope_context_set_exact(const char *workspace, const char *project,
+                                        const char *scope_type, const char *scope_value,
+                                        int include_all)
 {
    memset(&s_memory_scope_context, 0, sizeof(s_memory_scope_context));
    s_memory_scope_context.active = 1;
@@ -24,11 +58,26 @@ void db2_memory_scope_context_set(const char *workspace, const char *project, in
             workspace ? workspace : "");
    snprintf(s_memory_scope_context.project, sizeof(s_memory_scope_context.project), "%s",
             project ? project : "");
+   snprintf(s_memory_scope_context.scope_type, sizeof(s_memory_scope_context.scope_type), "%s",
+            scope_type ? scope_type : "");
+   snprintf(s_memory_scope_context.scope_value, sizeof(s_memory_scope_context.scope_value), "%s",
+            scope_value ? scope_value : "");
+   memory_scope_sync_pg();
+}
+
+void db2_memory_scope_context_restore(const db2_memory_scope_context_t *context)
+{
+   if (context)
+      s_memory_scope_context = *context;
+   else
+      memset(&s_memory_scope_context, 0, sizeof(s_memory_scope_context));
+   memory_scope_sync_pg();
 }
 
 void db2_memory_scope_context_clear(void)
 {
    memset(&s_memory_scope_context, 0, sizeof(s_memory_scope_context));
+   memory_scope_sync_pg();
 }
 
 void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
@@ -39,23 +88,50 @@ void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
 
 int db2_memory_scope_context_rank(int64_t memory_id)
 {
-   if (!s_memory_scope_context.active)
+   if (memory_id <= 0)
       return 0;
-   if (s_memory_scope_context.project[0] &&
-       db2_memory_scope_matches(memory_id, "project", s_memory_scope_context.project))
-      return 3;
-   if (s_memory_scope_context.workspace[0] &&
-       (db2_memory_scope_matches(memory_id, "workspace", s_memory_scope_context.workspace) ||
-        db2_memory_workspace_matches(memory_id, s_memory_scope_context.workspace)))
-      return 2;
-   if (db2_memory_scope_matches(memory_id, "global", "_global") ||
-       db2_memory_scope_matches(memory_id, "workspace", "_shared") ||
-       (!db2_memory_has_scope_type(memory_id, "global") &&
-        !db2_memory_has_scope_type(memory_id, "workspace") &&
-        !db2_memory_has_scope_type(memory_id, "project") &&
-        !db2_memory_has_any_workspace_tag(memory_id)))
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   char err[MSQ_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT scope_type,scope_value FROM memories WHERE id=?1", err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   int rank = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *type = aimee_pg_column_text(st, 0);
+      const char *value = aimee_pg_column_text(st, 1);
+      if (type && value && s_memory_scope_context.scope_type[0] &&
+          s_memory_scope_context.scope_value[0] &&
+          strcmp(type, s_memory_scope_context.scope_type) == 0 &&
+          strcmp(value, s_memory_scope_context.scope_value) == 0)
+         rank = 4;
+      else if (type && value && strcmp(type, "project") == 0 && s_memory_scope_context.project[0] &&
+               strcmp(value, s_memory_scope_context.project) == 0)
+         rank = 3;
+      else if (type && value && strcmp(type, "workspace") == 0 &&
+               s_memory_scope_context.workspace[0] &&
+               strcmp(value, s_memory_scope_context.workspace) == 0)
+         rank = 2;
+      else if (type && value &&
+               ((strcmp(type, "global") == 0 && strcmp(value, "_global") == 0) ||
+                (strcmp(type, "workspace") == 0 && strcmp(value, "_shared") == 0)))
+         rank = 1;
+   }
+   aimee_pg_finalize(st);
+   return rank;
+}
+
+int db2_memory_scope_context_allows(int64_t memory_id)
+{
+   if (memory_id <= 0)
+      return 0;
+   if (!s_memory_scope_context.active || s_memory_scope_context.include_all)
       return 1;
-   return 0;
+   return db2_memory_scope_context_rank(memory_id) > 0;
 }
 
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *st)
@@ -66,6 +142,8 @@ void db2_memory_scope_bind_current(aimee_pg_stmt_t *st)
    aimee_pg_bind_int(st, "?102", s_memory_scope_context.include_all ? 1 : 0);
    aimee_pg_bind_text(st, "?103", s_memory_scope_context.workspace);
    aimee_pg_bind_text(st, "?104", s_memory_scope_context.project);
+   aimee_pg_bind_text(st, "?105", s_memory_scope_context.scope_type);
+   aimee_pg_bind_text(st, "?106", s_memory_scope_context.scope_value);
 }
 
 int db2_memory_scope_matches(int64_t memory_id, const char *scope_type, const char *scope_value)
@@ -183,6 +261,10 @@ void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, cons
 {
    if (memory_id <= 0 || !scope_type || !scope_type[0] || !scope_value || !scope_value[0])
       return;
+   /* A scope tag changes ownership.  Keep the application-side authorization
+    * check even when the development connection is an RLS-bypassing owner. */
+   if (!db2_memory_scope_context_allows(memory_id))
+      return;
    void *conn = db2_conn();
    if (!conn)
       return;
@@ -197,11 +279,27 @@ void db2_memory_scope_tag_insert(int64_t memory_id, const char *scope_type, cons
    aimee_pg_bind_text(st, "?3", scope_value);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+
+   /* The primary authorization identity is denormalized onto memories so an
+    * RLS policy can decide visibility without trusting a neighbouring table. */
+   st = aimee_pg_prepare(conn,
+                         "UPDATE memories SET scope_type=?2,scope_value=?3,updated_at=pg_now_text()"
+                         " WHERE id=?1",
+                         err, sizeof(err));
+   if (!st)
+      return;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   aimee_pg_bind_text(st, "?2", scope_type);
+   aimee_pg_bind_text(st, "?3", scope_value);
+   (void)aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
 }
 
 void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace)
 {
    if (memory_id <= 0 || !workspace || !workspace[0])
+      return;
+   if (!db2_memory_scope_context_allows(memory_id))
       return;
    void *conn = db2_conn();
    if (!conn)
@@ -216,4 +314,68 @@ void db2_memory_workspace_tag_insert(int64_t memory_id, const char *workspace)
    aimee_pg_bind_text(st, "?2", workspace);
    (void)aimee_pg_step(st, err, sizeof(err));
    aimee_pg_finalize(st);
+}
+
+int db2_memory_scope_replace(int64_t memory_id, const char *scope_type, const char *scope_value)
+{
+   if (memory_id <= 0 || !scope_type || !scope_value || !scope_value[0] ||
+       (strcmp(scope_type, "project") != 0 && strcmp(scope_type, "workspace") != 0 &&
+        strcmp(scope_type, "global") != 0))
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[MSQ_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   static const char *const delete_sql[] = {
+       "DELETE FROM memory_scopes WHERE memory_id=?1",
+       "DELETE FROM memory_workspaces WHERE memory_id=?1",
+   };
+   for (size_t i = 0; i < sizeof(delete_sql) / sizeof(delete_sql[0]); i++)
+   {
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, delete_sql[i], err, sizeof(err));
+      if (!st)
+         goto rollback;
+      aimee_pg_bind_int64(st, "?1", memory_id);
+      int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+      aimee_pg_finalize(st);
+      if (!ok)
+         goto rollback;
+   }
+
+   aimee_pg_stmt_t *insert = aimee_pg_prepare(
+       conn, "INSERT INTO memory_scopes(memory_id,scope_type,scope_value) VALUES(?1,?2,?3)", err,
+       sizeof(err));
+   if (!insert)
+      goto rollback;
+   aimee_pg_bind_int64(insert, "?1", memory_id);
+   aimee_pg_bind_text(insert, "?2", scope_type);
+   aimee_pg_bind_text(insert, "?3", scope_value);
+   int inserted = aimee_pg_step(insert, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(insert);
+   if (!inserted)
+      goto rollback;
+
+   if (strcmp(scope_type, "workspace") == 0)
+   {
+      insert =
+          aimee_pg_prepare(conn, "INSERT INTO memory_workspaces(memory_id,workspace) VALUES(?1,?2)",
+                           err, sizeof(err));
+      if (!insert)
+         goto rollback;
+      aimee_pg_bind_int64(insert, "?1", memory_id);
+      aimee_pg_bind_text(insert, "?2", scope_value);
+      inserted = aimee_pg_step(insert, err, sizeof(err)) == AIMEE_PG_DONE;
+      aimee_pg_finalize(insert);
+      if (!inserted)
+         goto rollback;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) == 0)
+      return 0;
+
+rollback:
+   (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   return -1;
 }

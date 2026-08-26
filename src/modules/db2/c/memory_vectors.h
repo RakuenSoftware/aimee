@@ -14,6 +14,14 @@ int pgvec_memory_vector_upsert_memory(int64_t memory_id, const float *vec, int d
 int pgvec_memory_vector_upsert_unit(int64_t unit_id, const float *vec, int dim,
                                     const char *payload_json);
 int pgvec_memory_vector_delete_point(int64_t point_id);
+
+/* Reclaim the vector points owned by `memory_id` in a single statement, so no
+ * compile-time buffer bounds completeness. Always covers one point per
+ * memory_unit; `include_base` additionally covers the record's own point --
+ * pass 0 from unit-rebuild paths, where the record survives and only its units
+ * are being replaced. Returns embedding rows removed, or -1 on a bad call / no
+ * connection. Call while the memory_units rows still exist. */
+int pgvec_memory_vector_delete_points_for_memory(int64_t memory_id, int include_base);
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max);
 int pgvec_memory_vector_search_with_kinds(const float *vec, int dim, const char *const *kinds,

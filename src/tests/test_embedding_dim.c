@@ -149,15 +149,14 @@ int main(void)
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
                         sizeof err) == 0);
 
-   /* ---- EMBED_MAX_DIM bumped to 4000 (unified-llm-container §"8B truncation"):
-    * a 4000-d dim now records cleanly (was rejected when the cap was 2560). ---- */
+   /* ---- EMBED_MAX_DIM ceiling: a 4000-d dim records cleanly. ---- */
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
                         sizeof err) == 0);
    err[0] = '\0';
    assert(db2_embedding_dim_record_or_check(conn, 4000, err, sizeof err) == 0);
    assert(db2_embedding_dim_get(conn) == 4000);
 
-   /* ================= unified-llm-container §2: model-identity drift guard ====== */
+   /* ================= model-identity drift guard =============================== */
    /* No-op when the embedder reports no identity (the legacy torch embedder). */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(conn, NULL, NULL, err, sizeof err) == 0);
@@ -165,36 +164,36 @@ int main(void)
 
    /* Fresh record, then a matching check is a no-op. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
 
-   /* The same-dim DIFFERENT-model swap is REFUSED (the footgun: pplx-embed and
-    * Qwen3-0.6B are both 1024-d, so a dim-only guard would miss this). */
+   /* A same-dimension DIFFERENT-model swap is refused; a dimension-only guard
+    * would miss this vector-space change. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "perplexity-ai/pplx-embed-v1-0.6b", NULL, err,
-                                              sizeof err) == -1);
+   assert(db2_embedding_model_record_or_check(conn, "example/other-384", NULL, err, sizeof err) ==
+          -1);
    assert(err[0] != '\0');
-   assert(strstr(err, "Qwen/Qwen3-Embedding-0.6B@abc") != NULL); /* names recorded */
-   assert(strstr(err, "pplx-embed") != NULL);                    /* and configured */
+   assert(strstr(err, "bekko-embedding-v1-a25m@abc") != NULL); /* names recorded */
+   assert(strstr(err, "example/other-384") != NULL);           /* and configured */
    /* The refusal did not change the recorded identity. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
 
    /* A transition on the compat-list is ADMITTED (operator-validated cosine>=0.99)
     * and updates the recorded identity. Whitespace + multiple entries tolerated. */
-   const char *compat =
-       " other->x , Qwen/Qwen3-Embedding-0.6B@abc -> Qwen/Qwen3-Embedding-0.6B@def ";
+   const char *compat = " other->x , hotchpotch/bekko-embedding-v1-a25m@abc -> "
+                        "hotchpotch/bekko-embedding-v1-a25m@def ";
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@def", compat, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@def",
+                                              compat, err, sizeof err) == 0);
    /* Now the recorded id is @def; the old @abc would itself be a mismatch. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == -1);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == -1);
    /* A compat entry that doesn't match the actual transition does NOT admit. */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(conn, "totally/different@ghi", "a->b,c->d", err,
@@ -204,14 +203,15 @@ int main(void)
     * Malformed entries (no arrow, empty side) are silently skipped (not admitted);
     * newline-separated entries are tolerated. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@xyz",
                                               "no_arrow_here, ->, -> , a-->b", err,
                                               sizeof err) == -1); /* none admit */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(
-              conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
-              "junk->junk\nQwen/Qwen3-Embedding-0.6B@def->Qwen/Qwen3-Embedding-0.6B@xyz", err,
-              sizeof err) == 0); /* newline-separated entry admits */
+              conn, "hotchpotch/bekko-embedding-v1-a25m@xyz",
+              "junk->junk\nhotchpotch/bekko-embedding-v1-a25m@def->hotchpotch/"
+              "bekko-embedding-v1-a25m@xyz",
+              err, sizeof err) == 0); /* newline-separated entry admits */
 
    /* The vector-space guard: pooling/prefix changes keep the dim AND the model name,
     * so this is the only guard that can see them. Unlike the model guard there is no

@@ -21,8 +21,8 @@ const (
 	// disagree with the verdict it is captioning.
 	economicsResponseLen = 4 + 19*4 + economicsVerdictLen + economicsAdviceLen +
 		2*economicsLabelLen
-	economicsMaxTasks             = 4096
-	economicsMaxAgents            = 4096
+	economicsMaxTasks  = 4096
+	economicsMaxAgents = 4096
 )
 
 type economicsCursor struct {

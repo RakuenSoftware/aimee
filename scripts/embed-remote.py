@@ -9,8 +9,8 @@ container. Stdlib only — no torch in the kb image.
 Contract (platform_exec_pipe in src/memory_core_scope_embed.inc):
   stdin:  raw UTF-8 text
   stdout: JSON float array  [0.123, -0.456, ...]  (L2-normalised). The dimension
-          is whatever the pinned embedder emits — 1024 for the default CPU tier
-          (Qwen3-Embedding-0.6B), 2560 for the 4B GPU tier — NOT a fixed size;
+          is whatever the pinned embedder emits — for example 384 for the shipped
+          Bekko tier or 768 for Nomic — NOT a fixed size;
           probe it with `--dim`. `--serving-id` prints the endpoint's vector-space
           identity (empty when it reports none).
   exit 0 on success; non-zero on error (C caller logs a warning and skips)

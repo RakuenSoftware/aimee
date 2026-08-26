@@ -197,7 +197,8 @@ static void publish_cfg(void)
       cJSON_AddItemToArray(clients, client);
    }
    assert(config_client_set_value("mcp_clients", clients) == 0);
-   assert(config_client_set_number("mcp_client_count", cfg.mcp_client_count) == 0);
+   /* Production YAML contains the documented mcp_clients array, not a second
+    * hidden count that can drift from it. Registry boot must derive the count. */
    assert(config_client_set_number("mcp_osv_enabled", cfg.mcp_osv_enabled) == 0);
    assert(config_client_set_number("mcp_osv_enforce", cfg.mcp_osv_enforce) == 0);
    assert(config_client_set_number("mcp_osv_offline", cfg.mcp_osv_offline) == 0);

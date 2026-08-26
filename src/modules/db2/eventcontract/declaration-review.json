@@ -810,10 +810,10 @@
     },
     {
       "symbol": "db2_kb_service_memory_recall_json",
-      "signature_sha256": "698211af653dd6e1c534bac254f6a6b9dae5939d169aaec8e7aecb2d4560cd63",
+      "signature_sha256": "93b9585aadd545ebd1ae4ea61685c8b5fb39b03688356b890f8480a5e21d46e4",
       "disposition": "private-db2",
       "family": "memory",
-      "reason": "The recall cJSON envelope remains local serialization; a typed request bounds query and scope fields and returns structured recall records."
+      "reason": "The recall cJSON envelope and activation input remain local serialization; a typed request bounds query, scope, and activation fields and returns structured recall records."
     },
     {
       "symbol": "db2_kb_service_memory_reject_json",
@@ -1489,10 +1489,10 @@
     },
     {
       "symbol": "db2_memory_session_l0_purge",
-      "signature_sha256": "4e517dde22542cf42658f3ae08648c3a9297d256e7a5ffcf988d73060ca7d831",
+      "signature_sha256": "5ed60bf8363726a7f84f87b4fe0a1e25059e3d0fe9106fc8159157d015c990a5",
       "disposition": "private-db2",
       "family": "memory",
-      "reason": "Purging a session's L0 memories and provenance is a private mutation inside the future memory.session_fold transaction; it cannot be an independent wire operation without risking loss between checkpoint creation and deletion."
+      "reason": "Purging the exact L0 source set and its provenance is a private transactional step of memory.session_fold; exposing it independently would permit deletion without the derived checkpoint and its complete lineage."
     },
     {
       "symbol": "db2_memory_set_valid_from",

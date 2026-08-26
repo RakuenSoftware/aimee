@@ -89,13 +89,24 @@ extern "C"
                                                const char *note);
 
    /* L5 synthesis candidate row: a high-confidence L2 fact/pattern observed
-    * across >= 3 distinct sessions and not yet synthesized into an L5
-    * pattern. */
+    * across >= 3 distinct sessions of one canonical scope and not yet synthesized
+    * into an L5 pattern.
+    *
+    * `scope_type`/`scope_value` identify the most-specific canonical scope the
+    * recurrence was counted within, and the scope
+    * the synthesized row must be written into. Recurrence across unrelated
+    * workspaces is not recurrence: counting it that way turned three sessions
+    * in three unrelated projects into one globally-reachable record, which is
+    * both a scope leak in a background job and a derived row with no owning
+    * scope. `session_count` is a reachability/salience signal only -- it must
+    * never be converted into confidence. */
    typedef struct
    {
       int64_t source_id;
       char src_key[256];
       char src_content[1024];
+      char scope_type[16];
+      char scope_value[512];
       int session_count;
    } db2_memory_l5_candidate_t;
 

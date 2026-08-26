@@ -88,6 +88,9 @@ const (
 	opOSVCacheUpsert = 58
 	opOSVCacheList   = 59
 	opOSVAudit       = 60
+
+	opContextSnapshotInsertTurn = 61
+	opContextSnapshotActivation = 62
 )
 
 // Runtime is the family, ready to be bound to kind 11787.
@@ -212,6 +215,13 @@ var Runtime = store.Family{
 		},
 		opContextSnapshotHasMemory: {
 			Name: "context_snapshot_has_memory", Args: 1, Run: contextSnapshotHasMemory,
+		},
+		opContextSnapshotInsertTurn: {
+			Name: "context_snapshot_insert_turn", Args: 4, Tx: true, Run: contextSnapshotInsertTurn,
+		},
+		opContextSnapshotActivation: {
+			Name: "context_snapshot_activation", Cells: 1, Args: 2, Tx: true,
+			Run: contextSnapshotActivation,
 		},
 
 		// --- the agent cache ---

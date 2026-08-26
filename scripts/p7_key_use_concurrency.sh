@@ -37,7 +37,7 @@ wait
 new=$(grep -h '^t$' "$tmp"/* | wc -l)
 replay=$(grep -h '^f$' "$tmp"/* | wc -l)
 intent=$(psql -Atq "$db" -c "SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970714 AND use_id='same-use'")
-audit=$(psql -Atq "$db" -c "SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND subject='team:970714|bedrock|primary'")
+audit=$(psql -Atq "$db" -c "SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND subject='team:970714|bedrock|primary'")
 if [ "$new" -ne 1 ] || [ "$replay" -ne 11 ] || [ "$intent" -ne 1 ] || [ "$audit" -ne 1 ]; then
   echo "P7 key-use concurrency FAIL: new=$new replay=$replay intent=$intent audit=$audit" >&2
   exit 1

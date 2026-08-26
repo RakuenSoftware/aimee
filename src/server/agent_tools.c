@@ -15,6 +15,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
+#include "config_client.h"
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
@@ -186,29 +187,49 @@ int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd)
    return agent_tools_path_under_root(norm, g_parent_ro_root);
 }
 
-/* Session-isolation backstop (Layer 2, opt-in via require_session_worktree).
+static size_t agent_tools_managed_root_len(const char *path)
+{
+   const char *marker = strstr(path, "/.aimee/worktrees/");
+   if (marker)
+   {
+      const char *key = marker + strlen("/.aimee/worktrees/");
+      const char *slash = strchr(key, '/');
+      if (!slash || strncmp(slash, "/main", 5) != 0 || (slash[5] != '\0' && slash[5] != '/'))
+         return 0;
+      return (size_t)(slash + 5 - path);
+   }
+   marker = strstr(path, "/wfe-worktrees/");
+   if (marker)
+   {
+      const char *id = marker + strlen("/wfe-worktrees/");
+      const char *slash = strchr(id, '/');
+      return (size_t)((slash ? slash : id + strlen(id)) - path);
+   }
+   return 0;
+}
+
+/* Session-isolation backstop (Layer 2, enforced unless require_session_worktree
+ * is explicitly false).
  * Blocks a server-side agent/delegate write whose normalized target is NOT
  * inside an aimee-managed worktree (path component .aimee/worktrees/...). This
  * mirrors the client-side attention-guard
  * (Layer 1) so aimee's own in-process agent writes obey the same isolation
  * policy that a thin client's PreToolUse hook enforces — covering the case
- * where session-start never provisioned a worktree. Default off (the config
- * flag defaults to 0), so this is a no-op unless explicitly enabled. */
+ * where session-start never provisioned a worktree. */
 int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
 {
    if (!path || !path[0])
       return 0;
-   /* legacy_config_read here mirrors the per-call pattern already used elsewhere in
-    * this file (it is cheap and reads the cached config).
+   /* Fail closed. testing reached this independently and fixed it HERE, noting
+    * that the generated accessor "returns zero for both explicit false and
+    * transport failure, which would silently disable isolation". That is the
+    * same defect this branch fixed one level down, in the accessor itself --
+    * which also covers require_aimee_memory and require_aimee_git, who had it
+    * too and no call-site workaround.
     *
-    * Default ON, and an unreadable config ENFORCES. This comment used to say the
-    * opposite -- "default-off ... matching the feature's opt-in nature" -- while
-    * the same function said "(default ON)" twenty lines below, cli_attention_guard.c
-    * called isolation "the only safe default", and cmd_hooks.c documented the sister
-    * dial as "an unreadable config reads as ENFORCING". Four statements of intent,
-    * one of them the odd one out, and the accessor implemented the odd one.
-    *
-    * Only an explicit `require_session_worktree: false` turns it off. */
+    * With the accessor fail-closed, the local guard here is redundant, so the
+    * call goes back to reading as the intent does: only an explicit
+    * `require_session_worktree: false` turns isolation off. */
    if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
@@ -224,10 +245,15 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
-   if (strstr(norm, "/.aimee/worktrees/") != NULL)
-      return 0;
-   if (strstr(norm, "/wfe-worktrees/") != NULL)
-      return 0;
+   size_t root_len = agent_tools_managed_root_len(norm);
+   if (root_len && cwd && cwd[0])
+   {
+      char norm_cwd[MAX_PATH_LEN];
+      normalize_path(cwd, NULL, norm_cwd, sizeof(norm_cwd));
+      size_t cwd_root_len = agent_tools_managed_root_len(norm_cwd);
+      if (cwd_root_len == root_len && strncmp(norm, norm_cwd, root_len) == 0)
+         return 0;
+   }
    return 1;
 }
 

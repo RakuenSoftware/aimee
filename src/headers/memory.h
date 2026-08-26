@@ -501,6 +501,12 @@ int64_t memory_lineage_insert(const char *object_type, int64_t object_id, const 
  * Returns count written into out (up to max). */
 int memory_lineage_get(const char *object_type, int64_t object_id, memory_lineage_t *out, int max);
 
+/* Recursively validate declared memory sources before a derived write. The
+ * walk fails closed on a rejected/suppressed/missing source, cycle, row cap or
+ * depth cap. */
+#define MEMORY_DERIVATION_MAX_SOURCES 256
+int memory_derived_sources_allowed(const int64_t *source_ids, int source_count);
+
 /* Cite: show provenance chain for a memory ID in human-readable form. */
 void memory_cite(int64_t memory_id, int json_out);
 
@@ -605,6 +611,10 @@ typedef struct
    int total_demotions;
    int total_expirations;
    int cycles;
+   int64_t write_to_readable_samples;
+   double write_to_readable_p50_secs;
+   double write_to_readable_p95_secs;
+   double write_to_readable_p99_secs;
 } memory_health_t;
 
 int memory_query_health(memory_health_t *out);
@@ -630,9 +640,10 @@ int memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max);
 void add_provenance(int64_t memory_id, const char *session_id, const char *action,
                     const char *details);
 
-/* Session folding: compress L0 into L1 checkpoint. When summary_out is non-NULL,
- * it is filled with the session digest (the checkpoint text) so the caller can
- * surface it as a session_summary evidence artifact; pass NULL to skip. */
+/* Session folding: compress a bounded, complete L0 session into an L1
+ * checkpoint. Returns the number of source rows folded, 0 when empty, or -1
+ * when the source set is over the bound, recursively refused, or cannot be
+ * persisted completely. `summary_out` is published only on success. */
 int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len);
 
 /* --- Search --- */
@@ -732,7 +743,7 @@ double memory_effective_importance(const memory_t *m, time_t now_sec);
 /* Upsert a project workflow memory (kind=workflow) scoped to a workspace.
  * Key format: workflow:{workspace}:{signal_type}. Content is the rule text.
  * Repeat observations merge into the existing row and bump confidence toward
- * 1.0 (capped). Returns the memory id on success, -1 on failure. */
+ * its durable provenance ceiling. Returns the memory id on success, -1 on failure. */
 int64_t memory_upsert_workflow(const char *workspace, const char *signal_type, const char *rule,
                                double observed_confidence, const char *session_id);
 
@@ -913,6 +924,8 @@ typedef struct
     * so the two moving in opposite directions is the intended effect and the way
     * to tell whether the suppression is earning its place. */
    int suppressed_near_duplicates;
+   int deferred_for_origin_quota;
+   int held_for_activation;
 } context_budget_metrics_t;
 
 char *memory_assemble_context(const char *task_hint);
@@ -923,6 +936,11 @@ char *memory_assemble_context_ws(const char *task_hint, const char *workspace);
 char *memory_assemble_context_explain(const char *task_hint,
                                       context_assemble_explain_entry_t *explain, int *explain_count,
                                       int explain_max, context_budget_metrics_t *metrics);
+
+/* Set the four independent, human-authorable retrieval activation controls for
+ * one memory unit. Returns 0 on success. */
+int memory_activation_policy_set(int64_t memory_id, int sticky_turns, int cooldown_turns,
+                                 int delay_turns, int suppressed);
 
 /* --- Graph Boost (for context scoring) --- */
 #define MAX_BOOST_ENTRIES 256
@@ -1695,7 +1713,13 @@ struct cJSON *memory_alerts(const char *since);
 #define MEMORY_RECALL_MIN_LIMIT_TOKENS             64
 #define MEMORY_RECALL_MAX_LIMIT_TOKENS             8192
 
+struct memory_activation;
 struct cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start);
+/* Production recall receives the per-user activation snapshot from aimee-server.
+ * aimee-kb cannot load DB1 itself: it is the shared DB2 process, while DB1 is
+ * user-local. A NULL/unloaded snapshot preserves the pre-activation path. */
+struct cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
+                                      const struct memory_activation *activation);
 
 /* Topic-pivot detection between consecutive user turns.  Pure
  * function — no DB access — so callers can invoke it cheaply and

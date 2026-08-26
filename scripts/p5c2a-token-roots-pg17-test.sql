@@ -219,7 +219,7 @@ END $$;
 
 CREATE FUNCTION pg_temp.p5c2a_audit_count(p_action TEXT,p_subject TEXT) RETURNS BIGINT
 LANGUAGE sql STABLE SECURITY DEFINER SET search_path=pg_catalog,pg_temp AS $$
-  SELECT count(*) FROM public.kb_audit_event WHERE action=p_action AND subject=p_subject
+  SELECT count(*) FROM public.kb_audit_outbox WHERE action=p_action AND subject=p_subject
 $$;
 
 CREATE FUNCTION pg_temp.p5c2a_epoch() RETURNS BIGINT LANGUAGE sql STABLE SECURITY DEFINER
@@ -298,7 +298,7 @@ BEGIN
     THEN RAISE EXCEPTION 'injected P5-C2a WORM failure'; END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER p5c2a_fail_manifest_stage BEFORE INSERT ON public.kb_audit_event
+CREATE TRIGGER p5c2a_fail_manifest_stage BEFORE INSERT ON public.kb_audit_outbox
   FOR EACH ROW EXECUTE FUNCTION pg_temp.p5c2a_fail_manifest_stage();
 SET LOCAL ROLE aimee_kb_token_roots_provision;
 DO $$ BEGIN
@@ -308,13 +308,13 @@ DO $$ BEGIN
   END;
 END $$;
 RESET ROLE;
-DROP TRIGGER p5c2a_fail_manifest_stage ON public.kb_audit_event;
+DROP TRIGGER p5c2a_fail_manifest_stage ON public.kb_audit_outbox;
 DO $$ BEGIN
   IF EXISTS(SELECT 1 FROM public.kb_management_token_root WHERE root_kind='manifest') OR
      EXISTS(SELECT 1 FROM public.org_vault_secret WHERE principal='org:p5-jwks-manifest') OR
      EXISTS(SELECT 1 FROM public.org_vault_current WHERE principal='org:p5-jwks-manifest') OR
      EXISTS(SELECT 1 FROM public.org_vault_rotation WHERE principal='org:p5-jwks-manifest') OR
-     EXISTS(SELECT 1 FROM public.kb_audit_event WHERE action='management.token_root.bootstrap.stage'
+     EXISTS(SELECT 1 FROM public.kb_audit_outbox WHERE action='management.token_root.bootstrap.stage'
        AND subject='p5c2a-manifest-custody') THEN
     RAISE EXCEPTION 'manifest stage/WORM rollback was not atomic';
   END IF;
@@ -472,13 +472,13 @@ DO $$ BEGIN
      (SELECT count(*) FROM public.org_vault_rotation WHERE principal IN
        ('org:p5-token','org:p5-jwks-manifest') AND state='activated')<>2 OR
      (SELECT count(*) FROM public.kb_management_jwks_publication_root)<>1 OR
-     (SELECT count(*) FROM public.kb_audit_event
+     (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='management.token_root.bootstrap.stage'
          AND subject IN ('p5c2a-token-custody','p5c2a-manifest-custody'))<>2 OR
-     (SELECT count(*) FROM public.kb_audit_event
+     (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='management.token_root.bootstrap.activate'
          AND subject IN ('p5c2a-token-custody','p5c2a-manifest-custody'))<>2 OR
-     (SELECT count(*) FROM public.kb_audit_event
+     (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='management.jwks.publication_root.bind'
          AND subject='p5c2a-publication-custody')<>1 THEN
     RAISE EXCEPTION 'P5-C2a final row/WORM cardinality mismatch';

@@ -36,7 +36,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `cache_aware_rewrite_enabled` | bool | Rewrite prompts to align with the provider's prompt cache. |
 | `cache_shaping_enabled` | bool | Enable prompt cache-shaping. |
 | `claude_model` | string | Default Claude model (empty = CLI default). |
-| `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
+| `client_integrations_enabled` | bool | Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand. |
 | `client_tool_transport_preference` | string | n/a |
 | `code_cochange_git_enabled` | bool | Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on. |
 | `code_trust_actuation_enabled` | bool | Use earned code-graph trust lessons only as an equal-score retrieval tiebreak (default off). |
@@ -99,7 +99,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `reasoning_cap_enabled` | bool | Cap the model's reasoning effort. |
 | `require_aimee_git` | bool | Block a delegate from running `git` or `gh` in a shell (reads included) and redirect git/forge work to aimee's `git_*` tools, which execute on aimee-server where the forge credential stays in-process; delegates are also spawned without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed SSH to any host) and neuters the global/system git config (default on). |
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
-| `require_session_worktree` | bool | Fail closed on mutating ops outside an aimee-managed worktree (session-isolation guard; default off). |
+| `require_session_worktree` | bool | Fail closed on mutating ops outside this session's isolated worktree (session-isolation guard; default on). |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
 | `synthesis_endpoint` | string | The ONE synthesis endpoint, remote or loopback. Empty means synthesis is off, which is supported - embedding, search, recall and indexing never call it. On a *-llm image the container entrypoint sets this to loopback itself after starting the bundled model. |
 | `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
@@ -206,7 +206,7 @@ Expert scalars with sensible defaults; settable in the config file but off the e
 | `pr_base_mode` | string | What a PR opened from a session targets. feature (default): the session's durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on one branch and reach the default branch through a single reviewed PR. default_branch: every PR aims at the repo's default branch. Any other value fails closed rather than guessing a base. |
 | `prompt_manager_block_enabled` | bool | n/a |
 | `prompt_manager_review_enabled` | bool | n/a |
-| `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. Order: configured -> remote default -> main -> master. Values: remote_default (default), local_default, current (opt-in only, never a fallback), or an explicit ref. Env: AIMEE_SESSION_WORKTREE_BASE. |
+| `session_worktree_base` | string | What a new primary session's branch+worktree is cut from. remote_default (default) performs a bounded fetch and pins the remote's current HEAD; fetch failure stops session start. An explicit feature/release ref is preserved and receives the fetched default tip when needed. local_default and current are explicit offline/stale overrides. Env: AIMEE_SESSION_WORKTREE_BASE. |
 | `tool_output_max_bytes` | int | Per-result cap (bytes) on the model-visible tool output (read_file/bash/grep/glob/git_* results). 0 = built-in default (32768); any positive value is clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the prompt + history; the context-economizer (aggressive tier) compresses older results to keep history bounded. |
 
 ### Dev-only keys (7)
@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 235 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -597,7 +597,7 @@ The binaries read 230 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_CLI_PATH`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`
+`AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_RECALL_GATE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_WORM_DB2_URL`
 
 ## External & provider environment
 

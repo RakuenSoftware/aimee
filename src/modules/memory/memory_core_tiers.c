@@ -42,6 +42,23 @@
 #include <unistd.h>
 #include <pthread.h>
 
+static uint64_t memory_scope_identity_hash(const char *scope_type, const char *scope_value)
+{
+   uint64_t h = UINT64_C(1469598103934665603);
+   const char *parts[2] = {scope_type ? scope_type : "", scope_value ? scope_value : ""};
+   for (int p = 0; p < 2; p++)
+   {
+      for (const unsigned char *s = (const unsigned char *)parts[p]; *s; s++)
+      {
+         h ^= *s;
+         h *= UINT64_C(1099511628211);
+      }
+      h ^= 0xff;
+      h *= UINT64_C(1099511628211);
+   }
+   return h;
+}
+
 int memory_tier_priority(const char *tier)
 {
    if (!tier)
@@ -129,11 +146,21 @@ int memory_reclassify_directives(void)
  * Returns the number of L5 memories synthesized, or -1 on DB error. */
 int memory_synthesize_l5_patterns(void)
 {
-   db2_memory_l5_candidate_t candidates[20];
-   int cap = (int)(sizeof(candidates) / sizeof(candidates[0]));
-   int got = db2_memory_promotion_l5_pattern_candidates(candidates, cap);
+   enum
+   {
+      L5_SYNTHESIS_BATCH_CAP = 20
+   };
+   db2_memory_l5_candidate_t candidates[L5_SYNTHESIS_BATCH_CAP + 1];
+   int got = db2_memory_promotion_l5_pattern_candidates(candidates, L5_SYNTHESIS_BATCH_CAP + 1);
    if (got < 0)
       return -1;
+   if (got > L5_SYNTHESIS_BATCH_CAP)
+   {
+      LOG_WARN("memory",
+               "L5 synthesis batch truncated at %d; remaining candidates defer to the next pass",
+               L5_SYNTHESIS_BATCH_CAP);
+      got = L5_SYNTHESIS_BATCH_CAP;
+   }
 
    int synthesized = 0;
    for (int i = 0; i < got; i++)
@@ -141,25 +168,81 @@ int memory_synthesize_l5_patterns(void)
       const db2_memory_l5_candidate_t *c = &candidates[i];
       if (!c->src_key[0] || !c->src_content[0])
          continue;
+      if (!memory_derived_sources_allowed(&c->source_id, 1))
+      {
+         LOG_WARN("memory", "synthesize_l5_patterns: source %lld refused by lineage gate",
+                  (long long)c->source_id);
+         continue;
+      }
+      /* An unresolved scope is an error, not a permissive default. A candidate
+       * with no owning workspace has no scope to write the derived row into. */
+      if (!c->scope_type[0] || !c->scope_value[0])
+      {
+         LOG_WARN("memory", "synthesize_l5_patterns: source %lld has unresolved scope",
+                  (long long)c->source_id);
+         continue;
+      }
 
       char key[256];
       char content[1024];
-      snprintf(key, sizeof(key), "pattern_%.200s", c->src_key);
-      snprintf(content, sizeof(content), "Pattern observed across %d sessions: %.400s",
-               c->session_count, c->src_content);
+      /* Scope participates in derived identity, not merely visibility. Without
+       * it two identical source keys from unrelated projects merge into one
+       * memory and accumulate both scope tags, recreating the global laundering
+       * bug after the candidate query had correctly separated the counts. */
+      snprintf(key, sizeof(key), "pattern_%s_%016llx_%.180s", c->scope_type,
+               (unsigned long long)memory_scope_identity_hash(c->scope_type, c->scope_value),
+               c->src_key);
+      snprintf(content, sizeof(content), "Pattern observed across %d sessions in %s %.120s: %.400s",
+               c->session_count, c->scope_type, c->scope_value, c->src_content);
 
       memory_t mem = {0};
-      /* L5 synthesis carries high confidence — cross-session frequency is
-       * the strongest signal we have short of explicit operator approval. */
-      double conf = 0.85 + 0.01 * (c->session_count - 3);
-      if (conf > 0.95)
-         conf = 0.95;
+      /* Recurrence is a reachability and salience signal, not evidence. This
+       * used to scale confidence with session count to a 0.95 ceiling, which
+       * converted popularity into truth and then fed itself: a higher-confidence
+       * record ranks higher, is injected more, is restated more, and recurs in
+       * more sessions. Exposure does not validate and time does not validate;
+       * only independent evidence or explicit approval raises belief.
+       *
+       * A synthesized record is unproven inference, so it enters at the
+       * conservative confidence for that class and stays there: this value is
+       * also the provenance ceiling, because nothing raises a memory's
+       * confidence -- every other path only decays it -- so a popular error
+       * cannot climb into canon however often it recurs. Any future path that
+       * does raise confidence has to honour provenance, or it reopens exactly
+       * this hole. session_count stays on the record as the salience signal it
+       * is, in the content rather than in the belief. */
+      double conf = MEMORY_L5_SYNTHESIS_CONFIDENCE;
+      int existed = db2_memory_key_exists(key) == 1;
       if (memory_insert(TIER_L5, KIND_FACT, key, content, conf, "", &mem) != 0)
          continue;
+
+      /* The derived row inherits exactly the scope its recurrence was counted
+       * within. Replace (rather than append to) automatic cwd/shared tags:
+       * ambient scope is not part of this background derivation's evidence and
+       * appending it would widen reachability after the candidate query had
+       * correctly isolated the source scope. */
+      if (db2_memory_scope_replace(mem.id, c->scope_type, c->scope_value) != 0)
+      {
+         if (!existed)
+            (void)memory_delete(mem.id);
+         LOG_WARN("memory", "synthesize_l5_patterns: failed to persist source scope for %lld",
+                  (long long)mem.id);
+         continue;
+      }
 
       /* Link L5 synthesis → source memory so the provenance chain is
        * discoverable. */
       memory_link_create(mem.id, c->source_id, "synthesizes");
+      {
+         char ref[48];
+         snprintf(ref, sizeof(ref), "memory:%lld", (long long)c->source_id);
+         if (memory_lineage_insert("memory", mem.id, "memory", ref, conf) < 0)
+         {
+            if (!existed)
+               (void)memory_delete(mem.id);
+            continue;
+         }
+      }
 
       /* Emit MDL features for downstream ranker use. */
       kb_mdl_score_t mdl = {0};
@@ -180,6 +263,13 @@ int memory_synthesize_l5_patterns(void)
    if (synthesized > 0)
       LOG_INFO("memory", "synthesize_l5_patterns: synthesized %d L5 patterns", synthesized);
    return synthesized;
+}
+
+int memory_activation_policy_set(int64_t memory_id, int sticky_turns, int cooldown_turns,
+                                 int delay_turns, int suppressed)
+{
+   return db2_memory_activation_policy_set(memory_id, sticky_turns, cooldown_turns, delay_turns,
+                                           suppressed);
 }
 
 /* Promote stable L2 facts/preferences to L3.  L3 is reserved for slow-changing
@@ -234,6 +324,72 @@ int64_t memory_lineage_insert(const char *object_type, int64_t object_id, const 
 int memory_lineage_get(const char *object_type, int64_t object_id, memory_lineage_t *out, int max)
 {
    return db2_memory_lineage_get(object_type, object_id, out, max);
+}
+
+#define DERIVATION_MAX_DEPTH   16
+#define DERIVATION_MAX_VISITED MEMORY_DERIVATION_MAX_SOURCES
+#define DERIVATION_MAX_EDGES   64
+
+static int memory_lineage_source_id(const memory_lineage_t *row, int64_t *id_out)
+{
+   if (!row || !id_out || strcmp(row->source_kind, "memory") != 0)
+      return 0;
+   const char *p = row->source_ref;
+   if (strncmp(p, "memory:", 7) == 0)
+      p += 7;
+   char *end = NULL;
+   long long id = strtoll(p, &end, 10);
+   if (id <= 0 || !end || *end != '\0')
+      return -1;
+   *id_out = (int64_t)id;
+   return 1;
+}
+
+static int memory_derived_source_walk(int64_t memory_id, int depth, int64_t *visited,
+                                      unsigned char *visit_state, int *visited_count)
+{
+   if (depth > DERIVATION_MAX_DEPTH || !visited || !visit_state || !visited_count ||
+       *visited_count >= DERIVATION_MAX_VISITED)
+      return 0;
+   for (int i = 0; i < *visited_count; i++)
+      if (visited[i] == memory_id)
+         return visit_state[i] == 2; /* active means cycle; complete means shared DAG */
+   int visit_index = (*visited_count)++;
+   visited[visit_index] = memory_id;
+   visit_state[visit_index] = 1;
+
+   if (db2_memory_derivation_source_refused(memory_id) != 0)
+      return 0;
+
+   memory_lineage_t rows[DERIVATION_MAX_EDGES + 1];
+   int n = memory_lineage_get("memory", memory_id, rows, DERIVATION_MAX_EDGES + 1);
+   if (n < 0 || n > DERIVATION_MAX_EDGES)
+      return 0;
+   for (int i = 0; i < n; i++)
+   {
+      int64_t source_id = 0;
+      int parsed = memory_lineage_source_id(&rows[i], &source_id);
+      if (parsed < 0)
+         return 0; /* declared memory source cannot be resolved: fail closed */
+      if (parsed > 0 &&
+          !memory_derived_source_walk(source_id, depth + 1, visited, visit_state, visited_count))
+         return 0;
+   }
+   visit_state[visit_index] = 2;
+   return 1;
+}
+
+int memory_derived_sources_allowed(const int64_t *source_ids, int source_count)
+{
+   if (!source_ids || source_count <= 0 || source_count > DERIVATION_MAX_VISITED)
+      return 0;
+   int64_t visited[DERIVATION_MAX_VISITED];
+   unsigned char visit_state[DERIVATION_MAX_VISITED] = {0};
+   int visited_count = 0;
+   for (int i = 0; i < source_count; i++)
+      if (!memory_derived_source_walk(source_ids[i], 0, visited, visit_state, &visited_count))
+         return 0;
+   return 1;
 }
 
 /* --- Cite: show provenance chain for a memory ID --- */

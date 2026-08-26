@@ -215,6 +215,8 @@ than letting the output read as a command ignoring its argument.
   path, which a probe hardwired to answer "no evidence" would have satisfied
   just as well -- indistinguishable from the inert version this slice shipped
   with.
-- The S6 arm came back as the default (`full`). The sampler answered, which is
-  what was inert before; arm *selection under reward pressure* is covered by
-  unit tests, not by this run.
+- In this 2026-08-24 run the S6 arm came back as the default (`full`). The
+  [2026-08-25 six-loop run](learning-loop-evidence-2026-08-25.md) closes that
+  limit on a real stack: reward pressure selects and records non-default
+  `brief`. That follow-up also makes the two-way S4 proof and all six loop rows
+  reproducible through one Make target.

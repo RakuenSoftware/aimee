@@ -742,12 +742,14 @@ check_updated_input_gate() {
     ' "$file"
 }
 
-if check_updated_input_gate ../src/cmd_hooks.c 'hook_client_supports_updated_input()' &&
-   check_updated_input_gate ../src/cli_main.c 'cli_hook_client_supports_updated_input()' &&
+if check_updated_input_gate ../src/cmd_hooks.c 'hook_client_supports_updated_input' &&
+   check_updated_input_gate ../src/cli_main.c 'cli_hook_client_supports_updated_input' &&
    grep -q 'hook_client_supports_updated_input' ../src/cmd_hooks.c &&
    grep -q 'cli_hook_client_supports_updated_input' ../src/cli_main.c &&
    grep -q 'strcmp(client, "claude") == 0' ../src/cmd_hooks.c &&
    grep -q 'strcmp(client, "claude") == 0' ../src/cli_main.c &&
+   grep -q 'strcmp(client, "codex") == 0' ../src/cmd_hooks.c &&
+   grep -q 'strcmp(client, "codex") == 0' ../src/cli_main.c &&
    grep -q 'emit_pretool_rewrite_unsupported_json' ../src/cmd_hooks.c &&
    grep -q 'emit_pretool_rewrite_unsupported_json' ../src/cli_main.c; then
     pass "PreToolUse updatedInput is gated to supported clients in all hook entry paths"
@@ -755,11 +757,11 @@ else
     fail "PreToolUse updatedInput client gating regression"
 fi
 
-if grep -q "if client_id == 'codex'" ../configure-hooks.sh &&
-   grep -q "return cmd + ' || true'" ../configure-hooks.sh; then
-    pass "Codex PreToolUse hook is advisory"
+if grep -q "return client_env_cmd(bin_path + ' hooks pre')" ../configure-hooks.sh &&
+   ! grep -q "return cmd + ' || true'" ../configure-hooks.sh; then
+    pass "Codex PreToolUse isolation hook is enforcing"
 else
-    fail "Codex PreToolUse hook may surface failed-hook noise"
+    fail "Codex PreToolUse isolation hook can be bypassed by shell success coercion"
 fi
 
 # 7b. Installer non-interactive prompts stay wrapped behind helper functions

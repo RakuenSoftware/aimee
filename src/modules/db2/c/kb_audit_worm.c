@@ -1,8 +1,7 @@
-/* kb_audit_worm.c: the aimee-kb per-service WORM audit store (S5). Postgres
- * (db2) append-only store with the SAME hash-chain record + canonicalization as
- * the aimee-server SQLite store (via audit_worm_chain), so a row hashed on either
- * engine verifies on the other. WORM is enforced by the kb_audit_event triggers
- * (schema.sql) + a writer role granted only INSERT/SELECT at provisioning. */
+/* kb_audit_worm.c: the aimee-kb WORM audit producer/verifier seam (S5).
+ * PostgreSQL production builds submit immutable outbox intents; the dedicated
+ * aimee-kb-worm process is the sole chain constructor. The SQLite unit-test shim
+ * retains a local canonical builder to keep hash verification deterministic. */
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -59,6 +58,7 @@ int db2_kb_audit_worm_enabled(void)
    return g_kb_worm_enabled;
 }
 
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
 static void kb_worm_ts(char out[32])
 {
    time_t now = time(NULL);
@@ -66,6 +66,7 @@ static void kb_worm_ts(char out[32])
    gmtime_r(&now, &tmv);
    strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &tmv);
 }
+#endif
 
 int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
                                const char *action, const char *subject, const char *verdict,
@@ -90,17 +91,27 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    }
 
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   /* Serialize production appenders for the lifetime of the surrounding
-    * transaction.  Without this lock, two KB connections can read the same
-    * chain head and race on seq/prev_hash.  SQLite tests are single-store and
-    * intentionally skip this PostgreSQL primitive. */
-   {
-      char lock_err[256] = "";
-      if (aimee_pg_exec(conn, "SELECT pg_advisory_xact_lock(hashtext('kb_audit_event'))", lock_err,
-                        sizeof(lock_err)) != 0)
-         return -1;
-   }
-#endif
+   /* Production producers never read, lock, hash, or insert the chain. This
+    * SECURITY DEFINER entry point can only create an immutable outbox intent in
+    * the caller's existing transaction; the WORM process owns chain assembly. */
+   char submit_err[256] = "";
+   aimee_pg_stmt_t *submit = aimee_pg_prepare(
+       conn, "SELECT kb_audit_worm_submit(?1,?2,?3,?4,?5,?6)", submit_err, sizeof(submit_err));
+   if (!submit)
+      return -1;
+   aimee_pg_bind_text(submit, "?1", actor_role);
+   aimee_pg_bind_text(submit, "?2", actor_principal);
+   aimee_pg_bind_text(submit, "?3", action);
+   aimee_pg_bind_text(submit, "?4", subject);
+   aimee_pg_bind_text(submit, "?5", verdict);
+   aimee_pg_bind_text(submit, "?6", detail);
+   aimee_pg_step_t submitted = aimee_pg_step(submit, submit_err, sizeof(submit_err));
+   aimee_pg_finalize(submit);
+   return submitted == AIMEE_PG_ROW ? 0 : -1;
+#else
+   /* The SQLite unit-test shim has no stored procedures or sidecar. It retains
+    * the old local chain builder so the canonical hash verifier stays covered;
+    * this branch is absent from every production build. */
 
    char err[256];
    long long seq = 1;
@@ -152,6 +163,7 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    if (st == AIMEE_PG_ERR)
       return -1;
    return 0;
+#endif
 }
 
 int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
@@ -265,4 +277,32 @@ long db2_kb_audit_count(void)
       n = (long)aimee_pg_column_int64(q, 0);
    aimee_pg_finalize(q);
    return n;
+}
+
+int db2_kb_audit_pending(long long *count, long long *oldest_age_seconds)
+{
+   if (count)
+      *count = 0;
+   if (oldest_age_seconds)
+      *oldest_age_seconds = 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[128];
+   aimee_pg_stmt_t *q = aimee_pg_prepare(
+       conn, "SELECT pending_count,oldest_age_seconds FROM kb_audit_worm_pending()", err,
+       sizeof err);
+   if (!q)
+      return -1;
+   int rc = -1;
+   if (aimee_pg_step(q, err, sizeof err) == AIMEE_PG_ROW)
+   {
+      if (count)
+         *count = aimee_pg_column_int64(q, 0);
+      if (oldest_age_seconds)
+         *oldest_age_seconds = aimee_pg_column_int64(q, 1);
+      rc = 0;
+   }
+   aimee_pg_finalize(q);
+   return rc;
 }

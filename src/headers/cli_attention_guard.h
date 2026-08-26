@@ -19,6 +19,13 @@
 #define DEC_CLI_ATTENTION_GUARD_H 1
 
 #include <stddef.h>
+typedef struct cJSON cJSON;
+
+/* Client-neutral worktree router used by direct attention-guard hooks and by
+ * the full hooks.pre path. Returns 0 with an owned replacement input, 1 when no
+ * rewrite applies, -2 on provisioning failure, and -3 on cross-session access. */
+int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, const cJSON *input,
+                          cJSON **updated_out);
 
 /* Op class for a tool call. */
 typedef enum

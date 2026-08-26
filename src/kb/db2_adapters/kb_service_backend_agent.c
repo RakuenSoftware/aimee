@@ -1030,7 +1030,9 @@ cJSON *db2_kb_service_memory_fold_session_json(const char *session_id)
       learning_evidence_write_event("session_summary", "session", session_id ? session_id : "",
                                     summary, "kb.fold_session", NULL, 0);
 
-   cJSON_AddStringToObject(resp, "status", "ok");
+   cJSON_AddStringToObject(resp, "status", rc < 0 ? "error" : "ok");
+   if (rc < 0)
+      cJSON_AddStringToObject(resp, "message", "session fold was refused or incomplete");
    cJSON_AddNumberToObject(resp, "count", rc < 0 ? 0 : rc);
    return resp;
 }

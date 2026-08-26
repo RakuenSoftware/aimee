@@ -86,7 +86,7 @@ BEGIN
       AND agent='management' AND cred='ed25519')<>1 THEN
     RAISE EXCEPTION 'staging did not leave inert current v1';
   END IF;
-  SELECT count(*) INTO n FROM kb_audit_event WHERE action IN
+  SELECT count(*) INTO n FROM kb_audit_outbox WHERE action IN
     ('vault.rotation.start','vault.rotation.stage');
   PERFORM * FROM kb_management_status_key_bootstrap_stage(
     current_setting('p5b1b.bootstrap_id'),'platform:p5-status','status-v1',decode(repeat('21',32),'hex'),
@@ -95,7 +95,7 @@ BEGIN
     decode(repeat('22',12),'hex'),decode(repeat('23',32),'hex'),decode(repeat('24',16),'hex'),
     sha256(decode(repeat('21',32),'hex')),decode(repeat('d1',32),'hex'),
     decode(repeat('d2',32),'hex'));
-  IF (SELECT count(*) FROM kb_audit_event WHERE action IN
+  IF (SELECT count(*) FROM kb_audit_outbox WHERE action IN
       ('vault.rotation.start','vault.rotation.stage'))<>n THEN
     RAISE EXCEPTION 'exact stage replay duplicated audit';
   END IF;
@@ -138,7 +138,7 @@ END $$;
 RESET ROLE;
 CREATE FUNCTION pg_temp.p5b1b_fail_audit() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN RAISE EXCEPTION 'injected bootstrap audit failure'; END $$;
-CREATE TRIGGER p5b1b_fail_audit BEFORE INSERT ON kb_audit_event
+CREATE TRIGGER p5b1b_fail_audit BEFORE INSERT ON kb_audit_outbox
   FOR EACH ROW EXECUTE FUNCTION pg_temp.p5b1b_fail_audit();
 SET LOCAL ROLE aimee_kb_migrate;
 DO $$ BEGIN
@@ -151,7 +151,7 @@ DO $$ BEGIN
   END;
 END $$;
 RESET ROLE;
-DROP TRIGGER p5b1b_fail_audit ON kb_audit_event;
+DROP TRIGGER p5b1b_fail_audit ON kb_audit_outbox;
 DO $$ BEGIN
   IF (SELECT state FROM org_vault_rotation WHERE principal='org:p5-status')<>'activating'
      OR (SELECT version FROM org_vault_current WHERE principal='org:p5-status'
@@ -172,10 +172,10 @@ BEGIN
   IF x.state<>'activated' OR x.version<>2 OR octet_length(x.public_key)<>32 THEN
     RAISE EXCEPTION 'finalize result mismatch';
   END IF;
-  SELECT count(*) INTO n FROM kb_audit_event WHERE action='vault.rotation.activate';
+  SELECT count(*) INTO n FROM kb_audit_outbox WHERE action='vault.rotation.activate';
   PERFORM * FROM kb_management_status_key_bootstrap_finalize(
     current_setting('p5b1b.bootstrap_id'),decode(repeat('a2',64),'hex'));
-  IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.rotation.activate')<>n THEN
+  IF (SELECT count(*) FROM kb_audit_outbox WHERE action='vault.rotation.activate')<>n THEN
     RAISE EXCEPTION 'finalize replay duplicated audit';
   END IF;
 END $$;

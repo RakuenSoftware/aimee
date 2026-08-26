@@ -676,6 +676,44 @@ static void test_agent_eval_ablation_presets(void)
    assert(agent_eval_ablation_preset("definitely_not_a_preset", &flags) != 0);
 }
 
+static void test_agent_eval_manifest_comparability(void)
+{
+   eval_task_t tasks[1];
+   memset(tasks, 0, sizeof(tasks));
+   snprintf(tasks[0].name, sizeof(tasks[0].name), "manifest fixture");
+   snprintf(tasks[0].prompt, sizeof(tasks[0].prompt), "answer from evidence");
+   snprintf(tasks[0].role, sizeof(tasks[0].role), "review");
+   snprintf(tasks[0].success_check_type, sizeof(tasks[0].success_check_type), "contains");
+   snprintf(tasks[0].success_check_value, sizeof(tasks[0].success_check_value), "ok");
+
+   agent_eval_manifest_t a, b;
+   assert(agent_eval_manifest_build("suite", tasks, 1, "agent:model", 7, &a) == 0);
+   assert(agent_eval_manifest_build("suite", tasks, 1, "agent:model", 7, &b) == 0);
+   assert(strlen(a.dataset_hash) == 64 && strlen(a.target_hash) == 64);
+   assert(a.hardware_profile[0] && strcmp(a.harness_version, "2") == 0);
+   const char *reason = NULL;
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABLE);
+   assert(strcmp(reason, "comparable") == 0);
+
+   snprintf(b.hardware_profile, sizeof(b.hardware_profile), "different-machine");
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABLE);
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_LATENCY, &reason) ==
+          AGENT_EVAL_INCOMPARABLE);
+   assert(strcmp(reason, "hardware_changed") == 0);
+
+   b = a;
+   b.seed++;
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_INCOMPARABLE);
+   assert(strcmp(reason, "seed_changed") == 0);
+   b = a;
+   b.dataset_hash[0] = '\0';
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABILITY_UNKNOWN);
+}
+
 /* --- Golden smoke fixture for Phase 0 (effectiveness-weighted code vector graph) --- */
 
 /* 30 queries covering code/file, memory/recall, config/identity, agent/session,
@@ -847,6 +885,10 @@ int main(int argc, char **argv)
 
    printf("test_agent_eval_ablation_presets... ");
    test_agent_eval_ablation_presets();
+   printf("ok\n");
+
+   printf("test_agent_eval_manifest_comparability... ");
+   test_agent_eval_manifest_comparability();
    printf("ok\n");
 
    printf("test_multi_hop_recall... ");

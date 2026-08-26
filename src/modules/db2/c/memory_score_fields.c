@@ -107,6 +107,37 @@ int db2_memory_get_confidence_by_key(const char *key, double *confidence_out)
    return hit;
 }
 
+int db2_memory_list_by_key_after(const char *key, int64_t after_id,
+                                 db2_memory_id_content_row_t *out, int max)
+{
+   if (!key || !key[0] || !out || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   /* Ordered and cursored so a caller can drain the whole key. The uncursored
+    * form below fills its buffer and stops, which is fine for a bounded preview
+    * but silently truncates any scan whose completeness is load-bearing. */
+   static const char *sql =
+       "SELECT id, content FROM memories WHERE key = ?1 AND id > ?2 ORDER BY id ASC";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_bind_int64(st, "?2", after_id);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      out[n].id = aimee_pg_column_int64(st, 0);
+      const char *c = aimee_pg_column_text(st, 1);
+      snprintf(out[n].content, sizeof(out[n].content), "%s", c ? c : "");
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_memory_list_by_key(const char *key, db2_memory_id_content_row_t *out, int max)
 {
    if (!key || !key[0] || !out || max <= 0)
@@ -139,9 +170,9 @@ int db2_memory_session_l0_list(const char *session_id, db2_memory_session_l0_row
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   static const char *sql = "SELECT key, content FROM memories"
+   static const char *sql = "SELECT id, key, content FROM memories"
                             " WHERE tier = 'L0' AND source_session = ?1"
-                            " ORDER BY created_at ASC";
+                            " ORDER BY created_at ASC, id ASC";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
@@ -150,8 +181,9 @@ int db2_memory_session_l0_list(const char *session_id, db2_memory_session_l0_row
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      const char *k = aimee_pg_column_text(st, 0);
-      const char *c = aimee_pg_column_text(st, 1);
+      out[n].id = aimee_pg_column_int64(st, 0);
+      const char *k = aimee_pg_column_text(st, 1);
+      const char *c = aimee_pg_column_text(st, 2);
       snprintf(out[n].key, sizeof(out[n].key), "%s", k ? k : "");
       snprintf(out[n].content, sizeof(out[n].content), "%s", c ? c : "");
       n++;
@@ -160,33 +192,56 @@ int db2_memory_session_l0_list(const char *session_id, db2_memory_session_l0_row
    return n;
 }
 
-void db2_memory_session_l0_purge(const char *session_id)
+int db2_memory_session_l0_purge(const char *session_id, const int64_t *memory_ids, int count)
 {
-   if (!session_id || !session_id[0])
-      return;
+   if (!session_id || !session_id[0] || !memory_ids || count <= 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
-      return;
+      return -1;
    char err[MSF_ERRBUF] = "";
-   static const char *del_prov = "DELETE FROM memory_provenance WHERE memory_id IN"
-                                 " (SELECT id FROM memories WHERE tier = 'L0'"
-                                 "  AND source_session = ?1)";
-   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, del_prov, err, sizeof(err));
-   if (st)
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   static const char *del_prov = "DELETE FROM memory_provenance WHERE memory_id = ?1";
+   static const char *del_mem = "DELETE FROM memories"
+                                " WHERE id = ?1 AND tier = 'L0' AND source_session = ?2";
+   aimee_pg_stmt_t *prov = aimee_pg_prepare(conn, del_prov, err, sizeof(err));
+   aimee_pg_stmt_t *mem = aimee_pg_prepare(conn, del_mem, err, sizeof(err));
+   if (!prov || !mem)
    {
-      aimee_pg_bind_text(st, "?1", session_id);
-      (void)aimee_pg_step(st, err, sizeof(err));
-      aimee_pg_finalize(st);
+      aimee_pg_finalize(prov);
+      aimee_pg_finalize(mem);
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
    }
-   static const char *del_mem = "DELETE FROM memories WHERE tier = 'L0'"
-                                " AND source_session = ?1";
-   st = aimee_pg_prepare(conn, del_mem, err, sizeof(err));
-   if (st)
+
+   int removed = 0;
+   for (int i = 0; i < count; i++)
    {
-      aimee_pg_bind_text(st, "?1", session_id);
-      (void)aimee_pg_step(st, err, sizeof(err));
-      aimee_pg_finalize(st);
+      if (memory_ids[i] <= 0 || aimee_pg_reset(prov) != 0 ||
+          aimee_pg_bind_int64(prov, "?1", memory_ids[i]) != 0 ||
+          aimee_pg_step(prov, err, sizeof(err)) != AIMEE_PG_DONE || aimee_pg_reset(mem) != 0 ||
+          aimee_pg_bind_int64(mem, "?1", memory_ids[i]) != 0 ||
+          aimee_pg_bind_text(mem, "?2", session_id) != 0 ||
+          aimee_pg_step(mem, err, sizeof(err)) != AIMEE_PG_DONE || aimee_pg_stmt_changes(mem) != 1)
+         goto rollback;
+      removed++;
    }
+   aimee_pg_finalize(prov);
+   aimee_pg_finalize(mem);
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
+   }
+   return removed;
+
+rollback:
+   aimee_pg_finalize(prov);
+   aimee_pg_finalize(mem);
+   (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   return -1;
 }
 
 int db2_memory_last_retro_scan(char *out, int out_len)
@@ -485,7 +540,9 @@ int db2_memory_merge_update_ex(int64_t memory_id, const char *content, const cha
    void *conn = db2_conn();
    if (!conn)
       return -1;
-   static const char *sql = "UPDATE memories SET content = ?1, use_cases = ?2, confidence = ?3,"
+   static const char *sql = "UPDATE memories SET content = ?1, use_cases = ?2,"
+                            " confidence = CASE WHEN ?3 < confidence_ceiling"
+                            " THEN ?3 ELSE confidence_ceiling END,"
                             " use_count = ?4, observation_count = ?5, evidence_strength = ?6,"
                             " salience = ?7, surprise = ?8, last_used_at = ?9, updated_at = ?10"
                             " WHERE id = ?11";
@@ -553,6 +610,38 @@ int db2_memory_active_kind_dedupe_candidates(const char *kind, db2_memory_dedupe
    return n;
 }
 
+int db2_memory_rejection_blocks(const char *key, const char *content)
+{
+   if (!key)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   const char *scope_type = scope.project[0]     ? "project"
+                            : scope.workspace[0] ? "workspace"
+                                                 : "global";
+   const char *scope_value = scope.project[0]     ? scope.project
+                             : scope.workspace[0] ? scope.workspace
+                                                  : "_global";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='memory' AND active=1"
+       " AND memory_key=?1 AND memory_content=?2 AND scope_type=?3 AND scope_value=?4 LIMIT 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", key);
+   aimee_pg_bind_text(st, "?2", content ? content : "");
+   aimee_pg_bind_text(st, "?3", scope_type);
+   aimee_pg_bind_text(st, "?4", scope_value);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 1 : step == AIMEE_PG_DONE ? 0 : -1;
+}
+
 int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
                                            const char *epistemic_kind, const char *key,
                                            const char *content, const char *use_cases,
@@ -566,13 +655,41 @@ int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
    void *conn = db2_conn();
    if (!conn)
       return -1;
+   db2_memory_scope_context_t scope;
+   db2_memory_scope_context_get(&scope);
+   const char *scope_type = scope.project[0]     ? "project"
+                            : scope.workspace[0] ? "workspace"
+                                                 : "global";
+   const char *scope_value = scope.project[0]     ? scope.project
+                             : scope.workspace[0] ? scope.workspace
+                                                  : "_global";
+   if (db2_memory_rejection_blocks(key, content) != 0)
+      return -1;
+   /* The ceiling is a durable property of provenance. Model-authored material
+    * cannot acquire more confidence merely by being merged or re-exposed; a
+    * user assertion may range to 1.0. L5 synthesis is unproven inference and is
+    * capped at its conservative class regardless of caller. */
+   double ceiling = 1.0;
+   if (strcmp(tier, "L5") == 0)
+      ceiling = 0.5;
+   else if (!provenance_category || strcmp(provenance_category, "user_stated") != 0)
+      ceiling = 0.8; /* model-inferred durable ceiling: typed-fact Class B */
+   if (ceiling < 0.0)
+      ceiling = 0.0;
+   if (ceiling > 1.0)
+      ceiling = 1.0;
+   if (confidence < 0.0)
+      confidence = 0.0;
+   if (confidence > ceiling)
+      confidence = ceiling;
    /* Postgres replaces sqlite's last_insert_rowid() with INSERT ... RETURNING id. */
    static const char *sql =
        "INSERT INTO memories (tier, kind, key, content, use_cases, confidence,"
        " use_count, last_used_at, source_session, created_at,"
        " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count,"
-       " provenance_category, epistemic_kind)"
-       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?16)"
+       " provenance_category, epistemic_kind, confidence_ceiling, scope_type, scope_value)"
+       " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?16, ?17, "
+       "?18, ?19)"
        " RETURNING id";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -602,6 +719,9 @@ int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
                       (provenance_category && provenance_category[0]) ? provenance_category
                                                                       : "agent_message");
    aimee_pg_bind_text(st, "?16", epistemic_kind);
+   aimee_pg_bind_double(st, "?17", ceiling);
+   aimee_pg_bind_text(st, "?18", scope_type);
+   aimee_pg_bind_text(st, "?19", scope_value);
    int64_t new_id = -1;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
       new_id = aimee_pg_column_int64(st, 0);
@@ -896,9 +1016,21 @@ int db2_memory_summarise_clusters(double max_confidence, int min_count,
       return 0;
    /* Postgres rejects column aliases in HAVING; repeat COUNT(*) there. */
    static const char *sql =
+       /* Superseded and archived rows are excluded from the derivation input.
+        * A summary is a derived belief, so deriving one from sources that were
+        * corrected or rejected re-manufactures the rejected claim as a fresh
+        * record carrying none of the rejection -- the derivation bypass. The
+        * disposition has to reach the derivation, not just the row it was
+        * recorded on.
+        *
+        * Honest limit: this covers sources whose own lifecycle says they were
+        * retired. A derived writer that does not declare its sources cannot be
+        * checked this way at all, which is an argument for source references
+        * being mandatory rather than optional on derived writes. */
        "SELECT source_session, COUNT(*) AS cnt, AVG(confidence) AS avg_conf"
        " FROM memories"
        " WHERE tier = 'L1' AND confidence <= ?1 AND kind = 'fact' AND merged_into = 0"
+       "   AND lifecycle_state NOT IN ('superseded', 'archived')"
        " GROUP BY source_session"
        " HAVING COUNT(*) >= ?2";
    char err[MSF_ERRBUF] = "";
@@ -920,6 +1052,53 @@ int db2_memory_summarise_clusters(double max_confidence, int min_count,
    }
    aimee_pg_finalize(st);
    return n;
+}
+
+int db2_memory_summary_source_ids(const char *session_id, double max_confidence, int64_t *ids,
+                                  int max)
+{
+   if (!session_id || !session_id[0] || !ids || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT id FROM memories WHERE tier='L1' AND kind='fact' AND merged_into=0"
+       " AND source_session=?1 AND confidence<=?2 ORDER BY id ASC LIMIT ?3";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", session_id);
+   aimee_pg_bind_double(st, "?2", max_confidence);
+   aimee_pg_bind_int(st, "?3", max);
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      ids[n++] = aimee_pg_column_int64(st, 0);
+   aimee_pg_finalize(st);
+   return n;
+}
+
+int db2_memory_derivation_source_refused(int64_t memory_id)
+{
+   if (memory_id <= 0)
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "SELECT CASE WHEN lifecycle_state IN ('archived','superseded')"
+       " OR activation_suppressed<>0 THEN 1 ELSE 0 END FROM memories WHERE id=?1";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   int refused = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      refused = aimee_pg_column_int(st, 0) ? 1 : 0;
+   aimee_pg_finalize(st);
+   return refused;
 }
 
 void db2_memory_mark_merged_into(int64_t merged_into, const char *session_id, double max_confidence)
@@ -995,35 +1174,35 @@ int db2_memory_list_kv_section(db2_memory_section_t section, db2_memory_kv_row_t
    case DB2_MEM_SECTION_ACTIVE_TASKS:
       sql = "SELECT m.key, m.content FROM memories m"
             " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
-            "'task'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "'task'" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.updated_at DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_RECENT_CONTEXT:
       sql = "SELECT m.key, m.content FROM memories m"
-            " WHERE m.tier = 'L1' AND m.kind = 'episode'" DB2_MEMORY_SCOPE_FILTER_SQL(
+            " WHERE m.tier = 'L1' AND m.kind = 'episode'" DB2_MEMORY_RECALL_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.created_at DESC "
                                                                        "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_CONSTRAINTS:
-      sql =
-          "SELECT m.key, m.content FROM memories m"
-          " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
-          " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
-          " (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)))" DB2_MEMORY_SCOPE_FILTER_SQL(
-              "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
-                                                                     "LIMIT ?1";
+      sql = "SELECT m.key, m.content FROM memories m"
+            " WHERE (m.tier = 'L2' OR m.tier = 'L3')"
+            " AND (m.kind = 'decision' OR (m.kind = 'policy' AND"
+            " (m.epistemic_kind<>'policy' OR "
+            "m.governance_promoted<>0)))" DB2_MEMORY_RECALL_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC "
+                                                                       "LIMIT ?1";
       break;
    case DB2_MEM_SECTION_PROCEDURES:
       sql =
           "SELECT m.key, m.content FROM memories m"
           " WHERE (m.tier = 'L1' OR m.tier = 'L2') AND m.kind = "
-          "'procedure'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+          "'procedure'" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
               "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_SECTION_FAILURE_WARNINGS:
       sql = "SELECT m.key, m.content FROM memories m"
             " WHERE m.tier = 'L3' AND m.kind = 'episode' AND m.confidence > "
-            "0.3" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "0.3" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.created_at DESC LIMIT ?1";
       break;
    default:
@@ -1059,7 +1238,7 @@ int db2_memory_list_episode_cards(db2_memory_episode_card_row_t *rows, int max)
    static const char *sql =
        "SELECT m.content FROM memories m"
        " JOIN memory_units u ON u.memory_id = m.id"
-       " WHERE u.is_episode_card = 1" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " WHERE u.is_episode_card = 1" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, m.id "
                                                                   "DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
@@ -1090,7 +1269,7 @@ int db2_memory_list_global_constraints(db2_memory_kv_row_t *rows, int max)
        "SELECT m.key, m.content FROM memories m"
        " WHERE m.kind IN ('preference', 'policy')"
        " AND (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)"
-       " AND m.tier IN ('L1', 'L2', 'L3', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
+       " AND m.tier IN ('L1', 'L2', 'L3', 'L4')" DB2_MEMORY_RECALL_FILTER_SQL(
            "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                   "m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
@@ -1258,7 +1437,7 @@ int db2_memory_list_key_facts_with_provenance(db2_memory_key_fact_row_t *rows, i
        "  WHERE p.memory_id = m.id ORDER BY p.created_at DESC LIMIT 1) AS provenance"
        " FROM memories m"
        " WHERE m.tier IN ('L2', 'L3') AND (m.kind = 'fact' OR m.kind = "
-       "'preference')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+       "'preference')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
            "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1325,17 +1504,22 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
    {
    case DB2_MEM_CAND_PRIMARY:
       sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
-            " COALESCE(m.last_used_at, ''), m.created_at"
+            " COALESCE(m.last_used_at, ''), m.created_at, COALESCE(m.source_session, ''),"
+            " m.activation_sticky_turns, m.activation_cooldown_turns,"
+            " m.activation_delay_turns, m.activation_suppressed"
             " FROM memories m WHERE m.tier IN ('L1', 'L2', 'L3', 'L4', "
-            "'L5')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "'L5')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, m.confidence DESC, m.use_count DESC LIMIT ?1";
       break;
    case DB2_MEM_CAND_FALLBACK:
-      sql = "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
-            " COALESCE(m.last_used_at, ''), m.created_at"
-            " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_SCOPE_FILTER_SQL(
-                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
-                                                                       "m.use_count DESC LIMIT ?1";
+      sql =
+          "SELECT m.id, m.tier, m.key, m.content, m.kind, m.confidence, m.use_count,"
+          " COALESCE(m.last_used_at, ''), m.created_at, COALESCE(m.source_session, ''),"
+          " m.activation_sticky_turns, m.activation_cooldown_turns,"
+          " m.activation_delay_turns, m.activation_suppressed"
+          " FROM memories m WHERE m.tier IN ('L0', 'L1', 'L2', 'L4')" DB2_MEMORY_RECALL_FILTER_SQL(
+              "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                     "m.use_count DESC LIMIT ?1";
       break;
    default:
       return 0;
@@ -1362,12 +1546,46 @@ int db2_memory_list_candidates(db2_memory_cand_filter_t filter, db2_memory_cand_
       rows[n].use_count = aimee_pg_column_int(st, 6);
       const char *lu = aimee_pg_column_text(st, 7);
       const char *cr = aimee_pg_column_text(st, 8);
+      const char *ss = aimee_pg_column_text(st, 9);
       snprintf(rows[n].last_used_at, sizeof(rows[n].last_used_at), "%s", lu ? lu : "");
       snprintf(rows[n].created_at, sizeof(rows[n].created_at), "%s", cr ? cr : "");
+      snprintf(rows[n].source_session, sizeof(rows[n].source_session), "%s", ss ? ss : "");
+      rows[n].activation_sticky_turns = aimee_pg_column_int(st, 10);
+      rows[n].activation_cooldown_turns = aimee_pg_column_int(st, 11);
+      rows[n].activation_delay_turns = aimee_pg_column_int(st, 12);
+      rows[n].activation_suppressed = aimee_pg_column_int(st, 13) ? 1 : 0;
       n++;
    }
    aimee_pg_finalize(st);
    return n;
+}
+
+int db2_memory_activation_policy_set(int64_t memory_id, int sticky_turns, int cooldown_turns,
+                                     int delay_turns, int suppressed)
+{
+   if (memory_id <= 0 || sticky_turns < 0 || cooldown_turns < 0 || delay_turns < 0 ||
+       (suppressed != 0 && suppressed != 1))
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   static const char *sql =
+       "UPDATE memories SET activation_sticky_turns=?1, activation_cooldown_turns=?2,"
+       " activation_delay_turns=?3, activation_suppressed=?4, updated_at=pg_now_text()"
+       " WHERE id=?5";
+   char err[MSF_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int(st, "?1", sticky_turns);
+   aimee_pg_bind_int(st, "?2", cooldown_turns);
+   aimee_pg_bind_int(st, "?3", delay_turns);
+   aimee_pg_bind_int(st, "?4", suppressed);
+   aimee_pg_bind_int64(st, "?5", memory_id);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   int changed = rc == AIMEE_PG_DONE ? aimee_pg_stmt_changes(st) : -1;
+   aimee_pg_finalize(st);
+   return changed == 1 ? 0 : -1;
 }
 
 int db2_memory_l1_session_clusters(const char *excluded_source, int min_count,
@@ -1382,6 +1600,8 @@ int db2_memory_l1_session_clusters(const char *excluded_source, int min_count,
                             " FROM memories"
                             " WHERE tier = 'L1' AND source_session != ''"
                             " AND source_session != ?1"
+                            " AND lifecycle_state NOT IN ('archived','superseded')"
+                            " AND activation_suppressed = 0"
                             " GROUP BY source_session"
                             " HAVING COUNT(*) >= ?2";
    char err[MSF_ERRBUF] = "";
@@ -1414,6 +1634,8 @@ int db2_memory_l1_session_created_at(const char *session_id, db2_memory_created_
       return 0;
    static const char *sql = "SELECT created_at FROM memories"
                             " WHERE tier = 'L1' AND source_session = ?1"
+                            " AND lifecycle_state NOT IN ('archived','superseded')"
+                            " AND activation_suppressed = 0"
                             " ORDER BY created_at ASC";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1438,8 +1660,10 @@ int db2_memory_l1_session_content(const char *session_id, db2_memory_content_row
    void *conn = db2_conn();
    if (!conn)
       return 0;
-   static const char *sql = "SELECT content FROM memories"
+   static const char *sql = "SELECT id, content FROM memories"
                             " WHERE tier = 'L1' AND source_session = ?1"
+                            " AND lifecycle_state NOT IN ('archived','superseded')"
+                            " AND activation_suppressed = 0"
                             " ORDER BY created_at ASC";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -1449,7 +1673,8 @@ int db2_memory_l1_session_content(const char *session_id, db2_memory_content_row
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
-      const char *c = aimee_pg_column_text(st, 0);
+      rows[n].id = aimee_pg_column_int64(st, 0);
+      const char *c = aimee_pg_column_text(st, 1);
       snprintf(rows[n].content, sizeof(rows[n].content), "%s", c ? c : "");
       n++;
    }
@@ -1469,38 +1694,48 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
    switch (section)
    {
    case DB2_MEM_RECALL_IDENTITY:
-      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content,"
+            " m.activation_sticky_turns, m.activation_cooldown_turns,"
+            " m.activation_delay_turns, m.activation_suppressed FROM memories m"
             " WHERE m.tier IN ('L2','L3','L4','L5')"
             " AND m.kind = 'fact'"
             " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
+            " AND m.activation_suppressed=0"
             " AND (m.key LIKE 'identity:%' OR m.key LIKE 'name:%' OR m.key LIKE 'role:%'"
-            "      OR m.key LIKE 'user:%' OR m.key LIKE 'self:%')" DB2_MEMORY_SCOPE_FILTER_SQL(
+            "      OR m.key LIKE 'user:%' OR m.key LIKE 'self:%')" DB2_MEMORY_RECALL_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
                                                                        "m.evidence_strength DESC, "
                                                                        "m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_PREFERENCES:
-      sql =
-          "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
-          " WHERE m.tier IN ('L2','L3','L4','L5')"
-          " AND m.kind = 'preference'"
-          " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != "
-          "'superseded'" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
-              "m.id") " DESC, m.confidence DESC, m.observation_count DESC, m.id DESC LIMIT ?1";
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content,"
+            " m.activation_sticky_turns, m.activation_cooldown_turns,"
+            " m.activation_delay_turns, m.activation_suppressed FROM memories m"
+            " WHERE m.tier IN ('L2','L3','L4','L5')"
+            " AND m.kind = 'preference'" DB2_MEMORY_RECALL_FILTER_SQL(
+                "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, m.confidence DESC, "
+                                                                       "m.observation_count DESC, "
+                                                                       "m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_ACTIVE_CONTEXT:
-      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content,"
+            " m.activation_sticky_turns, m.activation_cooldown_turns,"
+            " m.activation_delay_turns, m.activation_suppressed FROM memories m"
             " WHERE m.tier IN ('L1','L2','L3','L4')"
             " AND m.kind IN ('fact','decision','policy','task')"
             " AND (m.epistemic_kind<>'policy' OR m.governance_promoted<>0)"
             " AND m.lifecycle_state != 'archived' AND m.lifecycle_state != 'superseded'"
+            " AND m.activation_suppressed=0"
             " AND COALESCE(m.last_used_at, m.updated_at) >= pg_now_text('-7 "
-            "days')" DB2_MEMORY_SCOPE_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
+            "days')" DB2_MEMORY_RECALL_FILTER_SQL("m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL(
                 "m.id") " DESC, COALESCE(m.last_used_at, m.updated_at) DESC, m.id DESC LIMIT ?1";
       break;
    case DB2_MEM_RECALL_OPEN_COMMITMENTS:
-      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content FROM memories m"
-            " WHERE m.lifecycle_state = 'pending'" DB2_MEMORY_SCOPE_FILTER_SQL(
+      sql = "SELECT m.id, m.tier, m.kind, m.key, m.content,"
+            " m.activation_sticky_turns, m.activation_cooldown_turns,"
+            " m.activation_delay_turns, m.activation_suppressed FROM memories m"
+            " WHERE m.lifecycle_state = 'pending' AND "
+            "m.activation_suppressed=0" DB2_MEMORY_SCOPE_FILTER_SQL(
                 "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC, COALESCE(m.ttl_at, "
                                                                        "m.created_at) ASC, m.id "
                                                                        "ASC LIMIT ?1";
@@ -1527,6 +1762,10 @@ int db2_memory_list_recall_section(db2_memory_recall_section_t section, db2_memo
       snprintf(rows[n].kind, sizeof(rows[n].kind), "%s", ki ? ki : "");
       snprintf(rows[n].key, sizeof(rows[n].key), "%s", k ? k : "");
       snprintf(rows[n].content, sizeof(rows[n].content), "%s", c ? c : "");
+      rows[n].activation_sticky_turns = aimee_pg_column_int(st, 5);
+      rows[n].activation_cooldown_turns = aimee_pg_column_int(st, 6);
+      rows[n].activation_delay_turns = aimee_pg_column_int(st, 7);
+      rows[n].activation_suppressed = aimee_pg_column_int(st, 8) ? 1 : 0;
       n++;
    }
    aimee_pg_finalize(st);

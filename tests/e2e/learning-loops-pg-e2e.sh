@@ -26,6 +26,7 @@
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/learning-loops)
 #   PGDB           the throwaway database                        (default aimee_shared)
 #   AIMEE_DB2_URL  libpq URL reaching that database
+#   AIMEE_STORE_URL PostgreSQL URL for the daemon store (defaults to AIMEE_DB2_URL)
 #   KB_PORT        TCP port for aimee-kb                         (default 18745)
 #
 # Every assertion prints PASS or FAIL; the script exits non-zero if any failed.
@@ -38,11 +39,14 @@ WORKDIR="${WORKDIR:-/tmp/learning-loops}"
 KB_PORT="${KB_PORT:-18745}"
 PGDB="${PGDB:-aimee_shared}"
 export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///$PGDB?host=/var/run/postgresql}"
+export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
 OBJ="$AIMEE_SRC/build/obj"
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
 
 PASS=0; FAIL=0
+S1_RESULT="NOT RUN"; S2_RESULT="NOT RUN"; S3_RESULT="NOT RUN"
+S4_RESULT="NOT RUN"; S5_RESULT="NOT RUN"; S6_RESULT="NOT RUN"
 check() { # check <name> <expected> <actual>
   if [ "$2" = "$3" ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS+1))
   else printf '  FAIL  %s\n        expected: %s\n        actual:   %s\n' "$1" "$2" "$3"; FAIL=$((FAIL+1)); fi
@@ -64,21 +68,31 @@ trap cleanup EXIT INT TERM
 rm -rf "$KBHOME" "$SRVHOME"
 mkdir -p "$KBHOME/.config/aimee/modules.d/kb" "$SRVHOME/.config/aimee/modules.d/server"
 
-deploy() { # deploy <placement> <name> <home>
+# The policy loop is only live when the KB has an optimizer command. Production
+# defaults leave it empty, which is the safe no-sidecar posture but makes every
+# selection fall back to the shipped arm. This isolated HOME deliberately wires
+# the repository's deterministic protocol implementation; section 8 then puts
+# one non-default arm under overwhelming posterior pressure.
+mkdir -p "$KBHOME/.config/aimee"
+printf 'bandit_optimize_command: "/usr/bin/python3 %s/../scripts/bandit-sidecar.py"\nbandit_exploration_fraction: 0\n' \
+    "$AIMEE_SRC" > "$KBHOME/.config/aimee/aimee.yaml"
+
+deploy() { # deploy <placement> <grant-name> <home> [executable-name]
     local grant="$OBJ/module-bundle/grants/$1/$2.grant"
+    local executable_name="${4:-$2}"
     [ -r "$grant" ] || return 1
-    local bin="$OBJ/aimee-module-$2"
+    local bin="$OBJ/aimee-module-$executable_name"
     [ -x "$bin" ] || bin="$OBJ/aimee-module"
     [ -x "$bin" ] || return 1
-    cp "$bin" "$3/.config/aimee/aimee-module-$2"
-    chmod 0755 "$3/.config/aimee/aimee-module-$2"
-    sed "s|^executable=.*|executable=$3/.config/aimee/aimee-module-$2|" "$grant" \
+    cp "$bin" "$3/.config/aimee/aimee-module-$executable_name"
+    chmod 0755 "$3/.config/aimee/aimee-module-$executable_name"
+    sed "s|^executable=.*|executable=$3/.config/aimee/aimee-module-$executable_name|" "$grant" \
         > "$3/.config/aimee/modules.d/$1/$2.grant"
 }
 attach() { # attach <name> <home> <bus> <tag>
     [ -x "$2/.config/aimee/aimee-module-$1" ] || return 1
     env HOME="$2" AIMEE_HOME="$2/.config/aimee" AIMEE_DB1_PATH="$2/.config/aimee/aimee.db" \
-        AIMEE_DB2_URL="$AIMEE_DB2_URL" \
+        AIMEE_DB2_URL="$AIMEE_DB2_URL" AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         "$2/.config/aimee/aimee-module-$1" "$3" > "$WORKDIR/mod-$4-$1.log" 2>&1 &
     MOD_PIDS="$MOD_PIDS $!"
 }
@@ -103,7 +117,15 @@ done
 check "aimee-kb is serving" "1" "$kb_up"
 [ "$kb_up" = 1 ] || { tail -15 "$WORKDIR/kb.log"; printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"; exit 1; }
 
-for m in config db1 learning; do deploy server "$m" "$SRVHOME"; done
+deploy server config "$SRVHOME"
+deploy server postgres "$SRVHOME"
+# The `aimee` Go module owns DB1. Its second grant, `aimee-db1`, authorizes the
+# same executable's outbound session-family reads; both grants must name the
+# one launched binary.
+deploy server aimee "$SRVHOME"
+deploy server aimee-db1 "$SRVHOME" aimee
+deploy server aimee-postgres "$SRVHOME" aimee
+deploy server learning "$SRVHOME"
 export AIMEE_KB_API_URL="$KB_URL"
 SRVBUS="$SRVHOME/.config/aimee/server-module-bus.sock"
 SRVSOCK="$SRVHOME/.config/aimee/aimee-http.sock"
@@ -111,13 +133,24 @@ env HOME="$SRVHOME" AIMEE_HOME="$SRVHOME/.config/aimee" AIMEE_KB_API_URL="$KB_UR
     "$AIMEE_ROOT/aimee-server" --foreground > "$WORKDIR/server.log" 2>&1 &
 SRV_PID=$!
 for _ in $(seq 1 300); do [ -S "$SRVBUS" ] && break; sleep 0.1; done
-for m in config db1 learning; do attach "$m" "$SRVHOME" "$SRVBUS" srv; done
+for m in config postgres aimee learning; do attach "$m" "$SRVHOME" "$SRVBUS" srv; done
 for _ in $(seq 1 300); do [ -S "$SRVSOCK" ] && break; sleep 0.2; done
 [ -S "$SRVSOCK" ] && ok "aimee-server is serving" || bad "aimee-server never came up"
 
 export HOME="$SRVHOME" AIMEE_HOME="$SRVHOME/.config/aimee"
 export AIMEE_API_ENDPOINT="unix:$SRVSOCK"
 A="$AIMEE_ROOT/aimee"
+
+# The server socket can appear before the newly attached store module has
+# applied its schema. Do not let section 1 race module readiness and report a
+# closed gate when the real answer is merely "store not ready yet".
+store_up=0
+for _ in $(seq 1 120); do
+    STORE_PROBE=$("$A" eval candidates --limit 1 2>&1 | head -1)
+    printf '%s' "$STORE_PROBE" | grep -q 'could not read candidates' || { store_up=1; break; }
+    sleep 0.5
+done
+check "the daemon store is serving" "1" "$store_up"
 
 section "1  S0: the gate answers to a real ledger, not to a guess"
 q "DELETE FROM learning_proposal_fate; DELETE FROM learning_proposals; DELETE FROM learning_signals;" >/dev/null
@@ -175,7 +208,81 @@ printf '        %s\n' "$REOPEN"
 printf '%s' "$REOPEN" | grep -q 'open' && ok "real outside evidence reopens the gate" \
     || bad "the gate stayed closed after the ledger recovered"
 
-section "3  S5: the fate ledger, written by the router and by an operator"
+section "3  S1: failed jobs become an admitted regression task"
+BEFORE=$FAIL
+q "DELETE FROM eval_candidates; DELETE FROM approach_failures; DELETE FROM agent_jobs;
+   INSERT INTO agent_jobs (role, prompt, agent_name, status, result) VALUES
+     ('execute','Rebuild the evidence index and report the row count.','agent-a','failed',
+      'index rebuild aborted'),
+     ('execute','Rebuild the evidence index and report the row count.','agent-a','failed',
+      'index rebuild aborted'),
+     ('execute','Say hello.','agent-a','done','hello');" >/dev/null
+SCAN=$("$A" eval candidates-update scan --suite evidence-synth 2>&1)
+printf '%s\n' "$SCAN" | sed 's/^/        /'
+printf '%s' "$SCAN" | grep -q 'scan: 2 observed' \
+    && ok "two failed jobs are observed through the daemon" \
+    || bad "the scan did not observe both failed jobs"
+check "the repeated failure becomes one candidate" "1" \
+      "$(q "SELECT count(*) FROM eval_candidates WHERE origin='agent_job'")"
+check "the candidate retains both observations" "2" \
+      "$(q "SELECT occurrences FROM eval_candidates WHERE origin='agent_job'")"
+
+GENERATED="$WORKDIR/generated-suite"
+mkdir -p "$GENERATED"
+ADMIT=$("$A" eval candidates-update admit --suite-dir "$GENERATED" --min-occurrences 2 2>&1)
+printf '%s\n' "$ADMIT" | sed 's/^/        /'
+printf '%s' "$ADMIT" | grep -q 'admit: 1 admitted' \
+    && ok "the reproduced failure is admitted" \
+    || bad "the reproduced failure was not admitted"
+check "admission materialises one task file" "1" \
+      "$(find "$GENERATED" -type f -name '*.json' 2>/dev/null | wc -l)"
+check "the candidate ledger records admission" "admitted" \
+      "$(q "SELECT state FROM eval_candidates WHERE origin='agent_job'")"
+[ "$FAIL" -eq "$BEFORE" ] && S1_RESULT=PASS || S1_RESULT=FAIL
+
+section "4  S3: the same failures become reusable negative knowledge"
+BEFORE=$FAIL
+check "one dead end is retained for the repeated approach" "1" \
+      "$(q "SELECT count(*) FROM approach_failures WHERE source='agent_job'")"
+check "the dead end retains both occurrences" "2" \
+      "$(q "SELECT occurrences FROM approach_failures WHERE source='agent_job'")"
+APPROACHES=$("$A" learning approaches \
+    "Rebuild the evidence index and report the row count." 2>&1)
+printf '%s\n' "$APPROACHES" | sed 's/^/        /'
+printf '%s' "$APPROACHES" | grep -q 'execute via agent-a' \
+    && ok "the production recall route returns the failed approach" \
+    || bad "the production recall route forgot the failed approach"
+printf '%s' "$APPROACHES" | grep -q 'index rebuild aborted' \
+    && ok "recall explains how the approach failed" \
+    || bad "recall omitted the failure mode"
+[ "$FAIL" -eq "$BEFORE" ] && S3_RESULT=PASS || S3_RESULT=FAIL
+
+section "5  S2: attribution reads a paired grid from the real store"
+BEFORE=$FAIL
+# These rows verify the store -> module -> CLI attribution plumbing. They are
+# deliberately an established runner ablation, not invented no_evalgrow,
+# no_deadend, or no_supersede labels. Only real runs with those loops disabled
+# could support the stronger efficacy claim.
+q "DELETE FROM eval_results WHERE suite='evidence-paired';
+   INSERT INTO eval_results (suite, task_name, ablation, success) VALUES
+     ('evidence-paired','task-a','full',true),
+     ('evidence-paired','task-a','no_rescue',false),
+     ('evidence-paired','task-b','full',true),
+     ('evidence-paired','task-b','no_rescue',false),
+     ('evidence-paired','task-c','full',true),
+     ('evidence-paired','task-c','no_rescue',false);" >/dev/null
+ATTRIBUTION=$("$A" learning attribution evidence-paired 2>&1)
+printf '%s\n' "$ATTRIBUTION" | sed 's/^/        /'
+printf '%s' "$ATTRIBUTION" | grep -q 'Baseline: full' \
+    && ok "attribution names the production baseline" \
+    || bad "attribution did not name its baseline"
+printf '%s' "$ATTRIBUTION" | grep -qE 'no_rescue[[:space:]]+3[[:space:]]+\+1\.000[[:space:]]+removing it cost us' \
+    && ok "three paired tasks carry the expected attribution" \
+    || bad "the paired grid did not produce its expected attribution"
+[ "$FAIL" -eq "$BEFORE" ] && S2_RESULT=PASS || S2_RESULT=FAIL
+
+section "6  S5: the fate ledger, written by the router and by an operator"
+BEFORE=$FAIL
 q "DELETE FROM learning_proposal_fate; DELETE FROM learning_proposals; DELETE FROM learning_signals;" >/dev/null
 q "INSERT INTO learning_signals (id, signal_type, source, polarity, title, description, target_key)
      VALUES (9001,'mark_rule','explicit','positive','first','the earlier rule','fate-target');
@@ -202,8 +309,10 @@ check "an operator verdict is recorded" "contradicted" \
 printf '%s' "$OUT" | grep -q 'counts against the detector' \
     && ok "and it counts against the detector that raised it" \
     || bad "a contradiction was not counted as regret"
+[ "$FAIL" -eq "$BEFORE" ] && S5_RESULT=PASS || S5_RESULT=FAIL
 
-section "4  S4: the backlog drain runs a real probe"
+section "7  S4: the backlog drain runs a real probe"
+BEFORE=$FAIL
 q "DELETE FROM curiosity_items;" >/dev/null
 q "INSERT INTO curiosity_items (gap_type, target_topic, evidence, importance, novelty, state, source_session)
      VALUES ('weak_coverage','a topic nothing in this store covers','seeded',0.5,0.5,'open','s-e2e');" >/dev/null
@@ -244,16 +353,38 @@ check "and the uncovered one is still open" "open" \
 printf '%s' "$OUT2" | grep -qE 'resolved [1-9]' \
     && ok "the pass reports the close it made" \
     || bad "the drain closed a gap without reporting it"
+[ "$FAIL" -eq "$BEFORE" ] && S4_RESULT=PASS || S4_RESULT=FAIL
 
-section "5  S6: the policy layer answers with an arm it declares"
+section "8  S6: reward pressure selects a non-default declared arm"
+BEFORE=$FAIL
+# A sampler merely returning the default does not prove the posterior reaches
+# selection. Make `brief` essentially certain while keeping `full` as the
+# shipped default. With exploration disabled above, the sidecar chooses the MAP
+# arm deterministically.
+q "DELETE FROM bandit_decisions WHERE decision_point='plan_advisory';
+   DELETE FROM bandit_arm_stats WHERE decision_point='plan_advisory';
+   INSERT INTO bandit_arm_stats
+     (decision_point, arm_id, n_decisions, n_rewards, sum_reward, sum_reward_sq,
+      posterior_alpha, posterior_beta)
+   VALUES
+     ('plan_advisory','off',100,100,0,0,1,101),
+     ('plan_advisory','brief',100,100,100,100,101,1),
+     ('plan_advisory','full',100,100,0,0,1,101);" >/dev/null
 SEL=$(curl -sS -m 10 -X POST -H 'Content-Type: application/json' -d '{}' \
       "$KB_URL/v1/actions/learning.policy_select")
 printf '        %s\n' "$SEL"
-printf '%s' "$SEL" | grep -qE '"arm":"(off|brief|full)"' \
-    && ok "the service samples and answers with a declared arm" \
-    || bad "policy_select gave no arm this build declares"
+printf '%s' "$SEL" | grep -q '"arm":"brief"' \
+    && ok "reward pressure selects the non-default brief arm" \
+    || bad "policy_select did not follow the rewarded non-default arm"
+printf '%s' "$SEL" | grep -q '"default_arm":"full"' \
+    && ok "sampling did not silently promote the selected arm" \
+    || bad "selection changed the declared default"
+check "the sampled decision is recorded against brief" "brief" \
+      "$(q "SELECT arm_id FROM bandit_decisions
+             WHERE decision_point='plan_advisory' ORDER BY decided_at DESC LIMIT 1")"
+[ "$FAIL" -eq "$BEFORE" ] && S6_RESULT=PASS || S6_RESULT=FAIL
 
-section "6  the fate ledger's SQL, executed by real Postgres"
+section "9  the fate ledger's SQL, executed by real Postgres"
 # These statements run on the sqlite shim in `make unit-tests`, and sqlite
 # accepts SQL that Postgres rejects. They are exercised here for the same reason
 # the typed-fact suite exists next door.
@@ -300,10 +431,10 @@ check "committed proposals group by signal type" "mark_rule:2 repeat_question:1"
               FROM learning_proposals p JOIN learning_signals s ON s.id = p.signal_id
               WHERE p.state='committed' GROUP BY s.signal_type) x")"
 
-section "7  the surfaces refuse bad input instead of breaking on it"
+section "10  the surfaces refuse bad input instead of breaking on it"
 # The exploratory pass. None of these should crash a service or answer as though
 # the request made sense; the assertion at the end of this section is that both
-# daemons are still standing and nothing below section 8 went silent.
+# daemons are still standing and nothing below section 11 went silent.
 probe() { # probe <label> <argv...>
     local label="$1"; shift
     local out
@@ -345,7 +476,7 @@ printf '%s' "$EMPTY" | grep -q '"status":"ok"' \
     && bad "an empty signal_type was accepted" \
     || ok "an empty signal_type is refused"
 
-section "8  neither service reported a missing provider, and neither crashed"
+section "11  neither service reported a missing provider, and neither crashed"
 PATTERNS='classification unavailable|provider (is )?(not registered|unavailable|missing)|no provider|verdict=TRANSPORT|module call failed'
 for log in "$WORKDIR/kb.log" "$WORKDIR/server.log"; do
     n=$(grep -iE "$PATTERNS" "$log" 2>/dev/null | grep -vc 'NOTICE:')
@@ -358,6 +489,15 @@ for log in "$WORKDIR/kb.log" "$WORKDIR/server.log"; do
 done
 kill -0 "$KB_PID" 2>/dev/null && ok "aimee-kb survived" || bad "aimee-kb died"
 kill -0 "$SRV_PID" 2>/dev/null && ok "aimee-server survived" || bad "aimee-server died"
+
+printf '\n=== six-loop live evidence\n'
+printf '  %-4s %-9s %s\n' "LOOP" "RESULT" "OBSERVATION"
+printf '  %-4s %-9s %s\n' "S1" "$S1_RESULT" "failed jobs -> admitted regression task"
+printf '  %-4s %-9s %s\n' "S2" "$S2_RESULT" "paired-grid attribution (plumbing, not new-loop efficacy)"
+printf '  %-4s %-9s %s\n' "S3" "$S3_RESULT" "failed approach -> recalled dead end"
+printf '  %-4s %-9s %s\n' "S4" "$S4_RESULT" "evidence-backed curiosity close"
+printf '  %-4s %-9s %s\n' "S5" "$S5_RESULT" "supersession and operator regret"
+printf '  %-4s %-9s %s\n' "S6" "$S6_RESULT" "rewarded non-default policy arm"
 
 printf '\n%d passed, %d failed\n' "$PASS" "$FAIL"
 [ "$FAIL" -eq 0 ] || exit 1

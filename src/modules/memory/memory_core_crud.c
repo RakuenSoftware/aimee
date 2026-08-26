@@ -297,6 +297,11 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
    char norm_key[512];
    normalize_key(key, norm_key, sizeof(norm_key));
 
+   /* A human rejection is a durable refusal, including against exact-key
+    * merge paths that never reach the physical INSERT backstop. */
+   if (db2_memory_rejection_blocks(norm_key, content) != 0)
+      return -1;
+
    char ts[32];
    now_utc(ts, sizeof(ts));
 
@@ -630,19 +635,14 @@ int memory_delete(int64_t id)
     * may predate the FK. */
    db2_memory_provenance_delete(id);
 
-   /* Drop any unit-scoped pgvector points for this memory. */
-   int64_t unit_ids[64];
-   int unit_count =
-       db2_memory_unit_list_ids(id, unit_ids, (int)(sizeof(unit_ids) / sizeof(unit_ids[0])));
-   for (int i = 0; i < unit_count; i++)
-   {
-      int64_t pt = PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET + unit_ids[i];
-      pgvec_memory_vector_delete_point(pt);
-      db2_vector_index_op_remove(pt);
-   }
-
-   pgvec_memory_vector_delete_point(id);
-   db2_vector_index_op_remove(id);
+   /* Drop the record's own pgvector point and every unit-scoped point. Both
+    * statements derive the unit points in SQL: enumerating them into a fixed
+    * buffer bounded reclamation at the buffer size, and memory_embeddings has no
+    * foreign key back to memories, so anything left behind stayed live in the
+    * ANN index with its payload. Runs before the row delete, while memory_units
+    * still exists. */
+   (void)pgvec_memory_vector_delete_points_for_memory(id, 1);
+   db2_vector_index_ops_remove_for_memory(id, PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, 1);
 
    int changes = db2_memory_delete_row(id);
    if (changes > 0 && db1_context_cache_invalidate)

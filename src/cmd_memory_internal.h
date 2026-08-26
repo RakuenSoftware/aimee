@@ -48,6 +48,7 @@ void mem_store(app_ctx_t *ctx, int argc, char **argv);
 void mem_get(app_ctx_t *ctx, int argc, char **argv);
 void mem_delete(app_ctx_t *ctx, int argc, char **argv);
 void mem_approve(app_ctx_t *ctx, int argc, char **argv);
+void mem_activation(app_ctx_t *ctx, int argc, char **argv);
 void mem_list(app_ctx_t *ctx, int argc, char **argv);
 void mem_search(app_ctx_t *ctx, int argc, char **argv);
 void mem_plan(app_ctx_t *ctx, int argc, char **argv);

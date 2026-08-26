@@ -79,7 +79,7 @@ RESET ROLE;
 DO $$ BEGIN
   IF (SELECT count(*) FROM public.kb_management_read_key_use
        WHERE correlation_id=repeat('f',64) AND selector='config' AND result_status='issued')<>1 OR
-     (SELECT count(*) FROM public.kb_audit_event
+     (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='vault.key_use' AND actor_principal='management-token-authority'
          AND detail LIKE '%"selector" : "config"%')<>1 THEN
     RAISE EXCEPTION 'P5-D2b config key-use/audit cardinality mismatch';

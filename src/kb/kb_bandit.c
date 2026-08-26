@@ -218,14 +218,20 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       return -1;
    }
 
-   const char *selected = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "selected_arm"));
+   /* Copy before deleting `resp`: cJSON owns the selected_arm string. Keeping
+    * its pointer across cJSON_Delete made every successful sidecar answer a
+    * use-after-free; in the live policy loop it usually degraded to arm 0. */
+   char selected[KB_BANDIT_MAX_ARM_ID] = "";
+   const char *selected_value = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "selected_arm"));
+   if (selected_value && strlen(selected_value) < sizeof(selected))
+      snprintf(selected, sizeof(selected), "%s", selected_value);
    cJSON *prop_item = cJSON_GetObjectItem(resp, "propensity");
    double propensity = prop_item ? prop_item->valuedouble : 1.0;
    cJSON_Delete(resp);
 
    /* Find selected arm index; fall back to 0 on unknown. */
    int arm_idx = 0;
-   if (selected)
+   if (selected[0])
    {
       for (int i = 0; i < n_arms; i++)
       {

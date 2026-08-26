@@ -5,7 +5,7 @@
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 76
+Total commands: 77
 
 ## Core commands
 
@@ -132,7 +132,8 @@ Launch any client in an isolated Aimee session.
 Subcommands:
 
 ```
-  -- <client> [args...]  Bind one session id and worktree, then exec the client
+  [--gateway] -- <client> [args...]  Fetch the default tip, bind one session worktree,
+                                      then exec the client
                          (Codex, Claude, OpenCode, or any executable)
 ```
 
@@ -226,6 +227,10 @@ Subcommands:
   --yes            Do not ask before replacing the binary
   --require-verify  Fail if the published SHA-256 cannot be verified
 ```
+
+### `aimee session-end`
+
+SessionEnd hook entry point.
 
 ### `aimee session-start`
 

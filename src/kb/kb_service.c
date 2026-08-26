@@ -378,6 +378,27 @@ static int kb_handle_memory_verify(int fd, cJSON *req)
    cJSON_AddNumberToObject(ops_j, "failed", (double)db2_verify.ops.failed_ops);
    cJSON_AddNumberToObject(ops_j, "stuck", (double)db2_verify.ops.stuck_ops);
 
+   /* Write-to-readable lag: how long a just-stored memory stays unrecallable
+    * while its embed is queued. Reported as unmeasured rather than zero when
+    * nothing has landed in the window, so an absent signal is not read as a
+    * fast one. */
+   {
+      cJSON *lag = cJSON_AddObjectToObject(ops_j, "write_to_readable_lag");
+      cJSON_AddNumberToObject(lag, "samples", (double)db2_verify.ops.lag_samples);
+      if (db2_verify.ops.lag_samples > 0)
+      {
+         cJSON_AddNumberToObject(lag, "p50_secs", db2_verify.ops.lag_p50_secs);
+         cJSON_AddNumberToObject(lag, "p90_secs", db2_verify.ops.lag_p90_secs);
+         cJSON_AddNumberToObject(lag, "p95_secs", db2_verify.ops.lag_p95_secs);
+         cJSON_AddNumberToObject(lag, "p99_secs", db2_verify.ops.lag_p99_secs);
+         cJSON_AddNumberToObject(lag, "max_secs", db2_verify.ops.lag_max_secs);
+      }
+      else
+      {
+         cJSON_AddStringToObject(lag, "state", "unmeasured");
+      }
+   }
+
    if (do_detail)
    {
       cJSON *fails = cJSON_AddArrayToObject(resp, "failed_ops");
@@ -1239,6 +1260,8 @@ static const struct
     {"memory.touch", kb_handle_memory_touch},
     {"memory.update", kb_handle_memory_update},
     {"memory.reject", kb_handle_memory_reject},
+    {"memory.restore", kb_handle_memory_restore},
+    {"memory.review_list", kb_handle_memory_review_list},
     {"memory.stats", kb_handle_memory_stats},
     {"memory.list_conflicts", kb_handle_memory_list_conflicts},
     {"memory.query_health", kb_handle_memory_query_health},

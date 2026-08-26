@@ -11,7 +11,7 @@
  * stale / un-migrated schema. BUMP this whenever schema.sql adds or changes objects
  * that a runtime kb depends on, so a runtime kb started against an old schema fails
  * closed rather than running degraded. */
-#define AIMEE_DB2_SCHEMA_VERSION 3
+#define AIMEE_DB2_SCHEMA_VERSION 4
 
 struct sqlite3;
 
@@ -68,9 +68,9 @@ extern "C"
 
    /* unified-llm-container §2: record/check the EMBEDDER model identity
     * (repo@sha) in kb_meta.schema_embedder_model_id alongside the dim. A dim-only
-    * guard is insufficient (two models can share a dim — pplx-embed and
-    * Qwen3-0.6B are both 1024-d), so a same-dim swap would silently mix vector
-    * spaces. model_id NULL/empty -> no-op (legacy torch embedder reports no
+    * guard is insufficient because different models can share a width, so a
+    * same-dim swap would silently mix vector spaces. model_id NULL/empty ->
+    * no-op (legacy torch embedder reports no
     * identity). compat_csv is a comma-separated list of admitted "old->new"
     * transitions (membership only; the cosine>=0.99 validation is the operator's
     * criterion for adding an entry). Returns 0 (recorded/match/admitted), -1

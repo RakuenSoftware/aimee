@@ -92,7 +92,6 @@ final directory membership, archive notices, explicit residual states, and recip
 | `event-bus-wire-spec.md` | Accurate feature-branch-only status: `origin/feat/event-bus` and its S1–S12 branches exist, but the implementation is not promoted to `testing`. Parent/owner links were updated. |
 | `feature-liveness-and-background-curator-removal.md` | Previously delivered but currently regressed: `skill_curator.c`, its header, and build membership were reintroduced in `e9093c70`; the dedicated absence checker exits 1 with `rule=deleted-file`. The live proposal now records the repair requirement in place. |
 | `frontend-development-module.md` | The existing computer-use pieces do not implement its browser executor and containment/visual-QA module slices. |
-| `gemma4-unified-embed-rerank-synth-base.md` | Explicit design-only model change; no unified Gemma-4 base plus EuroBERT reranker implementation/evaluation was found. |
 | `governance-agent-identity-and-artifact-trust.md` | Per-agent principals, delegation chains, fleet registry, and signed executable-artifact gates remain absent as a complete arc. One source/link reference was refreshed. |
 | `governance-attestable-enforcement.md` | WORM remains default-off (`config_save.c` and `kb_audit_worm.c`); capture completeness, policy revisions, and `aimee audit attest` remain open. Paths/links were refreshed. |
 | `governance-policy-surface-and-posture.md` | Profiles, complete ingress integrity gating, first-class approval verdict, and containment defaults remain open. Source paths were refreshed. |

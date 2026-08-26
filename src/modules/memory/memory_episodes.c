@@ -5,6 +5,7 @@
 #if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_relations.h"
 #include "modules/db2/c/memory_scenes.h"
 #endif
@@ -127,17 +128,29 @@ int64_t memory_episode_card_generate(const char *source_session)
 
    /* Collect session memories */
 #define MAX_SESSION_MEMS 200
-   db2_memory_id_content_row_t rows[MAX_SESSION_MEMS];
-   int mem_count =
-       db2_memory_session_id_content_list(source_session, MAX_SESSION_MEMS, rows, MAX_SESSION_MEMS);
-   if (mem_count <= 0)
+   db2_memory_id_content_row_t rows[MAX_SESSION_MEMS + 1];
+   int mem_count = db2_memory_session_id_content_list(source_session, MAX_SESSION_MEMS + 1, rows,
+                                                      MAX_SESSION_MEMS + 1);
+   if (mem_count <= 0 || mem_count > MAX_SESSION_MEMS)
+   {
+      if (mem_count > MAX_SESSION_MEMS)
+         LOG_WARN("memory.episode",
+                  "episode-card derivation refused for session %.96s: source cap %d reached",
+                  source_session, MAX_SESSION_MEMS);
       return 0;
+   }
    int64_t mem_ids[MAX_SESSION_MEMS];
    char *mem_texts[MAX_SESSION_MEMS];
    for (int i = 0; i < mem_count; i++)
    {
       mem_ids[i] = rows[i].id;
       mem_texts[i] = strdup(rows[i].content);
+   }
+   if (!memory_derived_sources_allowed(mem_ids, mem_count))
+   {
+      for (int i = 0; i < mem_count; i++)
+         free(mem_texts[i]);
+      return 0;
    }
 #undef MAX_SESSION_MEMS
 
@@ -201,12 +214,25 @@ int64_t memory_episode_card_generate(const char *source_session)
    snprintf(key, sizeof(key), "episode:%s", source_session);
    memory_t m;
    memset(&m, 0, sizeof(m));
+   int episode_existed = db2_memory_key_exists(key) == 1;
    if (memory_insert(TIER_L2, KIND_EPISODE, key, card_text, 1.8, "episode_card", &m) != 0 ||
        m.id <= 0)
       return 0;
 
    /* Associate the synthetic memory with the session */
    db2_memory_set_source_session(m.id, source_session);
+
+   for (int i = 0; i < mem_count; i++)
+   {
+      char source_ref[48];
+      snprintf(source_ref, sizeof(source_ref), "memory:%lld", (long long)mem_ids[i]);
+      if (memory_lineage_insert("memory", m.id, "memory", source_ref, 1.0) < 0)
+      {
+         if (!episode_existed)
+            (void)memory_delete(m.id);
+         return 0;
+      }
+   }
 
    /* Insert memory_unit with is_episode_card=1 */
    db2_memory_unit_episode_card_insert(m.id, key, card_text);

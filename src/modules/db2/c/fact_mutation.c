@@ -8,6 +8,7 @@
 #include "../headers/kb_identity.h"
 #include "../headers/kb_reqctx.h"
 #include "../headers/rel_types.h"
+#include "fact_identity.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -72,6 +73,68 @@ static int fm_actor_ok(const fact_actor_t *actor)
 {
    return actor && actor->principal[0] && actor->role[0] && actor->rank >= FACT_ACTOR_MODEL &&
           actor->rank <= FACT_ACTOR_OPERATOR;
+}
+
+static int fm_tombstone_blocks(void *conn, const char *source, const char *relation,
+                               const char *target)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT 1 FROM memory_rejection_tombstones WHERE object_kind='fact' AND active=1"
+       " AND source=?1 AND relation=?2 AND target=?3 LIMIT 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", source);
+   aimee_pg_bind_text(st, "?2", relation);
+   aimee_pg_bind_text(st, "?3", target);
+   aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+   return step == AIMEE_PG_ROW ? 1 : step == AIMEE_PG_DONE ? 0 : -1;
+}
+
+static int fm_tombstone_add_assertion(void *conn, int64_t assertion_id, const fact_actor_t *actor,
+                                      const char *reason)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "INSERT INTO memory_rejection_tombstones(object_kind,source,relation,target,"
+       " authority_rank,reason,rejected_by)"
+       " SELECT 'fact',source,relation,target,?2,?3,?4 FROM entity_edges WHERE id=?1"
+       " ON CONFLICT DO NOTHING",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", assertion_id);
+   aimee_pg_bind_int(st, "?2", (int)actor->rank);
+   aimee_pg_bind_text(st, "?3", reason ? reason : "explicit rejection");
+   aimee_pg_bind_text(st, "?4", actor->principal);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
+static int fm_tombstone_restore_assertion(void *conn, int64_t assertion_id,
+                                          const fact_actor_t *actor)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "UPDATE memory_rejection_tombstones AS t SET "
+                        "active=0,restored_at=pg_now_text(),restored_by=?2"
+                        " WHERE t.object_kind='fact' AND t.active=1 AND EXISTS"
+                        " (SELECT 1 FROM entity_edges e WHERE e.id=?1 AND e.source=t.source"
+                        "  AND e.relation=t.relation AND e.target=t.target)",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", assertion_id);
+   aimee_pg_bind_text(st, "?2", actor->principal);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
 }
 
 int db2_fact_actor_internal(fact_actor_rank_t rank, fact_actor_t *out)
@@ -244,22 +307,129 @@ static void fm_state_row(aimee_pg_stmt_t *st, fm_state_t *s)
    s->version = aimee_pg_column_int(st, 7);
 }
 
+typedef struct
+{
+   int64_t id;
+   char *source;
+   char *relation;
+   char *target;
+} fm_identity_backfill_row_t;
+
+static int fm_backfill_identity(void *conn)
+{
+   char err[FM_ERRBUF] = "";
+   aimee_pg_stmt_t *q = aimee_pg_prepare(
+       conn,
+       "SELECT id,source,relation,target FROM entity_edges WHERE edge_class='semantic'"
+       " AND (identity_key='' OR identity_subject_key='') ORDER BY id ASC",
+       err, sizeof(err));
+   if (!q)
+      return -1;
+   fm_identity_backfill_row_t *rows = NULL;
+   size_t count = 0, cap = 0;
+   aimee_pg_step_t step;
+   while ((step = aimee_pg_step(q, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      if (count == cap)
+      {
+         size_t next = cap ? cap * 2 : 64;
+         fm_identity_backfill_row_t *grown = realloc(rows, next * sizeof(*rows));
+         if (!grown)
+         {
+            step = AIMEE_PG_ERR;
+            break;
+         }
+         rows = grown;
+         cap = next;
+      }
+      rows[count].id = aimee_pg_column_int64(q, 0);
+      rows[count].source = strdup(aimee_pg_column_text(q, 1));
+      rows[count].relation = strdup(aimee_pg_column_text(q, 2));
+      rows[count].target = strdup(aimee_pg_column_text(q, 3));
+      if (!rows[count].source || !rows[count].relation || !rows[count].target)
+      {
+         step = AIMEE_PG_ERR;
+         count++;
+         break;
+      }
+      count++;
+   }
+   aimee_pg_finalize(q);
+   int ok = step != AIMEE_PG_ERR;
+   for (size_t i = 0; ok && i < count; i++)
+   {
+      char identity[FACT_IDENTITY_KEY_MAX], subject[FACT_IDENTITY_KEY_MAX];
+      if (fact_identity_key(rows[i].source, rows[i].relation, rows[i].target, identity,
+                            sizeof(identity)) == 0 ||
+          fact_identity_subject_key(rows[i].source, rows[i].relation, subject, sizeof(subject)) ==
+              0)
+         continue; /* invalid legacy text stays on the literal compatibility arm */
+      aimee_pg_stmt_t *u = aimee_pg_prepare(
+          conn,
+          "UPDATE entity_edges SET identity_key=?1,identity_subject_key=?2 WHERE id=?3"
+          " AND (identity_key='' OR identity_subject_key='')",
+          err, sizeof(err));
+      if (!u)
+      {
+         ok = 0;
+         break;
+      }
+      aimee_pg_bind_text(u, "?1", identity);
+      aimee_pg_bind_text(u, "?2", subject);
+      aimee_pg_bind_int64(u, "?3", rows[i].id);
+      ok = aimee_pg_step(u, err, sizeof(err)) == AIMEE_PG_DONE;
+      aimee_pg_finalize(u);
+   }
+   for (size_t i = 0; i < count; i++)
+   {
+      free(rows[i].source);
+      free(rows[i].relation);
+      free(rows[i].target);
+   }
+   free(rows);
+   return ok ? 0 : -1;
+}
+
+/* Match on the normalized identity when one can be computed, and on the literal
+ * triple otherwise.
+ *
+ * The literal arm is not a fallback for convenience -- it is what keeps a
+ * partially backfilled store correct. Rows written before identity_key existed
+ * carry '', and dropping the literal comparison would make every one of them
+ * invisible to this lookup, silently un-rejecting every rejection recorded
+ * before the migration. Both arms are ORed for exactly as long as that is true.
+ *
+ * Deliberately does NOT filter by lifecycle: a re-assertion has to *find* the
+ * dead row so the caller can apply the authority rules to it. A lookup that
+ * skipped invalidated rows would report "no such fact" and insert a clean new
+ * one, which is the tombstone bypass this whole path exists to prevent. */
 static int fm_load_exact(void *conn, const char *source, const char *relation, const char *target,
                          fm_state_t *out)
 {
    memset(out, 0, sizeof(*out));
+   char ikey[FACT_IDENTITY_KEY_MAX];
+   size_t ikey_len = fact_identity_key(source, relation, target, ikey, sizeof(ikey));
+
    char err[FM_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(
        conn,
-       "SELECT id,lifecycle_state,superseded_at,invalidated_at,suppressed,confidence,"
-       " authority_rank,version FROM entity_edges WHERE source=?1 AND relation=?2 AND target=?3"
-       " AND edge_class='semantic' ORDER BY id DESC LIMIT 1",
+       ikey_len > 0
+           ? "SELECT id,lifecycle_state,superseded_at,invalidated_at,suppressed,confidence,"
+             " authority_rank,version FROM entity_edges WHERE edge_class='semantic'"
+             " AND ((identity_key<>'' AND identity_key=?4)"
+             "   OR (identity_key='' AND source=?1 AND relation=?2 AND target=?3))"
+             " ORDER BY id DESC LIMIT 1"
+           : "SELECT id,lifecycle_state,superseded_at,invalidated_at,suppressed,confidence,"
+             " authority_rank,version FROM entity_edges WHERE source=?1 AND relation=?2"
+             " AND target=?3 AND edge_class='semantic' ORDER BY id DESC LIMIT 1",
        err, sizeof(err));
    if (!st)
       return -1;
    aimee_pg_bind_text(st, "?1", source);
    aimee_pg_bind_text(st, "?2", relation);
    aimee_pg_bind_text(st, "?3", target);
+   if (ikey_len > 0)
+      aimee_pg_bind_text(st, "?4", ikey);
    aimee_pg_step_t step = aimee_pg_step(st, err, sizeof(err));
    if (step == AIMEE_PG_ROW)
       fm_state_row(st, out);
@@ -351,10 +521,27 @@ static int fm_commit_finish(void *conn, const fact_actor_t *actor, const char *c
    aimee_pg_finalize(st);
    if (!ok)
       return -1;
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   /* PostgreSQL owns the security boundary: the narrow definer reads the
+    * canonical actor/operation/status from this changeset and writes only a
+    * durable outbox intent. The separately credentialed WORM process constructs
+    * the chain later; this runtime connection never receives chain INSERT. */
+   st = aimee_pg_prepare(conn, "SELECT kb_fact_commit_worm_seal(?1,?2)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", commit_id);
+   aimee_pg_bind_text(st, "?2", subject ? subject : "");
+   ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+#else
+   /* The SQLite test shim has no stored procedures or worker process. Retain
+    * its local append solely as a deterministic unit-test implementation. */
    char detail[160];
    snprintf(detail, sizeof(detail), "commit_id=%s", commit_id);
    return db2_kb_audit_append_in_txn(conn, actor->role, actor->principal, operation,
                                      subject ? subject : "", "allow", detail);
+#endif
 }
 
 static int fm_change(void *conn, const char *commit_id, int64_t assertion_id, const char *action,
@@ -555,6 +742,15 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
    void *conn = db2_conn();
    if (fm_begin(conn) != 0)
       return -1;
+   if (fm_backfill_identity(conn) != 0)
+      return fm_end(conn, 0);
+
+   int tombstoned = fm_tombstone_blocks(conn, in->source, in->relation, in->target);
+   if (tombstoned != 0)
+   {
+      (void)fm_end(conn, 0);
+      return tombstoned > 0 ? FACT_MUTATION_TOMBSTONED : -1;
+   }
 
    char now[32];
    fm_now(now);
@@ -621,14 +817,16 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
       if ((reactivate || promote_candidate) &&
           (in->functional || rel_type_is_functional(in->relation)))
       {
-         fm_state_t priors[FM_STATE_MAX];
+         fm_state_t priors[FM_STATE_MAX + 1];
          int np = 0;
          char err[FM_ERRBUF] = "";
          aimee_pg_stmt_t *q = aimee_pg_prepare(
              conn,
              "SELECT id,lifecycle_state,superseded_at,invalidated_at,suppressed,confidence,"
-             " authority_rank,version FROM entity_edges WHERE source=?1 AND relation=?2"
-             " AND id<>?3 AND edge_class='semantic' AND superseded_at='' AND invalidated_at=''"
+             " authority_rank,version FROM entity_edges WHERE edge_class='semantic'"
+             " AND ((identity_subject_key<>'' AND identity_subject_key=?4)"
+             "   OR (identity_subject_key='' AND source=?1 AND relation=?2))"
+             " AND id<>?3 AND superseded_at='' AND invalidated_at=''"
              " AND suppressed=0 AND lifecycle_state IN ('persistent','promoted')"
              " ORDER BY authority_rank DESC,id DESC",
              err, sizeof(err));
@@ -637,9 +835,17 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
          aimee_pg_bind_text(q, "?1", in->source);
          aimee_pg_bind_text(q, "?2", in->relation);
          aimee_pg_bind_int64(q, "?3", exact.id);
-         while (np < FM_STATE_MAX && aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            char sk[FACT_IDENTITY_KEY_MAX];
+            if (fact_identity_subject_key(in->source, in->relation, sk, sizeof(sk)) == 0)
+               sk[0] = '\0';
+            aimee_pg_bind_text(q, "?4", sk);
+         }
+         while (np <= FM_STATE_MAX && aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
             fm_state_row(q, &priors[np++]);
          aimee_pg_finalize(q);
+         if (np > FM_STATE_MAX)
+            return fm_end(conn, 0); /* bounded safety walk fails closed, never partially corrects */
          const rel_type_def_t *def = rel_types_seed_lookup(in->relation);
          correction_behavior_t behavior = def ? def->correction_behavior : CORR_SUPERSEDE;
          for (int i = 0; i < np; i++)
@@ -722,25 +928,48 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
       int64_t prior_version_id = 0;
       if (in->functional || rel_type_is_functional(in->relation))
       {
-         fm_state_t priors[FM_STATE_MAX];
+         fm_state_t priors[FM_STATE_MAX + 1];
          int np = 0;
          char err[FM_ERRBUF] = "";
          aimee_pg_stmt_t *q = aimee_pg_prepare(
              conn,
+             /* Incumbents are matched on the normalized (subject, predicate)
+              * key, with the incoming value excluded by its normalized identity
+              * rather than by literal target text. Keyed literally, a rephrased
+              * incumbent was invisible here and survived the correction, so a
+              * functional relation ended up with two current objects that were
+              * the same fact spelled two ways. The literal arm still applies to
+              * rows written before the backfill. */
              "SELECT id,lifecycle_state,superseded_at,invalidated_at,suppressed,confidence,"
-             " authority_rank,version FROM entity_edges WHERE source=?1 AND relation=?2"
-             " AND target<>?3 AND edge_class='semantic' AND superseded_at=''"
+             " authority_rank,version FROM entity_edges WHERE edge_class='semantic'"
+             " AND ((identity_subject_key<>'' AND identity_subject_key=?4)"
+             "   OR (identity_subject_key='' AND source=?1 AND relation=?2))"
+             " AND NOT ((identity_key<>'' AND identity_key=?5)"
+             "       OR (identity_key='' AND target=?3))"
+             " AND superseded_at=''"
              " AND invalidated_at='' AND suppressed=0 AND lifecycle_state IN"
              " ('candidate','persistent','promoted') ORDER BY authority_rank DESC,id DESC",
              err, sizeof(err));
          if (!q)
             return fm_end(conn, 0);
+         {
+            char sk[FACT_IDENTITY_KEY_MAX];
+            char ik[FACT_IDENTITY_KEY_MAX];
+            if (fact_identity_subject_key(in->source, in->relation, sk, sizeof(sk)) == 0)
+               sk[0] = '\0';
+            if (fact_identity_key(in->source, in->relation, in->target, ik, sizeof(ik)) == 0)
+               ik[0] = '\0';
+            aimee_pg_bind_text(q, "?4", sk);
+            aimee_pg_bind_text(q, "?5", ik);
+         }
          aimee_pg_bind_text(q, "?1", in->source);
          aimee_pg_bind_text(q, "?2", in->relation);
          aimee_pg_bind_text(q, "?3", in->target);
-         while (np < FM_STATE_MAX && aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
+         while (np <= FM_STATE_MAX && aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
             fm_state_row(q, &priors[np++]);
          aimee_pg_finalize(q);
+         if (np > FM_STATE_MAX)
+            return fm_end(conn, 0); /* no partial supersession beyond the audit buffer */
 
          const rel_type_def_t *def = rel_types_seed_lookup(in->relation);
          correction_behavior_t behavior = def ? def->correction_behavior : CORR_SUPERSEDE;
@@ -791,14 +1020,29 @@ int db2_fact_mutation_assert(const fact_actor_t *actor, const fact_assertion_inp
           "INSERT INTO entity_edges(source,relation,target,weight,relation_id,subject_kind,"
           " object_kind,edge_class,confidence_class,confidence,asserted_at,valid_from,valid_until,"
           " assertion_kind,epistemic_kind,lifecycle_state,authority_rank,actor_principal,version,"
-          " prior_version_id,commit_id) VALUES(?1,?2,?3,1,?4,?5,?6,'semantic',?7,?8,?9,?10,"
-          " ?11,?12,?13,?14,?15,?16,1,?17,?18) RETURNING id",
+          " prior_version_id,commit_id,identity_key,identity_subject_key)"
+          " VALUES(?1,?2,?3,1,?4,?5,?6,'semantic',?7,?8,"
+          " ?9,?10,?11,?12,?13,?14,?15,?16,1,?17,?18,?19,?20) RETURNING id",
           err, sizeof(err));
       if (!st)
          return fm_end(conn, 0);
       aimee_pg_bind_text(st, "?1", in->source);
       aimee_pg_bind_text(st, "?2", in->relation);
       aimee_pg_bind_text(st, "?3", in->target);
+      /* Identity is written at insert so every new row is keyed the way the
+       * lookup above searches. An empty key (component missing after
+       * normalization) leaves the row on the literal arm rather than colliding
+       * every such row into one shared '' key. */
+      {
+         char ikey[FACT_IDENTITY_KEY_MAX];
+         char skey[FACT_IDENTITY_KEY_MAX];
+         if (fact_identity_key(in->source, in->relation, in->target, ikey, sizeof(ikey)) == 0)
+            ikey[0] = '\0';
+         if (fact_identity_subject_key(in->source, in->relation, skey, sizeof(skey)) == 0)
+            skey[0] = '\0';
+         aimee_pg_bind_text(st, "?19", ikey);
+         aimee_pg_bind_text(st, "?20", skey);
+      }
       aimee_pg_bind_int(st, "?4", in->relation_id);
       aimee_pg_bind_int(st, "?5", in->subject_kind);
       aimee_pg_bind_int(st, "?6", in->object_kind);
@@ -952,6 +1196,8 @@ int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
       aimee_pg_finalize(u);
       if (!ok || fm_change(conn, commit_id, rows[i].id, "invalidate", &rows[i], &after,
                            "reversible correction") != 0)
+         return fm_end(conn, 0);
+      if (fm_tombstone_add_assertion(conn, rows[i].id, actor, "explicit fact invalidation") != 0)
          return fm_end(conn, 0);
       changed++;
       last_id = rows[i].id;
@@ -1129,6 +1375,21 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
       if (!reverses)
          return fm_end(conn, 0);
    }
+   if (action == FACT_REVIEW_APPROVE)
+   {
+      char target[2048] = "", qerr[FM_ERRBUF] = "";
+      aimee_pg_stmt_t *tq = aimee_pg_prepare(
+          conn, "SELECT target FROM entity_edges WHERE id=?1 AND edge_class='semantic'", qerr,
+          sizeof(qerr));
+      if (!tq)
+         return fm_end(conn, 0);
+      aimee_pg_bind_int64(tq, "?1", assertion_id);
+      if (aimee_pg_step(tq, qerr, sizeof(qerr)) == AIMEE_PG_ROW)
+         fm_copy(target, sizeof(target), aimee_pg_column_text(tq, 0));
+      aimee_pg_finalize(tq);
+      if (!target[0] || fm_tombstone_blocks(conn, review_source, review_relation, target) != 0)
+         return fm_end(conn, 0);
+   }
    char commit_id[FACT_COMMIT_ID_MAX];
    if (fm_commit_open(conn, actor, "fact.review", 1, commit_id) != 0)
       return fm_end(conn, 0);
@@ -1184,6 +1445,11 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
       after.invalidated_at[0] = '\0';
    after.authority_rank = action == FACT_REVIEW_UNDO ? undo_authority_rank : FACT_ACTOR_OPERATOR;
    after.version++;
+   /* The DB trigger rejects any transition back to a recallable lifecycle while
+    * the tombstone is active.  Deactivate it first in this same transaction;
+    * rollback restores it if any later review write fails. */
+   if (action == FACT_REVIEW_UNDO && fm_tombstone_restore_assertion(conn, assertion_id, actor) != 0)
+      return fm_end(conn, 0);
    char err[FM_ERRBUF] = "";
    aimee_pg_stmt_t *u = aimee_pg_prepare(
        conn,
@@ -1202,6 +1468,9 @@ int db2_fact_mutation_review(const fact_actor_t *actor, int64_t assertion_id,
    aimee_pg_finalize(u);
    if (!ok || fm_change(conn, commit_id, assertion_id, action_text, &before, &after,
                         "operator review") != 0)
+      return fm_end(conn, 0);
+   if (action == FACT_REVIEW_REJECT &&
+       fm_tombstone_add_assertion(conn, assertion_id, actor, "operator review rejection") != 0)
       return fm_end(conn, 0);
    if (action == FACT_REVIEW_UNDO)
    {

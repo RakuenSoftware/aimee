@@ -264,24 +264,23 @@ static void mk_assistant_turn(aimee_request_t *ir)
    ir->n_messages += 1;
 }
 
-/* IR seam (P4 port): ir_stage_memory appends the envelope as a trailing system TEXT
- * block, derives the query from the last user message, and reports the mutation. The
- * appended env is byte-identical to the legacy ingress_preinject_build(query, 0). */
+/* IR seam: first-turn code-owned guidance and retrieved evidence are distinct
+ * system blocks with distinct authority metadata. */
 static void test_ir_stage_appends_system_block(void)
 {
    aimee_request_t ir;
    mk_user_ir(&ir, "deploy matrix");
    int rc = ir_stage_memory(&ir, NULL);
    assert(rc == 1);          /* changed typed fields -> runner marks ir->mutated */
-   assert(ir.n_system == 1); /* exactly one trailing block appended */
+   assert(ir.n_system == 2); /* guidance + evidence */
    assert(ir.system[0].type == AIMEE_BLK_TEXT);
    assert(ir.system[0].cache_control == NULL); /* trailing block stays uncached */
-   /* Session start, so the block is the guidance FOLLOWED BY this turn's recall
-    * envelope. The envelope itself is unchanged -- assert it is carried verbatim
-    * inside; byte-identity with the bare envelope is asserted mid-session, where
-    * the guidance is not repeated. */
+   assert(ir.system[0].context.origin == AIMEE_CTX_ORIGIN_PLATFORM);
+   assert(ir.system[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+   assert(ir.system[1].context.origin == AIMEE_CTX_ORIGIN_RETRIEVAL);
+   assert(ir.system[1].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
    char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   assert(direct && ir.system[1].text && strcmp(ir.system[1].text, direct) == 0);
    assert(strstr(ir.system[0].text, "explore-with: ") != NULL);
    free(direct);
    aimee_request_free(&ir);
@@ -308,7 +307,8 @@ static void test_ir_stage_prefers_supplied_query(void)
 
    /* The envelope must be the one the CLEAN query produces. */
    char *direct = ingress_preinject_build("deploy matrix", 0);
-   assert(direct && ir.system[0].text && strstr(ir.system[0].text, direct) != NULL);
+   assert(direct && ir.n_system == 2 && ir.system[1].text &&
+          strcmp(ir.system[1].text, direct) == 0);
    free(direct);
    aimee_request_free(&ir);
 
@@ -317,7 +317,7 @@ static void test_ir_stage_prefers_supplied_query(void)
    aimee_request_t ir2;
    mk_user_ir(&ir2, "deploy matrix");
    assert(ir_stage_memory(&ir2, NULL) == 1);
-   assert(ir2.n_system == 1);
+   assert(ir2.n_system == 2);
    aimee_request_free(&ir2);
    printf("ir_stage_prefers_supplied_query OK\n");
 }
@@ -460,9 +460,114 @@ static void test_persona_prepends_first_user_message_once(void)
    printf("persona_prepends_first_user_message_once OK\n");
 }
 
+/* --- Turn-level recall gate -------------------------------------------
+ *
+ * Both error directions are asserted separately, because they have different
+ * costs: a retrieval wrongly performed injects irrelevant evidence, while a
+ * retrieval wrongly skipped produces a confident answer with no evidence behind
+ * it. The second is worse, so the gate is required to fail open and these
+ * "must still retrieve" cases are the larger half of the suite.
+ *
+ * These drive the production classifier through its public entry point rather
+ * than reimplementing its rules -- a harness that restates its subject proves
+ * only that the restatement is self-consistent. */
+
+static void assert_gate_skips(const char *q, const char *why)
+{
+   const char *reason = NULL;
+   int skip = gw_stage_memory_recall_gate_should_skip(q, &reason);
+   if (!skip)
+   {
+      fprintf(stderr, "  recall_gate: expected SKIP for \"%s\" (%s)\n", q, why);
+      assert(0);
+   }
+   assert(reason != NULL); /* every skip carries a logged reason */
+}
+
+static void assert_gate_retrieves(const char *q, const char *why)
+{
+   const char *reason = NULL;
+   int skip = gw_stage_memory_recall_gate_should_skip(q, &reason);
+   if (skip)
+   {
+      fprintf(stderr, "  recall_gate: expected RETRIEVE for \"%s\" (%s) but skipped (reason=%s)\n",
+              q, why, reason ? reason : "?");
+      assert(0);
+   }
+   assert(reason == NULL);
+}
+
+static void test_recall_gate_skips_acknowledgements(void)
+{
+   assert_gate_skips("thanks", "bare acknowledgement");
+   assert_gate_skips("thanks, that worked", "acknowledgement with tail");
+   assert_gate_skips("ok", "minimal ack");
+   assert_gate_skips("perfect", "ack");
+   assert_gate_skips("ship it", "ack");
+   printf("  recall_gate_skips_acknowledgements: ok\n");
+}
+
+static void test_recall_gate_fails_open(void)
+{
+   /* Anything carrying a question, an identifier, a path, a number or real
+    * length must retrieve. */
+   assert_gate_retrieves("what did we decide about staging?", "interrogative");
+   assert_gate_retrieves("why is that", "interrogative without punctuation");
+   assert_gate_retrieves("ok but how does the retry work", "ack prefix, but a question follows");
+   assert_gate_retrieves("thanks for src/db2/fact_mutation.c", "path token");
+   assert_gate_retrieves("great, v2 then", "digit");
+   assert_gate_retrieves("ok MemoryStore", "interior capital: identifier");
+   /* An all-caps acronym trips the same interior-capital rule as an identifier.
+    * The gate cannot tell "LGTM" from "HTTP" cheaply, so it retrieves. That is
+    * the fail-open direction working as intended, and it is pinned here so a
+    * later "optimisation" that starts skipping acronyms has to argue for it. */
+   assert_gate_retrieves("LGTM", "all-caps reads as an identifier; conservative");
+   assert_gate_retrieves("done with the eu-west-1 move", "hyphenated identifier");
+   assert_gate_retrieves("thanks — merci beaucoup, ça marche", "non-ASCII: out of competence");
+   assert_gate_retrieves(
+       "ok so the thing we talked about last week regarding the deployment plan and the rollback",
+       "too long for a cheap classifier to judge");
+   assert_gate_retrieves("", "empty");
+   assert_gate_retrieves("   ", "whitespace only");
+   assert_gate_retrieves(NULL, "NULL query must never skip");
+   assert_gate_retrieves("deploy the new index", "an instruction is not an acknowledgement");
+   printf("  recall_gate_fails_open: ok\n");
+}
+
+static void test_recall_gate_observes_before_enforcing(void)
+{
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
+   unsetenv("AIMEE_MEMORY_RECALL_GATE"); /* observe is the shipping default */
+   char *observed = gw_memory_system_prompt("thanks deploy");
+   assert(observed != NULL);
+   free(observed);
+
+   assert(setenv("AIMEE_MEMORY_RECALL_GATE", "enforce", 1) == 0);
+   assert(gw_memory_system_prompt("thanks deploy") == NULL);
+   unsetenv("AIMEE_MEMORY_RECALL_GATE");
+   printf("  recall_gate_observes_before_enforcing: ok\n");
+}
+
+static void test_recall_gate_error_directions_are_separate(void)
+{
+   gw_memory_recall_gate_metrics_t before = {0};
+   gw_memory_recall_gate_metrics_t after = {0};
+   gw_stage_memory_recall_gate_metrics(&before);
+   gw_stage_memory_recall_gate_record_outcome(1, 1); /* needed, but gate skipped */
+   gw_stage_memory_recall_gate_record_outcome(0, 0); /* ran, but was unnecessary */
+   gw_stage_memory_recall_gate_metrics(&after);
+   assert(after.wrongly_skipped == before.wrongly_skipped + 1);
+   assert(after.wrongly_performed == before.wrongly_performed + 1);
+   printf("  recall_gate_error_directions_are_separate: ok\n");
+}
+
 int main(void)
 {
    printf("test_gw_stage_memory:\n");
+   test_recall_gate_skips_acknowledgements();
+   test_recall_gate_fails_open();
+   test_recall_gate_observes_before_enforcing();
+   test_recall_gate_error_directions_are_separate();
    ingress_preinject_register_confidence_provider(test_confidence_provider);
    test_system_prompt_raw_env();
    test_disabled_noop();

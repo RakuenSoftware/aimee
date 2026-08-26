@@ -21,6 +21,7 @@
 #   MODE          full | hybrid                 (default full; or pass --mode)
 #   AIMEE_DB2_URL Postgres URL for the kb        (full mode; default
 #                 postgresql://aimee@localhost/aimee_shared via local peer auth)
+#   AIMEE_STORE_URL PostgreSQL URL for server DB1 (optional; isolated per run)
 #   KB_URL        external kb base URL           (hybrid mode; default
 #                 http://localhost:8741)
 #   EMBEDDER_URL  embedder endpoint        (full mode; optional)
@@ -28,6 +29,19 @@
 #   SERVER_TLS_PORT server TLS /v1 port           (default SERVER_PORT + 3)
 #   BEARER        server first-boot bearer        (default random per run)
 #   WAIT_SECONDS  health wait budget             (default 90)
+#   AIMEE_E2E_HOLD_SECONDS keep a green scratch stack alive for exploratory
+#                 probes before cleanup           (default 0)
+#   AIMEE_E2E_PROBE_SCRIPT executable invoked after the built-in checks while
+#                 every service and enrolled identity remains live. The probe
+#                 receives scratch paths, endpoints, credentials, and PIDs in
+#                 its environment.                         (optional)
+#   AIMEE_E2E_TURN_INTEGRITY_MCP=1 configures the repository's deterministic
+#                 timeout MCP fixture as a server-owned client. (default 0)
+#   AIMEE_E2E_RESTART_COMPONENTS=1 restart both daemons after all probes and
+#                 prove enrolled/persisted service recovery.       (default 0)
+#   AIMEE_E2E_KEEP_RUN_ROOT=1 retain the scratch tree after cleanup for failed
+#                 live-run diagnosis; the printed path is operator-removable.
+#   AIMEE_E2E_SKIP_BUILD=1 reuse already-built binaries (exploratory reruns)
 #
 # Exit code: 0 = all checks passed.
 
@@ -75,14 +89,35 @@ check() {
 }
 
 # --- build ----------------------------------------------------------------
-bold "==> Building aimee client + server + kb + required modules"
-make -C src ../aimee ../aimee-server ../aimee-kb \
-  build/obj/aimee-module build/obj/aimee-module-config \
-  build/obj/aimee-module >/dev/null
+if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 ]]; then
+  bold "==> Building aimee client + server + kb + required modules"
+  make -C src ../aimee ../aimee-server ../aimee-kb \
+    build/obj/aimee-module build/obj/aimee-module-config \
+    build/obj/aimee-module >/dev/null
+else
+  bold "==> Reusing already-built binaries for exploratory rerun"
+fi
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
-cleanup_run_root() { rm -rf "$RUN_ROOT"; }
+# Give the DB1 store the same per-run PostgreSQL isolation as the integration
+# harness.  Without this, a second live run inherits the immutable first-user
+# claim and cannot exercise enrollment honestly.
+if [[ -n "${AIMEE_STORE_URL:-}" && "$AIMEE_STORE_URL" != *"search_path="* ]]; then
+  LIVE_STORE_SCHEMA="local_stack_${$}_${RANDOM}"
+  case "$AIMEE_STORE_URL" in
+    *\?*) AIMEE_STORE_URL="${AIMEE_STORE_URL}&search_path=${LIVE_STORE_SCHEMA}" ;;
+    *)    AIMEE_STORE_URL="${AIMEE_STORE_URL}?search_path=${LIVE_STORE_SCHEMA}" ;;
+  esac
+  export AIMEE_STORE_URL
+fi
+cleanup_run_root() {
+  if [[ "${AIMEE_E2E_KEEP_RUN_ROOT:-0}" == "1" ]]; then
+    yellow "retaining E2E scratch tree for inspection: $RUN_ROOT"
+  else
+    rm -rf "$RUN_ROOT"
+  fi
+}
 trap cleanup_run_root EXIT INT TERM
 python3 scripts/export_c_repositories.py \
   --runtime-bundle "$BUNDLE" >/dev/null
@@ -105,13 +140,31 @@ sed "s/8740/${SERVER_PORT}/; s/8743/${SERVER_TLS_PORT}/" \
 sed "s#/opt/aimee/scripts/#${REPO}/scripts/#g" \
     deploy/container/aimee.yaml >> "$AIMEE_HOME/aimee.yaml"
 chmod 0600 "$AIMEE_HOME/aimee.yaml"
-# Optional: point memory embedding at a REAL small embedder so the semantic
-# vector path is actually exercised (see scripts/test-embedder-qwen.sh, which
-# serves Qwen3-Embedding-0.6B at 1024-d). Without this the kb falls back to the
-# builtin hash and the embedder-fidelity gate below reports DEGRADED. An http(s)
-# URL is used directly (aimee POSTs raw text to {url}/embed).
+if [[ "${AIMEE_E2E_TURN_INTEGRITY_MCP:-0}" == "1" ]]; then
+  cat >>"$AIMEE_HOME/aimee.yaml" <<YAML
+
+mcp_clients:
+  - name: ti_remote
+    transport: stdio
+    install: server
+    command:
+      - python3
+      - ${REPO}/scripts/fixtures/turn-integrity-mcp.py
+YAML
+fi
+# Optional: point memory embedding at a real deployment-supported embedder so
+# the semantic vector path is actually exercised. Without this the kb falls
+# back to the builtin hash and the embedder-fidelity gate below reports
+# DEGRADED. The endpoint's health identity and dimension are authoritative; the
+# harness does not select or guess a model. An http(s) URL is used directly.
 if [[ -n "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
   bold "==> Using real embedder for memory: ${AIMEE_E2E_EMBEDDER_URL} (dim=${EMBEDDER_DIMS:-unset})"
+  # `embedding_command` is the request-side hint, while EMBEDDER_URL is the
+  # daemon runtime contract used by the KB's dimension probe and asynchronous
+  # memory embedding path. Supply both from the one E2E input: setting only the
+  # config field lets query requests embed but leaves startup reporting
+  # "no embed command configured" and stores zero corpus vectors.
+  export EMBEDDER_URL="$AIMEE_E2E_EMBEDDER_URL"
   # The server forwards embedding_command to the kb on memory.store / memory
   # search, and the kb reads the same installation document for direct embedding.
   set_embed_cmd() {  # $1 = config file
@@ -130,27 +183,67 @@ export AIMEE_API_REMOTE_WRITES=off
 export AIMEE_DB1_URL="sqlite://${AIMEE_HOME}/aimee.db"
 
 DB1_MODULE="$REPO/src/build/obj/aimee-module-aimee"
-[ -x "$DB1_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
+# Integration and prior E2E runs can leave a named copy behind. Refresh it after
+# every build: the module grant is bound to the current executable identity, so
+# reusing an older copy is correctly denied and prevents the TLS ramp starting.
+cp "$REPO/src/build/obj/aimee-module" "$DB1_MODULE"
 PG_MODULE="$REPO/src/build/obj/aimee-module-postgres"
-[ -x "$PG_MODULE" ] || cp "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
+install -m0755 "$REPO/src/build/obj/aimee-module" "$PG_MODULE"
 CONFIG_MODULE="$REPO/src/build/obj/aimee-module-config"
 POSTGRES_MODULE="$REPO/src/build/obj/aimee-module-postgres"
+MODULE_BIN_DIR="$RUN_ROOT/modules"
 SERVER_POLICY="$AIMEE_HOME/modules.d/server"
 KB_POLICY="$AIMEE_HOME/modules.d/kb"
-mkdir -p "$SERVER_POLICY" "$KB_POLICY"
+mkdir -p "$MODULE_BIN_DIR" "$SERVER_POLICY" "$KB_POLICY"
 sed "s|^executable=.*|executable=$DB1_MODULE|" \
   "$BUNDLE/grants/server/aimee.grant" > "$SERVER_POLICY/aimee.grant"
+sed "s|^executable=.*|executable=$DB1_MODULE|" \
+  "$BUNDLE/grants/server/aimee-postgres.grant" > "$SERVER_POLICY/aimee-postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/server/config.grant" > "$SERVER_POLICY/config.grant"
+sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
+  "$BUNDLE/grants/server/postgres.grant" > "$SERVER_POLICY/postgres.grant"
 sed "s|^executable=.*|executable=$CONFIG_MODULE|" \
   "$BUNDLE/grants/kb/config.grant" > "$KB_POLICY/config.grant"
 sed "s|^executable=.*|executable=$POSTGRES_MODULE|" \
   "$BUNDLE/grants/kb/postgres.grant" > "$KB_POLICY/postgres.grant"
+
+# A live chat/tool turn reaches process-owned policy in memory, routing,
+# delegates, tools, workspace, git, skills, response composition, execution
+# policy, runtime-web and sandbox. Starting only config + storage makes health
+# and CRUD green while every real agent turn fails at its first module call.
+# Reproduce the packaged server's required module manifest here, then add the
+# optional modules exercised by this harness's turn-integrity probe.
+feature_module_ids=()
+while IFS=$'\t' read -r module_id _; do
+  case "$module_id" in
+    config|postgres|aimee) ;;
+    *) feature_module_ids+=("$module_id") ;;
+  esac
+done < "$BUNDLE/server.modules"
+for module_id in ${AIMEE_E2E_OPTIONAL_SERVER_MODULES:-benchmarks governance roundtable}; do
+  [[ " ${feature_module_ids[*]} " == *" $module_id "* ]] || feature_module_ids+=("$module_id")
+done
+
+for module_id in "${feature_module_ids[@]}"; do
+  module_bin="$MODULE_BIN_DIR/aimee-module-$module_id"
+  install -m0755 "$REPO/src/build/obj/aimee-module" "$module_bin"
+  grant="$BUNDLE/grants/server/$module_id.grant"
+  [[ -r "$grant" ]] || { red "missing generated server grant: $grant"; exit 1; }
+  sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
+    "$grant" > "$SERVER_POLICY/$module_id.grant"
+done
+if [[ " ${feature_module_ids[*]} " == *" roundtable "* ]]; then
+  sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
+    "$BUNDLE/grants/server/roundtable-delegates.grant" \
+    > "$SERVER_POLICY/roundtable-delegates.grant"
+fi
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
-server_db1_pid=""; server_config_pid=""
+server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
 kb_config_pid=""; kb_postgres_pid=""
+feature_module_pids=()
 
 arm_module() { # executable socket policy log pid-variable [environment...]
   local executable="$1" socket="$2" policy="$3" log="$4" pid_var="$5"
@@ -169,22 +262,116 @@ arm_module() { # executable socket policy log pid-variable [environment...]
   printf -v "$pid_var" '%s' "$!"
 }
 
-stop_modules() {
+stop_server_modules() {
   local pid
-  for pid in "$server_db1_pid" "$server_config_pid" "$kb_config_pid" "$kb_postgres_pid"; do
+  for pid in "$server_db1_pid" "$server_config_pid" "$server_postgres_pid" \
+             "${feature_module_pids[@]}"; do
     [[ -n "$pid" ]] || continue
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
   done
-  server_db1_pid=""; server_config_pid=""
+  server_db1_pid=""; server_config_pid=""; server_postgres_pid=""
+  feature_module_pids=()
+}
+
+stop_kb_modules() {
+  local pid
+  for pid in "$kb_config_pid" "$kb_postgres_pid"; do
+    [[ -n "$pid" ]] || continue
+    kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
+  done
   kb_config_pid=""; kb_postgres_pid=""
+}
+
+stop_modules() {
+  stop_server_modules
+  stop_kb_modules
+}
+
+start_kb_modules() {
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
+    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
+    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+}
+
+start_server_modules() {
+  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-postgres-module.log" server_postgres_pid \
+    "AIMEE_STORE_URL=$AIMEE_STORE_URL"
+  arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
+    "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
+  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+    "$AIMEE_HOME/server-config-module.log" server_config_pid
+  for module_id in "${feature_module_ids[@]}"; do
+    feature_pid=""
+    arm_module "$MODULE_BIN_DIR/aimee-module-$module_id" \
+      "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
+      "$AIMEE_HOME/server-$module_id-module.log" feature_pid
+    feature_module_pids+=("$feature_pid")
+  done
+}
+
+recycle_kb_daemon() {
+  local stop_deadline deadline
+  if [[ -n "$kb_pid" ]]; then
+    kill "$kb_pid" 2>/dev/null || true
+    stop_deadline=$((SECONDS + 10))
+    while kill -0 "$kb_pid" 2>/dev/null && (( SECONDS < stop_deadline )); do
+      sleep 0.1
+    done
+    kill -KILL "$kb_pid" 2>/dev/null || true
+    wait "$kb_pid" 2>/dev/null || true
+    kb_pid=""
+  fi
+  stop_kb_modules
+  rm -f "$AIMEE_HOME/kb-module-bus.sock"
+  start_kb_modules
+  "$REPO/aimee-kb" --http-port=8741 >>"$AIMEE_HOME/kb.log" 2>&1 &
+  kb_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fsS --max-time 3 "${AIMEE_KB_API_URL}/v1/health" >/dev/null 2>&1; do
+    kill -0 "$kb_pid" 2>/dev/null || return 1
+    (( SECONDS < deadline )) || return 1
+    sleep 1
+  done
+}
+
+recycle_probe_stack() {
+  local stop_deadline deadline
+  if [[ -n "$server_pid" ]]; then
+    kill "$server_pid" 2>/dev/null || true
+    stop_deadline=$((SECONDS + 10))
+    while kill -0 "$server_pid" 2>/dev/null && (( SECONDS < stop_deadline )); do
+      sleep 0.1
+    done
+    kill -KILL "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+    server_pid=""
+  fi
+  stop_server_modules
+  rm -f "$AIMEE_HOME/server-module-bus.sock"
+  recycle_kb_daemon || return 1
+  start_server_modules
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+  server_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
+    "$SERVER_URL/v1/health" >/dev/null 2>&1; do
+    kill -0 "$server_pid" 2>/dev/null || return 1
+    (( SECONDS < deadline )) || return 1
+    sleep 1
+  done
 }
 
 cleanup() {
   stop_modules
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
   [[ -n "$kb_pid" ]] && kill "$kb_pid" 2>/dev/null || true
-  rm -rf "$RUN_ROOT"
+  cleanup_run_root
 }
 trap cleanup EXIT
 
@@ -194,14 +381,48 @@ ulimit -S -s 65536 || true
 if [[ "$MODE" == "full" ]]; then
   bold "==> Mode FULL (T5): local server + local kb"
   export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql:///aimee_shared}"
+  # DB1 is a module-owned family too. Its aimee module reaches storage only
+  # through the Postgres module on the SERVER bus; an unset store URL leaves
+  # that declared edge present but unusable and the mTLS ramp correctly refuses.
+  export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
+  # This is an environment harness, so provision the extensions its fresh
+  # database needs before migrations run. A server should not require runtime
+  # CREATE EXTENSION authority, and silently running without pgvector would make
+  # keyword-only retrieval look like semantic coverage.
+  extension_error=""
+  if command -v psql >/dev/null 2>&1; then
+    pg_extension_cmd=(psql)
+    if [[ "$(id -u)" == "0" && "$AIMEE_DB2_URL" =~ ^postgres(ql)?:///[^/?]+$ ]] && \
+       command -v runuser >/dev/null 2>&1; then
+      # A local peer-auth E2E database is normally owned by a non-superuser.
+      # Use the cluster administrator only for CREATE EXTENSION; daemons and
+      # every schema migration continue under AIMEE_DB2_URL's runtime role.
+      pg_extension_cmd=(runuser -u postgres -- psql)
+    fi
+    if ! "${pg_extension_cmd[@]}" "$AIMEE_DB2_URL" -v ON_ERROR_STOP=1 \
+      -c 'CREATE EXTENSION IF NOT EXISTS vector' \
+      -c 'CREATE EXTENSION IF NOT EXISTS pg_trgm' \
+      >/dev/null 2>"$RUN_ROOT/extension-provision.err"; then
+      extension_error="$(<"$RUN_ROOT/extension-provision.err")"
+    fi
+  else
+    extension_error="psql is unavailable"
+  fi
+  if [[ -n "$extension_error" ]]; then
+    if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+      red "    required PostgreSQL vector extensions could not be provisioned: $extension_error"
+      exit 1
+    fi
+    yellow "    DEGRADED  PostgreSQL vector extensions were not provisioned: $extension_error"
+  fi
   [[ -n "${EMBEDDER_URL:-}" ]] && export EMBEDDER_URL
   export AIMEE_KB_HTTP_BIND=1
+  # Authenticate the local server-to-KB hop. Restore/undo is intentionally a
+  # human-authority operation and must not be made to pass by weakening KB's
+  # actor check just because this harness uses loopback HTTP.
+  export AIMEE_KB_API_BEARER_TOKEN="${AIMEE_KB_API_BEARER_TOKEN:-$BEARER}"
   echo "    DB2: ${AIMEE_DB2_URL}"
-  arm_module "$CONFIG_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
-    "$AIMEE_HOME/kb-config-module.log" kb_config_pid
-  arm_module "$POSTGRES_MODULE" "$AIMEE_HOME/kb-module-bus.sock" "$KB_POLICY" \
-    "$AIMEE_HOME/kb-postgres-module.log" kb_postgres_pid \
-    "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+  start_kb_modules
   # Capture kb output so the embedder-fidelity gate below can see whether pgvec
   # accepted the memory vectors or refused them on a dim mismatch.
   "$REPO/aimee-kb" --http-port=8741 >"$AIMEE_HOME/kb.log" 2>&1 &
@@ -241,11 +462,7 @@ else
 fi
 
 bold "==> Starting aimee-server"
-arm_module "$DB1_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-  "$AIMEE_HOME/server-db1-module.log" server_db1_pid \
-  "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
-arm_module "$CONFIG_MODULE" "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-  "$AIMEE_HOME/server-config-module.log" server_config_pid
+start_server_modules
 AIMEE_API_BEARER_TOKEN="$BEARER" \
   "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
 server_pid=$!
@@ -329,6 +546,35 @@ check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: applica
                                                -d '{"query":"local e2e","scope":"all","max_results":3}' \
                                                "${SERVER_URL}/v1/kb/search"
 
+# Run corpus-sensitive contract probes before the outer harness stores its
+# round-trip and semantic facts. The probe's typed empty-retrieval assertion is
+# meaningful only while this freshly provisioned database is genuinely empty.
+if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
+  bold "==> External live-stack probe: ${AIMEE_E2E_PROBE_SCRIPT}"
+  if REPO="$REPO" RUN_ROOT="$RUN_ROOT" SCRATCH="$SCRATCH" SERVER_URL="$SERVER_URL" \
+       BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+       KB_PID="$kb_pid" SERVER_PID="$server_pid" \
+       "$AIMEE_E2E_PROBE_SCRIPT"; then
+    green "  PASS  external live-stack probe"; PASS=$((PASS + 1))
+  else
+    red "  FAIL  external live-stack probe"; FAIL=$((FAIL + 1))
+  fi
+  # A probe that deliberately interrupts the KB can request a clean lifecycle
+  # boundary before unrelated outer checks run. Resuming a stopped process is
+  # sufficient to prove transport recovery, but it can leave expensive
+  # background work queued in both daemons; recycling both prevents that load
+  # from leaking into the next contract.
+  if [[ "$MODE" == "full" && -e "$RUN_ROOT/probe-recycle-kb" ]]; then
+    bold "==> Recycling server + kb after disruptive external probe"
+    if recycle_probe_stack; then
+      green "    disruptive probe isolation restored"
+    else
+      red "    stack failed to recover after disruptive external probe"
+      exit 1
+    fi
+  fi
+fi
+
 bold "==> Write→read round-trip (store a memory, read it back)"
 if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
    "$REPO/scripts/aimee-write-read-e2e.sh"; then
@@ -337,29 +583,164 @@ else
   red   "  FAIL  write→read round-trip"; FAIL=$((FAIL + 1))
 fi
 
+bold "==> Memory governance (row scope + durable human rejection)"
+if SERVER_URL="$SERVER_URL" BEARER="$BEARER" CLIENT_CERT="$CLIENT_CERT" CLIENT_KEY="$CLIENT_KEY" \
+   "$REPO/scripts/aimee-memory-governance-e2e.sh"; then
+  green "  PASS  memory governance round-trip"; PASS=$((PASS + 1))
+else
+  red   "  FAIL  memory governance round-trip"; FAIL=$((FAIL + 1))
+fi
+
 # Embedder fidelity: the round-trip above passes on list + KEYWORD retrieval even
 # when no real embedder is wired — the memory embedding silently falls back to the
 # builtin hash (a vestigial 384-d stand-in) whose vectors pgvec then REFUSES on a
-# dim mismatch against a corpus built by the real embedder (Qwen3-Embedding: 1024-d
-# CPU / 2560-d GPU). That makes the semantic/vector path a no-op while the run still
+# dim mismatch against a corpus built by the real embedder. That makes the
+# semantic/vector path a no-op while the run still
 # reports green. Surface it: if kb refused the memory vector, the semantic path was
 # NOT exercised — announce it loudly, and hard-fail under AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1.
 bold "==> Embedder fidelity (semantic vector path)"
 mm="$(grep -aoE 'memory embedding dim mismatch: got [0-9]+, expected [0-9]+' "$AIMEE_HOME/kb.log" 2>/dev/null | tail -1 || true)"
-if [[ -n "$mm" ]]; then
+if [[ -z "${AIMEE_E2E_EMBEDDER_URL:-}" ]]; then
+  yellow "  DEGRADED  no external embedder configured — builtin hash path only."
+  if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
+    red "  FAIL  real embedder required but AIMEE_E2E_EMBEDDER_URL is unset"
+    FAIL=$((FAIL + 1))
+  fi
+elif [[ -n "$mm" ]]; then
   yellow "  DEGRADED  ${mm}; vectors refused — semantic search NOT exercised (list/keyword only)."
-  yellow "            Wire a real embedder: point EMBEDDER_URL / SYNTHESIS_ENDPOINT at a"
-  yellow "            Qwen3-Embedding endpoint whose dim matches the corpus (1024 CPU / 2560 GPU)."
+  yellow "            Wire a real embedder: point EMBEDDER_URL at the selected deployment"
+  yellow "            embedder and ensure its declared dimension matches the corpus."
   if [[ "${AIMEE_E2E_REQUIRE_REAL_EMBEDDER:-0}" == "1" ]]; then
     red "  FAIL  real embedder required (AIMEE_E2E_REQUIRE_REAL_EMBEDDER=1) but the run degraded to the builtin embedder"
     FAIL=$((FAIL + 1))
   fi
 else
-  green "  PASS  memory vectors accepted (no dim mismatch) — real semantic path exercised"
-  PASS=$((PASS + 1))
+  embed_health="$(curl -fsS --max-time 5 "${AIMEE_E2E_EMBEDDER_URL%/}/health" 2>/dev/null || true)"
+  if ! python3 - "$embed_health" <<'PY'
+import json
+import sys
+
+try:
+    health = json.loads(sys.argv[1])
+except (json.JSONDecodeError, IndexError):
+    raise SystemExit(1)
+raise SystemExit(
+    0 if health.get("status") == "ok"
+    and isinstance(health.get("dim"), int) and health["dim"] > 0
+    and isinstance(health.get("serving_id"), str) and health["serving_id"]
+    else 1
+)
+PY
+  then
+    red "  FAIL  configured embedder has no healthy dimension-bound serving identity"
+    FAIL=$((FAIL + 1))
+  else
+    semantic_marker="ti-semantic-${RANDOM}-${$}"
+    semantic_content="At the moonless harbor, a cerulean lantern beside the eastern quay directs returning vessels. ${semantic_marker}"
+    semantic_store="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
+      -H 'content-type: application/json' -X POST \
+      -d "{\"key\":\"semantic harbor guide ${semantic_marker}\",\"content\":\"${semantic_content}\",\"kind\":\"fact\"}" \
+      "$SERVER_URL/v1/memory/store" 2>/dev/null || true)"
+    semantic_recall=""
+    if [[ "$semantic_store" != *'"status":"ok"'* ]]; then
+      yellow "  UNCERTAIN  semantic store acknowledgement missing; checking the persisted postcondition"
+    fi
+    for _ in $(seq 1 20); do
+      # /memory/recall assembles the always-on/session context sections; it is
+      # not the ranked fact-search surface. /memory/search accepts keyword
+      # clusters but routes their joined natural-language query through the
+      # live KB semantic ranker as well, so a lexically-disjoint query here is
+      # direct evidence that the stored pgvector row was retrieved. Always run
+      # this postcondition: a client timeout can leave the store outcome unknown
+      # even though the fact and vector committed successfully.
+      semantic_recall="$(curl -fksS --max-time 60 "${IDENTITY[@]}" "${AUTH[@]}" \
+        -H 'content-type: application/json' -X POST \
+        -d '{"keywords":["Which colored light helps ships locate the dock after dark?"],"limit":10,"scope":"all"}' \
+        "$SERVER_URL/v1/memory/search" 2>/dev/null || true)"
+      [[ "$semantic_recall" == *"$semantic_marker"* ]] && break
+      sleep 0.25
+    done
+    if [[ "$semantic_recall" == *"$semantic_marker"* ]]; then
+      green "  PASS  real embedder stored and semantically recalled a lexically-disjoint fact"
+      PASS=$((PASS + 1))
+    else
+      red "  FAIL  real embedder did not semantically recall the stored fact"
+      FAIL=$((FAIL + 1))
+    fi
+  fi
+fi
+
+if [[ "${AIMEE_E2E_RESTART_COMPONENTS:-0}" == "1" && "$MODE" == "full" ]]; then
+  bold "==> Exploratory daemon restart and persisted recovery"
+  kill "$server_pid"
+  wait "$server_pid" 2>/dev/null || true
+  server_pid=""
+  # Process modules are supervised siblings. They exit when their owner's bus
+  # disappears, so a daemon-only restart must re-arm them just as a service
+  # manager would. Remove only the now-stale socket after its owner is reaped;
+  # otherwise an arm process can race into the dead inode and exit before the
+  # replacement server binds.
+  stop_server_modules
+  rm -f "$AIMEE_HOME/server-module-bus.sock"
+  start_server_modules
+  # The bootstrap bearer is a first-process transport secret. After deploy/apply
+  # seals the installation, replaying an enrolled client's bearer through that
+  # channel is invalid configuration and must be rejected. A real restart uses
+  # only the persisted Vault/config state.
+  "$REPO/aimee-server" --socket="$AIMEE_HOME/aimee-server.sock" &
+  server_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  while ! curl -fksS --max-time 5 "${IDENTITY[@]}" "${AUTH[@]}" \
+    "$SERVER_URL/v1/health" >/dev/null 2>&1; do
+    kill -0 "$server_pid" 2>/dev/null || break
+    (( SECONDS < deadline )) || break
+    sleep 1
+  done
+  persisted="$(curl -fksS --max-time 10 "${IDENTITY[@]}" "${AUTH[@]}" \
+    -H 'content-type: application/json' -X POST -d '{"limit":50}' \
+    "$SERVER_URL/v1/memory/list" 2>/dev/null || true)"
+  if [[ "$persisted" == *'aimeeE2E'* ]]; then
+    green "  PASS  aimee-server restart retained mTLS identity and persisted memory"
+    PASS=$((PASS + 1))
+  else
+    red "  FAIL  aimee-server did not recover enrolled persisted state"
+    FAIL=$((FAIL + 1))
+  fi
+
+  kill "$kb_pid"
+  wait "$kb_pid" 2>/dev/null || true
+  kb_pid=""
+  stop_kb_modules
+  rm -f "$AIMEE_HOME/kb-module-bus.sock"
+  start_kb_modules
+  "$REPO/aimee-kb" --http-port=8741 >>"$AIMEE_HOME/kb.log" 2>&1 &
+  kb_pid=$!
+  deadline=$((SECONDS + WAIT_SECONDS))
+  kb_recovered=""
+  while (( SECONDS < deadline )); do
+    kb_recovered="$(curl -fksS --max-time 10 "${IDENTITY[@]}" "${AUTH[@]}" \
+      -H 'content-type: application/json' -X POST \
+      -d '{"query":"restart recovery","scope":"all","max_results":1}' \
+      "$SERVER_URL/v1/kb/search" 2>/dev/null || true)"
+    [[ "$kb_recovered" == *'"hits"'* ]] && break
+    kill -0 "$kb_pid" 2>/dev/null || break
+    sleep 1
+  done
+  if [[ "$kb_recovered" == *'"hits"'* ]]; then
+    green "  PASS  aimee-kb restart restored the live server→KB search path"
+    PASS=$((PASS + 1))
+  else
+    red "  FAIL  aimee-kb did not restore server→KB search after restart"
+    FAIL=$((FAIL + 1))
+  fi
 fi
 
 echo
 bold "==> Summary (${MODE}): ${PASS} passed, ${FAIL} failed"
 [[ "$FAIL" == 0 ]] || exit 1
 green "local ${MODE} stack is up and serving."
+hold_seconds="${AIMEE_E2E_HOLD_SECONDS:-0}"
+if [[ "$hold_seconds" =~ ^[0-9]+$ ]] && (( hold_seconds > 0 )); then
+  yellow "holding green scratch stack for ${hold_seconds}s (exploratory probes)"
+  sleep "$hold_seconds"
+fi

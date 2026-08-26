@@ -1224,6 +1224,9 @@ void mem_assemble(app_ctx_t *ctx, int argc, char **argv)
          cJSON_AddNumberToObject(budget, "budget_tokens", metrics.budget_tokens);
          cJSON_AddNumberToObject(budget, "used_tokens", metrics.used_tokens);
          cJSON_AddNumberToObject(budget, "rejected_for_budget", metrics.rejected_for_budget);
+         cJSON_AddNumberToObject(budget, "deferred_for_origin_quota",
+                                 metrics.deferred_for_origin_quota);
+         cJSON_AddNumberToObject(budget, "held_for_activation", metrics.held_for_activation);
          cJSON *arr = cJSON_AddArrayToObject(obj, "candidates");
          for (int i = 0; i < ecount; i++)
          {

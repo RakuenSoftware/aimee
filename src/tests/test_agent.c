@@ -2872,6 +2872,22 @@ static void test_dispatch_tool_call(void)
    assert(strstr(result, "error") == NULL);
    free(result);
 
+   /* Reversible writes are contracted and independently read back before the
+    * dispatcher reports success. */
+   run_cmd_set_cwd(script_cwd);
+   result = dispatch_tool_call(
+       "write_file", "{\"path\":\"contract.txt\",\"content\":\"verified write\\n\"}", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "error:") == NULL);
+   free(result);
+   result = dispatch_tool_call("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
+   assert(result != NULL && strcmp(result, "verified write\n") == 0);
+   free(result);
+   result = dispatch_tool_call("write_file", "{\"content\":\"no target\"}", 5000);
+   assert(result != NULL && strstr(result, "effect contract refused") != NULL);
+   free(result);
+   run_cmd_set_cwd(NULL);
+
    /* Write file error includes recovery hint */
    run_cmd_set_cwd(script_cwd);
    result = dispatch_tool_call("write_file", "{\"path\":\"nonexistent/dir/file\"}", 5000);
@@ -3389,16 +3405,13 @@ static void test_agent_trace_log_uses_db1_execution_trace(void)
    if (!store_module_fixture_available())
       return;
 
-   /* The store is a separate process now, so this used to be different: it
-    * opened a real sqlite3 handle on ":memory:", ran db1_apply_pragmas and
-    * db1_apply_schema_sqlite over it, and let the production path write there.
-    * None of that exists any more.
-    *
-    * The ASSERTION is unchanged, because its subject never was the database:
-    * agent_trace_log must fill turn and tool_name from the right arguments.
-    * tests/support/execution_trace_stub.c records the write and returns it, so
-    * what is checked here is still the function that built the row. */
-   agent_trace_log(7, 3, "call", "content", "bash", "{}", "ok", "abc123");
+   /* The real Postgres-backed store enforces execution_trace.plan_id as a
+    * foreign key. Seed the plan this trace declares instead of relying on the
+    * old in-process stub's acceptance of a fabricated id. The assertion remains
+    * about agent_trace_log mapping turn and tool_name into the stored row. */
+   int plan_id = db1_execution_plan_create("trace-fixture", "trace contract", "[]");
+   assert(plan_id > 0);
+   agent_trace_log(plan_id, 3, "call", "content", "bash", "{}", "ok", "abc123");
 
    db1_execution_trace_recent_row_t rows[4];
    int count = db1_execution_trace_list_recent(rows, 4);
@@ -3459,25 +3472,18 @@ static void test_session_isolation_guard(void)
    const char *primary = "/some/repo/src/x.c";
    const char *worktree = "/some/repo/.aimee/worktrees/ab12/main/src/x.c";
 
-   /* (1) Default ON (no aimee.yaml): a primary-checkout target is blocked, since
-    *     session-worktree isolation is required by default. */
+   /* Default ON, including when config authority is unavailable: a
+    * primary-checkout target is blocked. */
    remove(cfg);
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
 
-   /* (2) Explicit false: still no block. */
-   FILE *f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: false\n", f);
-   fclose(f);
-   assert(agent_tools_session_isolation_blocks(primary, NULL) == 0);
-
-   /* (3) Enabled: primary-checkout target blocked, managed-worktree target allowed. */
-   f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: true\n", f);
-   fclose(f);
+   /* Only the managed worktree that owns cwd is allowed. */
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
-   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 0);
+   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 1);
+   assert(agent_tools_session_isolation_blocks(worktree, "/some/repo/.aimee/worktrees/ab12/main") ==
+          0);
+   assert(agent_tools_session_isolation_blocks("/some/repo/.aimee/worktrees/other/main/src/x.c",
+                                               "/some/repo/.aimee/worktrees/ab12/main") == 1);
    /* Traversal escape out of the worktree normalizes + blocks. */
    assert(agent_tools_session_isolation_blocks(
               "/some/repo/.aimee/worktrees/ab12/main/../../../src/y.c", NULL) == 1);
@@ -3490,7 +3496,9 @@ static void test_session_isolation_guard(void)
     * server-side mirror of #1314's guardrail fix): a wfe delegate's writes into
     * its own wfe worktree must not be refused by this backstop. */
    assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c",
-                                               NULL) == 0);
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
+   assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_other.s3/src/x.c",
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 1);
    assert(agent_tools_session_isolation_blocks("src/x.c",
                                                "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
    /* Traversal OUT of a wfe worktree still blocks. */

@@ -79,6 +79,7 @@ PRIVATE_HEADER_REACH = {
     ("src/modules/tools/agent_tools.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/tools/agent_tools_anchored.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/tools/agent_tools_dispatch.c", "modules/workspace/workspace_provider.h"),
+    ("src/modules/tools/agent_tools_effect_contract.c", "modules/workspace/workspace_provider.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/git/forge_credentials.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/git/git_cred_inject.h"),
     ("src/modules/webuser/webuser_editor.c", "modules/workspace/workspace_scope.h"),

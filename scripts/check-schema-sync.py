@@ -78,6 +78,10 @@ DB1_ONLY_TABLES = {
     # local runtime cache: never replicated, never shared, safe to drop.
     "web_page_cache",
     "context_snapshots",
+    # Persisted retrieval hysteresis. The turn counter and firing events stay
+    # with the DB1-owned conversation rather than resetting with a C process.
+    "context_activation_turns",
+    "context_activation_events",
     "cost_fold_log",
     "cron_job_runs",
     "cron_jobs",

@@ -1775,8 +1775,10 @@ native_provider_http:
             if (dj > 0)
                db1_agent_job_heartbeat_ext(dj, parsed.calls[i].name, api_call_count);
          }
+         agent_tools_set_effect_authorized(1);
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
+         agent_tools_set_effect_authorized(0);
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();

@@ -224,8 +224,8 @@ class ModuleInventoryTest(unittest.TestCase):
         self.assertEqual(json.loads(raw), yaml.safe_load(raw))
 
     # The expected counts come from the checker rather than a literal. A literal
-    # here is a second copy of the constant that nothing keeps in step: adding
-    # `sandbox` as an eighth optional module broke this test, not the checker.
+    # here is a second copy of the constant that nothing keeps in step: changing
+    # a module's activation class should require updating only the checker.
     def test_required_count_drift(self):
         data = self.changed()
         data["required"].append("unexpected-module")

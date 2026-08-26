@@ -252,13 +252,16 @@ static void test_projected_module_names_are_not_truncated(void)
    client_tool_surface_requirements_dispose(&req);
 }
 
-static void test_codex_plugin_omits_session_start_hook(void)
+static void test_codex_plugin_provisions_session_worktree(void)
 {
    {
       const char *hooks = codex_hooks_json("/usr/local/bin/aimee", "cli");
-      assert(strstr(hooks, "\"SessionStart\"") == NULL);
-      assert(strstr(hooks, "session-start") == NULL);
+      assert(strstr(hooks, "\"SessionStart\"") != NULL);
+      assert(strstr(hooks, "session-start") != NULL);
+      assert(strstr(hooks, "startup|resume|clear|compact") != NULL);
       assert(strstr(hooks, "\"PreToolUse\"") != NULL);
+      assert(strstr(hooks, "\"SessionEnd\"") != NULL);
+      assert(strstr(hooks, "session-end") != NULL);
       assert(strstr(hooks, "AIMEE_CLI_PATH=/usr/local/bin/aimee") != NULL);
       /* MUST be `hooks pre`, not `hooks`. Bare `hooks` exits with "hooks requires
        * 'pre' or 'post'" and codex allows the tool -- a hook that is installed,
@@ -439,7 +442,7 @@ static void assert_required_hooks_present(cJSON *hooks)
    } required[] = {
        {"UserPromptSubmit", "user-prompt-submit"}, /* per-turn recall envelope */
        {"PreCompact", "pre-compact"},              /* post-compact recall re-prime */
-       {"PreToolUse", "attention-guard"},          /* per-file attention + destructive-op guard */
+       {"PreToolUse", "hooks pre"},                /* policy plus transparent workspace routing */
        {"PostToolUse", "hooks post"},              /* post-edit hook */
    };
    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++)
@@ -707,9 +710,8 @@ static void test_claude_hooks_subagent_ban_gate(void)
    assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
    assert(perms_deny_has(root, "Task"));
    assert(perms_deny_has(root, "Agent"));
-   /* The attention-guard matcher no longer claims Task|Agent (the dedicated guard
-    * owns them now). */
-   assert(hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
+   /* The composed pre hook covers all tools; the dedicated guard owns Task|Agent. */
+   assert(hook_event_has_cmd(hooks, "PreToolUse", "hooks pre"));
    cJSON_Delete(root);
 
    /* The path written into the user's GLOBAL config must be the INSTALLED
@@ -816,10 +818,10 @@ static void test_claude_hooks_patch_existing_matcher(void)
    assert(strstr(matcher->valuestring, "EnterWorktree") != NULL);
    assert(strstr(matcher->valuestring, "ExitWorktree") != NULL);
 
-   /* Existing installations are migrated away from SessionStart persona
-    * delivery while the remaining hooks are merged normally. */
+   /* SessionStart remains installed for silent workspace provisioning only. */
    assert_required_hooks_present(hooks);
-   assert(!hook_event_has_cmd(hooks, "SessionStart", "session-start"));
+   assert(hook_event_has_cmd(hooks, "SessionStart", "session-start"));
+   assert(hook_event_has_cmd(hooks, "SessionEnd", "session-end"));
    cJSON_Delete(root);
 
    char cmd[512];
@@ -858,10 +860,10 @@ static void test_claude_hooks_repoint_stale_command(void)
    assert(cJSON_IsObject(root));
    cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
 
-   /* Both the PreToolUse attention-guard and the PostToolUse hooks-post commands
-    * are re-pointed off the stale /tmp path to the resolved binary. */
+   /* The stale direct guard is replaced by the composed pre hook; both current
+    * commands are re-pointed off the stale /tmp path. */
    const char *events[] = {"PreToolUse", "PostToolUse"};
-   const char *needles[] = {"attention-guard", "hooks post"};
+   const char *needles[] = {"hooks pre", "hooks post"};
    for (int e = 0; e < 2; e++)
    {
       cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, events[e]);
@@ -883,6 +885,7 @@ static void test_claude_hooks_repoint_stale_command(void)
       assert(strstr(found, "AIMEE_HOOK_CLIENT=claude ") == found);
       assert(strstr(found, needles[e]) != NULL);
    }
+   assert(!hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
    cJSON_Delete(root);
 
    char cmd[512];
@@ -1546,6 +1549,91 @@ static void test_client_integrations_optout_gate(void)
    system(rm_cmd);
 }
 
+static void test_opencode_and_hermes_worktree_adapters(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-client-adapters-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   char path[768];
+   snprintf(path, sizeof path, "%s/.config/opencode", tmpdir);
+   assert(platform_mkdir_p(path, 0700) == 0);
+   snprintf(path, sizeof path, "%s/.hermes", tmpdir);
+   assert(platform_mkdir_p(path, 0700) == 0);
+   snprintf(path, sizeof path, "%s/.hermes/config.yaml", tmpdir);
+   assert(write_text_file(path, "model: test\nplugins:\n  enabled: [existing]\n", 0600) == 0);
+
+   ensure_opencode_worktree_integration(tmpdir);
+   ensure_hermes_worktree_integration(tmpdir);
+   ensure_hermes_worktree_integration(tmpdir); /* idempotent config merge */
+
+   dstr_t text;
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.config/opencode/plugins/aimee-worktrees.js", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "session.created") != NULL);
+   assert(strstr(dstr_cstr(&text), "session.deleted") != NULL);
+   assert(strstr(dstr_cstr(&text), "session-end") != NULL);
+   assert(strstr(dstr_cstr(&text), "tool.execute.before") != NULL);
+   assert(strstr(dstr_cstr(&text), "attention-guard") != NULL);
+   assert(strstr(dstr_cstr(&text), "new TextEncoder().encode(JSON.stringify(payload))") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/plugins/aimee-worktrees/__init__.py", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "on_session_start") != NULL);
+   assert(strstr(dstr_cstr(&text), "on_session_end") != NULL);
+   assert(strstr(dstr_cstr(&text), "pre_tool_call") != NULL);
+   assert(strstr(dstr_cstr(&text), "active_sid") != NULL);
+   assert(strstr(dstr_cstr(&text), "session_id or active_sid[0]") != NULL);
+   assert(strstr(dstr_cstr(&text), "'action':'block'") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/plugins/aimee-worktrees/plugin.yaml", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "provides_hooks:") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - on_session_start") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - pre_tool_call") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - on_session_end") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/config.yaml", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "existing, aimee-worktrees") != NULL);
+   const char *first = strstr(dstr_cstr(&text), "aimee-worktrees");
+   assert(first && strstr(first + 1, "aimee-worktrees") == NULL);
+   assert(strstr(dstr_cstr(&text), "model: test") != NULL);
+   dstr_free(&text);
+
+   char cmd[800];
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
+static void test_installed_client_detection_does_not_require_first_run(void)
+{
+   char tmpdir[512], bin[640];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-client-path-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   snprintf(bin, sizeof bin, "%s/opencode", tmpdir);
+   assert(write_text_file(bin, "#!/bin/sh\nexit 0\n", 0700) == 0);
+   assert(chmod(bin, 0700) == 0);
+
+   const char *old = getenv("PATH");
+   char *saved = old ? strdup(old) : NULL;
+   assert(platform_setenv("PATH", tmpdir) == 0);
+   assert(client_command_installed("opencode") == 1);
+   assert(client_command_installed("hermes") == 0);
+   assert(platform_setenv("PATH", saved ? saved : "") == 0);
+   free(saved);
+
+   char cmd[800];
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 int main(void)
 {
    client_config_set_provider(test_client_config_value);
@@ -1558,7 +1646,7 @@ int main(void)
    test_codex_manifest_registers_selected_transports_only();
    test_projected_mcp_only_module_registers_filtered_backup();
    test_projected_module_names_are_not_truncated();
-   test_codex_plugin_omits_session_start_hook();
+   test_codex_plugin_provisions_session_worktree();
    test_mcp_config_uses_resolved_command();
    test_hooks_do_not_vary_by_tool_profile();
    test_client_markdown_is_retired();
@@ -1590,6 +1678,8 @@ int main(void)
    test_claude_trust_no_op_when_claude_json_missing();
    test_tool_transport_preference_config();
    test_client_integrations_optout_gate();
+   test_opencode_and_hermes_worktree_adapters();
+   test_installed_client_detection_does_not_require_first_run();
 
    printf("all tests passed\n");
    return 0;

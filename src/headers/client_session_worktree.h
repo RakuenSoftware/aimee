@@ -48,12 +48,45 @@
  * Never chdirs; the caller decides whether to enter the worktree. */
 int client_session_worktree_ensure(const char *sid, char *out, size_t cap);
 
-/* Resolve the branch a fresh session worktree should be cut from, mirroring the
- * server's worktree_detect_base_branch policy: AIMEE_SESSION_WORKTREE_BASE (or
- * the "remote_default" default) -> origin/HEAD -> the local default branch.
- * Deliberately has NO silent fall back to the current HEAD: inheriting whatever
- * branch the shared checkout happens to be on is what put sessions on another
- * session's branch. `current` is reachable only by explicit opt-in.
+/* As above, but resolve the repository from `cwd` rather than the caller's
+ * process cwd. Lifecycle and tool hooks must use the cwd in their payload: a
+ * hook subprocess can have a different cwd, and it cannot chdir its parent.
+ * An existing Aimee worktree is reused only when its key belongs to `sid`;
+ * entering another session's worktree creates/routes to this session's own. */
+int client_session_worktree_ensure_at(const char *sid, const char *cwd, char *out, size_t cap);
+
+/* SessionEnd cleanup. Removes only a clean Aimee-owned checkout. Git refuses
+ * dirty/untracked trees, and the session branch is deleted only when merged.
+ * Returns 0 removed, 1 retained/not applicable, -1 invalid input. */
+int client_session_worktree_release_at(const char *sid, const char *cwd);
+
+/* Transparently route a tool path or shell command from the checkout named by
+ * `cwd` into `sid`'s worktree. These are the client-neutral primitives used by
+ * Claude, Codex, OpenCode, Hermes, and future lifecycle adapters.
+ *
+ * route_path writes an absolute path. A NULL/empty input means "the effective
+ * cwd", which is useful for shell tools. route_command prefixes the command
+ * with the routed cwd and remaps literal absolute source-root references.
+ * A path outside the repository is returned unchanged without provisioning a
+ * worktree; external reads must not depend on repository base resolution.
+ *
+ * Returns 0 when routed, 1 when isolation is not applicable, -2 when the
+ * worktree could not be prepared, and -3 when the input explicitly targets a
+ * different Aimee session's worktree. */
+int client_session_worktree_route_path(const char *sid, const char *cwd, const char *input,
+                                       char *out, size_t cap);
+int client_session_worktree_route_command(const char *sid, const char *cwd, const char *command,
+                                          char *out, size_t cap);
+int client_session_worktree_route_patch(const char *sid, const char *cwd, const char *patch,
+                                        char *out, size_t cap);
+
+/* Resolve the exact ref/commit a fresh session worktree should be cut from,
+ * mirroring the server policy. With origin configured, session start performs
+ * a bounded, non-interactive fetch and pins the remote's current HEAD commit;
+ * it never accepts stale tracking data after a failed fetch. An explicit
+ * feature/release ref is preserved, but creation makes the fetched default tip
+ * its ancestor inside the new session branch. `current` and `local_default`
+ * are the explicit offline/stale overrides.
  * Returns 0 and fills buf[cap] on success, -1 when no base could be resolved. */
 int client_session_worktree_base(const char *git_root, char *buf, size_t cap);
 

@@ -165,6 +165,40 @@ int main(void)
    aimee_request_free(&a);
    aimee_request_free(&b);
 
+   /* --- context authority: conservative defaults + promotion ceiling --- */
+   {
+      aimee_request_t ctx;
+      memset(&ctx, 0, sizeof ctx);
+      ctx.n_system = 1;
+      ctx.system = mk_blocks(1);
+      ctx.system[0].type = AIMEE_BLK_TEXT;
+      ctx.system[0].text = dup("client instruction");
+      ctx.n_messages = 2;
+      ctx.messages = calloc(2, sizeof *ctx.messages);
+      ctx.messages[0].role = dup("assistant");
+      ctx.messages[0].n_blocks = 1;
+      ctx.messages[0].blocks = mk_blocks(1);
+      ctx.messages[0].blocks[0].type = AIMEE_BLK_TEXT;
+      ctx.messages[0].blocks[0].text = dup("prior claim");
+      ctx.messages[1].role = dup("tool");
+      ctx.messages[1].n_blocks = 1;
+      ctx.messages[1].blocks = mk_blocks(1);
+      ctx.messages[1].blocks[0].type = AIMEE_BLK_TOOL_RESULT;
+      ctx.messages[1].blocks[0].tool_result = cJSON_CreateString("observed");
+      assert(aimee_ir_classify_context(&ctx) == 3);
+      assert(ctx.system[0].context.authority == AIMEE_CTX_AUTH_TASK_INSTRUCTION);
+      assert(ctx.messages[0].blocks[0].context.origin == AIMEE_CTX_ORIGIN_MODEL);
+      assert(ctx.messages[0].blocks[0].context.authority == AIMEE_CTX_AUTH_EVIDENCE);
+      assert(ctx.messages[1].blocks[0].context.origin == AIMEE_CTX_ORIGIN_TOOL);
+      assert(!aimee_ir_context_promotion_allowed(AIMEE_CTX_ORIGIN_MODEL, AIMEE_CTX_AUTH_EVIDENCE,
+                                                 AIMEE_CTX_AUTH_TASK_INSTRUCTION));
+      assert(aimee_ir_context_promotion_allowed(AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_EVIDENCE,
+                                                AIMEE_CTX_AUTH_TASK_INSTRUCTION));
+      assert(!aimee_ir_context_promotion_allowed(
+          AIMEE_CTX_ORIGIN_USER, AIMEE_CTX_AUTH_TASK_INSTRUCTION, AIMEE_CTX_AUTH_POLICY));
+      aimee_request_free(&ctx);
+   }
+
    /* --- request transform stage (the protocol-neutral module seam) --- */
    {
       aimee_request_t t;

@@ -14,6 +14,7 @@
 #include "kb_client.h"
 #include "runtime_secret.h"
 #include "db1_client/user_memory.h"
+#include "db1_client/caches.h"
 #include "support/mock_agent_http.h"
 #include "cJSON.h"
 
@@ -21,6 +22,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static int activation_writes;
+static int64_t activation_write_id;
+static int64_t activation_write_turn;
+
+const char *session_id(void)
+{
+   return "activation-client-session";
+}
+
+int db1_context_snapshot_activation(const char *session_id_arg,
+                                    char (*out)[DB1_CONTEXT_ACTIVATION_ROW_LEN], int max)
+{
+   assert(strcmp(session_id_arg, "activation-client-session") == 0);
+   assert(max >= 3);
+   snprintf(out[0], DB1_CONTEXT_ACTIVATION_ROW_LEN, "0 7");
+   snprintf(out[1], DB1_CONTEXT_ACTIVATION_ROW_LEN, "41 6");
+   snprintf(out[2], DB1_CONTEXT_ACTIVATION_ROW_LEN, "52 3");
+   return 3;
+}
+
+int db1_context_snapshot_insert_turn(const char *session_id_arg, int64_t memory_id,
+                                     double relevance_score, int64_t turn_index)
+{
+   assert(strcmp(session_id_arg, "activation-client-session") == 0);
+   assert(relevance_score == 0.0);
+   activation_writes++;
+   activation_write_id = memory_id;
+   activation_write_turn = turn_index;
+   return 0;
+}
 
 int db1_user_memory_any(void)
 {
@@ -138,6 +170,44 @@ static int typed_context_post_handler(const char *url, const char *auth_header, 
    return 200;
 }
 
+static int activation_recall_post_handler(const char *url, const char *auth_header,
+                                          const char *body, char **response_buf, int timeout_ms,
+                                          const char *extra_headers)
+{
+   (void)auth_header;
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url && strstr(url, "/v1/actions/memory.recall") != NULL);
+   assert(body && strstr(body, "\"current_turn\":7") != NULL);
+   assert(strstr(body, "\"memory_id\":41") != NULL);
+   assert(strstr(body, "\"last_turn\":6") != NULL);
+   if (response_buf)
+      *response_buf =
+          strdup("{\"status\":\"ok\",\"recall\":{\"identity\":[{\"memory_id\":73,"
+                 "\"activation_managed\":true,\"text\":\"kept\"},{\"memory_id\":74,"
+                 "\"text\":\"user-local\"}],"
+                 "\"preferences\":[],\"active_context\":[],\"open_commitments\":[],"
+                 "\"reminders\":[{\"memory_id\":99}],\"directives\":[{\"memory_id\":100}]}}");
+   return 200;
+}
+
+static void test_recall_carries_and_records_production_activation(void)
+{
+   activation_writes = 0;
+   activation_write_id = 0;
+   activation_write_turn = 0;
+   mock_agent_http_set_post_handler(activation_recall_post_handler);
+   char *json = kb_client_memory_recall_json("activation path", 128, 0);
+   assert(json != NULL);
+   assert(strstr(json, "\"memory_id\":73") != NULL);
+   free(json);
+   assert(activation_writes == 1);
+   assert(activation_write_id == 73);
+   assert(activation_write_turn == 7);
+   mock_agent_http_reset();
+   printf("  PASS: test_recall_carries_and_records_production_activation\n");
+}
+
 static void test_readers_distinguish_unreachable_from_empty(void)
 {
    memory_t mems[8];
@@ -215,9 +285,20 @@ static void test_ordered_readers_propagate_active_project_context(void)
    (void)kb_client_memory_top_l2_facts(mems, 8);
    (void)kb_client_memory_list_session_scope_priority(mems, 8);
    (void)kb_client_memory_list_session_scope_priority_like("%q%", mems, 8);
+   (void)kb_client_memory_insert("L2", "fact", "scoped-key", "scoped-content", 0.8, NULL, NULL);
+   (void)kb_client_memory_find_id_by_key_kind("scoped-key", "fact");
+   (void)kb_client_memory_supersede(42, "replacement", 0.9, NULL, NULL);
+   (void)kb_client_memory_update_as(42, "replacement", MEMORY_AUTHORITY_MODEL, NULL);
+   (void)kb_client_memory_delete_as(42, MEMORY_AUTHORITY_MODEL);
+   (void)kb_client_memory_touch(42);
+   (void)kb_client_memory_reject(42, "wrong");
+   (void)kb_client_memory_restore(42);
+   json = kb_client_memory_review_list_json(NULL, 8);
+   free(json);
+   (void)kb_client_memory_get(42, &mems[0]);
 
    kb_client_memory_scope_context_clear();
-   assert(scoped_request_count == 21);
+   assert(scoped_request_count == 31);
    mock_agent_http_reset();
    printf("  PASS: test_ordered_readers_propagate_active_project_context\n");
 }
@@ -360,6 +441,7 @@ int main(void)
    test_ordered_readers_propagate_active_project_context();
    test_explicit_scope_overrides_ambient_context();
    test_typed_context_uses_server_defaults();
+   test_recall_carries_and_records_production_activation();
    test_as_of_reaches_the_kb_and_its_verdict_comes_back();
 
    unsetenv("AIMEE_KB_API_URL");

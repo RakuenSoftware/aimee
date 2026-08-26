@@ -600,7 +600,7 @@ if [ "$CLIENT_INTEGRATIONS_SKIPPED" -eq 1 ]; then
     bold "aimee installed (AI-tool integration skipped: AIMEE_NO_CLIENT_INTEGRATIONS set)."
     echo "aimee will not register itself into any tool's global config. Wire it into a single project manually."
 elif [ "$TOTAL_ACTIVE" -eq 0 ]; then
-    warn "No AI coding tools detected (checked for Claude Code, Claude Desktop, Gemini CLI, Codex CLI, GitHub Copilot, VS Code)."
+    warn "No AI coding tools detected (checked for Claude Code, Claude Desktop, Gemini CLI, Codex CLI, OpenCode, Hermes, GitHub Copilot, VS Code)."
     warn "Install one of them, then re-run this script."
 else
     bold "aimee installed and configured for $TOTAL_ACTIVE tool(s)."

@@ -20,8 +20,9 @@ claims.
 
 ## Event-bus gate
 
-The bus has a committed dispatch baseline and ceiling. The reference measurement is roughly 134 ns
-per event against a 2,000 ns ceiling for host enqueue through client dequeue, excluding module work.
+The bus has committed dispatch and audit-enqueue baselines and ceilings. Dispatch measures roughly
+134 ns per event against a 1,000 ns ceiling for host enqueue through client dequeue, excluding
+module work. Governed-action audit enqueue has the same 1,000 ns ceiling.
 Run the gate on comparable hardware and keep the raw artifact. A slower machine can still be
 correct; changing the committed ceiling needs an explicit decision, not a convenient rebaseline.
 

@@ -687,6 +687,16 @@ cJSON *db2_kb_service_memory_query_health_json(void)
    cJSON_AddNumberToObject(h, "total_promotions", health.total_promotions);
    cJSON_AddNumberToObject(h, "total_demotions", health.total_demotions);
    cJSON_AddNumberToObject(h, "total_expirations", health.total_expirations);
+   cJSON *lag = cJSON_AddObjectToObject(h, "write_to_readable_lag");
+   cJSON_AddNumberToObject(lag, "samples", (double)health.write_to_readable_samples);
+   if (health.write_to_readable_samples > 0)
+   {
+      cJSON_AddNumberToObject(lag, "p50_secs", health.write_to_readable_p50_secs);
+      cJSON_AddNumberToObject(lag, "p95_secs", health.write_to_readable_p95_secs);
+      cJSON_AddNumberToObject(lag, "p99_secs", health.write_to_readable_p99_secs);
+   }
+   else
+      cJSON_AddStringToObject(lag, "state", "unmeasured");
    return resp;
 }
 
@@ -761,6 +771,55 @@ cJSON *db2_kb_service_memory_reject_json(int64_t id, const char *reason)
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
+   return resp;
+}
+
+cJSON *db2_kb_service_memory_restore_json(int64_t id, const char *actor)
+{
+   cJSON *resp = cJSON_CreateObject();
+   if (!resp)
+      return NULL;
+   if (db2_memory_restore(id, actor ? actor : "") != 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "message", "failed to restore memory");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   return resp;
+}
+
+cJSON *db2_kb_service_memory_review_list_json(const char *state, int limit)
+{
+   if (limit <= 0 || limit > 64)
+      limit = 64;
+   db2_memory_review_row_t rows[64];
+   int n = db2_memory_review_list(state ? state : "", limit, rows, 64);
+   cJSON *resp = cJSON_CreateObject();
+   cJSON *items = resp ? cJSON_AddArrayToObject(resp, "memories") : NULL;
+   if (!resp || !items || n < 0)
+   {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *o = cJSON_CreateObject();
+      cJSON_AddNumberToObject(o, "id", (double)rows[i].id);
+      cJSON_AddStringToObject(o, "tier", rows[i].tier);
+      cJSON_AddStringToObject(o, "kind", rows[i].kind);
+      cJSON_AddStringToObject(o, "key", rows[i].key);
+      cJSON_AddStringToObject(o, "content", rows[i].content);
+      cJSON_AddNumberToObject(o, "confidence", rows[i].confidence);
+      cJSON_AddStringToObject(o, "lifecycle", rows[i].lifecycle_state);
+      cJSON_AddStringToObject(o, "review_reason", rows[i].review_reason);
+      cJSON_AddStringToObject(o, "scope_type", rows[i].scope_type);
+      cJSON_AddStringToObject(o, "scope_value", rows[i].scope_value);
+      cJSON_AddStringToObject(o, "created_at", rows[i].created_at);
+      cJSON_AddStringToObject(o, "updated_at", rows[i].updated_at);
+      cJSON_AddItemToArray(items, o);
+   }
    return resp;
 }
 
@@ -890,12 +949,13 @@ cJSON *db2_kb_service_memory_alerts_json(const char *since)
    return resp;
 }
 
-cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)
+cJSON *db2_kb_service_memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
+                                         const struct memory_activation *activation)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   cJSON *bundle = memory_recall(task_hint, limit_tokens, session_start);
+   cJSON *bundle = memory_recall_activated(task_hint, limit_tokens, session_start, activation);
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "recall", bundle ? bundle : cJSON_CreateObject());
    return resp;

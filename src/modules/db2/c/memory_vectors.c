@@ -125,6 +125,46 @@ int pgvec_memory_vector_delete_point(int64_t point_id)
    return pgvec_memory_delete(point_id);
 }
 
+int pgvec_memory_vector_delete_points_for_memory(int64_t memory_id, int include_base)
+{
+   if (memory_id <= 0)
+      return -1;
+   void *pg = db2_conn();
+   if (!pg)
+      return -1;
+
+   /* The unit point ids are derived inside the statement rather than enumerated
+    * into a C array. A fixed buffer silently bounds reclamation: the listing
+    * helper fills to capacity and returns, so a record with more units than the
+    * buffer holds leaves the remainder as live rows here. memory_embeddings is
+    * keyed on the synthetic point id and carries no foreign key back to
+    * memories, so nothing else reclaims them and they stay in the ANN index
+    * with their payload. Reclamation must not depend on a compile-time bound
+    * over a runtime-sized set.
+    *
+    * Must run while memory_units still exists — both it and this table lose
+    * their rows once the parent memory is deleted. */
+   static const char *sql_units =
+       "DELETE FROM " PGVEC_MEMORY_TABLE
+       " WHERE point_id IN (SELECT id + :off FROM memory_units WHERE memory_id = :mid)";
+   static const char *sql_all =
+       "DELETE FROM " PGVEC_MEMORY_TABLE " WHERE point_id = :base"
+       " OR point_id IN (SELECT id + :off FROM memory_units WHERE memory_id = :mid)";
+   char errbuf[256] = "";
+   aimee_pg_stmt_t *stmt =
+       aimee_pg_prepare(pg, include_base ? sql_all : sql_units, errbuf, sizeof(errbuf));
+   if (!stmt)
+      return -1;
+   if (include_base)
+      aimee_pg_bind_int64(stmt, ":base", memory_id);
+   aimee_pg_bind_int64(stmt, ":off", PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET);
+   aimee_pg_bind_int64(stmt, ":mid", memory_id);
+   aimee_pg_step_t rc = aimee_pg_step(stmt, errbuf, sizeof(errbuf));
+   int removed = (rc == AIMEE_PG_DONE) ? aimee_pg_stmt_changes(stmt) : -1;
+   aimee_pg_finalize(stmt);
+   return removed;
+}
+
 int pgvec_memory_vector_search_record_type(const char *record_type, const float *vec, int dim,
                                            int limit, int64_t *ids, double *scores, int max)
 {

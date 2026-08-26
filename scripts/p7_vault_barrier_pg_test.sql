@@ -114,9 +114,9 @@ BEGIN
   END IF;
   IF (SELECT seal_epoch FROM org_vault_key_use_intent WHERE team_id=970721 AND
       authenticated_origin='cert:test-ca:barrier' AND use_id='use-replay')<>7 OR
-     (SELECT (detail::json->>'seal_epoch')::bigint FROM kb_audit_event
+     (SELECT (detail::json->>'seal_epoch')::bigint FROM kb_audit_outbox
        WHERE action='vault.key_use' AND subject='team:970721|bedrock|primary'
-       ORDER BY seq DESC LIMIT 1)<>7 THEN
+       ORDER BY outbox_id DESC LIMIT 1)<>7 THEN
     RAISE EXCEPTION 'P7 barrier FAIL: durable intent/WORM epoch mismatch';
   END IF;
 END $$;

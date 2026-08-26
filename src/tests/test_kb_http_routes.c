@@ -2553,6 +2553,37 @@ static void test_console_pipeline(void)
    printf("  PASS: console pipeline (registry + key allowlist)\n");
 }
 
+static void test_console_memories(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[2048];
+   int status =
+       kb_http_route_ex("GET", "/v1/console/memories", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"schema\":\"console.memories.v1\"") != NULL);
+   assert(strstr(buf, "\"memories\"") != NULL);
+
+   const char *reject = "{\"memory_id\":42,\"action\":\"reject\",\"reason\":\"wrong extraction\"}";
+   test_kb_fact_actor_set(1);
+   status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, reject,
+                             (int)strlen(reject), buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"action\":\"reject\"") != NULL);
+
+   const char *restore = "{\"memory_id\":42,\"action\":\"restore\"}";
+   status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                             (int)strlen(restore), buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"action\":\"restore\"") != NULL);
+
+   assert(kb_http_route_ex("POST", "/v1/console/memories", NULL, NULL, NULL, "{}", 2, buf,
+                           sizeof(buf)) == 405);
+   assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 405);
+   test_kb_fact_actor_set(0);
+   printf("  PASS: console memory review (list + reject + restore)\n");
+}
+
 static void test_console_settings(void)
 {
    g_stub_secret_configured = 0;
@@ -7072,6 +7103,7 @@ int main(void)
    test_console_overview();
    test_console_admin_requires_authorization_module();
    test_console_pipeline();
+   test_console_memories();
    test_console_settings();
    test_console_evidence_operator_boundary();
    test_accounts_routes();

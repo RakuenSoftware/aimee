@@ -65,6 +65,11 @@ char *dispatch_tool_call(const char *name, const char *arguments_json, int timeo
 typedef int (*agent_tool_classifier_fn)(const char *name, int *classification);
 void agent_tools_register_classifier(agent_tool_classifier_fn classifier);
 
+/* Bind a successful execution-policy decision to the next dispatch on this
+ * thread. External mutations and unknown remote tools refuse execution without
+ * this trusted caller signal; model-provided arguments cannot set it. */
+void agent_tools_set_effect_authorized(int authorized);
+
 /* Tool definition builders */
 struct cJSON *build_tools_array(void);
 struct cJSON *build_tools_array_responses(void);
@@ -223,7 +228,8 @@ typedef struct
    const char *actor;       /* principal (session id / role), captured on the dispatch thread */
    const char *verdict;     /* "ok" | "error" | "timeout" | "refused" */
    const char *reason_code; /* "" | "guardrail" | "role" | "cancelled" | "tool_error" | */
-                            /* "timeout" | "unknown_tool" | "bad_args" | "policy"          */
+                            /* "timeout" | "unknown_tool" | "bad_args" | "policy" |       */
+                            /* "effect_contract" | "precondition" | "postcondition"        */
    const char *mode;        /* "internal" | "outbound" | "outbound:stdio" | */
                             /* "outbound:sse" | "served"                    */
 } agent_tool_completion_t;
@@ -305,10 +311,10 @@ int agent_tools_knowledge_write_allowed(void);
 void agent_tools_write_capable_set(int capable);
 int agent_tools_readonly_delegate_blocks(void);
 
-/* Session-isolation backstop (Layer 2, opt-in via require_session_worktree):
+/* Session-isolation backstop (Layer 2, default-on via require_session_worktree):
  * returns 1 to BLOCK a server-side agent write whose normalized target is not
- * inside an aimee-managed worktree, else 0. No-op (returns 0) unless the
- * require_session_worktree config flag is enabled. Mirrors the client-side
+ * inside this session's aimee-managed worktree, else 0. No-op (returns 0) only
+ * when require_session_worktree is explicitly false. Mirrors the client-side
  * attention-guard isolation policy for aimee's own in-process agent writes. */
 int agent_tools_session_isolation_blocks(const char *path, const char *cwd);
 

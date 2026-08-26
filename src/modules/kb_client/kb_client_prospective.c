@@ -220,6 +220,7 @@ int kb_client_memory_tag_workspace(int64_t memory_id, const char *workspace)
    if (memory_id <= 0 || !workspace || !workspace[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
    cJSON_AddStringToObject(req, "workspace", workspace);
    char *json = kb_v1_action_request("memory.tag_workspace", req);
@@ -240,6 +241,7 @@ int kb_client_memory_tag_scope(int64_t memory_id, const char *scope_type, const 
    if (memory_id <= 0 || !scope_type || !scope_type[0] || !scope_value || !scope_value[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
    cJSON_AddStringToObject(req, "scope_type", scope_type);
    cJSON_AddStringToObject(req, "scope_value", scope_value);

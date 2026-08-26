@@ -152,9 +152,8 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
    return 0;
 }
 
-/* Model-identity drift guard (unified-llm-container §2). A dim-only guard is
- * insufficient: two different models can share a dim (pplx-embed and the default
- * Qwen3-Embedding-0.6B are BOTH 1024-d), so a same-dim swap would silently mix
+/* Model-identity drift guard. A dim-only guard is insufficient: two different
+ * models can share a dimension, so a same-dim swap would silently mix
  * incompatible vector spaces. These globals carry the configured embedder model
  * identity (repo@sha) and the compat-list of admitted transitions, set from
  * config before db2_init like the

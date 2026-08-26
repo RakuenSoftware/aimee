@@ -42,6 +42,16 @@
 #define TIER_L4 "L4"
 #define TIER_L5 "L5"
 
+/* Confidence a cross-session L5 synthesis enters at, and never rises above.
+ *
+ * Recurrence across sessions is a reachability and salience signal, not
+ * evidence: exposure does not validate. Synthesis previously scaled confidence
+ * with the session count toward 0.95, which converted popularity into truth and
+ * self-reinforced through ranking. A synthesized pattern is unproven inference
+ * and is priced as such; only independent evidence or explicit approval may
+ * raise belief, through the paths that already gate on those. */
+#define MEMORY_L5_SYNTHESIS_CONFIDENCE 0.5
+
 /* Human-readable functional tier names */
 #define TIER_L0_NAME "Experience"
 #define TIER_L1_NAME "Experience"
@@ -91,13 +101,12 @@
 #define EFFECTIVENESS_MIN_SAMPLES      10
 
 /* Embedding retrieval.
- * EMBED_MAX_DIM is the largest embedder output we buffer for: 4000 covers the
- * Qwen3-Embedding ladder (0.6b=1024, 4b=2560, 8b truncated 4096->4000) as well
- * as the legacy pplx-embed (0.6b=1024 / 4b=2560). A deployment runs ONE embedder;
+ * EMBED_MAX_DIM is the largest embedder output we buffer for. A deployment runs
+ * ONE selected embedder;
  * config.embedder_dims selects which, and the DB2 halfvec columns are created at
  * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
- * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
- * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
+ * (inclusive) — wider outputs must be reduced to 4000 by the embedding boundary
+ * before indexing. */
 #define EMBED_MAX_DIM 4000
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly

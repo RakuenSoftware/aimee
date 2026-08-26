@@ -120,8 +120,6 @@ func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
 		role := "a writing delegate"
 		if !writes {
 			role = "a read-only delegate"
-			req.GitDir = ""
-			req.RepoRoot = ""
 		}
 		args, status := callLaunchArgs(t, req)
 		if status != bus.ModuleStatusOK {
@@ -134,8 +132,8 @@ func TestLaunchArgsAlwaysHasNoNetwork(t *testing.T) {
 	}
 }
 
-// A write role gets the repo read-only with its own worktree and git dir
-// writable nested inside; `git status` refreshes its index in that git dir.
+// A write role gets its own worktree and git index, plus only the common Git
+// metadata read-only. The parent checkout's working files are not mounted.
 func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 	args, status := callLaunchArgs(t, writeRequest())
 	if status != bus.ModuleStatusOK {
@@ -143,7 +141,7 @@ func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 	}
 	joined := strings.Join(args, " ")
 	for _, want := range []string{
-		"/repo:/repo:ro",
+		"/repo/.git:/repo/.git:ro",
 		"/repo/.aimee/worktrees/d1:/repo/.aimee/worktrees/d1",
 		"/repo/.git/worktrees/d1:/repo/.git/worktrees/d1",
 	} {
@@ -157,25 +155,27 @@ func TestLaunchArgsWriteRoleMountLayering(t *testing.T) {
 	}
 }
 
-// A read-only role mounts the parent's worktree, and the mode is the
-// enforcement -- not a request the delegate is asked to honour.
+// A read-only role mounts its own worktree read-only.
 func TestLaunchArgsReadOnlyRoleGetsReadOnlyMount(t *testing.T) {
 	req := writeRequest()
 	req.WritesAllowed = false
-	req.RepoRoot = ""
-	req.GitDir = "/repo/.git/worktrees/d1" // supplied, and must be ignored
-	req.Worktree = "/repo"
+	req.GitDir = "/repo/.git/worktrees/d1"
+	req.Worktree = "/repo/.aimee/worktrees/d1"
+	req.WorkDir = req.Worktree
 
 	args, status := callLaunchArgs(t, req)
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "/repo:/repo:ro") {
-		t.Errorf("the parent worktree was not mounted read-only: %v", args)
+	if !strings.Contains(joined, req.Worktree+":"+req.Worktree+":ro") {
+		t.Errorf("the dedicated worktree was not mounted read-only: %v", args)
 	}
-	// A git dir belongs to an isolated delegate only. Carrying one here would
-	// hand a read-only delegate a writable mount.
+	if !strings.Contains(joined, "/repo/.git:/repo/.git:ro") {
+		t.Errorf("the common Git metadata was not mounted read-only: %v", args)
+	}
+	// Its per-worktree Git dir is covered by the common read-only mount and
+	// must never be over-mounted writable.
 	if strings.Contains(joined, ".git/worktrees") {
 		t.Errorf("a read-only delegate was given a git dir mount: %v", args)
 	}
@@ -227,8 +227,8 @@ func TestLaunchArgsTranslatesMountSources(t *testing.T) {
 		t.Fatalf("status = %v", status)
 	}
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "/host/checkout:/repo:ro") {
-		t.Errorf("the repo source was not translated: %v", args)
+	if !strings.Contains(joined, "/host/checkout/.git:/repo/.git:ro") {
+		t.Errorf("the common Git source was not translated: %v", args)
 	}
 	if !strings.Contains(joined, "/host/checkout/.aimee/worktrees/d1:/repo/.aimee/worktrees/d1") {
 		t.Errorf("the worktree source was not translated: %v", args)

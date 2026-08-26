@@ -24,22 +24,22 @@ func TestPlanWorktreeWriteRoleIsIsolated(t *testing.T) {
 	}
 }
 
-// Cutting a worktree for a read-only delegate would be work whose only product
-// is a directory to clean up.
-func TestPlanWorktreeReadOnlyRoleCreatesNothing(t *testing.T) {
+// Read-only is enforced by the mount; it does not make sharing another
+// session's checkout safe.
+func TestPlanWorktreeReadOnlyRoleGetsDedicatedTree(t *testing.T) {
 	for _, role := range []string{"review", "validate", "diagnose", "summarize"} {
 		plan, err := PlanWorktree(false, "deleg-7")
 		if err != nil {
 			t.Fatalf("%s: %v", role, err)
 		}
-		if plan.Isolated {
-			t.Errorf("%s: a read-only role asked for its own worktree", role)
+		if !plan.Isolated {
+			t.Errorf("%s: a read-only role did not get its own worktree", role)
 		}
 		if !plan.ReadOnlyMount {
 			t.Errorf("%s: a read-only role did not require a read-only mount", role)
 		}
-		if plan.WorkName != "" {
-			t.Errorf("%s: a read-only role named a branch: %q", role, plan.WorkName)
+		if plan.WorkName != "deleg-7" {
+			t.Errorf("%s: work name = %q", role, plan.WorkName)
 		}
 	}
 }
@@ -64,15 +64,9 @@ func TestPlanWorktreeRejectsUnsafeDelegateIDs(t *testing.T) {
 	}
 }
 
-// A read-only delegate's id is never used, so a hostile one cannot reach a
-// branch name through this path either.
-func TestPlanWorktreeReadOnlyIgnoresTheDelegateID(t *testing.T) {
-	plan, err := PlanWorktree(false, "$(id); rm -rf /")
-	if err != nil {
-		t.Fatalf("a read-only plan failed on an id it does not use: %v", err)
-	}
-	if plan.WorkName != "" {
-		t.Errorf("work name = %q, want empty", plan.WorkName)
+func TestPlanWorktreeReadOnlyRejectsUnsafeDelegateID(t *testing.T) {
+	if _, err := PlanWorktree(false, "$(id); rm -rf /"); err == nil {
+		t.Fatal("a read-only worktree accepted an unsafe id")
 	}
 }
 
@@ -95,7 +89,8 @@ func TestSandboxRequestForMatchesThePlan(t *testing.T) {
 	}
 
 	readPlan, _ := PlanWorktree(false, "deleg-8")
-	req = SandboxRequestFor(readPlan, "/srv/repo", "/srv/repo", "", true,
+	readWT := "/srv/repo/.aimee/worktrees/w2/main"
+	req = SandboxRequestFor(readPlan, "/srv/repo", readWT, "", true,
 		"/run/aimee/aimee-http.sock", "/run/aimee/aimee-http.sock", "")
 	spec, err = BuildSandboxSpec(req)
 	if err != nil {
@@ -104,6 +99,9 @@ func TestSandboxRequestForMatchesThePlan(t *testing.T) {
 	if !spec.ReadOnly {
 		t.Error("a read-only plan produced a writable sandbox")
 	}
+	if _, ok := findMount(spec, readWT); !ok {
+		t.Error("a read-only delegate did not get its dedicated worktree mount")
+	}
 	for _, m := range spec.Mounts {
 		if m.Kind == SandboxWorkspace && !m.ReadOnly {
 			t.Errorf("read-only plan produced a writable workspace mount: %+v", m)
@@ -111,13 +109,13 @@ func TestSandboxRequestForMatchesThePlan(t *testing.T) {
 	}
 }
 
-// A read-only delegate writes nothing, so it needs no writable git dir -- and
-// must not be handed one even if the caller passes a path.
-func TestSandboxRequestForReadOnlyDropsTheGitDir(t *testing.T) {
+// A read-only delegate retains the returned git dir so the sandbox can mount
+// its common object store without exposing the parent checkout.
+func TestSandboxRequestForReadOnlyRetainsTheGitDir(t *testing.T) {
 	readPlan, _ := PlanWorktree(false, "deleg-8")
 	req := SandboxRequestFor(readPlan, "/srv/repo", "/srv/repo",
 		"/srv/repo/.git", true, "", "", "")
-	if req.GitDir != "" {
-		t.Errorf("git dir = %q, want empty for a read-only delegate", req.GitDir)
+	if req.GitDir != "/srv/repo/.git" {
+		t.Errorf("git dir = %q, want the workspace-provided git identity", req.GitDir)
 	}
 }
