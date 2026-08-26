@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
@@ -35,10 +36,18 @@ int server_send_response(server_conn_t *conn, cJSON *response)
    g_was_error = 0;
    g_message[0] = '\0';
    cJSON *err = response ? cJSON_GetObjectItemCaseSensitive(response, "error") : NULL;
+   cJSON *status = response ? cJSON_GetObjectItemCaseSensitive(response, "status") : NULL;
+   cJSON *message = response ? cJSON_GetObjectItemCaseSensitive(response, "message") : NULL;
    if (cJSON_IsString(err))
    {
       g_was_error = 1;
       snprintf(g_message, sizeof(g_message), "%s", err->valuestring);
+   }
+   else if (cJSON_IsString(status) && strcmp(status->valuestring, "error") == 0)
+   {
+      g_was_error = 1;
+      snprintf(g_message, sizeof(g_message), "%s",
+               cJSON_IsString(message) ? message->valuestring : "dispatch error");
    }
    return 0;
 }
@@ -64,6 +73,16 @@ void vault_audit_bridge_server_list(const char *principal, int count)
    g_audited++;
 }
 
+void vault_audit_bridge_server_write(const char *principal, const char *agent, const char *cred,
+                                     const char *fingerprint, const char *transport)
+{
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   (void)fingerprint;
+   (void)transport;
+}
+
 /* True iff the handler refused at its own gate, as opposed to getting past it.
  * Both refusals name themselves; nothing downstream produces these strings. */
 static int refused_by_gate(void)
@@ -87,8 +106,40 @@ static int list_refused(attested_transport_t transport, const char *principal)
    return refused_by_gate();
 }
 
+static int set_refused(attested_transport_t transport, const char *principal)
+{
+   server_conn_t conn;
+   memset(&conn, 0, sizeof(conn));
+   conn.attested_transport = transport;
+   snprintf(conn.vault_principal, sizeof(conn.vault_principal), "%s", principal ? principal : "");
+   g_was_error = 0;
+   g_message[0] = '\0';
+   cJSON *req = cJSON_CreateObject();
+   assert(req != NULL);
+   cJSON_AddStringToObject(req, "agent", "git");
+   cJSON_AddStringToObject(req, "cred", "author_name");
+   cJSON_AddStringToObject(req, "secret", "Release Operator");
+   (void)handle_vault_set(NULL, &conn, req);
+   cJSON_Delete(req);
+   return refused_by_gate();
+}
+
 int main(void)
 {
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-vault-admin-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(home) != NULL);
+   assert(setenv("AIMEE_HOME", home, 1) == 0);
+   char webchat[320];
+   snprintf(webchat, sizeof webchat, "%s/webchat", home);
+   assert(mkdir(webchat, 0700) == 0);
+   char admin_record[384];
+   snprintf(admin_record, sizeof admin_record, "%s/bootstrap-user", webchat);
+   FILE *admin_file = fopen(admin_record, "w");
+   assert(admin_file != NULL);
+   assert(fputs("generated:aimee-0123456789ab\n", admin_file) >= 0);
+   assert(fclose(admin_file) == 0);
+
    char path[256];
    snprintf(path, sizeof path, "%s/aimee-vault-gate-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
@@ -105,6 +156,15 @@ int main(void)
    assert(!list_refused(ATTEST_UDS_PEERCRED, "uid:1000"));
    assert(!list_refused(ATTEST_UDS_PEERCRED, "uid:0"));
    assert(!list_refused(ATTEST_TLS_BEARER, ""));
+
+   /* The setup wizard's generated administrator can store shared appliance
+    * credentials over the kernel-attested webchat hop. No ordinary webuser gets
+    * that implicit authority; they still need the explicit UDS-minted grant. */
+   assert(!set_refused(ATTEST_WEBCHAT_TRUSTED, "webuser:aimee-0123456789ab"));
+   assert(set_refused(ATTEST_WEBCHAT_TRUSTED, "webuser:alice"));
+   assert(vault_capability_grant("webuser:alice") == 0);
+   assert(!set_refused(ATTEST_WEBCHAT_TRUSTED, "webuser:alice"));
+   assert(vault_capability_revoke("webuser:alice") == 0);
 
    /* A client cert is a network credential on arbitrary remote machines. It is
     * what reaches /v1, not what opens the credential store — so it enumerates
@@ -141,6 +201,9 @@ int main(void)
 
    vault_capability_set_path_for_test(NULL);
    unlink(path);
+   unlink(admin_record);
+   rmdir(webchat);
+   rmdir(home);
    printf("PASS: server_vault_gate list gate per transport (webchat/UDS/TLS admit, "
           "mTLS needs a grant, plaintext refused)\n");
    return 0;

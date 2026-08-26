@@ -178,6 +178,13 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
    char errbuf[256];
    (void)dim; /* pgvector infers dimension from data; not needed for index DDL */
 
+   /* schema.sql prefers StreamingDiskANN when pgvectorscale is installed. A
+    * valid DiskANN index satisfies the same ANN-readiness contract; do not add
+    * a redundant HNSW index merely because this legacy helper's default is
+    * HNSW. Recreate remains explicit and retains its existing semantics. */
+   if (!recreate && pgvec_table_ready(table) > 0)
+      return 0;
+
    if (recreate)
    {
       char sql[256];

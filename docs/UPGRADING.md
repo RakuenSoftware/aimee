@@ -153,17 +153,27 @@ fails closed when the counterpart identity is absent, so partial certificate ins
 startup/configuration error rather than a bearer-only fallback.
 
 Every networked Aimee hop now applies three independent checks on ordinary requests: the verified
-pair-specific mTLS identity, the current rotating connection bearer, and the enrolled PAM or OIDC
-application identity. On server-to-KB traffic these are configured with
-`AIMEE_KB_CLIENT_BEARER_TOKEN` plus either `AIMEE_KB_CLIENT_OIDC_TOKEN` or the
-`AIMEE_KB_CLIENT_PAM_USERNAME`/`AIMEE_KB_CLIENT_PAM_PASSWORD` pair. OIDC mode does not fall back to
-PAM when its federation is unavailable. On thinclient-to-server content traffic, a caller identity
+pair-specific mTLS identity, the current rotating connection bearer, and an enrolled application
+identity. On server-to-KB traffic these are configured with `AIMEE_KB_CLIENT_BEARER_TOKEN` plus
+either `AIMEE_KB_CLIENT_OIDC_TOKEN`, the
+`AIMEE_KB_CLIENT_PAM_USERNAME`/`AIMEE_KB_CLIENT_PAM_PASSWORD` pair, or the managed stack's distinct
+`AIMEE_KB_SERVICE_IDENTITY_TOKEN`. The managed token has the canonical
+`scope:service:aimee-server:<secret>` form and must be sealed into both the server and KB Vaults;
+the wizard does this automatically and rotates it independently from the connection bearer. OIDC
+mode does not fall back to the managed token or PAM when its federation is unavailable. On
+thinclient-to-server content traffic, a caller identity
 JWT occupies `Authorization` while the independent rotating connection bearer is carried in
 `x-api-key`; a verified client certificate no longer bypasses that bearer check.
 
-Those four server-to-KB values are first-boot inputs: bootstrap seals them into Vault, removes them
-from the process environment, and the client reads the current Vault values for every request so
-bearer, OIDC-token, and PAM-password rotation takes effect on an existing pooled TLS connection.
+The same managed identity one-shot enrolls the `aimee-server` application identity and the
+appliance administrator into the owner's default KB team. This enrollment is idempotent across
+redeploys. Additional host accounts are not silently granted shared knowledge access; an operator
+must add their explicit KB team membership before their content reads can resolve.
+
+Those server-to-KB values are first-boot inputs: bootstrap seals them into Vault, removes them from
+the process environment, and the client reads the current Vault values for every request so bearer,
+managed-service-token, OIDC-token, and PAM-password rotation takes effect on an existing pooled TLS
+connection.
 Changing `AIMEE_KB_CLIENT_PAM_USERNAME` is an identity migration, not password rotation: provision
 that PAM account on the KB and rotate the matching `service:<name>` certificate enrollment in the
 same staged change.

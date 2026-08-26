@@ -179,6 +179,19 @@ func TestPAMListReportsOnlyManagedLogins(t *testing.T) {
 	}
 }
 
+func TestPAMListHidesLockedRetiredLogin(t *testing.T) {
+	p := newTestPAM(newFakeUsers("aimee-0123456789ab", "releasee2e"),
+		func(string, string, string) error { return nil })
+	p.usable = func(username string) bool { return username == "releasee2e" }
+	names, err := p.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(names, []string{"releasee2e"}) {
+		t.Fatalf("List() = %v; want only the usable replacement login", names)
+	}
+}
+
 // A username that already names a host group remains creatable because the
 // wizard names its managed primary group instead of asking useradd to allocate a
 // colliding private group.

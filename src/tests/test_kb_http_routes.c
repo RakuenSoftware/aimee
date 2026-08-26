@@ -7,6 +7,11 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include "config.h"
 #include "command_registry.h"
 #include "cJSON.h"
@@ -38,6 +43,38 @@
 extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
                                                               const uint8_t *, uint32_t, uint8_t *,
                                                               uint32_t, uint32_t *, void *);
+
+static int self_signed_ec_cert(char *out, size_t cap)
+{
+   EVP_PKEY *key = EVP_EC_gen("prime256v1");
+   X509 *cert = X509_new();
+   BIO *bio = BIO_new(BIO_s_mem());
+   int ok = key && cert && bio && X509_set_version(cert, 2) == 1 &&
+            ASN1_INTEGER_set(X509_get_serialNumber(cert), 1) == 1 &&
+            X509_gmtime_adj(X509_getm_notBefore(cert), 0) &&
+            X509_gmtime_adj(X509_getm_notAfter(cert), 3600) && X509_set_pubkey(cert, key) == 1;
+   X509_NAME *name = ok ? X509_get_subject_name(cert) : NULL;
+   ok = ok && name &&
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)"server.local",
+                                   -1, -1, 0) == 1 &&
+        X509_set_issuer_name(cert, name) == 1 && X509_sign(cert, key, EVP_sha256()) > 0 &&
+        PEM_write_bio_X509(bio, cert) == 1;
+   BUF_MEM *memory = NULL;
+   if (ok)
+      BIO_get_mem_ptr(bio, &memory);
+   ok = ok && memory && memory->length + 1 <= cap;
+   if (ok)
+   {
+      memcpy(out, memory->data, memory->length);
+      out[memory->length] = '\0';
+   }
+   else if (out && cap)
+      out[0] = '\0';
+   BIO_free(bio);
+   X509_free(cert);
+   EVP_PKEY_free(key);
+   return ok ? 0 : -1;
+}
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -3127,6 +3164,30 @@ static void test_mtls_serve(void)
                     resp, sizeof(resp));
    assert(strstr(resp, "403 Forbidden") &&
           strstr(resp, "service identity does not match client certificate"));
+
+   /* The self-contained managed stack has no external IdP or mutable host PAM
+    * database. Its independently rotating application token is still scoped to
+    * the enrolled certificate identity and is checked as the third layer. */
+   assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                               "scope:service:aimee-server:application-secret") == 0);
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Bearer application-secret\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "200 OK") && strstr(resp, "\"status\":\"ok\""));
+   assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                               "scope:service:other-service:application-secret") == 0);
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Bearer application-secret\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "service identity does not match client certificate"));
+   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
    mtls_request_raw(sctx, cctx,
                     "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
                     "X-Aimee-Caller-Subject: uid:1000\r\nConnection: close\r\n\r\n",
@@ -3678,6 +3739,21 @@ static void test_mtls_listener(void)
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+
+      /* Managed installs use the independently scoped opaque application
+       * identity and have no host PAM account. Exercise the real client header
+       * builder and listener together, then restore PAM for its rotation cases. */
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_USERNAME");
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_PASSWORD");
+      assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                                  "scope:service:aimee-server:managed-application") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200);
+      assert(r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       struct stat identity_stat;
       assert(stat(identity_file, &identity_stat) == 0 && S_ISREG(identity_stat.st_mode));
       assert((identity_stat.st_mode & 0777) == 0600 && identity_stat.st_uid == geteuid());
@@ -3690,6 +3766,24 @@ static void test_mtls_listener(void)
       identity_json[identity_n] = '\0';
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* The appliance HTTPS identity is P-256 while managed KB enrollment
+       * deliberately issues an RSA client identity. OpenSSL cannot compare
+       * cross-algorithm keys with EVP_PKEY_eq(), but the algorithms themselves
+       * prove non-reuse. This is the exact managed-appliance pairing. */
+      char ec_server_cert[KB_PKI_CERT_PEM_MAX];
+      assert(self_signed_ec_cert(ec_server_cert, sizeof(ec_server_cert)) == 0);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(ec_server_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+      kb_client_mtls_reset_for_test();
+      int mixed_key_status = -1;
+      char *mixed_key = kb_client_mtls_request("GET", "/v1/health", NULL, &mixed_key_status);
+      assert(mixed_key_status == 200 && mixed_key && strstr(mixed_key, "\"status\":\"ok\""));
+      free(mixed_key);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
 
       /* Absence is not evidence of separation. Once server->KB is configured,
        * the thinclient-facing counterpart must remain installed and readable. */

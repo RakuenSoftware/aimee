@@ -56,6 +56,16 @@ static void test_identity_key(void)
 
    /* Owner: no issuer -> owner principal, key "owner" */
    CHECK(kb_principal_from_verify(&v, "", &p) == 0 && p.kind == KB_PRIN_OWNER, "owner principal");
+   char empty_issuer[256] = "";
+   char owner_subject[256] = "owner";
+   char provider_key[32];
+   CHECK(kb_identity_key_from_fields(KB_PRIN_OWNER, empty_issuer, owner_subject, 1, provider_key,
+                                     sizeof(provider_key)) == 0 &&
+             strcmp(provider_key, "owner") == 0,
+         "DB2 identity adapter derives owner key");
+   CHECK(kb_identity_key_from_fields(KB_PRIN_OWNER, empty_issuer, owner_subject, 0, provider_key,
+                                     sizeof(provider_key)) == -1,
+         "DB2 identity adapter rejects unauthenticated fields");
    CHECK(kb_identity_key(&p, key, sizeof(key)) == 0 && strcmp(key, "owner") == 0, "owner key");
 
    /* Cert: cert:<issuer>:<normalized serial>; CN is a label, not the key */

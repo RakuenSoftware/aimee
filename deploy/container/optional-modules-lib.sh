@@ -138,7 +138,10 @@ apply_optional_modules() {
             # so key off the output file existing instead.
             : > "$_om_tmp.f"
             grep -v "^${_om_id}[[:space:]]" "$_om_tmp" >> "$_om_tmp.f" 2>/dev/null || true
-            mv "$_om_tmp.f" "$_om_tmp"
+            # The copied manifest may be read-only. Force replacement so an
+            # attached operator TTY can never turn startup or verification into
+            # an interactive overwrite prompt.
+            mv -f "$_om_tmp.f" "$_om_tmp"
             _om_changed=1
             command -v log >/dev/null 2>&1 && \
                 log "optional module $_om_id disabled by $(_module_env_name "$_om_id")" >&2
@@ -146,7 +149,7 @@ apply_optional_modules() {
     done
 
     if [ "$_om_changed" -eq 1 ]; then
-        mv "$_om_tmp" "$_om_out" 2>/dev/null || {
+        mv -f "$_om_tmp" "$_om_out" 2>/dev/null || {
             rm -f "$_om_tmp"
             printf '%s' "$_om_manifest"
             return 0

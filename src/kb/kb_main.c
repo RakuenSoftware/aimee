@@ -770,6 +770,11 @@ static int kb_cmd_tenancy_init_db2(void)
    }
    db2_set_embedding_dim_default(config_embedder_dims_default());
    db2_set_embedding_dim(config_embedder_dims_current());
+   /* Tenant entry delegates canonical key construction to the identity owner.
+    * Daemon startup registers this through module-stage setup, which CLI
+    * subcommands intentionally do not run. Register the narrow adapter here so
+    * owner/team operations do not fail closed before their first SQL statement. */
+   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
    /* These commands read a deployment somebody else is running. Applying the
     * schema from here races the daemon's own pass, and Postgres answers "tuple
     * concurrently updated", which surfaced below as "DB2 not reachable" against a
@@ -801,7 +806,8 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
    if (argc < 3 || strcmp(argv[2], "install") != 0)
    {
       fputs("Usage: aimee-kb managed-server-identity install --server-home=PATH "
-            "--host=HOST --port=N --endpoint=URL --uid=N [--force]\n"
+            "--host=HOST --port=N --endpoint=URL --uid=N [--member=USER] [--force]\n"
+            "  --member enroll the managed appliance's PAM operator into the server team\n"
             "  --force  re-issue the client certificate even when a stored identity\n"
             "           already matches this KB (repairs trust the KB no longer accepts)\n",
             stderr);
@@ -825,6 +831,8 @@ static int kb_cmd_managed_server_identity(int argc, char **argv)
       }
       else if (strncmp(argv[i], "--endpoint=", 11) == 0 && !options.endpoint)
          options.endpoint = argv[i] + 11;
+      else if (strncmp(argv[i], "--member=", 9) == 0 && !options.member && argv[i][9])
+         options.member = argv[i] + 9;
       else if (strncmp(argv[i], "--uid=", 6) == 0 && !owner_seen)
       {
          owner_seen = 1;

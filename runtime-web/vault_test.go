@@ -27,6 +27,7 @@ func TestVaultUnlockSendsWebuserWithoutBearer(t *testing.T) {
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock",
 		strings.NewReader(`{"password":"hunter2"}`)), "alice")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
 
@@ -56,6 +57,7 @@ func TestVaultUnlockNeedsNoSharedToken(t *testing.T) {
 
 	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock",
 		strings.NewReader(`{"password":"hunter2"}`)), "alice")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
 	rr := httptest.NewRecorder()
 	s.handleVaultUnlock(rr, req)
 
@@ -110,7 +112,9 @@ func TestVaultResponsesNeverLeakSecrets(t *testing.T) {
 
 	// unlock must surface only {status:ok}, never the upstream key fields.
 	rr2 := httptest.NewRecorder()
-	s.handleVaultUnlock(rr2, withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock", strings.NewReader(`{"password":"p"}`)), "eve"))
+	unlockReq := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/unlock", strings.NewReader(`{"password":"p"}`)), "eve")
+	unlockReq.Header.Set("Sec-Fetch-Site", "same-origin")
+	s.handleVaultUnlock(rr2, unlockReq)
 	b2 := rr2.Body.String()
 	for _, leak := range []string{"RAWKEKLEAK", "sk-LEAKED3"} {
 		if strings.Contains(b2, leak) {
@@ -140,6 +144,7 @@ func TestVaultCredentialsRoutesByMethod(t *testing.T) {
 
 	do := func(method, body string) int {
 		req := withUser(httptest.NewRequest(method, "/api/vault/credentials", strings.NewReader(body)), "bob")
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
 		rr := httptest.NewRecorder()
 		s.handleVaultCredentials(rr, req)
 		return rr.Code
@@ -149,5 +154,72 @@ func TestVaultCredentialsRoutesByMethod(t *testing.T) {
 	do(http.MethodDelete, `{"agent":"claude","cred":"api_key"}`)
 	if !listed || !set || !deleted {
 		t.Fatalf("routing: list=%v set=%v delete=%v", listed, set, deleted)
+	}
+}
+
+func TestVaultCredentialsRejectCrossOriginMutation(t *testing.T) {
+	called := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/vault/set", func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		w.Write([]byte(`{"status":"ok"}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/credentials",
+		strings.NewReader(`{"agent":"git","cred":"author_name","secret":"Operator"}`)), "bob")
+	req.Host = "aimee.example"
+	req.Header.Set("Origin", "https://evil.example")
+	rr := httptest.NewRecorder()
+
+	s.handleVaultCredentials(rr, req)
+
+	if rr.Code != http.StatusForbidden {
+		t.Fatalf("code=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if called {
+		t.Fatal("cross-origin mutation reached aimee-server")
+	}
+}
+
+// aimee-server's native /v1 transport carries dispatch failures inside an HTTP
+// 200 envelope. A denied write must never be rewritten into {status:ok}, or the
+// setup wizard advances while nothing was persisted.
+func TestVaultMutationSurfacesDispatchErrorEnvelope(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/vault/set", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"error","kind":"permission_denied","http_status":403,"message":"vault write refused"}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	req := withUser(httptest.NewRequest(http.MethodPost, "/api/vault/credentials",
+		strings.NewReader(`{"agent":"git","cred":"author_name","secret":"Operator"}`)), "bob")
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	rr := httptest.NewRecorder()
+
+	s.handleVaultCredentials(rr, req)
+
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "vault write refused") {
+		t.Fatalf("dispatch refusal became code=%d body=%q", rr.Code, rr.Body.String())
+	}
+	if strings.Contains(rr.Body.String(), `"status":"ok"`) {
+		t.Fatalf("dispatch refusal became success: %q", rr.Body.String())
+	}
+}
+
+// Listing uses the same dispatch transport. Treating an error envelope as an
+// empty successful inventory would hide configured credentials and keep setup
+// steps permanently incomplete.
+func TestVaultListSurfacesDispatchErrorEnvelope(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/vault/list", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"status":"error","kind":"permission_denied","http_status":403,"message":"vault list refused"}`))
+	})
+	s := &server{cfg: startFakeV1(t, mux)}
+	rr := httptest.NewRecorder()
+
+	s.handleVaultCredentials(rr, withUser(
+		httptest.NewRequest(http.MethodGet, "/api/vault/credentials", nil), "bob"))
+
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "vault list refused") {
+		t.Fatalf("dispatch refusal became code=%d body=%q", rr.Code, rr.Body.String())
 	}
 }

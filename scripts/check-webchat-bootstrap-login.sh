@@ -214,6 +214,13 @@ grep -Fq "generated:$gen_user" "$WEBCHAT_BOOTSTRAP_USER"
 [[ ! -e $WEBCHAT_BOOTSTRAP_CREDENTIALS ]]
 ! grep -rFq "$gen_pass" "$AIMEE_HOME" 2>/dev/null
 
+# The shell-created account is snapshotted before runtime-web starts. Otherwise
+# an ordinary container replacement loses /etc/shadow, mints a different login,
+# and invalidates the only first-boot credential the operator was shown.
+[[ -f $WEBCHAT_IDENTITIES ]]
+grep -Fq "$gen_user:\$6\$salt\$usableverifier" "$WEBCHAT_IDENTITIES"
+[[ $(stat -c %a "$WEBCHAT_IDENTITIES") == 600 ]]
+
 # The marker must be readable by the C server, which runs as a different user
 # and resolves the appliance administrator from it.
 marker_mode=$(stat -c %a "$WEBCHAT_BOOTSTRAP_USER")
@@ -239,6 +246,10 @@ printf '%s\n' operator legacy aimee "$fixture_process_user" > "$existing_users" 
 printf '' > "$group_members"                                       # group ships empty
 printf 'generated:%s\n' "$gen_user" > "$WEBCHAT_BOOTSTRAP_USER"
 printf 'jbailes\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
+# Model an appliance created before first-boot accounts were snapshotted. New
+# installs retain the file asserted above and restore the original credential;
+# this remains the safe fallback for legacy state with no restorable verifier.
+rm -f "$WEBCHAT_IDENTITIES"
 upgrade_log=$(webchat_provision_bootstrap_account 2>&1)
 grep -Fq 'FIRST-BOOT DASHBOARD LOGIN' <<<"$upgrade_log"
 upgrade_user=$(sed -n 's/.*username: //p' <<<"$upgrade_log" | tr -d ' ' | head -1)

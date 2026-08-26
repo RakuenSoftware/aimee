@@ -813,11 +813,15 @@ check_output "server.health status" '"status":"ok"' echo "$RESP"
 check_output "server.health uptime" '"uptime"' echo "$RESP"
 # The DB1 state is the server's answer to "can I reach the store", and since
 # the store became a module that is a question about the module being
-# attached rather than about a file this process opened. Asserted because
-# nothing else here would notice it answering "unavailable" forever: every
-# other check in this suite goes through a handler that would simply fail,
-# and "status":"ok" above stays ok either way.
-check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo "$RESP"
+# attached rather than about a file this process opened. When this run has a
+# PostgreSQL DSN the module must be reachable. The documented no-DSN path above
+# deliberately skips it, so health must honestly report that degraded state
+# instead of pretending the store is available.
+if [ -n "$DB1_MODULE_PID" ]; then
+    check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo "$RESP"
+else
+    check_output "server.health reports the skipped DB1 store unavailable" '"state":"unavailable"' echo "$RESP"
+fi
 
 # ... and stops reporting it once the store is gone, promptly.
 #
@@ -830,7 +834,7 @@ check_output "server.health reports the DB1 store reachable" '"state":"ok"' echo
 # Five seconds is the budget here: the probe caches for one, and the rest is
 # slack for a loaded CI box. A regression to inferring availability rather than
 # probing it fails this by twenty seconds, not by a hair.
-if [ -x "$DB1_MODULE" ]; then
+if [ -n "$DB1_MODULE_PID" ]; then
     stop_db1_module
     HEALTH_GONE=""
     for _i in $(seq 1 25); do

@@ -79,6 +79,9 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out);
 
 /* Deterministic test seams; production passes NULL and uses the wall clock. */
 void kb_client_dependency_reset_for_tests(void);
+/* Clear stale transport failure budgets after an operator has installed or
+ * replaced the durable KB identity. Safe to call while requests are active. */
+void kb_client_dependency_reset(void);
 void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void));
 
 /* Query aimee-kb health.  Fills *out and returns 0 on success.  Returns -1

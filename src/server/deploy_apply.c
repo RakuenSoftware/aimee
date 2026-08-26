@@ -3,12 +3,15 @@
 
 #include "deploy_apply.h"
 
+#include "appliance_admin.h"
 #include "aimee_home.h"      /* one-shot legacy credential migration path */
 #include "cJSON.h"           /* scope `docker compose ps` to the managed services */
 #include "config.h"          /* legacy_config_record, legacy_config_read */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
 #include "runtime_secret.h"
+#include "modules/kb_client/kb_client.h"
+#include "modules/kb_client/kb_client_mtls.h"
 #include "vault_config_bootstrap.h"
 
 #include <ctype.h>
@@ -26,10 +29,14 @@
 
 extern char **environ;
 
-#define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
-#define DEPLOY_OUT_CAP         8192                    /* tail of compose output kept for the UI */
-#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
-#define DEPLOY_LLM_TOKEN_HEX   64                      /* 256-bit opaque bearer */
+#define DEPLOY_DEFAULT_COMPOSE    "/opt/aimee/deploy/aimee-managed.compose.yaml"
+#define DEPLOY_OUT_CAP            8192 /* tail of compose output kept for the UI */
+#define DEPLOY_LLM_TOKEN_FILE     ".managed-kb-llm-token" /* legacy migration only */
+#define DEPLOY_LLM_TOKEN_HEX      64                      /* 256-bit opaque bearer */
+#define DEPLOY_KB_TOKEN_HEX       64                      /* 256-bit managed KB credential secret */
+#define DEPLOY_KB_SERVICE_SCOPE   "scope:service:aimee-server:"
+#define DEPLOY_KB_TOKEN_MAX       ((sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1) + DEPLOY_KB_TOKEN_HEX)
+#define DEPLOY_MANAGED_MEMBER_ENV "AIMEE_MANAGED_KB_MEMBER="
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -85,6 +92,19 @@ static int deploy_env_has_profile(const char *env, const char *profile)
    return 0;
 }
 
+static int deploy_managed_member(char out[33])
+{
+   appliance_admin_webuser(out, 33);
+   size_t n = strnlen(out, 33);
+   if (!n || n > 32 || out[0] < 'a' || out[0] > 'z')
+      return -1;
+   for (size_t i = 1; i < n; i++)
+      if (!((out[i] >= 'a' && out[i] <= 'z') || (out[i] >= '0' && out[i] <= '9') || out[i] == '-' ||
+            out[i] == '_'))
+         return -1;
+   return 0;
+}
+
 static int deploy_llm_token_valid(const char *token)
 {
    if (!token)
@@ -101,6 +121,69 @@ static int deploy_llm_token_valid(const char *token)
             token[i] == '='))
          return 0;
    return 1;
+}
+
+static int deploy_kb_scoped_token_valid(const char *token)
+{
+   size_t prefix_len = sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1;
+   return token && strncmp(token, DEPLOY_KB_SERVICE_SCOPE, prefix_len) == 0 &&
+          deploy_llm_token_valid(token + prefix_len);
+}
+
+/* Resolve or mint one certificate-bound service credential. Older managed
+ * installs stored the KB connection bearer as an unscoped owner token. Scope
+ * that same secret during upgrade so the enrolled service certificate and the
+ * independently rotating bearer name exactly the same identity, without
+ * silently granting aimee-server KB-administrator authority. */
+static int deploy_kb_scoped_token(const char *name, char *out, size_t cap)
+{
+   if (!name || !out || cap < DEPLOY_KB_TOKEN_MAX + 1)
+      return -1;
+
+   char configured[513] = "";
+   if (runtime_secret_get(name, configured, sizeof(configured)))
+   {
+      if (deploy_kb_scoped_token_valid(configured))
+      {
+         snprintf(out, cap, "%s", configured);
+         runtime_secret_wipe(configured, sizeof(configured));
+         return 0;
+      }
+      int n = deploy_llm_token_valid(configured)
+                  ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, configured)
+                  : -1;
+      if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
+      {
+         runtime_secret_wipe(configured, sizeof(configured));
+         runtime_secret_wipe(out, cap);
+         return -1;
+      }
+      runtime_secret_wipe(configured, sizeof(configured));
+      return 0;
+   }
+
+   char proposed[DEPLOY_KB_TOKEN_HEX + 1];
+   int n = platform_random_hex(proposed, DEPLOY_KB_TOKEN_HEX) == 0
+               ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, proposed)
+               : -1;
+   if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
+   {
+      runtime_secret_wipe(proposed, sizeof(proposed));
+      runtime_secret_wipe(out, cap);
+      return -1;
+   }
+   runtime_secret_wipe(proposed, sizeof(proposed));
+   return 0;
+}
+
+static int deploy_kb_token(char *out, size_t cap)
+{
+   return deploy_kb_scoped_token("AIMEE_KB_API_BEARER_TOKEN", out, cap);
+}
+
+static int deploy_kb_service_identity_token(char *out, size_t cap)
+{
+   return deploy_kb_scoped_token("AIMEE_KB_SERVICE_IDENTITY_TOKEN", out, cap);
 }
 
 static void deploy_remove_legacy_token_file(const char *path, off_t size)
@@ -377,6 +460,14 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       *managed_kb_out = managed_kb;
    if (managed_identity_out)
       *managed_identity_out = managed_kb && explicit_parts == 0;
+   char managed_member[33] = "";
+   if (managed_kb && explicit_parts == 0 && deploy_managed_member(managed_member) != 0)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "could not resolve a valid appliance operator for managed KB membership");
+      return NULL;
+   }
    if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
    {
       if (err && err_cap)
@@ -396,7 +487,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       if (*p == '\n')
          extra++;
 
-   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + 1, sizeof(char *));
+   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + (managed_member[0] ? 1 : 0) + 1,
+                        sizeof(char *));
    if (!envp)
    {
       if (err && err_cap)
@@ -414,7 +506,10 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
            * OLD names, and a rename silently stopped the filter matching. */
           (managed_llm &&
            (strncmp(*e, "SYNTHESIS_API_KEY=", sizeof("SYNTHESIS_API_KEY=") - 1) == 0 ||
-            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) == 0)))
+            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) ==
+                0)) ||
+          (managed_member[0] &&
+           strncmp(*e, DEPLOY_MANAGED_MEMBER_ENV, sizeof(DEPLOY_MANAGED_MEMBER_ENV) - 1) == 0))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -464,6 +559,17 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
          return NULL;
       }
       n++;
+   }
+   if (managed_member[0])
+   {
+      size_t len = strlen(DEPLOY_MANAGED_MEMBER_ENV) + strlen(managed_member);
+      envp[n] = malloc(len + 1);
+      if (!envp[n])
+      {
+         free_envp(envp);
+         return NULL;
+      }
+      snprintf(envp[n++], len + 1, "%s%s", DEPLOY_MANAGED_MEMBER_ENV, managed_member);
    }
    envp[n] = NULL;
    return envp;
@@ -656,28 +762,32 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
  * --no-deps is deliberate: the orchestrator starts aimee-kb first so its CPU-only
  * initialization/indexing can run while aimee-llm downloads models. Deliberately
  * omits --remove-orphans, for the reason above. */
-static int deploy_up_service_argv(const char *file, const char *service, const char **argv,
-                                  size_t cap)
+static int deploy_up_service_argv(const char *file, const char *service, int force_recreate,
+                                  const char **argv, size_t cap)
 {
-   const char *cmd[] = {"docker", "compose", "-f", file, "up", "-d", "--no-deps", service};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   const char *cmd[] = {"docker",    "compose",          "-f",   file, "up", "-d",
+                        "--no-deps", "--force-recreate", service};
+   size_t n = force_recreate ? sizeof(cmd) / sizeof(cmd[0]) : sizeof(cmd) / sizeof(cmd[0]) - 1;
    if (!argv || !file || !file[0] || !service || !service[0] || cap < n + 1)
       return -1;
-   for (size_t i = 0; i < n; i++)
+   for (size_t i = 0; i < n - 1; i++)
       argv[i] = cmd[i];
+   argv[n - 1] = service;
    argv[n] = NULL;
    return (int)n;
 }
 
-/* Bootstrap the managed KB's LLM service bearer over stdin before creating the
- * long-lived KB container. The one-shot is --rm and its Config.Env is clean;
- * only the pipe carries the first-boot value. */
+/* Bootstrap managed credentials over stdin before creating the long-lived KB
+ * container. The one-shot is --rm and its Config.Env contains only a public
+ * overwrite-control flag; only the pipe carries credential values. Overwrite is
+ * required for rotation and for upgrading the old unscoped owner bearer. */
 static int deploy_kb_vault_bootstrap_argv(const char *file, const char **argv, size_t cap)
 {
    const char *cmd[] = {"docker",       "compose",
                         "-f",           file,
                         "run",          "--rm",
                         "-T",           "--no-deps",
+                        "-e",           "AIMEE_VAULT_ENV_OVERWRITE=1",
                         "--entrypoint", "/usr/local/bin/aimee-kb",
                         "aimee-kb",     "--bootstrap-vault-stdin"};
    size_t n = sizeof(cmd) / sizeof(cmd[0]);
@@ -712,6 +822,16 @@ static int deploy_identity_bootstrap_argv(const char *file, const char **argv, s
       argv[i] = cmd[i];
    argv[n] = NULL;
    return (int)n;
+}
+
+/* The server stays alive while its managed identity is installed into the shared
+ * home volume. Drop any pre-install TLS objects and outage backoff immediately;
+ * otherwise the first project cloned after the wizard can report the healthy KB
+ * unavailable until a process restart or the circuit's longest retry window. */
+static void deploy_managed_identity_activated(void)
+{
+   kb_client_mtls_pool_reset();
+   kb_client_dependency_reset();
 }
 
 /* Run the isolated offline root/JWKS bootstrap. The service receives only named
@@ -754,10 +874,51 @@ static void *deploy_worker(void *arg)
       code = 0;
       size_t used = 0;
 
+      /* Bootstrap the managed KB's own bearer before its long-lived container
+       * exists. The token crosses only stdin to a disposable one-shot and is
+       * sealed into the KB Vault; it never enters Compose metadata or .env. */
+      if (managed_kb)
+      {
+         char token[DEPLOY_KB_TOKEN_MAX + 1] = "";
+         char service_token[DEPLOY_KB_TOKEN_MAX + 1] = "";
+         char record[sizeof("AIMEE_KB_API_BEARER_TOKEN=") + DEPLOY_KB_TOKEN_MAX +
+                     sizeof("AIMEE_KB_SERVICE_IDENTITY_TOKEN=") + DEPLOY_KB_TOKEN_MAX];
+         int first_len =
+             deploy_kb_token(token, sizeof(token)) == 0
+                 ? snprintf(record, sizeof(record), "AIMEE_KB_API_BEARER_TOKEN=%s", token)
+                 : -1;
+         int second_len =
+             first_len > 0 && (size_t)first_len + 1 < sizeof(record) &&
+                     deploy_kb_service_identity_token(service_token, sizeof(service_token)) == 0
+                 ? snprintf(record + first_len + 1, sizeof(record) - (size_t)first_len - 1,
+                            "AIMEE_KB_SERVICE_IDENTITY_TOKEN=%s", service_token)
+                 : -1;
+         size_t record_len = second_len > 0 ? (size_t)first_len + 1 + (size_t)second_len + 1 : 0;
+         const char *bootstrap_argv[16];
+         int bootstrap_code = -1;
+         used = strlen(out);
+         if (!record_len || record_len > sizeof(record) ||
+             deploy_kb_vault_bootstrap_argv(
+                 file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
+             run_capture_input(bootstrap_argv, envp, record, record_len, out + used,
+                               sizeof(out) - used, &bootstrap_code) != 0 ||
+             bootstrap_code != 0)
+         {
+            code = bootstrap_code == 0 ? -1 : bootstrap_code;
+            used = strlen(out);
+            if (used < sizeof(out) - 1)
+               snprintf(out + used, sizeof(out) - used,
+                        "deploy: failed to seal the managed KB bearer into its Vault\n");
+         }
+         runtime_secret_wipe(token, sizeof(token));
+         runtime_secret_wipe(service_token, sizeof(service_token));
+         memset(record, 0, sizeof(record));
+      }
+
       /* The server is already running this worker. Start KB next and LLM last.
        * Model downloads continue inside the LLM container after this deploy
        * finishes; KB initialization and CPU indexing do not wait for them. */
-      if (managed_kb && managed_llm)
+      if (code == 0 && managed_kb && managed_llm)
       {
          const char *token = deploy_env_value(envp, "SYNTHESIS_API_KEY");
          char record[sizeof("SYNTHESIS_API_KEY=") + 512];
@@ -785,7 +946,10 @@ static void *deploy_worker(void *arg)
       {
          const char *kb_argv[10];
          used = strlen(out);
-         if (deploy_up_service_argv(file, "aimee-kb", kb_argv,
+         /* Recreate even when Compose sees no configuration change: the
+          * immediately preceding one-shot may have added or rotated Vault
+          * credentials which the live process can only load at startup. */
+         if (deploy_up_service_argv(file, "aimee-kb", 1, kb_argv,
                                     sizeof(kb_argv) / sizeof(kb_argv[0])) < 0 ||
              run_capture(kb_argv, envp, out + used, sizeof(out) - used, &code) != 0)
          {
@@ -797,7 +961,7 @@ static void *deploy_worker(void *arg)
       {
          const char *llm_argv[10];
          used = strlen(out);
-         if (deploy_up_service_argv(file, "aimee-llm", llm_argv,
+         if (deploy_up_service_argv(file, "aimee-llm", 0, llm_argv,
                                     sizeof(llm_argv) / sizeof(llm_argv[0])) < 0 ||
              run_capture(llm_argv, envp, out + used, sizeof(out) - used, &code) != 0)
          {
@@ -858,6 +1022,7 @@ static void *deploy_worker(void *arg)
          }
          else
          {
+            deploy_managed_identity_activated();
             used = strlen(out);
             if (used < sizeof(out) - 1)
                snprintf(out + used, sizeof(out) - used,

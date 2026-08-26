@@ -161,7 +161,7 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    out->suppressed_calls = snap.suppressed_calls;
 }
 
-void kb_client_dependency_reset_for_tests(void)
+void kb_client_dependency_reset(void)
 {
    for (int i = 0; i < KB_DEP_CLASS_COUNT; i++)
       dependency_breaker_reset(&g_kb_dependency[i]);
@@ -172,6 +172,11 @@ void kb_client_dependency_reset_for_tests(void)
    g_kb_last_observed_dimension = 0;
    g_kb_last_current_dimension = 0;
    g_kb_last_retry_after_ms = 0;
+}
+
+void kb_client_dependency_reset_for_tests(void)
+{
+   kb_client_dependency_reset();
 }
 
 void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void))
@@ -1906,11 +1911,30 @@ char *kb_client_search_json_scoped_ex(const char *project, int all_projects, con
    if (fusion_mode_override && fusion_mode_override[0])
       cJSON_AddStringToObject(body, "fusion_mode", fusion_mode_override);
    int http_status = -1;
-   char *resp =
-       kb_client_v1_post_json("/v1/search", body, KB_CLIENT_SEARCH_TIMEOUT_MS, &http_status);
+   /* Preserve a structured KB refusal.  The search caller can then surface the
+    * precise authorization or scope failure instead of replacing it with a
+    * generic HTTP-status message, which is essential for managed deployments. */
+   char *resp = kb_client_v1_post_json_keep_error("/v1/search", body, KB_CLIENT_SEARCH_TIMEOUT_MS,
+                                                  &http_status);
    cJSON_Delete(body);
    if (resp)
    {
+      if (http_status < 200 || http_status >= 300)
+      {
+         char detail[256] = "knowledge service search was rejected";
+         cJSON *error_body = cJSON_Parse(resp);
+         const cJSON *error =
+             error_body ? cJSON_GetObjectItemCaseSensitive(error_body, "error") : NULL;
+         const cJSON *message =
+             error_body ? cJSON_GetObjectItemCaseSensitive(error_body, "message") : NULL;
+         if (cJSON_IsString(error) && error->valuestring[0])
+            snprintf(detail, sizeof(detail), "%s", error->valuestring);
+         else if (cJSON_IsString(message) && message->valuestring[0])
+            snprintf(detail, sizeof(detail), "%s", message->valuestring);
+         free(resp);
+         cJSON_Delete(error_body);
+         return kb_typed_error_json(kb_client_last_result_status(), detail);
+      }
       if (have_key)
          kb_cache_put(cache_key, resp);
       return resp;

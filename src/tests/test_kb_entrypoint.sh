@@ -26,6 +26,17 @@ export AIMEE_KB_ENTRYPOINT_SOURCE_ONLY
 # shellcheck disable=SC1090
 . "$entrypoint"
 
+echo "embedded store module receives the local socket DSN"
+unset AIMEE_STORE_URL 2>/dev/null || true
+embedded_test_dsn='postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee'
+configure_embedded_store_module "$embedded_test_dsn"
+if [ "${AIMEE_STORE_URL:-}" = "$embedded_test_dsn" ]; then
+    ok "embedded DSN exported as AIMEE_STORE_URL"
+else
+    bad "embedded DSN did not reach AIMEE_STORE_URL"
+fi
+unset AIMEE_STORE_URL
+
 echo "kb_is_serving: flags mean serve, a bare word means one-shot"
 kb_is_serving            && ok "no args -> serving"            || bad "no args should serve"
 kb_is_serving --http-port=8741 && ok "--http-port -> serving"  || bad "flag should serve"

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
-import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
+import { visibleSteps, isRestartKey, helpFor, ownsPrimaryAction, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
 import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
 import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
@@ -343,7 +343,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 {step.optional && <Button variant="default" onClick={advance}>Skip</Button>}
                 {step.keys.length > 0 ? (
                   <Button variant="primary" disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</Button>
-                ) : step.kind === 'account' || step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                ) : ownsPrimaryAction(step) ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (

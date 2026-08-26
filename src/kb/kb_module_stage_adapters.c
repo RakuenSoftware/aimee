@@ -547,39 +547,6 @@ static int embed_text(const char *text, const char *command, int input_type, flo
    return embed_over_module(text, command, input_type, out, max_dim);
 }
 
-static int identity_key(int kind, const char *issuer, const char *subject, int authenticated,
-                        char *out, size_t cap)
-{
-   kb_principal_t principal;
-   memset(&principal, 0, sizeof(principal));
-   if (!issuer || !subject || !out || cap < 2 || authenticated != 1 ||
-       strnlen(issuer, sizeof(principal.issuer)) == sizeof(principal.issuer) ||
-       strnlen(subject, sizeof(principal.subject)) == sizeof(principal.subject))
-      return -1;
-
-   switch (kind)
-   {
-   case AIMEE_DB2_PRINCIPAL_OIDC:
-      principal.kind = KB_PRIN_OIDC;
-      break;
-   case AIMEE_DB2_PRINCIPAL_CERT:
-      principal.kind = KB_PRIN_CERT;
-      break;
-   case AIMEE_DB2_PRINCIPAL_OWNER:
-      principal.kind = KB_PRIN_OWNER;
-      break;
-   case AIMEE_DB2_PRINCIPAL_HOST:
-      principal.kind = KB_PRIN_HOST;
-      break;
-   default:
-      return -1;
-   }
-   memcpy(principal.issuer, issuer, strlen(issuer) + 1);
-   memcpy(principal.subject, subject, strlen(subject) + 1);
-   principal.authenticated = 1;
-   return kb_identity_key(&principal, out, cap);
-}
-
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
 {
    uint8_t request[AIMEE_POSTGRES_REQUEST_LEN];
@@ -640,7 +607,7 @@ void kb_module_stage_adapters_configure(void)
    memory_pii_register_turn_classifier(kb_memory_pii_turn);
    memory_pii_register_sensitivity_batch(kb_memory_pii_sensitivity);
    aimee_db2_register_embed_provider(embed_text);
-   aimee_db2_register_identity_key_provider(identity_key);
+   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
    aimee_db2_register_css_render_compare_provider(css_render_compare);
    aimee_db2_register_css_analysis_providers(css_analyze, css_stylesheet_free,
                                              css_extract_class_tokens);

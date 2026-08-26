@@ -51,6 +51,7 @@ services:
   aimee-store-db:
     restart: unless-stopped
     image: ${AIMEE_STORE_DB_IMAGE:-postgres:18}
+    networks: [aimee]
     environment:
       # Literal, not per-field knobs. AIMEE_STORE_URL below is the ONE override
       # that matters: an operator with their own PostgreSQL points it there and
@@ -127,10 +128,11 @@ services:
       # forwarded here cannot be set at all — the documented knob reaches the
       # binary from nowhere and setting it appears to do nothing.
       #
-      # Empty default means "keep the image default", which for both of these is
-      # off, so adding them changes no existing deployment.
+      # Economizer remains opt-in. Roundtable is enabled for a clean managed
+      # install because the shipped config and UI expose it as on by default;
+      # operators can still disable the process explicitly with 0/off/false.
       AIMEE_MODULE_ECONOMIZER: ${AIMEE_MODULE_ECONOMIZER:-}
-      AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-}
+      AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}
       # Reach the managed kb by name on the shared network once it is up.
       AIMEE_KB_API_URL: http://aimee-kb:8741
       # Per-user remote-write identity. These stay empty on a read-only install,

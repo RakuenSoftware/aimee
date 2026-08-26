@@ -10,23 +10,29 @@
 
 #include "modules/db2/c/db2_tenant.h"
 #include "membership.h"
+#include "log.h"
 
 #include <string.h>
 
 /* Read one principal's own teams + default under an identity-bootstrap scope.
  * On any failure leaves *n = 0 / *deflt = 0 (deny). */
-static void lookup_principal(const kb_principal_t *p, int64_t *teams, int *n, int64_t *deflt)
+static void lookup_principal(const kb_principal_t *p, int64_t *teams, int *n, int64_t *deflt,
+                             int *scope_rc, int *teams_rc)
 {
    *n = 0;
    *deflt = 0;
+   *scope_rc = -1;
+   *teams_rc = -1;
    char key[600];
    if (kb_identity_key(p, key, sizeof(key)) != 0)
       return;
    /* Bootstrap: set aimee.principal only (team 0), so the own-rows policy on
     * kb_team_membership exposes exactly this principal's rows. */
-   if (db2_tenant_scope_begin(p, 0) != 0)
+   *scope_rc = db2_tenant_scope_begin(p, 0);
+   if (*scope_rc != 0)
       return;
    int cnt = db2_membership_teams(key, teams, KB_MAX_TEAMS);
+   *teams_rc = cnt;
    if (cnt > 0)
       *n = cnt;
    (void)db2_membership_default_team(key, deflt); /* leaves *deflt=0 when none */
@@ -47,20 +53,31 @@ kb_resolve_status_t kb_identity_resolve(const kb_principal_t *transport,
    int64_t tteams[KB_MAX_TEAMS], ateams[KB_MAX_TEAMS];
    int n_t = 0, n_a = 0;
    int64_t tdefault = 0, adefault = 0;
+   int t_scope_rc = -1, a_scope_rc = -1;
+   int t_teams_rc = -1, a_teams_rc = -1;
 
    if (has_t)
    {
-      lookup_principal(transport, tteams, &n_t, &tdefault);
+      lookup_principal(transport, tteams, &n_t, &tdefault, &t_scope_rc, &t_teams_rc);
       out->transport = *transport;
       out->has_transport = 1;
    }
    if (has_a)
    {
-      lookup_principal(actor, ateams, &n_a, &adefault);
+      lookup_principal(actor, ateams, &n_a, &adefault, &a_scope_rc, &a_teams_rc);
       out->actor = *actor;
       out->has_actor = 1;
    }
 
-   return kb_identity_combine(tteams, n_t, tdefault, has_t, ateams, n_a, adefault, has_a,
-                              named_team, out->teams, &out->n_teams, &out->billing_team);
+   kb_resolve_status_t result =
+       kb_identity_combine(tteams, n_t, tdefault, has_t, ateams, n_a, adefault, has_a, named_team,
+                           out->teams, &out->n_teams, &out->billing_team);
+   if (result != KB_RESOLVE_OK)
+      LOG_WARN("kb.identity",
+               "composite resolution rejected: result=%d named_team=%lld "
+               "service_teams=%d service_scope_rc=%d service_query_rc=%d "
+               "caller_teams=%d caller_scope_rc=%d caller_query_rc=%d",
+               (int)result, (long long)named_team, n_t, t_scope_rc, t_teams_rc, n_a, a_scope_rc,
+               a_teams_rc);
+   return result;
 }
