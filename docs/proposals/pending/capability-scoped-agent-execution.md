@@ -1,6 +1,6 @@
 # Proposal: immutable Go capability scope for delegate disclosure and execution
 
-- **State:** PENDING — restored 2026-08-16 after rejection #2686 discarded a live invariant
+- **State:** PENDING. Restored 2026-08-16 after rejection #2686 discarded a live invariant
   together with its obsolete C placement.
 - **Date:** 2026-07-21; Go ownership rewrite 2026-08-16.
 - **Charter roles:** Enforce / Constrain-Verify / Gate-Promote.
@@ -104,11 +104,11 @@ default toolset, environment channel, or prior pooled-worker state.
 
 The invocation states are explicit:
 
-- `unbound` — named non-delegate compatibility callers only. A delegate invocation may not reach
+- `unbound`: named non-delegate compatibility callers only. A delegate invocation may not reach
   provider request construction or dispatch in this state.
-- `bound_empty` — a valid or failed resolution with no executable tools. Disclosure emits none and
+- `bound_empty`: a valid or failed resolution with no executable tools. Disclosure emits none and
   dispatch denies every tool name.
-- `bound_list` — the frozen ordered canonical list and its complete bound metadata.
+- `bound_list`: the frozen ordered canonical list and its complete bound metadata.
 
 Binding overwrites the complete prior state before resolution begins. Cleanup clears the complete
 state. A shorter second invocation cannot retain a prior tail, and concurrent invocations cannot

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 after descriptor completeness, source ownership, and graph
+- **State:** DONE. Archived 2026-08-04 after descriptor completeness, source ownership, and graph
   validation landed. Authoritative build generation and packaging parity remain in
   [`descriptor-authoritative-build-residual.md`](../pending/descriptor-authoritative-build-residual.md).
 

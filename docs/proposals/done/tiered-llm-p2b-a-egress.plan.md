@@ -1,4 +1,4 @@
-# P2b-a — buffered kb Bedrock egress authority
+# P2b-a: buffered kb Bedrock egress authority
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -134,7 +134,7 @@ the exact `(current principal, current team, requested model)`. In one primary
 transaction it rechecks team membership, exact entitlement, catalog enabled/provider/
 wire/Bedrock adapter constraints, binding enabled, pinned immutable pricing existence,
 and active credential-slot identity. Every unavailable condition collapses to one
-denial result—no catalog/key/pricing existence oracle. Its private fields are never
+denial result, no catalog/key/pricing existence oracle. Its private fields are never
 serialized to the client or logs. The existing P6 authorized-target resolver remains
 the only constructor of the opaque network target, and must resolve within this same
 tenant transaction so the binding and catalog snapshot cannot interleave with a
@@ -191,7 +191,7 @@ states:
 Terminal rows are immutable except that a separate future operator reconciliation may
 move `uncertain` to a proven terminal state; P2b-a exposes no redispatch transition.
 Store only content-free outcome class, authenticated HTTP status when known, usage,
-audit/reservation identifiers, and timestamps—never request/response bodies or signed
+audit/reservation identifiers, and timestamps, never request/response bodies or signed
 headers. WORM guards reject immutable-field changes, illegal transitions, delete, and
 truncate. Runtime has only SECURITY DEFINER operations.
 
@@ -277,7 +277,7 @@ surface into two ownership-safe operations:
   and session-token fields are explicit `(pointer,length)` pairs (no `strlen` contract); it
   creates one initialized, owned `kb_bedrock_wire_request_t`
   containing the body, target-derived host/path, payload hash, access-key identifier,
-  session token if any, and signature—but never the secret access key;
+  session token if any, and signature, but never the secret access key;
 - a dispatcher accepts only the opaque target plus that owned signed request and does
   TLS/network/response decoding without any raw credential parameter.
 
@@ -345,16 +345,16 @@ production-live; it replaces the predicate implementation, not the route contrac
 
 ## Code units
 
-1. **P2b-a1 — schema and DB2:** private binding, opaque resolver, conservative pricing,
+1. **P2b-a1, schema and DB2:** private binding, opaque resolver, conservative pricing,
    atomic admission, dispatch machine/sweeper, grants, SQLite shape-only mirrors, and
    real-PG concurrency/rollback/WORM tests.
-2. **P2b-a2 — transport identity and HTTP safety:** reqctx transport principal,
+2. **P2b-a2, transport identity and HTTP safety:** reqctx transport principal,
    strict framed reader/deadlines, bounded listener workers, route registration, and
    identity/leak/saturation tests.
-3. **P2b-a3 — IR/admission/sign/dispatch orchestration:** strict parser/digest,
+3. **P2b-a3, IR/admission/sign/dispatch orchestration:** strict parser/digest,
    vault credential parser and signed-request ownership split, durable outcome
    handling, response render, failpoints, and focused sanitizers/fuzzers.
-4. **P2b-a4 — live gate:** operator binding command, CT260 fixture/scripts, real
+4. **P2b-a4, live gate:** operator binding command, CT260 fixture/scripts, real
    PG17+mTLS+signed HWM/mock Bedrock proof, documentation/status tally.
 
 Each unit is independently committed and verified; the branch is adversarially
@@ -367,7 +367,7 @@ roundtable-reviewed after the live gate and every valid finding is fixed before 
 - Strict-envelope corpus/fuzzer: duplicate/unknown keys, numeric edge cases, UTF-8,
   depth/node/body caps, mismatched model/stream, missing/unbounded max tokens, and
   canonical digest equivalence/difference.
-- Identity: issuer+serial—not CN—owns current authorization while
+- Identity: issuer+serial, not CN, owns current authorization while
   `(authority_id,request_id)` owns idempotency; primary admission rejects
   unknown/revoked/mismatched fingerprint and
   issuer/serial even when the listener cache says active; same CN/different serial is

@@ -8,10 +8,10 @@
       "observed_note": "reference dev box, 16-byte inline payload; the ceiling carries ~7x headroom so CI variance does not flake the gate while a gross regression (e.g. a per-event syscall) still trips it."
     },
     "audit_enqueue_overhead_ns": {
-      "description": "Caller-side cost of publishing one governed-action audit row over the bus (audit_bus_emit), EXCLUDING the ledger write, which the migration moves off the caller's thread. This is the committed budget shape for the first real migration (delivery step 3), which is asynchronous: for an async publish the number that matters is what it costs the caller, not a request/reply round trip. Median over test_bus_audit_durability's per-emit samples.",
+      "description": "Caller-side cost of publishing one governed-action audit row over the bus (audit_bus_emit), EXCLUDING the ledger write, which the migration moves off the caller's thread. This is the committed budget shape for the first real migration (delivery step 3), which is asynchronous: for an async publish the number that matters is what it costs the caller, not a request/reply round trip. Each test_bus_audit_durability run reports the median of 5,000 per-emit samples; observed_ns is the median of eight controlled per-run medians.",
       "ceiling_ns": 1000,
-      "observed_ns": 82,
-      "observed_note": "reference dev box; ~12x headroom absorbs CI variance and the occasional backpressure retry while a gross regression (a per-emit syscall, or the async being lost so the caller waits on the write) still trips the gate."
+      "observed_ns": 117,
+      "observed_note": "2026-08-26 controlled reference on an Intel i7-14700K with the test pinned to CPU 1: eight per-run medians were 119, 121, 119, 115, 121, 115, 115, and 115 ns (range 115-121 ns; median 117 ns). The ceiling carries ~8x headroom while a gross regression (a per-emit syscall, or the async being lost so the caller waits on the write) still trips the gate."
     },
     "audit_durability": {
       "invariant": "exactly-once",

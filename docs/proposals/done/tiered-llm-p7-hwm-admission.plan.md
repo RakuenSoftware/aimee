@@ -105,8 +105,8 @@ the guard immediately before KEK acquisition and proceeds only if the generation
 unchanged and the provider is still unsealed. It holds the guard through callback
 cleanup. `vault_seal` takes the exclusive side, increments the generation before
 sealing/cache flush, and never rolls it back on unseal. Thus a use that already entered
-the protected boundary may finish, while an admission waiting across seal—even if an
-unseal follows—is denied. Fleet-wide Postgres seal epochs remain a separate
+the protected boundary may finish, while an admission waiting across seal, even if an
+unseal follows, is denied. Fleet-wide Postgres seal epochs remain a separate
 multi-instance slice and are not claimed here.
 
 Disable pthread cancellation from protected-boundary entry through arena cleanup and

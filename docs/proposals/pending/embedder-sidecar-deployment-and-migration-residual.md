@@ -1,6 +1,6 @@
 # Embedder sidecar deployment and model-migration residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:**
   [`embedder-image-split-and-rebuild.md`](../done/embedder-image-split-and-rebuild.md).
 

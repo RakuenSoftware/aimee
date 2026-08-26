@@ -12,9 +12,9 @@ still be wrong.
 That is true of wfe_store. It was not true of the family: this document said the
 transaction reached db1_plan_step_set_status_output and therefore tied
 execution_plans in, and that function does not appear in wfe_engine.c at all.
-Every write inside both critical sections -- lifecycle_event_add,
+Every write inside both critical sections, lifecycle_event_add,
 stage_attempt_inc, work_item_abandon_children, _add_cost, _set_pause,
-_set_pr_ref, _set_stage, _set_terminal -- is defined in wfe_store.c and nowhere
+_set_pr_ref, _set_stage, _set_terminal, is defined in wfe_store.c and nowhere
 else. Checking that took one grep; asserting it cost six sources several months
 of being described as blocked.
 
@@ -35,12 +35,11 @@ why: "atomic critical section: cost + step outcome + state update."
 `db1_lifecycle_txn_begin`, `_commit` and `_rollback` are declared in
 wfe_store.h, so the catalog would have to serve them. Across the boundary each
 becomes its own request, and the module would have to hold an open transaction
-between requests — on a shared connection, behind the gate mutex that
+between requests, on a shared connection, behind the gate mutex that
 `db1_txn_begin` takes. A caller that died between BEGIN and COMMIT would leave
 that mutex held and every other caller blocked.
 
-That is not a thing to declare and find out about later. It is the reason the
-family stops here.
+That is the reason the family stops here, and it has to be settled before the work starts.
 
 ## Three ways out
 
@@ -52,7 +51,7 @@ the `goto txn_fail` paths.
 
 This is the right end state and it is a redesign of a workflow engine's
 correctness-critical write path. Getting it wrong leaves work items in states
-that no single write produced -- a cost recorded without the step outcome that
+that no single write produced. A cost recorded without the step outcome that
 justified it, or a stage advanced without the cost. That belongs to whoever
 owns that engine, reviewing it as a change to the engine.
 
@@ -70,12 +69,12 @@ direct DB1 connection, which is what the migration exists to remove.
 `db1_conn()` is called in twenty places under `src/server` and
 `src/modules/workflows`, and `BEGIN IMMEDIATE` is opened directly by pki.c (six
 sites), server_mgmt_status.c, server_dev_submit.c and server_mgmt_jwks_cache.c.
-Some of those tables have no family yet, so they are not blocked today -- but
+Some of those tables have no family yet, so they are not blocked today, but
 they are the same shape, and each will reach this question when its family
 does.
 
 Three DB1 sources also live under `src/server/` rather than
-`src/modules/db1/` -- server_mgmt_jwks_cache.c, server_http_mgmt_read_routes.c
+`src/modules/db1/`, server_mgmt_jwks_cache.c, server_http_mgmt_read_routes.c
 and server_mgmt_audit.c. They are compiled into DB1_SRCS from there, which
 means the "one family claims every source" rule has never seen them.
 
@@ -83,7 +82,7 @@ means the "one family claims every source" rule has never seen them.
 
 All six: execution_trace, wfe_binding, pipelines, roadmap_runtime,
 execution_plans and roundtable_pipeline. The friction was ordinary, and the
-predictions here were right about it -- the allocated-array lists needed nothing
+predictions here were right about it, the allocated-array lists needed nothing
 new, and `db1_execution_plan_create` took the delegate_learning answer, with the
 caller serialising and the module parsing.
 
@@ -103,7 +102,7 @@ transaction:
 
 wfe_store.c alone: 34 functions, sixteen of whose writes ride two transactions
 that wfe_engine.c opens and commits across separate calls. The three ways out
-below still stand, and the first is still the right one -- with the correction
+below still stand, and the first is still the right one, with the correction
 that making each critical section a single operation is a change to
 wfe_engine.c and wfe_store.c only, not to the six sources listed above.
 
@@ -115,7 +114,7 @@ rather than from imagining them.
 
 The branching in wfe_engine.c is not the problem. Every branch is pure decision
 -- which pause reason, whether a PENDING in an autonomous run is a dead end,
-which failure class maps to which reason string -- and all of it can stay in the
+which failure class maps to which reason string, and all of it can stay in the
 engine. What must move is the applying, which is always some subset of the same
 six writes:
 
@@ -148,10 +147,10 @@ loses db1_lifecycle_txn_begin/_commit/_rollback, the WFE_CKW macro and every
 half-applied.
 
 The reason this is still not done here: the failure mode is silent. A wrong
-subset leaves a work item in a state no single write produces -- a cost recorded
+subset leaves a work item in a state no single write produces. A cost recorded
 without the outcome that justified it, a stage advanced without the cost, a
 PENDING parked with an empty reason (which the code comments note reads as "not
-parked" and re-runs a gate forever). None of that shows up as a link error or a
+parked" and re-runs a gate forever); none of that shows up as a link error or a
 failing assertion, which is how every other mistake in this migration announced
 itself. It wants tests written against the state machine, by someone reviewing
 it as a change to the engine.

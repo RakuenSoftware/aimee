@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — curator removal delivered and archived 2026-08-04; residual audit extracted.
+- **State:** DONE. Curator removal delivered and archived 2026-08-04; residual audit extracted.
 
 > **Archived after partial delivery.** The background curator's complete touch set is removed again,
 > its authoritative disposition remains checked, and the default lint lane prevents reintroduction.
@@ -30,7 +30,7 @@
 
 > **2026-07-23 amendment reconciliation.** This proposal is essentially unaffected by the suite
 > amendment: its liveness-evidence rule and the background-curator removal stand. The amendment only
-> strengthens the evidence surface — because every inter-module interaction is now a bus event
+> strengthens the evidence surface, because every inter-module interaction is now a bus event
 > ([`core-substrate-and-source-module-boundaries-residual.md`](core-substrate-and-source-module-boundaries-residual.md)),
 > a feature that publishes and subscribes no bus event and has no consumer outside its own cluster is
 > demonstrably dead by construction, which the liveness audit may use as additional mechanical

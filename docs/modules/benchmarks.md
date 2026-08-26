@@ -46,7 +46,7 @@ smoke gates remain owned elsewhere and consume this module rather than belonging
 - `module-runtime`: supplies optional lifecycle, capability, and readiness contracts.
 - `routing`: selects benchmarked providers/arms without allowing benchmark code to change live routing.
 
-Consumers include developers, CI, `aimee agent eval`, `aimee memory benchmark`, `eval.run`, optimize
+Consumers include developers, CI, `aimee eval run`, `aimee memory benchmark`, `eval.run`, optimize
 comparison gates, dashboards, and research scripts. Runtime KB ranker promotion gates consume benchmark
 results but remain owned by learning/memory, not this optional harness module.
 
@@ -68,7 +68,7 @@ physical/build boundary; this slice documents the mismatch without changing it.
 
 ## Surfaces
 
-Surfaces include `aimee agent eval`, `eval.run`, `aimee memory benchmark`, `memory.benchmark`, optimize
+Surfaces include `aimee eval run`, `eval.run`, `aimee memory benchmark`, `memory.benchmark`, optimize
 run/compare, benchmark scripts, dataset provision/download scripts, baseline/result files, dashboard
 summaries, and `bench-smoke.yml`. Names may retain legacy `eval` compatibility during migration, but the
 module taxonomy and new ownership language use `benchmarks`.

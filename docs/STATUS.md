@@ -30,6 +30,11 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
 | Structured PDF evidence | Gated | Coordinates are the base; vectors, tables, assets, and OCR have separate gates. |
 | Autonomous curation | Done | Extract, dedupe, contradict, decay, reflect, and promote through bounded workers. |
+| Temporal assertion recall | Done | Independent world-time and belief-time axes; current-only by default, historical recall opt-in. |
+| Evidence-backed observations | Done | Two independent sessions before a recurrence becomes an observation; every claim carries an exact span and hash. |
+| Reviewed procedural learning | Done | Observations raise proposals into the existing review gate with applicability, expiry, evidence, and rollback. |
+| Typed context assembly | Done | Per-channel budgets, packing traces, watermarks, and trust boundaries. Master and per-channel opt-outs remain. |
+| Index detach, purge, and GC | Proposed | `workspace remove` unregisters only. No shipped command deletes indexed data; the audited lifecycle is designed. |
 | Multi-KB fleet routing | Next | The design selects a KB by corpus, authority, and capabilities; current managed and split profiles configure one KB URL. |
 | Per-KB internal or remote model roles | In progress | Configuration records embedding and synthesis placement; profile support is still converging. There is no standalone inference service. |
 

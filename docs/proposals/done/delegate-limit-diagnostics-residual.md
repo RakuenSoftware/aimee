@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — Go-owned grouped diagnostics and real producer-exhaustion proof delivered
+- **State:** DONE. Go-owned grouped diagnostics and real producer-exhaustion proof delivered
   2026-08-16.
 - **Archived parent:**
   [`delegate-budget-must-fit-its-stage-cap.md`](../done/delegate-budget-must-fit-its-stage-cap.md).

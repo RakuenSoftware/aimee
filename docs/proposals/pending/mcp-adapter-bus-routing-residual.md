@@ -1,6 +1,6 @@
 # MCP adapter: general bus routing residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`mcp-adapter-optional-module.md`](../done/mcp-adapter-optional-module.md)
 

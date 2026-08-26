@@ -1,6 +1,6 @@
 # Modular refactor completion and compatibility: residual work
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`large-refactor-delivery-and-compatibility.md`](../done/large-refactor-delivery-and-compatibility.md)
 

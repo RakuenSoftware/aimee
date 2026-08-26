@@ -1,7 +1,7 @@
 # Plugin modules: one Go module per MCP server or pluggy plugin, registering into the command list
 
 - **State:** PENDING (proposed). Supersedes the C-oriented draft of this scope, which put the
-  adapter in `src/modules/` on the C MCP client — wrong under the standing direction that only
+  adapter in `src/modules/` on the C MCP client, wrong under the standing direction that only
   the event bus and its communication stay in C and everything else becomes a Go module. Extends
   the delivered [`mcp-adapter-optional-module`](../done/mcp-adapter-optional-module.md) from
   *per-daemon* plugin ownership to *per-plugin module processes*. Does not touch the deferred
@@ -21,14 +21,14 @@ removal to a module. Pluggy has no support at all.
 
 **2. The command list exists, but nothing registers into it.** *(Corrected from this
 proposal's first draft, which claimed no command list existed. It does, and the design is
-better for it — this builds on the registry rather than inventing a parallel one.)*
+better for it, this builds on the registry rather than inventing a parallel one.)*
 
 `src/headers/command_registry.h` is THE command table, and its stated invariant is exactly
 what a plugin module needs: *"A capability is registered ONCE, here, by the module that owns
 it. CLI, the v1 RPC routes, MCP and ACP all route from this table."* The declaration
-contract over the bus exists too — `server-go/modules/memory/commands.go` answers event 5894
+contract over the bus exists too, `server-go/modules/memory/commands.go` answers event 5894
 / stage 6 with a `DCMD`→`DCMR` frame carrying `surfaces`, `visibility`, `group`, `verb`,
-`summary` — and `src/modules/protocols/mcp/mcp_group_tool.c` already enumerates the registry
+`summary`, and `src/modules/protocols/mcp/mcp_group_tool.c` already enumerates the registry
 to build its surface.
 
 What is missing is the middle:
@@ -44,19 +44,19 @@ What is missing is the middle:
   `aimee_command_registry_reset()` for teardown and nothing to remove one module's entries,
   which a plugin that disconnects requires.
 
-The target shape is fifteen-ish independent processes — say 10 MCP modules and 5 pluggy
-modules, **one plugin each** — that come and go at runtime. The registry is the right
+The target shape is fifteen-ish independent processes. Say 10 MCP modules and 5 pluggy
+modules, **one plugin each**. That come and go at runtime. The registry is the right
 destination; the driver that fills it, the manifest that reads it, and per-module withdrawal
 are the work.
 
-## Current state — the trace (all file:line verified on branch `testing` @ `553e859cbe`)
+## Current state: the trace (all file:line verified on branch `testing` @ `553e859cbe`)
 
 ### The Go module substrate (exists, and is the target)
 
-- **Multicall host.** `server-go/cmd/aimee-module/main.go` — `aimee-module-NAME
+- **Multicall host.** `server-go/cmd/aimee-module/main.go`, `aimee-module-NAME
   DAEMON_MODULE_BUS_SOCKET`. One binary, N processes, dispatched by argv[0]. This is already
   the multiplicity mechanism this proposal needs.
-- **Module runtime.** `server-go/bus/module_runtime.go` — `ModuleRuntimeConfig{SocketPath,
+- **Module runtime.** `server-go/bus/module_runtime.go`, `ModuleRuntimeConfig{SocketPath,
   ModuleName, PrincipalClass, PrincipalRef, Stages []ModuleStage}`, where each
   `ModuleStage{EventKind, StageID}` binds one event kind to a stage. The runtime attaches to
   the module bus socket and serves invocations; unknown stage, bad decode, or wrong operation
@@ -65,20 +65,20 @@ are the work.
   its `EventKind`, its stage constants, and its wire encode/decode. 20 modules exist under
   `server-go/modules/`.
 - **Outbound identity precedent.** `main.go` already shows that a module needing to *call*
-  another stage carries a second principal — `economizerStorePrincipalRef` (66),
-  `roundtableDelegatePrincipalRef` (65) — because "a module's serving grant requests nothing".
+  another stage carries a second principal, `economizerStorePrincipalRef` (66),
+  `roundtableDelegatePrincipalRef` (65), because "a module's serving grant requests nothing".
   Registering into a command list is an outbound call, so it needs this pattern.
 
 ### The migration rule this obeys
 
 `docs/proposals/pending/db2-as-a-go-module.md` states it plainly: *"There is no cgo bridge.
 The module boundary is language-neutral: phase one uses the C bus client; phase two uses the
-Go bus client."* New work skips phase one — a plugin module is new, so it is Go from the
+Go bus client."* New work skips phase one; A plugin module is new, so it is Go from the
 start and never becomes C debt to port later.
 
 ### What exists in C and is deliberately not extended
 
-`src/modules/protocols/mcp/` — `mcp_client.c` (transport vtable: stdio + SSE, JSON-RPC
+`src/modules/protocols/mcp/`, `mcp_client.c` (transport vtable: stdio + SSE, JSON-RPC
 framing, session handshake, `tools/list` caching, `tools/call`), `mcp_client_registry.c`
 (process-wide registry, `client[64]:tool[128]` → `qualified[160]` namespacing). This is the
 behavioural specification for the Go implementation and the conformance baseline to prove
@@ -103,8 +103,8 @@ aimee-module-pluggy-lint     ── hosts exactly one pluggy plugin
 ...                             (5 of these)
 ```
 
-Each is an instance of one of two Go packages — `server-go/modules/mcp` and
-`server-go/modules/pluggy` — with per-instance configuration. One plugin per module is a
+Each is an instance of one of two Go packages, `server-go/modules/mcp` and
+`server-go/modules/pluggy`, with per-instance configuration. One plugin per module is a
 hard rule, not a default: it makes the failure domain, the identity, the command namespace,
 and the lifetime all the same boundary. A module whose plugin dies has lost its only job,
 so it withdraws its commands and reports failed; nothing else is affected.
@@ -114,24 +114,23 @@ so it withdraws its commands and reports failed; nothing else is affected.
 The module owns a local endpoint and the plugin attaches to it, rather than the module
 reaching out to find a plugin. For an MCP server that means the module owns the transport
 endpoint and speaks MCP across it; for pluggy it means the module owns a socket that
-`aimee-pluggy-host.py` — a thin Python shim loading exactly one pinned plugin distribution —
-connects back to, reflects its hookspecs over, and then serves.
+`aimee-pluggy-host.py` (a thin Python shim loading exactly one pinned plugin distribution) connects back to, reflects its hookspecs over, and then serves.
 
 Both sides then look identical to everything upstream: a set of named, schema'd callables
-with a module identity in front of them. Pluggy's hookspec-to-callable mapping is explicit —
-one hookspec becomes one command, a `firstresult` hookspec returns the single result and a
+with a module identity in front of them. Pluggy's hookspec-to-callable mapping is explicit.
+One hookspec becomes one command, a `firstresult` hookspec returns the single result and a
 non-`firstresult` one returns the list in pluggy's own call order. Hookwrappers are not
 callables and are reported rather than silently dropped.
 
-### Dynamic command registration — the new infrastructure
+### Dynamic command registration: the new infrastructure
 
-This is the part that does not exist. A command list gains a runtime layer over the static
-one:
+The runtime layer does not exist. A command list gains one over the static
+list:
 
 1. On plugin attach, the module enumerates its plugin's commands (name, description, input
    schema, side-effect class).
 2. The module **registers** them, over the bus, using an outbound principal granted exactly
-   that one request — the `economizerStorePrincipalRef` pattern.
+   that one request, the `economizerStorePrincipalRef` pattern.
 3. The registry merges dynamic entries over the static `g_v1_routes`-derived manifest and
    serves the union from `GET /v1/cli/manifest` and `GET /v1/capabilities`.
 4. Connected clients are notified so a long-lived session sees a plugin appear without
@@ -139,7 +138,7 @@ one:
 5. On plugin detach or module exit, registration is withdrawn and clients are notified again.
 
 Commands namespace as `<module-instance>:<command>`, and with 15 instances that namespace is
-the collision boundary — the existing `client[64]:tool[128]` grammar already sizes for it.
+the collision boundary, the existing `client[64]:tool[128]` grammar already sizes for it.
 Precedence at the merge: static route > dynamic registration, and a dynamic command that
 would shadow a static one is refused with a diagnostic, never silently shadowed.
 
@@ -165,7 +164,7 @@ boundary, not a naming convenience.
    **Delivered with:** 21 package tests plus 4 host-dispatch tests, `-race` clean. The
    round-trip serialisation is mutation-verified (removing `Client.callMu` fails the
    out-of-order concurrency test).
-   **Not included:** the plugin is never spawned — see Slice 4. The module serves its stages
+   **Not included:** the plugin is never spawned. See Slice 4. The module serves its stages
    inert, declaring zero commands, until the supply-chain gate exists.
 
 2. **[DONE] Instance identity, principal refs, and EVENT KINDS.**
@@ -176,8 +175,8 @@ boundary, not a naming convenience.
    allocated an aligned pair from a reserved range (`PluginEventBase` 11264), and
    its principal ref separately; both must agree with its `.grant` file
    (`principal_ref=` and the `serve=` list). Both are read from the environment
-   the provisioning owns, and a module missing either **refuses to start** —
-   deriving a base by hashing the instance name would collide two plugins onto
+   the provisioning owns, and a module missing either **refuses to start**,
+deriving a base by hashing the instance name would collide two plugins onto
    one kind, and the bus refuses the second at attach with no indication of why.
    **Gate met:** the scale e2e runs 10 instances concurrently, each answering only
    for its own plugin, plus a deliberate collider on an allocated base which is
@@ -193,14 +192,14 @@ boundary, not a naming convenience.
    - **Withdrawal.** `aimee_command_unregister_module()`; the registry was
      append-only, so a disconnected plugin could neither drop its commands nor
      re-register them (a duplicate is refused).
-   - **DISPATCH — the one that made the rest decorative.** `aimee_command_find_method`
+   - **DISPATCH, the one that made the rest decorative.** `aimee_command_find_method`
      and a command's `fn` had **no production caller at all**, so a registered
      command was listed everywhere and invocable nowhere. `POST /v1/commands/<group>.<verb>`
      now resolves through the registry and calls the handler, which for a plugin
      module dispatches back over the bus to its invoke stage. *(An earlier draft of
      this proposal made that worse: the manifest advertised a bare `/v1/commands/`
-     prefix — a route no client could reach, which is exactly the "listed but
-     unroutable" failure the registry exists to remove. Fixed to the full path,
+     prefix. A route no client could reach, which is exactly the "listed but
+     unroutable" failure the registry exists to remove; Fixed to the full path,
      documented in `api/openapi-server-v1.yaml`, and the conformance gate now
      covers it.)*
    - **MCP tools/list.** Registry commands reached the CLI manifest and nothing
@@ -210,8 +209,8 @@ boundary, not a naming convenience.
      modules from each adding N entries to a list `mcp_tool_profile.c` measured as a
      per-session tax.
 
-   **Push.** `handle_initialize` has always advertised `tools.listChanged` — a promise
-   that the client will be told rather than have to poll — and the notification was
+   **Push.** `handle_initialize` has always advertised `tools.listChanged`, a promise
+   that the client will be told rather than have to poll, and the notification was
    never sent, so a client that trusted the capability never re-listed. The registry
    now carries a generation, `mcp.tools_list` returns it, and the stdio bridge samples
    it and emits `notifications/tools/list_changed` when it moves. Polling under the
@@ -224,7 +223,7 @@ boundary, not a naming convenience.
    callable; a withdrawn one stops resolving so its route 404s rather than dispatching
    into a plugin that is gone.
 
-4. **[DONE] Supply-chain admission — and a correction to what "parity" meant.**
+4. **[DONE] Supply-chain admission, and a correction to what "parity" meant.**
    The original slice claimed OSV **and** permission **and** egress parity. Checking the
    code first showed two of those three were vacuous:
 
@@ -232,9 +231,9 @@ boundary, not a naming convenience.
      START a client whose package carries malware advisories. Module-hosted plugins now go
      through the **same function**, not a copy: the gate was extracted to
      `modules/protocols/mcp/mcp_osv_gate.c` and both callers use it. A duplicate would have
-     been the dangerous kind of bug — passing every test while enforcing a different policy
+     been the dangerous kind of bug, passing every test while enforcing a different policy
      on the path that runs untrusted code.
-   - **Permission: NOT parity — new.** `plugin_permission_t` is parsed and stored and
+   - **Permission: NOT parity, new.** `plugin_permission_t` is parsed and stored and
      **never checked** anywhere; aimee.yaml clients have no per-call permission enforcement
      to be at parity with. Added anyway, because a plugin module's whole job is running
      someone else's tools: an instance declares a ceiling, a tool's required permission is
@@ -247,14 +246,14 @@ boundary, not a naming convenience.
 
    **Control is inverted to make the gate real.** A module no longer starts its plugin;
    it reports the argv it wants to run (`DCMP`) and waits. The daemon runs the gate and
-   answers with a verdict bound to a SHA-256 of exactly those bytes — without that binding
+   answers with a verdict bound to a SHA-256 of exactly those bytes, without that binding
    a module could report a benign command, collect an admit, and spawn something else.
-   **Gate met:** the e2e proves a refused plugin never executes by OBSERVING it — the
+   **Gate met:** the e2e proves a refused plugin never executes by OBSERVING it. The
    refused instance's plugin would create a sentinel file as its first action, and the file
    never appears. Mutation-verified: flipping the verdict to allow makes the sentinel
    appear and the assertion fire.
 
-5. **[DONE] The pluggy module — which turned out to need no Go module at all.**
+5. **[DONE] The pluggy module, which turned out to need no Go module at all.**
    `scripts/aimee-pluggy-host.py` serves one pluggy plugin as an MCP server: it builds a
    `PluginManager`, registers the host application's hookspecs, loads exactly one plugin,
    and reflects each implemented hookspec into one MCP tool. A `firstresult` hookspec
@@ -273,26 +272,26 @@ boundary, not a naming convenience.
 
    Delivered:
    - **Provisioning.** `scripts/provision-plugin-module.py` allocates the two things
-     an instance cannot allocate for itself — `principal_ref` and an aligned
-     event-kind pair — refusing to reuse either, writes the `.grant` the daemon
+     an instance cannot allocate for itself, `principal_ref` and an aligned
+     event-kind pair, refusing to reuse either, writes the `.grant` the daemon
      reads, and prints the environment to start it with. Re-running is an update,
      not a second allocation. `unit-test-plugin-grant-provisioning` feeds its output
      to the daemon's OWN parser (`bus_runtime_policy_load_dir`), so the file format
      the two sides must agree on is checked rather than assumed.
    - **Operator surface.** `GET /v1/dashboard/metrics` carries a `plugins` array:
-     event base, group, command count, state, last error. The state is the point —
-     `refused` / `silent` / `pending` / `active` / `error` all otherwise present as
+     event base, group, command count, state, last error. The state is the point,
+`refused` / `silent` / `pending` / `active` / `error` all otherwise present as
      "zero commands" and each needs a different action.
    - **SSE transport (`server-go/modules/mcp/sse.go`).** The last capability gap.
 
    ### Why the retirement is not a deletion, and what this proposal got wrong
 
    Slice 6 originally said "retirement of `src/modules/protocols/mcp` and the
-   `config_mcp_client_t` boot path". That wording was wrong, and acting on it would
+   `config_mcp_client_t` boot path"; that wording was wrong, and acting on it would
    have broken working features. `src/modules/protocols/mcp/` holds eight files, and
    only **two** are the remote-client path (`mcp_client.c`, `mcp_client_registry.c`).
    The rest are the native MCP tool surface (`mcp_tools*.c`, `mcp_tool_profile.c`,
-   `mcp_skill_tools.c`, `mcp_group_tool.c` — which Slice 3 just wired into
+   `mcp_skill_tools.c`, `mcp_group_tool.c`, which Slice 3 just wired into
    `tools/list`) plus `mcp_osv_gate.c`, which Slice 4 made the SHARED supply-chain
    gate for both paths. Deleting the directory would remove the gate that guards
    the very thing replacing it.
@@ -304,7 +303,7 @@ boundary, not a naming convenience.
 
    And the decisive one: the C client supports **SSE**, and this module did not.
    A plugin module that could only spawn a local process could not host a remote MCP
-   server at all, so retirement would have deleted that capability outright — a
+   server at all, so retirement would have deleted that capability outright, a
    functional gap, not merely a missing evidence gate. **That gap is now closed**
    (`sse.go`, six tests including bearer-on-every-request and relative-endpoint
    resolution, plus a module-level test proving the `Transport` seam makes the two
@@ -314,7 +313,7 @@ boundary, not a naming convenience.
 
    **Live-server evidence now exists** (`docs/validation/plugin-modules-live-on-252.md`):
    a real daemon on `.252`, a provisioned instance, and an `aimee.yaml` client on the
-   SAME server — provisioning, admission, registration, `POST /v1/commands/...`
+   SAME server, provisioning, admission, registration, `POST /v1/commands/...`
    dispatch to a real plugin, withdrawal, and the operator surface all verified over
    HTTP. It also found two defects nothing else had: an `aimee-kb` link regression
    from extracting the OSV gate, and an operator endpoint that reported nothing until
@@ -331,7 +330,7 @@ boundary, not a naming convenience.
       `modules/protocols/mcp/` before that directory can shrink.
 
    These are operational sequencing, not missing implementation. Executing the
-   deletion now would trade a working, shipped feature for an unproven one — the
+   deletion now would trade a working, shipped feature for an unproven one, the
    opposite of what an evidence-gated retirement is for. It stays open deliberately,
    with the blocking list above made concrete rather than left as "needs evidence".
 

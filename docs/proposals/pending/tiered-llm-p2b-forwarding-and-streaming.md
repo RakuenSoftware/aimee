@@ -1,6 +1,6 @@
 # P2b residual: KB forwarding and true streaming
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`tiered-llm-p2-kb-egress-authority.md`](../done/tiered-llm-p2-kb-egress-authority.md)
 

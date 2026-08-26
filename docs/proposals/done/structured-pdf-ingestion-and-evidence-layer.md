@@ -4,19 +4,19 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** ✅ **DONE — Phases 1–2 + the access-controlled evidence surface + agent reachability
+- **State:** **DONE. Phases 1–2 + the access-controlled evidence surface + agent reachability
   shipped; proposal filed.** Phase 1 (#702/#706: extractor + geometry + §6 sensitivity/upload
   enforcement), Phase 2 (#712 search_chunks; #715 §6 quarantine admin; #717 §5 escalation reads
   open_page/open_neighbors/inspect_structure), and the **server-ingress wiring** (#720: four
   agent-callable MCP tools `pdf_search_chunks` / `pdf_open_page` / `pdf_open_neighbors` /
   `pdf_inspect_structure`, each project-scoped) are all merged to `testing`. The full
   access-controlled KB evidence layer is live and agent-reachable. R3 roundtable sign-off
-  (reviewer / architect / data-model Pass; security Conditional Pass — residual is the
+  (reviewer / architect / data-model Pass; security Conditional Pass, residual is the
   explicitly-deferred automated PII detection).
-  - **Carried forward to a successor proposal:** the remaining **deploy-tier** scope — Phase 3
+  - **Carried forward to a successor proposal:** the remaining **deploy-tier** scope. Phase 3
     (table-structure recognition → typed facts + `lookup_table`), Phase 4 (figure/table crops +
     content-addressed blob store + `open_asset`, and OCR for scanned PDFs), plus the optional
-    **vector retrieval** path and the **§5-A answerability signal** — all of which need local
+    **vector retrieval** path and the **§5-A answerability signal**, all of which need local
     sidecar models (ONNX TSR/OCR + the embedder) and a deployed KB to build and validate against.
     They remain specified below for design history; the live successor is
     [[structured-pdf-tables-visual-and-ocr]] in `pending/`.
@@ -24,40 +24,40 @@
   - **1a (PR #702): the pure extractor pipeline + geometry storage.** New module
     `src/kb/kb_doc_pdf.{c,h}` parses poppler `pdftotext -bbox-layout` XHTML →
     pages/lines → normalized `[0,1]` bbox → deterministic **page-boundary** chunking
-    (100-line cap; font/heading heuristics deferred — they are flaky across producers) →
+    (100-line cap; font/heading heuristics deferred; they are flaky across producers) →
     transactional ingest into `kb_documents` (`doc_kind='pdf'`, `chunk_strategy='page'`,
     new `page_start`/`page_end`) + the new **`kb_doc_regions`** per-line coordinate index,
     with neighbour threading, delete-then-insert re-ingest (regions cascade), `embed_raw`
     enqueue, and a 0-chunk guard that never wipes prior rows on an empty extraction. Behind
-    `kb_pdf_ingest_enabled` (default off) with **no live call site yet** — exercised by
+    `kb_pdf_ingest_enabled` (default off) with **no live call site yet**, exercised by
     `src/tests/test_kb_doc_pdf.c` only. **License posture: poppler runs as a separate
     operator-installed process across a process boundary; aimee never links or bundles it.**
   - **1b (PR #706): wiring + §6 sensitivity.** Hardened `pdftotext -bbox-layout` exec wrapper
     (separate operator process; wall-clock deadline + stdout byte-cap + child RLIMIT_CPU/AS/
     FSIZE + `setsid`/group-kill + 0600 `mkstemp` unlinked on all paths). `.pdf` uploads (flag
-    on) route to the structured extractor — gated on the `.pdf` extension AND `%PDF-` magic
-    (a bad-magic `.pdf` is rejected, not silently legacy-processed) — and MUST carry a valid
+    on) route to the structured extractor, gated on the `.pdf` extension AND `%PDF-` magic
+    (a bad-magic `.pdf` is rejected, not silently legacy-processed), and MUST carry a valid
     `sensitivity_class ∈ {public,internal,restricted}` (absent/invalid = 4xx, no rows). The
     class is stamped on every chunk + region; `restricted → quarantine_state='pending'`.
     **Safety:** PDF chunks are NOT embedded, and the KB search is vector-only, so PDF content
     is invisible to existing search by construction until Phase 2's access-controlled
     retrieval lands.
   - **Phase 2 (PR #712): access-controlled citation retrieval.** New KB `/v1/pdf/search`
-    (`search_chunks`) — lexical (case-insensitive, bound-param) content match over PDF chunks,
+    (`search_chunks`), lexical (case-insensitive, bound-param) content match over PDF chunks,
     returning line-level `{page_no, bbox, quote}` citations from `kb_doc_regions`; restricted/
     `quarantine_state='pending'` documents are withheld; token scope inherited from
     `kb_http_route_ex`. **Safety:** PDF content is excluded from every general/derived
-    kb_documents read path — `kb_fetch_doc_row` (both `/v1/search` legs), the curator
-    extraction queue + worker (so PDF text never becomes a searchable derived artifact — a leak
+    kb_documents read path, `kb_fetch_doc_row` (both `/v1/search` legs), the curator
+    extraction queue + worker (so PDF text never becomes a searchable derived artifact, a leak
     caught in review), and the convention-candidate sweep. PDFs stay un-embedded (retrieval is
     lexical).
-  - **§6 quarantine admin (PR #715).** Owner-only `POST /v1/pdf/quarantine` (confirm/reject) —
-    confirm releases a pending restricted PDF (it becomes search_chunks-retrievable), reject
+  - **§6 quarantine admin (PR #715).** Owner-only `POST /v1/pdf/quarantine` (confirm/reject).
+Confirm releases a pending restricted PDF (it becomes search_chunks-retrievable), reject
     purges it; scoped `… RETURNING id` so it acts on exactly the pending PDF chunks.
   - **§5 escalation read tools (PR #717).** `GET /v1/pdf/page` (a page's full citation set),
     `/v1/pdf/neighbors` (prev/next reading-order chunks, project-scoped to close a cross-scope
-    IDOR caught in review), `/v1/pdf/structure` (the document outline) — all quarantine-gated.
-  - **Follow-up (makes it agent-reachable):** the server-ingress wiring — a `kb_client`
+    IDOR caught in review), `/v1/pdf/structure` (the document outline), all quarantine-gated.
+  - **Follow-up (makes it agent-reachable):** the server-ingress wiring. A `kb_client`
     `search_chunks` call folded into `<aimee-context>` + naming the escalation tools in the
     `explore-with` set; optionally, vector retrieval for search_chunks.
   See **Review revisions (R1)** / **(R2)** / **(R3)** for the design history.
@@ -69,8 +69,8 @@
   signal returned with results), Curate (table regions promoted into the typed-
   fact layer), Gate-Promote (default-off flag rollout per the readiness
   program).
-- **Scope — entirely aimee-KB-side except one thin client call:**
-  a new PDF extraction front-end (`src/kb/kb_doc_pdf.{c,h}` — parse to pages /
+- **Scope, entirely aimee-KB-side except one thin client call:**
+  a new PDF extraction front-end (`src/kb/kb_doc_pdf.{c,h}`, parse to pages /
   blocks / lines / chunks + per-line geometry, OCR/TSR via optional local
   sidecars, same pattern as the embedder/reranker), additive geometry on the
   existing chunk spine (`src/modules/db2/c/schema_sqlite.sql` + the Postgres equivalent:
@@ -92,7 +92,7 @@
 ## Goal
 
 Let the **company knowledge base** ingest PDFs into the same inspectable,
-retrievable spine it already uses for code and docs — but with **page and
+retrievable spine it already uses for code and docs, but with **page and
 bounding-box geometry retained on every chunk**, so retrieval can return
 citations that point back to the exact region of the exact page a fact came
 from. Tables become structured facts; figures/tables become retrievable crops;
@@ -102,7 +102,7 @@ This is an **aimee-KB feature.** The KB is the shared, canonical, multi-user
 store: one PDF is ingested once for the whole company, deduped, access-
 controlled, and read by *any* person's aimee-server through `kb_client`. The
 personal agent (aimee-server) gains only a thin client call and keeps its
-existing per-user steering — it does not parse PDFs and does not hold the
+existing per-user steering. It does not parse PDFs and does not hold the
 evidence model. See [[kb-vs-server-tenancy-boundary]].
 
 The design deliberately rides the spine we already have rather than standing up
@@ -129,17 +129,17 @@ it does not replace it.
   rule, the whole document is retained alongside its chunks; aggregate checks
   retrieve rather than re-ingest. PDFs follow the same rule.
 - **Async embedding.** `kb_async_jobs` (`kind='embed_raw'`) already drains
-  chunks to the embedder. New PDF chunks enqueue the same way — embeddings are
+  chunks to the embedder. New PDF chunks enqueue the same way, embeddings are
   one retrieval path among several, not a precondition for ingest. **Embeddings
   stay text-only** (chunk `content`); geometry is *not* embedded and does not
-  participate in ranking — so there is no new embedding model and the "no new
-  service" claim holds. Geometry is used only for citation resolution (§2, §5).
+  participate in ranking, so there is no new embedding model and the "no new
+  service" claim holds; Geometry is used only for citation resolution (§2, §5).
 - **Document upload/push surface.** `src/server/kb_client_docs.c`
   (`..._manifest_json` / `..._upload_json` / `..._push_json`) already does
   client-push document ingest with hashing and dedup.
 - **Optional local model sidecars.** The embedder and reranker already deploy as
   optional local models the KB calls out to. OCR and table-structure-recognition
-  models follow exactly that pattern — no new service class.
+  models follow exactly that pattern, no new service class.
 
 **The genuine gaps for PDFs:** (1) nothing parses a PDF into text + geometry;
 (2) the chunk spine stores text-line ranges (`line_start`/`line_end`), not
@@ -160,12 +160,12 @@ expects, **plus geometry**:
   populates the existing `heading_path` / `chunk_strategy='heading'` columns.
 - **chunks** assembled on structural boundaries from the lines, threaded with
   `prev_chunk_id` / `next_chunk_id`, exactly as the existing chunker does for
-  markdown — so semantic chunks land in `kb_documents` unchanged in shape.
+  markdown, so semantic chunks land in `kb_documents` unchanged in shape.
 
 **Chunks may span pages (decided).** A heading at the bottom of page N whose body
 starts on page N+1 produces one chunk with `page_start=N`, `page_end=N+1`. We
 deliberately **preserve the existing heading-based chunker** rather than forcing
-a page-boundary split — chunk shape stays identical to markdown, and the
+a page-boundary split, chunk shape stays identical to markdown, and the
 per-line geometry in `kb_doc_regions` (§2) carries the precise page for every
 line regardless of where the chunk boundaries fall. The consequence, made
 explicit for consumers: `open_neighbors` can return content from an adjacent
@@ -197,8 +197,8 @@ A chunk spans multiple lines and can cross a page boundary, so chunk-level
 geometry is too coarse for a citation. Two additive pieces:
 
 - **`page_start` / `page_end`** columns on `kb_documents` (coarse, for "which
-  pages does this chunk touch"). These are a *cache* — the authoritative page
-  set is `MIN/MAX(page_no)` over a chunk's `kb_doc_regions` rows — populated at
+  pages does this chunk touch"); these are a *cache*; the authoritative page
+  set is `MIN/MAX(page_no)` over a chunk's `kb_doc_regions` rows, populated at
   ingest in the same transaction that writes the regions, so they cannot drift.
 - a new **`kb_doc_regions`** table, one row per extracted line:
   `(id, chunk_id INTEGER FK→kb_documents(id) ON DELETE CASCADE, document_key
@@ -220,7 +220,7 @@ joins to `kb_doc_regions` for *all* lines of each chunk (so the consumer has
 surrounding context, not just the matched line), and flags the line(s) whose
 `quote` overlaps the query terms as the primary highlight. A single FTS match
 spanning multiple lines yields multiple flagged line citations. This is exactly
-the artifact `auditable-correctness-for-the-kb` wants on the provenance path — a
+the artifact `auditable-correctness-for-the-kb` wants on the provenance path, a
 fact traceable to a highlightable region, not just a relevant document. The two
 proposals share this representation; this one *produces* the coordinates, that
 one *audits* against them.
@@ -231,24 +231,24 @@ one *audits* against them.
   class, deployed like the embedder/reranker sidecars) converts detected table
   regions into structured cells. Cells become **searchable table facts** that
   feed the existing typed-fact layer (`typed-fact-knowledge-layer`) rather than
-  a new fact store — tables are the highest-yield typed-fact source in real
+  a new fact store, tables are the highest-yield typed-fact source in real
   documents. When the sidecar is absent, table regions degrade gracefully to
   text chunks with geometry (still retrievable, just not cell-structured).
 - **Visual evidence.** Detected figure/table regions are rendered to crops and
   stored in a new **`kb_doc_assets`** table
   `(id, document_key TEXT, page_no INTEGER, x0/y0/x1/y1 REAL, kind TEXT,
   caption TEXT, blob_ref TEXT, created_at)`. The crop is retrievable as
-  source-grounded evidence alongside the surrounding text chunk — the on-ramp to
+  source-grounded evidence alongside the surrounding text chunk, the on-ramp to
   multimodal KB entries.
   - **`blob_ref` storage is a new surface, scoped explicitly to Phase 4.** Crops
     are binary and don't belong inline in the DB. They are written to a
     content-addressed blob store under `AIMEE_HOME` (filesystem, one file per
     `sha256`), and `blob_ref` is that `sha256`. Content-addressing gives free
     dedup (identical crops across re-ingests collapse). This is an honestly-new
-    storage dependency — called out here, not hidden under "no new datastore"
+    storage dependency, called out here, not hidden under "no new datastore"
     (which refers to relational stores).
   - **Blob access is gated, never direct (R2-S1).** The `sha256` is a
-    **KB-internal** identifier — it is *never* returned to a client, and the
+    **KB-internal** identifier. It is *never* returned to a client, and the
     blob directory is on the KB host's private filesystem, served by **no**
     static/file route. The sole read path is **`open_asset`**, which takes an
     opaque `kb_doc_assets.id`, applies the same `document_key` access check as
@@ -281,19 +281,19 @@ A small set of **read-only** retrieval primitives on the KB `/v1` API, served by
 `src/kb/kb_service_kb.c`. These are the company-KB tools any consumer (a
 person's aimee-server, a delegate, the roundtable) can call:
 
-- **`search_chunks`** — two-stage: (1) FTS5 + text-embedding candidate retrieval
+- **`search_chunks`**: two-stage: (1) FTS5 + text-embedding candidate retrieval
   over chunk `content`; (2) citation resolution by joining candidates to
   `kb_doc_regions` (§2). Returns chunks with line-level `{page_no, bbox, quote}`
   citations. Optional `--page N` filter.
-- **`open_page`** — all regions for one page of a document, ordered by
+- **`open_page`**: all regions for one page of a document, ordered by
   `line_index`.
-- **`open_neighbors`** — by default the **linear** `prev_chunk_id`/`next_chunk_id`
+- **`open_neighbors`**: by default the **linear** `prev_chunk_id`/`next_chunk_id`
   walk; an optional `hierarchical=true` mode returns sibling chunks under the
   same `heading_path` (more useful for context around a citation). The mode is a
   parameter, not two endpoints.
-- **`inspect_structure`** — the heading/section tree for a document.
-- **`lookup_table`** — structured cells for a table region (when TSR ran).
-- **`open_asset`** — fetch a figure/table crop by `blob_ref`.
+- **`inspect_structure`**: the heading/section tree for a document.
+- **`lookup_table`**: structured cells for a table region (when TSR ran).
+- **`open_asset`**: fetch a figure/table crop by `blob_ref`.
 
 **Access control (every endpoint).** All six endpoints apply the *same*
 document-level access check the KB already enforces on `kb_documents`, using the
@@ -306,13 +306,13 @@ consumer.
 corpus-level answerability signal with a fixed contract so consumers can depend
 on it: a **`float score ∈ [0,1]`** plus an enum **`label ∈ {NONE, LOW, MEDIUM,
 HIGH}`** (default thresholds `<0.15`→NONE, `<0.40`→LOW, `<0.66`→MEDIUM, else
-HIGH — config-overridable per deployment; the defaults mirror the server's
+HIGH, config-overridable per deployment; the defaults mirror the server's
 existing confidence tiers so behaviour is familiar, and the rationale is
 documented with them).
 Inputs are deterministic and KB-side: max FTS rank of the top-k hits, query-term
 coverage across matched chunks, and presence of table-facts for query entities.
 A reference test pins it (e.g. "query Q over fixture corpus C ⇒ score ≥ 0.7,
-label HIGH"). It is a *shared, document-level* judgment and stays in the KB; it
+label HIGH"); it is a *shared, document-level* judgment and stays in the KB; it
 is **not** folded into the personal server's per-user confidence tier (see
 boundary note). It may later be exposed as a standalone, cheaper
 `/v1/answerability?q=…` endpoint that runs only signal computation; that is
@@ -321,7 +321,7 @@ additive and does not change the `search_chunks` contract.
 ## §6 PII and sensitivity policy
 
 PDFs are the highest-risk format for PII (contracts, HR, financial, medical), and
-this is a *company-wide shared* store — so the policy is stated up front, not
+this is a *company-wide shared* store, so the policy is stated up front, not
 deferred. The v1 position, explicitly:
 
 - **Access control is the primary control.** A PDF is only ever as visible as the
@@ -338,7 +338,7 @@ deferred. The v1 position, explicitly:
   - **Upload-time enforcement (R2-S2, Phase 1).** The `src/server/kb_client_docs.c`
     upload handler requires a `sensitivity_class` field in the upload metadata
     and **rejects the upload** (4xx, no rows written) if it is absent or not one
-    of the three allowed values — there is no implicit default that silently
+    of the three allowed values. There is no implicit default that silently
     under-tags a document. The validated class is persisted on the document at
     ingest and copied to every `kb_doc_regions` / `kb_doc_assets` row so
     retrieval filters on it without a join.
@@ -369,18 +369,18 @@ the quarantine state machine, and the upload-time enforcement land in Phase 1
 The personal server change is intentionally minimal: `ingress_preinject.c`
 already issues `kb_client_index_code_search` and `kb_client_memory_context_block`
 and folds their results into the `<aimee-context>` envelope. We add **one** more
-of the same shape — a `kb_client` call to `search_chunks` — and `open_page`,
+of the same shape (a `kb_client` call to `search_chunks`) and `open_page`,
 `open_neighbors`, `inspect_structure`, `lookup_table` join the envelope's
 existing `explore-with:` set so a co-registered agent escalates to *multi-step*
 document retrieval through the KB exactly as it already does for code symbols
 (naming only `search_chunks` would seed the agent but starve the escalation the
 goal calls for). **No new sufficiency logic on the server.** We do *not* fold
-the KB's corpus-level answerability into the server's per-user confidence tier —
-that would drag company-KB judgment into the personal agent.
+the KB's corpus-level answerability into the server's per-user confidence tier.
+That would drag company-KB judgment into the personal agent.
 
 ## Data model summary
 
-Additive only — no new *relational* datastore, no table rebuilt. (The crop blob
+Additive only, no new *relational* datastore, no table rebuilt. (The crop blob
 store, §3, is a deliberately-acknowledged new filesystem surface in Phase 4.)
 
 - `kb_documents`: **+ `page_start`, `page_end`** (nullable; non-PDF docs leave
@@ -472,7 +472,7 @@ returns document evidence.
   sensitivity, not automated detection (§6); a misclassified document is exposed
   to whoever its declared class permits. Automated PII scanning is future work.
 - **Heading-extraction stability.** Heading detection from PDF tags / font
-  heuristics is flaky across producers (LaTeX, Word, Docs, OCR) — unstable chunk
+  heuristics is flaky across producers (LaTeX, Word, Docs, OCR), unstable chunk
   boundaries degrade citations; mitigated by the producer-diversity tests below.
 - **Boundary creep.** The temptation to compute answerability once and reuse the
   server's confidence tier is real and wrong; keep the two judgments at their
@@ -510,97 +510,96 @@ security-privacy / data-model). Security returned **Fail**, the other three
 **Conditional Pass**; all ten blocking findings are resolved. Each blocker and
 where it landed:
 
-- **R1-S1 — no access-control spec for new tables/endpoints** *(security)*:
+- **R1-S1, no access-control spec for new tables/endpoints** *(security)*:
   added `document_key` (denormalized) to `kb_doc_regions`; §5 now states every
   endpoint applies the existing `kb_documents` document-level check and filters
   on `document_key` with no join; Tenancy table unchanged but enforcement made
   explicit.
-- **R1-S2 — no PII / sensitivity policy** *(security)*: new **§6** — access
+- **R1-S2 (no PII / sensitivity policy** *(security)*: new **§6**) access
   control as primary control, uploader-declared sensitivity class
   (`public|internal|restricted`) required at upload, quarantine state, PII
   detection explicitly out of scope for v1 (named future work). Risks now lists
   the residual exposure.
-- **R1-R1 — embedding/geometry interaction unspecified** *(reviewer)*: §0
+- **R1-R1, embedding/geometry interaction unspecified** *(reviewer)*: §0
   async-embedding bullet now states embeddings stay **text-only**, geometry is
   not embedded and not ranked → no new model, "no new service" holds.
-- **R1-R2 — FTS→citation path undefined** *(reviewer)*: §2 + §5 now specify
+- **R1-R2, FTS→citation path undefined** *(reviewer)*: §2 + §5 now specify
   **line-granularity** resolution (FTS/embedding candidate chunks → join all
   lines → flag query-overlapping lines; multi-line matches flag multiple lines).
-- **R1-R3 — cross-page chunk policy conflicts with the chunker** *(reviewer)*:
+- **R1-R3, cross-page chunk policy conflicts with the chunker** *(reviewer)*:
   §1 decides **chunks may span pages** (heading chunker preserved;
   `page_start≠page_end` allowed; `open_neighbors` may cross pages; precision
   recovered at the line level).
-- **R1-A1 — `blob_ref` storage unspecified** *(architect)*: §3 specifies a
+- **R1-A1, `blob_ref` storage unspecified** *(architect)*: §3 specifies a
   content-addressed filesystem blob store under `AIMEE_HOME`
   (`blob_ref`=`sha256`), called out as a **new storage surface scoped to Phase
   4**, and the "no new datastore" claim narrowed to *relational* stores.
-- **R1-A2 — answerability signal had no contract** *(architect)*: §5-A defines
+- **R1-A2, answerability signal had no contract** *(architect)*: §5-A defines
   `score∈[0,1]` + enum `{NONE,LOW,MEDIUM,HIGH}` with thresholds, deterministic
   inputs, and a reference test; optional standalone `/v1/answerability` noted as
   additive.
-- **R1-D1 — `bbox` as TEXT forecloses spatial queries** *(data-model)*: changed
+- **R1-D1, `bbox` as TEXT forecloses spatial queries** *(data-model)*: changed
   to four `REAL` columns (`x0,y0,x1,y1`) on both tables + R*-tree on SQLite;
   normalization convention (top-left, per-page, clamped) fixed in §2.
-- **R1-D2 — per-line volume unplanned** *(data-model)*: Data model now carries
+- **R1-D2, per-line volume unplanned** *(data-model)*: Data model now carries
   row estimates (~150M at 10k PDFs), the three composite indexes for the hot
   queries, and a **measure-before-default-on** gating criterion.
-- **R1-R4 — `kb_doc_assets` keying/FK inconsistent** *(reviewer)*: keying
+- **R1-R4, `kb_doc_assets` keying/FK inconsistent** *(reviewer)*: keying
   standardized on logical `document_key`; `kb_doc_regions` gets `chunk_id` FK
   with `ON DELETE CASCADE`; assets cleanup made an explicit maintenance-path
-  step (no single-document row exists to FK against — stated honestly).
+  step (no single-document row exists to FK against, stated honestly).
 
-**Non-blocking suggestions** — folded: producer-diversity + access-control tests
+**Non-blocking suggestions**, folded: producer-diversity + access-control tests
 (§Tests), `content_type` on regions (§2), `open_neighbors` hierarchical mode +
 the three escalation tools added to the server consumer (§5, Tenancy),
 `--page N` on the CLI (§Surface), `doc_kind='pdf'` reuse (§1), bbox
 normalization convention (§2), sidecar data-retention (§6). **Deferred with
 rationale:** dropping `page_start/page_end` in favour of a derived view
-(suggestion 1) — kept as a drift-proof write-time cache instead, since the join
+(suggestion 1), kept as a drift-proof write-time cache instead, since the join
 cost on the hot `open_page` path is the thing we're avoiding; revisit if the
 cache proves a maintenance burden.
 
 ### R2 (second review round)
 
 A fresh four-lens pass over the R1 revision marked **all ten R1 findings CLOSED**
-and confirmed the tenancy boundary still holds — with one exception that became
+and confirmed the tenancy boundary still holds, with one exception that became
 a new blocker (the blob store). Verdicts: reviewer / architect / data-model
 **Conditional Pass**, security **Fail** (on R2-S1). Both new blockers folded:
 
-- **R2-S1 — blob store bypasses document access control** *(security)*: a
+- **R2-S1, blob store bypasses document access control** *(security)*: a
   content-addressed crop readable by its `sha256` would sidestep `open_asset`'s
   check. §3 now states the `sha256` is **KB-internal, never returned to a
   client**, the blob dir is served by **no** file route, and `open_asset` (taking
   an opaque asset id + applying the `document_key` check) is the **sole** read
-  path — so binary evidence is gated exactly as text is. Tests assert a by-hash
+  path, so binary evidence is gated exactly as text is. Tests assert a by-hash
   fetch outside `open_asset` is denied.
-- **R2-S2 — upload-time sensitivity enforcement undefined** *(security)*: §6 now
+- **R2-S2, upload-time sensitivity enforcement undefined** *(security)*: §6 now
   specifies the `kb_client_docs.c` upload handler **requires** a valid
-  `sensitivity_class` and **rejects** (4xx, no rows) when it is absent/invalid —
-  no silent default — with the class persisted and propagated to regions/assets;
+  `sensitivity_class` and **rejects** (4xx, no rows) when it is absent/invalid (no silent default) with the class persisted and propagated to regions/assets;
   Phase 1. A test covers the rejection.
 
-**Non-blocking suggestions** — folded: chunk-size bound (~100 lines, split
+**Non-blocking suggestions**, folded: chunk-size bound (~100 lines, split
 preserving `heading_path`) + the large-chunk join load test (§1, §Tests),
 heading-extraction fallback to page-boundary chunking with manual-review flag
 (§1), configurable answerability thresholds with documented defaults (§5-A),
 the explicit quarantine state machine + operator route (§6), the periodic
 orphan-blob cleanup job + its integration test (§3). **Deferred with rationale:**
-dropping the `quote` column to derive line text at query time — kept, because
+dropping the `quote` column to derive line text at query time, kept, because
 `quote` is the natural, bbox-aligned join target for a citation and re-slicing
 chunk `content` by `line_index` at query time would re-introduce the per-row work
 the four `REAL` columns were chosen to avoid; the storage cost is accepted.
 Region-level (sub-document) access control is noted as a future extensibility
 path, not v1.
 
-### R3 (third review round) — convergence
+### R3 (third review round): convergence
 
 A third four-lens pass confirmed both R2 security blockers **CLOSED** (the
 `sha256` never crosses the trust boundary; access rides on the opaque
-`kb_doc_assets.id` + `document_key` check — and upload enforcement is a hard 4xx
+`kb_doc_assets.id` + `document_key` check, and upload enforcement is a hard 4xx
 with no silent default) and moved the lenses to **reviewer Pass / architect Pass
 / security Conditional Pass / data-model Pass**, with **no remaining blocking
-findings** and an explicit **READY FOR SIGN-OFF**. Security's one residual — no
-automated PII detection in v1 — is the documented v1 boundary (uploader-declared
+findings** and an explicit **READY FOR SIGN-OFF**. Security's one residual. No
+automated PII detection in v1, is the documented v1 boundary (uploader-declared
 class + access control), with scanning named as future work, judged "a
 defensible v1 position, not a blocker."
 
@@ -610,4 +609,4 @@ hygiene so hashes don't leak into client-visible errors; (2) the eventual-
 consistency window between chunk deletion and the maintenance-path asset/blob
 cleanup (integration-tested, but operationally a brief orphan window); (3)
 keeping asset-id access checks on `document_key` regardless of id guessability.
-No further rounds are warranted — converged.
+No further rounds are warranted, converged.

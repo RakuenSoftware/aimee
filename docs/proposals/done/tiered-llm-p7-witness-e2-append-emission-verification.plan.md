@@ -6,7 +6,7 @@
 
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
   `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). Atomic witness append is wired into all
-  three source ledgers (audit, reseal, open) — proven by the wiring + atomicity gate
+  three source ledgers (audit, reseal, open), proven by the wiring + atomicity gate
   enforced from `run-p1-rls-gate.sh`. Emission on the log path, numeric-only health
   metrics, continuous chain verification with typed integrity alerts, the offline
   verifier tool, and boot fail-closed for a key-holding kb are all delivered. Does
@@ -36,7 +36,7 @@ three places, and nowhere else.
 
 ### Shard model: one reserved shard per source ledger
 
-The three source ledgers are **not** per-`(tenant, provider)` — they are
+The three source ledgers are **not** per-`(tenant, provider)`. They are
 service-global or whole-vault chains. Verified against the code:
 `db2_kb_audit_append` / `kb_audit_worm_append` carry only actor/action/subject;
 `kb_vault_rewrap_worm` and `kb_vault_open_event` are whole-vault. So each ledger
@@ -47,7 +47,7 @@ with real identities.
 | ledger | reserved `(tenant, provider)` | `source_kind` | `source_id` | `source_hash` | `has_source_pred` / `source_pred_hash` |
 |---|---|---|---|---|---|
 | audit | `("!kb", "!audit")` | 0 AUDIT | `seq::text` | the audit row's `row_hash` (a real content hash) | **true** / the audit row's `prev_hash` |
-| reseal | `("!kb", "!reseal")` | 1 REWRAP | `operation_id \|\| '/' \|\| event_kind` | **`sha256(content pack of the rewrap row)`** — not `event_id` | false / zero |
+| reseal | `("!kb", "!reseal")` | 1 REWRAP | `operation_id \|\| '/' \|\| event_kind` | **`sha256(content pack of the rewrap row)`**: not `event_id` | false / zero |
 | open | `("!kb", "!open")` | 2 OPEN | `event_id` | the open row's `row_hash` | false / zero |
 
 Each reserved shard is its own tamper-evident sub-chain with its own checkpoint
@@ -57,7 +57,7 @@ vault maintenance barrier), so one-shard-per-ledger adds no hotspot.
 
 **`source_hash` must bind row content, not identity.** For the audit and open
 ledgers the existing `row_hash` is a true content hash, so the witness reuses it.
-For the reseal ledger, `event_id` is `sha256(label ‖ operation_id ‖ event_kind)` —
+For the reseal ledger, `event_id` is `sha256(label ‖ operation_id ‖ event_kind)`,
 a hash of *identity*, unchanged by a tamper of `state`, `seal_epoch`,
 `receipt_digest`, or `detail`. Using it as `source_hash` would leave those fields
 unwitnessed. The reseal witness therefore computes `source_hash` as a SHA-256 over
@@ -84,36 +84,35 @@ that slice must validate them against the reserved set. A blanket CHECK forbiddi
 `!`-prefixed shard keys is **not** usable here because the reserved shards
 themselves use `!`.
 
-**Reseal — `kb_vault_rewrap_worm`.** Add the call inside the existing definer
+**Reseal, `kb_vault_rewrap_worm`.** Add the call inside the existing definer
 functions in `src/modules/db2/c/schema.sql` that already `PERFORM
 org_vault_rewrap_worm_append`: the `intent`, `resealed`, `completed`, `abort`,
 and `recovery_required` transitions. Each already performs its control-row
 update, operation-row write, and WORM append in one plpgsql body, so the witness
 append joins that transaction with no restructuring.
 
-**D3b open — `kb_vault_open_event`.** Same shape: the completed-open and
+**D3b open, `kb_vault_open_event`.** Same shape: the completed-open and
 idle-open functions already update `kb_vault_control`, insert the open event, and
 `PERFORM` an audit append together.
 
-**Admission — `kb_audit_event`, wired in SQL, not C (finding during implementation).**
+**Admission, `kb_audit_event`, wired in SQL, not C (finding during implementation).**
 The plan originally assumed the admission witness must modify the C
 `db2_kb_audit_append`. Investigation showed otherwise: `kb_audit_event` has two
 writers, and the security-critical one is SQL. Every `vault.key_use` (the append
 that gates key attachment), reseal, open, rotation, catalog, registry, and status
 event is written by the SQL `kb_audit_worm_append`, which already serializes
 appenders under `pg_advisory_xact_lock`. **The witness append is wired there**, in
-that transaction — so the key-attachment gate is fully witnessed, the witness
+that transaction, so the key-attachment gate is fully witnessed, the witness
 shard `FOR UPDATE` is never contended (the advisory lock already serialized), and
 the high-blast-radius C admission-path change with its unsafe `MAX(seq)+INSERT`
 sequence assignment is avoided entirely.
 
 The C `db2_kb_audit_append` (`src/modules/db2/c/kb_audit_worm.c`) is the *other* writer, used
 by only three call sites: two conspicuous integration-test overrides in
-`kb_main.c` and artifact promotion in `artifacts.c` — none of them vault or key
+`kb_main.c` and artifact promotion in `artifacts.c`, none of them vault or key
 security events. Witnessing that path (artifact-promotion audits) is a bounded
-follow-up that would need the SERIALIZABLE-retry contract, because unlike the SQL
-path it is not advisory-locked. It is **not** required for the umbrella's security
-property, which is about vault/key events, all of which take the SQL path.
+follow-up that would need the SERIALIZABLE-retry contract, because unlike the SQL path it is not
+advisory-locked. That follow-up is **not** required for the umbrella's security property, which is about vault/key events, all of which take the SQL path.
 
 All three ledgers' wiring is validated on real PG17: `scripts/run-p7-witness-wiring.sh`
 (isolated DB) proves audit/reseal/open each witness in-transaction with
@@ -122,7 +121,7 @@ passes with the audit witnessing active across every subsystem (no regression).
 
 **The witness call must not inherit the audit chain's read-then-insert pattern.**
 The C `db2_kb_audit_append` establishes its sequence and predecessor with
-`SELECT … ORDER BY seq DESC LIMIT 1` followed by `INSERT`, with no advisory lock —
+`SELECT … ORDER BY seq DESC LIMIT 1` followed by `INSERT`, with no advisory lock,
 not safe against concurrent appenders (the SQL `kb_audit_worm_append` *does* take
 `pg_advisory_xact_lock`, so the two writers to `kb_audit_event` differ in safety).
 The witness shard advance uses E1's ensure-sentinel + `FOR UPDATE` instead.
@@ -130,15 +129,15 @@ The witness shard advance uses E1's ensure-sentinel + `FOR UPDATE` instead.
 A noted side effect, not a load-bearing fix: because the witness append takes
 `FOR UPDATE` on the `(!kb,!audit)` shard row inside the same transaction, two
 concurrent audit appends on the wired path serialize on that row and cannot both
-commit the same audit `seq`. E2 must not *rely* on this to fix the audit chain —
-the underlying C `MAX(seq)+INSERT` race is a pre-existing source-ledger defect,
+commit the same audit `seq`. E2 must not *rely* on this to fix the audit chain.
+The underlying C `MAX(seq)+INSERT` race is a pre-existing source-ledger defect,
 out of scope here, and should be surfaced as a follow-up (a sequence-backed
 `INSERT … RETURNING`, mirroring the witness store's own per-shard pattern) rather
 than papered over.
 
 On `witness_concurrency_exhausted` from E1's bounded retry, the caller aborts the
 source event. Evidence that cannot be appended means the source event does not
-commit — that is the invariant working, not an error to swallow.
+commit. That is the invariant working, not an error to swallow.
 
 **Reachability is enforced by tooling, not review.** E1's gate asserted no
 production symbol reaches the witness code. E2 asserts the inverse by the same
@@ -163,14 +162,14 @@ each raising an integrity alert.
 
 - **Signer: a vault-held witness Ed25519 key (not external KMS).** The umbrella's
   own invariant downgrades signatures to transport-integrity and rotation
-  hygiene — comparison against retained copies is the load-bearing defense — so
+  hygiene (comparison against retained copies is the load-bearing defense) so
   coupling the hot-path cadence (every N records / T seconds) to KMS availability
   buys a stronger posture than the threat model needs. This differs from the
   `vault_hwm` precedent (external KMS) because HWM is a one-shot externally
   published boundary marker, not a hot internal control loop. The signing is
   reached through a clean seam `vault_witness_sign(digest32, sig64)` whose current
   implementation is the vault-held key and behind which a future KMS
-  implementation drops in with **no schema change** — the documented B→A path.
+  implementation drops in with **no schema change**, the documented B→A path.
 - **Key provisioning: reuse the vault KEK + custody seam.** The witness private
   key is a normal vault-keyed secret, sealed by the KEK under the selected custody
   anchor, generated during the existing vault provision step, unsealed in-process
@@ -179,7 +178,7 @@ each raising an integrity alert.
   revocation the rotation story needs. Hardening for the in-process unsealed key:
   `mlock` the buffer and `explicit_bzero` it immediately after the sign call, no
   logging of the unsealed bytes. The witness key is **not** a release-gating
-  artifact — holding it does not change the `kb_egress_release_allowed()` story.
+  artifact, holding it does not change the `kb_egress_release_allowed()` story.
 - **C/SQL split: one C-driven `REPEATABLE READ` transaction.** Open txn → SQL
   revalidates the `kb_vault_control` fence (`FOR UPDATE` on the fence row only,
   never on shard heads) → SQL scans + cross-checks and returns the verified leaf
@@ -191,7 +190,7 @@ each raising an integrity alert.
 - **Cross-check walk: from the previous checkpoint's leaf snapshot** in
   production (O(records since last checkpoint)), read inside the same
   `REPEATABLE READ` snapshot. `org_vault_witness_verify_shard` currently walks from
-  genesis — provably correct and the right primitive for the first-ever checkpoint
+  genesis, provably correct and the right primitive for the first-ever checkpoint
   and an operator `--from-genesis` rebuild, but O(all records/shard). The
   incremental walk is a **required follow-up before high-volume production**; it
   is not yet a load concern because the cadence scheduler is not wired.
@@ -199,7 +198,7 @@ each raising an integrity alert.
 ### Witness signing-key lifecycle (verified property)
 
 The witness Ed25519 key is `HKDF(server_kek)`. Checked against the code: nothing
-rotates the server master key — `vault_server_kek` derives from a persisted
+rotates the server master key, `vault_server_kek` derives from a persisted
 `<config_dir>/.vault/.server-master.key` generated once, and the whole-vault reseal
 (`org_vault_rewrap` / the reseal orchestrator) does **not** touch it. Two
 consequences, both worth stating rather than discovering later:
@@ -216,11 +215,11 @@ consequences, both worth stating rather than discovering later:
 
 ### Checkpoint SQL surface (built, PG17-validated)
 
-- `org_vault_witness_verify_shard(tenant, provider)` — the head-vs-log cross-check
+- `org_vault_witness_verify_shard(tenant, provider)`: the head-vs-log cross-check
   (§ above), returns the verified head or raises `P7W01`.
-- `org_vault_witness_checkpoint_leaves()` — one-snapshot scan of all shards,
+- `org_vault_witness_checkpoint_leaves()`: one-snapshot scan of all shards,
   cross-checks each, enforces the 2^20 ceiling (`P7W02`), returns verified leaves.
-- `org_vault_witness_checkpoint_persist(...)` — fenced monotonic-seq insert of an
+- `org_vault_witness_checkpoint_persist(...)`: fenced monotonic-seq insert of an
   already-signed checkpoint (persist-before-emit). The C producer computes the
   root, predecessor digest, and signature, then calls this to durably commit.
 
@@ -234,18 +233,18 @@ health signal for exactly this reason.
 **Status: built and PG17-validated.** `src/modules/db2/c/db2_witness_emit.c` reads committed
 state only, driven from the checkpoint cadence in `src/kb/kb_witness_cadence.c`.
 
-**Log/OTLP path — all evidence bytes.** Witness records, signed checkpoints, and
+**Log/OTLP path. All evidence bytes.** Witness records, signed checkpoints, and
 their leaf snapshots, emitted as base64 of the exact export frame so a retained
 line decodes straight into `aimee-witness-verify`. Emission reads committed state
 only.
 
-**Metrics path — numbers only.** Latest checkpoint sequence, latest checkpoint
+**Metrics path, numbers only.** Latest checkpoint sequence, latest checkpoint
 age, evidence count, emission backlog depth, failed-send count, and
 verification-failure counters, on the existing P9a surface
 (`src/kb/http/kb_http_telemetry.c`). No bytes, no roots, no signatures.
 
-Alerts fire on locally measurable state — backlog depth, failed sends, checkpoint
-age — and never on inferred downstream health. With no consumer registry, aimee
+Alerts fire on locally measurable state, backlog depth, failed sends, checkpoint
+age, and never on inferred downstream health. With no consumer registry, aimee
 cannot distinguish "collector is down" from "no collector configured," and must
 not pretend to.
 
@@ -262,7 +261,7 @@ the "emission re-encode parity test" item carried forward from the E1 review.
 
 **The emission cursor is a position, not evidence.** It lives in
 `kb_vault_witness_emit_cursor`, is deliberately not WORM, and carries no integrity
-role. Advance is monotonic — a lower value is ignored, never applied — so a late or
+role. Advance is monotonic (a lower value is ignored, never applied) so a late or
 duplicated advance cannot rewind the stream into a re-emission storm. Losing the
 cursor entirely causes re-emission, which the offline verifier collapses as
 byte-identical duplicates.
@@ -273,7 +272,7 @@ exact stored snapshot bytes. The offline verifier hashes the payload and require
 equality with the `leaf_snapshot_digest` inside that checkpoint's *signed* body, so
 a substituted or truncated snapshot cannot pass as the leaf set the signature
 committed to. A snapshot whose checkpoint is absent from the stream is reported
-`unmatched` — unverifiable, not tampered — so an operator knows to go fetch the
+`unmatched` (unverifiable, not tampered) so an operator knows to go fetch the
 checkpoint rather than treating it as an attack. Consumers predating this frame
 kind report it as an unknown frame, which was already tolerated and never counted
 as tampering.
@@ -298,8 +297,8 @@ Two were real defects, found and fixed:
 
 - **False tamper alarm on re-emission.** The offline verifier deduped records but
   not checkpoints, while a comment claimed otherwise. A byte-identical re-emitted
-  checkpoint — which this emitter itself produces after a snapshot sink failure, and
-  which a reset cursor produces for the entire run — was reported
+  checkpoint, which this emitter itself produces after a snapshot sink failure, and
+  which a reset cursor produces for the entire run, was reported
   `CONTINUITY_BROKEN` with `any_tamper=1`, because the duplicate's
   `has_predecessor` is false in mid-run position. A healthy system retrying would
   have raised a hard tampering alarm. Checkpoints are now collapsed exactly as
@@ -330,13 +329,13 @@ the other:
 - *Chain verification is continuous by construction.* The checkpoint producer's leaf
   scan calls `org_vault_witness_verify_shard` on every shard every tick, so a shard
   head that diverges from its evidence log raises `head_log_mismatch` and refuses to
-  sign — verified on PG17, including that the producer refuses rather than
+  sign, verified on PG17, including that the producer refuses rather than
   certifying a divergent shard.
 - *Signed-root verification* (`db2_witness_checkpoint_verify_run`, every 300s over a
   bounded window) reconstructs retained checkpoints from stored columns, verifies
   each signature against the current witness key, and checks predecessor continuity.
   "Could not run" is logged as unverified rather than passing silently, and
-  `continuity_unproven` is surfaced as an operator work item — neither clean nor a
+  `continuity_unproven` is surfaced as an operator work item, neither clean nor a
   tampering claim.
 
 Boot fail-closed is built and extends beyond the original wording: a key-holding kb
@@ -365,7 +364,7 @@ own evidence.
 ## 5. The offline verifier tool
 
 A standalone tool that takes emitted bytes plus an out-of-band trust anchor and
-verifies them with **no access to aimee's database** — because during an incident
+verifies them with **no access to aimee's database**, because during an incident
 the database is the thing under suspicion.
 
 It verifies a checkpoint's signature and root, an inclusion proof against a
@@ -376,7 +375,7 @@ immediately before and after so the operator can compare heads across it.
 
 `continuity_unproven` is rendered as a work item, never as a pass. The tool's
 output must not let an operator mistake a routine emission gap for a clean
-result — that is precisely the shape an attacker would hide a fork behind.
+result. That is precisely the shape an attacker would hide a fork behind.
 
 ## 6. What E2 does not do
 
@@ -419,9 +418,9 @@ result — that is precisely the shape an attacker would hide a fork behind.
   the `FOR UPDATE` lock is released at commit without having modified the row, and
   under `REPEATABLE READ` the loser's snapshot still reports `max(seq)=1`, so its
   `v_next` computes to 2 and the `P7W05` equality check **passes**. The unique
-  primary key on `seq` is the load-bearing constraint. `P7W05` remains valuable —
-  it rejects a producer that signed a stale seq it can see is stale, giving a
-  precise error instead of a PK collision — but it is the second line, not the
+  primary key on `seq` is the load-bearing constraint. `P7W05` remains valuable.
+It rejects a producer that signed a stale seq it can see is stale, giving a
+  precise error instead of a PK collision, but it is the second line, not the
   first. Both SQLSTATEs map to `TRANSIENT`, so the observable behaviour is correct
   either way; the note exists so nobody later "simplifies away" the primary key on
   the belief that `P7W05` covers the race.
@@ -433,7 +432,7 @@ result — that is precisely the shape an attacker would hide a fork behind.
 ### CT260 real daemon
 
 - Real aimee-kb, real PG17, swtpm, and a log/OTLP consumer **configured to
-  durably retain the stream** — records as well as checkpoints.
+  durably retain the stream**, records as well as checkpoints.
 - A locally rewritten chain is caught by comparison against retained copies,
   using the offline tool and nothing else.
 - A fork hidden behind a suppressed checkpoint is caught by cross-gap leaf
@@ -457,7 +456,7 @@ are not lost between slices:
   the stored `record_hash`. E1's `record_valid` already rejects a record whose
   `is_first_in_shard` disagrees with `shard_seq == 1` or whose witness predecessor
   is not the genesis sentinel on a first record, so a reconstructed-but-inconsistent
-  record fails to encode — but the round-trip-from-columns test is E2's to add,
+  record fails to encode, but the round-trip-from-columns test is E2's to add,
   because E1 has no caller that reconstructs from columns.
 - **Typed error for shard-key collision.** `vault_witness_merkle_root` returns a
   generic `-1` for a duplicate 8-byte key (an SMT collision) as well as for other
@@ -469,7 +468,7 @@ are not lost between slices:
   single-shot form under the caller's isolation level; it contains no retry. E2 owns
   the bounded (5-attempt) SERIALIZABLE retry around the source-plus-witness
   transaction, raising `witness_concurrency_exhausted` on exhaustion and aborting
-  the source event — never committing a source event whose witness row is missing.
+  the source event, never committing a source event whose witness row is missing.
 
 ## 8b. E2 adversarial review outcome (job 11435)
 
@@ -482,8 +481,8 @@ the same suspicion should not have to re-derive the answer:
   directly. It does *not* go through the one-blob-per-statement cache that
   `aimee_pg_column_blob` uses, so text pointers stay valid for the lifetime of the
   `PGresult` and are unaffected by subsequent blob reads. (The blob cache *is* a
-  real hazard — it caused a genuine bug earlier in E2, fixed by copying each
-  `bytea` immediately — but it does not extend to text columns.)
+  real hazard, it caused a genuine bug earlier in E2, fixed by copying each
+  `bytea` immediately, but it does not extend to text columns.)
 - **Claimed the verifier may not recompute and compare predecessor digests, so a
   swapped checkpoint body at the same seq would pass.** It does:
   `vault_witness_verify_checkpoint_run` calls `vault_witness_checkpoint_digest`
@@ -501,7 +500,7 @@ Findings that were real and are now fixed:
 - The deliberate best-effort `mlock` of the derived signing seed was undocumented
   and read as a swallowed error. It is now commented: `mlock` fails under a low
   `RLIMIT_MEMLOCK` (common in containers), and failing the signature there would
-  halt checkpoint production entirely — a worse outcome than a pageable seed that
+  halt checkpoint production entirely. A worse outcome than a pageable seed that
   is cleansed immediately after use. The cleanse, not the pin, is the load-bearing
   control.
 

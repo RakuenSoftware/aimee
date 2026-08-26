@@ -1,6 +1,6 @@
 # Turn-scoped change sets and safe workspace restore
 
-- **State:** roundtable-approved — design candidate, revision 4.
+- **State:** roundtable-approved. Design candidate, revision 4.
 - **Scope:** deterministic execution safety for Aimee-managed worktrees.
 - **Charter fit:** strengthens existing **Execute / Persist / Enforce / Review**
   boundaries. It adds no intelligence role, policy engine, conversation store, workspace
@@ -671,7 +671,7 @@ duplicating them.
 These slices state what must become true; the implementation plan owns exact signatures
 and SQL.
 
-### P0 — Contain the unsafe legacy path
+### P0: Contain the unsafe legacy path
 
 - change the legacy capture regression from latest-wins to first-wins;
 - propagate capture outcome instead of ignoring it;
@@ -683,7 +683,7 @@ and SQL.
 P0 tests update `test_record_overwrite_within_snapshot` to expect the original bytes and
 assert legacy restore returns `legacy_restore_removed` without writing.
 
-### P1 — V2 storage and turn binding
+### P1: V2 storage and turn binding
 
 - additive DB1 tables, immutable rows, blob store, budgets, state machine;
 - bind presence turn id/principal/worktree before dispatch and seal before `turn_done`;
@@ -693,7 +693,7 @@ assert legacy restore returns `legacy_restore_removed` without writing.
 
 P1 does not expose restore.
 
-### P2 — Native mutation coverage and preview
+### P2: Native mutation coverage and preview
 
 - move capture into the guarded anchored-edit, legacy-edit, and write-file seams;
 - reuse anchored current bytes and `diff.c`;
@@ -702,14 +702,14 @@ P1 does not expose restore.
 
 P2 is read-only at user surfaces.
 
-### P3 — Journaled restore
+### P3: Journaled restore
 
 - short-lived preview binding and exact CAS;
 - per-worktree lock, durable restore/step journal, compensation sets;
 - fd-relative staged apply, fsync ordering, incident freeze/recovery;
 - no force path.
 
-### P4 — Server, CLI, MCP, webchat, and audit parity
+### P4: Server, CLI, MCP, webchat, and audit parity
 
 - server-authoritative `/v1` operations and generated conformance artifacts;
 - thin `cmd_rewind.c` adapter and stable JSON/human printers;
@@ -718,7 +718,7 @@ P2 is read-only at user surfaces.
 - presence `turn_changes` notification and durable reconnect query;
 - audit event parity across every surface.
 
-### P5 — Doctor and measured rollout
+### P5: Doctor and measured rollout
 
 - integrate focused findings into `cmd_doctor.c` and appliance recovery;
 - GC, quarantine, compensation resume, alerts, and dashboards;

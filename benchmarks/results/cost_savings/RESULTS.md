@@ -1,14 +1,14 @@
-# Aimee delegation benchmarks — token/cost savings and parallel-decomposition speedup
+# Aimee delegation benchmarks: token/cost savings and parallel-decomposition speedup
 
 Primary/frontier model: **gpt-5.6-sol** ("codex"). Cheap worker pool: MiniMax-M3,
 mimo-v2.5-pro, kimi-k2.7-code. All numbers measured from the live server `token_audit`
 ledger. Frontier-equivalent pricing: **$1.25 / 1M input, $10 / 1M output**.
 
-Two independent levers, measured separately (they do **not** stack — see Caveats):
+Two independent levers, measured separately (they do **not** stack; see Caveats):
 
-1. **Token/cost** — delegate the drafting to cheap models; the frontier model only
+1. **Token/cost**: delegate the drafting to cheap models; the frontier model only
    supervises. Counts **frontier (manager) tokens only**.
-2. **Speed** — split a multi-file task across parallel calls instead of one monolithic
+2. **Speed**: split a multi-file task across parallel calls instead of one monolithic
    call. Measured with a **queue-free** latency metric.
 
 ---
@@ -22,7 +22,7 @@ Two independent levers, measured separately (they do **not** stack — see Cavea
 | SWE-bench Verified (multi-file, 3–21 files) | 12 | 335,366 → 43,724 | $0.8229 → $0.2309 | −87.0% | −71.9% |
 
 - Both columns are frontier-model (gpt-5.6-sol) tokens only; cheap-worker tokens are
-  **excluded** (verified against the ledger — e.g. the multi-file delegate window contained
+  **excluded** (verified against the ledger, e.g; the multi-file delegate window contained
   259K of MiniMax/mimo worker tokens that are correctly **not** counted).
 - More decomposable → bigger, more consistent savings (multi-file is strongest, every
   instance 72–95%).
@@ -31,7 +31,7 @@ Two independent levers, measured separately (they do **not** stack — see Cavea
 
 ---
 
-## 2. Speed — parallel decomposition (pre-registered, queue-free)
+## 2. Speed: parallel decomposition (pre-registered, queue-free)
 
 **Question:** on a K-file task, does solving each file in a separate parallel call beat one
 model solving all K files at once?
@@ -71,7 +71,7 @@ count.
 
 **Latency metric (this is the corrected part).** Latency comes strictly from
 `token_audit.duration_ms`, a `CLOCK_MONOTONIC` timer wrapped **only** around the provider
-HTTP round-trip (`src/server/agent_runtime.c:1141-1200`) — it **excludes** aimee-side
+HTTP round-trip (`src/server/agent_runtime.c:1141-1200`), it **excludes** aimee-side
 queue/admission wait. The delegate-job `created_at → updated_at` span was verified to
 **include** queue wait (`src/db1/agent_jobs.c:95` inserts the row `pending` at enqueue) and
 is **not** used. Because `duration_ms` is queue-free, parallel latency = `max(duration_ms)`
@@ -98,8 +98,8 @@ accept the aggregate whatever the direction.
 
 ## Harness / reproduce
 
-- `bench_cost_savings.py` — 3-measurement token/cost (best-of-N supervised).
-- `swebench_multifile_prep.py` — prep multi-file SWE-bench Verified instances (region/file).
-- `bench_decompose.py` — file-split / subtask-split decomposition arms.
-- `bench_speed.py` — pre-registered parallel-vs-monolithic speed test (queue-free duration_ms).
-- `bench_reddit_validate.py` — single-file dual-investigation sanity check (tokens + timing).
+- `bench_cost_savings.py`: 3-measurement token/cost (best-of-N supervised).
+- `swebench_multifile_prep.py`: prep multi-file SWE-bench Verified instances (region/file).
+- `bench_decompose.py`: file-split / subtask-split decomposition arms.
+- `bench_speed.py`: pre-registered parallel-vs-monolithic speed test (queue-free duration_ms).
+- `bench_reddit_validate.py`: single-file dual-investigation sanity check (tokens + timing).

@@ -17,7 +17,7 @@ set-equality on the `private_headers` role against a real module.
 
 The completeness domain is every module-local file whose suffix matches the `sources` or
 `private_headers` role, excluding `module.yaml` and everything under
-`src/modules/governance/include/aimee/governance/` (which does not exist — the module has no public
+`src/modules/governance/include/aimee/governance/` (which does not exist; the module has no public
 header directory). The module root contains exactly `gw_stage_governance.c`, `gw_stage_governance.h`,
 and `module.yaml`. The declared source set is `{gw_stage_governance.c}` and the declared
 private-header set is `{gw_stage_governance.h}`; both equal their actual sets, so the latch is exact.
@@ -30,8 +30,8 @@ test. That audit is not repeated here; this slice adds only the completeness ass
 already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
-the governance plane the canonical document describes — OIDC, organizational identity, policy
-distribution, the console surfaces — has been migrated; that code remains distributed across the KB,
+the governance plane the canonical document describes, OIDC, organizational identity, policy
+distribution, the console surfaces, has been migrated; that code remains distributed across the KB,
 DB2, management, and console layers and is not module-local. The latch means the descriptor covers what
 is under `src/modules/governance/` today, and nothing more is there today.
 

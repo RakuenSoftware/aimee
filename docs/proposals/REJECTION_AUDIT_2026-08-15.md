@@ -1,4 +1,4 @@
-# Proposal rejection audit — 2026-08-15
+# Proposal rejection audit: 2026-08-15
 
 This follow-up audits every proposal-rejection PR created during the 2026-08-13 through
 2026-08-15 pending-proposal validation run. It corrects the rule used by those PRs:
@@ -40,20 +40,20 @@ The remaining misrejections are not unowned deferrals. Each gets one atomic PR s
 accept or reject its policy boundary without coupling it to unrelated proposal lifecycle changes.
 The default order after #2662 is #2678, #2686, #2688, then #2690:
 
-- **#2678 — per-user content visibility.** Owner: the required Go `execution-policy` boundary.
+- **#2678, per-user content visibility.** Owner: the required Go `execution-policy` boundary.
   Dependencies: workspace supplies validated actor/project/resource identity, and PostgreSQL RLS is
   a mechanical enforcement adapter rather than the content-authorization owner. Lifecycle
   acceptance: restore the proposal to pending with fail-closed actor/project decisions, explicit
   migration authority, and negative cross-tenant evidence.
-- **#2686 — capability-scoped agent execution.** Owners: Go delegates for dispatch and the required
+- **#2686, capability-scoped agent execution.** Owners: Go delegates for dispatch and the required
   Go execution-policy boundary for authorization. Dependency: one immutable effective capability
   set resolved before either disclosure or execution. Lifecycle acceptance: restore pending with
   disclosure/dispatch parity, denial evidence, and no C-owned policy decision.
-- **#2688 — persona-authored outputs.** Owner: Go `response-composition` for the authored envelope,
+- **#2688, persona-authored outputs.** Owner: Go `response-composition` for the authored envelope,
   voice, and provenance. Dependencies: Go delegates supplies persona/permission evidence, and
   execution-policy authorizes side effects. Lifecycle acceptance: restore pending with compatible
   output composition plus explicit denial and impersonation evidence.
-- **#2690 — Runtime/Control product boundary.** Owners: the existing Go `runtime-web` and
+- **#2690. Runtime/Control product boundary.** Owners: the existing Go `runtime-web` and
   `control-web` processes, with effective settings owned by the Go config store. Packaging remains
   mechanical delivery work. Lifecycle acceptance: restore pending with truthful process separation,
   omit/readiness behavior, effective configuration, transport, packaging, and upgrade evidence.

@@ -1,7 +1,7 @@
 # Dynamic-alpha fusion benchmark
 
 Measures whether the `dynamic_alpha` fusion mode improves retrieval over the
-`rrf` baseline (and `static_alpha`) on a labelled query set — reporting the
+`rrf` baseline (and `static_alpha`) on a labelled query set, reporting the
 **per-shape better/worse split**, not a single average, because dynamic alpha is
 expected to be a *mixed* result: win on lexical/identifier queries without
 regressing semantic ones.
@@ -18,14 +18,14 @@ python3 run.py --endpoint http://192.168.1.254:8741 --project aimee
 ```
 
 Exit code is non-zero if `dynamic_alpha` regresses a `false_positive_guard` /
-`regression` fixture versus `rrf` — so it can gate CI once a stable corpus exists.
+`regression` fixture versus `rrf`, so it can gate CI once a stable corpus exists.
 
 ## Files
 
-- `fixtures.json` — the charter query set (3 `positive`, 2 `false_positive_guard`,
+- `fixtures.json`: the charter query set (3 `positive`, 2 `false_positive_guard`,
   2 `regression`), each with an `expected_top_path_substring`.
-- `run.py` — the A/B runner (this harness).
-- `before_report.json` / `after_report.json` — the 2026-05-03 spike run.
+- `run.py`: the A/B runner (this harness).
+- `before_report.json` / `after_report.json`. The 2026-05-03 spike run.
 
 ## Known limitations before this yields a verdict
 
@@ -37,7 +37,7 @@ before the harness produces a real go/no-go:
    it applies the mode correctly (`fusion_mode_used` reflects the request). But on
    a KB whose doc-embed/curator drain has been wedged, doc embeddings are
    incomplete and retrieval is undiscriminative (flat ~0.03 scores, one artifact
-   dominating) — every fixture misses in every mode. Run only against a KB whose
+   dominating), every fixture misses in every mode. Run only against a KB whose
    curator has fully drained (see the curator-drain lease fix).
 2. **Doc-only surface vs. code fixtures.** `/v1/search` ranks `doc_chunk`s from
    `kb_documents`; three fixtures (`lexical_*`) expect **code** files

@@ -30,20 +30,20 @@ find src/tests -maxdepth 1 -type f -name '*audit*.c' -print | sort
 
 returned these 14 files, all represented in `docs/modules/audit.md`:
 
-1. `src/tests/test_audit_action.c` — audit-owned action primitive
-2. `src/tests/test_audit_action_log.c` — core log writer
-3. `src/tests/test_audit_ledger.c` — audit-owned ledger reader
-4. `src/tests/test_audit_worm.c` — audit-owned SQLite WORM store
-5. `src/tests/test_audit_worm_chain.c` — audit-owned shared chain primitive
-6. `src/tests/test_code_audit.c` — independent CLI code-audit feature
-7. `src/tests/test_code_audit_graph.c` — independent code-audit graph feature
-8. `src/tests/test_db2_code_audit.c` — DB2 code-audit assembly
-9. `src/tests/test_harness_memory_audit.c` — memory interception logging
-10. `src/tests/test_kb_audit_worm.c` — mixed KB/store integration
-11. `src/tests/test_kb_audit_worm_pg.c` — mixed KB/PostgreSQL integration
-12. `src/tests/test_token_audit.c` — DB1 token accounting and agent ingress
-13. `src/tests/test_token_audit_load.c` — DB1 token/ingress concurrency
-14. `src/tests/test_vault_audit.c` — vault/server/log integration
+1. `src/tests/test_audit_action.c`: audit-owned action primitive
+2. `src/tests/test_audit_action_log.c`: core log writer
+3. `src/tests/test_audit_ledger.c`: audit-owned ledger reader
+4. `src/tests/test_audit_worm.c`: audit-owned SQLite WORM store
+5. `src/tests/test_audit_worm_chain.c`: audit-owned shared chain primitive
+6. `src/tests/test_code_audit.c`: independent CLI code-audit feature
+7. `src/tests/test_code_audit_graph.c`: independent code-audit graph feature
+8. `src/tests/test_db2_code_audit.c`: DB2 code-audit assembly
+9. `src/tests/test_harness_memory_audit.c`: memory interception logging
+10. `src/tests/test_kb_audit_worm.c`: mixed KB/store integration
+11. `src/tests/test_kb_audit_worm_pg.c`: mixed KB/PostgreSQL integration
+12. `src/tests/test_token_audit.c`: DB1 token accounting and agent ingress
+13. `src/tests/test_token_audit_load.c`: DB1 token/ingress concurrency
+14. `src/tests/test_vault_audit.c`: vault/server/log integration
 
 Only items 1, 3, 4, and 5 are assigned to the audit descriptor. The other filenames use “audit” in a
 different subsystem or cross a storage/runtime integration boundary; they are not dual-claimed.

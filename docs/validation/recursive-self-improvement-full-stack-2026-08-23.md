@@ -1,4 +1,4 @@
-# Validation — recursive self-improvement, full stack (aimee-kb + aimee-server)
+# Validation: recursive self-improvement, full stack (aimee-kb + aimee-server)
 
 The two earlier reports
 ([S0/S1](recursive-self-improvement-s0-s1-2026-08-23.md),
@@ -7,7 +7,7 @@ up and **`aimee-kb` down**. Everything DB2-backed was therefore covered only by
 unit tests and by SQL run through `psql` by hand: S5's regret ledger, S0's gate
 reading a populated ledger, and S1's correction-signal source.
 
-This report closes that gap — and closing it found another defect.
+This report closes that gap, and closing it found another defect.
 
 - **Commit:** `a143590875` plus its follow-up, on
   `worktree-recursive-self-improvement`, from `origin/testing` at `a2fac47caa`.
@@ -21,8 +21,8 @@ This report closes that gap — and closing it found another defect.
 ## The stack that was actually running
 
 - **`aimee-kb`** against real PostgreSQL, with its own config module on its own
-  bus, listening on `127.0.0.1:18743`. It applied the full DB2 schema itself —
-  including `learning_proposal_fate`, which is how that table is confirmed to
+  bus, listening on `127.0.0.1:18743`. It applied the full DB2 schema itself,
+including `learning_proposal_fate`, which is how that table is confirmed to
   work in the real service rather than in a shim.
 - **`aimee-server`**, with its own config and db1 modules, its own
   `AIMEE_HOME`, and `AIMEE_KB_API_URL` pointing at the KB.
@@ -38,7 +38,7 @@ moving to DB1.
 The gate reads the learning ledger, which is DB2. The daemon builds with DB2
 compiled out, so `learning_gate_check()` took the compiled-out branch and
 returned OPEN unconditionally. It was a no-op at the one place it is enforced,
-`eval_synthesis_admit_pending()` — a loop whose evidence had become entirely
+`eval_synthesis_admit_pending()`, a loop whose evidence had become entirely
 self-referential would still have been allowed to widen its own yardstick,
 which is the single thing S0 exists to prevent.
 
@@ -46,8 +46,8 @@ The symptom was unmissable once both services ran: four committed proposals and
 three recorded fates in Postgres, and the daemon reporting *"no settled
 proposals yet."*
 
-This is the **third defect of the same shape** in this work — a cross-tier
-assumption that does not survive the real process layout — after S3's store
+This is the **third defect of the same shape** in this work. A cross-tier
+assumption that does not survive the real process layout, after S3's store
 placement and the recall-vs-error confusion. Two of the three were found only
 by standing services up.
 
@@ -57,8 +57,8 @@ The gate is now answered where the ledger lives: a `learning.endogeneity` route
 on the KB, reached through `kb_client`. Two things were wrong on the first
 attempt and were corrected before this run:
 
-1. The kb_client action helper **never returns NULL** on a transport failure —
-   it returns an error document. The "unreachable" branch was dead code, and
+1. The kb_client action helper **never returns NULL** on a transport failure.
+It returns an error document. The "unreachable" branch was dead code, and
    every failure would have been read as a definite answer. Detection now keys
    on the absence of a `gate` field.
 2. The `eval.candidates` listing still computed the gate locally, so one
@@ -70,7 +70,7 @@ attempt and were corrected before this run:
 ledger means nothing is being committed into one, so there is nothing
 self-referential to guard against, and refusing would make admission depend on
 the KB being up for a feature that otherwise does not need it. An unanswered
-gate reports `unavailable`, never `open` — an operator must be able to tell a
+gate reports `unavailable`, never `open`. An operator must be able to tell a
 measured gate from an absent one.
 
 ## What the full stack proved
@@ -80,7 +80,7 @@ directly in Postgres:
 
 | Check | Result |
 | --- | --- |
-| the daemon sees the KB ledger | `open (75% of 4 committed proposals exogenous)` — matching `psql` and the KB's own answer |
+| the daemon sees the KB ledger | `open (75% of 4 committed proposals exogenous)`: matching `psql` and the KB's own answer |
 | a wholly self-referential ledger (25 implicit-detector commits) | `closed (0% of 25 committed proposals exogenous)` |
 | a fully reproduced candidate, gate closed | `0 admitted`, and **no task file written** |
 | the same candidate, gate reopened | `1 admitted` |
@@ -96,7 +96,7 @@ enforcing itself, end to end, against a real ledger.
 | Command | Result |
 | --- | --- |
 | `make -C src -j8 all` | exit 0 |
-| `make -C src -j8 unit-tests` | 734 tests; 1 failure — `unit-test-mcp-git`, pre-existing (proven earlier on this host against the base tree) |
+| `make -C src -j8 unit-tests` | 734 tests; 1 failure: `unit-test-mcp-git`, pre-existing (proven earlier on this host against the base tree) |
 | `make -C src lint` | `lint: all 63 checks passed` |
 | `make -C src docs-gen-check` | ok |
 | `make -C src integration-tests` | `integration: 115/115 passed` |
@@ -114,7 +114,7 @@ One intermediate run reported two extra failures (`unit-test-cli-server-compat`,
 `unit-test-server-compute`). Those were an artefact of copying a stale build
 cache onto the host to save a rebuild: the same commit passed locally, and a
 **clean** build on the host passed too. The lesson is recorded rather than
-hidden — do not carry a build cache across a source change.
+hidden. Do not carry a build cache across a source change.
 
 The daemon-only live suite also had one stale expectation of my own: it asserted
 the gate reports `open` with no KB running. That is now `unavailable`, which is

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
@@ -13,7 +13,7 @@
 [surface-neutral-retrieval-substrate.md](surface-neutral-retrieval-substrate.md).
 Classification: **enhancement**.*
 
-> ## SUPERSEDED — the key argument was right for an extractor that no longer exists
+> ## SUPERSEDED. The key argument was right for an extractor that no longer exists
 >
 > This record argued that a retrieval cache must key on `(document, query,
 > budget)` because "a key without the query is a page cache, not a result
@@ -27,7 +27,7 @@ Classification: **enhancement**.*
 > the key.
 >
 > **Implemented** as `db1/web_page_cache.{c,h}`: stripped page text keyed by
-> canonical URL. Consequences, all in the same direction — any query against a
+> canonical URL. Consequences, all in the same direction, any query against a
 > previously-fetched page hits rather than only a repeat of the same query;
 > changing the extractor invalidates nothing, so there is no policy version to
 > bump; and the key has no budget dimension.
@@ -41,7 +41,7 @@ Classification: **enhancement**.*
 
 ## Problem
 
-There is no retrieval cache anywhere in the tree — `semcache`,
+There is no retrieval cache anywhere in the tree, `semcache`,
 `semantic_cache`, and `retrieval_cache` all return zero matches. `tool_web_read`
 therefore refetches a page on every call, including when the same page is read
 repeatedly within one investigation.
@@ -68,7 +68,7 @@ constrain any real design:
 At minimum: the surface; the normalized document identity; the normalized query;
 the selection budget; and a policy version covering the chunker, the legs, and
 the selection rule, so that changing any of them invalidates rather than serves
-stale output. Authorization scope matters too — a cached result must not cross a
+stale output. Authorization scope matters too. A cached result must not cross a
 principal boundary that the live path would have enforced.
 
 ## Design questions to settle before implementing
@@ -78,7 +78,7 @@ principal boundary that the live path would have enforced.
   likely answer.
 - Freshness. Static per-surface TTLs are the simple starting point; inferred
   volatility is explicitly deferred until staleness failures are observed.
-- Invalidation on policy change — a version column compared on read, rather than
+- Invalidation on policy change. A version column compared on read, rather than
   a migration on every tuning change.
 - Interaction with egress policy: a cache hit must not become a way to serve
   content that current policy would now refuse to fetch. Re-validating the

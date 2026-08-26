@@ -1,11 +1,11 @@
-# P2a implementation plan — org model catalog + entitlement (P2 §1, catalog-only)
+# P2a implementation plan: org model catalog + entitlement (P2 §1, catalog-only)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
 Slice P2a of P2 (kb egress authority). Branch off `testing` (P1, P3a, P10 s1/s2/s3b
-merged). **Catalog-only — holds NO keys, no egress, no vault.** P7 §0: "No org keys
+merged). **Catalog-only, holds NO keys, no egress, no vault.** P7 §0: "No org keys
 exist on either tier at this point"; P2a introduces the org model *offering* + entitlement
 so the server can later merge a blended roster and P2b can route egress. Explicitly
 allowed to precede the P7 key-handling. Testable end-to-end (schema + RLS + API + real-PG),
@@ -18,14 +18,14 @@ mirroring P1/P3a.
 - Identity/admin: `kb_identity_resolve` (P1 s2), `kb_principal_is_admin()` (db2/schema.sql,
   keyed on `aimee.principal` + `kb_admin_grant`). Tenant RLS via `set_tenant_context`.
 - WORM audit: `db2/kb_audit_worm.c` + `kb_audit_event` triggers (append-only, hash-chain).
-- P3a `org_model_pricing` is keyed by `billable_model` — the catalog's model relates to
+- P3a `org_model_pricing` is keyed by `billable_model`. The catalog's model relates to
   pricing but is distinct (catalog = offering + entitlement; pricing = cost). A catalog
   entry MAY reference a `billable_model` for the P3 metering key (nullable link).
 
 ## Design decisions
 
 1. **`cred_slot_ref` is a server-invisible opaque reference**, scoped by
-   `(org, billing_team, provider, model)` (P2 §1) — NOT a key, NOT a vault slot yet. P2a
+   `(org, billing_team, provider, model)` (P2 §1), NOT a key, NOT a vault slot yet. P2a
    stores it as opaque TEXT set by admin CRUD; it is NEVER returned by
    `/v1/models/entitled` and never leaves kb. P2b resolves it to a vault slot after
    authoritative entitlement resolution. In P2a it is inert metadata.
@@ -54,7 +54,7 @@ mirroring P1/P3a.
    - ENABLE RLS; admin-only direct read on catalog (cred_slot_ref never in a tenant read);
      entitlement tenant read (team ∈ caller memberships) + admin. SECURITY DEFINER fns:
      `org_catalog_entitled(p_principal) -> rows a caller may use` (join filtered by
-     membership; returns model_id/display_name/provider/wire/billable_model — NEVER
+     membership; returns model_id/display_name/provider/wire/billable_model, NEVER
      cred_slot_ref); admin-gated `org_catalog_upsert`, `org_catalog_remove`,
      `org_model_entitle`, `org_model_unentitle` (advisory-locked where needed, WORM-audited
      via a kb_audit append inside the txn).
@@ -64,7 +64,7 @@ mirroring P1/P3a.
 3. **Admin CRUD** `/v1/models/org/{add,remove,set}` + `/v1/models/org/entitle|unentitle`:
    org-admin gated, tenant-scoped, WORM-audited, cross-org rejected.
 4. **CLI** `aimee-kb models org {add,remove,list,entitle,unentitle}` (operator, in-process
-   db2 as owner) — mirrors the P1 `aimee-kb team/project` CLI (`kb_main.c`).
+   db2 as owner), mirrors the P1 `aimee-kb team/project` CLI (`kb_main.c`).
 5. **Tests**: unit (entitlement resolution excludes non-entitled; cred_slot_ref never in
    the entitled surface; admin gate rejects non-admin); real-PG RLS gate
    (`scripts/p2a_catalog_rls_test.sql`, p3a-style): cross-team entitlement isolation (a
@@ -94,18 +94,18 @@ inert. Pure catalog + entitlement + admin CRUD, tenant-isolated + WORM-audited.
 
 ## v2 refinements (roundtable-converged; simpler + more correct)
 
-Panel found no blocking issue; these repeated signals reshape the slice — net effect is
+Panel found no blocking issue; these repeated signals reshape the slice, net effect is
 SIMPLER and more correct:
 
 - **DROP `cred_slot_ref` from P2a.** It is inert here and one-per-catalog-row can't
   express per-team credentials. The org-key vault slot is keyed by `(team, provider)` (P7
-  §9), so P2b DERIVES it from the resolved billing team + the model's provider at egress —
-  no catalog column, no server-invisible field, no exposure surface. (Removes ~8 findings.)
+  §9), so P2b DERIVES it from the resolved billing team + the model's provider at egress,
+no catalog column, no server-invisible field, no exposure surface. (Removes ~8 findings.)
 - **ADD `endpoint` (TEXT, may be empty→provider default) to `org_model_catalog`.** P2b's
   strict-trust-boundary derives provider/wire/**endpoint**/cred exclusively from the
-  authoritative catalog — endpoint must be catalog-owned now to avoid a P2b migration and
+  authoritative catalog, endpoint must be catalog-owned now to avoid a P2b migration and
   to prevent the server ever supplying it.
-- **`org_catalog_entitled()` takes NO principal argument** — it reads
+- **`org_catalog_entitled()` takes NO principal argument**: it reads
   `current_setting('aimee.principal', true)` (the actor set by `set_tenant_context` /
   `db2_tenant_scope_begin`), so a caller can never nominate another principal's
   memberships (no confused-deputy on the owner-bypassing definer). It also **excludes
@@ -116,7 +116,7 @@ SIMPLER and more correct:
   tenant-filtered (defense-in-depth).
 - **Atomic WORM audit.** Every catalog/entitlement mutation is a SECURITY DEFINER function
   that appends the `kb_audit_event` (before/after, actor, action) INSIDE the same txn as
-  the mutation — if the audit append fails the mutation rolls back (never a mutation
+  the mutation, if the audit append fails the mutation rolls back (never a mutation
   without its audit). `org_catalog_remove` deletes the model's entitlements EXPLICITLY
   (auditing the removal) rather than relying on a silent `ON DELETE CASCADE`.
 - **DROP the `billable_model` link.** P3 metering keys off its own derivation; a
@@ -125,7 +125,7 @@ SIMPLER and more correct:
 - **Single-org (platform-scoped), like P3a.** aimee-kb IS the org tier; there is no
   multi-org-in-one-kb, so NO `org_id` column. `UNIQUE(model_id)` is the org-global catalog.
   "cross-org rejected" = a request naming a `team_id` NOT in the caller's resolved
-  memberships is rejected (the P1 resolver rule) — enforced by `org_catalog_entitled`
+  memberships is rejected (the P1 resolver rule), enforced by `org_catalog_entitled`
   reading only the actor's teams. Documented as the P2a boundary (multi-org is a non-goal
   here, same posture as P3a pricing).
 - **CLI writes go through the audited definer functions** (not raw owner INSERTs), so the

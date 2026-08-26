@@ -2,8 +2,8 @@
 
 ## Scope
 
-This slice completes the `delegates` descriptor's `sources` declaration — adding the twenty-four
-sources an earlier slice left undeclared — and expands `tests` from two to nineteen. It does not set
+This slice completes the `delegates` descriptor's `sources` declaration, adding the twenty-four
+sources an earlier slice left undeclared, and expands `tests` from two to nineteen. It does not set
 `ownership_complete`. It is the declaration half of the declaration-then-latch pair; the latch, its
 mutation coverage, and the completeness audit follow in slice 53. It changes descriptor metadata, the
 regenerated test-registration baseline, documentation, and cleanup accounting only; no production code,
@@ -17,12 +17,12 @@ moved and no include site is rewritten.
 Every other Class B module kept all its headers at the module root and declared them private.
 `delegates` is the inverse and was already partially declared:
 
-- It declares **twenty-one public headers** under `src/modules/delegates/include/aimee/delegates/` —
-  the canonical include tree the header-layout checker requires. This slice leaves them unchanged.
+- It declares **twenty-one public headers** under `src/modules/delegates/include/aimee/delegates/`.
+The canonical include tree the header-layout checker requires. This slice leaves them unchanged.
 - It has **zero module-root headers**, so the `private_headers` completeness domain is empty. The
   descriptor therefore declares no `private_headers` field: an absent field is an empty declared set
   compared against an empty actual set, which is exact by construction. This was verified against the
-  validator before writing — a descriptor with all twenty-seven sources, no `private_headers` field,
+  validator before writing, a descriptor with all twenty-seven sources, no `private_headers` field,
   and `ownership_complete: true` passes `validate_complete_ownership`, so slice 53's latch does not
   depend on an untested convention.
 - It already declared **three of twenty-seven sources** (`aimee_ir_rescue.c`, `panel_provider.c`,
@@ -49,7 +49,7 @@ and the gateway orchestration seam.
 
 Make compiles all twenty-seven sources. CMake compiles twenty-three, omitting four:
 `aimee_ir_rescue.c`, `delegate_ephemeral_ws.c`, `delegate_sandbox_image.c`, and
-`gw_orch_delegates.c` — the IR-rescue, ephemeral-workspace, sandbox-image, and gateway-orchestration
+`gw_orch_delegates.c`. The IR-rescue, ephemeral-workspace, sandbox-image, and gateway-orchestration
 units that are server/kb-side. This is the same intentional thin-client profile boundary recorded for
 gateway (slice 38), audit (slice 34), learning (slice 42), workspace (slice 44), vault (slice 46),
 config (slice 48), and git (slice 50), evidenced by the green thin-client CMake jobs. Notably CMake
@@ -80,13 +80,13 @@ at this slice's base commit. Nineteen tests are declared:
 Six adjacent files are excluded because their subject is another module's source, the same
 subject-over-name criterion applied to gateway, learning, workspace, vault, and git:
 
-- `test_delegate_liveness.c` links only `server/liveness.o` — a server test.
-- `test_delegate_token_budget.c` links only `server/agent_coord.o` — a server test.
+- `test_delegate_liveness.c` links only `server/liveness.o`, a server test.
+- `test_delegate_token_budget.c` links only `server/agent_coord.o`, a server test.
 - `test_delegate_ensemble.c` links `modules/roundtable/delegate_ensemble.o` plus four other roundtable
-  objects and `server/` objects; it links `panel_roster.o` only as a dependency — a roundtable test.
-- `test_gw_orch_workflows.c` and `test_gw_orchestration_seam.c` link no delegates object — a
+  objects and `server/` objects; it links `panel_roster.o` only as a dependency, a roundtable test.
+- `test_gw_orch_workflows.c` and `test_gw_orchestration_seam.c` link no delegates object, a
   workflows test and a pipeline orchestration-seam test.
-- `test_panel_ir_contract.c` links no module object and includes `<aimee/ir/panel_result.h>` — an IR
+- `test_panel_ir_contract.c` links no module object and includes `<aimee/ir/panel_result.h>`, an IR
   contract test.
 
 All nineteen declared tests are Make-registered; one, `test_delegate_plan.c`, is additionally
@@ -100,7 +100,7 @@ silently moved partition.
 ## Why declare without latching
 
 The latch asserts the descriptor exhaustively covers the module root. That is true once these
-twenty-four sources are declared — verified directly against the validator, as noted above — so the
+twenty-four sources are declared (verified directly against the validator, as noted above) so the
 latch would pass. It is deferred because declaring the files and asserting completeness are distinct
 claims, and the roundtable required the completeness audit to review declarations merged on their own
 first rather than authored in the same change.
@@ -110,7 +110,7 @@ first rather than authored in the same change.
 The declaration is covered by the existing descriptor validation: every declared path must exist and
 resolve within the module, and the regenerated test-registration baseline pins the nineteen delegates
 tests' per-suite registration. The empty-domain guard from slice 39 does not apply, because the module
-root is not empty. The latch mutation coverage — source removal, planted files, cleared latch — is
+root is not empty. The latch mutation coverage (source removal, planted files, cleared latch) is
 deferred to slice 53. There is no private-header removal case for this module because it has no
 private headers.
 

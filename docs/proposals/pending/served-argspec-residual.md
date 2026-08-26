@@ -1,6 +1,6 @@
 # Proposal: the 21 CLI methods the served argument spec cannot describe
 
-- **State:** PENDING — no slice started.
+- **State:** PENDING. No slice started.
 - **Residual of:** the served thin-client argument specs, PR #2821.
 - **Date:** 2026-08-20.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
@@ -38,8 +38,8 @@ then defended as principle:
 | "a literal comparison is string surgery" | `skip_if_dash` already tests a field's own value against a prefix | 2 |
 | "the `user_capture` family is string surgery" | a constant prefix and a length limit are less computation than the admitted clamp | 4 |
 
-The lesson is not "the line was too strict". It is that a refusal stated as a principle should be
-checkable against the code, and these were not. The reasons below are written so they can be
+The lesson is that a refusal stated as a principle should be checkable against the code, and these
+were not. The reasons below are written so they can be
 checked.
 
 ## Non-goals
@@ -48,7 +48,7 @@ This proposal does not propose a policy language, a general expression evaluator
 reader, or a second argv parser in the spec. Each is the thing the line exists to prevent, and each
 would make a served spec a program transmitted over the wire.
 
-## Group 1 — six methods whose file CONTENTS go in the body
+## Group 1: six methods whose file CONTENTS go in the body
 
 `delegate`, `delegate.launch`, `roundtable.review`, `skill.create`, `skill.edit`, `vault.unlock`
 
@@ -57,15 +57,15 @@ request.
 
 **Why not a `file_contents` source.** Today the set of commands that read a file is fixed in the
 client binary. Served, the SERVER would choose which argv slot becomes a path, so a compromised
-server — or anyone able to answer as one — could make `aimee kb search /etc/passwd` read that file
+server (or anyone able to answer as one) could make `aimee kb search /etc/passwd` read that file
 instead of searching for it. That is a capability grant, not an expressiveness gap, and it is
 qualitatively different from `cwd` and `session`, which are two fixed facts the client already
 sends.
 
 **The intended resolution is the other direction.** The server and the kb already have to stay
 current with file contents. The plan is to index and embed EVERY tree rather than main alone, with
-pruning for trees that go away. Once the server holds every tree, these commands send a REF — a
-path, a tree id — and the server reads its own copy. The client stops carrying bytes at all: a
+pruning for trees that go away. Once the server holds every tree, these commands send a REF. A
+path, a tree id, and the server reads its own copy. The client stops carrying bytes at all: a
 smaller client than `file_contents` would give, and the exfiltration path is removed rather than
 accepted.
 
@@ -74,15 +74,15 @@ away plus a capability the real design never needs.
 
 **Dependency:** whole-tree indexing and pruning. **Open question this proposal does not answer:**
 who owns pruning. Indexing every tree means the index grows with every worktree ever created, and
-an index that is never reaped fails slowly and quietly — the same shape as the defects #2821 was
+an index that is never reaped fails slowly and quietly. The same shape as the defects #2821 was
 about.
 
-## Group 2 — seven methods that parse argv themselves
+## Group 2: seven methods that parse argv themselves
 
 `git.cli`, `git.verify`, `index.ast_grep`, `tool.call`, `memory.supersede`, `skill.autostub`,
 `skill.lifecycle`
 
-**Blocked by:** they never call `cli_args_parse`. They loop over argv with a grammar of their own —
+**Blocked by:** they never call `cli_args_parse`. They loop over argv with a grammar of their own,
 `key=value` pairs, in-place string mutation, a `--status` special case, refusal on a missing `=`,
 and inline-only `--flag=value` in `memory.supersede`'s case.
 
@@ -92,13 +92,13 @@ agree on one form and diverge on the other. The suite now carries `--flag=value`
 so that divergence cannot ship unnoticed.
 
 **What would unblock them:** convert them to `cli_args_parse` like every other marshaller. That is
-a marshaller change, and it WIDENS accepted syntax — `--snapshot=X` starts working. That is a
+a marshaller change, and it WIDENS accepted syntax, `--snapshot=X` starts working. That is a
 change to a shipped CLI's accepted input, which is why it is not made here.
 
 **Acceptance if attempted:** the differential test must pass with the existing `--flag=value`
 samples, and the change should be announced as an accepted-syntax widening rather than a refactor.
 
-## Group 3 — seven methods that need a cross-field rule
+## Group 3: seven methods that need a cross-field rule
 
 | method | the rule |
 | --- | --- |
@@ -110,7 +110,7 @@ samples, and the change should be announced as an accepted-syntax widening rathe
 | `index.span` | the positional INDEX depends on whether an earlier argument parses as a number |
 
 **Blocked by:** each consults another field's value, or computes one. This is the half of the line
-that still forbids something, and it holds where it should — `skill.archive` is refused for the
+that still forbids something, and it holds where it should, `skill.archive` is refused for the
 same reason: it gates a field read from `argv[2]` on `argv[1]` matching a literal.
 
 **What would unblock them:** a marshaller change that removes the cross-field dependency. For
@@ -120,13 +120,13 @@ splitting the command. Either alters what the CLI sends, so the server contract 
 **Do not** solve this by adding conditional presence keyed on another field. That is the point at
 which a spec stops being data.
 
-## Group 4 — one cost decision
+## Group 4: one cost decision
 
 `get_help`
 
 **Blocked by:** nothing in principle. It is pure argv with no client state and no branch. It wears
-the MCP tool-call envelope — method `help.get`, a constant `tool`, a nested `arguments`, and no
-`protocol_version` — and serving it needs four mechanisms for one method, one of which is envelope
+the MCP tool-call envelope, method `help.get`, a constant `tool`, a nested `arguments`, and no
+`protocol_version`, and serving it needs four mechanisms for one method, one of which is envelope
 suppression.
 
 **Why that one mechanism is the objection:** every served spec currently produces a properly
@@ -151,7 +151,7 @@ Any slice that serves a method must:
 
 - add the spec and its samples to `test_cli_argspec`, which runs the REAL compiled marshaller
   against the spec interpreter over identical argv;
-- sample every arity the spec implies, from one positional to n+1 — the gap that let
+- sample every arity the spec implies, from one positional to n+1, the gap that let
   `index.structure` ship a spec sending the file as a `project`;
 - sample the `--flag=value` form;
 - sample the awkward input for whatever convention the method uses, including any limit or refusal,

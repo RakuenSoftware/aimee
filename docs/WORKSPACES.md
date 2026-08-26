@@ -132,8 +132,7 @@ aimee workspace remove /path/to/repo
 ```
 
 Removal unregisters the workspace. It does not silently delete source, git repositories, or durable
-KB knowledge. `aimee index detach <stable-id>` hides the current generation while retaining it for
-audit. `aimee index purge <stable-id>` and `aimee index gc` are separate owner-only, audited,
-dry-run-first operations; each prints the exact manifest hash required for confirmation. See
-[Code intelligence](CODE_INTELLIGENCE.md#project-generations-and-lifecycle) for the lifecycle
-contract and commands.
+KB knowledge, and indexed data survives it. The commands that would detach, purge, or collect that
+data are designed and not shipped, so no supported command deletes an index today. See
+[Code intelligence](CODE_INTELLIGENCE.md#project-generations-and-lifecycle) for the planned
+contract.

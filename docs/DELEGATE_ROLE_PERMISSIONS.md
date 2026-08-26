@@ -62,7 +62,7 @@ holds.
 ## The brief does not change what a delegate may do
 
 A task that says "read-only, do not edit anything" no longer makes a `code`
-delegate read-only. It never really did. The wording changed one derivation and
+delegate read-only. It never did. The wording changed one derivation and
 not the others, so the same delegate could be planned read-only and mounted
 writable, and which one you got depended on which code path asked.
 
