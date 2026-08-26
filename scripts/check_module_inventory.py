@@ -49,7 +49,7 @@ RESERVED_BANDS = (
 REQUIRED_COUNT = 20
 # Principal references stay stable when a module changes activation class;
 # PostgreSQL is also appended while its C-to-Go migration is staged.
-OPTIONAL_COUNT = 10
+OPTIONAL_COUNT = 11
 PINNED_REQUIRED = {"git"}
 
 

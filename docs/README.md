@@ -57,7 +57,7 @@ Start here:
 
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
-- [Observability package](OBSERVABILITY.md)
+- [Observability module](modules/observability.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)
 - [Sanitizer call-site register](SANITIZER_CALL_SITES.md)

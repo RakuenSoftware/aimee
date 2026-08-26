@@ -1,11 +1,11 @@
-# Observability package and tap adapter
+# Observability module and tap adapter
 
 ## Purpose
 
-`observability` is a reusable Go package implemented at
-`server-go/observability`. It is not a first-class Aimee runtime module and does not have a
-module descriptor. Consumers import it from the repository's existing `server-go` Go module; it
-does not add another `go.mod` or create a separately versioned dependency.
+`observability` is a disabled-by-default Aimee module implemented as a reusable Go package at
+`server-go/modules/observability`. Its descriptor records ownership and dependency edges, while
+consumers import it from the repository's existing `server-go` Go module. It does not add another
+`go.mod` or create a separately versioned dependency.
 
 The package gives every Go service one contract for structured logs, metrics, traces, Prometheus
 scraping, HTTP instrumentation, flush, and shutdown. OpenTelemetry is the provider boundary. A
@@ -122,5 +122,5 @@ correctness. Shutdown has a caller-provided deadline and attempts all three sign
 `deploy/observability/` contains collector configurations for the local Grafana stack and Datadog,
 plus a Compose reference stack and provisioned Grafana data sources. These files are operational
 examples, not embedded backends. See
-[`docs/runbooks/observability-security.md`](runbooks/observability-security.md) for the complete
+[`docs/runbooks/observability-security.md`](../runbooks/observability-security.md) for the complete
 production configuration, trust-material, rotation, Prometheus, Collector, and verification guide.

@@ -4,6 +4,7 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,6 +17,12 @@
 static const char k_token[] = "0123456789abcdef0123456789abcdef";
 static char g_configured_hash[65];
 
+static const char *test_tmpdir(void)
+{
+   const char *path = getenv("TMPDIR");
+   return path && path[0] ? path : "/tmp";
+}
+
 void aimee_log(log_level_t level, const char *module, const char *format, ...)
 {
    (void)level;
@@ -26,6 +33,11 @@ void aimee_log(log_level_t level, const char *module, const char *format, ...)
 void kb_http_set_telemetry_token(const char *hash)
 {
    snprintf(g_configured_hash, sizeof(g_configured_hash), "%s", hash ? hash : "");
+}
+
+void kb_http_set_telemetry_enabled(int enabled)
+{
+   (void)enabled;
 }
 
 int kb_http_telemetry_scrape(const char *presented, int trusted_transport, int require_bearer,
@@ -67,11 +79,10 @@ static int tcp_request(unsigned short port, const char *authorization)
    address.sin_port = htons(port);
    assert(connect(fd, (struct sockaddr *)&address, sizeof(address)) == 0);
    char request[1024];
-   int request_len = snprintf(request, sizeof(request),
-                              "GET /metrics HTTP/1.1\r\nHost: localhost\r\n%s%s%s\r\n",
-                              authorization ? "Authorization: Bearer " : "",
-                              authorization ? authorization : "",
-                              authorization ? "\r\n" : "");
+   int request_len =
+       snprintf(request, sizeof(request), "GET /metrics HTTP/1.1\r\nHost: localhost\r\n%s%s%s\r\n",
+                authorization ? "Authorization: Bearer " : "", authorization ? authorization : "",
+                authorization ? "\r\n" : "");
    assert(request_len > 0 && (size_t)request_len < sizeof(request));
    assert(write(fd, request, (size_t)request_len) == request_len);
    char response[1024] = "";
@@ -118,7 +129,9 @@ static void test_disabled_and_fail_closed(void)
 
 static void test_loopback_bearer(void)
 {
-   char token_path[] = "/tmp/aimee-metrics-token-XXXXXX";
+   char token_path[PATH_MAX];
+   assert(snprintf(token_path, sizeof(token_path), "%s/aimee-metrics-token-XXXXXX", test_tmpdir()) <
+          (int)sizeof(token_path));
    int token_fd = mkstemp(token_path);
    assert(token_fd >= 0);
    assert(fchmod(token_fd, 0600) == 0);
@@ -143,7 +156,9 @@ static void test_loopback_bearer(void)
 
 static void test_unix_lifecycle(void)
 {
-   char directory[] = "/tmp/aimee-metrics-dir-XXXXXX";
+   char directory[PATH_MAX];
+   assert(snprintf(directory, sizeof(directory), "%s/aimee-metrics-dir-XXXXXX", test_tmpdir()) <
+          (int)sizeof(directory));
    assert(mkdtemp(directory) != NULL);
    char path[sizeof(((struct sockaddr_un *)0)->sun_path)];
    snprintf(path, sizeof(path), "%s/metrics.sock", directory);

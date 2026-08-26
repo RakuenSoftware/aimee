@@ -1683,23 +1683,8 @@ int main(int argc, char **argv)
    int bootstrap_db2 = 0;
    int json_output = 0;
    int http_port_override = -1; /* -1 = use config */
-   const char *observability_listen = getenv("AIMEE_KB_OBSERVABILITY_LISTEN");
-   if (!observability_listen || !observability_listen[0])
-      observability_listen = getenv("AIMEE_OBSERVABILITY_LISTEN");
-   const char *observability_tls_certificate =
-       getenv("AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE");
-   if (!observability_tls_certificate || !observability_tls_certificate[0])
-      observability_tls_certificate = getenv("AIMEE_OBSERVABILITY_TLS_CERTIFICATE");
-   const char *observability_tls_key = getenv("AIMEE_KB_OBSERVABILITY_TLS_KEY");
-   if (!observability_tls_key || !observability_tls_key[0])
-      observability_tls_key = getenv("AIMEE_OBSERVABILITY_TLS_KEY");
-   const char *observability_tls_client_ca = getenv("AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA");
-   if (!observability_tls_client_ca || !observability_tls_client_ca[0])
-      observability_tls_client_ca = getenv("AIMEE_OBSERVABILITY_TLS_CLIENT_CA");
-   const char *observability_bearer_token_file =
-       getenv("AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE");
-   if (!observability_bearer_token_file || !observability_bearer_token_file[0])
-      observability_bearer_token_file = getenv("AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE");
+   kb_metrics_listener_config_t metrics_listener_config;
+   kb_metrics_listener_config_from_env(&metrics_listener_config);
    const char *fusion_probe_query = NULL;
 
    for (int i = 1; i < argc; i++)
@@ -1716,23 +1701,8 @@ int main(int argc, char **argv)
          json_output = 1;
       else if (strncmp(argv[i], "--http-port=", 12) == 0)
          http_port_override = atoi(argv[i] + 12);
-      else if (strncmp(argv[i], "--observability-listen=", 23) == 0)
-         observability_listen = argv[i] + 23;
-      else if (strncmp(argv[i], "--observability-tls-certificate=",
-                       sizeof("--observability-tls-certificate=") - 1) == 0)
-         observability_tls_certificate =
-             argv[i] + sizeof("--observability-tls-certificate=") - 1;
-      else if (strncmp(argv[i], "--observability-tls-key=",
-                       sizeof("--observability-tls-key=") - 1) == 0)
-         observability_tls_key = argv[i] + sizeof("--observability-tls-key=") - 1;
-      else if (strncmp(argv[i], "--observability-tls-client-ca=",
-                       sizeof("--observability-tls-client-ca=") - 1) == 0)
-         observability_tls_client_ca =
-             argv[i] + sizeof("--observability-tls-client-ca=") - 1;
-      else if (strncmp(argv[i], "--observability-bearer-token-file=",
-                       sizeof("--observability-bearer-token-file=") - 1) == 0)
-         observability_bearer_token_file =
-             argv[i] + sizeof("--observability-bearer-token-file=") - 1;
+      else if (kb_metrics_listener_config_parse_arg(&metrics_listener_config, argv[i]))
+         ;
       else if (strncmp(argv[i], "--log-level=", 12) == 0)
       {
          if (log_parse_level(argv[i] + 12, &log_level) != 0)
@@ -1771,21 +1741,13 @@ int main(int argc, char **argv)
              "  --socket=PATH        (deprecated, ignored) Unix socket path\n"
              "  --bg-socket=PATH     (deprecated, ignored) Background-worker socket path\n"
              "  --http-port=N        TCP port for /v1/* REST API (required; default 0 = off)\n"
-             "  --observability-listen=ENDPOINT\n"
-             "                       Optional Prometheus listener: tcp://host:port or\n"
-             "                       unix:///absolute/path (default: disabled)\n"
-             "  --observability-tls-certificate=FILE\n"
-             "  --observability-tls-key=FILE\n"
-             "  --observability-tls-client-ca=FILE\n"
-             "                       TLS server chain/key and optional client CA for mTLS\n"
-             "  --observability-bearer-token-file=FILE\n"
-             "                       Bearer secret file (32-512 ASCII bytes; mode 0600)\n"
              "  --log-level=LEVEL    Log level: error, warn, info, debug (default: info)\n"
              "  --bootstrap-db2      Provision/verify the configured DB2 Postgres database\n"
              "  --json               Emit JSON for bootstrap commands\n"
              "  --version            Print version\n"
              "  --help               Show this help\n";
          fputs(usage, stdout);
+         kb_metrics_listener_print_usage();
          return 0;
       }
       else
@@ -2323,13 +2285,6 @@ int main(int argc, char **argv)
     * file so all stateless kb instances agree on trusted keys and IdP rotation
     * converges within the bounded refresh. Falls back to the file when no PG rows. */
    kb_oidc_jwks_fleet_enable();
-   /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
-    * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
-   char telemetry_token[256] = "";
-   (void)runtime_secret_get("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_token,
-                            sizeof(telemetry_token));
-   kb_http_set_telemetry_token(telemetry_token);
-   kb_http_set_telemetry_enabled(observability_listen && observability_listen[0]);
    if (vault_tpm_runtime_lock &&
        kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
    {
@@ -2342,7 +2297,6 @@ int main(int argc, char **argv)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
-      runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
       agent_http_cleanup();
       return 1;
    }
@@ -2357,21 +2311,11 @@ int main(int argc, char **argv)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
-      runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
       agent_http_cleanup();
       return 1;
    }
-   kb_metrics_listener_config_t metrics_listener_config = {
-       .endpoint = observability_listen,
-       .tls_certificate_file = observability_tls_certificate,
-       .tls_key_file = observability_tls_key,
-       .tls_client_ca_file = observability_tls_client_ca,
-       .bearer_token_file = observability_bearer_token_file,
-       .bearer_token_hash = telemetry_token,
-   };
-   if (kb_metrics_listener_start(&metrics_listener_config) != 0)
+   if (kb_metrics_listener_start_from_runtime(&metrics_listener_config) != 0)
    {
-      runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
       fprintf(stderr,
               "aimee-kb: invalid observability listener or TLS/authentication configuration\n");
       kb_management_runtime_stop();
@@ -2388,7 +2332,6 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
-   runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
    char kb_http_bearer[4096] = "";
    (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer, sizeof(kb_http_bearer));
    int kb_http_start_rc = kb_http_start(http_port, kb_http_bearer);

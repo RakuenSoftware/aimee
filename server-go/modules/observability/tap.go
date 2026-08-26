@@ -20,7 +20,7 @@ type TapObserver struct {
 }
 
 func NewTapObserver(telemetry Telemetry) (*TapObserver, error) {
-	meter := telemetry.Meter("github.com/JBailes/aimee/server-go/observability/tap")
+	meter := telemetry.Meter("github.com/JBailes/aimee/server-go/modules/observability/tap")
 	events, err := meter.Int64Counter("aimee.tap.events",
 		metric.WithDescription("Events accepted by the ordered event-bus tap"))
 	if err != nil {
@@ -38,7 +38,7 @@ func NewTapObserver(telemetry Telemetry) (*TapObserver, error) {
 		return nil, err
 	}
 	return &TapObserver{
-		log:    telemetry.Logger("github.com/JBailes/aimee/server-go/observability/tap"),
+		log:    telemetry.Logger("github.com/JBailes/aimee/server-go/modules/observability/tap"),
 		events: events, bytes: bytes, exceptions: exceptions,
 	}, nil
 }

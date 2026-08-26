@@ -24,9 +24,9 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/modules/observability"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
-	"github.com/JBailes/aimee/server-go/observability"
 )
 
 func configuredForge(url, socket string) (engine.Forge, error) {

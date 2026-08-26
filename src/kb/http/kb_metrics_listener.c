@@ -4,6 +4,7 @@
 
 #include "kb_http_telemetry.h"
 #include "log.h"
+#include "runtime_secret.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -24,11 +25,11 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-#define KB_METRICS_REQUEST_MAX 8192
+#define KB_METRICS_REQUEST_MAX  8192
 #define KB_METRICS_RESPONSE_MAX (1024 * 1024)
-#define KB_METRICS_BACKLOG 32
-#define KB_METRICS_MAX_WORKERS 8
-#define KB_METRICS_TOKEN_MAX 512
+#define KB_METRICS_BACKLOG      32
+#define KB_METRICS_MAX_WORKERS  8
+#define KB_METRICS_TOKEN_MAX    512
 
 typedef struct
 {
@@ -113,8 +114,8 @@ static void write_all(metrics_connection_t *connection, const char *data, size_t
 
 static void send_response(metrics_connection_t *connection, int status, const char *body)
 {
-   const char *content_type = status == 200 ? "text/plain; version=0.0.4; charset=utf-8"
-                                             : "application/json";
+   const char *content_type =
+       status == 200 ? "text/plain; version=0.0.4; charset=utf-8" : "application/json";
    size_t body_len = body ? strlen(body) : 0;
    char header[640];
    int header_len = snprintf(header, sizeof(header),
@@ -239,8 +240,7 @@ static void serve_metrics_connection(metrics_connection_t *connection)
       return;
    }
    int status = kb_http_telemetry_scrape(bearer, g_metrics_trusted_transport,
-                                         g_metrics_require_bearer, body,
-                                         KB_METRICS_RESPONSE_MAX);
+                                         g_metrics_require_bearer, body, KB_METRICS_RESPONSE_MAX);
    OPENSSL_cleanse(bearer, sizeof(bearer));
    send_response(connection, status, body);
    free(body);
@@ -529,8 +529,8 @@ static int load_token_file(const char *path, char hash_out[65])
       }
    unsigned char digest[EVP_MAX_MD_SIZE];
    unsigned int digest_len = 0;
-   int ok = EVP_Digest(token, len, digest, &digest_len, EVP_sha256(), NULL) == 1 &&
-            digest_len == 32;
+   int ok =
+       EVP_Digest(token, len, digest, &digest_len, EVP_sha256(), NULL) == 1 && digest_len == 32;
    OPENSSL_cleanse(token, sizeof(token));
    if (!ok)
       return -1;
@@ -596,13 +596,68 @@ static int has_value(const char *value)
    return value && value[0];
 }
 
+static const char *service_env_or_generic(const char *service_name, const char *generic_name)
+{
+   const char *value = getenv(service_name);
+   return has_value(value) ? value : getenv(generic_name);
+}
+
+void kb_metrics_listener_config_from_env(kb_metrics_listener_config_t *config)
+{
+   if (!config)
+      return;
+   memset(config, 0, sizeof(*config));
+   config->endpoint =
+       service_env_or_generic("AIMEE_KB_OBSERVABILITY_LISTEN", "AIMEE_OBSERVABILITY_LISTEN");
+   config->tls_certificate_file = service_env_or_generic("AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE",
+                                                         "AIMEE_OBSERVABILITY_TLS_CERTIFICATE");
+   config->tls_key_file =
+       service_env_or_generic("AIMEE_KB_OBSERVABILITY_TLS_KEY", "AIMEE_OBSERVABILITY_TLS_KEY");
+   config->tls_client_ca_file = service_env_or_generic("AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA",
+                                                       "AIMEE_OBSERVABILITY_TLS_CLIENT_CA");
+   config->bearer_token_file = service_env_or_generic("AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE",
+                                                      "AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE");
+}
+
+int kb_metrics_listener_config_parse_arg(kb_metrics_listener_config_t *config, const char *arg)
+{
+   if (!config || !arg)
+      return 0;
+#define OBS_ARG(name, field)                                                                       \
+   if (strncmp(arg, name, sizeof(name) - 1) == 0)                                                  \
+   {                                                                                               \
+      config->field = arg + sizeof(name) - 1;                                                      \
+      return 1;                                                                                    \
+   }
+   OBS_ARG("--observability-listen=", endpoint)
+   OBS_ARG("--observability-tls-certificate=", tls_certificate_file)
+   OBS_ARG("--observability-tls-key=", tls_key_file)
+   OBS_ARG("--observability-tls-client-ca=", tls_client_ca_file)
+   OBS_ARG("--observability-bearer-token-file=", bearer_token_file)
+#undef OBS_ARG
+   return 0;
+}
+
+void kb_metrics_listener_print_usage(void)
+{
+   fputs("  --observability-listen=ENDPOINT\n"
+         "                       Optional Prometheus listener: tcp://host:port or\n"
+         "                       unix:///absolute/path (default: disabled)\n"
+         "  --observability-tls-certificate=FILE\n"
+         "  --observability-tls-key=FILE\n"
+         "  --observability-tls-client-ca=FILE\n"
+         "                       TLS server chain/key and optional client CA for mTLS\n"
+         "  --observability-bearer-token-file=FILE\n"
+         "                       Bearer secret file (32-512 ASCII bytes; mode 0600)\n",
+         stdout);
+}
+
 int kb_metrics_listener_start(const kb_metrics_listener_config_t *config)
 {
    if (!config)
       return -1;
    int has_security = has_value(config->tls_certificate_file) || has_value(config->tls_key_file) ||
-                      has_value(config->tls_client_ca_file) ||
-                      has_value(config->bearer_token_file);
+                      has_value(config->tls_client_ca_file) || has_value(config->bearer_token_file);
    if (!has_value(config->endpoint))
       return has_security ? -1 : 0;
    if (atomic_load_explicit(&g_metrics_running, memory_order_acquire))
@@ -658,7 +713,8 @@ int kb_metrics_listener_start(const kb_metrics_listener_config_t *config)
       }
       g_metrics_fd = listen_tcp(config->endpoint + 6, &loopback);
       g_metrics_trusted_transport = loopback || client_ca;
-      if (g_metrics_fd >= 0 && !loopback && (!certificate || (!client_ca && !g_metrics_require_bearer)))
+      if (g_metrics_fd >= 0 && !loopback &&
+          (!certificate || (!client_ca && !g_metrics_require_bearer)))
          goto fail;
    }
    if (g_metrics_fd < 0)
@@ -684,6 +740,20 @@ fail:
    }
    kb_metrics_listener_stop();
    return -1;
+}
+
+int kb_metrics_listener_start_from_runtime(kb_metrics_listener_config_t *config)
+{
+   if (!config)
+      return -1;
+   char token_hash[256] = "";
+   (void)runtime_secret_get("AIMEE_TELEMETRY_METRICS_TOKEN", token_hash, sizeof(token_hash));
+   kb_http_set_telemetry_enabled(has_value(config->endpoint));
+   config->bearer_token_hash = token_hash;
+   int rc = kb_metrics_listener_start(config);
+   config->bearer_token_hash = NULL;
+   runtime_secret_wipe(token_hash, sizeof(token_hash));
+   return rc;
 }
 
 void kb_metrics_listener_stop(void)
