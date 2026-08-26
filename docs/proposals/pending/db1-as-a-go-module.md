@@ -34,10 +34,10 @@ Taken from `origin/testing` at `2687`:
 | `src/db1` C and header lines | 22,160 |
 | Exported `db1_*` symbols | 409 |
 | Call sites outside `src/db1` | 2,888 |
-|: of those, in `src/tests` | 1,975 |
-|: in `src/server` | 360 |
-|: in `src/modules` | 241 |
-|: in `src/posix`, `src/kb`, `src/modules/db2/c`, platform | 46 |
+| of those, in `src/tests` | 1,975 |
+| of those, in `src/server` | 360 |
+| of those, in `src/modules` | 241 |
+| of those, in `src/posix`, `src/kb`, `src/modules/db2/c`, platform | 46 |
 | **Distinct symbols used in production** (non-test) | **242** |
 
 The gap between 409 exported and 242 production-used is the first useful finding: **167

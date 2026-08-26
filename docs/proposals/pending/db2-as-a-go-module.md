@@ -76,10 +76,10 @@ Measured on `origin/testing` at `0916c09472`:
 | SQL files under `src/modules/db2/c` | 6 |
 | C, header, and SQL lines | 92,852 |
 | Files outside `src/modules/db2/c` that include a DB2 header | 297 |
-|: production files | 147 |
-|: test files | 150 |
+| of those, production files | 147 |
+| of those, test files | 150 |
 | Direct DB2-header include directives outside the boundary | 967 |
-|: production directives | 532 |
+| of those, production directives | 532 |
 | Lines across the six SQL files | 16,349 |
 
 The physical move also exposed the other side of the source boundary. At the relocation merge,

@@ -27,7 +27,7 @@
 | **P7** Hardened kb vault | integration | seal/PolicyNV, PKCS#11, KMS helper, CA-key custody, per-key DEK re-wrap, signed-HWM + crash-resumable rotation core, fenced provision/probe/revoke/retire driver, steady-state signed-HWM use-in-place + WORM admission, prepared-TPM2 reseal helper + receipt discovery/recovery, primary maintenance barrier, whole-vault inventory/staging/atomic promotion, exclusive local guard + dual-epoch admission, completed/quarantine lifecycle, canonical reseal receipts + typed PG verification foundations, production-uninvoked TPM2/PG whole-vault reconciler, **D3a** least-privilege operator status/discovery + mandatory TPM singleton, **D3b** protected operator unseal/mutations + exact terminal cleanup and bounded activation | external WORM delivery + full kill matrix |
 | **P8** thin-client mTLS | yes, done | per-request durable cert revocation, local client enrollment/cert presentation, monotonic durable optional→required ramp | n/a |
 | **P9** Telemetry tiering | partial | **P9a** kb Prometheus export + content-free ingest | **§1/§2** server→kb forwarder + OTLP (needs the mTLS channel) |
-| **P10** Shared vault core | yes, done | core extraction, kb Postgres store, custody selection + seal barrier |: (hardening tracked under P7) |
+| **P10** Shared vault core | yes, done | core extraction, kb Postgres store, custody selection + seal barrier | n/a (hardening tracked under P7) |
 
 P5 is complete: D2a/b provide isolated management-read authority, purpose-separated
 nonce/status/checkpoint composition, bounded agent and five-field safe-config projections, and the
