@@ -1078,8 +1078,9 @@ move only when new exploitability or compensating-control evidence is recorded i
 <a id="acg-031"></a>
 ### ACG-031 — no data-subject erasure, and no content retention control
 
-- **Control objective:** durable personal data has a bounded lifetime, a documented classification,
-  and can be deleted on request with an audit record of what was deleted.
+- **Control objective:** mutable personal data has a bounded lifetime, a documented classification,
+  and can be deleted on request; the immutable WORM ledger records that deletion without retaining
+  the deleted content.
 
 - **Evidence.** `docs/SECURITY.md` instructs operators: "Memory and document ingestion can retain
   sensitive source text. Scope the KB, **configure retention**, and avoid sending restricted
@@ -1094,9 +1095,9 @@ move only when new exploitability or compensating-control evidence is recorded i
   (`src/cmd_index.c:204`) and governs code-index lifecycle, not content.
 
   Separately, there is **no per-principal erasure operation**. Purge is scoped to a project
-  (`aimee index purge`, `db2_kb_service_clear_current_project`), not to a data subject. DB2 holds
-  memories, documents, conversation history and audit rows keyed by principal; a request to erase
-  one person's data cannot be executed with the tools that exist.
+  (`aimee index purge`, `db2_kb_service_clear_current_project`), not to a data subject. Mutable DB2
+  data includes memories, documents, conversation history and derived records keyed by principal;
+  a request to erase one person's mutable data cannot be executed with the tools that exist.
 
 - **Impact.** For a product whose premise is durable cross-session memory of a user's work, this is
   the gap most likely to be raised first in any privacy review, and it blocks the primary audit's
@@ -1104,33 +1105,44 @@ move only when new exploitability or compensating-control evidence is recorded i
   retention, deletion, backup, restore, and audit behavior."*
 
 - **Design notes that belong in the decision, not the backlog.**
-  - **Erasure and WORM are in genuine tension.** An append-only hash-chained store cannot delete a
-    row without breaking the chain. The standard resolution is crypto-shredding: store erasable
-    content under a per-subject key, keep the chain over ciphertext and hashes, and erase by
-    destroying the key. This must be decided **before** ACG-002 makes the chain default-on, not
-    discovered afterwards.
+  - **WORM is never an erasure target.** Its purpose is to retain immutable evidence. A subject
+    erasure deletes mutable source data and derived content; it appends a new WORM event stating
+    that deletion was requested and completed. No existing WORM row is updated, deleted, encrypted
+    for later shredding, or made unreadable. The deletion event must contain only the minimum
+    non-content evidence needed for accountability — operation/request id, authorized actor,
+    bounded scope or pseudonymous reference, affected-store counts, policy revision, timestamp,
+    outcome and a non-reversible evidence digest — never a copy of the deleted content.
+  - **Turning WORM on does not depend on an erasure design.** ACG-002 should make the chain
+    default-on independently. The privacy control is minimization at audit-event creation plus
+    access control over the immutable ledger, not retrospective deletion from it.
   - **At-rest encryption is undocumented outside the vault.** `docs/STORAGE_TIERS.md` and
     `docs/DEPLOYMENT.md` contain no encryption guidance. The vault has real custody options
     (TPM 2, PKCS#11, KMS); DB1, DB2 and the audit log have none stated, so an operator cannot tell
     whether at-rest protection is expected from them or from the platform. This compounds ACG-008.
 
 - **Required change / owner.** Data & Privacy:
-  1. Add content retention policy: per-class maximum age (document text, memory content,
-     conversation history, audit rows) with a scheduled reaper and an audited deletion record.
+  1. Add content retention policy: per-class maximum age for mutable document text, memory content,
+     conversation history and derived data, with a scheduled reaper and an audited deletion event.
+     WORM evidence is governed by a separate immutable evidence-retention and access policy and is
+     never subject to row deletion.
      Until it exists, remove "configure retention" from `docs/SECURITY.md` — the document must not
      instruct an operator to use a control that is absent.
   2. Add `aimee kb erase-subject <principal>` spanning memories, documents, history and derived
-     vectors, emitting an audited, itemised completion record.
-  3. Decide and document the erasure/WORM resolution, sequenced before ACG-002's remediation.
+     vectors, appending a minimized WORM completion event without the deleted content.
+  3. Define and test the immutable deletion-event schema, including prohibited payload fields and
+     the rule that erasure code has no UPDATE/DELETE capability over the WORM store. This work is
+     independent of, and does not block, ACG-002's default-on remediation.
   4. State the at-rest expectation for DB1, DB2 and the audit log in `docs/STORAGE_TIERS.md`, even
      if the answer is "provide it at the volume layer."
 
 - **Acceptance tests.**
-  - `aimee kb erase-subject` removes a principal's rows across every store and leaves a verifiable
-    audit record of what was removed.
-  - After the retention age elapses, a reaper deletes the corresponding content and records the
-    deletion.
-  - `aimee audit verify` still verifies across an erasure boundary.
+  - `aimee kb erase-subject` removes a principal's mutable rows and derived content across every
+    applicable store, then appends exactly one verifiable deletion-completion event containing no
+    deleted content.
+  - After the mutable-data retention age elapses, a reaper deletes the corresponding content and
+    appends the same bounded deletion evidence.
+  - Before/after verification proves all prior WORM rows are byte-identical, the chain gained only
+    the deletion event, and any attempted WORM UPDATE/DELETE is refused.
 
 ## Cross-cutting observation
 
@@ -1324,13 +1336,13 @@ executed-upon: review shell and git history, and rotate the forge credentials th
    failure. Apply it jointly to the audit argument-hash (ACG-006) and to identifier generation
    (ACG-030), and move `platform_random_bytes` onto `getrandom(2)` so the failure being handled
    becomes rare as well as safe.
-10. **Decide erasure before the chain turns on.** ACG-031's crypto-shredding decision is a
-    **prerequisite** of item 3, not a successor to it. Every governed-action row written after WORM
-    becomes default-on, but before an erasure design exists, is permanently unerasable. This is the
-    single hardest ordering constraint in the programme.
+10. **Separate mutable-data erasure from immutable evidence.** Deliver ACG-031 without weakening
+    item 3: erasure removes mutable source and derived data, while WORM appends only a minimized
+    deletion event. The erasure path must never receive UPDATE/DELETE authority over WORM and must
+    never copy the deleted content into its evidence event.
 
-Phase 1 depends on defining identity and canonical evidence schemas before broad migration, and on
-the ACG-031-before-item-3 constraint above. Roll out
+Phase 1 depends on defining identity and canonical evidence schemas before broad migration. ACG-002
+and ACG-031 can proceed independently under the immutable-evidence rule above. Roll out
 tenant enforcement in observe, backfill/quarantine, enforce, and remove-legacy stages; never use a
 silent fail-open compatibility path. Dual-write WORM v1/v2 during a bounded migration, but verify and
 export the versions separately.
@@ -1352,9 +1364,8 @@ export the versions separately.
   beneath an authorized root with no symlink following, via directory FDs and
   `openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS)` or a portable no-follow walk — with the helper's
   ignored bounds parameter honoured and its misleading name corrected;
-- deliver the content retention policy and `aimee kb erase-subject` designed under Phase 1 item 10,
-  with an audited, itemised deletion record and a verification that the WORM chain still verifies
-  across an erasure boundary (ACG-031);
+- deliver the mutable-content retention policy and `aimee kb erase-subject` from Phase 1 item 10;
+  append a minimized deletion event and prove that no prior WORM row changed (ACG-031);
 - adopt a hardened release profile (`-D_FORTIFY_SOURCE=3`, `-fstack-protector-strong`, full RELRO,
   `-Wformat-security`) rather than inheriting whatever the build host defaults to, and remove
   `-Wno-format-truncation` so silent truncation of a constructed command or path is a build failure
