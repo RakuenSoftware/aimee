@@ -8,7 +8,7 @@ request. The Slice-1 golden harness will, per fixture:
    cache_control kept).
 2. **Same-protocol round-trip parity**: `frontend.render`/`backend.build` back to
    the SAME wire → assert byte-parity (or documented semantic parity) with the
-   original — this is the prompt-cache invariant.
+   original. This is the prompt-cache invariant.
 3. **Cross-protocol semantic equivalence**: fixtures tagged with a `pair_id` are the
    SAME semantic turn expressed in two wires; parse both → assert
    `aimee_ir_request_equal` (identical IR → identical KB input + identical backend
@@ -34,6 +34,6 @@ request. The Slice-1 golden harness will, per fixture:
 - cross-protocol pairs share a `"_pair_id"` top-level key (stripped before parse).
 
 ## Provenance / privacy
-Fixtures are HAND-AUTHORED synthetic payloads — never captured raw user/production
+Fixtures are HAND-AUTHORED synthetic payloads, never captured raw user/production
 traffic (raw bodies must not enter fixtures, logs, or KB per the security ruling).
 A live capture harness (for the byte-parity fixture) must scrub content first.

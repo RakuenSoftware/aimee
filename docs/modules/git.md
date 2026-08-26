@@ -86,14 +86,14 @@ but Git owns their repository semantics, credential containment, verification ga
 The `aimee` CLI reaches all of them through one wildcard `/v1` route (`{"git", NULL, "git.cli", ...}` in
 `cli_v1_routes.c`, marshalled by `marshal_git_cli`) that dispatches `mcp.call` with `tool=git_<command>`.
 Previously only `git verify` was routed and every other `aimee git ...` answered "is not a subcommand of
-'git'". The CLI grammar is uniform rather than per-command: `aimee git <command> [primary] [key=value ...]`,
+'git'"; the CLI grammar is uniform rather than per-command: `aimee git <command> [primary] [key=value ...]`,
 where the table in `marshal_git_cli` holds the only per-command knowledge (what a bare first, and
 sometimes second, word means). Values are typed the way verify's already are, `continue`/`abort`/`skip` are
 recognised as actions, and the repository defaults to the caller's directory unless `path=` names one.
 `git verify` keeps its own marshaller: its row precedes the wildcard, and the lookup takes the first
 match.
 
-Note that `cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
+`cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
 two agree today but are separate parsers, and folding them together is untaken work.
 
 ### History integration: merge, rebase, sync, cherry_pick, revert

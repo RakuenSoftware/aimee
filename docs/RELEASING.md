@@ -48,13 +48,13 @@ version component written down:
 #define AIMEE_VERSION_SERIES "0.4"
 ```
 
-The patch comes from the highest `v<series>.*` tag at release time. So `0.3.1` after `0.3.0` needs no
+The patch comes from the highest `v<series>.*` tag at release time. So `0.4.1` after `0.4.0` needs no
 commit, and the number cannot drift from what was tagged. The tag search is scoped to the series, so
-a `0.4.0` tag does not make the next `0.3.x` jump the line.
+a `0.5.0` tag does not make the next `0.4.x` jump the line.
 
 **To ship a patch:** merge to `main`, approve. Nothing else.
 
-**To move to a new series:** edit that line to `"0.4"` in a pull request, merge, approve. The first
+**To move to a new series:** edit that line to the next series in a pull request, merge, approve. The first
 release in a new series is `X.Y.0`. Nothing infers this, because deciding that a change set is a
 minor rather than a patch is the one part of versioning a machine should not guess.
 

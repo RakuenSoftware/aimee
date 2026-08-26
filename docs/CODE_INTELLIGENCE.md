@@ -163,20 +163,19 @@ Moving or re-adding a checkout updates its alias and retains one stable project 
 generation is created only when a detached project is re-added; default queries read the current
 generation only.
 
-Lifecycle operations are intentionally distinct:
+One lifecycle operation ships today:
 
 ```bash
 aimee workspace remove /path/to/repo       # unregister only; preserves indexed data
-aimee index detach stable-project-id        # hide current generation; preserve data
-aimee index purge stable-project-id         # read-only exact-target manifest
-aimee index purge stable-project-id \
-  --confirm <manifest-sha256> --reason '<reason>'
-aimee index gc [stable-project-id] --retention-days 30
-aimee index gc [stable-project-id] --retention-days 30 \
-  --confirm <manifest-sha256> --reason '<reason>'
 ```
 
-Purge and garbage collection are dry-run by default. Their manifest includes the stable project,
+**`index detach`, `index purge`, and `index gc` are designed and not shipped.** `aimee index` has no
+such subcommands, and no `/v1` route deletes an index. The contract below is the accepted design
+from [agent-facing code intelligence](proposals/done/agent-facing-code-intelligence-effectiveness.md),
+kept here so an operator planning retention knows what it will require. Until it lands, indexed data
+outlives `workspace remove` and no supported command deletes it.
+
+Purge and garbage collection will be dry-run by default. Their manifest includes the stable project,
 generation, policy criteria, per-table counts, and SHA-256 fingerprints of the exact physical
 targets. Confirmation recomputes that manifest in a serializable transaction and fails if any row
 or criterion changed. A confirmed mutation requires an authenticated unscoped owner, derives the

@@ -1,5 +1,9 @@
 # db3 module contract
 
+This page carries routing, admission, fallback, and revalidation.
+[`docs/modules/db3.md`](modules/db3.md) is the shorter module contract and the entry point from the
+[module index](modules/README.md).
+
 ## Purpose and ownership
 
 `db3` is the provider-neutral vector serving contract owned by DB2. Pgvector remains physically

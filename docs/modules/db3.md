@@ -1,11 +1,14 @@
 # db3: external vector providers
 
+This is the module contract. [`docs/db3.md`](../db3.md) carries the operational detail: routing,
+admission, fallback, revalidation, and the projection outbox.
+
 ## Purpose and non-goals
 
 `db3` is the provider-neutral contract for vector search served by something
 other than the relational store. A Qdrant, Milvus, remote pgvector, or other
 adapter is an **implementation of this contract**, admitted like any other
-module -- not a new API and not a storage tier with its own name.
+module, not a new API and not a storage tier with its own name.
 
 It exists because in-database indexing has ceilings. pgvector's HNSW fits a
 vector into one 8 KB index page, so it caps at 2000 dimensions for `vector`;
@@ -18,7 +21,7 @@ authoritative vector copy, content hash, model/version/dimension, generation,
 tombstone and outbox. A provider returns **candidates only**: the store
 rehydrates each one and repeats the scope, lifecycle, quarantine and
 classification checks before anything is returned. A provider that goes away, or
-was never installed, costs recall -- never correctness.
+was never installed, costs recall, never correctness.
 
 ## When you need one
 
@@ -34,7 +37,7 @@ aimee: memory_embeddings.embedding has no in-database vector index
        limit, attach an external vector provider module ...
 ```
 
-Exact search keeps working meanwhile -- it just scans.
+Exact search keeps working meanwhile, it just scans.
 
 ## Identity: how a provider attaches
 
@@ -58,7 +61,7 @@ out-of-band principal outright.
 
 This is enforced rather than documented because the failure is silent: a provider
 attaching as ref 28 would derive `postgres`'s event kinds, and
-`bus_host_serve_kind()` binds one kind to exactly one serving slot -- so the
+`bus_host_serve_kind()` binds one kind to exactly one serving slot, so the
 **core module** would be the one denied at attach, with nothing in its own log to
 explain why. That exact defect shipped once, with the plugin event range sitting
 on top of postgres's block, and a live `aimee-kb` is what found it.
@@ -76,7 +79,7 @@ python3 scripts/provision-plugin-module.py \
 
 That allocates a ref from the provider band, derives its kinds, and writes
 `db3-qdrant.grant`. The same tool provisions plugin instances (`--kind plugin`,
-the default) from their own band -- one allocator, so the two cannot drift apart.
+the default) from their own band. One allocator, so the two cannot drift apart.
 
 A provider and a plugin may share a NAME; they get separate grants and
 non-colliding refs.
@@ -85,9 +88,9 @@ Grants load once, at daemon start: provision before starting, or restart after.
 
 ## Public contracts
 
-The wire contract is generated -- `src/modules/db2/include/aimee/db2/db3_contract.h`,
+The wire contract is generated, `src/modules/db2/include/aimee/db2/db3_contract.h`,
 `server-go/db3/contract_generated.go`, and the pinned
-`tests/baselines/modules/db3-wire-v1.json` -- by `scripts/gen_db3_contract.py`,
+`tests/baselines/modules/db3-wire-v1.json`, by `scripts/gen_db3_contract.py`,
 gated by `make -C src db3-contract-check`.
 
 `server-go/db3/principal.go` carries the identity rules: `ValidateProviderRef`
@@ -96,7 +99,7 @@ and `ProviderKind`.
 A provider has **no entry in `src/modules/process-contracts.json`**, and should
 not: that file lists the 30 compile-time components, and a provider is installed
 by an operator at runtime. Its contract is its grant plus the generated wire
-contract -- the same arrangement plugin instances have.
+contract. The same arrangement plugin instances have.
 
 What may cross the boundary is constrained by the operation catalog. **No DB3
 event carries SQL, pgvector table names or operators, raw provider query JSON,
@@ -127,5 +130,5 @@ explicit override.
 
 - `docs/proposals/pending/one-store-postgres-and-pgvectorscale-everywhere.md` --
   why vector columns are `vector` rather than `halfvec`, and where this fits.
-- `docs/proposals/pending/db2-as-a-go-module.md` §3.2–3.3 -- the correctness split
+- `docs/proposals/pending/db2-as-a-go-module.md` §3.2–3.3, the correctness split
   above, and the observer/routing contract.

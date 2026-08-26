@@ -76,13 +76,52 @@ context policy.
 
 Typed facts are gated by configuration. See the generated reference for the current key.
 
+## Temporal recall
+
+Assertions carry two independent times. World time is when the thing was true. Belief time is when
+the KB came to believe it. Asking what a value was last March and asking what the KB thought last
+March are different queries, and they return different rows.
+
+Recall returns current assertions by default. Historical recall is a request-level opt-in, so a
+superseded value never arrives beside a live one without being asked for.
+
+A model-extracted claim carries the exact byte span it came from and a hash of that region. A
+candidate that cannot name its evidence is refused rather than stored unsourced.
+
+Lexical and vector legs fuse late under a similarity floor. Graph expansion is bounded, temporally
+filtered, and scope-checked at every hop. Each result carries the trace that explains its rank.
+
+## Observations and reviewed procedures
+
+An episode that fails, or recovers, once is a single event. The same shape across two independent
+sessions becomes an observation: a deterministic, evidence-linked record of a recurring failure,
+recovery, commitment, or state transition. The threshold is two sessions because one session cannot
+distinguish a pattern from a coincidence.
+
+An observation can raise a procedural proposal. It enters the same review and promotion gate the
+learning module already uses, carrying applicability, expiry, evidence, and rollback metadata. A
+proposal never promotes itself, and a rejected one rolls back without leaving an attribution row.
+
+Application and outcome are attributed back to the record that was used, with cost, latency, turn,
+and tool metrics. Retrieval sufficiency is scored separately from answer correctness, so a wrong
+answer over good evidence and a wrong answer over missing evidence are told apart.
+
+Context assembly is typed. Current assertions, historical assertions, episodes, summaries,
+observations, reviewed procedures, and recent working context each occupy their own channel with a
+budget, a packing trace, a watermark, and a stated trust boundary.
+
+Semantic recall, active observations, reviewed procedures, and the typed assembler are on by
+default. The master assembler and every channel keep a request-level opt-out; historical recall
+stays opt-in. See the
+[validation report](validation/temporal-assertion-learning-loop.md) for the deployment evidence.
+
 ## Memory lifecycle
 
 Session context begins as local DB1 evidence. Durable, shareable knowledge belongs in DB2 after the
 owning write or promotion contract accepts it. Useful records strengthen through recall and feedback;
 stale or contradicted records can decay without deleting their history.
 
-Working memory is not a lower-quality KB. It is session scratch and should not be promoted by
+Working memory is session scratch. It is not a lower-quality KB, and it should not be promoted by
 accident.
 
 ## Commands
@@ -115,7 +154,8 @@ inference service beside the KB.
 
 ## What exists now
 
-Scoped memory, typed facts, hybrid retrieval, curation, graph links, contradiction handling,
+Scoped memory, typed facts, temporal recall, evidence-backed observations, reviewed procedural
+learning, hybrid retrieval, curation, graph links, contradiction handling,
 evidence, and the current single-KB model path are implemented. Multi-KB routing, connectors for
 every company data source, and free-form cross-domain synthesis are not automatic; they need an
 integrated routing or ingest path, scope policy, and evidence contract.
