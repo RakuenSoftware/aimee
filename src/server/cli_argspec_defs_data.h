@@ -169,7 +169,8 @@
 {"index.find",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"identifier\","
  "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
- "},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":"
+ "},{\"json\":\"project\",\"from\":\"project\"},{\"json\":\"scope\","
+ "\"from\":\"flag\",\"flag\":\"scope\",\"empty\":"
  "\"drop\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"memory.list",
@@ -193,9 +194,9 @@
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"symbol\","
  "\"count_min\":1,\"from\":\"positional\",\"index\":0,\"empty\":\"emit\""
  "},{\"json\":\"project\",\"count_min\":2,\"from\":\"positional\","
- "\"index\":1,\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\","
- "\"flag\":\"scope\",\"empty\":\"drop\"},{\"json\":\"cwd\",\"from\":"
- "\"cwd\"}]}"},
+ "\"index\":1,\"empty\":\"emit\"},{\"json\":\"project\",\"count_max\":1,"
+ "\"from\":\"project\"},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":"
+ "\"scope\",\"empty\":\"drop\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"kb.search",
  "{\"fields\":[{\"json\":\"query\",\"count_min\":1,\"from\":"
@@ -363,20 +364,17 @@
  "},{\"json\":\"file_path\",\"count_min\":2,\"from\":\"positional\","
  "\"index\":1,\"empty\":\"emit\"},{\"json\":\"file_path\",\"count_min\":"
  "1,\"count_max\":1,\"from\":\"positional\",\"index\":0,\"empty\":"
- "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "\"emit\"},{\"json\":\"project\",\"count_max\":1,\"from\":\"project\"},{"
+ "\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\"},{\"json\":"
+ "\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"index.hybrid",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"queries\",\"from\":"
  "\"positional_array\",\"count_min\":2},{\"json\":\"query\","
  "\"count_min\":1,\"count_max\":1,\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":"
+ "\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"project\"},{\"json\":"
+ "\"scope\",\"from\":\"flag\",\"flag\":"
  "\"scope\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
-
-{"index.investigate",
- "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"queries\",\"from\":"
- "\"positional_array\",\"count_min\":2},{\"json\":\"query\","
- "\"count_min\":1,\"count_max\":1,\"from\":\"positional\",\"index\":0,"
- "\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"index.structure",
  "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"project\","
@@ -384,7 +382,9 @@
  "},{\"json\":\"file_path\",\"count_min\":2,\"from\":\"positional\","
  "\"index\":1,\"empty\":\"emit\"},{\"json\":\"file_path\",\"count_min\":"
  "1,\"count_max\":1,\"from\":\"positional\",\"index\":0,\"empty\":"
- "\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "\"emit\"},{\"json\":\"project\",\"count_max\":1,\"from\":\"project\"},{"
+ "\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\"},{\"json\":"
+ "\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"skill.pin",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
@@ -919,7 +919,9 @@
  "\"ambiguous\"},{\"json\":\"direction\",\"from\":\"flag\",\"flag\":"
  "\"reverse\",\"type\":\"const_if_set\",\"value\":\"in\"},{\"json\":"
  "\"dry_run\",\"from\":\"flag\",\"flag\":\"dry-run\",\"type\":"
- "\"true_if_set\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "\"true_if_set\"},{\"json\":\"project\",\"count_max\":0,\"from\":\"project\"},{"
+ "\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\"},{"
+ "\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 /* The inverted-flag pair: `compress` is true unless --no-compress was given. */
 

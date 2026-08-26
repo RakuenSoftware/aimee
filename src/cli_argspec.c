@@ -68,9 +68,10 @@
  * They are NAMED, FIXED facts, not a general escape. There is deliberately no
  * `{"from": "env", "name": <anything>}`: that would let a server -- or anyone
  * who could answer as one -- ask the client to read AWS_SECRET_ACCESS_KEY and
- * post it back. A spec can ask for the working directory and the session id
- * because those are the two the CLI already puts on the wire, and for nothing
- * else. Adding a third is a deliberate act, not a configuration. */
+ * post it back. A spec can ask for the working directory, session id, and
+ * active project because those are fixed values the CLI already puts on the
+ * wire, and for nothing else. Adding another is a deliberate act, not a
+ * configuration. */
 /* An ordered cascade for ONE field: the first source that yields a value wins,
  * and `default` supplies a literal when none does. memory.recall's task_hint is
  * --task, then positional[0], then --query, then the literal "session start".
@@ -96,6 +97,7 @@
 #define SRC_FIRST_OF         "first_of"
 #define SRC_CWD              "cwd"
 #define SRC_SESSION          "session"
+#define SRC_PROJECT          "project"
 
 /* Whether a field present-but-empty is sent or dropped. Absent means "drop".
  *
@@ -201,13 +203,14 @@ static const char *field_str(const cJSON *field, const char *key)
 
 static int known_source(const char *from)
 {
-   return from && (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
-                   !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
-                   !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
-                   !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG) ||
-                   !strcmp(from, SRC_CWD) || !strcmp(from, SRC_SESSION) ||
-                   !strcmp(from, SRC_FIRST_OF) || !strcmp(from, SRC_POSITIONAL_ARRAY) ||
-                   !strcmp(from, SRC_CONST) || !strcmp(from, SRC_POSITIONAL_JOIN));
+   return from &&
+          (!strcmp(from, SRC_FLAG) || !strcmp(from, SRC_POSITIONAL) ||
+           !strcmp(from, SRC_POSITIONAL_FLAG) || !strcmp(from, SRC_FLAG_POSITIONAL) ||
+           !strcmp(from, SRC_ARGV_JOINED) || !strcmp(from, SRC_ARGV_ARRAY) ||
+           !strcmp(from, SRC_ARGV_INDEX) || !strcmp(from, SRC_REPEATED_FLAG) ||
+           !strcmp(from, SRC_CWD) || !strcmp(from, SRC_SESSION) || !strcmp(from, SRC_PROJECT) ||
+           !strcmp(from, SRC_FIRST_OF) || !strcmp(from, SRC_POSITIONAL_ARRAY) ||
+           !strcmp(from, SRC_CONST) || !strcmp(from, SRC_POSITIONAL_JOIN));
 }
 
 static int known_empty(const char *e)
@@ -388,6 +391,18 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
       if (s && s[0])
          return s;
       return "default";
+   }
+
+   if (!strcmp(from, SRC_PROJECT))
+   {
+      /* marshal_add_index_context(): an explicit flag wins, then the launcher
+       * supplied stable project id. This remains a fixed, non-secret fact; a
+       * served spec still cannot name an arbitrary environment variable. */
+      const char *project = cli_args_get(opts, flag && flag[0] ? flag : "project");
+      if (project && project[0])
+         return project;
+      project = getenv("AIMEE_PROJECT_ID");
+      return project && project[0] ? project : NULL;
    }
 
    if (!strcmp(from, SRC_POSITIONAL_JOIN))

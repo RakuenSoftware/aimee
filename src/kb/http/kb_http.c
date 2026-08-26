@@ -393,7 +393,10 @@ static int kb_search_project_scope(const char *body, char *project, size_t proje
    if (strcmp(scope, "all") == 0)
    {
       cJSON_Delete(root);
-      if (verified)
+      /* A service credential is the managed deployment's data-plane identity:
+       * it spans projects but remains tenant-bounded by the resolved caller
+       * context and is still excluded from administrative routes. */
+      if (verified && strcmp(verified_kind, KB_SCOPE_KIND_SERVICE) != 0)
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential "
