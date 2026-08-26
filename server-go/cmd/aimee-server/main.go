@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
+	"github.com/JBailes/aimee/server-go/observability"
 )
 
 func configuredForge(url, socket string) (engine.Forge, error) {
@@ -63,6 +65,17 @@ func main() {
 	workflowDir := flag.String("workflow-dir", "", "workflow definition directory")
 	moduleBusSocket := flag.String("module-bus-socket", os.Getenv("AIMEE_MODULE_BUS_SOCKET"),
 		"daemon module bus socket; reviews are requested over it")
+	metricsConfig := observability.MetricsServerConfigFromEnv("AIMEE_SERVER")
+	flag.StringVar(&metricsConfig.Endpoint, "observability-listen", metricsConfig.Endpoint,
+		"optional Prometheus listener: tcp://host:port or unix:///absolute/path")
+	flag.StringVar(&metricsConfig.TLSCertificateFile, "observability-tls-certificate",
+		metricsConfig.TLSCertificateFile, "TLS certificate chain for the Prometheus listener")
+	flag.StringVar(&metricsConfig.TLSKeyFile, "observability-tls-key",
+		metricsConfig.TLSKeyFile, "owner-only TLS private key for the Prometheus listener")
+	flag.StringVar(&metricsConfig.TLSClientCAFile, "observability-tls-client-ca",
+		metricsConfig.TLSClientCAFile, "CA bundle requiring Prometheus client certificates")
+	flag.StringVar(&metricsConfig.BearerTokenFile, "observability-bearer-token-file",
+		metricsConfig.BearerTokenFile, "owner-only file containing the Prometheus bearer token")
 	concurrency := flag.Int("workflow-concurrency", envInt("AIMEE_AUTONOMY_CONCURRENCY", 5),
 		"maximum concurrent work items across the whole WFE (total agent budget)")
 	flag.Parse()
@@ -75,6 +88,25 @@ func main() {
 	if err := os.MkdirAll(*home, 0o700); err != nil {
 		log.Fatalf("create aimee home: %v", err)
 	}
+	telemetry, err := observability.New(context.Background(),
+		observability.ConfigFromEnv("aimee-server", os.Getenv("AIMEE_VERSION")))
+	if err != nil {
+		log.Fatalf("initialize observability: %v", err)
+	}
+	slog.SetDefault(telemetry.LocalLogger("aimee-server"))
+	var metricsServer *observability.MetricsServer
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if metricsServer != nil {
+			if err := metricsServer.Shutdown(ctx); err != nil {
+				log.Printf("shutdown observability listener: %v", err)
+			}
+		}
+		if err := telemetry.Shutdown(ctx); err != nil {
+			log.Printf("shutdown observability: %v", err)
+		}
+	}()
 
 	// The store is the DB1 module now, not a file. This process used to open
 	// $home/aimee.db directly -- the module's own file -- which made two
@@ -141,7 +173,10 @@ func main() {
 	// The WFE control plane is deliberately Unix-socket-only. Credentials must
 	// never be carried in this long-lived process's argv or environment; the
 	// socket's ownership and 0600 mode are the authentication boundary.
-	server := &http.Server{Handler: handler, ReadHeaderTimeout: 15 * time.Second}
+	server := &http.Server{
+		Handler:           telemetry.HTTPHandler("aimee-server.http", handler),
+		ReadHeaderTimeout: 15 * time.Second,
+	}
 	var runner engine.Runner
 	var worktreeManager *engine.WorktreeManager
 	if *runnerURL != "" {
@@ -297,6 +332,18 @@ func main() {
 		log.Fatal(err)
 	}
 	defer listener.Close()
+	metricsServer, err = observability.StartMetricsServer(metricsConfig, telemetry.MetricsHandler())
+	if err != nil {
+		log.Fatalf("initialize observability listener: %v", err)
+	}
+	if metricsServer != nil {
+		log.Printf("Prometheus metrics listening on %s", metricsServer.Addr())
+		go func() {
+			if err := <-metricsServer.Done(); err != nil {
+				log.Printf("observability listener stopped: %v", err)
+			}
+		}()
+	}
 
 	// Serve the workflow control stage over the event bus.
 	//
@@ -342,11 +389,15 @@ func main() {
 		rootCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
+		if metricsServer != nil {
+			_ = metricsServer.Shutdown(ctx)
+		}
 		_ = server.Shutdown(ctx)
 	}()
 	log.Printf("Go aimee-server listening on %s", listener.Addr())
 	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Fatal(fmt.Errorf("serve: %w", err))
+		log.Printf("serve: %v", err)
+		return
 	}
 }
 

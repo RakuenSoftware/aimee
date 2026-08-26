@@ -51,11 +51,13 @@ Start here:
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
+- [Observability security](runbooks/observability-security.md)
 
 ## Engineering
 
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
+- [Observability package](OBSERVABILITY.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)
 - [Sanitizer call-site register](SANITIZER_CALL_SITES.md)

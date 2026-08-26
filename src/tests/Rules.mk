@@ -770,6 +770,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-curator-fixtures \
                $(TESTPREFIX)/unit-test-substrate-fixtures \
                $(TESTPREFIX)/unit-test-org-telemetry \
+               $(TESTPREFIX)/unit-test-kb-metrics-listener \
                $(TESTPREFIX)/unit-test-aws-auth \
                $(TESTPREFIX)/unit-test-org-model-catalog-target \
                $(TESTPREFIX)/unit-test-kb-mgmt-endpoint \
@@ -1138,6 +1139,11 @@ $(OBJDIR)/tests/test_org_telemetry.o: schema_data.h
 $(TESTPREFIX)/unit-test-org-telemetry: $(OBJDIR)/tests/test_org_telemetry.o \
                                        $(OBJDIR)/db2/org_telemetry_fmt.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-metrics-listener: \
+                                      $(OBJDIR)/tests/test_kb_metrics_listener.o \
+                                      $(OBJDIR)/kb/http/kb_metrics_listener.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lssl -lcrypto -lpthread
 
 # P6a AWS-auth core pure tests: SigV4 (published aws-sig-v4-test-suite vectors),
 # STS body/parse + web-identity JWT signature verify, bedrock least-privilege
