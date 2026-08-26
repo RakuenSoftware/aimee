@@ -178,7 +178,7 @@ class DescriptorTests(unittest.TestCase):
                         # fixture fails on inventory-shape and never reaches
                         # the version rule it exists to exercise.
                         "plugin_principal_ref_band": {"first": 200, "limit": 456},
-                        "db3_provider_principal_ref_band": {"first": 456, "limit": 512},
+                        "retired_principal_ref_band": {"first": 456, "limit": 512},
                     }
                 ),
                 encoding="utf-8",

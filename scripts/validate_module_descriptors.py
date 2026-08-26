@@ -143,7 +143,7 @@ def load_inventory(repo: Path) -> tuple[set[str], set[str]]:
         "principal_refs",
         "retired_principal_refs",
         "plugin_principal_ref_band",
-        "db3_provider_principal_ref_band",
+        "retired_principal_ref_band",
     }:
         fail("inventory-shape", "canonical inventory keys differ from v2")
     if type(value["schema_version"]) is not int or value["schema_version"] != 2:

@@ -33,7 +33,6 @@ KEYWORDS = {
 }
 IGNORED_CALL_LIKE = {"__attribute__", "__declspec", "__asm__", "asm"}
 DISPOSITIONS = {"private-db2", "wire-operation", "compatibility-wrapper"}
-PLACEMENTS = {"retained-db2", "db3-eligible"}
 FAMILIES = {
     "lifecycle", "tenancy", "memory", "index", "learning", "organization",
     "custody", "maintenance",
@@ -413,7 +412,7 @@ def _review_rows(value: object, declarations: dict[str, dict[str, object]]) -> d
     previous = ""
     for index, row in enumerate(value["reviews"]):
         expected = {
-            "symbol", "signature_sha256", "disposition", "family", "db3_placement", "reason",
+            "symbol", "signature_sha256", "disposition", "family", "reason",
         }
         if not isinstance(row, dict) or set(row) != expected:
             fail("review-shape", f"review {index} has invalid keys")
@@ -429,15 +428,13 @@ def _review_rows(value: object, declarations: dict[str, dict[str, object]]) -> d
         if row["signature_sha256"] != declaration["signature_sha256"]:
             fail("review-signature", f"review signature for {symbol} is stale")
         if row["disposition"] not in DISPOSITIONS or row["family"] not in FAMILIES or \
-                row["db3_placement"] not in PLACEMENTS or not row["reason"]:
+                not row["reason"]:
             fail("review-value", f"review for {symbol} has an invalid disposition")
         if len(row["reason"].encode("utf-8")) > 512:
             fail("review-value", f"review reason for {symbol} exceeds 512 UTF-8 bytes")
-        if symbol.startswith("pgvec_") and (row["disposition"] != "private-db2" or
-                                              row["db3_placement"] != "retained-db2"):
-            fail("pgvector-placement", f"{symbol} must remain private and retained in DB2")
-        if row["disposition"] == "private-db2" and row["db3_placement"] != "retained-db2":
-            fail("private-placement", f"private declaration {symbol} must remain in DB2")
+        if symbol.startswith("pgvec_") and row["disposition"] != "private-db2":
+            fail("pgvector-placement",
+                 f"{symbol} is pgvector execution state and must stay private to DB2")
         result[symbol] = row
     return result
 
@@ -480,7 +477,7 @@ def build(root: Path) -> dict[str, object]:
         if review is not None:
             row["review"] = {
                 key: review[key]
-                for key in ("disposition", "family", "db3_placement", "reason")
+                for key in ("disposition", "family", "reason")
             }
         rows.append(row)
     complete = review_doc["declarations_complete"]
