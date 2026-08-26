@@ -65,24 +65,30 @@ moved to the Go multicall executable in `server-go/cmd/aimee-module`: `memory`,
 identity and one module package under `server-go/modules`. The runtime bundle emits no C process
 source for those entries. Their C `module_adapter.c` files serve only as
 wire-parity fixtures while the deeper module-owned C surfaces are migrated in
-later batches. The workflows process owns only the deterministic advance
-admission classification; it is not a second workflow lifecycle runtime. The
-server's interactive advance executor requests that classification over the
-event bus and refuses to mutate workflow state when the process call fails.
-The KB synthesis process similarly owns only the pure grounding decision, not
-the curator worker, provider, or persistence lifecycle.
-The runtime-web process owns only RPC fault classification. The server requests
-that decision over the event bus and adds the returned HTTP status to its RPC
-error envelope. The physical Go web provider consumes that status without a
-local classification policy; missing or invalid module output remains a generic
-502 transport failure. The provider remains the owner of HTTPS, browser
-authentication, sessions, routing, proxy transport, and assets.
-The control-web process owns only proxy-route authorization. Its physical Go
-provider imports the same policy package; HTTPS, OIDC/session handling, CSRF,
-credential selection, proxy transport, and assets remain provider-owned. The
-KB console-admin containment is also event-bus-only: the route layer asks the
-separately supervised control-web module and fails closed if no valid decision
-arrives. The KB keeps no duplicate local control-web allowlist.
+later batches.
+
+Each migrated process owns one bounded decision and nothing around it:
+
+- **workflows** owns the deterministic advance admission classification, and is
+  not a second workflow lifecycle runtime. The server's interactive advance
+  executor requests that classification over the event bus and refuses to mutate
+  workflow state when the process call fails.
+- **kb-synthesis** owns the pure grounding decision, leaving the curator worker,
+  provider, and persistence lifecycle where they are.
+- **runtime-web** owns RPC fault classification. The provider remains the owner of
+  HTTPS, browser authentication, sessions, routing, proxy transport, and assets.
+- **control-web** owns proxy-route authorization. HTTPS, OIDC/session handling,
+  CSRF, credential selection, proxy transport, and assets remain provider-owned.
+
+The server requests the runtime-web decision over the event bus and adds the
+returned HTTP status to its RPC error envelope. The physical Go web provider
+consumes that status with no local classification policy, and missing or invalid
+module output remains a generic 502 transport failure.
+
+Control web's physical Go provider imports the same policy package. The KB
+console-admin containment is event-bus-only: the route layer asks the separately
+supervised control-web module and fails closed if no valid decision arrives. The
+KB keeps no duplicate local control-web allowlist.
 The server's live `memory.benchmark` RPC sends each bounded retrieval result set
 to the benchmarks process for MRR, NDCG@K, and recall@K scoring. An unavailable
 or invalid process response fails the RPC with no in-process scoring fallback;

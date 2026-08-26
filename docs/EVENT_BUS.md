@@ -39,20 +39,26 @@ Eighteen production C-to-Go process batches now cover every supervised process:
 `runtime-web`, `control-web`, and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
-fixtures; the bounded memory rerank, response-composition key, roundtable
-verification-rubric, and benchmark IR-scoring stages do not mean those modules'
-storage-heavy or daemon orchestration code has all moved to Go. Governance moves
-the bounded response tool-policy decision; parsed-response mutation and its
-broader identity/OIDC plane remain in their current C owners. Workflows moves
-only the pure advance admission classification; the Go WFE remains the sole
-lifecycle, persistence, scheduling, and transition owner. KB synthesis moves
-only the deterministic code-unit grounding gate; curator queues, model calls,
-storage, linking, promotion, and scheduling remain in their current owners.
-Runtime web moves the bounded RPC-fault-to-HTTP-status decision. The server asks
-that process over the event bus and places the returned status in its error
-envelope; the physical Go HTTPS provider consumes the result without importing
-or reimplementing the policy. Listener, authentication, sessions, proxying, and
-assets remain provider-owned.
+fixtures.
+
+A moved stage is a bounded decision, and the storage-heavy or daemon
+orchestration code around it stays where it was. The memory rerank, the
+response-composition key, the roundtable verification rubric, and benchmark
+IR scoring are all decisions of that shape.
+
+- **Governance** moves the bounded response tool-policy decision. Parsed-response
+  mutation and its broader identity/OIDC plane remain in their current C owners.
+- **Workflows** moves only the pure advance admission classification. The Go WFE
+  remains the sole lifecycle, persistence, scheduling, and transition owner.
+- **KB synthesis** moves only the deterministic code-unit grounding gate. Curator
+  queues, model calls, storage, linking, promotion, and scheduling remain in their
+  current owners.
+- **Runtime web** moves the bounded RPC-fault-to-HTTP-status decision. Listener,
+  authentication, sessions, proxying, and assets remain provider-owned.
+
+The server asks the runtime-web process over the event bus and places the
+returned status in its error envelope. The physical Go HTTPS provider consumes
+the result without importing or reimplementing the policy.
 Control web moves bounded console-admin and fleet proxy-route authorization; its
 physical Go provider and isolated process consume the same policy package. The
 KB requests console-admin decisions from that process over its local event bus
