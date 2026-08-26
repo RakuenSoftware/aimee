@@ -27,7 +27,7 @@ ALLOWED_KEYS = {
     "principal_refs",
     "retired_principal_refs",
     "plugin_principal_ref_band",
-    "db3_provider_principal_ref_band",
+    "retired_principal_ref_band",
 }
 
 # Every band of principal refs reserved for DYNAMICALLY provisioned processes.
@@ -40,7 +40,11 @@ ALLOWED_KEYS = {
 # this rule is how the two would drift.
 RESERVED_BANDS = (
     ("plugin_principal_ref_band", "plugin instances"),
-    ("db3_provider_principal_ref_band", "DB3 vector providers"),
+    # Refs an external vector database provider was allocated from, before that
+    # subsystem was removed. RESERVED rather than released: an installed
+    # deployment may still carry a grant naming a ref in this band, and handing
+    # the same ref to a future module would give it kinds that grant claims.
+    ("retired_principal_ref_band", "refs a removed subsystem allocated"),
 )
 REQUIRED_COUNT = 20
 # Principal references stay stable when a module changes activation class;

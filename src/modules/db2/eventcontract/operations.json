@@ -78,9 +78,11 @@
       "results": [
         "ok"
       ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Readiness covers the PostgreSQL schema, pg_trgm, and canonical KB tables.",
-      "c_symbols": ["db2_health_probe", "db2_is_initialized", "db2_kb_health_probe"],
+      "c_symbols": [
+        "db2_health_probe",
+        "db2_is_initialized",
+        "db2_kb_health_probe"
+      ],
       "request": {
         "magic": 1363685956,
         "encoded_size": 8
@@ -116,9 +118,9 @@
         "ok",
         "invalid_state"
       ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The effective dimension is canonical PostgreSQL and pgvector schema evidence.",
-      "c_symbols": ["db2_embedding_dim"],
+      "c_symbols": [
+        "db2_embedding_dim"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none"
@@ -146,9 +148,9 @@
         "ok",
         "invalid_state"
       ],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Connection-pool occupancy and failure counters describe the DB2 PostgreSQL owner.",
-      "c_symbols": ["db2_pool_stats"],
+      "c_symbols": [
+        "db2_pool_stats"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none"
@@ -157,13 +159,44 @@
         "encoded_size_ok": 68,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "size", "type": "u32", "minimum": 1, "maximum": 256},
-          {"name": "in_use", "type": "u32", "minimum": 0, "maximum": 256},
-          {"name": "waiters", "type": "u32", "minimum": 0, "maximum": 4294967295},
-          {"name": "lease_grants", "type": "u64", "minimum": 0},
-          {"name": "lease_timeouts", "type": "u64", "minimum": 0},
-          {"name": "stuck", "type": "u64", "minimum": 0},
-          {"name": "poisoned", "type": "u64", "minimum": 0}
+          {
+            "name": "size",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          },
+          {
+            "name": "in_use",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          },
+          {
+            "name": "waiters",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "lease_grants",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "lease_timeouts",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "stuck",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "poisoned",
+            "type": "u64",
+            "minimum": 0
+          }
         ]
       }
     },
@@ -175,17 +208,33 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Width-refusal evidence diagnoses writes rejected by DB2's canonical pgvector schema.",
-      "c_symbols": ["db2_embedding_dim_last_offered", "db2_embedding_dim_refused_count"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_embedding_dim_last_offered",
+        "db2_embedding_dim_refused_count"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_ok": 36,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "refused_count", "type": "u64", "minimum": 0},
-          {"name": "last_offered", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "refused_count",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "last_offered",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -197,20 +246,50 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Connection pressure, PostgreSQL recovery role, and WAL replay lag remain DB2 operational evidence.",
-      "c_symbols": ["db2_pg_stat_summary"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_pg_stat_summary"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_ok": 48,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "available", "type": "u32", "minimum": 0, "maximum": 15},
-          {"name": "active_connections", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "max_connections", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "is_replica", "type": "u32", "minimum": 0, "maximum": 1},
-          {"name": "replica_lag_bytes", "type": "u64", "minimum": 0}
+          {
+            "name": "available",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 15
+          },
+          {
+            "name": "active_connections",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "max_connections",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "is_replica",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "replica_lag_bytes",
+            "type": "u64",
+            "minimum": 0
+          }
         ]
       }
     },
@@ -222,17 +301,33 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok", "not_found", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The canonical re-embedding maintenance marker coordinates DB2 schema width and authoritative corpus rebuilds.",
-      "c_symbols": ["db2_reembed_in_progress_get"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok",
+        "not_found",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_in_progress_get"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_ok": 36,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
-          {"name": "started_epoch", "type": "u64", "minimum": 1}
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "started_epoch",
+            "type": "u64",
+            "minimum": 1
+          }
         ]
       }
     },
@@ -244,12 +339,22 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Clearing the canonical re-embedding maintenance marker remains a DB2 lifecycle mutation.",
-      "c_symbols": ["db2_reembed_in_progress_clear"],
-      "request": {"encoded_size": 24, "payload": "none"},
-      "reply": {"encoded_size_ok": 24, "encoded_size_error": 24, "fields": []}
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_in_progress_clear"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
     },
     {
       "family": "lifecycle",
@@ -259,22 +364,49 @@
       "scope": "none",
       "transaction": "single",
       "idempotency": "safe",
-      "results": ["ok", "conflict", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The consistency check and maintenance-marker delete must remain one DB2-owned transactional operator action.",
-      "c_symbols": ["db2_reembed_clear_maintenance"],
+      "results": [
+        "ok",
+        "conflict",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_clear_maintenance"
+      ],
       "request": {
         "encoded_size": 28,
-        "field": {"name": "force", "type": "u32", "minimum": 0, "maximum": 1}
+        "field": {
+          "name": "force",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
       },
       "reply": {
         "encoded_size_payload": 36,
         "encoded_size_error": 24,
-        "payload_results": ["ok", "conflict"],
+        "payload_results": [
+          "ok",
+          "conflict"
+        ],
         "fields": [
-          {"name": "was_in_progress", "type": "u32", "minimum": 0, "maximum": 1},
-          {"name": "recorded_dimension", "type": "u32", "minimum": 0, "maximum": 4000},
-          {"name": "running_dimension", "type": "u32", "minimum": 1, "maximum": 4000}
+          {
+            "name": "was_in_progress",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "recorded_dimension",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          {
+            "name": "running_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          }
         ]
       }
     },
@@ -286,11 +418,17 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The effective vector-space identity is established during DB2 bootstrap and remains DB2 lifecycle evidence tied to the canonical corpus.",
-      "c_symbols": ["db2_embedder_serving_id"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_embedder_serving_id"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_min_ok": 28,
         "encoded_size_max_ok": 187,
@@ -311,30 +449,88 @@
       "scope": "none",
       "transaction": "single",
       "idempotency": "safe",
-      "results": ["ok", "conflict", "denied", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Schema-width replacement, maintenance marking, and authoritative requeue accounting are one DB2-owned operator transaction.",
-      "c_symbols": ["db2_dim_change_reset"],
+      "results": [
+        "ok",
+        "conflict",
+        "denied",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_dim_change_reset"
+      ],
       "request": {
         "encoded_size": 36,
         "fields": [
-          {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
-          {"name": "force", "type": "u32", "minimum": 0, "maximum": 1},
-          {"name": "dry_run", "type": "u32", "minimum": 0, "maximum": 1}
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "force",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "dry_run",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
         ]
       },
       "reply": {
         "encoded_size_payload": 56,
         "encoded_size_error": 24,
-        "payload_results": ["ok", "conflict", "denied"],
+        "payload_results": [
+          "ok",
+          "conflict",
+          "denied"
+        ],
         "fields": [
-          {"name": "recorded_dimension", "type": "u32", "minimum": 0, "maximum": 4000},
-          {"name": "target_dimension", "type": "u32", "minimum": 1, "maximum": 4000},
-          {"name": "tables_discovered", "type": "u32", "minimum": 0, "maximum": 16},
-          {"name": "tables_dropped", "type": "u32", "minimum": 0, "maximum": 16},
-          {"name": "rows_cleared", "type": "u64", "minimum": 0},
-          {"name": "curator_requeued", "type": "i32", "minimum": -1, "maximum": 2147483647},
-          {"name": "evidence_requeued", "type": "i32", "minimum": -1, "maximum": 2147483647}
+          {
+            "name": "recorded_dimension",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "tables_discovered",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 16
+          },
+          {
+            "name": "tables_dropped",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 16
+          },
+          {
+            "name": "rows_cleared",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "curator_requeued",
+            "type": "i32",
+            "minimum": -1,
+            "maximum": 2147483647
+          },
+          {
+            "name": "evidence_requeued",
+            "type": "i32",
+            "minimum": -1,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -346,10 +542,12 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The global L3 count is canonical relational corpus evidence owned by DB2, not portable ANN state.",
-      "c_symbols": ["db2_memory_count_l3"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l3"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none"
@@ -373,10 +571,12 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The global L2 count is canonical relational corpus evidence owned by DB2, not portable ANN state.",
-      "c_symbols": ["db2_memory_count_l2"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l2"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none"
@@ -400,15 +600,25 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The orphaned L0 count is canonical relational integrity evidence owned by DB2, not portable ANN state.",
-      "c_symbols": ["db2_memory_count_orphaned_l0"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_orphaned_l0"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -419,15 +629,25 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The global memory-row count is canonical relational corpus evidence owned by DB2, not portable ANN state.",
-      "c_symbols": ["db2_memory_count"],
-      "request": {"encoded_size": 24, "payload": "none"},
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
       "reply": {
         "encoded_size_ok": 32,
         "encoded_size_error": 24,
-        "field": {"name": "count", "type": "u64", "minimum": 0, "maximum": 9223372036854775807}
+        "field": {
+          "name": "count",
+          "type": "u64",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
       }
     },
     {
@@ -438,19 +658,31 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Session attribution and canonical L2 memory rows remain relational DB2 authority rather than portable ANN state.",
-      "c_symbols": ["db2_memory_count_l2_for_session"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l2_for_session"
+      ],
       "request": {
         "encoded_size_min": 29,
         "encoded_size_max": 155,
-        "field": {"name": "source_session", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 127}
+        "field": {
+          "name": "source_session",
+          "type": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 127
+        }
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -461,19 +693,31 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Exact canonical memory-key existence is relational DB2 authority and does not depend on portable ANN state.",
-      "c_symbols": ["db2_memory_key_exists"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_key_exists"
+      ],
       "request": {
         "encoded_size_min": 29,
         "encoded_size_max": 539,
-        "field": {"name": "key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511}
+        "field": {
+          "name": "key",
+          "type": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 511
+        }
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+        "field": {
+          "name": "exists",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     {
@@ -484,24 +728,46 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Exact canonical memory-key and kind lookup is relational DB2 authority and does not depend on portable ANN state.",
-      "c_symbols": ["db2_memory_find_id_by_key_kind"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_find_id_by_key_kind"
+      ],
       "request": {
         "encoded_size_min": 34,
         "encoded_size_max": 558,
         "fields": [
-          {"name": "key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
-          {"name": "kind", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 15}
+          {
+            "name": "key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          }
         ]
       },
       "reply": {
         "encoded_size_ok": 36,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "found", "type": "u32", "minimum": 0, "maximum": 1},
-          {"name": "id", "type": "u64", "minimum": 0, "maximum": 9223372036854775807}
+          {
+            "name": "found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
         ]
       }
     },
@@ -513,23 +779,45 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Exact canonical key and tier lookup is relational DB2 authority and does not depend on portable ANN state.",
-      "c_symbols": ["db2_memory_key_exists_in_tier_pair"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_key_exists_in_tier_pair"
+      ],
       "request": {
         "encoded_size_min": 39,
         "encoded_size_max": 577,
         "fields": [
-          {"name": "key", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 511},
-          {"name": "tier_a", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 15},
-          {"name": "tier_b", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 15}
+          {
+            "name": "key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "tier_a",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "tier_b",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          }
         ]
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "exists", "type": "u32", "minimum": 0, "maximum": 1}
+        "field": {
+          "name": "exists",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
       }
     },
     {
@@ -540,16 +828,34 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok", "invalid_state"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Canonical memory effectiveness is relational DB2 state derived by the host from DB1 session outcomes and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_health_clear_effectiveness", "db2_memory_health_set_effectiveness"],
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_memory_health_clear_effectiveness",
+        "db2_memory_health_set_effectiveness"
+      ],
       "request": {
         "encoded_size": 44,
         "fields": [
-          {"name": "memory_id", "type": "u64", "minimum": 1, "maximum": 9223372036854775807},
-          {"name": "has_value", "type": "u32", "minimum": 0, "maximum": 1},
-          {"name": "value", "type": "f64", "encoding": "ieee754-binary64-le"}
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "has_value",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "value",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le"
+          }
         ],
         "consistency": "has_value=0 requires value bits to be positive zero"
       },
@@ -567,22 +873,35 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Canonical content-safety retention deletes relational memory rows under the fixed restricted and sensitive policies and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_health_delete_by_sensitivity"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_delete_by_sensitivity"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
         "policy": [
-          {"sensitivity": "restricted", "retention_days": 7},
-          {"sensitivity": "sensitive", "retention_days": 90}
+          {
+            "sensitivity": "restricted",
+            "retention_days": 7
+          },
+          {
+            "sensitivity": "sensitive",
+            "retention_days": 90
+          }
         ]
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "deleted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        "field": {
+          "name": "deleted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -593,19 +912,28 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Demoting canonical relational memory tiers from the host-defined effectiveness policy remains DB2 state management and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_health_demote_low_effectiveness"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_demote_low_effectiveness"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"threshold_binary64_bits": 4599075939470750515}
+        "policy": {
+          "threshold_binary64_bits": 4599075939470750515
+        }
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        "field": {
+          "name": "demoted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -616,23 +944,42 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Aggregate effectiveness over the canonical relational memory corpus is DB2 authority and does not depend on portable ANN state.",
-      "c_symbols": ["db2_memory_health_effectiveness_stats"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_effectiveness_stats"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"low_threshold_binary64_bits": 4599075939470750515}
+        "policy": {
+          "low_threshold_binary64_bits": 4599075939470750515
+        }
       },
       "reply": {
         "encoded_size_ok": 40,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "avg_effectiveness", "type": "f64", "encoding": "ieee754-binary64-le",
-           "minimum_binary64_bits": 0, "maximum_binary64_bits": 4607182418800017408},
-          {"name": "low_effectiveness_count", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "high_impact_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "avg_effectiveness",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "minimum_binary64_bits": 0,
+            "maximum_binary64_bits": 4607182418800017408
+          },
+          {
+            "name": "low_effectiveness_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "high_impact_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -644,22 +991,31 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Canonical L2 memory identifiers are relational DB2 authority; the host joins them against DB1 surfacing evidence, so the identifiers cross the boundary rather than the join.",
-      "c_symbols": ["db2_memory_health_list_l2_memory_ids"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_list_l2_memory_ids"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"maximum_ids": 2048}
+        "policy": {
+          "maximum_ids": 2048
+        }
       },
       "reply": {
         "encoded_size_min_ok": 28,
         "encoded_size_max_ok": 16412,
         "encoded_size_error": 24,
-        "field": {"name": "memory_ids", "type": "u64-list",
-                  "minimum_items": 0, "maximum_items": 2048,
-                  "item_minimum": 1, "item_maximum": 9223372036854775807}
+        "field": {
+          "name": "memory_ids",
+          "type": "u64-list",
+          "minimum_items": 0,
+          "maximum_items": 2048,
+          "item_minimum": 1,
+          "item_maximum": 9223372036854775807
+        }
       }
     },
     {
@@ -670,17 +1026,36 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "unsafe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "A health-cycle snapshot row is canonical relational DB2 bookkeeping over the memory corpus and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_health_record"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_record"
+      ],
       "request": {
         "encoded_size": 36,
-        "policy": {"conflict_window_days": 1},
+        "policy": {
+          "conflict_window_days": 1
+        },
         "fields": [
-          {"name": "promotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "demotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "expirations", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "promotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "demotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "expirations",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       },
       "reply": {
@@ -697,21 +1072,37 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Health snapshot and contradiction retention deletes canonical relational DB2 bookkeeping rows and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_health_prune_old", "db2_memory_health_prune_old_contradictions"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_prune_old",
+        "db2_memory_health_prune_old_contradictions"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"snapshot_retention_days": 90, "contradiction_retention_days": 90}
+        "policy": {
+          "snapshot_retention_days": 90,
+          "contradiction_retention_days": 90
+        }
       },
       "reply": {
         "encoded_size_ok": 32,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "snapshots_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "contradictions_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "snapshots_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "contradictions_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -723,29 +1114,78 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "The rolling health-window counters aggregate canonical relational DB2 snapshot and corpus rows; the host derives its rates from them and owns no part of the aggregation.",
-      "c_symbols": ["db2_memory_health_query_counters"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_query_counters"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"promote_use_count": 3,
-                   "promote_confidence_binary64_bits": 4606281698874543309}
+        "policy": {
+          "promote_use_count": 3,
+          "promote_confidence_binary64_bits": 4606281698874543309
+        }
       },
       "reply": {
         "encoded_size_ok": 60,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "cycles", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "total_contradictions", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "total_promotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "total_demotions", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "total_expirations", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "new_memories", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "l1_eligible", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "l2_total", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "l2_stale_30_days", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "cycles",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_contradictions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_promotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_demotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_expirations",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "new_memories",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l1_eligible",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l2_total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l2_stale_30_days",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -757,10 +1197,12 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Tier, kind, and conflict breakdowns of the canonical relational memory corpus are DB2 authority; the host layers only its own PageRank timings on top.",
-      "c_symbols": ["db2_memory_stats_counts"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_stats_counts"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none"
@@ -769,15 +1211,52 @@
         "encoded_size_ok": 96,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "tier_counts", "type": "u32-array", "items": 6,
-           "item_minimum": 0, "item_maximum": 2147483647,
-           "labels": ["L0", "L1", "L2", "L3", "L4", "L5"]},
-          {"name": "kind_counts", "type": "u32-array", "items": 10,
-           "item_minimum": 0, "item_maximum": 2147483647,
-           "labels": ["fact", "preference", "decision", "episode", "task",
-                      "scratch", "procedure", "policy", "workflow", "opinion"]},
-          {"name": "total", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "conflicts", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "tier_counts",
+            "type": "u32-array",
+            "items": 6,
+            "item_minimum": 0,
+            "item_maximum": 2147483647,
+            "labels": [
+              "L0",
+              "L1",
+              "L2",
+              "L3",
+              "L4",
+              "L5"
+            ]
+          },
+          {
+            "name": "kind_counts",
+            "type": "u32-array",
+            "items": 10,
+            "item_minimum": 0,
+            "item_maximum": 2147483647,
+            "labels": [
+              "fact",
+              "preference",
+              "decision",
+              "episode",
+              "task",
+              "scratch",
+              "procedure",
+              "policy",
+              "workflow",
+              "opinion"
+            ]
+          },
+          {
+            "name": "total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "conflicts",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -789,23 +1268,39 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Expiring canonical relational memory rows and their provenance is DB2 lifecycle authority and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_promotion_delete_l0_provenance", "db2_memory_promotion_delete_l0",
-                    "db2_memory_promotion_delete_stale_l1_provenance",
-                    "db2_memory_promotion_delete_stale_l1"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_delete_l0_provenance",
+        "db2_memory_promotion_delete_l0",
+        "db2_memory_promotion_delete_stale_l1_provenance",
+        "db2_memory_promotion_delete_stale_l1"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"stale_l1_tier": "L1", "maximum_kinds": 16}
+        "policy": {
+          "stale_l1_tier": "L1",
+          "maximum_kinds": 16
+        }
       },
       "reply": {
         "encoded_size_ok": 32,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "level0_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "stale_level1_deleted", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "level0_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "stale_level1_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ]
       }
     },
@@ -817,21 +1312,37 @@
       "scope": "none",
       "transaction": "none",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Demoting canonical relational memory tiers and cascading confidence to dependants is DB2 lifecycle authority and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_promotion_demote_kind", "db2_memory_promotion_demote_cascade"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_demote_kind",
+        "db2_memory_promotion_demote_cascade"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
-        "policy": {"demote_tier": "L2", "maximum_kinds": 16}
+        "policy": {
+          "demote_tier": "L2",
+          "maximum_kinds": 16
+        }
       },
       "reply": {
         "encoded_size_ok": 32,
         "encoded_size_error": 24,
         "fields": [
-          {"name": "demoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647},
-          {"name": "cascaded_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+          {
+            "name": "demoted_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "cascaded_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
         ],
         "consistency": "demoted_count=0 requires cascaded_count=0"
       }
@@ -844,17 +1355,22 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Promoting settled relational memory rows into the slow-changing project tier is DB2 lifecycle authority and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_promotion_promote_stable_l2_to_l3"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_promote_stable_l2_to_l3"
+      ],
       "request": {
         "encoded_size": 24,
         "payload": "none",
         "policy": {
           "source_tier": "L2",
           "target_tier": "L3",
-          "kinds": ["fact", "preference"],
+          "kinds": [
+            "fact",
+            "preference"
+          ],
           "minimum_confidence_binary64_bits": 4606732058837280358,
           "minimum_use_count": 5,
           "stable_days": 30
@@ -863,7 +1379,12 @@
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "promoted_count", "type": "u32", "minimum": 0, "maximum": 2147483647}
+        "field": {
+          "name": "promoted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -874,25 +1395,39 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Reclassifying canonical relational directive rows into the highest-priority tier is DB2 lifecycle authority and does not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_promotion_reclassify_directives"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_reclassify_directives"
+      ],
       "request": {
         "encoded_size": 28,
         "policy": {
           "source_tier": "L3",
           "target_tier": "L4",
-          "kinds": ["policy", "workflow"],
+          "kinds": [
+            "policy",
+            "workflow"
+          ],
           "gated_kind": "policy"
         },
-        "field": {"name": "require_approval", "type": "u32", "minimum": 0, "maximum": 1}
+        "field": {
+          "name": "require_approval",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
       },
       "reply": {
         "encoded_size_ok": 28,
         "encoded_size_error": 24,
-        "field": {"name": "reclassified_count", "type": "u32", "minimum": 0,
-                  "maximum": 2147483647}
+        "field": {
+          "name": "reclassified_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
       }
     },
     {
@@ -903,19 +1438,37 @@
       "scope": "none",
       "transaction": "single-statement",
       "idempotency": "safe",
-      "results": ["ok"],
-      "db3_placement": "retained-db2",
-      "db3_reason": "Promotion approvals are canonical relational DB2 rows that gate a later tier change and do not belong to portable ANN providers.",
-      "c_symbols": ["db2_memory_promotion_record_l4_approval"],
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_record_l4_approval"
+      ],
       "request": {
         "encoded_size_min": 41,
         "encoded_size_max": 614,
-        "policy": {"target_tier": "L4"},
+        "policy": {
+          "target_tier": "L4"
+        },
         "fields": [
-          {"name": "memory_id", "type": "u64", "minimum": 1,
-           "maximum": 9223372036854775807},
-          {"name": "approver", "type": "utf8", "minimum_bytes": 1, "maximum_bytes": 63},
-          {"name": "note", "type": "utf8", "minimum_bytes": 0, "maximum_bytes": 511}
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "approver",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "note",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
         ]
       },
       "reply": {

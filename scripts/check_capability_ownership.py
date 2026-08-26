@@ -180,7 +180,7 @@ def inventory(root: Path) -> tuple[set[str], set[str]]:
         # serves. check_module_inventory.py enforces the rule; this only has to
         # accept the keys.
         "plugin_principal_ref_band",
-        "db3_provider_principal_ref_band",
+        "retired_principal_ref_band",
     }:
         fail("inventory-structure", "canonical inventory has an invalid envelope", path)
     if type(value["schema_version"]) is not int or value["schema_version"] != 2:

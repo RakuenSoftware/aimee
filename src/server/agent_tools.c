@@ -220,13 +220,17 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
 {
    if (!path || !path[0])
       return 0;
-   /* Fail closed if the independently running config authority is unavailable.
-    * Its generated convenience accessor returns zero for both explicit false
-    * and transport failure, which would silently disable isolation. */
-   double require_worktree = 1.0;
-   if (config_client_read_number("require_session_worktree", &require_worktree) != 0)
-      require_worktree = 1.0;
-   if (require_worktree == 0.0)
+   /* Fail closed. testing reached this independently and fixed it HERE, noting
+    * that the generated accessor "returns zero for both explicit false and
+    * transport failure, which would silently disable isolation". That is the
+    * same defect this branch fixed one level down, in the accessor itself --
+    * which also covers require_aimee_memory and require_aimee_git, who had it
+    * too and no call-site workaround.
+    *
+    * With the accessor fail-closed, the local guard here is redundant, so the
+    * call goes back to reading as the intent does: only an explicit
+    * `require_session_worktree: false` turns isolation off. */
+   if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
     * escapes. Match the canonical managed-worktree location plus the workflow

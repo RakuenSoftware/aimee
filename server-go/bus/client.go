@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -85,6 +86,9 @@ type Client struct {
 	qpMem   []byte
 
 	pendingRead bool
+
+	// emitMu serialises writers to the single-producer outbound ring. See emit.
+	emitMu sync.Mutex
 }
 
 // Event is a received event; Payload points into the shared inbound slot and is
@@ -216,6 +220,22 @@ func (c *Client) emit(flags uint16, kind uint32, corr uint64, payload []byte) er
 	if c.control == nil {
 		return ErrProtocol
 	}
+	// The outbound ring is SINGLE-PRODUCER: ProduceBegin reads head, the caller
+	// writes that slot, and ProduceCommit stores head+1. Two goroutines emitting
+	// at once both get the same slot, one overwrites the other, and head
+	// advances twice -- so a message is silently lost and a second is delivered
+	// twice.
+	//
+	// That is not hypothetical. A module process serves its stages from its own
+	// loop, which emits replies, while anything else holding the client -- a
+	// sidecar speaking a second protocol on the one attachment -- emits too. The
+	// symptom was applies that left the caller without error and never arrived,
+	// which reads as a provider that is up and ignoring writes.
+	//
+	// Serialised here rather than in each caller, because the invariant belongs
+	// to the ring and every current and future emitter has to honour it.
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
 	if len(payload) > 0 &&
 		(uint32(len(payload)) > c.inlineBudget || HdrLen+len(payload) > int(c.slotSize)) {
 		return ErrPayload
