@@ -207,6 +207,8 @@ static void test_tools(void)
    assert(tool_class("test") == AIMEE_TOOL_CLASS_EXEC);
    assert(tool_class("run_tests") == AIMEE_TOOL_CLASS_EXEC);
    assert(tool_class("read_file") == AIMEE_TOOL_CLASS_READ);
+   assert(tool_class("web_search") == AIMEE_TOOL_CLASS_REMOTE);
+   assert(tool_class("git_pr") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("mcp:remote") == AIMEE_TOOL_CLASS_REMOTE);
    assert(tool_class("not_registered") == AIMEE_TOOL_CLASS_UNKNOWN);
 }

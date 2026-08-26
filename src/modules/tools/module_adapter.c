@@ -14,17 +14,21 @@ static int one_of(const char *name, const char *const *values)
 static aimee_tool_class_t classify(const char *name)
 {
    static const char *const exec[] = {"bash", "execute_script", "test", "run_tests", NULL};
-   static const char *const write[] = {"write_file", "edit_file", "edit_symbol", "create_note",
-                                       "rules_propose", "learning_propose", "git_commit",
-                                       "git_push", "git_branch", "git_pr", NULL};
-   static const char *const control[] = {"request_input", "clarify_start", "clarify_answer",
-                                         "diagnose_start", "diagnose_observe",
-                                         "diagnose_hypothesize", "diagnose_evidence", NULL};
-   static const char *const read[] = {"read_file", "list_files", "grep", "code_search",
-                                      "find_symbol", "read_symbol", "search_memory",
-                                      "search_docs", "web_search", "web_read", "list_notes",
-                                      "search_notes", "git_log", "git_diff", "git_status", NULL};
+   static const char *const write[] = {
+       "write_file",    "edit_file",        "edit_symbol", "create_note",
+       "rules_propose", "learning_propose", "git_commit",  "git_push",
+       "git_branch",    "git_pr",           NULL};
+   static const char *const control[] = {
+       "request_input",    "clarify_start",        "clarify_answer",    "diagnose_start",
+       "diagnose_observe", "diagnose_hypothesize", "diagnose_evidence", NULL};
+   static const char *const read[] = {
+       "read_file",   "list_files",    "grep",        "code_search", "find_symbol",
+       "read_symbol", "search_memory", "search_docs", "list_notes",  "search_notes",
+       "git_log",     "git_diff",      "git_status",  NULL};
+   static const char *const remote[] = {"web_search", "web_read", "git_push", "git_pr", NULL};
    if (strchr(name, ':'))
+      return AIMEE_TOOL_CLASS_REMOTE;
+   if (one_of(name, remote))
       return AIMEE_TOOL_CLASS_REMOTE;
    if (one_of(name, exec))
       return AIMEE_TOOL_CLASS_EXEC;
@@ -37,10 +41,10 @@ static aimee_tool_class_t classify(const char *name)
    return AIMEE_TOOL_CLASS_UNKNOWN;
 }
 
-aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data)
+aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
+                                           const uint8_t *request_body, uint32_t request_len,
+                                           uint8_t *response_body, uint32_t response_capacity,
+                                           uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    char name[AIMEE_TOOLS_NAME_MAX + 1];

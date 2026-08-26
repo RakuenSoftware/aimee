@@ -73,7 +73,7 @@ saving a different choice for an active corpus.
 Width is not identity. Pooling and the query/document prefixes change every vector while leaving
 both the dimension and the model name untouched: well-formed vectors, right width, right name,
 different space, collapsed recall and no error anywhere. Both have happened: nomic served with
-`last` pooling (correct for the previous Qwen3 embedder), and nomic served prefix-free, which
+`last` pooling (from an earlier model contract), and nomic served prefix-free, which
 measured 0.5823 NDCG@10 against 0.6075 with its card prefixes.
 
 The selected embedding role publishes a `serving_id` on `/health` (the model key plus a digest over

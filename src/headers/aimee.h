@@ -101,13 +101,12 @@
 #define EFFECTIVENESS_MIN_SAMPLES      10
 
 /* Embedding retrieval.
- * EMBED_MAX_DIM is the largest embedder output we buffer for: 4000 covers the
- * Qwen3-Embedding ladder (0.6b=1024, 4b=2560, 8b truncated 4096->4000) as well
- * as the legacy pplx-embed (0.6b=1024 / 4b=2560). A deployment runs ONE embedder;
+ * EMBED_MAX_DIM is the largest embedder output we buffer for. A deployment runs
+ * ONE selected embedder;
  * config.embedder_dims selects which, and the DB2 halfvec columns are created at
  * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
- * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
- * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
+ * (inclusive) — wider outputs must be reduced to 4000 by the embedding boundary
+ * before indexing. */
 #define EMBED_MAX_DIM 4000
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly

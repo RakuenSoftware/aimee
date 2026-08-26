@@ -685,21 +685,6 @@ int handle_curator_contradictions(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    return send_and_free(conn, resp);
 }
 
-int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Inbound push from aimee-kb: a source doc's derived curator artifacts were
-    * invalidated. The subscriber (this server) has now received the event. */
-   const char *source_kind = jo_str(req, "source_kind", "");
-   const char *source_id = jo_str(req, "source_id", "");
-   int stale = jo_int(req, "artifacts_stale", 0);
-   (void)source_kind;
-   (void)source_id;
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "received", stale);
-   return send_and_free(conn, resp);
-}
-
 /* kb.build / kb.update / kb.ingest / kb.docs.push relay to aimee-kb.
  *
  * All four are SYNCHRONOUS, for the reason on handle_index_scan: these used to
