@@ -210,6 +210,26 @@ catalog without reusing identifiers; an incompatible field change requires a new
 dual-version compatibility window. The C and Go codec generators must reproduce the checked-in
 fingerprint byte-for-byte.
 
+> **Outcome, 2026-08-26: sections 3.2 and 3.3 were built and removed.** The DB3
+> half of this proposal exists no longer; the rest of it stands.
+>
+> What killed it was the caller trace this proposal did not do first. Memory
+> visibility is a four-level rank over `EXISTS` subqueries against
+> `memory_scopes` / `memory_workspaces`, whose bottom tier includes rows carrying
+> no scope rows at all — a store filtering on labels silently drops the shared,
+> global and legacy-untagged memories while still answering in the right shape.
+> `kb_embeddings` has no generation column and joins `kb_documents` for it. Code
+> search is one leg of an RRF fusion keyed on `(project, file_path)` whose other
+> three legs are relational.
+>
+> That left curator entity resolution — one table, `scope_kind`/`scope_id`
+> equality, top-1 against a threshold. One lookup does not justify an outbox, a
+> delivery ledger, backfill cursors, admission, leases and a provider protocol.
+>
+> pgvectorscale (StreamingDiskANN) is the default index instead, and it has the
+> joins. Do not rebuild the observer contract without new evidence that some
+> search actually reduces to points and labels.
+
 ### 3.2 DB2 keeps pgvector; DB3 observers take the portable surface
 
 Pgvector remains part of DB2. It uses DB2's PostgreSQL pool, tenant transaction, schema migration,
