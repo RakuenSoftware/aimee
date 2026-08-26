@@ -174,7 +174,7 @@ unblocked slice 3 onward.
 | 9 — Go reference client | merged; pure Go, vectors byte-exact |
 | 10 — conformance suite | merged; real Go client ↔ C host interop |
 | 11 — capture + replay | merged; normal + ASAN + TSAN |
-| 12 — perf baseline gate | merged; ~134 ns/event dispatch, 2000 ns ceiling |
+| 12 — perf baseline gate | merged; ~134 ns/event dispatch, 1000 ns ceiling |
 
 The suite ran under self-review from slice 4 onward (the shared roundtable panel was only partly
 working); every slice's adversarial self-review caught real defects before merge — a control fd
