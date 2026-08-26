@@ -27,7 +27,7 @@ Current contracts:
 - [gateway](gateway.md), [runtime web](runtime-web.md), [control web](control-web.md), and
   [vault](vault.md);
 - [aimee](aimee.md), [economizer](economizer.md), and [sandbox](sandbox.md);
-- [db1](db1.md), [db2](db2.md), [db3](db3.md), and [postgres](postgres.md).
+- [db1](db1.md), [db2](db2.md), and [postgres](postgres.md).
 
 See the [technical reference](../../src/README.md) for the process and source map.
 

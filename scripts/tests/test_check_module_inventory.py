@@ -344,19 +344,19 @@ class ModuleInventoryTest(unittest.TestCase):
 
     def test_missing_db3_band_is_refused(self):
         data = self.changed()
-        data.pop("db3_provider_principal_ref_band")
+        data.pop("retired_principal_ref_band")
         self.assert_failed(self.run_checker(data), "rule=structure", "missing keys")
 
     def test_inverted_db3_band_is_refused(self):
         data = self.changed()
-        data["db3_provider_principal_ref_band"] = {"first": 512, "limit": 456}
+        data["retired_principal_ref_band"] = {"first": 512, "limit": 456}
         self.assert_failed(self.run_checker(data), "rule=plugin-band", "first < limit")
 
     def test_overlapping_bands_are_refused(self):
         # Two dynamic allocators drawing from one range is the same defect as a
         # module sitting inside a band.
         data = self.changed()
-        data["db3_provider_principal_ref_band"] = {"first": 400, "limit": 512}
+        data["retired_principal_ref_band"] = {"first": 400, "limit": 512}
         self.assert_failed(self.run_checker(data), "rule=plugin-band", "overlaps")
 
 

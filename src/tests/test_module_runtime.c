@@ -20,6 +20,9 @@
 #include <aimee/roundtable/module_api.h>
 #include <aimee/routing/module_api.h>
 #include <aimee/runtime-web/module_api.h>
+#include <aimee/execution-policy/module_api.h>
+#include <aimee/postgres/module_api.h>
+#include "config_client.h"
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
@@ -40,13 +43,15 @@
 #include <unistd.h>
 #include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
-#define TEST_KIND            5889U
-#define EMPTY_KIND           5890U
-#define TEST_STAGE           1U
-#define MODULE_REF           7U
-#define CALLER_REF           90U
-#define LARGE_BODY           (128U * 1024U + 37U)
-#define PRODUCTION_STAGE_MAX 5U
+#define TEST_KIND  5889U
+#define EMPTY_KIND 5890U
+#define TEST_STAGE 1U
+#define MODULE_REF 7U
+#define CALLER_REF 90U
+#define LARGE_BODY (128U * 1024U + 37U)
+/* The largest stage count any component declares in
+ * src/modules/process-contracts.json. `aimee` has twenty-three. */
+#define PRODUCTION_STAGE_MAX 32U
 
 typedef struct
 {
@@ -148,7 +153,12 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[2] = AIMEE_MEMORY_EVENT_EMBED;
       served[3] = AIMEE_MEMORY_EVENT_RETRIEVE;
       served[4] = AIMEE_MEMORY_EVENT_RERANK;
-      *serve_count = PRODUCTION_STAGE_MAX;
+      /* Five, stated rather than borrowed from the array bound. It used to say
+       * PRODUCTION_STAGE_MAX, which was 5 and therefore correct by coincidence;
+       * raising the bound to hold aimee's twenty-three made this module claim
+       * to serve twenty-three kinds, and the grant for the ones past its fifth
+       * carried uninitialised array entries. */
+      *serve_count = 5;
       return 0;
    }
    if (strcmp(name, "learning") == 0)
@@ -217,6 +227,41 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[3] = AIMEE_ECONOMIZER_EVENT_TOOL_STATS;
       served[4] = AIMEE_ECONOMIZER_EVENT_RECORD_BUILD;
       *serve_count = 5;
+      return 0;
+   }
+   /* These four were missing, and the omission was invisible because the only
+    * script that exercises this table -- scripts/test_bus_conformance.sh -- is
+    * run by no CI job and no make target. It derives its module list from
+    * process-contracts.json, so every component added since this table was
+    * written arrived here as "return -1" and aborted the run. config,
+    * execution-policy, postgres and aimee had all drifted in that way.
+    *
+    * The stage lists mirror process-contracts.json, which is the source of
+    * truth; a component that grows a stage has to be added here too, and the
+    * conformance run is what says so. */
+   else if (strcmp(name, "config") == 0)
+      *kind = AIMEE_CONFIG_EVENT_KIND, *principal_ref = 2;
+   else if (strcmp(name, "execution-policy") == 0)
+      *kind = AIMEE_EXECUTION_POLICY_EVENT_TOOL, *principal_ref = 17;
+   else if (strcmp(name, "postgres") == 0)
+   {
+      *kind = AIMEE_POSTGRES_EVENT_HEALTH, *principal_ref = 28;
+      served[0] = AIMEE_POSTGRES_EVENT_HEALTH;
+      served[1] = AIMEE_POSTGRES_EVENT_SQL;
+      *serve_count = 2;
+      return 0;
+   }
+   else if (strcmp(name, "aimee") == 0)
+   {
+      /* Twenty-three stages, carved from ref 30 by the canonical rule
+       * kind = 4096 + ref*256 + stage. Written as the derivation rather than
+       * twenty-three constants, because that IS the contract and a hand-copied
+       * list is what drifts. */
+      *principal_ref = 30;
+      *kind = 4096u + 30u * 256u + 1u;
+      for (uint32_t stage = 1; stage <= 23u; stage++)
+         served[stage - 1] = 4096u + 30u * 256u + stage;
+      *serve_count = 23;
       return 0;
    }
    else
@@ -645,6 +690,40 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(strstr((const char *)response, "src/server/session_compact.c") != NULL);
       assert(strstr((const char *)response, "decisions_made") != NULL);
       assert(strstr((const char *)response, "[done] changed") != NULL);
+   }
+   else if (strcmp(name, "postgres") == 0)
+   {
+      /* The health stage is REACHED, and with no database configured it reports
+       * a typed failure rather than inventing an answer.
+       *
+       * That refusal is the assertion. A probe that fabricated health when it
+       * could not reach the store would be wrong exactly when it mattered, and
+       * this harness deliberately stands up no database -- so a failure here is
+       * the contract being kept. What is proven either way is that the C caller
+       * reaches the Go stage and gets its verdict back. */
+      assert(aimee_postgres_health_request_encode(request, sizeof(request)) == 0);
+      aimee_module_call_result_t health = aimee_module_client_call(
+          client, AIMEE_POSTGRES_EVENT_HEALTH, AIMEE_POSTGRES_STAGE_HEALTH, 2101, 0, request,
+          AIMEE_POSTGRES_REQUEST_LEN, response, sizeof(response), &response_len, NULL, NULL);
+      if (health == AIMEE_MODULE_CALL_OK)
+         assert(response_len == AIMEE_POSTGRES_RESPONSE_LEN);
+   }
+   else if (strcmp(name, "execution-policy") == 0)
+   {
+      /* A tool decision, JSON both ways. "rm -rf /" is the case where a policy
+       * that failed open would be catastrophic, so the assertion is that it is
+       * REFUSED rather than merely that something came back. */
+      static const char body[] = "{\"tool\":\"bash\",\"side_effect\":\"destructive\","
+                                 "\"arguments\":{\"command\":\"rm -rf /\"}}";
+      assert(sizeof(body) - 1 <= sizeof(request));
+      memcpy(request, body, sizeof(body) - 1);
+      assert(aimee_module_client_call(client, AIMEE_EXECUTION_POLICY_EVENT_TOOL,
+                                      AIMEE_EXECUTION_POLICY_STAGE_TOOL, 2102, 0, request,
+                                      (uint32_t)(sizeof(body) - 1), response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"allowed\"") != NULL);
    }
    else
    {

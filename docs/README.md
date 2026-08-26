@@ -63,7 +63,7 @@ Start here:
 
 ## Engineering
 
-- [Module contracts](modules/README.md), including [db3 routing and admission](db3.md)
+- [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
 - [Core C libraries](core/connection.md): [event bus](core/event-bus.md) and
   [repository extraction](core/repository-extraction.md)
