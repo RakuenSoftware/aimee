@@ -1,4 +1,4 @@
-# Orchestration seam — delegate first-port plan (Slice 3 deliverable)
+# Orchestration seam: delegate first-port plan (Slice 3 deliverable)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -7,7 +7,7 @@
 > **Archived complete (2026-07-26).** The scoped implementation and safety gates are
 > present on `testing` with dedicated tests.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   `response-orchestration-stages.md` is required to produce. The seam itself
   (`gw_orchestration_seam.{h,c}` + `test_gw_orchestration_seam.c`) lands in Slice 3;
   the actual delegate port described here is a **sequenced follow-up**, not Slice 3.
@@ -18,14 +18,14 @@
 
 A distinct orchestration-hook seam, deliberately NOT a request/response stage transform:
 
-- `gw_turn_snapshot_t` — immutable, borrowed view of the turn (turn id, session id,
+- `gw_turn_snapshot_t`: immutable, borrowed view of the turn (turn id, session id,
   read-only request + response-or-NULL). Hooks observe; they do not rewrite it.
-- `gw_turn_capabilities_t` — two narrow handles, `spawn_delegate(role, brief)` and
+- `gw_turn_capabilities_t`: two narrow handles, `spawn_delegate(role, brief)` and
   `dispatch_workflow(lane, payload)`. The only way a hook effects change.
-- `gw_orch_result_t` — tagged verb `CONTINUE / COMPLETE / SUSPEND / FAIL`, **fail-OPEN**
+- `gw_orch_result_t`: tagged verb `CONTINUE / COMPLETE / SUSPEND / FAIL`, **fail-OPEN**
   (a bad hook never blocks a turn; the wire site logs FAIL). `SUSPEND` carries a
   caller-owned continuation string.
-- `gw_orchestration_registry_build` / `gw_orchestration_run` — same up-front catalog
+- `gw_orchestration_registry_build` / `gw_orchestration_run`, same up-front catalog
   validation as `gw_response_registry` (dup/empty-name/NULL-fn/overflow → −1), but the
   runner is fail-open rather than fail-closed.
 
@@ -36,9 +36,9 @@ the worked example.
 
 Workflows already have a request-side advisory seam (`gw_stage_router` /
 `router_advise.c`, wired at `anthropic_http.c:289` and `openai_chat.c:986`). Delegate
-spawning has **no** seam — it is called imperatively:
+spawning has **no** seam. It is called imperatively:
 
-- `delegate_spawn_ondemand(compute_ctx_t*)` — `server/server_delegate_ondemand.c:92`
+- `delegate_spawn_ondemand(compute_ctx_t*)`: `server/server_delegate_ondemand.c:92`
   (thread pool + in-flight ceiling; the real spawn primitive).
 - Callers: `server/server_compute.c:410`, `server/server_coord_dispatcher.c:55`,
   `server/server_skill_jobs.c:48`.
@@ -56,7 +56,7 @@ So delegates are the genuinely-new orchestration path and the honest first port.
    primitive itself.
 2. **A `"delegates"` orchestration hook** that encodes the current `prevent_subagents` /
    on-demand decision and calls `caps->spawn_delegate`. Enable/disable via the config-store
-   (per the roundtable ruling that the config-store — not env — is canonical for
+   (per the roundtable ruling that the config-store (not env) is canonical for
    enablement); pick the toggle name in the config-surface slice, mirroring how Slice 2 left
    `AIMEE_STAGE_GOVERNANCE`'s durable surface to that slice.
 3. **One wire site** builds the hook catalog + capabilities and calls `gw_orchestration_run`

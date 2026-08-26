@@ -1,16 +1,16 @@
-# Proposal: structured-PDF Phase 3–4 — tables → typed facts, visual evidence, OCR, and retrieval-quality (vector + answerability)
+# Proposal: structured-PDF Phase 3–4: tables → typed facts, visual evidence, OCR, and retrieval-quality (vector + answerability)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** ✅ **DONE — Phases §A–§D shipped to `testing`** as four
+- **State:** **DONE. Phases §A–§D shipped to `testing`** as four
   independently-shippable, default-off PRs (§A #883, §B #885, §C #888, §D #890),
   each roundtable-reviewed on the actual diff before merge. The remaining work is
   the deploy-tier GA gates enumerated in the **Close-out** section at the end
   (sidecar/binary deploys, the corpus-scale row-count measure, the engine-level
   RLS/least-priv role, live retrieval-quality validation, the durable/WORM audit
-  store) — none of which can be exercised in a code-only environment. Successor to
+  store), none of which can be exercised in a code-only environment. Successor to
   the now-filed structured-PDF evidence proposal
   ([[structured-pdf-ingestion-and-evidence-layer]], in `done/`), which delivered
   Phases 1–2: text+geometry ingest, the access-controlled citation retrieval
@@ -36,7 +36,7 @@
   cells promoted into the typed-fact layer), Calibrate (corpus-level
   answerability signal returned with `search_chunks`), Gate-Promote (per-sidecar
   capability flags + the row-count gate).
-- **Scope — entirely aimee-KB-side, additive on the Phase 1–2 spine:** an
+- **Scope, entirely aimee-KB-side, additive on the Phase 1–2 spine:** an
   optional TSR sidecar client and an optional OCR sidecar client (same
   call-out pattern as the embedder/reranker; `src/kb/kb_doc_pdf.{c,h}` +
   new sidecar client files), a new **`kb_doc_assets`** relational table + a
@@ -51,7 +51,7 @@
 
 ## §0 What Phases 1–2 already established (the foundation this rides)
 
-From [[structured-pdf-ingestion-and-evidence-layer]] — do not rebuild:
+From [[structured-pdf-ingestion-and-evidence-layer]]. Do not rebuild:
 
 - **The chunk + geometry spine.** `kb_documents` (`doc_kind='pdf'`,
   `chunk_strategy='page'`, `page_start`/`page_end`) and the per-line
@@ -79,10 +79,10 @@ Phase 2 shipped `search_chunks` as **lexical-only** (case-insensitive content
 match), and PDF chunks are deliberately **un-embedded** so they stay invisible to
 the vector-only `/v1/search`. This phase completes the parent's §5 design.
 
-- **A1 — Embed PDF chunks into a structurally-isolated PDF-vector relation
+- **A1. Embed PDF chunks into a structurally-isolated PDF-vector relation
   (RT-S1).** Wire the existing `kb_async_jobs` (`kind='embed_raw'`) path to PDF
   chunks, but write the vectors to a **dedicated PDF-only vector relation with no
-  general-vector-search read path** — *structural* isolation, not a runtime
+  general-vector-search read path**, *structural* isolation, not a runtime
   `WHERE doc_kind='pdf'` filter on the shared table. A query-time predicate is a
   data-classification filter, not an access-control boundary: a future code path
   that forgets it would leak withheld content. By giving PDF vectors their own
@@ -95,10 +95,10 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   optional (RT2-S1):** the general-search code path connects under a
   **least-privilege DB role with no grant on the PDF-vector relation** (and/or a
   Postgres row-security policy on that relation), so the structural boundary is
-  enforced by the database engine even if an application JOIN is mis-written — the
+  enforced by the database engine even if an application JOIN is mis-written. The
   app-layer separation and the engine-level privilege boundary are *both* present,
   neither alone is trusted.
-- **A2 — Two-stage `search_chunks` (join semantics + ingest ordering, RT-C1).**
+- **A2. Two-stage `search_chunks` (join semantics + ingest ordering, RT-C1).**
   Make retrieval the parent's intended shape: (1) FTS/lexical **and**
   text-embedding candidate retrieval over chunk `content`; (2) citation
   resolution against `kb_doc_regions`. The candidate→region join is a **LEFT
@@ -107,24 +107,24 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   silently dropped (INNER) or returned as a bare confusing row. **Ingest ordering
   is a stated guarantee:** the ingest transaction commits `kb_doc_regions` before
   the chunk's `embed_raw` job is enqueued, so a vector-retrievable chunk always
-  has its citations — and the LEFT-JOIN path is the backstop if that ever races.
+  has its citations, and the LEFT-JOIN path is the backstop if that ever races.
   The **symmetric missing-embed case is not an atomicity violation (RT2-C1):**
   embedding is intentionally **async** (`kb_async_jobs`), so a chunk whose
-  `embed_raw` fails or is still pending simply has regions-but-no-vector — it stays
+  `embed_raw` fails or is still pending simply has regions-but-no-vector. It stays
   **fully lexically retrievable** with citations, and the job system **retries**
   the embed; no ingest transaction is left half-applied because the vector is never
   part of it. The response contract (chunks + citations) is otherwise unchanged and
   backward-compatible; lexical-only stays the graceful-degradation path when the
   embedder is absent. Observability: retrieval emits latency + region-miss-rate
   metrics, and the embed-job backlog/failure rate is already monitored.
-- **A3 — Per-query answerability signal (§5-A contract; RT-C2).** `search_chunks`
+- **A3, Per-query answerability signal (§5-A contract; RT-C2).** `search_chunks`
   returns an answerability judgment with the **fixed contract** the parent
   specified: a `float score ∈ [0,1]` plus an enum `label ∈ {NONE, LOW, MEDIUM,
   HIGH}` (default thresholds `<0.15`→NONE, `<0.40`→LOW, `<0.66`→MEDIUM, else HIGH;
   config-overridable; defaults mirror the server's confidence tiers). **Naming
   correction (the parent called it "corpus-level," which is imprecise):** the
-  signal is **per-query *over* the corpus** — "given *this* query, how well can
-  the KB answer it" — so the same document scores differently across queries *by
+  signal is **per-query *over* the corpus**, "given *this* query, how well can
+  the KB answer it": so the same document scores differently across queries *by
   design*, and that is not a contradiction. Its inputs are split and documented so
   the value is reproducible: **query-scoped** components computed at search time
   (max FTS rank of the top-k hits, query-term coverage across matched chunks) and
@@ -132,12 +132,12 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   FTS index health), combined by a **documented deterministic function with fixed
   default weights** (pinned by a reference test: query Q over fixture corpus C ⇒
   score ≥ 0.7, label HIGH). The invariant that actually matters for the tenancy
-  boundary holds: it is computed **KB-side and stays a shared judgment** — it is
+  boundary holds: it is computed **KB-side and stays a shared judgment**. It is
   **not** folded into the server's per-user confidence/steer tier, and the API
   keeps the two as distinct fields so clients cannot conflate them. A standalone
   `/v1/answerability?q=…` (signal-only) may follow as a purely additive endpoint.
 
-## §B Phase 3 — tables → typed facts (`lookup_table`)
+## §B Phase 3: tables → typed facts (`lookup_table`)
 
 - **TSR sidecar.** An *optional* local table-structure-recognition model
   (ONNX-class, deployed like the embedder/reranker) converts table regions
@@ -146,7 +146,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   in real documents).
 - **Cell provenance + discriminator (RT-C3).** Reusing the typed-fact store is the
   goal, but table cells need provenance the generic fact row does not carry, and
-  `lookup_table` must return *only* table cells — so each cell fact records: a
+  `lookup_table` must return *only* table cells, so each cell fact records: a
   **`source_type='table_cell'` discriminator** (indexed, so `lookup_table` filters
   to cells and never returns unrelated facts), its **(row, col) position**, the
   **TSR confidence**, and a link to the **source `kb_doc_regions` region** (and
@@ -155,10 +155,10 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   is an implementation decision validated against the actual typed-fact schema
   during Phase 3; the **provenance contract above is the requirement**, the
   storage shape is not pre-committed. Cell facts remain first-class typed facts
-  (entity-linkable, searchable) — the discriminator narrows, it does not wall them
+  (entity-linkable, searchable). The discriminator narrows, it does not wall them
   off.
 - **Graceful degradation (must be tested, not assumed).** When the sidecar is
-  absent, a table region degrades to a normal text chunk with geometry — still
+  absent, a table region degrades to a normal text chunk with geometry, still
   retrievable via `search_chunks`, just not cell-structured. The **user-visible
   contract is explicit, not silent (RT-sug):** `lookup_table` on a
   TSR-absent/region returns an empty cell set **with a `tsr_status` marker**
@@ -172,7 +172,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   document the caller cannot read returns empty), not merely a check that the
   request named a `document_key`.
 
-## §C Phase 4 — visual evidence: crops + content-addressed blob store (`open_asset`)
+## §C Phase 4: visual evidence: crops + content-addressed blob store (`open_asset`)
 
 - **`kb_doc_assets` table.** New relational table
   `(id, document_key TEXT, page_no INTEGER, x0/y0/x1/y1 REAL, kind TEXT,
@@ -183,7 +183,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   do.
 - **Sensitivity is a denormalized filter, not the authority (RT-D1).** As with
   `kb_doc_regions` in the parent, the class is copied onto each asset row so
-  retrieval filters without a join — but the **authoritative** control is the
+  retrieval filters without a join, but the **authoritative** control is the
   live `document_key`-level permission + `quarantine_state`, *not* the cached
   per-row class. A sensitivity change re-propagates to all of a document's region
   **and** asset rows through the **same maintenance path** that already
@@ -194,7 +194,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   rule.
 - **Crop rendering.** Detected figure/table regions are rendered to image crops
   (poppler `pdftoppm`-class rasterization over the same operator-installed
-  process boundary as `pdftotext` — no new linked dependency).
+  process boundary as `pdftotext`, no new linked dependency).
 - **Content-addressed blob store (new filesystem surface).** Crops are binary and
   do not belong inline in the DB. They are written to a content-addressed store
   under `AIMEE_HOME` (one file per `sha256`); `blob_ref` is that `sha256`.
@@ -203,25 +203,25 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   one filesystem layout (RT-sug). This is an honestly-new storage dependency
   (filesystem, not relational).
 - **Blob access is gated, never direct (R2-S1, carried + sharpened RT-S3).** The
-  `sha256` is a **KB-internal identifier — never returned to a client, never in a
-  URL/log/error** — and the blob directory is served by **no** static/file route.
+  `sha256` is a **KB-internal identifier, never returned to a client, never in a
+  URL/log/error**, and the blob directory is served by **no** static/file route.
   The sole read path is **`open_asset`**, whose handle is explicitly the **opaque
-  `kb_doc_assets.id` (the row id — *never* sha256-derived);** it applies the
+  `kb_doc_assets.id` (the row id, *never* sha256-derived);** it applies the
   caller's **auth context + the `document_key`-level access check** (the same ACL
   every PDF read uses, not a bare id lookup) and an **access audit log entry**
   (success/failure) before streaming bytes. The id being unguessable is *defense
-  in depth* — the `document_key` ACL is the authority regardless of id
+  in depth*. The `document_key` ACL is the authority regardless of id
   guessability (R3 execution item #3). A caller cannot construct a path or fetch a
   crop by knowing a hash. **Engine-level backstop (RT2-S3):** since the live ACL is
   the primary control, `kb_doc_assets` also carries a **row-security policy /
   least-privilege role** so a query that omits the application check still cannot
-  read another tenant's asset rows — the same both-layers posture as the
+  read another tenant's asset rows, the same both-layers posture as the
   PDF-vector relation (§A1). The audit log is append-only and stored under a role
   distinct from the asset rows it records.
 - **Cross-sensitivity dedup is safe (RT-S2 clarification).** Two documents that
   contain the *byte-identical* crop share one blob, but each has its **own
   `kb_doc_assets` row** carrying its **own `document_key` + sensitivity**, and
-  `open_asset` checks the *row*, never the blob — so dedup never widens access
+  `open_asset` checks the *row*, never the blob, so dedup never widens access
   (the bytes are identical by definition of content-addressing; there is nothing
   "more sensitive" to leak). A blob persists as long as *any* row references it,
   which is correct: a public document legitimately keeps showing its crop after a
@@ -229,7 +229,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
 - **Orphan + blob lifecycle (atomicity + ordering, RT-S2).** Writes are ordered so
   the failure modes are safe: the **blob is written and fsync-durable *before* its
   `kb_doc_assets` row is inserted**, so a crash can only ever leave an *orphan
-  blob* (harmless, reclaimed by cleanup) — never a row pointing at a missing blob.
+  blob* (harmless, reclaimed by cleanup), never a row pointing at a missing blob.
   Deletion is **not** a relational cascade: when a document's chunks are
   deleted/re-ingested, the same maintenance path deletes its asset rows first,
   then a periodic reconciliation job scans `kb_doc_assets` for `blob_ref` values
@@ -240,7 +240,7 @@ the vector-only `/v1/search`. This phase completes the parent's §5 design.
   **Cadence + alarm are specified, not left implicit (RT2-perf):** the
   reconciliation job runs on a **configurable interval** (default hourly) and can
   also be triggered on demand; an **orphan-bytes alarm** (configurable threshold)
-  fires if reclaimable bytes grow unbounded — so a lagging or failing sweep under
+  fires if reclaimable bytes grow unbounded, so a lagging or failing sweep under
   crash load is observable and bounded, not a silent path to storage exhaustion.
 
 ## §D OCR fallback (scanned / image-only PDFs)
@@ -254,7 +254,7 @@ from §C, no text chunks).
 
 - **OCR-absent is a documented limitation, not a silent drop (RT-sug).** A scanned
   PDF ingested without OCR yields **no searchable text and no quote-bearing
-  citations** — it is reachable only as visual crops via `open_asset`. The upload
+  citations**. It is reachable only as visual crops via `open_asset`. The upload
   path **surfaces this** (an asset-only ingest is reported, not silently
   accepted as if text-indexed), so an operator is never misled into thinking a
   scanned contract is searchable. Re-ingesting once OCR is deployed upgrades it
@@ -269,8 +269,8 @@ from §C, no text chunks).
   assumed-safe by analogy. Both sidecars run **inside the KB trust perimeter** with
   **no external network** and **no document-content retention** after processing.
 - **The byte-consuming PDF parser *is* the threat surface (RT2-S4).** The
-  components that consume the user-supplied PDF bytes — `pdftotext` (Phase 1),
-  `pdftoppm` (crop rasterization), and the OCR sidecar's image decoder — are
+  components that consume the user-supplied PDF bytes, `pdftotext` (Phase 1),
+  `pdftoppm` (crop rasterization), and the OCR sidecar's image decoder, are
   exactly the CVE-rich parsers, and they are exactly what the hardened harness
   wraps; there is no *separate* "trusted parser" upstream of them. Hardening is
   named concretely: `RLIMIT_AS` is tuned to bound **in-memory decompression**
@@ -278,7 +278,7 @@ from §C, no text chunks).
   **subprocess stdout + scratch output**, and scratch is unlinked on **every**
   exit path including signal/group-kill. A **syscall-filter profile**
   (seccomp-bpf, or the platform sandbox equivalent) on these subprocesses is a
-  named hardening upgrade to the shared harness — evaluated as part of this phase,
+  named hardening upgrade to the shared harness, evaluated as part of this phase,
   since this phase adds two more untrusted parsers to it.
 
 ## Security (carried from the parent's R1–R3; the deltas this phase introduces)
@@ -287,14 +287,14 @@ The phase introduces three genuinely-new attack surfaces; each inherits a settle
 control:
 
 1. **Vectorized PDF content (§A1).** PDF vectors live in a **dedicated relation
-   the general vector search never reads** — *structural* isolation, with the
+   the general vector search never reads**, *structural* isolation, with the
    `quarantine_state<>'pending'` predicate as defense-in-depth inside the PDF
    surface (a runtime filter alone was rejected as a classification, not an
    access, boundary). Tested adversarially: a general-search caller and a
    `pending` doc are vector-unreachable by every path.
-2. **Binary crops in a content-addressed store (§C).** `open_asset` — keyed on the
+2. **Binary crops in a content-addressed store (§C).** `open_asset`, keyed on the
    opaque **`kb_doc_assets.id` row id (never sha256)**, applying the caller's auth
-   context + the live `document_key` ACL + an audit-log entry — is the **sole**
+   context + the live `document_key` ACL + an audit-log entry, is the **sole**
    gated read path; the `sha256` never crosses the trust boundary, appears in no
    URL/log/error, and no file route serves the blob dir (R2-S1). Content-addressed
    dedup does not widen access (gating is on the per-document asset row, not the
@@ -310,20 +310,20 @@ sensitivity is the v1 control; automated PII detection remains named future work
 
 ## Data model (additive)
 
-- **new `kb_doc_assets`** as above — the one new relational table; the blob store
+- **new `kb_doc_assets`** as above. The one new relational table; the blob store
   is filesystem, not relational.
 - **table cells** are written through the **existing** typed-fact / entity store,
   tagged with the `source_type='table_cell'` discriminator (§B) on an indexed
   column so `lookup_table` is index-served and table-cell facts are **isolatable**
   (partition / dedicated index by `source_type` or `document_key`) to bound their
-  blast radius on the shared store — no new *fact* table, but the cells are not
+  blast radius on the shared store. No new *fact* table, but the cells are not
   allowed to silently bloat the general fact indexes (RT-perf).
 - **`kb_documents` / `kb_doc_regions` / `kb_fts` / `kb_async_jobs`:** unchanged;
   PDF chunks now additionally enqueue `embed_raw` (§A) and may spawn asset rows
   (§C).
-- **Row-count gate — threshold + runtime behavior (RT-perf).** Per-line region
+- **Row-count gate, threshold + runtime behavior (RT-perf).** Per-line region
   volume (~150M rows at a 10k-PDF corpus) must be **measured on the target corpus
-  and a partition/archive decision taken before default-on** — a hard gating
+  and a partition/archive decision taken before default-on**, a hard gating
   criterion this phase inherits. The gate is now given *behavior*, not just a
   measure step: (a) a configured row/size threshold that **blocks default-on
   promotion** until a partition/archive plan is in place; and (b) a per-ingest
@@ -338,7 +338,7 @@ sensitivity is the v1 control; automated PII detection remains named future work
 - KB `/v1` (read-only, additive): `lookup_table`, `open_asset`; the
   answerability fields on the existing `search_chunks` response.
 - MCP: `pdf_lookup_table`, `pdf_open_asset` (project-scoped, registered the same
-  3-site way as the four shipped PDF tools — note the golden tool-surface test
+  3-site way as the four shipped PDF tools. Note the golden tool-surface test
   must be regenerated).
 - Ingest: the existing PDF upload path additionally renders crops and runs
   TSR/OCR when those sidecars are present; behaviour is unchanged when absent.
@@ -346,12 +346,12 @@ sensitivity is the v1 control; automated PII detection remains named future work
 
 ## Phasing (each independently shippable, default-off)
 
-1. **§A retrieval quality** — embed PDF chunks behind the access filter; two-stage
+1. **§A retrieval quality**: embed PDF chunks behind the access filter; two-stage
    `search_chunks`; the answerability signal. (Needs the embedder; no new sidecar.)
-2. **§B tables** — TSR sidecar → typed-fact cells + `lookup_table`; text-chunk
+2. **§B tables**: TSR sidecar → typed-fact cells + `lookup_table`; text-chunk
    degradation when absent.
-3. **§C visual** — `kb_doc_assets` + blob store + `open_asset` + orphan cleanup.
-4. **§D OCR** — OCR sidecar for scanned PDFs; asset-only fallback when absent.
+3. **§C visual**: `kb_doc_assets` + blob store + `open_asset` + orphan cleanup.
+4. **§D OCR**: OCR sidecar for scanned PDFs; asset-only fallback when absent.
 
 ## Flags
 
@@ -365,7 +365,7 @@ absent, and that degradation path is tested, not assumed.
 - Replacing embeddings or the existing vector search. §A *adds* a PDF-scoped
   vector path; it does not touch the general halfvec/HNSW path.
 - Automated PII detection/redaction (still future work).
-- Region-level (sub-document) access control — noted by the parent as a future
+- Region-level (sub-document) access control, noted by the parent as a future
   extensibility path, not in scope here.
 - Layout-preserving translation, discovery feeds, or any per-user document logic
   on aimee-server (all parent non-goals, restated).
@@ -385,7 +385,7 @@ absent, and that degradation path is tested, not assumed.
   a direct, adversarial regression test.
 - **Geometry volume at corpus scale.** The row-count gate (carried) becomes a
   hard, measured promotion criterion in this phase.
-- **Extraction quality variance** (multi-column, dense-math, OCR noise) — same as
+- **Extraction quality variance** (multi-column, dense-math, OCR noise), same as
   the parent; mitigated by retaining the origin PDF for re-extraction.
 
 ## Tests
@@ -427,44 +427,44 @@ absent, and that degradation path is tested, not assumed.
 
 A four-lens delegate roundtable (reviewer / architect / security-privacy /
 data-model) over the first draft returned **9 blocking findings**; all are folded
-in here. (The panel still lacks a codex seat server-side — a known limitation;
+in here. (The panel still lacks a codex seat server-side, a known limitation;
 codex review applies to code diffs via `/code-review`, not proposal text.)
 
-- **RT-S1 — pgvec filter is classification, not access control** *(security)*:
+- **RT-S1, pgvec filter is classification, not access control** *(security)*:
   §A1 now mandates a **dedicated PDF-vector relation with no general-search read
   path** (structural isolation), with the `quarantine_state` predicate as
   defense-in-depth and an adversarial regression test; the runtime-filter-only
   design is explicitly rejected.
-- **RT-S2 — blob lifecycle atomicity + cross-sensitivity dedup** *(security)*: §C
+- **RT-S2, blob lifecycle atomicity + cross-sensitivity dedup** *(security)*: §C
   now states blob-durable-before-row-insert ordering (a crash can only orphan a
   blob, never dangle a row), refcount-by-scan cleanup, and that content-addressed
   dedup cannot widen access because gating is on the per-document asset row, not
   the shared bytes.
-- **RT-S3 — `open_asset` identity/audit + opaque-id definition** *(security)*: the
+- **RT-S3, `open_asset` identity/audit + opaque-id definition** *(security)*: the
   handle is defined as the **`kb_doc_assets.id` row id (never sha256-derived)**;
   `open_asset` applies the caller auth context + the live `document_key` ACL + an
   access audit-log entry; id-unguessability is defense-in-depth only.
-- **RT-S4 — sidecar isolation under-specified** *(security)*: §D pins TSR/OCR and
+- **RT-S4, sidecar isolation under-specified** *(security)*: §D pins TSR/OCR and
   the `pdftoppm` rasterizer to the **Phase-1b hardened-exec harness** (rlimits,
   deadline, byte-cap, group-kill, 0600 scratch), each treated as its own untrusted
   subprocess.
-- **RT-C1 — two-stage join semantics + ingest ordering** *(correctness)*: §A2
+- **RT-C1, two-stage join semantics + ingest ordering** *(correctness)*: §A2
   specifies a **LEFT JOIN + `has_citation` flag** and a regions-before-embeddings
   commit guarantee.
-- **RT-C2 — answerability "corpus-level" vs query-level** *(correctness)*: §A3
+- **RT-C2, answerability "corpus-level" vs query-level** *(correctness)*: §A3
   reframed as an explicitly **per-query-over-corpus** signal with split
   query/corpus inputs and a documented deterministic combiner; the only invariant
   asserted is that it stays KB-side and is not the server's per-user tier.
-- **RT-C3 — table-cell provenance + discriminator** *(correctness)*: §B requires a
+- **RT-C3, table-cell provenance + discriminator** *(correctness)*: §B requires a
   `source_type='table_cell'` discriminator, (row,col) position, TSR confidence,
   and a source-region link, so `lookup_table` returns only cells and provenance is
   preserved; the storage shape (columns vs adjunct table) is left to
   implementation against the real typed-fact schema.
-- **RT-Perf — row-count gate behavior + typed-fact bloat** *(performance)*: the
+- **RT-Perf, row-count gate behavior + typed-fact bloat** *(performance)*: the
   gate now has a threshold that **blocks default-on** and an over-budget
   **text-only ingest fallback**; table-cell facts are isolated (partition/index by
   `source_type`) so they cannot bloat the general fact indexes.
-- **RT-D1 — denormalized sensitivity staleness + cardinality** *(data-model)*: §C
+- **RT-D1, denormalized sensitivity staleness + cardinality** *(data-model)*: §C
   states `document_key` is the N-assets access key, the cached per-row class is a
   filter (the live ACL is authority), and a class change re-propagates via the
   same maintenance path the parent uses for regions.
@@ -480,20 +480,20 @@ boundary, inherited from the parent.
 A second round confirmed the RT1 fixes and pushed on engine-level enforcement and
 operability; four further hardenings are folded in:
 
-- **RT2-S1 / RT2-S3 — structural isolation needs an engine-level privilege
+- **RT2-S1 / RT2-S3, structural isolation needs an engine-level privilege
   boundary, not just module discipline** *(security)*: §A1 (PDF-vector relation)
   and `open_asset`/`kb_doc_assets` (§C) now **require** a least-privilege DB role
-  and/or row-security policy as the engine-level backstop to the app-layer ACL —
-  both layers present, neither alone trusted.
-- **RT2-perf — orphan-blob cleanup cadence/alarm** *(performance/ops)*: §C names a
+  and/or row-security policy as the engine-level backstop to the app-layer ACL,
+both layers present, neither alone trusted.
+- **RT2-perf, orphan-blob cleanup cadence/alarm** *(performance/ops)*: §C names a
   configurable sweep interval (default hourly) + on-demand trigger + an
   orphan-bytes alarm, so a lagging sweep is observable and bounded, not a silent
   storage-exhaustion path.
-- **RT2-C1 — symmetric missing-embed case** *(correctness)*: §A2 states embedding
+- **RT2-C1, symmetric missing-embed case** *(correctness)*: §A2 states embedding
   is async by design, a failed/pending embed leaves a chunk lexically retrievable
-  (with citations) and is retried by `kb_async_jobs` — no ingest atomicity is
+  (with citations) and is retried by `kb_async_jobs`. No ingest atomicity is
   violated because the vector is never part of the ingest transaction.
-- **RT2-S4 — the byte-consuming parser is the threat surface** *(security)*: §D
+- **RT2-S4. The byte-consuming parser is the threat surface** *(security)*: §D
   states `pdftotext`/`pdftoppm`/the OCR image decoder *are* the untrusted parsers
   (no separate trusted parser exists), tunes `RLIMIT_AS` against decompression
   bombs, bounds stdout+scratch, unlinks scratch on every exit, and names a
@@ -512,24 +512,24 @@ hardenings above folded, the design has **converged**: the security posture is
 both-layers (structural + engine-level), every degradation path has an explicit
 contract, and the residual is the parent's documented PII boundary.
 
-## Close-out — Phases A–D shipped (filed to done/)
+## Close-out: Phases A–D shipped (filed to done/)
 
 Implemented and merged to `testing` as four independently-shippable, **default-off** PRs, each
 roundtable-reviewed (aimee roundtable + code-review finders) on the actual diff before merge:
 
-- **§A retrieval quality** — PR #883. Isolated `kb_pdf_embeddings` relation the general
+- **§A retrieval quality**: PR #883. Isolated `kb_pdf_embeddings` relation the general
   `/v1/search` never reads (`pgvec_kbpdf_*`), `embed_pdf` async job + drainer (withholds
   quarantined docs), two-stage `search_chunks` (lexical + vector, `has_citation`/`matched_via`),
   per-query `answerability` (distinct from the server confidence tier). Gate `kb_pdf_vector_enabled`.
-- **§B tables** — PR #885. Optional TSR sidecar (`kb_tsr_sidecar`), `kb_table_cells` (cells stored
-  ONLY here, NOT shared `typed_facts` — closes the pending-doc leak + cascade-orphan + UNIQUE
+- **§B tables**: PR #885. Optional TSR sidecar (`kb_tsr_sidecar`), `kb_table_cells` (cells stored
+  ONLY here, NOT shared `typed_facts`, closes the pending-doc leak + cascade-orphan + UNIQUE
   blockers), `lookup_table` + `pdf_lookup_table` MCP, `tsr_status` marker, restricted→confirm
   visibility. Gate `kb_pdf_tsr_enabled`.
-- **§C visual** — PR #888. Content-addressed blob store (fsync-durable-before-row, path-safe,
+- **§C visual**: PR #888. Content-addressed blob store (fsync-durable-before-row, path-safe,
   sha256 never exposed), `kb_doc_assets` + `open_asset` (opaque row-id, authoritative-`kb_documents`
   ACL + audit log), crop rendering via the hardened `pdftoppm` harness, orphan reconciliation
   (refcount-by-scan + grace window + alarm). Gates `kb_pdf_assets_enabled` (+ blob dir/recon/alarm).
-- **§D OCR** — PR #890. Optional OCR sidecar (`kb_ocr_sidecar`) feeding the same ingest path for
+- **§D OCR**: PR #890. Optional OCR sidecar (`kb_ocr_sidecar`) feeding the same ingest path for
   scanned/no-text-layer PDFs, asset-only fallback with a surfaced `text_layer`/`asset_only` status
   (never silently "searchable"). Gate `kb_pdf_ocr_enabled`.
 
@@ -542,7 +542,7 @@ dissolves the leak/orphan/supersede blockers. Fork-3 → four internally-complet
 
 **Deploy / GA gates carried (cannot be validated in a code-only environment).**
 1. **Sidecar + binary deploys**: TSR + OCR ONNX-class models, and `pdftoppm` (poppler) on the KB
-   image — each phase degrades to text-only / asset-only when absent (tested), but live
+   image. Each phase degrades to text-only / asset-only when absent (tested), but live
    recognition/render quality is validated on the deploy target.
 2. **Corpus-scale row-count gate**: the per-line `kb_doc_regions` volume (and now `kb_table_cells`)
    must be measured on the target corpus and a partition/archive decision taken **before

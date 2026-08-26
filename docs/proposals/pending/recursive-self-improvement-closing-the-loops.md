@@ -1,9 +1,9 @@
-# Proposal: Recursive self-improvement — closing the loops aimee opens but never finishes
+# Proposal: Recursive self-improvement: closing the loops aimee opens but never finishes
 
-- **State:** 🟡 **PENDING — all six slices implemented and wired; three narrowed with stated reasons.** Net-new design over
+- **State:** **PENDING. All six slices implemented and wired; three narrowed with stated reasons.** Net-new design over
   existing substrate. It does **not** re-propose the learning-signals router, the
   learning-to-rank fitter, `kb_bandit`, the retrieval-outcome ledger, or the memory
-  maintenance passes — it adds the loops those systems leave open.
+  maintenance passes. It adds the loops those systems leave open.
 - **Author:** JBailes
 - **Date:** 2026-08-23
 - **Charter roles:** Calibrate (measured reward instead of proxy reward),
@@ -31,8 +31,8 @@ deduped, summarised, reinforced, and demoted.
 
 Five loops are open, and each open loop is the reason another one cannot be trusted.
 
-**1. The yardstick is frozen.** Every promotion gate — `kb_ranker_model_commit`, the
-parity bands cited across acceptance criteria — measures against a fixed suite
+**1. The yardstick is frozen.** Every promotion gate, `kb_ranker_model_commit`, the
+parity bands cited across acceptance criteria, measures against a fixed suite
 (`tests/eval/*`, `benchmarks/locomo`, `benchmarks/longmemeval`, the mini fixtures).
 Nothing turns a live failure into a permanent check. A learning system optimising
 against a static yardstick converges on the yardstick, not the goal. This is the
@@ -42,7 +42,7 @@ shipped.
 **2. Credit assignment is proxy-shallow.** `kb_bandit_recall_sufficiency_reward()`
 documents itself as an "inspectable proxy". `eval_feedback_loop()`
 (`src/modules/benchmarks/agent_eval.c:296`) reinforces a rule on **word overlap** with
-a failed task *and* on word overlap with a passed task — the same rule is bumped for
+a failed task *and* on word overlap with a passed task. The same rule is bumped for
 opposite outcomes, by up to +10 and +5 respectively, with no causal claim behind
 either. No reward in the system is measured against a counterfactual.
 
@@ -66,7 +66,7 @@ unmeasured.** `learning_metrics_commit_ratio()` measures **acceptance**, not
 **correctness**: a proposal committed and later contradicted, superseded, or reverted
 scores identically to one that held. Per-sink caps and confidence thresholds are
 hand-tuned constants governing an adaptive system. And as the self-generated share of
-input signal grows, nothing measures drift toward an echo chamber — the same failure
+input signal grows, nothing measures drift toward an echo chamber, the same failure
 mode `repetition-collapse-guardrail` addresses one layer down.
 
 ### Boundary
@@ -109,7 +109,7 @@ This proposal is bound by that rule and takes it as a design input, not an obsta
 
 - **No slice here introduces a self-scheduled background worker.** Every pass is
   invoked by an operator command, a `/v1` route, or an existing supervised stage.
-  S4 in particular is deliberately **operator-invoked**, not a cadence job — that is
+  S4 in particular is deliberately **operator-invoked**, not a cadence job. That is
   the whole difference between it and the deleted curator.
 - **Every slice names a production consumer outside its own cluster**, with
   entrypoint-to-effect evidence, before it may be retained:
@@ -136,7 +136,7 @@ This proposal is bound by that rule and takes it as a design input, not an obsta
   rewriting.
 - **No cross-installation learning.** Federated lesson distillation, and fine-tuning a
   local model from production trajectories, are real and adjacent and deliberately
-  excluded — they need their own design pass, and
+  excluded. They need their own design pass, and
   [`dedicated-extraction-model-curator-tier-a.md`](dedicated-extraction-model-curator-tier-a.md)
   already approaches the second from the other side. Successor proposal.
 - **No second benchmark harness.** S1 grows the existing suite format
@@ -154,22 +154,22 @@ itself against it.**
 
 | Failure | Control |
 | --- | --- |
-| **Echo chamber** — self-generated signal dominates and the loop reinforces its own priors | S0: each committed proposal's evidence chain is classified exogenous/endogenous; gated promotions fail **closed** when the exogenous share falls below `learning.endogeneity.min_exogenous_ratio` |
-| **Poisoned yardstick** — a flaky or wrong failure becomes a permanent task and the system optimises to satisfy it | S1: quarantine + **reproduce-twice from distinct sessions** + recorded provenance + operator visibility + a permanent per-signature rejection |
-| **Suite bloat** — thousands of near-duplicate regressions make every gate slow and meaningless | S1: dedup on a normalised failure signature, per-window admission cap, retirement of long-passing tasks |
-| **Reward hacking via replay** — a perturbation that games the harness rather than the task | S2: replay reuses the live suite's success checks; a perturbation that cannot change the check's inputs records `attributable=0` and yields no reward |
-| **Runaway compute** — resolution passes burn the machine | S4: operator-invoked only, bounded per-invocation job budget, no scheduler hook |
+| **Echo chamber**: self-generated signal dominates and the loop reinforces its own priors | S0: each committed proposal's evidence chain is classified exogenous/endogenous; gated promotions fail **closed** when the exogenous share falls below `learning.endogeneity.min_exogenous_ratio` |
+| **Poisoned yardstick**: a flaky or wrong failure becomes a permanent task and the system optimises to satisfy it | S1: quarantine + **reproduce-twice from distinct sessions** + recorded provenance + operator visibility + a permanent per-signature rejection |
+| **Suite bloat**: thousands of near-duplicate regressions make every gate slow and meaningless | S1: dedup on a normalised failure signature, per-window admission cap, retirement of long-passing tasks |
+| **Reward hacking via replay**: a perturbation that games the harness rather than the task | S2: replay reuses the live suite's success checks; a perturbation that cannot change the check's inputs records `attributable=0` and yields no reward |
+| **Runaway compute**: resolution passes burn the machine | S4: operator-invoked only, bounded per-invocation job budget, no scheduler hook |
 | **Prompt injection through learned artifacts** | Any corpus-derived or model-authored string that becomes a stored task, pattern, or description passes the existing S0 sanitizer from `graph-feedback-self-audit-and-learning.md` before persistence |
 | **Silent behaviour change on upgrade** | Every new config key defaults off or to the conservative bound; an installation that enables nothing sees no behaviour change |
 
-## S0 — Endogeneity accounting and the collapse gate
+## S0: Endogeneity accounting and the collapse gate
 
 **Contract.** For a committed learning proposal, walk its `evidence_refs` chain to the
 roots and classify each root:
 
-- **exogenous** — a human correction, a test or verify exit code, an official grader, a
+- **exogenous**: a human correction, a test or verify exit code, an official grader, a
   git outcome, an operator accept;
-- **endogenous** — model-authored evidence, a prior learning artifact, a
+- **endogenous**: model-authored evidence, a prior learning artifact, a
   self-generated eval result, a lesson derived from another lesson.
 
 `learning_metrics_endogeneity(window_days, out)` reports the exogenous share over the
@@ -179,7 +179,7 @@ S1 admission, S5 threshold changes.
 
 **The gate must be answered by the knowledge service, not by the daemon.** It
 reads the learning ledger, which is DB2, and the daemon builds with DB2
-compiled out — a daemon computing it locally always answers "nothing observed"
+compiled out, a daemon computing it locally always answers "nothing observed"
 however self-referential the ledger has become, which makes the gate inert
 exactly where it is enforced. It is served by `learning.endogeneity` on the KB
 and consulted through `kb_client`. A reachable service reporting a closed gate
@@ -190,7 +190,7 @@ nothing is being committed into one.
 turns "is aimee learning, or hallucinating at itself?" into a number an operator can
 see.
 
-## S1 — The eval suite grows from live failure
+## S1: The eval suite grows from live failure
 
 **Contract.** A confirmed failure becomes a *candidate*; a candidate that reproduces
 becomes an *admitted* task in a real suite directory.
@@ -217,7 +217,7 @@ dogfood autolabel negative; a failed mechanical verify in the autonomous-dev loo
    regression suite directory and record the admission with its provenance.
 5. **Retire.** An admitted task passing continuously for
    `learning.eval_synthesis.retire_windows` windows becomes `archived` and leaves the
-   hot suite — the suite tracks live risk, not history.
+   hot suite. The suite tracks live risk, not history.
 
 **Boundary.** Candidates and admissions are per-machine, so the ledger is DB1
 (`eval_candidates`), beside `eval_results`, owned by the `db1` module. The synthesis
@@ -228,9 +228,9 @@ human that runs a suite today runs these with no code change.
 
 **Operator surface.** `aimee eval candidates [list|show|admit|reject|retire]`.
 Admission is automatic under the gate; `admit` forces one, `reject` suppresses a
-signature permanently — the poisoned-yardstick escape hatch.
+signature permanently, the poisoned-yardstick escape hatch.
 
-## S2 — Counterfactual trajectory replay
+## S2: Counterfactual trajectory replay
 
 **Contract.** `aimee trajectory replay <trajectory> --perturb <decision_point>=<arm>`
 re-runs a recorded trajectory with exactly one decision changed, scores both arms with
@@ -247,7 +247,7 @@ guessed.
 S2 also replaces `eval_feedback_loop()`'s word-overlap reinforcement with attributed
 reward, under its own acceptance checks.
 
-## S3 — Approach-level negative knowledge
+## S3: Approach-level negative knowledge
 
 **Contract.** Extend negative knowledge from lexical to semantic. Add a row class keyed
 on `(goal_signature, approach_signature, failure_mode)` with an embedding on the goal,
@@ -258,23 +258,23 @@ one; it failed because Y."
 Recall is advisory context, never a block. The blocking escalation path
 (`db2_anti_pattern_list_hot`) is unchanged and stays lexical.
 
-## S4 — Findings get resolved
+## S4: Findings get resolved
 
-**Contract.** An **operator-invoked** pass — `aimee graph resolve` / `aimee memory
-curiosity resolve --auto`, with a per-invocation job budget and no scheduler hook —
+**Contract.** An **operator-invoked** pass, `aimee graph resolve` / `aimee memory
+curiosity resolve --auto`, with a per-invocation job budget and no scheduler hook,
 drains two backlogs that today only accumulate:
 
-- **Graph audit** — take unverified inferred edges, confirm or refute them with the
+- **Graph audit**: take unverified inferred edges, confirm or refute them with the
   extractor/LSP, write the verdict back through the existing §1↔§3 finding-verdict
   path.
-- **Curiosity** — for `unverified_assumption` and `weak_coverage`, attempt resolution
+- **Curiosity**: for `unverified_assumption` and `weak_coverage`, attempt resolution
   from the indexed corpus, then resolve or annotate the item.
 
 Both write through existing verdict paths; neither invents a new store, and neither
 schedules itself. If a cadence is later wanted, it is proposed separately with a named
 journey and a liveness disposition, not smuggled in here.
 
-## S5 — Post-commit regret, and gates fitted from it
+## S5: Post-commit regret, and gates fitted from it
 
 **Contract.** Record every committed proposal's **fate**: standing, superseded,
 contradicted by a later signal, or reverted. Regret is the share that did not stand
@@ -282,14 +282,14 @@ within a horizon.
 
 Then use it: per-detector confidence becomes a function of that detector's observed
 regret, and per-sink weekly caps and confidence thresholds become bandit arms whose
-reward is *retained* commits — committed **and** still standing — not commits. The
+reward is *retained* commits (committed **and** still standing) not commits. The
 gate stops being a hand-tuned constant and becomes measured, which is only safe
 because S0 bounds how self-referential the input is and S2 makes the reward causal.
 
-## S6 — The policy layer enters the loop
+## S6: The policy layer enters the loop
 
-**Contract.** Register injectable policy fragments — prompt blocks, role-template
-sections, tool descriptions, toolset composition — as versioned arms at named decision
+**Contract.** Register injectable policy fragments, prompt blocks, role-template
+sections, tool descriptions, toolset composition, as versioned arms at named decision
 points through the existing `kb_bandit_arm_register`. Selection is bandit sampling;
 reward is S2's measured delta; promoting a new default fragment goes through the same
 benchmark gate as a ranker model, against a suite that now includes S1's admitted
@@ -319,7 +319,7 @@ measured (S5), and the recursion is bounded (S0).
   `pending/kb-hybrid-outcome-wiring-residual.md`, and the bandit/counterfactual-replay
   record, without altering their contracts. It is the admission-contract successor
   named by `done/feature-liveness-and-background-curator-removal.md`. It shares
-  motivation with `pending/standing-benchmark-cadence.md` — that proposal puts the
+  motivation with `pending/standing-benchmark-cadence.md`. That proposal puts the
   *fixed* suites on a cadence, this one makes the suite *grow*; they compose, and
   neither blocks the other.
 
@@ -327,34 +327,34 @@ measured (S5), and the recursion is bounded (S0).
 
 **Mechanical (unit; no live DB or model required):**
 
-- **S0** — evidence chains with known roots classify deterministically; a wholly
+- **S0**: evidence chains with known roots classify deterministically; a wholly
   endogenous chain drives the ratio below the floor and `learning_gate_check()`
   returns closed; an empty window does not report a false-confident ratio.
-- **S1** — synthesis from each failure source produces a task that
+- **S1**: synthesis from each failure source produces a task that
   `agent_eval_load_tasks` parses and whose success check round-trips; identical
   failures collapse to one signature and bump `occurrences`; admission refuses below
   `min_occurrences`, refuses repeat occurrences from the same session, and refuses
   while S0's gate is closed; a rejected signature is never re-admitted; retirement
   moves a long-passing task out of the hot suite.
-- **S2** — a perturbation that cannot change the success check records
+- **S2**: a perturbation that cannot change the success check records
   `attributable=0` and emits no reward.
-- **S3** — goal/approach recall returns the failed approach for a semantically near
+- **S3**: goal/approach recall returns the failed approach for a semantically near
   goal and never fires the blocking path.
-- **S5** — a commit later contradicted scores as regret; the same commit standing does
+- **S5**: a commit later contradicted scores as regret; the same commit standing does
   not.
 
 **Integration:**
 
-- **S1 end-to-end** — induce a failure, observe a candidate, reproduce it from a second
+- **S1 end-to-end**: induce a failure, observe a candidate, reproduce it from a second
   session, observe the materialised file, run the suite and see it execute as an
   ordinary task, then retract it and see it leave the suite.
-- **S4** — a run with a seeded unverified edge and a seeded curiosity item resolves both
+- **S4**: a run with a seeded unverified edge and a seeded curiosity item resolves both
   within one invocation and stays inside its job budget.
-- **Liveness** — `scripts/check_background_skill_curator_absence.py` still passes
+- **Liveness**: `scripts/check_background_skill_curator_absence.py` still passes
   (no slice reintroduces a self-scheduled grouping/scoring worker), and each new
   cluster carries a disposition and a named non-self production consumer before
   it is retained.
-- **Every slice** — `make -j4 && make unit-tests && make lint && make docs-gen-check`
+- **Every slice**: `make -j4 && make unit-tests && make lint && make docs-gen-check`
   clean, and ASAN over the new DB paths.
 
 ```yaml acceptance
@@ -369,21 +369,21 @@ measured (S5), and the recursion is bounded (S0).
 
 | Slice | Depends on | Status |
 | --- | --- | --- |
-| S0 endogeneity + gate | — | implemented and wired |
+| S0 endogeneity + gate | n/a | implemented and wired |
 | S1 eval synthesis + admission | S0 | implemented and wired |
 | S2 counterfactual attribution | S1 | implemented; narrowed (below) |
 | S3 approach negative knowledge | S1 | implemented; narrowed (below) |
-| S4 backlog resolution | — | implemented; narrowed (below) |
+| S4 backlog resolution | n/a | implemented; narrowed (below) |
 | S5 regret + detector controls | S2 | implemented; cap-fitting deferred |
 | S6 policy arms | S1, S2, S5 | implemented and wired |
 
-## Delivery record — S2 to S6 (2026-08-23)
+## Delivery record: S2 to S6 (2026-08-23)
 
 Validated on a separate host: the
 [S2–S6 report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md)
 covers the daemon-only run, and the
 [full-stack report](../../validation/recursive-self-improvement-full-stack-2026-08-23.md)
-covers `aimee-kb` on real PostgreSQL alongside `aimee-server` — which is where
+covers `aimee-kb` on real PostgreSQL alongside `aimee-server`, which is where
 S0's gate was found to be inert in the daemon and was moved to the knowledge
 service.
 
@@ -393,17 +393,17 @@ the design above; each narrowing and its reason is stated, because a slice
 quietly delivered smaller than promised is the failure mode this record exists
 to prevent.
 
-### S2 — narrowed from live replay to attribution over the ablation grid
+### S2: narrowed from live replay to attribution over the ablation grid
 
 The design says "re-runs a recorded trajectory with exactly one decision
-changed". Re-running needs a model and a configured provider, which a test host
+changed"; Re-running needs a model and a configured provider, which a test host
 does not have and a gate cannot depend on.
 
 The counterfactual did not need inventing. `eval run --ablation all` already
 runs every task once per preset, each removing exactly one capability, and
 records the outcome: same task, one thing changed, same success check. That
-grid was never read. `learning_attribution_*` reads it, PAIRED — only tasks
-where both the baseline and the arm ran — because comparing marginal pass rates
+grid was never read. `learning_attribution_*` reads it, PAIRED, only tasks
+where both the baseline and the arm ran, because comparing marginal pass rates
 across a different task mix measures the mix, not the capability.
 
 **Still open:** perturbing an arbitrary registered bandit decision point on a
@@ -411,13 +411,13 @@ recorded trajectory. That remains the live-replay work, and it needs a provider.
 
 S2 also removed the success-direction reinforcement in `eval_feedback_loop()`.
 It bumped a rule for overlapping a FAILED task and, separately, for overlapping
-a PASSED one — a pure ratchet toward weight 100. A per-rule counterfactual does
+a PASSED one, a pure ratchet toward weight 100. A per-rule counterfactual does
 not exist yet, so the honest move was to stop manufacturing the signal rather
 than keep a wrong one.
 
-### S3 — narrowed to a sibling store in DB1, and to token overlap
+### S3: narrowed to a sibling store in DB1, and to token overlap
 
-Three changes from the design. The third was not a choice — it was a defect the
+Three changes from the design. The third was not a choice. It was a defect the
 live run caught:
 
 - `approach_failures` is a **sibling** of `anti_patterns`, not an extension.
@@ -428,21 +428,21 @@ live run caught:
 - Similarity is **token overlap, not an embedding**. The embedder lives behind
   the knowledge service, and plan-time recall has to work on an installation
   with no KB reachable. Overlap is weaker at paraphrase and exactly as good at
-  the case that matters — the same goal, worded differently. Upgrading is a
+  the case that matters, the same goal, worded differently. Upgrading is a
   follow-up that must first give the recall site a route to the embedder.
 - The store is in **DB1, not DB2**. It was written into DB2 first, and the live
   run showed the feature was inert: both the writer (the failed-job scan) and
   the reader (the plan-time route) run in the daemon, which builds with DB2
-  compiled out. The rows belong in DB1 anyway — they are this machine's
-  observations about its own failed jobs, sourced from `agent_jobs` — and the
+  compiled out. The rows belong in DB1 anyway. They are this machine's
+  observations about its own failed jobs, sourced from `agent_jobs`, and the
   move forced the pure/storage split the module boundary requires. See
   [the validation report](../../validation/recursive-self-improvement-s2-s6-2026-08-23.md).
 
-### S4 — narrowed to the curiosity backlog; graph-audit verification deferred
+### S4: narrowed to the curiosity backlog; graph-audit verification deferred
 
 Curiosity resolution ships: operator-invoked, budgeted, with an INSTALLED
 evidence probe rather than an assumed one. With no probe the pass closes
-nothing and says why — emptying a backlog by assertion is worse than leaving it
+nothing and says why, emptying a backlog by assertion is worse than leaving it
 full. Only `unverified_assumption` and `weak_coverage` are touched;
 `contradiction` and `stale_fact` ask which of two claims is right, and a
 coverage probe answering that would silently pick a winner.
@@ -451,7 +451,7 @@ coverage probe answering that would silently pick a winner.
 the extractor and LSP inside the knowledge service, not a probe the server can
 install. Faking it would produce confident verdicts about edges nobody checked.
 
-### S5 — regret and detector controls ship; cap-fitting deferred
+### S5: regret and detector controls ship; cap-fitting deferred
 
 Committed proposals carry a fate; per-detector regret feeds two controls that
 only ever tighten: required corroboration, and whether a high-confidence signal
@@ -461,11 +461,11 @@ may still commit on sight. An unmeasured detector behaves exactly as before.
 knowledge-service binary, so fitting caps from it is a KB-side change; the
 regret signal it would consume now exists.
 
-### S6 — implemented against a fragment that exists
+### S6: implemented against a fragment that exists
 
 Rather than inventing prompt variants to measure, S6 registers the one fragment
 this work already added: S3's plan-time advisory block, with `off` / `brief` /
-`full` arms. The `off` arm is mandatory — without a control there is nothing to
+`full` arms. The `off` arm is mandatory, without a control there is nothing to
 measure against. Selection uses an installed sampler when one exists and the
 declared default otherwise, so an installation with no knowledge service sees
 no behaviour change. A sampler's out-of-range answer is treated as declining,
@@ -475,7 +475,7 @@ default; and promotion consults S0's gate.
 **Not done, deliberately:** authoring new prompt text. A loop that writes its
 own instructions is a different and much larger proposal.
 
-## Delivery record — S0 and S1 substrate (2026-08-23)
+## Delivery record: S0 and S1 substrate (2026-08-23)
 
 **What landed.**
 
@@ -493,19 +493,19 @@ backlog and the gate; `aimee eval candidates-update <scan|admit|reject|retire>`
 drives it. Both are ordinary `/v1` routes (`GET`/`POST /v1/eval/candidates`).
 Nothing schedules itself.
 
-**Wiring — where the failures come from.** `scan` sweeps two ledgers, and the
+**Wiring, where the failures come from.** `scan` sweeps two ledgers, and the
 boundary between them and everything else is a finding worth stating: a
 synthesisable regression needs a **replayable prompt**. Failed `agent_jobs`
 carry one and become tasks whose bar is "this must now succeed"; negative
 signals carrying a correction carry both a prompt and what should have been
 said, so they become `contains` checks. `agent_outcomes` (role/reason only) and
 `eval_results` (which names an *existing* suite task, and so feeds retirement)
-carry neither, and are deliberately not synthesis sources — manufacturing a
+carry neither, and are deliberately not synthesis sources, manufacturing a
 prompt for them would be fabrication. Observation is idempotent per session, so
 re-running a sweep cannot manufacture its own reproduction.
 
 Verified: `make -j8 all`, `make unit-tests` (all pass), `make lint` (63/63),
-`make docs-gen-check`, `make integration-tests` (115/115) — clean on the
+`make docs-gen-check`, `make integration-tests` (115/115), clean on the
 development machine and on a separate host, plus a live end-to-end run against a
 real server. See
 [the validation report](../../validation/recursive-self-improvement-s0-s1-2026-08-23.md).
@@ -526,7 +526,7 @@ left implicit:**
 2. **`signal_type` overrides `source` in classification.** The capture API
    (`kb_service_backend_agent.c`) defaults an unset `source` to `"explicit"`.
    Without the override, a caller could launder a self-derived signal into the
-   exogenous count by simply omitting a field — which would defeat the entire
+   exogenous count by simply omitting a field, which would defeat the entire
    measurement. The self-derived detector types are therefore endogenous
    whatever the source claims, and unknown provenance classifies endogenous.
 
@@ -535,8 +535,8 @@ left implicit:**
    but it is built into the KB binary, and pulling it into the server build to
    escape text at *storage* time would be a module-ownership change this slice
    has no mandate for. Instead `learning_eval_text_admissible()` is a
-   conservative character allowlist — it rejects control characters, non-ASCII,
-   and the markup characters that carry injection structure — and synthesis
+   conservative character allowlist. It rejects control characters, non-ASCII,
+   and the markup characters that carry injection structure, and synthesis
    fails closed on any field it rejects. It is deliberately not a second
    sanitizer (it tracks no marker list, so it cannot drift from `kMarkers[]`),
    and it is stricter than the render boundary, not a replacement for it.
@@ -553,7 +553,7 @@ left implicit:**
 - **The dogfood-autolabel and mechanical-verify sources.** Both are named in S1
   as failure sources and neither is wired. The reason is the same finding above:
   the dogfood ledger is JSONL keyed on retrieval moments and the verify gate
-  reports a command's exit status — neither carries a replayable prompt today,
+  reports a command's exit status, neither carries a replayable prompt today,
   so wiring them means first deciding what prompt a synthesised task would
   replay. That is a design question, not plumbing, and it belongs with S2's work
   on trajectories rather than being guessed at here.
@@ -561,10 +561,10 @@ left implicit:**
   `retire_windows` are compile-time defaults, overridable per invocation through
   the CLI (`--min-occurrences`, `--retire-windows`, `--window-days`). Every
   policy function already takes explicit bounds (`learning_gate_check_with`), so
-  promoting them to config fields is mechanical — but it touches the generated
+  promoting them to config fields is mechanical, but it touches the generated
   accessor set and its drift check, which is its own change.
 
-## Delivery record — the producing halves (2026-08-24)
+## Delivery record: the producing halves (2026-08-24)
 
 S4, S5 and S6 each shipped with the *consuming* half built and the *producing*
 half absent. Each was correct in unit tests and inert in a deployment: nothing
@@ -578,14 +578,14 @@ the learning tables live. The router it calls needs a signal classifier to
 decide which sinks a signal reaches, and **only `aimee-server` ever registered
 one**. In the KB the pointer was null, so every signal was refused with a single
 WARN while the route answered `200` carrying an error document and wrote
-nothing. Signal ingest through the KB had never worked — which meant S5's
+nothing. Signal ingest through the KB had never worked, which meant S5's
 supersession producer, which lives on the router's commit path, could not fire
 in production however correct its own code was.
 
 It is the same shape as the gap `scripts/check-module-placement.py` exists for:
 a stage a daemon needs, served by a module not placed in it, failing as
 TRANSPORT and doing nothing loudly. It took the same fix that closed that gap
-for `memory` — place `learning` in the KB as well as the server
+for `memory`, place `learning` in the KB as well as the server
 (`src/modules/process-contracts.json`,
 `dependencies/aimee-repositories.lock.json`), add the adapter and register it
 (`src/kb/kb_module_stage_adapters.c`). The check now covers this stage, so it
@@ -601,16 +601,16 @@ cannot reopen silently.
 | S6 | the service samples and answers with a declared arm | `kb_policy_sampler` / `kb_handle_learning_policy_select` in `src/kb/kb_service.c` |
 | S4 | a real evidence probe backs the backlog drain | `kb_curiosity_probe`, registered in `src/kb/kb_service.c` |
 
-Verified on a full stack — both services, real PostgreSQL, the learning module
-attached to the KB bus — with every effect read back through `psql` rather than
+Verified on a full stack, both services, real PostgreSQL, the learning module
+attached to the KB bus, with every effect read back through `psql` rather than
 from the process that wrote it. See
 [the validation report](../../validation/recursive-self-improvement-producers-2026-08-24.md).
 
 That verification is now committed rather than living in scratch, as
-[`tests/e2e/learning-loops-pg-e2e.sh`](../../../tests/e2e/learning-loops-pg-e2e.sh)
-— 46 assertions covering the S0 gate, S1 admission, S2 paired-grid attribution,
+[`tests/e2e/learning-loops-pg-e2e.sh`](../../../tests/e2e/learning-loops-pg-e2e.sh),
+46 assertions covering the S0 gate, S1 admission, S2 paired-grid attribution,
 S3 dead-end recall, the two-way S4 evidence probe, S5 supersession and operator
-regret, and S6 selecting a rewarded non-default arm —
+regret, and S6 selecting a rewarded non-default arm,
 alongside
 [`tests/e2e/module-liveness-pg-e2e.sh`](../../../tests/e2e/module-liveness-pg-e2e.sh),
 which proves every granted module attaches and no provider is silently null. The

@@ -25,8 +25,8 @@ Reproduce with `scripts/e2e-252-full.sh` inside the container, after
 
 **Eight ran. Two never executed**, and the summary line below does not say so:
 `PASS=8 FAIL=0` reads as a complete passing run, and it is a partial one. The
-two unexecuted checks -- that the store module created its schema, and that
-migrations were recorded -- sit inside the branch the BLOCKED row describes, so
+two unexecuted checks. That the store module created its schema, and that
+migrations were recorded, sit inside the branch the BLOCKED row describes, so
 the module never reached them.
 
 That is the under-claiming direction: a check that never ran leaves no trace,
@@ -43,7 +43,7 @@ call sites in the script, and the count it compares against is 10.
     PASS  the daemon holds no .db descriptor
     PASS  the supervisor started modules (11)
     BLOCKED  the store module attached and stopped at its one missing dependency
-    PASS=8 FAIL=0        (2 of 10 checks not reached -- see above)
+    PASS=8 FAIL=0        (2 of 10 checks not reached; see above)
 
 **SUPERSEDED. The gap is closed and the run below was repeated in full; see
 "Run two" at the end of this document.**
@@ -55,7 +55,7 @@ The store module attaches, builds its store client, and stops here:
     store: schema: read the applied schema version:
     aimee: the postgres module is not answering
 
-It holds principal ref 30 serving and ref 68 outbound, and asks for kind 11266 —
+It holds principal ref 30 serving and ref 68 outbound, and asks for kind 11266,
 the postgres module's SQL stage. Nothing serves that stage in this tree, so
 there is no answer. Everything before that point works; the module is complete
 and its dependency is not present.
@@ -74,15 +74,15 @@ nobody serves.
   given it.
 - **One unusable grant refuses the whole directory.** The grants pin absolute
   executables and only `aimee-module-aimee` was installed, so
-  `governance.grant` was unresolvable and the daemon refused to start entirely —
-  not a degraded module, a dead server. The module runtime is a multicall binary,
+  `governance.grant` was unresolvable and the daemon refused to start entirely,
+not a degraded module, a dead server. The module runtime is a multicall binary,
   so the fix is to install it under every name the grants name.
 - **Grant policy is read once, at startup.** A grant added while the daemon was
   already running was invisible, and the module was denied for a reason that had
   nothing to do with the grant's contents.
 - **A rebuilt binary that was never redeployed.** The outbound ref was corrected
   from 67 to 68 in the source and the artifact was rebuilt, but the container
-  still ran the old one — so the grant said 68 and the process attached as 67.
+  still ran the old one, so the grant said 68 and the process attached as 67.
   The prose had said 68 for hours. A comment is not what attaches to a bus.
 
 ## What the run says about SQLite
@@ -97,7 +97,7 @@ store; `make -C src check-linking` asserts each binary's boundary.
 
 Ninety-three C test files were deleted alongside the C store module. A scan for
 `db1_|sqlite3|db1/` classified 93 of 93 as store-coupled, which reads as every
-deletion being justified — and is the same defect this document keeps recording:
+deletion being justified, and is the same defect this document keeps recording:
 a true statement that does not support the conclusion drawn from it.
 
 Coupling is not subject. Ranked by assertions per store-referencing line, the
@@ -120,7 +120,7 @@ true.** It was counted as coupled on the strength of prose denying the coupling.
 The coupling was real, but it lived in the link line rather than the source:
 `modules/db1/interaction_events.o`, pulled in for one symbol `failover.o` calls.
 That object was made inert by stubbing `db1_conn` to NULL so the real recorder
-had no connection to write through — a trick that only works while the store is
+had no connection to write through, a trick that only works while the store is
 in-process. It is a bus client now, reaching a separate process, so there is no
 handle to withhold.
 
@@ -129,7 +129,7 @@ Restored, with the dependency cut at the call instead
 overflow-safe clamping, stall caps, parallel cancel and body identity across
 attempts, none of it about storage, and none of it with another home. It passes.
 
-`unit-test-wfe-blocks` failed the same way in the other direction — the target
+`unit-test-wfe-blocks` failed the same way in the other direction. The target
 survived and its link line did not. It had satisfied `wfe_blocks.o`'s work-item
 references with `db1_init.o`, `db_schema.o` and `wfe_store.o`, under a comment
 reading "no engine/db1; the schema + externalization tests are pure". Pure, and
@@ -141,14 +141,14 @@ zeroed struct it believes it read.
 
 The other four files above have real store calls and are not reinstated here:
 whether their subject moved to Go is a judgment about each one, not a scan
-result, and this document is not the place to make it. They are recorded so the
-question is answerable rather than invisible.
+result, and this document is not the place to make it. The four are recorded so the question is
+answerable rather than invisible.
 
 ## The gates that were red, and why
 
 `make lint` ran five failing targets at the end of this work. Four are now green:
 
-- **bus-blast-radius-check** — the DB1 client became a bus client, so the dev rig
+- **bus-blast-radius-check**: the DB1 client became a bus client, so the dev rig
   `../write-tier-enforce-live` inherited the event-bus archive through
   `$(DB1_CLIENT_OBJS)`. The check matched the TEXT of each hit line against
   `$(SERVER):`/`$(KB):`, which cannot work for a link line whose prerequisites
@@ -158,9 +158,9 @@ question is answerable rather than invisible.
   happening to contain `$(SERVER):` somewhere. A permitted owner that stops
   referencing the archive now fails as a stale allowance, and a scan finding
   zero references fails rather than reporting a clean boundary.
-- **db2-declaration-ledger-check** and **config-encapsulation-check** — regenerated;
+- **db2-declaration-ledger-check** and **config-encapsulation-check**, regenerated;
   both were recording debt against files the retirement removed.
-- **aimee-home-check** — eleven files whose aligned trailing comments shifted when
+- **aimee-home-check**: eleven files whose aligned trailing comments shifted when
   the include paths changed from `modules/db1/` to `db1_client/`. Reformatted.
 
 **docs-gen-check remains red and cannot go green here.** It regenerates
@@ -173,7 +173,7 @@ is, deliberately. It clears on commit and not before.
 A peer session found that its validation-record guard matched check names
 against the whole document, so output it had quoted verbatim in the prose
 satisfied the guard it had written. That is the same shape as the `db1_conn`
-comment above, and it is a shape, not an incident — so the validators added by
+comment above, and it is a shape, not an incident, so the validators added by
 this work were checked for it rather than assumed clean. Three had it.
 
 **check-log-prefix-ownership** matched a quoted prefix anywhere in a Go file. A
@@ -186,21 +186,21 @@ people to remove rationale.
 **check-memory-store-degradation** was the false-clean direction and the worse
 of the two. It decided a file degraded gracefully if `AIMEE_DB2_DISABLED`
 appeared anywhere in it, and that it reported failures if `LOG_WARN(` did. A
-planted file reaching the store with neither — carrying only a TODO comment
-promising both — came back clean. The guard read intent as implementation.
+planted file reaching the store with neither, carrying only a TODO comment
+promising both, came back clean. The guard read intent as implementation.
 
 Both now strip comments first, via `scripts/source_text.py`. Quotes are tracked
 rather than ignored: the `//` inside `"http://host/"` does not open a comment,
 and blanking from there would truncate the literal these checks exist to read.
-Mutation-verified in both directions — planted prose no longer fires, planted
+Mutation-verified in both directions, planted prose no longer fires, planted
 code still does, and a literal containing `//` is still read past.
 
 **check-validation-record was inert and said `ok`.** Its heading pattern
 required `scripts/validation/*.sh`; the live probe is `scripts/e2e-252-full.sh`,
 so nothing matched. It then took the `not checked and not problems` path and
 returned 0. Its own docstring names this failure for an empty glob and guards
-that case; the same condition one level in — records found, read, and none
-asserting anything — returned success. Marking the previous record HISTORICAL
+that case; the same condition one level in, records found, read, and none
+asserting anything, returned success. Marking the previous record HISTORICAL
 was enough to reach it, which is an ordinary edit nobody would expect to disarm
 a gate.
 
@@ -215,7 +215,7 @@ shape of a complete one.
 **Zero on both sides is not agreement.** `check-validation-record` compares a
 record's claimed count against the call sites in the probe it names. A probe
 that defines its `ck` helper and never calls it, paired with a record claiming
-`0 checks`, agrees perfectly — and the equality is between two absences. Worse
+`0 checks`, agrees perfectly, and the equality is between two absences. Worse
 than passing quietly: it increments the comparison counter, so an inert pair
 made the summary report MORE comparisons than the tree supported. Planted
 exactly that pair to watch it report `2 count(s) match`. A zero on either side
@@ -228,7 +228,7 @@ outside the hand-written map and nothing says so. It now derives its set by
 walking `All()` for `Args < 0`, so a new variadic operation is covered by
 existing code and the only way out of the test is to stop being variadic.
 
-The derivation found the same five, which is the useful part — it agrees with
+The derivation found the same five, which is the useful part, it agrees with
 the hand-list rather than replacing it with a guess. And an empty set now fails
 loudly, because the one thing a refusal test cannot establish by observing
 refusals is whether any were requested.
@@ -239,7 +239,7 @@ possible causes, and removing `windowTerms`' own bound still produces
 
 A caution worth recording alongside these, from the peer session running the
 same sweep: **not every collection should be guarded against being empty.**
-Emptying their arity TABLE makes their test stricter, not weaker — every shape
+Emptying their arity TABLE makes their test stricter, not weaker. Every shape
 becomes unknown and any success fails. The reflex after a sweep like this is to
 add an emptiness guard everywhere, and half the time that guards the safe
 direction. The question is which way the collection fails, not whether it can be
@@ -249,7 +249,7 @@ empty.
 
 `check-validation-record` fails loudly when a record's claimed count disagrees
 with the probe it names. The repair that failure invites is to edit the number
-in the markdown until it matches — one character, and the gate goes green.
+in the markdown until it matches. One character, and the gate goes green.
 
 That repair makes the record assert a count no run produced: a claim about a
 container that no longer exists, which is the precise thing the check was
@@ -262,14 +262,14 @@ historical. Do not reconcile the number.
 This is a third category alongside the two the sweep above turned up. A silent
 green that means nothing is the worst; a loud failure is fine; **a loud failure
 whose obvious fix over-claims sits between them**, and it earns a comment even
-though the failure itself is perfectly clear. Guarding it is not possible — the
-edit is legitimate when a run really did change — so the defence is that the
+though the failure itself is perfectly clear. Guarding it is not possible. The
+edit is legitimate when a run did change, so the defence is that the
 person making it is told what they are asserting.
 
 ## Where the hazard was written down
 
-The peer session found its wrong-repair warning sitting in a COMMENT — the place
-a guard's author looks — while the person who meets the failure reads the
+The peer session found its wrong-repair warning sitting in a COMMENT, the place
+a guard's author looks, while the person who meets the failure reads the
 MESSAGE, which said nothing about it. The warning had been filed somewhere
 nobody standing in the trap can see it.
 
@@ -277,7 +277,7 @@ Two guards here had the same fault, and both invited the same wrong repair:
 adding a name to an allowlist.
 
 **bus-blast-radius** reported which target owned the stray reference and stopped
-there. The one-line repair is to add that target to `BUS_LIB_OWNERS` — after
+there. The one-line repair is to add that target to `BUS_LIB_OWNERS`, after
 which the check goes green having recorded the widening as permission for it.
 The reasoning against that was in the comment above the list. The failure now
 says it: ask why the target needs the bus at all, because it usually links an
@@ -286,7 +286,7 @@ object.
 
 **check-log-prefix-ownership** named the harm and no remedy. The obvious repair
 is to add the module name to `AMBIGUOUS`, which silences the finding and leaves
-the operator being sent to the wrong process — the entire harm, preserved. The
+the operator being sent to the wrong process, the entire harm, preserved. The
 failure now says to fix the string, and states what `AMBIGUOUS` is actually for.
 
 Both were then read the way someone meeting them at speed reads them, by making
@@ -312,7 +312,7 @@ the cheap repair is **exactly how this check went inert in the first place**.
 
 Its "compared nothing" branch said: give the live record a counted heading, *or
 mark it historical too*. Learning N means running the probe. Marking a record
-historical is one line — and it makes that record permanently unchecked, which
+historical is one line, and it makes that record permanently unchecked, which
 is the state the branch exists to report. The message recommended, as a co-equal
 alternative, the act whose consequence it was written to catch. That is recorded
 three sections up as the thing that disarmed the gate, in the docstring of the
@@ -322,7 +322,7 @@ The mismatch branch had the same pairing around a third option.
 
 Both now rank the repairs and say what the cheap one *claims* rather than what
 it costs. Marking a record historical asserts that it no longer describes the
-current program and may not be cited as evidence for anything current — true
+current program and may not be cited as evidence for anything current, true
 after a rewrite, not true because a count moved. Verified by firing both
 branches and reading the output cold.
 
@@ -336,17 +336,17 @@ that stops it being the one taken.
 Ranging, self-bounding and caller-bounded are properties of code, and each can
 be established by making the code fail. The wrong-repair hazard is a property of
 the human path out of a failure; there is no fire available, because the edit
-that over-claims is legitimate when the underlying run really did change.
+that over-claims is legitimate when the underlying run did change.
 
-Which is why both sessions filed the warning in a comment without noticing. A
-comment is the natural home for a fact about the code. This is not one — it is a
-fact about the person who arrives when the code fails, and it belongs where they
+So both sessions filed the warning in a comment without noticing. A comment is
+the natural home for a fact about the code. This is a fact about the person who
+arrives when the code fails, and it belongs where they
 are standing.
 
 It does have a test, just not an automated one: fire the guard, and read what it
 prints as someone who has never seen it. Firing is how you get the text; being
 unfamiliar with it is the part you have to fake. That step caught a second fault
-here and in the peer tree independently — in both cases a remedy that was
+here and in the peer tree independently, in both cases a remedy that was
 correct and arrived as one unwrapped wall, written thirty seconds earlier and
 therefore invisible to its author.
 
@@ -355,7 +355,7 @@ therefore invisible to its author.
 Most readings in this work were taken by grepping a command's output. That is a
 second-hand instrument: it reports what a program SAID, and a program that dies
 early says nothing and greps clean. Worse, `cmd | filter; echo $?` reports the
-FILTER's status — `head` essentially always succeeds, so a failing build reads
+FILTER's status, `head` essentially always succeeds, so a failing build reads
 as `rc=0`. That mistake was made here, live, while checking one of these very
 guards, and caught only because the number disagreed with the message above it.
 
@@ -375,15 +375,15 @@ The answers stand. They stand because they were checked, not because the earlier
 readings meant anything.
 
 **The shape is not in any shipped script.** A first scan flagged 24 sites and
-every one was fine, because it looked for the wrong thing — `$?` after a
+every one was fine, because it looked for the wrong thing, `$?` after a
 pipeline, which matches the CORRECT idiom:
 
     echo "$OUT" | grep -q '"db2_ok":true'; check $? "..."
 
 There the assertion is LAST, so `$?` is grep's status and grep's status is the
 question. The defect is the inverse: the thing under test first, a pass-through
-formatter last. Rescanning for that — a pipeline ending in
-`head|tail|cat|tr|tee|...` whose status is consumed — found three candidates,
+formatter last. Rescanning for that. A pipeline ending in
+`head|tail|cat|tr|tee|...` whose status is consumed, found three candidates,
 all correct, and the two subtle ones were settled by demonstration rather than
 by reasoning about expansion order:
 
@@ -394,7 +394,7 @@ by reasoning about expansion order:
 `tail`'s. The CI hits were all `make --version | head -1 || true`, diagnostics
 with the status explicitly discarded.
 
-`scripts/e2e-252-full.sh` — the probe this record cites — was checked separately
+`scripts/e2e-252-full.sh` (the probe this record cites) was checked separately
 because its verdict is the thing being claimed. `ck` runs its command directly,
 with no pipe. `sqlv` DOES pipe psql into `tr`, so its exit status is `tr`'s and
 always zero; what `ck_gt` consumes is its OUTPUT, and a database refusing every
@@ -408,7 +408,7 @@ on the same night, and neither found it by reading.
 
 The corrected pipe scan produced a category none of the shapes above covers. A
 scanner that flags 24 sites and is wrong about all of them is **the same object
-as a guard that passes having checked nothing** — it just fails loudly instead
+as a guard that passes having checked nothing**. It just fails loudly instead
 of quietly. Loud-and-wrong and silent-and-wrong are one defect in different
 clothes, and the loud one is more expensive: it gets switched off rather than
 answered.
@@ -417,21 +417,21 @@ Which makes scope load-bearing wherever a guard's rule is true only locally. Two
 guards here were measured against a one-word widening of their path, and they
 gave **opposite answers**:
 
-**check-memory-store-degradation — do not widen.** Its rule is that a file
+**check-memory-store-degradation. Do not widen.** Its rule is that a file
 reaching db2 must branch on `AIMEE_DB2_DISABLED` or report. That is true for
 memory recall, where an empty result is indistinguishable from a genuine absence
 and silence is the harm. It is not general: most code reaching db2 should fail
 hard, and for it a fork would be the defect. Measured: 442 files outside
 `src/modules/memory` call `db2_*`, and **406 of them would be reported SILENT**.
 The distinction is invisible from inside the directory, because within it a db2
-call with no fork genuinely is a defect every time — and that coincidence is
+call with no fork genuinely is a defect every time, and that coincidence is
 exactly what makes widening look safe.
 
-**check-log-prefix-ownership — do not widen, for the opposite reason.** Measured
+**check-log-prefix-ownership. Do not widen, for the opposite reason.** Measured
 across 47 further files outside `server-go/modules`: it would fire **zero**
 times. That is not a licence. Zero hits says the rule does not currently
 misfire; it says nothing about whether the premise holds, and outside `modules/`
-it does not — `server-go/bus` is a package, not a module with a principal ref,
+it does not, `server-go/bus` is a package, not a module with a principal ref,
 so there is no owner for a prefix to disagree with. Extending a rule into a
 directory where its premise is absent buys coverage that cannot mean anything.
 
@@ -449,7 +449,7 @@ guards and getting different answers.
 **The record guard vouched for one file and said `ok` beside eighty-eight.**
 Its summary read `ok (1 count matches, 1 historical)`. There are 88 records in
 `docs/validation/`; it compares exactly one. The other 86 assert no count, which
-is not a lie and not a defect — a record is free to be prose — but a summary
+is not a lie and not a defect (a record is free to be prose) but a summary
 that omits how few it could reach **grows more reassuring as the directory
 grows**, which is the wrong direction for a number to move.
 
@@ -463,14 +463,14 @@ runs nobody re-ran. It now says:
 **The BLOCKED row's claim was re-derived rather than repeated.** This record's
 one incomplete result rests on "nothing serves kind 11266 in this tree". That
 sentence had been carried forward across sessions, and carried-forward is not
-the same as verified — a distinction worth keeping explicitly, because in a week
+the same as verified. A distinction worth keeping explicitly, because in a week
 neither reading is recoverable from the prose.
 
 Counted, from `src/modules/process-contracts.json`: the `postgres` component
 declares `principal_ref` 28 and exactly one stage, `postgres-health` at stage 1,
 kind 11265. No component in the file declares kind 11266 at all. The only
 mentions anywhere are the constants in `server-go/modules/aimee/store_client.go`
-that name the stage the client will one day call — the caller's expectation, not
+that name the stage the client will one day call, the caller's expectation, not
 a server.
 
 So the claim holds, and it now holds because it was counted here rather than
@@ -484,7 +484,7 @@ tree. It did. **And `make lint` stayed red, on a different target.**
 
 `check-docs` had never seen `docs/modules/db3.md`. It enumerates with
 `git ls-files *.md`, which lists TRACKED files only, so the file was invisible
-for as long as it was new — and it reached its first commit carrying ten em
+for as long as it was new, and it reached its first commit carrying ten em
 dashes the voice check exists to refuse.
 
 The script already knew about this hole and had patched it by hand:
@@ -497,8 +497,8 @@ The script already knew about this hole and had patched it by hand:
     ):
 
 Three names, maintained by hand, with the failure mode of every enumerated gate.
-`db3.md` was the fourth such guide and nobody added it, which is not a lapse —
-it is what enumerated gates do.
+`db3.md` was the fourth such guide and nobody added it, which is what enumerated gates do, rather
+than a lapse.
 
 Replaced with `git ls-files --others --exclude-standard *.md`, so every new
 guide is covered by existing code. `--exclude-standard` keeps `.gitignore`'d
@@ -512,7 +512,7 @@ The em dashes are fixed and `make lint` is green end to end.
 before this commit was true, and none of them covered this file, because the
 gate's own scope excluded it and said nothing about the exclusion. "Everything
 passes" and "everything was checked" are different claims, and only the second
-one is worth anything — which is the same lesson as the record guard vouching
+one is worth anything, which is the same lesson as the record guard vouching
 for one file out of eighty-eight, arriving from the opposite direction.
 
 ## test_guardrails restored, and what restoring it uncovered
@@ -525,8 +525,8 @@ The store dependency is cut at the call, in `tests/support/session_state_stub.c`
 and **two of its five functions do real work** because two tests genuinely
 depend on a round trip:
 
-- Session state saves and loads through one in-memory slot. A load that always
-  misses is not a neutral stand-in for a store — it is a store that forgets,
+- Session state saves and loads through one in-memory slot. A load that always misses is a store
+that forgets,
   which is a behaviour, and code under test may read back what it just wrote.
 - Guardrail events are **counted** by `final_action`, because
   `test_semantic_advisory_pre_tool_check` takes a baseline, drives two tool
@@ -536,7 +536,7 @@ depend on a round trip:
   count would fail the assertion outright, and a fixed count would pass it while
   measuring nothing.
 
-The delete and the ownership upsert return success and do nothing — their
+The delete and the ownership upsert return success and do nothing. Their
 results are never examined. That is the opposite choice from
 `wfe_store_stub.c`, whose functions return failure, and the difference is
 whether a future test might start *reading* them.
@@ -558,7 +558,7 @@ three, a reading of artifacts of code that no longer existed.
 a target, which is the other direction. A target naming a source that is gone is
 outside its question.
 
-Retiring them is correct — each drove the real bus and then read the SQLite
+Retiring them is correct. Each drove the real bus and then read the SQLite
 table the consumer wrote to, and that sink does not exist. But the property they
 guarded does: every guardrail event the bus accepts reaches the store exactly
 once, and a graceful stop drains those in flight. Nothing tests that against the
@@ -572,7 +572,7 @@ executed every run and built never.
 ### Two edits that made the same mistake as the guards
 
 Removing those entries by regex on the bare target names clipped one out of the
-*prose* above the block — `` so `make ` matched a rule `` — which is precisely
+*prose* above the block (`` so `make ` matched a rule ``) which is precisely
 the defect this work spent the night removing from its guards, reproduced by the
 script doing the removing. The second attempt matched the `.PHONY` pair exactly
 and left its recipe line orphaned, which make rejects outright.
@@ -583,7 +583,7 @@ grep for leaves the rest.
 
 ## test_mcp_git restored
 
-675 assertions about MCP git behaviour — chdir resolution, commit identity
+675 assertions about MCP git behaviour, chdir resolution, commit identity
 masking, sensitive-file skipping, push/branch/fetch semantics, mirror-workspace
 write refusal. Deleted for five lines: an `<sqlite3.h>` include it never used, a
 `db_schema.h` include it never used, the `db1_init`/`db1_shutdown` fixture pair,
@@ -596,8 +596,8 @@ incidental. The two reads are a genuine round trip:
     claim "some-branch" as session-D in repo B
     assert A reports session-C and B reports session-D
 
-The subject is an **MCP git** property — a claim is scoped to its repository,
-not to the branch name — and the store is only where the answer is read back
+The subject is an **MCP git** property. A claim is scoped to its repository,
+not to the branch name, and the store is only where the answer is read back
 from. A stub keyed on branch alone answers one owner for both, and would retire
 the only assertion that distinguishes them while leaving it in the file.
 
@@ -611,8 +611,8 @@ order; and the feature branch a session's PRs target is a separate table from
 ownership, because they are different facts and a test may set one without the
 other.
 
-The stubs were split so each symbol has one home — session state, guardrail
-events and git ownership in three files rather than one — since the guardrails
+The stubs were split so each symbol has one home, session state, guardrail
+events and git ownership in three files rather than one, since the guardrails
 and mcp-git binaries need overlapping but different subsets.
 
 ## test_agent restored, and a fixture that said yes to the wrong question
@@ -630,7 +630,7 @@ bring the real module up, or skip saying why.
 ### The fixture aborted the moment a database was named
 
 Standing up PostgreSQL 17.11 and pointing `AIMEE_STORE_URL` at it did not run
-the gated tests — it **aborted the whole suite**:
+the gated tests, it **aborted the whole suite**:
 
     store_module_fixture: module exited before it attached
                           (check AIMEE_STORE_URL reaches the database)
@@ -638,13 +638,13 @@ the gated tests — it **aborted the whole suite**:
 The DSN was fine. `store_module_fixture_available()` answered on the DSN alone,
 and the DSN was never sufficient: the store module does not open PostgreSQL
 itself. `storeBackend()` in `cmd/aimee-module` connects as principal 68 and
-reaches the database **through the postgres module's SQL stage, kind 11266** —
-the one gap this whole document records. Nothing serves it, so the module exits
+reaches the database **through the postgres module's SQL stage, kind 11266**.
+The one gap this whole document records. Nothing serves it, so the module exits
 before it attaches whatever the DSN names.
 
 That combination is the worst arrangement of the two halves. `available()` is
-generous, `start()` aborts by design — correctly, since a failure after a yes is
-a real fault — and the error message points at the operator's database. Seven
+generous, `start()` aborts by design, correctly, since a failure after a yes is
+a real fault, and the error message points at the operator's database. Seven
 existing suites carried this, not just the restored one, and every one of them
 would have died the same way.
 
@@ -663,17 +663,17 @@ Fixed on the way: the fixture configures the module runtime and starts the bus,
 and `obs_bus` refuses configuration once running. Several `test_agent` cases
 bring the bus up as a side effect, so a fixture started at the first store-backed
 test found it already up and died at `configure the module endpoint`. It starts
-from `main` now, before anything else. Also only visible with a real database —
-the two faults were stacked, and the first hid the second.
+from `main` now, before anything else. Also only visible with a real database.
+The two faults were stacked, and the first hid the second.
 
 ### What the restoration cost
 
 `check_tests_are_run` then failed correctly: `test_agent_caps.c` and
 `test_agent_responses.c` were in `UNBUILT_SOURCES`, orphaned when `test_agent`
 was deleted, and are built again now. Its stale-entry rule caught that without
-being asked — the one guard in this sweep that needed no repair.
+being asked, the one guard in this sweep that needed no repair.
 
-## test_memory_advanced restored — all four back
+## test_memory_advanced restored: all four back
 
 513 assertions, deleted for four lines: the `db1_init`/`db1_shutdown` fixture
 pair and two cognify enqueues.
@@ -682,7 +682,7 @@ Three blocks here are genuinely store-backed and are **gated on
 `db1_store_ready()` rather than stubbed**, because what they assert *is* store
 behaviour:
 
-- the cognify queue's UNIQUE constraint — a duplicate enqueue leaves `pending`
+- the cognify queue's UNIQUE constraint. A duplicate enqueue leaves `pending`
   unchanged;
 - `memory_cognify_drain` reading that queue;
 - `memory_maintenance_run`'s idle guard, which records its own last-run time and
@@ -755,8 +755,8 @@ The client's operation constants were a `const` block with no `iota`:
     opStoreBegin      // ← also 1
     ...
 
-All seven were 1. Every operation aimee asked of the store — query, begin,
-commit, rollback, migrate, current_version — went onto the wire as EXEC.
+All seven were 1. Every operation aimee asked of the store, query, begin,
+commit, rollback, migrate, current_version, went onto the wire as EXEC.
 
 Nothing caught it because nothing served the other end. Every call failed at the
 transport before its opcode was read. The Go compiler found it the moment the
@@ -765,7 +765,7 @@ only checked by the far side reading it**, and until there is a far side, "the
 numbers are obviously right" is the only check there is.
 
 Pinned now by `store_opcodes_test.go`, to the numbers rather than to being
-distinct — asserting distinctness would pass on any renumbering, and renumbering
+distinct, asserting distinctness would pass on any renumbering, and renumbering
 a live wire silently reinterprets every frame.
 
 ## It works
@@ -787,7 +787,7 @@ Every suite gated on the store fixture, **zero skips**:
     unit-test-curiosity                        exit=0
 
 The fixture now starts the postgres module **beside** the store, with its own
-grant and the store's separate outbound grant at ref 68 — a serving grant and a
+grant and the store's separate outbound grant at ref 68. A serving grant and a
 requesting grant are two different admissions, and the store needs both.
 
 ## Three defects the working store exposed
@@ -795,7 +795,7 @@ requesting grant are two different admissions, and the store needs both.
 Making it run is what found these. None could fail while every call failed first.
 
 **`server_mgmt_status_init()` was deleted from a test with the dead code around
-it.** The migration removed `db1_init(path)`/`db1_shutdown()` — correct — and
+it.** The migration removed `db1_init(path)`/`db1_shutdown()` (correct) and
 took the init call with them, which was not dead: it calls
 `db1_mgmt_nonce_clear()`. Two assertions were about it, and one is the subject of
 a real property: across a restart the high-water mark survives and an in-flight
@@ -804,21 +804,21 @@ hold, and the pair stopped testing restarts at all. Restored.
 
 **`ErrStoreUnavailable` discarded the transport's error at all three sites.** A
 refused grant, an unreachable socket and a genuinely absent module all produced
-the same sentence, naming none of them — which is what I spent the first hour of
+the same sentence, naming none of them, which is what I spent the first hour of
 diagnosis inside. Wrapped now, so `errors.Is` still answers and the cause travels.
 
 **`test_bus_shutdown_race` could no longer make its second claim.** It asserted
 that every event counted written is in the store, read back *after*
 `obs_bus_stop()`. That was free with in-process SQLite. It is impossible now: the
 store is reached over the bus, and stopping the bus is the thing under test.
-Restarting the host does not recover it — the module does not re-attach, measured
+Restarting the host does not recover it. The module does not re-attach, measured
 with a ten-second poll rather than assumed. Pointing its sink at the real store
 instead made it a load test against a database on another host and it stopped
 finishing.
 
 It has a counting sink now, which is what the in-process SQLite one actually gave
 it: somewhere fast for events to go. That makes the accounting claim **exact**
-rather than inferred — the sink reports what it was handed. 54,241 events raced
+rather than inferred. The sink reports what it was handed. 54,241 events raced
 the stop, all accounted for. The store-durability property is stated in the file
 as belonging elsewhere, with the retired `test_bus_guardrail_durability`.
 
@@ -845,14 +845,14 @@ under the supervisor.
     PASS=11 FAIL=0
 
 Exploratory checks on the same live system: 21 rows in the ledger under owner
-`db1` at version 21, and **21 distinct checksums** — one recorded per version
+`db1` at version 21, and **21 distinct checksums**, one recorded per version
 rather than one repeated, which is what proves each migration was hashed as
 applied rather than copied from the first.
 
 ## The store wire was exercised, not just the schema
 
 Applying the schema proves MIGRATE and CURRENT_VERSION. Those are two of seven
-operations, and they take their own path in the stage — `h.migrate` and
+operations, and they take their own path in the stage, `h.migrate` and
 `h.currentVersion` use the pool directly. **EXEC and QUERY go through
 `h.statement`, which none of that touches**, and a broken statement path would
 let the schema apply and fail everything afterwards.
@@ -860,7 +860,7 @@ let the schema apply and fail everything afterwards.
 Guessing which HTTP endpoint reads which table was going nowhere, so the
 database was measured instead. Driving the daemon moved
 `pg_stat_database.xact_commit` from 163 to 168 and `tup_returned` by 242, the
-store module held **two connections as `root`** — its pool — and
+store module held **two connections as `root`** (its pool) and
 `pg_stat_activity` showed a real family query mid-flight:
 
     SELECT id, schedule, mode, script, prompt, workdir, context_from, ...
@@ -877,21 +877,21 @@ first call before postgres had claimed 11266 and exited:
     store: schema: read the applied schema version: ... capability absent
     aimee-module: module "aimee" could not start
 
-Fixed with a bounded wait — thirty attempts, one second apart, retrying only
+Fixed with a bounded wait, thirty attempts, one second apart, retrying only
 `ErrStoreUnavailable`. Ordering the manifest would not fix it: registration is
 asynchronous, so starting postgres first narrows the window, and a window that
 closes on a fast machine reopens on a loaded one.
 
 **The first version of that wait ran zero times.** It wrapped `storeBackend`,
-which talks to nothing — it opens a bus client and constructs a `Store`.
+which talks to nothing, it opens a bus client and constructs a `Store`.
 Construction succeeded and the failure was one line later in `ApplySchema`, the
 first call that leaves the process. The run failed identically, which is how it
 was caught: *a fix that changes nothing looks exactly like a fix that was not
 deployed*, and this work had just been bitten by the second twice.
 
 **The rig never created the role the daemon connects as.** The DSN carries no
-user, so libpq uses the process's OS name — `root`, since that is what the
-supervisor runs modules as — and PostgreSQL answered SQLSTATE 28000, `role
+user, so libpq uses the process's OS name, `root`, since that is what the
+supervisor runs modules as, and PostgreSQL answered SQLSTATE 28000, `role
 "root" does not exist`. It could not have come up before: the C store was a
 SQLite file with no roles at all. Added to `e2e-252-dbsetup.sh`.
 
@@ -917,9 +917,9 @@ Recorded here and at both sites rather than left to be rediscovered.
 
 # The guardrail durability property, and what writing its test found
 
-The gap this document has carried since the retirement — *every guardrail event
+The gap this document has carried since the retirement. *Every guardrail event
 the bus accepts reaches the store exactly once, and a graceful stop drains those
-in flight* — now has a test. Writing it found three defects, two fixed and one
+in flight*, now has a test. Writing it found three defects, two fixed and one
 open.
 
 ## The test is in two halves, and has to be
@@ -928,7 +928,7 @@ open.
 the bus, and reports what the bus counted. **It cannot check its own work**:
 stopping the bus is half the property, and the store is reached *over* that bus,
 so after the stop there is no transport to ask through. Restarting the host does
-not recover it — the module does not re-attach, measured with a ten-second poll.
+not recover it. The module does not re-attach, measured with a ten-second poll.
 
 `test_bus_guardrail_durability.sh` does the read-back straight out of
 PostgreSQL, after the emitter has exited and its modules with it. It checks the
@@ -940,7 +940,7 @@ boolean.
 ## Fixed: `obs_bus_module_available()` deadlocked shutdown
 
 It took `start_lock`. `obs_bus_stop()` holds `start_lock` while waiting for
-callers to drain and joining the consumer — and the consumer, inside
+callers to drain and joining the consumer, and the consumer, inside
 `persist_guardrail`, asks whether the kind is served *first*. Both threads
 parked in futex waits, forever.
 
@@ -949,7 +949,7 @@ the probe was never on its path. `obs_bus_adapter.c` still says the sink is
 "safe to call from the bus consumer thread", which was true when written and
 became false without either file being edited.
 
-Now registers in `module_callers` and reads the atomic instead — the discipline
+Now registers in `module_callers` and reads the atomic instead, the discipline
 `obs_bus_module_call` already used, for the same reason.
 
 ## Fixed: the final drain could not reach the store
@@ -964,14 +964,14 @@ what "a graceful stop drains those in flight" requires.
 
 ## FIXED (was OPEN): a store call from the bus consumer thread did not complete
 
-With both fixes in, the events still do not arrive — `DEADLINE_EXCEEDED`, and
+With both fixes in, the events still do not arrive, `DEADLINE_EXCEEDED`, and
 **zero rows reach PostgreSQL**. It is not the stop: setting a settle window puts
 the failure squarely inside it, with the bus fully running.
 
 The contrast that locates it: every store-backed suite listed above passes
 against the same PostgreSQL, and `unit-test-server-mgmt-status` does a
 *transactional* nonce consume. Those call the store from the **main** thread.
-This calls it from the obs_bus **consumer** thread — which is what routes peer
+This calls it from the obs_bus **consumer** thread, which is what routes peer
 traffic, so while it blocks waiting for the store's reply, the store's own call
 to the postgres module has nobody to route it.
 
@@ -980,8 +980,8 @@ from the thread that routes the bus. **See the next section: it is fixed.**
 
 **The test is committed and registered.** Without `AIMEE_STORE_URL` it skips, so
 `make unit-tests` is green; with one it fails, which is the truth. That is the
-opposite of the state this property was in before — a retired test and a note in
-a Makefile — and it is why the defect is now a failing assertion rather than a
+opposite of the state this property was in before, a retired test and a note in
+a Makefile, and it is why the defect is now a failing assertion rather than a
 paragraph.
 
 ---
@@ -1008,7 +1008,7 @@ And the cause is in the consumer loop itself:
 
 `drain()` waits inside the very thread that would deliver its reply. It resolves
 only when the 2s deadline expires. **Blast radius is one sink**: the audit sink
-calls `audit_action_log`, which writes the WORM ledger — a file — and makes no
+calls `audit_action_log`, which writes the WORM ledger (a file) and makes no
 module call. Checked rather than assumed.
 
 ## The fix, and why the ordering is forced
@@ -1017,15 +1017,15 @@ A writer thread owns the guardrail sink. The consumer copies each payload into a
 bounded queue and keeps pumping; the writer makes the call and counts the event
 **written only when the sink reports it durable**, so `obs_bus_written()` still
 means "in the store" and the exactly-once claim is unchanged. A full queue drops
-and counts it — blocking would put the consumer back to waiting on the store,
+and counts it, blocking would put the consumer back to waiting on the store,
 which is the defect being removed.
 
 Shutdown is the subtle part, and both obvious orders are wrong:
 
 - finish the writer **before** the consumer's final drain, and the events that
-  drain rescues meet a stopped writer — `written 0, dropped 3`;
+  drain rescues meet a stopped writer, `written 0, dropped 3`;
 - finish it **after** the consumer is joined, and every queued call times out
-  with nobody routing replies — also `written 0`.
+  with nobody routing replies, also `written 0`.
 
 Both were measured, not reasoned about. The order that works has three steps
 and a wait between each: signal the drain, **wait for the drain to complete**,
@@ -1044,7 +1044,7 @@ like the original defect.
     PASS  dry_run round-tripped as a boolean on every row
 
 The identity check was verified non-vacuous by planting a duplicate row for `s7`
-and watching it report one — a loss and a duplicate that net to 2000 pass the
+and watching it report one. A loss and a duplicate that net to 2000 pass the
 count and fail there, which is the whole reason each event carries an identity.
 
 All seven store-backed suites pass against a clean PostgreSQL after the change,
@@ -1065,8 +1065,8 @@ clean database all twenty-one apply and all seven suites pass.
 # Run three: the whole system, with the threading change in it
 
 Run two proved the store on hardware. It was taken **before** the obs_bus
-threading change, so the daemons had never run with the guardrail writer thread
-— and that change alters shutdown ordering in a process every module attaches
+threading change, so the daemons had never run with the guardrail writer thread,
+and that change alters shutdown ordering in a process every module attaches
 to. A green unit suite says little about it: no unit test stops a real
 `aimee-server` with a real fleet attached.
 
@@ -1084,7 +1084,7 @@ Fresh container, current build, both daemons.
 ## Shutdown, which is what actually changed
 
 `obs_bus_stop()` now waits for the consumer's final drain, finishes a writer
-thread against a still-pumping consumer, then releases the consumer — three
+thread against a still-pumping consumer, then releases the consumer, three
 waits where there were none, and a mistake in any of them is a daemon that never
 exits.
 
@@ -1111,8 +1111,8 @@ binaries that were deployed:
 ## What this rig cannot show, stated rather than implied
 
 **The daemon emitted no guardrail events of its own.** `/v1/hooks/pre` answers
-and blocks — `"BLOCKED: write blocked because this session is not running in a
-worktree"` — but that refusal happens at the worktree guard, upstream of the
+and blocks, `"BLOCKED: write blocked because this session is not running in a
+worktree"`, but that refusal happens at the worktree guard, upstream of the
 semantic orchestrator that calls `gsem_record`. Reaching it needs a
 worktree-backed agent session, which this rig does not create.
 

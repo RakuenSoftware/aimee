@@ -1,9 +1,9 @@
-# Pending proposal audit update — 2026-08-13
+# Pending proposal audit update: 2026-08-13
 
 This incremental reconciliation carries forward the exhaustive 2026-08-04 manifest and records the
 delegate and WFE panel residuals changed since that snapshot by subsequent work.
 
-## Corrected residual lifecycle — 2026-08-15
+## Corrected residual lifecycle: 2026-08-15
 
 PR #2634 moved `delegate-limit-diagnostics-residual.md` from `pending/` to `rejected/` because the
 producer was then C-owned. The Go producer later landed, and the rejection rule was itself corrected
@@ -12,7 +12,7 @@ does not invalidate a live objective. The residual was restored, rewritten aroun
 typed failed result, and completed on 2026-08-16 with grouped diagnostics plus real Claude/Codex
 producer-exhaustion fixtures. It does not revive the retired C `partial` terminal state.
 
-## Subsequent WFE panel completion — 2026-08-14
+## Subsequent WFE panel completion: 2026-08-14
 
 `wfe-panel-capacity-residual.md` moved from `pending/` to `done/`. The Go delegate module,
 roundtable module, and WFE scheduler now preserve capacity wait, capacity-wait deadline, and delegate

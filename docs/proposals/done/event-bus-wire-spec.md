@@ -1,10 +1,10 @@
-# Spec: Aimee shared-memory event bus — wire and segment specification (v0)
+# Spec: Aimee shared-memory event bus: wire and segment specification (v0)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — v0 promoted and archived 2026-08-04; third-language residual later rejected.
+- **State:** DONE. V0 promoted and archived 2026-08-04; third-language residual later rejected.
 
 > **Archived after partial delivery.** The C host, C and Go clients, frozen vectors, cross-process
 > conformance, arena routing, capture, performance gate, and shipping module-runtime integration are
@@ -35,28 +35,28 @@ the event wire encoding, the attach/admission handshake, routing, flow control, 
 the governance/audit tap, and capture/replay format. It is what a bus client in any language
 implements to interoperate with the single in-source C bus host.
 
-Out of scope (owned elsewhere): the descriptor and **event-contract schema** — which event kinds a
-module publishes/subscribes/requests — owned by `module-runtime`; **admission policy** (identity,
-install, `execution-policy`) — owned by core, invoked at attach; **cross-service** (Runtime↔Control)
-transport — the network path, not this bus; and module business logic.
+Out of scope (owned elsewhere): the descriptor and **event-contract schema**, which event kinds a
+module publishes/subscribes/requests, owned by `module-runtime`; **admission policy** (identity,
+install, `execution-policy`), owned by core, invoked at attach; **cross-service** (Runtime↔Control)
+transport, the network path, not this bus; and module business logic.
 
 ## Terminology
 
-- **Bus host** — the single in-source C implementation that owns the segment, admits clients, routes
+- **Bus host**: the single in-source C implementation that owns the segment, admits clients, routes
   events, and runs the tap. Exactly one per service (Runtime, Control Plane).
-- **Bus client** — a per-language library a module uses to attach and publish/subscribe/request.
-- **Segment** — the shared-memory region host and admitted clients map.
-- **Ring** — a single-producer/single-consumer (SPSC) lock-free queue in the segment.
-- **Queue pair** — one client's inbound ring (host→client) and outbound ring (client→host).
-- **Event** — one typed message: a fixed header plus a payload reference.
-- **Handle** — the opaque per-client identity core grants at admission; indexes the client's queue
+- **Bus client**: a per-language library a module uses to attach and publish/subscribe/request.
+- **Segment**: the shared-memory region host and admitted clients map.
+- **Ring**: a single-producer/single-consumer (SPSC) lock-free queue in the segment.
+- **Queue pair**: one client's inbound ring (host→client) and outbound ring (client→host).
+- **Event**: one typed message: a fixed header plus a payload reference.
+- **Handle**: the opaque per-client identity core grants at admission; indexes the client's queue
   pair and its authorization.
 
 ## Topology
 
 Per service: one host, N admitted clients. The host is the only participant that reads or writes more
 than one client's queues; each client maps **only its own queue pair** and the shared payload arena.
-There is no client↔client shared ring — all routing goes through the host, which is what makes
+There is no client↔client shared ring. All routing goes through the host, which is what makes
 observer routing and the audit tap total (suite invariants 13, 18). A cross-service request does not
 use this segment; it leaves on the network transport carrying the same event encoding.
 
@@ -77,7 +77,7 @@ use this segment; it leaves on the network transport carrying the same event enc
 > **Amendment status: ACCEPTED.** This line is the machine-readable record
 > `scripts/check_bus_d1_gate.sh` reads at slice-3 PR open. The document's owner changes it to
 > `ACCEPTED` or `DECLINED`; while it reads `REQUESTED`, slice 3 and everything downstream of it
-> cannot open. Declining is not a one-slice fallback — see D1's gate section for what it re-opens.
+> cannot open. Declining is not a one-slice fallback. See D1's gate section for what it re-opens.
 
 The bus is realized as **several fd-backed regions**, not one segment. A client receives file
 descriptors only for what it is allowed to map, so isolation is enforced by the kernel rather than
@@ -128,7 +128,7 @@ spec's existing note that a hostile native client in the trusted tier is outside
 threat model. Untrusted code does not run as a native admitted client; it runs sandboxed under
 `module-loader`, whose tier will need per-lease arena sub-regions or a copy-on-deliver mode.
 
-Attach carries three descriptors — control, arena, and that client's queue pair — in a single
+Attach carries three descriptors (control, arena, and that client's queue pair) in a single
 `sendmsg` over the `SOCK_SEQPACKET` attach socket, via `SCM_RIGHTS`, only after admission succeeds.
 An unadmitted process receives no descriptors and, because the regions are anonymous `memfd`s with
 no filesystem name, has nothing to open. The host's descriptor table grows by one per admitted slot
@@ -148,7 +148,7 @@ therefore never re-issues a conformance vector.
 
 Each ring is a lock-free **SPSC** queue with a producer index and a consumer index on separate cache
 lines to avoid false sharing. Because every ring has exactly one writer (the client for its outbound,
-the host for the client's inbound) and one reader, no lock is needed — publication uses release
+the host for the client's inbound) and one reader, no lock is needed, publication uses release
 stores and consumption uses acquire loads. A ring is a power-of-two slot array; `full` and `empty`
 are distinguished by the producer/consumer index pair (not by a count that could alias). Slot size is
 fixed per segment and carries the event header plus a small inline payload budget; larger payloads go
@@ -176,14 +176,14 @@ this spec. This spec defines only the framing.
 
 ## Message patterns
 
-- **Notification** — one-way; `correlation_id = 0`; no reply expected.
-- **Request/reply** — the requester sets a fresh `correlation_id`; the serving module replies with the
+- **Notification**: one-way; `correlation_id = 0`; no reply expected.
+- **Request/reply**: the requester sets a fresh `correlation_id`; the serving module replies with the
   same `correlation_id`; the host routes the reply point-to-point back to the requester only.
-- **capability_absent** — if the target kind has no ready authorized server, the host synthesizes a
+- **capability_absent**: if the target kind has no ready authorized server, the host synthesizes a
   typed `capability_absent` reply rather than dropping the request.
-- **cancel** — a requester may cancel an outstanding `correlation_id`; delivery of cancel is
+- **cancel**: a requester may cancel an outstanding `correlation_id`; delivery of cancel is
   best-effort and idempotent.
-- **fragmentation** — wire version 3 sets `BUS_F_MORE` on every non-final inline fragment of one
+- **fragmentation**: wire version 3 sets `BUS_F_MORE` on every non-final inline fragment of one
   correlated request or reply. Fragments remain ordered under the correlation ID; the first frame
   without `BUS_F_MORE` completes the message. The host does not close or reuse the pending route
   while either side is fragmented, and cancel retires the partial stream.
@@ -191,8 +191,8 @@ this spec. This spec defines only the framing.
 ## Attach and admission handshake
 
 Attach is **not** a free mmap. A client requests attach over a small control channel; the host invokes
-core admission (identity/attestation, installation, `execution-policy`) — owned by `module-runtime`,
-not this spec — and only on success allocates the client a queue-directory slot, maps **only** that
+core admission (identity/attestation, installation, `execution-policy`), owned by `module-runtime`,
+not this spec, and only on success allocates the client a queue-directory slot, maps **only** that
 slot's queue pair and the arena into the client, and returns the `handle_id` and negotiated version.
 An unadmitted process gets no slot, no handle, and no mapping. Detach (graceful or by reaped
 heartbeat) frees the slot; `host_epoch` bumps invalidate all handles at once.
@@ -213,7 +213,7 @@ publish only up to the consumer's advertised free slots; when credits are exhaus
 bounded wait or returns `would_block` (the client library chooses per call). The host protects itself
 from a slow client by bounding per-client in-flight and, past a threshold, applying the descriptor's
 declared overflow policy for that client's kinds (block the producer, or shed with a typed
-`overflow` event) — never an unbounded host-side queue. A wedged client is reaped by heartbeat; its
+`overflow` event), never an unbounded host-side queue. A wedged client is reaped by heartbeat; its
 slot is reclaimed.
 
 ## Ordering and delivery
@@ -222,7 +222,7 @@ slot is reclaimed.
 - Global order is defined only by the host's `seq`; there is no cross-ring order before the host
   stamps it. The **capture/replay** stream is exactly the host's `seq` order.
 - Delivery within a live segment is exactly-once per destination; on `host_epoch` change (restart),
-  in-flight events not yet `seq`-stamped are lost and clients re-attach — the durable audit chain,
+  in-flight events not yet `seq`-stamped are lost and clients re-attach. The durable audit chain,
   not the ring, is the persistence boundary.
 
 ## Versioning and negotiation
@@ -236,7 +236,7 @@ ignored by older readers; a layout-incompatible change bumps `layout_version` an
 
 Small payloads inline in the ring slot (a copy, but cheap). Payloads above the inline budget go to the
 shared **arena** and are referenced by `(offset, len)`. Zero-copy across a process boundary needs an
-ownership/lifetime discipline: v0's baseline is **host-mediated arena leases** — the producer requests
+ownership/lifetime discipline: v0's baseline is **host-mediated arena leases**. The producer requests
 an arena region, fills it, publishes the ref; the consumer reads and releases; the host tracks the
 lease and reclaims on release or on client reap. Arena allocation remains limited to trusted
 co-located publishers. Module processes instead use the wire-v3 ordered fragmentation contract for
@@ -247,34 +247,34 @@ producer→consumer arena allocation across that process boundary remains outsid
 
 - The regions are anonymous `memfd`s with no filesystem name, so there is nothing for an unadmitted
   process to open; descriptors are passed only after admission succeeds. Each client receives
-  descriptors for the control region (read-only), the arena, and its own queue pair — and for
+  descriptors for the control region (read-only), the arena, and its own queue pair, and for
   nothing else, so "never another client's rings" is enforced by the descriptor it was not given
   rather than by permission bits on a shared object.
 - The host is the only multi-queue reader/writer; a client cannot read another client's traffic,
   matching observer routing at the memory level, not only the API level.
 - Arena access is bounded to leased regions; a client cannot read arbitrary arena bytes outside its
   active leases (enforced by the client library and validated by conformance; a hostile native client
-  in the trusted tier is out of this boundary's threat model — untrusted clients run sandboxed per
-  [`module-loader.md`](module-loader.md)).
+  in the trusted tier is out of this boundary's threat model, untrusted clients run sandboxed per
+  [`module-loader.md`](../pending/module-loader.md)).
 
 ## Conformance
 
 The spec is validated, not defined, by its implementations. All of the following are built and green
 (see [Implementation status](#implementation-status)):
 
-- **Wire vectors** — shared encode/decode fixtures for headers, each message pattern, version
+- **Wire vectors**: shared encode/decode fixtures for headers, each message pattern, version
   negotiation, and error frames; the C and Go reference clients both produce and accept the exact
   bytes. Committed in `src/tests/fixtures/bus/wire_vectors.tsv`, generated independently of either
-  codec by `scripts/gen_bus_wire_vectors.py` (10 positive + 13 negative rows). ✔
-- **Interop** — the single in-source C host driven with a C client and a real Go client across a
+  codec by `scripts/gen_bus_wire_vectors.py` (10 positive + 13 negative rows).
+- **Interop**: the single in-source C host driven with a C client and a real Go client across a
   process boundary, exchanging notifications and request/replies in both directions, including
   `capability_absent`, cancel, and reaped-client recovery. Backpressure/credit exhaustion is a
   language-independent host and client-ring property, proven in-process
-  (`test_bus_flow`, and the C/Go client `would_block` paths). ✔
-- **No-second-host** — exactly one host implementation; `scripts/check_bus_single_host.sh` fails a
-  second `bus_host_create` and confirms the Go side is client-only. ✔
-- **Third-language proof** — a client in a language other than C/Go, written only from this spec and
-  the vectors, attaches and interoperates — the credibility test for "any language." *Not yet
+  (`test_bus_flow`, and the C/Go client `would_block` paths).
+- **No-second-host**: exactly one host implementation; `scripts/check_bus_single_host.sh` fails a
+  second `bus_host_create` and confirms the Go side is client-only.
+- **Third-language proof**: a client in a language other than C/Go, written only from this spec and
+  the vectors, attaches and interoperates, the credibility test for "any language." *Not yet
   written; the two-language agreement and the language-neutral vectors are what make it possible, and
   a later contributor can add one without any change here.*
 
@@ -283,7 +283,7 @@ The spec is validated, not defined, by its implementations. All of the following
 - Cross-service transport (network path between Runtime and Control Plane).
 - The event-contract/kind schema and descriptor graph (owned by `module-runtime`).
 - Admission policy semantics (owned by core; invoked here at attach).
-- Freezing exact byte offsets in prose — the vectors are authoritative.
+- Freezing exact byte offsets in prose. The vectors are authoritative.
 
 ## Open questions
 
@@ -303,12 +303,12 @@ Answered in v0 (settled by the decisions in
 Still open for a later version (out of v0 scope):
 
 - **Huge and streamed payloads** (chunking over the ring vs a dedicated arena stream).
-- **Arena-payload routing** — the host publishing a lease to the resolved observer set before
+- **Arena-payload routing**: the host publishing a lease to the resolved observer set before
   forwarding the reference. The allocator exists (slice 4) and inline routing works; the composition
   is a focused slice-4/6 follow-up. Arena-flagged frames are currently dropped-with-count, not
   delivered to a consumer that could not read them.
 - **NUMA/placement** of the regions on multi-socket hosts.
-- **`shm_open` portability fallback** — v0 is Linux-only (`memfd_create`) by D1; a fallback carries
+- **`shm_open` portability fallback**: v0 is Linux-only (`memfd_create`) by D1; a fallback carries
   its own threat-model note.
 
 ## Implementation status

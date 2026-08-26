@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-Status: done — the complete provider-backed matrix passed and promoted `on`
+Status: done. The complete provider-backed matrix passed and promoted `on`
 
 ## Goal
 

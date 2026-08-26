@@ -1,6 +1,6 @@
 # Aimee core capability contract: cross-process residual
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`aimee-core-capability-contract.md`](../done/aimee-core-capability-contract.md)
 

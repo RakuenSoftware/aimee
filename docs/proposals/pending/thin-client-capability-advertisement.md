@@ -1,9 +1,9 @@
 # Proposal: the registration chain and the static thin client
 
-- **State:** DRAFT — 2026-07-23; awaiting roundtable review. Not part of the 2026-07-20 suite
+- **State:** DRAFT. 2026-07-23; awaiting roundtable review. Not part of the 2026-07-20 suite
   roundtable approval; this is a later-drafted consuming child.
 - **Parent:** [`core process separation residual`](core-process-separation-residual.md)
-- **Owns:** the registration chain — how a module registers with its host service, how a Runtime
+- **Owns:** the registration chain. How a module registers with its host service, how a Runtime
   registers with a Control Plane, and how a thin client registers with a Runtime; the
   generation-stamped capability-and-surface projection each registration edge returns and refreshes;
   and the rule that makes the thin client **static**: a client binary carries no module knowledge and
@@ -27,7 +27,7 @@ declared dependencies and a typed capability state. Once that is true, a thin cl
 assume a fixed feature set: which modules are selected, enabled, and ready differs per Runtime, per
 Control Plane, and over time.
 
-Today the client does not merely fail to *learn* the feature set — it **contains** it. `commands[]`
+Today the client does not merely fail to *learn* the feature set, it **contains** it. `commands[]`
 (`src/cmd_table.c:139`) is a compiled table of 84 entries, each binding a CLI verb, its help text,
 and its tier to a `cmd_*` function pointer resident in the client binary. `route_capabilities`
 (`src/server/server_http.c:642`) and the Control Plane equivalent (`src/kb/http/kb_http.c:173`)
@@ -61,8 +61,8 @@ governance policy distribution; it composes them.
    closure. The Control Plane's contribution reaches the client because the Runtime registered with
    it, not because the client did.
 3. **The projection carries the invocable surface, not only capability state.** A capability is
-   advertised together with the surface descriptors needed to present and invoke it — CLI verb,
-   arguments, help, tier; MCP tool name and input schema; HTTP route; web surface — so a client that
+   advertised together with the surface descriptors needed to present and invoke it, CLI verb,
+   arguments, help, tier; MCP tool name and input schema; HTTP route; web surface, so a client that
    has never heard of a module can expose it.
 4. **The thin client is static and stateless.** A client binary ships no module knowledge and
    dispatches every module surface generically from the projection. It holds the current projection
@@ -72,7 +72,7 @@ governance policy distribution; it composes them.
    version *N+k* within the compatibility window; only a change to the core transport, registration,
    or handshake contract requires a client release.
 5. **A capability the effective set does not offer is never presented**, and invoking it returns a
-   typed `capability_absent` — never a partial or silent success.
+   typed `capability_absent`, never a partial or silent success.
 
 ## The registration chain
 
@@ -105,7 +105,7 @@ Control Plane own a bus and terminate this edge for their own modules.
 declaring its identity, version, and the capability/surface closure its own modules published. The
 Control Plane admits it under the existing transport principal class, folds it into its view, and
 returns its own generation-stamped projection scoped to that Runtime. The Runtime holds the **merged
-closure** — its modules plus the Control Plane's advertised capabilities — evaluated under the suite
+closure** (its modules plus the Control Plane's advertised capabilities) evaluated under the suite
 dependency law across both services. Cross-service dependency evaluation happens here, at the
 Runtime, once, rather than at every attached client.
 
@@ -129,12 +129,12 @@ still refetches from the Runtime. Consumer output therefore cannot make a thin c
 
 The registrant is the party whose availability is contingent; the authority is the party that
 persists and arbitrates. Pushing downward would require each authority to discover, address, and
-maintain liveness for an unbounded, churning set of dependents — a Control Plane tracking every
-Runtime, a Runtime tracking every client — and to hold credentials for connecting *to* them. Upward
+maintain liveness for an unbounded, churning set of dependents, a Control Plane tracking every
+Runtime, a Runtime tracking every client, and to hold credentials for connecting *to* them. Upward
 registration inverts all three: the registrant knows exactly one address, initiates the only
 connection, and authenticates itself under the transport class it already holds. This also matches
-the transport that exists — the thin client's remote path probes and attaches to its Runtime and has
-no Control Plane connection at all (`remote_health_ok`, `src/cli_remote.c:307`) — and it keeps the
+the transport that exists, the thin client's remote path probes and attaches to its Runtime and has
+no Control Plane connection at all (`remote_health_ok`, `src/cli_remote.c:307`), and it keeps the
 Control Plane reachable from a network position clients cannot reach.
 
 ## What is registered
@@ -143,9 +143,9 @@ A registration declares, and a projection returns, the **capability record**: ev
 needs to decide whether a capability is available and how to invoke it.
 
 **Capability state**: the capability `id`; its `kind` (`required` | `optional`); its typed `state`
-(the module-runtime lifecycle value — `absent`, `selected`, `disabled`, `starting`, `ready`,
+(the module-runtime lifecycle value, `absent`, `selected`, `disabled`, `starting`, `ready`,
 `degraded`, `unavailable`, `stopping`, `failed`); its dependencies, carried as two **separate** lists
-per suite invariant 16 — `hard_depends_on` and `soft_depends_on` — and the `generation` at which its
+per suite invariant 16 (`hard_depends_on` and `soft_depends_on`) and the `generation` at which its
 state last changed. A soft dependency additionally carries the `fallback` identifier its module
 declared, so a consumer can be told which reduced behavior is in force rather than inferring it.
 The two lists are never merged into one `depends_on`: they gate differently (see *Dependency law*),
@@ -154,14 +154,14 @@ and collapsing them would suppress a capability the parent contract requires to 
 **Surface descriptors**: for each surface the capability offers, a typed descriptor sufficient for a
 client that has never heard of the module to present and dispatch it. Surface kinds:
 
-- `cli` — verb (and subcommand path), argument and flag schema with types and defaults, one-line
+- `cli`: verb (and subcommand path), argument and flag schema with types and defaults, one-line
   help, long help, tier (`core` | `advanced` | `admin`), hidden flag, and aliases. This is precisely
   the information `command_t` holds today (`src/cmd_table.c:139`) minus the function pointer, which
   the generic dispatcher replaces.
-- `tool` — MCP tool name, description, and JSON input schema, in the shape `tools/list` already
+- `tool`: MCP tool name, description, and JSON input schema, in the shape `tools/list` already
   returns.
-- `route` — HTTP method and `/v1` path, for clients that proxy or surface routes.
-- `web` — the web surface identifier the product boundary defines.
+- `route`: HTTP method and `/v1` path, for clients that proxy or surface routes.
+- `web`: the web surface identifier the product boundary defines.
 
 A surface descriptor is **declarative only**. It names no client-side code, carries no executable
 content, no template language, and no code URL; it says what a surface is called, what it takes, and
@@ -173,7 +173,7 @@ transports *descriptions*, never behavior.
 
 "Declarative only" is not self-enforcing: a surface can require client-local behavior implicitly, by
 naming something the client must resolve, render, or shape locally. So each kind's descriptor schema
-is **closed** — a fixed field set, each field with a fixed type and a fixed meaning — and the
+is **closed** (a fixed field set, each field with a fixed type and a fixed meaning) and the
 permitted client behavior for that kind is fixed with it:
 
 | kind | the client is permitted to | and nothing else |
@@ -183,51 +183,51 @@ permitted client behavior for that kind is fixed with it:
 | `route` | display or proxy the declared method+path to its authority | no client-authored request shaping, no alternate host |
 | `web` | render the surface identifier from a **closed enumeration** the product boundary owns | no free-form identifier, no URL, no markup |
 
-A descriptor field whose value the client would have to *interpret* to act — a path, a URL, a
-hostname, a command line, a MIME type, a renderer name, a free-form `web` identifier — is not in any
+A descriptor field whose value the client would have to *interpret* to act, a path, a URL, a
+hostname, a command line, a MIME type, a renderer name, a free-form `web` identifier, is not in any
 kind's schema, and the descriptor validator rejects a descriptor carrying one. This is what makes
 "the validator rejects a surface requiring client-local execution" a decidable property rather than
 an aspiration: the check is schema conformance against a closed field set, not intent detection.
 
 ### Surface keys are globally unique and core-reserved names are refused
 
-Capability ids are unique, but two *different* capabilities can still claim the same invocable name —
+Capability ids are unique, but two *different* capabilities can still claim the same invocable name,
 the same CLI verb or alias, the same MCP tool name, the same method+path. That is ambiguous dispatch
 at best and surface impersonation at worst: a module claiming `remote` or `login` would shadow a
 core verb the user trusts. So each kind has a **canonical key** that is unique across the entire
 merged closure, not merely within a capability:
 
-- `cli` — the fully-qualified verb path, and independently every alias, in one flat namespace
-- `tool` — the tool name
-- `route` — the (method, normalized path) pair
-- `web` — the enumerated surface identifier
+- `cli`: the fully-qualified verb path, and independently every alias, in one flat namespace
+- `tool`: the tool name
+- `route`: the (method, normalized path) pair
+- `web`: the enumerated surface identifier
 
 A canonical key claimed by two capabilities is a **registration error**, and the resolution is
 **incumbent-preserving**: the already-admitted claimant keeps the key and stays advertised, and the
-*later* registration is rejected atomically — the whole registration, so a module cannot partially
-land — with a typed conflict naming both claimants and an audit record.
+*later* registration is rejected atomically. The whole registration, so a module cannot partially
+land, with a typed conflict naming both claimants and an audit record.
 
 Incumbent-preserving is a security requirement, not a tie-break preference. Withdrawing both
 claimants on conflict would hand any admitted module a **denial-of-service primitive**: claim the
 verb, tool name, or route of an incumbent it wants silenced, and the incumbent's surface disappears
 even though the attacker's own registration failed. Refusal must never cost the incumbent anything.
 Replacing an incumbent's key is possible only through a separately authorized **transactional
-replacement** — withdraw-then-claim as one atomic operation, never a side effect of an ordinary
+replacement**, withdraw-then-claim as one atomic operation, never a side effect of an ordinary
 registration. Its authorization is specified rather than implied: the operation is permitted only to
 a principal holding the incumbent capability's own authorization under a `cert:CN` transport class
-(never a bare bearer), is available at registration time only — not as a live runtime mutation, so a
-verb cannot change owner under a session in flight — and emits an audit record naming both
+(never a bare bearer), is available at registration time only, not as a live runtime mutation, so a
+verb cannot change owner under a session in flight, and emits an audit record naming both
 capabilities, the principal, and the transport class. A Runtime-local module that believes it should
 own a key an incumbent holds does not get it by racing or by priority; an operator performs the
 replacement deliberately.
 
 Because "incumbent" is decided by order, the order is specified rather than left to whoever wins a
-race. Uniqueness is enforced by **the authority that holds the merged closure** — the Runtime — since
+race. Uniqueness is enforced by **the authority that holds the merged closure** (the Runtime) since
 it is the only party that sees both services' keys. Admission order is: Control-Plane capabilities
 first, then Runtime-local capabilities, then within each group the descriptor graph's profile order,
 which is already deterministic for a given profile. So when a Runtime module and a Control-Plane
 module claim the same key, the Control-Plane claimant is the incumbent and the Runtime one is
-refused — the same way on every start, on every node, with the same profile.
+refused. The same way on every start, on every node, with the same profile.
 
 **That order only holds if the startup sequence produces it,** so the sequence is part of the
 contract rather than an implementation detail. A Runtime, on start: (1) attempts registration with
@@ -239,22 +239,22 @@ because it started first.
 
 The unhappy path is stated because it is the one that actually varies: if the Control Plane is
 unreachable within the startup deadline, the Runtime proceeds to step 3 and serves its local
-capabilities — the outage rule already says an outage must not withhold independent Runtime-local
+capabilities. The outage rule already says an outage must not withhold independent Runtime-local
 capabilities. A Control-Plane capability arriving later that claims a key a local module now holds is
 **refused**, because incumbent-preservation outranks admission order: rank decides who wins a
 *simultaneous* claim, never who may evict a live one. That refusal is a configuration error reported
 to the operator with both claimants named, not a silent reordering, and it is resolved by the
-authorized transactional replacement or by changing a descriptor — never automatically.
+authorized transactional replacement or by changing a descriptor, never automatically.
 
 Separately, core **reserves** the names of the verbs it owns (the attach/remote, identity/enrollment,
 health, help, and version verbs) plus a reserved prefix; a module descriptor claiming a reserved name
-is rejected at validation, before it can ever be registered. Aliases are checked identically to verbs
-— an alias is a claim on the namespace, and alias-shadowing is the cheapest impersonation path.
+is rejected at validation, before it can ever be registered. Aliases are checked identically to verbs.
+An alias is a claim on the namespace, and alias-shadowing is the cheapest impersonation path.
 
 ### The normative wire schema
 
 "Closed schema" is only mechanically checkable if the schema itself is written down. The following is
-the **normative semantic content** of the projection wire form — the same device
+the **normative semantic content** of the projection wire form. The same device
 `module-runtime-source-ownership-and-build.md` uses for its ownership baseline. Key order is
 irrelevant; no entry may be omitted, aliased, or weakened, and unknown keys are rejected.
 
@@ -417,7 +417,7 @@ Where a richer projection is needed later, `schema_version` increments and the n
 ### Descriptor content is untrusted input
 
 Forbidding executable content does not make module-authored *text* safe: this content is rendered
-into a terminal and parsed by a client. Every string field is normalized and bounded — a required
+into a terminal and parsed by a client. Every string field is normalized and bounded, a required
 Unicode normalization form, no C0/C1 control characters or ANSI escape sequences, no bidirectional
 or zero-width overrides, no confusable-script mixing within a canonical key, and a declared maximum
 length. Every schema field is bounded in size, nesting depth, and total node count, and a schema
@@ -441,21 +441,21 @@ observable timing difference, for a change confined to capabilities outside its 
 noninterference property is stated as invariant 9 and tested, not assumed.
 
 Surface declarations live in the module descriptor and are owned by
-[`module-runtime-source-ownership-and-build.md`](../done/module-runtime-source-ownership-and-build-residual.md) —
+[`module-runtime-source-ownership-and-build.md`](../done/module-runtime-source-ownership-and-build-residual.md),
 whose descriptor contract already declares "routes/commands/protocols". This proposal fixes their
 projected wire form and requires the projection be **derived from** those declarations, never authored
 separately. The projection introduces no capability, no state, no surface, and no dependency edge that
 the descriptor graph and config activation filtering do not already declare.
 
 An `optional` module **omitted** from the build closure is **absent from the projection entirely**
-(not listed as `disabled`) — consistent with the suite rule that omission leaves no residue;
+(not listed as `disabled`), consistent with the suite rule that omission leaves no residue;
 `disabled` is reserved for a selected module whose runtime lifecycle is off.
 
 The projection is **authorization-scoped**: it is what *this* principal and transport class may see
 and use, not a full inventory. A stronger transport class (`cert:CN`, per
 [`tiered-llm-p8-thinclient-mtls.md`](../done/tiered-llm-p8-thinclient-mtls.md)) may be shown capabilities a
 bare bearer is not. Scoping reuses the existing gateway identity/capability gate; it defines no second
-authorization model. Surface descriptors are scoped with their capability — an unauthorized
+authorization model. Surface descriptors are scoped with their capability. An unauthorized
 capability's surfaces are absent, not merely non-invocable.
 
 ## The static client
@@ -475,7 +475,7 @@ them; it is not broken by their existence.
    bootstrap contract, not the capability/integration client, and must not be used to smuggle module
    or surface state into the thin client.
 1. **Unknown keys are rejected everywhere except one designated place.** Ignoring an unknown field is
-   safe exactly when the field cannot change what the client *does* — it is presentation metadata. It
+   safe exactly when the field cannot change what the client *does*. It is presentation metadata. It
    is unsafe when the field constrains validation, routing, authorization, or invocation, because
    ignoring it means acting without a constraint the author required. A per-field `advisory` /
    `critical` *marking* cannot carry this, because an old client meeting an unknown key has no way to
@@ -485,7 +485,7 @@ them; it is not broken by their existence.
      any defined position is a malformed document: the capability is projected `unavailable` with
      `schema_too_old`, never silently parsed.
    - The single `advisory_ext` map is the **only** position where unknown keys are legal. Anything an
-     authority places there is advisory by definition — an old client ignores unrecognized entries
+     authority places there is advisory by definition, an old client ignores unrecognized entries
      with no behavioral consequence, and a new client may use them. Its values are scalars or bounded
      strings only, so nothing there can ever encode a constraint.
 
@@ -493,25 +493,24 @@ them; it is not broken by their existence.
    silently ignore: to be behavioral it must be a defined field, and a new defined field bumps
    `schema_version` and is negotiated per rule 4.
 
-   **Defined fields are additive-only; a rename is not a rename.** Renaming a defined field —
-   `requires_acknowledge` becoming `requires_confirmation` — must never be treated as one edit. It is
+   **Defined fields are additive-only; a rename is not a rename.** Renaming a defined field (`requires_acknowledge` becoming `requires_confirmation`) must never be treated as one edit. It is
    a removal plus an addition, and rule 4 already bumps `schema_version` for each, so the negotiation
    path applies and an old client gets `schema_too_old` rather than a silently dropped constraint.
    Stating it explicitly because the failure mode is quiet and the mistake is natural: if a rename
    *were* handled as a single in-place edit at an unchanged version, both sides would parse
-   successfully under their own schemas and the constraint would evaporate — exactly the class of
+   successfully under their own schemas and the constraint would evaporate, exactly the class of
    silent downgrade this section exists to prevent. The validator therefore rejects any schema
    revision in which a defined field name disappears without a `schema_version` increment. The old client's parse is decidable in both
-   directions — it knows every key it must understand, and it knows exactly one region it may skip.
+   directions. It knows every key it must understand, and it knows exactly one region it may skip.
 2. **Unknown surface kinds are dropped, not fatal.** A capability offering only surface kinds the
    client cannot render is omitted from that client's effective set; a capability offering a mix is
    presented through the kinds it can render.
 3. **Unknown state values fail closed.** A lifecycle state the client does not recognize is treated as
    not-`ready`, so a newer state name can never be mistaken for availability.
-4. **Additive-advisory is free; anything behavioral is negotiated — per capability, not per
+4. **Additive-advisory is free; anything behavioral is negotiated, per capability, not per
    connection.** Adding a capability, a surface, or an `advisory_ext` entry does not bump
    `schema_version`. Adding a **defined field**, removing any field, narrowing a meaning, or changing
-   a state's semantics **does** — a behavior- or security-affecting addition is a version change even
+   a state's semantics **does**. A behavior- or security-affecting addition is a version change even
    though it is additive, because an older client cannot honor it.
 
    Down-negotiation and critical fields must not be allowed to contradict each other. Serving an N
@@ -521,13 +520,13 @@ them; it is not broken by their existence.
    other capability too. The resolution is that **negotiation is per capability**, using this exact
    algorithm:
 
-   1. The connection is admitted at `min(client_declared, authority_max)` — call it *V*. Registration
+   1. The connection is admitted at `min(client_declared, authority_max)`. Call it *V*. Registration
       is refused outright only if *V* is below the authority's minimum supported version, which is a
       genuine core-transport incompatibility.
    2. A capability whose complete representation fits within *V* is projected at *V*, normally.
    3. A capability that requires any **critical** field not expressible at *V* is projected at *V*
       as `state: unavailable` with `unavailable_reason: schema_too_old`. Its surfaces are omitted.
-      This is expressible in every version — `unavailable` is in the base vocabulary — so the old
+      This is expressible in every version (`unavailable` is in the base vocabulary) so the old
       client understands it exactly, without receiving a field it cannot parse.
    4. Authorities **retain** the older representation of a capability only for versions inside the
       supported window; outside it, rule 3 applies. Older representations are *derived* from the
@@ -546,13 +545,11 @@ them; it is not broken by their existence.
    gained a constraint it cannot express, is told exactly which and why, and cannot invoke those
    capabilities even if it tries.
 5. **The client ships no module knowledge.** No module name, verb, tool name, route, help string, or
-   argument schema is compiled into the client. `commands[]` reduces to the verbs core owns —
-   attach/remote, identity and enrollment, health, help, version, and the generic dispatcher itself —
-   and everything else arrives by registration. A mechanical check enforces this so the table cannot
+   argument schema is compiled into the client. `commands[]` reduces to the verbs core owns (attach/remote, identity and enrollment, health, help, version, and the generic dispatcher itself) and everything else arrives by registration. A mechanical check enforces this so the table cannot
    silently regrow.
 
 **What still requires a client release:** a change to the transport, the registration handshake, the
-projection envelope, or the generic dispatch contract — that is, a change to *core*, which is exactly
+projection envelope, or the generic dispatch contract. That is, a change to *core*, which is exactly
 the small stable surface the suite reduces core to. Shipping a module is not on that list.
 
 **Generic dispatch.** For a `cli` surface, the client parses the declared argument schema, validates
@@ -563,8 +560,8 @@ argument; the client does not guess, coerce, or forward an invocation it cannot 
 
 **A capability record is rendered even when it carries no surfaces.** The effective set is enumerated
 from **capability records**, not from surfaces. This distinction is load-bearing: a capability that is
-`unavailable` — because a hard dependency is not ready, because its projection is stale, or because it
-requires a schema the client cannot express — has its surfaces omitted, so a dispatcher that built its
+`unavailable`, because a hard dependency is not ready, because its projection is stale, or because it
+requires a schema the client cannot express, has its surfaces omitted, so a dispatcher that built its
 view by walking surfaces would render *nothing* and the capability would vanish silently. That would
 contradict the guarantee that the user is told which capabilities were lost and why. So whenever a
 record is present in the projection, the consumer is shown its `id`, `state`, and
@@ -572,7 +569,7 @@ record is present in the projection, the consumer is shown its `id`, `state`, an
 different outcomes: a capability outside the projection entirely is absent (see *Absent means
 absent*), while a capability inside it that cannot currently be used is **visibly** unusable.
 
-**Local execution is out of scope.** Some surfaces genuinely need the client's own machine — the
+**Local execution is out of scope.** Some surfaces genuinely need the client's own machine, the
 filesystem, the TTY, an editor integration. This proposal does **not** define a client-side native
 handler mechanism for them; those surfaces remain core-owned client verbs. Introducing module-supplied
 local execution would put untrusted module intent on the client host and is a separate proposal with
@@ -593,21 +590,21 @@ advertising a stale list.
   attach: the client presents its capability declaration and holds the returned projection with its
   `epoch`/`generation` only in process memory for the life of that attachment. The Runtime registers
   with the Control Plane the same way at its own startup and on reconnect.
-- **On change — every network edge has a defined mechanism, not an optional one.** Each network
+- **On change. Every network edge has a defined mechanism, not an optional one.** Each network
   registration edge (client→Runtime, Runtime→Control Plane) operates in exactly one of two modes,
   chosen at registration and reported in the projection so both ends know which is in force:
   - **Notified.** The authority holds an open change stream to the registrant and pushes the new
     per-scope `generation` on change; the registrant then refetches conditionally. This is the
     default whenever the transport supports it. A stream is only a bound if its own liveness is
-    bounded, so notified mode carries three deadlines — **transmitted in the envelope**, not merely
+    bounded, so notified mode carries three deadlines, **transmitted in the envelope**, not merely
     assumed: `heartbeat_ms`, which the authority emits on regardless of change; `half_open_after_ms`,
     after which a registrant that has seen neither change nor heartbeat declares the stream dead; and
-    `reconnect_deadline_ms`. Beyond it, **fallback is mandatory** — a registrant that cannot
+    `reconnect_deadline_ms`. Beyond it, **fallback is mandatory**, a registrant that cannot
     re-establish the stream within the reconnect deadline reverts to bounded revalidation rather than
     waiting on a stream that may never speak again.
 
   **Only semantic changes advance a generation.** Advancing on *any* descriptor edit would make a
-  reworded help string wake every attached client and cascade a refetch down the whole chain — a
+  reworded help string wake every attached client and cascade a refetch down the whole chain. A
   notification storm for a change that alters nothing a client can act on. So the fields split:
   changes to `verb_path`, `aliases`, arg `name`/`form`/`type`/`enum_values`/`repeated`/`required`,
   `tier`, `hidden`, `tool.name`, `route.method`/`path`, `web.surface`, any capability `state`, or any
@@ -616,13 +613,13 @@ advertising a stale list.
   projection a registrant fetches for any other reason, and never trigger one on their own.
 
     A notified hop contributes `heartbeat_ms + round_trip_budget_ms` on the healthy path and
-    `half_open_after_ms + reconnect_deadline_ms + one_revalidation` on the failure path — where
+    `half_open_after_ms + reconnect_deadline_ms + one_revalidation` on the failure path, where
     `one_revalidation` is itself `revalidate_after_ms + request_timeout_ms + round_trip_budget_ms`,
     exactly as `hop_bound_computation` defines it. Its advertised `hop_bound_ms` is the **worse** of
     the two, since a registrant cannot know in advance whether its stream is alive. Two terms here are easy to drop and both are
     load-bearing: the post-fallback revalidation, because detecting a dead stream and abandoning
     reconnection does not by itself deliver the change; and the round trip, because an interval
-    elapsing is not a delivery either — the conditional exchange still has to complete. Omitting
+    elapsing is not a delivery either. The conditional exchange still has to complete. Omitting
     either would let a conformance test certify a bound the specified behavior cannot meet on any
     real network. A silently broken stream therefore degrades to the revalidation bound; it never
     degrades to never.
@@ -637,14 +634,14 @@ advertising a stale list.
 - **Additions propagate, not only withdrawals.** Freshness expiry alone can only *withdraw* a
   capability the client already knows about; it can never reveal a capability that appeared after the
   last fetch. That is why revalidation is mandatory rather than a fallback: without it a client would
-  keep serving a correct-but-shrinking view forever and never pick up a newly installed module —
-  which is precisely the upgrade case this proposal exists to serve. Discovery of additions is
+  keep serving a correct-but-shrinking view forever and never pick up a newly installed module,
+which is precisely the upgrade case this proposal exists to serve. Discovery of additions is
   therefore bounded by the same interval as detection of removals.
 - **Propagation latency is bounded end-to-end and stated.** A module state change advances its host
   service's affected scopes; if that service is a Control Plane, it advances the registered Runtime's
   merged projection, which advances what attached clients see, which fires the consumer protocol's
   capability-change signal. Each hop is either notified or bounded, so the worst-case
-  module→consumer latency is the **sum of the hops' bounds** — a stated, testable number, not an
+  module→consumer latency is the **sum of the hops' bounds**, a stated, testable number, not an
   unquantified "without polling" claim. No hop polls another hot; a hop in bounded mode issues one
   conditional generation check per interval.
 - **Freshness is bounded and fail-closed.** A projection older than its freshness window, or one
@@ -667,18 +664,17 @@ advertising a stale list.
 
 Provenance is what makes the rule above computable, and it is exactly the kind of fact a client must
 not be told. A `provenance` field in the client-visible projection would disclose both that a Control
-Plane exists and which capabilities come from it — contradicting the requirement that the client know
+Plane exists and which capabilities come from it, contradicting the requirement that the client know
 only what its Runtime knows. So provenance is **authority-internal**: it lives in the Runtime's merged
 closure and travels on the Runtime↔Control-Plane edge, and it is absent from the bytes a client
-receives. The Runtime computes the outage scope from it and projects only the *result* — capabilities
+receives. The Runtime computes the outage scope from it and projects only the *result*, capabilities
 that are now `unavailable`.
 
 The reason codes are constrained for the same purpose. A client-visible
 `unavailable_reason: upstream_unreachable` would leak the existence of an upstream just as surely as
 a provenance field. The client-visible enum is therefore closed to reasons that describe the client's
 own relationship to its authority (`dependency`, `stale`, `schema_too_old`, `policy`); an upstream
-outage reaches the client as `dependency`, which is true — the capability's dependency is not ready —
-without describing where that dependency lived. Richer topological reasons may exist on the
+outage reaches the client as `dependency`, which is true (the capability's dependency is not ready) without describing where that dependency lived. Richer topological reasons may exist on the
 Runtime↔Control-Plane edge and in operator-facing surfaces, which are not this projection.
 
 Generalized: a registrant is told what it may *use*, never what its authority is *made of*. Any
@@ -687,20 +683,20 @@ upstream edge, not in the downward projection.
 
 **A schema rule is not enough; the whole path is in scope.** Forbidding a `provenance` *field*
 constrains only the document the codec emits. The projection path can leak the same fact through
-channels the schema never sees — a debug log naming the upstream service, an HTTP header, a sidecar
+channels the schema never sees, a debug log naming the upstream service, an HTTP header, a sidecar
 audit record, an error string quoting an upstream address, a trace span with the peer's identity.
 This is the precise shape of the mistake revision 3 made: a rule that looked complete because it
 covered the structure being reviewed, while the disclosure lived elsewhere. So non-disclosure is a
 property of the **path**, not the schema: no artifact the projection path emits on behalf of a client
-request — response bytes, headers, logs, traces, metrics labels, or audit records visible at the
-client's trust level — may contain another service's identity, address, health, or a capability's
+request, response bytes, headers, logs, traces, metrics labels, or audit records visible at the
+client's trust level, may contain another service's identity, address, health, or a capability's
 origin. Enforcement is a deny-list of those tokens applied to everything the path can emit, with a
 fixture that injects a provenance value and asserts it appears nowhere in any emitted artifact
 (check 13). Operator-facing surfaces at the authority's own trust level are unaffected.
 
 **Single-Runtime scope.** This holds for the three-edge chain defined here, in which each registrant
 has exactly one authority. It is *not* established for a topology where Runtimes exchange
-projections with each other — in a mesh or federation, provenance would travel sideways and a peer
+projections with each other, in a mesh or federation, provenance would travel sideways and a peer
 would learn another peer's composition. Peer-Runtime and multi-Runtime topologies are out of scope
 and require their own proposal with their own disclosure analysis; nothing here should be read as
 having cleared them.
@@ -709,15 +705,15 @@ having cleared them.
 
 The **Runtime** composes its own modules' closure with the Control Plane's projection into a single
 effective set. Merging at the Runtime rather than at each client means the cross-service dependency
-law is evaluated once, consistently, by the party that holds both views — and it is what lets the
+law is evaluated once, consistently, by the party that holds both views, and it is what lets the
 client remain ignorant of the Control Plane entirely.
 
-- **Dependency law across services — hard suppresses, soft degrades.** The parent suite's invariant
+- **Dependency law across services, hard suppresses, soft degrades.** The parent suite's invariant
   16 governs dependencies, and it draws a distinction this seam must preserve: a **hard** dependency
   is required, while a **soft** dependency is used-if-present and its dependent "must function
-  without it via a declared fallback". Readiness gating therefore splits:
+  without it via a declared fallback"; Readiness gating therefore splits:
   - a capability is offered only when it and every capability in its `hard_depends_on` list are
-    `ready` — including dependencies satisfied on the *other* service; a hard dependency in any
+    `ready`, including dependencies satisfied on the *other* service; a hard dependency in any
     non-`ready` state suppresses its dependent;
   - a `soft_depends_on` entry that is not `ready` **never suppresses** its dependent. The capability
     is offered in `degraded` state, carrying the `fallback` its module declared, so the consumer is
@@ -726,7 +722,7 @@ client remain ignorant of the Control Plane entirely.
 
   **Scope note.** Invariant 16 is an *install-time* rule (what may be installed and removed). The
   parent suite states no *runtime readiness closure* over that graph. This proposal therefore
-  **defines** the runtime gating above as a consuming refinement of invariant 16 — it does not merely
+  **defines** the runtime gating above as a consuming refinement of invariant 16. It does not merely
   restate a parent rule, and it must be reviewed as new normative content. It introduces no new
   dependency edge: it evaluates readiness over exactly the hard/soft edges the descriptor graph
   already declares. (An earlier revision cited "invariants 1–4" as the dependency law; those
@@ -736,7 +732,7 @@ client remain ignorant of the Control Plane entirely.
   the suite taxonomy, so the same id advertised by both services is the same capability; its merged
   state is the **weaker** of the two (any non-`ready` contribution yields non-`ready`), and its surface
   descriptors must be identical. A conflicting descriptor for a shared id is a registration error the
-  Runtime reports and fails closed on — it does not pick a winner.
+  Runtime reports and fails closed on. It does not pick a winner.
 - **Re-advertisement maps onto the consumer's protocol.** The effective set is projected into the
   handshake the client already speaks: the MCP `initialize` capability object (`handle_initialize`,
   `src/cli_mcp_serve.c:271`) and its change notification, the ACP capability handshake, and the
@@ -760,7 +756,7 @@ client remain ignorant of the Control Plane entirely.
             "existed but withheld" occurs before the response is emitted
   ```
 
-  The response must not echo the requested id, name a reason, or vary in length — each would
+  The response must not echo the requested id, name a reason, or vary in length. Each would
   reintroduce the distinction the rule exists to remove. Note this is deliberately *different* from a
   capability that is present-but-`unavailable`: that one is visible in the projection with its state
   and reason (see *A capability record is rendered even when it carries no surfaces*), because the
@@ -801,7 +797,7 @@ dependency, and a client never advertises one, for the same reason and through t
    projection alone: a change confined to capabilities outside a caller's scope produces no
    generation advance, no event, and no byte difference for that caller. This invariant is scoped
    deliberately to **deterministically observable** channels. Wall-clock timing is *not* claimed as a
-   covert-channel-free surface — a shared process has shared caches, allocators, and schedulers, and
+   covert-channel-free surface. A shared process has shared caches, allocators, and schedulers, and
    asserting timing noninterference would be a promise the implementation cannot keep and a test that
    would fail nondeterministically in CI. What is required and tested instead is that the projection
    path performs **no work proportional to out-of-scope content**: scope filtering happens before
@@ -844,18 +840,18 @@ dependency, and a client never advertises one, for the same reason and through t
 ## Binding checks
 
 The scripts named below are **implementation deliverables of this proposal**, not claims that those
-files exist today — the same convention every sibling in this suite follows. What a proposal owes at
+files exist today, the same convention every sibling in this suite follows. What a proposal owes at
 review time is not the script but the **observable pass condition** each check asserts, so the check
 cannot later be satisfied by a script that merely exits zero. Each check below therefore states its
 fixture and its decision procedure; a flag name alone is not an acceptance criterion.
 
 **Each flag is a separately reported assertion.** The checks below are written as one invocation per
 concern, but the flag lists bundle many independent assertions, and a single exit code would let one
-passing assertion mask a failing one — or let an unimplemented assertion contribute silently. So the
+passing assertion mask a failing one, or let an unimplemented assertion contribute silently. So the
 contract on every script here is: it emits one machine-readable result **per flag** (`flag`,
 `pass|fail|not-implemented`, and on failure the observed value), a flag with no implementation
 reports `not-implemented` rather than passing by omission, and the run fails if *any* flag is not
-`pass`. This is what makes a long flag list acceptable — it is a list of named assertions with
+`pass`. This is what makes a long flag list acceptable. It is a list of named assertions with
 individual verdicts, not a checklist collapsed into one boolean. Reviewers read the per-flag report,
 not the exit status.
 
@@ -864,7 +860,7 @@ The non-obvious ones, made concrete:
 - **Closure equality** (check 1) compares the served projection against the closure the descriptor
   graph and activation filtering produce for the same profile, over a fixture set of profiles
   including `core`, `runtime`, `control`, `full`, and full-minus-one. Pass is set equality of
-  (id, kind, state, hard deps, soft deps, surfaces) — not a subset, and not a spot check.
+  (id, kind, state, hard deps, soft deps, surfaces), not a subset, and not a spot check.
 - **"No second authorization model"** (check 2) is decided structurally, not by intent: the
   projection filter must reach its allow/deny decision solely through the existing gateway
   identity/capability gate, proven by a call-graph assertion that the projection path contains no
@@ -873,12 +869,12 @@ The non-obvious ones, made concrete:
 - **"Client source unchanged when a module is added"** (check 4) builds the client from an unmodified
   source tree, adds a fixture module to the service, and asserts the module's `cli`/`tool` surfaces
   are usable through that same client binary. The "unchanged" half is a hash comparison rather than a
-  review judgement — but a hash comparison is only meaningful against a **reproducible build**, and
+  review judgement, but a hash comparison is only meaningful against a **reproducible build**, and
   an ordinary C toolchain defeats it by embedding build timestamps, build IDs, and absolute paths
   that differ run to run even when no source changed. So the check requires a normalized build:
   `SOURCE_DATE_EPOCH` pinned, deterministic archive and link order, no `__DATE__`/`__TIME__`, build
   paths remapped, and build ID either omitted or derived only from input content. The check
-  **self-tests that contract first** — it builds the unmodified tree twice and requires those two
+  **self-tests that contract first**. It builds the unmodified tree twice and requires those two
   hashes to match before comparing anything else, so a toolchain that cannot reproduce fails as a
   harness error rather than as a false report about module leakage. Where reproducibility genuinely
   cannot be achieved on a platform, the fallback assertion is that no file under the client's source
@@ -886,15 +882,15 @@ The non-obvious ones, made concrete:
 - **Propagation latency** (check 5) is measured, not asserted: a fixture module transitions state,
   and the elapsed time until the consumer observes the change must be at or below the sum of the
   configured per-hop bounds, in both notified and bounded-revalidation modes. The test also asserts
-  the *addition* case — a module installed after the client attached becomes visible within that same
-  bound — since expiry alone cannot discover additions.
+  the *addition* case. A module installed after the client attached becomes visible within that same
+  bound, since expiry alone cannot discover additions.
 - **No-client-to-Control-Plane** (check 5) is decided by network observation with a defined capture
   point: the Control Plane is reachable from the client's namespace only via a capturing interface,
   capture runs from before client start to after clean exit, and the check fails on any packet from
   the client addressed to it. The configuration half is a defined scan, not "inspect memory": the
   client's on-disk configuration, environment, and command line are scanned for the Control Plane's
   address and credential in plaintext, percent-encoded, and base64 representations. A live-memory
-  scan is deliberately *not* claimed — it has no reliable capture point or lifecycle and would pass
+  scan is deliberately *not* claimed. It has no reliable capture point or lifecycle and would pass
   vacuously; the enforceable property is that no Control Plane address or credential is ever
   *delivered* to the client, which the network and configuration observations together decide.
 - **Noninterference** (check 10) is a differential test over deterministic channels only: two
@@ -902,7 +898,7 @@ The non-obvious ones, made concrete:
   principal B's scope must produce, for B, no generation advance, no event, and a byte-identical
   projection. The work-proportionality property is checked structurally, and the structural claim is
   stated precisely enough to test: **the scope decision for a capability requires only its `id` and
-  authorization tag** — not its surfaces, dependencies, state, or `advisory_ext` — and is taken
+  authorization tag** (not its surfaces, dependencies, state, or `advisory_ext`) and is taken
   *before* any expansion or allocation on that capability. "Filters first" is otherwise satisfiable
   by a path that expands a record and then discards it, which does work proportional to
   out-of-scope content. The fixture constructs an out-of-scope capability carrying a maximal
@@ -939,7 +935,7 @@ suite roundtable and does not inherit the 2026-07-20 approvals; it must complete
 technical-writing, architecture, adversarial, and verification review before acceptance.
 
 It has been through **six roundtable verdicts** (revisions 1→7), and every genuine finding from each
-is resolved — see the revision history below. Revision 8 adds a governing stateless-client
+is resolved. See the revision history below. Revision 8 adds a governing stateless-client
 clarification after those verdicts and is not reviewed yet. Review had paused before a clean pass
 while the `codex` seat was out of quota; that quota reset on 2026-07-29, so the next step is a
 full-strength pass over revision 8. The two rounds before the pause produced malformed-verdict seat
@@ -981,18 +977,18 @@ cross-scope activity, treated every additive descriptor field as compatible, and
 client-local-execution ban with no decidable property behind it.
 
 *Revision 6 → 7* (roundtable run `…_1784827190_54`, 7 real blocking + suggestions; two of the nine
-reported blocking were false and rejected — one seat reported the *Capability state* paragraph
+reported blocking were false and rejected. One seat reported the *Capability state* paragraph
 "ends mid-token", which it does not; the text is intact and that seat had truncated its own context.
 Another claimed `route_capabilities` is at `server_http.c:675` and `server_http_set_ready_provider`
-at `702`; both are wrong — 642 and 669 respectively in this branch *and* in `origin/testing`, the
+at `702`; both are wrong, 642 and 669 respectively in this branch *and* in `origin/testing`, the
 same 675 a prior round asserted, so the citations stand.) Real fixes: the envelope marked the
-notified-mode deadlines `required: true` while the prose said "required iff notified" — reconciled to
+notified-mode deadlines `required: true` while the prose said "required iff notified", reconciled to
 a `when_notified` requiredness (present-and-non-zero in notified mode, absent otherwise), so the
 validity relations that mention them are unambiguous. The narrative hop arithmetic still summed
 `revalidate_after_ms + round_trip_budget_ms` while the YAML had grown a `request_timeout_ms` term, so
-prose and schema disagreed on the number a conformance test checks — the narrative now names
+prose and schema disagreed on the number a conformance test checks, the narrative now names
 `one_revalidation` and matches. `unavailable_reason: policy` had no stated precondition, so it could
-have been used for a capability withheld for authorization — disclosing its existence; it is now
+have been used for a capability withheld for authorization, disclosing its existence; it is now
 permitted only for a capability the caller may *see* but not *use*, with withheld capabilities absent
 entirely. The Runtime's startup sequence was never pinned, so the admission order that decides
 "incumbent" was not actually guaranteed by anything; the sequence (register upstream → admit upstream
@@ -1008,17 +1004,17 @@ failing rather than passing by omission.
 "blocking" entries were seat failures returning malformed verdicts, not findings): `capability_absent`
 was named as a typed result in two places but had no wire definition, so "indistinguishable from
 never-existed" was unenforceable and an implementer could not tell whether it meant 404, 200+empty,
-or something else — now a normative status/body/timing block with its own check 15, explicitly
+or something else, now a normative status/body/timing block with its own check 15, explicitly
 contrasted with the *visible* present-but-`unavailable` record. The per-authority advisory cap named
 no enforcement site; registration-time summation is the only site that closes the amplification
 (projection-time fails after the memory is spent, a sweep races admission), so the site, the running
 total's lifecycle, and the overflow contract are now part of the schema. The bounded-revalidation hop
-bound still had no term for a request that *stalls* — one dropped GET made the hop unbounded
-regardless of the interval — fixed with a derived `request_timeout_ms`. Topology non-disclosure was
+bound still had no term for a request that *stalls*. One dropped GET made the hop unbounded
+regardless of the interval, fixed with a derived `request_timeout_ms`. Topology non-disclosure was
 enforced on the schema alone, which cannot bound what the code emits: a log line, header, trace span,
 or audit record could carry provenance out of band, the same shape of mistake revision 3 made, so it
 is now a path-level property with a deny-list over every emitted artifact. Defined-field renames are
-now explicitly rejected without a version bump — rule 4 already covered this, since a rename is a
+now explicitly rejected without a version bump, rule 4 already covered this, since a rename is a
 removal plus an addition, but the failure is silent and the mistake natural. Adopted suggestions:
 per-scalar-type bounds folded into the one validator pass; the work-proportionality claim formalized
 (the scope decision may use only `id` and authorization tag, before any expansion); transactional
@@ -1029,7 +1025,7 @@ relations, and propagation rule so each is independently testable.
 
 *Revision 4 → 5* (roundtable run `…_1784825942_51`, 3 blocking + 6 suggestions + 2 nits): an
 `unavailable` capability has its surfaces omitted, and a dispatcher enumerating *surfaces* would have
-rendered nothing at all — silently losing the capability the client was supposed to be told about;
+rendered nothing at all, silently losing the capability the client was supposed to be told about;
 the effective set is now enumerated from capability records, so an unusable capability is visibly
 unusable rather than absent. The validity relations referenced a `propagation_bound_ms` that was
 never a field, so the relation could not be enforced; it and `hop_bound_ms` are now stated envelope
@@ -1043,15 +1039,15 @@ so "incumbent" is not decided by a race; `advisory_ext` gains a per-authority ag
 server-side amplification; `unavailable_reason` gains a state-validity relation; and multi-Runtime
 topologies are explicitly out of scope, since provenance would travel sideways in a mesh. Cited line
 numbers were re-verified against the branch and four were wrong (`server_http.c` 653→642, 667→669;
-`cli_mcp_serve.c` 308→315; `cli_remote.c` 306→307, 304→321) — note the review's own proposed
+`cli_mcp_serve.c` 308→315; `cli_remote.c` 306→307, 304→321). Note the review's own proposed
 replacement for the first was also wrong, so each was checked against the symbol rather than adopted.
 
 *Revision 3 → 4* (roundtable run `…_1784823160_37`, 4 blocking): revision 3's own outage fix
 introduced a `provenance` field into the **client-visible** projection, disclosing both that a
-Control Plane exists and which capabilities came from it — a direct contradiction of invariant 6 and
+Control Plane exists and which capabilities came from it, a direct contradiction of invariant 6 and
 of the governing request. Provenance is now authority-internal, the client-visible reason enum is
 closed against topological codes, and *Topology is not projected downward* states the general rule
-(invariant 12, check 13). The advisory/critical distinction was unrepresentable as specified —
+(invariant 12, check 13). The advisory/critical distinction was unrepresentable as specified,
 criticality sat on a whole surface while unknown keys were rejected outright, so an old client could
 not identify an unknown field as advisory at all; replaced with a *positional* rule where every
 defined field is critical by construction and a single `advisory_ext` map is the one place unknown
@@ -1060,22 +1056,22 @@ bound omitted the post-fallback revalidation delay, so a conformance test could 
 behavior cannot meet; the deadlines are now envelope fields with stated validity relations
 (check 14) and the failure bound includes that delay. Invariant 10 still said a collision advertises
 neither claimant, contradicting the incumbent-preserving rule it was supposed to encode and
-reinstating the denial-of-service primitive on a literal reading — corrected.
+reinstating the denial-of-service primitive on a literal reading, corrected.
 
 *Revision 2 → 3* (roundtable run `…_1784822498_34`, 6 blocking): the "closed schema" was named but
-never written down, leaving checks 3 and 12 undecidable — now a normative wire-schema block with a
+never written down, leaving checks 3 and 12 undecidable, now a normative wire-schema block with a
 closed scalar argument model (chosen so validation linearity is structural rather than analyzed) and
 concrete numeric limits. The collision rule advertised *neither* claimant, which handed any admitted
-module a denial-of-service primitive against an incumbent's verb or tool name — now
+module a denial-of-service primitive against an incumbent's verb or tool name, now
 incumbent-preserving, with replacement only through an authorized transactional operation. Critical
-fields contradicted schema down-negotiation (serving the older representation erased the constraint)
-— now a per-capability negotiation algorithm where such a capability is `unavailable` with
+fields contradicted schema down-negotiation (serving the older representation erased the constraint),
+now a per-capability negotiation algorithm where such a capability is `unavailable` with
 `schema_too_old` and the authority refuses its invocation independently of the client. Control Plane
-loss was unbounded in blast radius — now scoped by `provenance` plus hard-dependency closure, with
+loss was unbounded in blast radius, now scoped by `provenance` plus hard-dependency closure, with
 independent Runtime-local capabilities explicitly retained. Notified mode had no liveness deadline,
-so a silently broken stream had no bound — now heartbeat, half-open detection, reconnect, and
+so a silently broken stream had no bound, now heartbeat, half-open detection, reconnect, and
 mandatory fallback to revalidation. The noninterference and no-Control-Plane-contact checks were not
-reproducible — the memory-scan and wall-clock-timing assertions are withdrawn as unenforceable and
+reproducible. The memory-scan and wall-clock-timing assertions are withdrawn as unenforceable and
 replaced with deterministic ones (network capture with a defined lifecycle, configuration/env/argv
 scanning, byte-identical projections, and a structural work-proportionality check); residual
 microarchitectural timing is now documented as out of scope rather than silently claimed.

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 after source ownership and the required contract/caller
+- **State:** DONE. Archived 2026-08-04 after source ownership and the required contract/caller
   migration landed. Cross-process event adoption and rollout telemetry remain in
   [`git-core-cross-process-rollout-residual.md`](../pending/git-core-cross-process-rollout-residual.md).
 

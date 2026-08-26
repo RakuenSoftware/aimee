@@ -1,4 +1,4 @@
-# Tier-A small-model benchmark — findings
+# Tier-A small-model benchmark: findings
 
 **Date:** 2026-07-30/31 · **Branch:** `bench/tier-a-small-models`
 **Question:** can a model in the hundreds-of-millions class serve the curator
@@ -11,8 +11,8 @@ run tests the current sub-1B field, plus two larger reference points.
 
 ## Headline
 
-**No slam dunk at the M-parameter scale — the honest answer is no.** Under the
-production configuration, every small model commits **exactly zero facts** — not
+**No slam dunk at the M-parameter scale. The honest answer is no.** Under the
+production configuration, every small model commits **exactly zero facts**, not
 "worse than E4B", zero. The only permissive model that commits anything is
 Qwen3-1.7B, which is not an M-parameter model, and it reaches 43% of E4B.
 
@@ -21,14 +21,14 @@ Two distinct causes, and separating them is most of the value here:
 - **A config interaction we own.** `MF_CONF_FLOOR` (0.6) discards facts emitted
   with confidence 0.0, which is what sub-1B models produce. Lift the floor and
   the same runs score 0.14–0.42. This is the same end state as the
-  thinking-truncation bug in §1 of the proposal — job runs, `typed_facts` stays
-  empty — reached by a different route, and in production it would have looked
+  thinking-truncation bug in §1 of the proposal, job runs, `typed_facts` stays
+  empty, reached by a different route, and in production it would have looked
   like "the small model cannot extract".
 - **A genuine capability floor.** Below ~600M the models cannot do the task even
   with the floor lifted: the best 350M result is 0.179, and two models never
   produce the output shape at all.
 
-E4B is unaffected by the first because it emits real confidences — its floored
+E4B is unaffected by the first because it emits real confidences, its floored
 and floor-free scores differ by 0.004.
 
 ## What was measured
@@ -43,7 +43,7 @@ drift**. Output parsing mirrors `mf_commit_facts()` exactly: first `{` to last
 
 Gold set: 70 hand-authored notes, 64 gold triples, across ten categories
 (first/third person, multi-fact, implicit, negation, transient, ambiguous, novel
-predicate, infra, governance). **23 notes have a deliberately empty gold list** —
+predicate, infra, governance). **23 notes have a deliberately empty gold list**,
 over-extraction is the expensive failure for a drain that writes into
 `memory_facts`, so it is measured rather than assumed. Labelling rules and the
 external-validity limits are in `data/LABELING.md`.
@@ -52,7 +52,7 @@ Every number below is regenerated from committed result files by
 `harness/summarize.py`; raw per-note predictions are committed too, so any figure
 traces back to the model output that produced it.
 
-## GPU accuracy — production prompt
+## GPU accuracy: production prompt
 
 | model | params | licence | F1 prod | F1 no-floor | precision | recall | schema | abstain | med ms |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -67,7 +67,7 @@ traces back to the model output that produced it.
 | unsloth/gemma-3-270m-it | 270M | gemma | 0.000 | 0.000 | 0.000 | 0.000 | 0.00 | None | 273.1 |
 
 
-## GPU accuracy — confidence-literal ablation (NOT production)
+## GPU accuracy: confidence-literal ablation (NOT production)
 
 | model | params | licence | F1 prod | F1 no-floor | precision | recall | schema | abstain | med ms |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -94,24 +94,22 @@ traces back to the model output that produced it.
 ## Reading the table
 
 **`F1 prod` is what the drain would actually commit.** `F1 no-floor` is the same
-run with `MF_CONF_FLOOR` lifted — the extraction ability underneath the config.
+run with `MF_CONF_FLOOR` lifted, the extraction ability underneath the config.
 The gap between those two columns is the finding.
 
 **The confidence floor is model-dependent, and I initially got this wrong.**
 Seeing Granite first, I concluded the models were copying the literal
 `"confidence":0.0` out of the prompt's own schema example. The ablation
-(byte-identical prompt, example value changed to 0.9) falsifies that for Granite —
-it emits 0.0 regardless — but strongly confirms it for Qwen: Qwen3-0.6B goes
+(byte-identical prompt, example value changed to 0.9) falsifies that for Granite (it emits 0.0 regardless) but strongly confirms it for Qwen: Qwen3-0.6B goes
 0.000 → 0.279, essentially reaching its own no-floor ceiling of 0.286. So a
 one-character prompt change unlocks the Qwen models and does nothing for Granite.
 
-**The unlock costs precision — but so does the incumbent.** Qwen3-0.6B's
+**The unlock costs precision, but so does the incumbent.** Qwen3-0.6B's
 abstention on empty-gold notes collapses from 1.00 to 0.09 under the ablation:
 with confidences unlocked it commits triples on 91% of notes asserting no durable
 fact. My first instinct was that this made the unlock a bad trade. E4B's own
-abstention is **0.05**, which is worse. So over-extraction is not a small-model
-regression — it is what this prompt does on this task across the board, incumbent
-included, and it is a finding about the drain rather than about model size.
+abstention is **0.05**, which is worse. So over-extraction is what this prompt does on this task
+across the board, incumbent included. It is a finding about the drain rather than about model size.
 
 **A high abstention number in the production column is not a virtue.** Models
 scoring 1.00 there (Qwen3-0.6B, granite-h, LFM2.5) achieve it by committing
@@ -120,39 +118,39 @@ F1.
 
 ## Model-by-model
 
-**Qwen3-1.7B (Apache-2.0)** — the only model that works under the current
+**Qwen3-1.7B (Apache-2.0)**. The only model that works under the current
 production config, and the accuracy leader among permissive candidates at 0.253
 (0.357 with the prompt fix). It is 5× the size the brief asked for, and by far
 the slowest thing measured on CPU at 12.1 s/note.
 
-**Qwen3-0.6B (Apache-2.0)** — the most interesting M-scale candidate, and the
+**Qwen3-0.6B (Apache-2.0)**, the most interesting M-scale candidate, and the
 clearest illustration of the floor problem: 0.000 today, 0.279 with a one-literal
 prompt change, against its own floor-free ceiling of 0.286. So the config, not
 the model, is what stops it. Two caveats. It is the *slowest* small model on CPU
 by roughly 2× (6.1 s/note vs 2.2–3.3 s for the 350M class), which is the opposite
 of what its size suggests. And it reaches under half of E4B.
 
-**Granite 4.0 350m / h-350m (Apache-2.0)** — extract correctly on simple notes
+**Granite 4.0 350m / h-350m (Apache-2.0)**, extract correctly on simple notes
 (`fp01` yields exactly `user works_for Rakuen Software`) but emit confidence 0.0
 unconditionally, so nothing survives the floor and the prompt fix does not help.
 The `h` hybrid variant additionally fails to terminate its JSON on 69% of notes.
-Note `granite-4.0-350m` also needs `use_cache=False` under current transformers —
-it selects a hybrid Mamba cache the non-hybrid checkpoint cannot satisfy.
+Note `granite-4.0-350m` also needs `use_cache=False` under current transformers.
+It selects a hybrid Mamba cache the non-hybrid checkpoint cannot satisfy.
 
-**LFM2-350M-Extract (LFM Open v1.0)** — my pre-benchmark favourite, and it fails
+**LFM2-350M-Extract (LFM Open v1.0)**, my pre-benchmark favourite, and it fails
 this task outright. Degenerate repetition loop on 60/70 notes under production
 decoding; raising the cap to production's 8192 does not fix it (10/12 still
-truncate at 15.6 s/note). A 1.1 repetition penalty *does* fix the loop — schema
-validity 0.75, 198 median tokens — and F1 is **still 0.0**, because it emits
+truncate at 15.6 s/note). A 1.1 repetition penalty *does* fix the loop, schema
+validity 0.75, 198 median tokens, and F1 is **still 0.0**, because it emits
 capitalised noun phrases and invented relations (`Engineer`, `Database`) instead
 of ontology-bound triples, and never uses the `user` subject convention. It is
 built for schema-driven field extraction (invoice → named fields), not open
 triple extraction against a relation ontology. Different task than its marketing
 suggests, and the licence was already disqualifying.
 
-**LFM2.5-230M (LFM Open v1.0)** — zero, same family, same mismatch.
+**LFM2.5-230M (LFM Open v1.0)**, zero, same family, same mismatch.
 
-**SmolLM2-360M (Apache-2.0)** — terminal. 0/12 schema validity in every
+**SmolLM2-360M (Apache-2.0)**, terminal. 0/12 schema validity in every
 configuration tried, 17–22 tokens of output. It never produces the `facts`
 wrapper at all.
 
@@ -190,23 +188,23 @@ at all in any configuration tried. This is not a tuning gap.
 
 **2. Fix the `MF_CONF_FLOOR` interaction regardless of model choice.** It is a
 latent landmine: any future Tier-A swap to a smaller model will hit it, and the
-failure is silent — the job succeeds, `typed_facts` stays empty, and it looks
+failure is silent. The job succeeds, `typed_facts` stays empty, and it looks
 like the model cannot extract. E4B masks it today because it emits real
 confidences (its floored and floor-free scores are within 0.004). Options, in
 order of preference: have `mf_commit_facts` treat a missing or zero confidence as
 "unscored" rather than "reject", or drop the floor and gate on the `rel_types`
 write gate alone, which is already the component designed to make that judgement.
-Changing the schema example's literal is the cheap fix and only half-works — it
+Changing the schema example's literal is the cheap fix and only half-works, it
 rescues Qwen, not Granite.
 
-**3. If the goal is getting off the Gemma licence, the candidate is Qwen3-1.7B —
+**3. If the goal is getting off the Gemma licence, the candidate is Qwen3-1.7B,
 but only on GPU.** Apache-2.0, 0.357 F1 with the prompt fix (61% of E4B), and 4×
 faster than E4B on the 5080 at 438 ms/note. That is still a real quality drop and
 should go through §4.3 shadow mode on live traffic before anyone believes a
 70-note number.
 
 The CPU picture kills the cost argument. Qwen3-1.7B is **12.1 s/note** on 8
-pinned cores — the slowest thing measured, 5× the 350M models. Qwen3-0.6B is
+pinned cores, the slowest thing measured, 5× the 350M models. Qwen3-0.6B is
 6.1 s/note, also slower than every 350M model despite being the more accurate
 choice among them. Model size and CPU throughput are not tracking together here:
 gemma-3-270m does 504 prompt-tok/s and Qwen3-1.7B does 53.5. So "smaller model to
@@ -216,7 +214,7 @@ answer; if it stays on GPU, Qwen3-1.7B is a defensible licence-driven swap at a
 measurable accuracy cost.
 
 **4. Look at the drain's precision independently of all of this.** E4B abstains
-correctly on only **5%** of the 23 factless notes — it commits triples on nearly
+correctly on only **5%** of the 23 factless notes, it commits triples on nearly
 every note that asserts no durable fact. Qwen3-0.6B under the ablation is 9%, so
 this is not a small-model regression; it is the prompt and the task as currently
 specified, and it means the drain is likely writing a lot of noise into
@@ -233,7 +231,7 @@ are extraction failures. They are failures of *serialising* an extraction.
 The encoder route sidesteps the entire class. **GLiNER2** (`fastino/gliner2-base-v1`)
 is 205M parameters, **Apache-2.0 for both code and weights**, CPU-native, and
 scores all candidate labels in a single forward pass against a declared schema.
-Our `rel_types` seed set is a fixed 17-label vocabulary — precisely the regime it
+Our `rel_types` seed set is a fixed 17-label vocabulary, precisely the regime it
 is built for. There is no JSON to malform, no confidence literal to copy, and no
 repetition loop to fall into; it returns spans and scores directly, and the score
 is a real model probability rather than a token the model guessed.
@@ -252,7 +250,7 @@ GGUF decoder endpoint. GLiNER2 ships ONNX weights.
 The honest caveat is that it changes the Tier-A contract. It does not produce
 `{"facts":[...]}`, so `kb_curator_provider.c` would need a non-OpenAI call path
 and `mf_commit_facts` an alternative input shape. That is real work, and it
-should be costed before anyone commits to it — but it is the only route in this
+should be costed before anyone commits to it, but it is the only route in this
 report that could plausibly deliver Tier-A extraction at 205M parameters on CPU.
 
 ## Reproducing

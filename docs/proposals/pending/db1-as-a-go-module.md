@@ -1,6 +1,6 @@
 # Proposal: DB1 as a Go module on the event bus
 
-- **State:** PENDING — scope only; no implementation has started.
+- **State:** PENDING. Scope only; no implementation has started.
 - **Date:** 2026-08-15.
 - **Charter roles:** Constrain-Verify / Gate-Promote.
 - **Thesis:** DB1 is state, so by the module doctrine it belongs behind a module reached over
@@ -12,8 +12,8 @@
 
 ## 1. Why this exists
 
-The doctrine is that C owns four things — the event bus, outside-world communication, the
-HTTP surface, and the audit tap — and that **all logic and all state** live in Go modules.
+The doctrine is that C owns four things, the event bus, outside-world communication, the
+HTTP surface, and the audit tap, and that **all logic and all state** live in Go modules.
 DB1 is state. Today it is 63 C translation units linked into `aimee-server`, and callers
 reach it by direct function call.
 
@@ -21,8 +21,8 @@ This came up concretely while moving the economizer gateway seam. After the verd
 breaker, the post-dispatch decision and the counters had all moved into the module, what
 remained in C at that seam was the reducer state: `db1_economizer_state_load` before the
 call and `db1_economizer_state_save` after it, plus a conversation fingerprint computed
-from the loaded blob. That is not seam logic that resisted moving — it is DB1 access, and
-it cannot move until DB1 does. **The gateway seam is blocked on this proposal**, and so is
+from the loaded blob. That is DB1 access, and it cannot move until DB1 does. No seam logic resisted
+moving. **The gateway seam is blocked on this proposal**, and so is
 every other seam whose last C residue is a load/save pair.
 
 ## 2. The measured surface
@@ -34,15 +34,15 @@ Taken from `origin/testing` at `2687`:
 | `src/db1` C and header lines | 22,160 |
 | Exported `db1_*` symbols | 409 |
 | Call sites outside `src/db1` | 2,888 |
-| — of those, in `src/tests` | 1,975 |
-| — in `src/server` | 360 |
-| — in `src/modules` | 241 |
-| — in `src/posix`, `src/kb`, `src/modules/db2/c`, platform | 46 |
+|: of those, in `src/tests` | 1,975 |
+|: in `src/server` | 360 |
+|: in `src/modules` | 241 |
+|: in `src/posix`, `src/kb`, `src/modules/db2/c`, platform | 46 |
 | **Distinct symbols used in production** (non-test) | **242** |
 
 The gap between 409 exported and 242 production-used is the first useful finding: **167
 exported symbols are reached only by tests.** Whatever shape the module takes, that
-difference should be resolved before porting, not carried across — either the tests are
+difference should be resolved before porting, not carried across, either the tests are
 exercising internals that need no module surface, or they are the only coverage of
 functions nothing calls.
 
@@ -58,8 +58,8 @@ query into an inventory change.
 
 **The module must group.** The two candidate shapes:
 
-- **Domain stages.** One stage per table family — sessions, turns, economizer state, token
-  audit, workspace, and so on — each taking an operation discriminator in its request. Maybe
+- **Domain stages.** One stage per table family, sessions, turns, economizer state, token
+  audit, workspace, and so on, each taking an operation discriminator in its request. Maybe
   15–25 stages. Keeps the contract readable and the grants meaningful, because a grant can
   say which domains a caller may reach.
 - **One generic query stage.** A single stage taking a statement identifier and arguments.
@@ -72,7 +72,7 @@ boundary between domains is a real design question and is not settled here.
 ### 3.2 Modules build without cgo
 
 `c-repositories.yml` runs `CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module`,
-and the one existing database module, `server-go/modules/postgres`, uses `pgxpool` — pure
+and the one existing database module, `server-go/modules/postgres`, uses `pgxpool`, pure
 Go. A DB1 module must therefore use a **pure-Go SQLite driver** (`modernc.org/sqlite`), not
 `mattn/go-sqlite3`. That is a dependency decision with its own consequences for
 performance, WAL behaviour and busy-timeout semantics, and it should be validated against
@@ -103,7 +103,7 @@ Phase A and Phase B are separate.
 
 1. **Domain stages or one generic query stage** (§3.1).
 2. **Who owns writes.** DB1 has one writer today because one process links it. Over a bus,
-   the module is the writer and callers queue — which is stricter, and changes the failure
+   the module is the writer and callers queue, which is stricter, and changes the failure
    mode of anything that assumed a synchronous local call.
 3. **Transactions across calls.** Several call sites do read-modify-write. A module that
    holds a transaction open across bus calls is holding a caller's state, which the module
@@ -120,7 +120,7 @@ Phase A and Phase B are separate.
 boundary and rewrites an implementation in one step, so a failure has two candidate causes.
 The boundary moves first, with the C behind it unchanged.
 
-### Phase A — db1 becomes a module, still C
+### Phase A: db1 becomes a module, still C
 
 `src/db1/` is a source boundary, not a module: 129 files, 64 headers, no descriptor, no
 `docs/modules/db1.md`, absent from the canonical inventory. Making it a module means:
@@ -129,8 +129,8 @@ The boundary moves first, with the C behind it unchanged.
   `src/modules/<id>/` (`ownership-role-boundary`), so this is not optional. The 587 include
   sites across 349 files survive it: they are bare (`#include "db1.h"` against `-Idb1`), so
   the build's include path changes and the call sites do not.
-- **It is a `process` component with `runtime: "c"`.** The contract already permits this —
-  `validate_module_process_contracts` asserts `(id in GO_PROCESSES) != (runtime == "go")`, so
+- **It is a `process` component with `runtime: "c"`.** The contract already permits this,
+`validate_module_process_contracts` asserts `(id in GO_PROCESSES) != (runtime == "go")`, so
   a component simply absent from that set must be C. No process module is C today; db1 would
   be the first, and its grant pins its own executable the way every module's does.
 - **It is `required`**, which is now free of consequence: since the principal ref became a
@@ -138,7 +138,7 @@ The boundary moves first, with the C behind it unchanged.
 
 Phase A moves no logic and changes no caller. It is packaging plus a bus surface.
 
-### Phase B — callers cross the bus, domain by domain
+### Phase B: callers cross the bus, domain by domain
 
 This is the phase that makes it a boundary rather than a directory. 349 files stop including
 db1 headers and call stages instead. It is the bulk of the work and the only phase that
@@ -187,7 +187,7 @@ because unlinked" becomes "absent because unreachable", which is the availabilit
 other module already gives. Phase B has to carry that guard across rather than delete it, or
 `aimee-kb` silently loses a security gate.
 
-### Phase C — port the implementation to Go, per domain
+### Phase C: port the implementation to Go, per domain
 
 Only now does the language change, against a stage contract already proven by Phase B. This
 is where the pure-Go SQLite driver (§3.2) and the transaction questions (§4.3) actually land,

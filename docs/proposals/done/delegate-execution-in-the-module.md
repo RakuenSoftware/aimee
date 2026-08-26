@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — Go sandbox-specification slice delivered and archived 2026-08-14.
+- **State:** DONE. Go sandbox-specification slice delivered and archived 2026-08-14.
 - **Owner:** delegates.
 
 > **Archived after delivery.** This proposal explicitly scoped itself to order-of-work step 1,
@@ -37,8 +37,8 @@ A delegate is a completely sandboxed container. That is the whole of it:
 - The agent loop runs **inside** the container. Its LLM calls leave through the
   parent proxy, then the module, then egress.
 - The container holds **no credentials of any kind**. Work that needs them is
-  done by a module on the delegate's behalf — git through the git module,
-  secrets through the vault module — each reached over the bus.
+  done by a module on the delegate's behalf, git through the git module,
+  secrets through the vault module, each reached over the bus.
 - When the delegate finishes the container exits, and the parent already has the
   edited files, because the worktree is a bind mount.
 
@@ -67,10 +67,10 @@ not assumed. These are not optional and must survive the move:
 3. Refuse to bind-mount a directory that is not a git checkout. Otherwise any
    host directory can be mounted into a delegate.
 4. Mount layering for a write delegate, validated on docker 26.1.5:
-   - `<repo>:ro` — the tree is readable, and a write outside the worktree fails
+   - `<repo>:ro`: the tree is readable, and a write outside the worktree fails
      with "Read-only file system"
-   - `<worktree>` read-write — nested mount correctly overlays the read-only repo
-   - `<gitdir>` read-write — `git status` refreshes its index there, so a
+   - `<worktree>` read-write, nested mount correctly overlays the read-only repo
+   - `<gitdir>` read-write, `git status` refreshes its index there, so a
      read-only `.git` breaks it
 5. A consequence of (4) is that `git commit` inside the container fails: blobs
    cannot be written to a read-only object store. This is intended. Commits run
@@ -83,11 +83,11 @@ not assumed. These are not optional and must survive the move:
    the container's attached networks and confirm none is attached and none has
    an IP.
 8. `http_proxy` points at the egress so a `--network none` delegate can still
-   install software — the narrow update whitelist, and nothing broader.
+   install software, the narrow update whitelist, and nothing broader.
 
 ## Why read-only must be enforced rather than trusted
 
-A read-only delegate mounts the **parent's** worktree — the branch a supervisor
+A read-only delegate mounts the **parent's** worktree. The branch a supervisor
 is actively working in. If the mount is writable and the delegate is merely
 asked not to write, a review or diagnose delegate can corrupt the supervisor's
 branch. The mode is the enforcement; the role is only what selects it.
@@ -95,7 +95,7 @@ branch. The mode is the enforcement; the role is only what selects it.
 ## Order of work
 
 1. **Sandbox specification** (this slice). A pure function: given a role and the
-   workspace, produce the container specification — mounts and their modes,
+   workspace, produce the container specification, mounts and their modes,
    network posture, environment. No I/O, fully testable, and the place where
    every invariant above is stated once.
 2. Container lifecycle in Go, driven by that specification.

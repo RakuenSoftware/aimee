@@ -13,8 +13,8 @@ have shipped.
 
 - **Host**: Proxmox `pvetest` at 192.168.1.252, `pve-manager/9.2.6`.
 - **Containers**, both created for this and both Debian 13 standard, unprivileged, DHCP:
-  - **CT 9090** `aimee-peer-verify`, 4 cores / 4GB / 16GB, at 192.168.0.84 -- aimee-server.
-  - **CT 9091** `aimee-kb-verify`, 4 cores / 6GB / 20GB, at 192.168.0.97 -- aimee-kb.
+  - **CT 9090** `aimee-peer-verify`, 4 cores / 4GB / 16GB, at 192.168.0.84, aimee-server.
+  - **CT 9091** `aimee-kb-verify`, 4 cores / 6GB / 20GB, at 192.168.0.97, aimee-kb.
 - **Build**: this worktree at `pre-merge-safety-2831-ga2fac47caa` plus the peer-messaging
   work, built locally and carried in as binaries. Nothing was compiled on the
   Proxmox host or in either container.
@@ -40,21 +40,21 @@ and the module was listed **optional** in the canonical inventory, so it was
 absent from `server.modules` entirely.
 
 Every unit test passed. Every module validator passed. The module would have
-been installed, granted, and never started -- and nothing in the repository
+been installed, granted, and never started, and nothing in the repository
 would have said so, because "declared" and "spawned" are different facts and
 only one of them is checked.
 
 The first fix was `enabled_by_default: true`, matching the other
 optional-but-running modules. `validate_module_descriptors` then refused it: an
 optional module may only be default-on if it is in the validator's `DEFAULT_ON`
-set, which also forces `runtime_toggle.supported: true` -- a live enable/disable
+set, which also forces `runtime_toggle.supported: true`. A live enable/disable
 this module must not have, because a session waiting on a peer would have no
 defined outcome if delivery vanished underneath it.
 
 So `aimee` is **required** instead, which is what it should have been: a server
 without the home for aimee-server-specific functionality is not a smaller
 server. That took three more declarations, each of which failed loudly rather
-than silently -- `REQUIRED_COUNT`/`OPTIONAL_COUNT` in `check_module_inventory.py`,
+than silently, `REQUIRED_COUNT`/`OPTIONAL_COUNT` in `check_module_inventory.py`,
 and `PROCESS_REQUIRED` in `validate_module_process_contracts.py`. `aimee` then
 appears as entry 14 in `server.modules`.
 
@@ -92,7 +92,7 @@ exercise. A production image installs every executable it writes a grant for.
 
 That ref is deliberately not 67. 67 is reserved for the module's own OUTBOUND
 identity (`aimee-db1`, for reading the session directory out of db1), and the
-probe held it at first — harmless only because that client does not exist yet.
+probe held it at first, harmless only because that client does not exist yet.
 Once `DirectorySource` is wired the two would be a duplicate principal and the
 bus would refuse whichever attached second, so the failure would surface long
 after the cause. 69 is validation-only and is not declared in
@@ -102,8 +102,8 @@ never shipped.
 ## Re-run 2026-08-24: the decoders changed, so the probe had to
 
 The end-to-end result below was made at an earlier commit. Production code has
-changed since -- a new wire status, both scalar decoders now refusing a corrupt
-cell instead of defaulting, the bus caller lifecycle -- so the run was repeated,
+changed since, a new wire status, both scalar decoders now refusing a corrupt
+cell instead of defaulting, the bus caller lifecycle, so the run was repeated,
 and the probe grew two checks for the part that changed.
 
 A re-run exercising only what the previous one did proves the build compiles.
@@ -118,7 +118,7 @@ Both used to answer the ZERO VALUE. `Atob` returned plain false for anything
 unrecognised, so a malformed flag and a deliberate "no" were one value;
 `textToTime` mapped an unparseable timestamp onto the zero time, which is exactly
 what the encoder writes for a message that has none. In process the unit tests
-assert the same thing -- what only hardware shows is that a frame carrying a
+assert the same thing, what only hardware shows is that a frame carrying a
 corrupt cell survives the transport intact and is refused by the MODULE rather
 than mangled on the way.
 
@@ -140,9 +140,9 @@ and logs removed.
 ## END TO END: two sessions exchange a message
 
 **The feature works.** On a clean Debian 13 container, against the current tree,
-with the whole stack running -- `aimee-server` hosting the bus, the config
+with the whole stack running, `aimee-server` hosting the bus, the config
 module, the C `db1` module over SQLite, and this module wired to db1's session
-family -- **23 of 23 checks pass, twice consecutively, `probe exit=0`**:
+family, **23 of 23 checks pass, twice consecutively, `probe exit=0`**:
 
 ```
 2026/08/23 21:15 aimee module: session directory = db1 sessions (kind 11782) as principal 1/67
@@ -167,7 +167,7 @@ module: it learned they exist entirely from db1.
 
 - **Sessions the directory vouches for could not send.** `Send` required a LOCAL
   entry, so a session db1 knew about was refused until some message had already
-  touched it -- a conversation that could never start. The local map holds
+  touched it, a conversation that could never start. The local map holds
   inboxes and labels, which is this module's state; existence is db1's. Admission
   through the directory now creates the entry on first use.
 - **The channel stage did not follow.** Fixed `Send` and not `ChannelSend`, so
@@ -182,9 +182,9 @@ module: it learned they exist entirely from db1.
 - **A segfault after "all checks passed".** The probe's caller polls the bus's
   shared-memory region from its own goroutine, and `Detach` unmaps it.
   `CloseAndWait` says in as many words that it "must run before the underlying
-  Client is detached"; the probe never called it. Every check green, then a fault
+  Client is detached"; the probe never called it; every check green, then a fault
   in `Control.Epoch` reading through an unmapped page. Nothing in process can
-  find this -- there is no region to unmap, so the rule has nothing to enforce it.
+  find this. There is no region to unmap, so the rule has nothing to enforce it.
 
 ### Two characteristics, stated rather than left to be discovered
 
@@ -206,8 +206,8 @@ shorter deadline is a design decision and both need their own tests.
 ## Re-run against the current code
 
 The run recorded below was made at an earlier commit. Everything the module
-ANSWERS has changed since -- session-scoped stages now report `no_directory`
-rather than `unknown_sender` or `no_peer` -- so the record was re-made on a fresh
+ANSWERS has changed since, session-scoped stages now report `no_directory`
+rather than `unknown_sender` or `no_peer`, so the record was re-made on a fresh
 container against the current tree. Same shape, different answers, and three new
 findings about the rig itself.
 
@@ -225,7 +225,7 @@ that matter, quoted from the run:
 ```
 
 The channel row is the one worth reading twice. It previously answered `ok` with
-no members -- a successful, healthy-looking reply from a module where no channel
+no members. A successful, healthy-looking reply from a module where no channel
 can ever have a member, which is what made the inert module invisible. It now
 answers `no_directory` over a real bus, and the startup line
 
@@ -250,7 +250,7 @@ anywhere but a unit test.
   separate program from an external repository and has to be built and started
   first.
 - **The supervisor did not spawn the module in this hand-built rig**, because no
-  `server.modules` manifest was installed -- that manifest is what it spawns
+  `server.modules` manifest was installed. That manifest is what it spawns
   from, and this rig seeded grants only. So the module was started directly, and
   spawn ELIGIBILITY was checked separately and statically, by the same
   computation `export_c_repositories.py` performs: `aimee` is in the canonical
@@ -357,7 +357,7 @@ disagree about the same database on the same connection string.
 Not diagnosed further. One hypothesis worth someone's time rather than mine at
 this point: the bootstrap reported `"config_saved":false`, so the URL was never
 persisted, and a health check reading it from config rather than the environment
-would be checking nothing. That is a hypothesis, not a finding -- it is written
+would be checking nothing. That is a hypothesis, not a finding. It is written
 down as one so nobody later reads it as the second.
 
 **The server never reached the KB**, and said so with the KB up and answering:
@@ -368,7 +368,7 @@ arrangement, and the KB client resolves an endpoint that was not configured here
 
 **Peer messaging is unaffected and green throughout**: 25 checks, twice
 consecutively, `probe exit=0`, with both services running. The feature does not
-touch the KB, which is why it is unaffected -- stated because "green while the KB
+touch the KB, which is why it is unaffected, stated because "green while the KB
 was degraded" would otherwise read as coverage it is not.
 
 ### The earlier run, at commit `ffb60ac`
@@ -400,14 +400,14 @@ that no longer exists.
 Both containers were destroyed and their staging files removed when the run
 finished, per the host's own rule in `/root/AGENTS.md`: a resource created to
 test something is cleaned up before the task is complete, and a successful test
-does not waive that. Verified after the fact — `pct status` reports no config
+does not waive that. Verified after the fact, `pct status` reports no config
 for either id, the thin-pool space is back, and every guest belonging to another
 session is untouched.
 
 Two things worth carrying to the next run of this, because both were learned the
 hard way here. The teardown should be arranged BEFORE the test rather than
 remembered after, so it also runs on failure or interruption. And the host runs
-a reaper on two independent clocks — a 4h lease renewed by `aimee-keepalive
+a reaper on two independent clocks, a 4h lease renewed by `aimee-keepalive
 ct:<id>`, and a 4h liveness clock that no renewal resets, so an idle guest dies
 however recently it was leased. A guest vanishing mid-run is that working
 correctly, not the host being unreliable.
@@ -429,7 +429,7 @@ longer the clean room the evidence claims it was.
 
   Those checks still passed, and had to. A module that correctly refuses an
   unregistered sender and a module that can never have a sender produce the same
-  word -- `unknown_sender`. The channel row is the sharpest: "members of an
+  word, `unknown_sender`. The channel row is the sharpest: "members of an
   absent channel answers OK with none" is a SUCCESSFUL, healthy-looking reply,
   and it read as the feature working.
 
@@ -445,13 +445,13 @@ longer the clean room the evidence claims it was.
   independently, and the server still reported `knowledge service unreachable`
   because nothing configured a KB endpoint for it. So "both services up" is
   true and "the two are integrated" is not, and only the first was tested.
-  RESOLVED on CT 9099 -- see "The two loose ends closed" below. It was a rig
+  RESOLVED on CT 9099. See "The two loose ends closed" below. It was a rig
   gap: `AIMEE_KB_API_URL` was never set, and the server had not been told where
   the KB was.
 - **The KB's store.** It reports `status: degraded` with `DB2 schema not ready`
   while 253 tables sit in the schema it uses. Its bootstrap and its health check
   disagree, and which of them is right was not established.
-  RESOLVED on CT 9099 -- see below. Also a rig gap, and the premise here was
+  RESOLVED on CT 9099. See below. Also a rig gap, and the premise here was
   wrong: they do not disagree. The health check is a bus call to the postgres
   module, which was not running; bootstrap goes straight through libpq.
 - **The in-image PostgreSQL.** The kb was pointed at the container's stock
@@ -486,11 +486,11 @@ The section above listed two things the run left unexplained: the KB reporting
 reporting `knowledge service unreachable` while the KB answered on 8790.
 
 Both were read out of the source rather than guessed at, and **neither was a
-code defect. Both were gaps in the rig** — things that run never did.
+code defect. Both were gaps in the rig**, things that run never did.
 
 **`db2_ok: false`.** `kb_module_postgres_health_probe`
 (`src/kb/kb_module_stage_adapters.c:581`) is a `call_module` to
-`AIMEE_POSTGRES_EVENT_HEALTH` — a *bus call to the postgres module*
+`AIMEE_POSTGRES_EVENT_HEALTH`. A *bus call to the postgres module*
 (`runtime: go`, ref 28, kind 11265, `placements: ["kb"]`). No postgres module
 was running on the KB's bus, so the probe had nobody to ask. The KB's *pool*
 connects directly through libpq, which is exactly why bootstrap succeeded and
@@ -502,7 +502,7 @@ different paths, and only one of them had been stood up.
 `NULL` when it is unset or empty. The rig never set it. The server was not
 failing to reach the KB; it had never been told where the KB was.
 
-CT 9099 was built with both closed — the postgres module started on the KB's
+CT 9099 was built with both closed. The postgres module started on the KB's
 own bus (daemon `"kb"`, its own grant directory and its own config module), and
 `AIMEE_KB_API_URL=http://127.0.0.1:8790` in the server's environment.
 
@@ -535,7 +535,7 @@ restored server: all checks passed, including `DELIVERED: the recipient drains
 the sender's exact text`.
 
 The first attempt at this control **failed and still printed something that
-looked like an answer** — it backgrounded the restarts inside a single
+looked like an answer**, it backgrounded the restarts inside a single
 `pct exec`, which killed them when the call returned. The server was down, so
 "no unreachable lines" was true for entirely the wrong reason. That is the
 session's own recurring defect shape turned on its own instrument: a
@@ -580,11 +580,11 @@ nothing before could have found.
   two `/v1/mcp/call` requests carrying those session ids. No fixture wrote them.
 - **The client's frames are correct.** With the module instrumented to log every
   arrival, every server-originated call landed as `stage=1 op=1 cells=6` (send)
-  or `stage=2 op=3 cells=2` (take) — exactly the declared arities.
+  or `stage=2 op=3 cells=2` (take), exactly the declared arities.
 - **The refusals arrive, and differ.** `self`, `too_long`, and `no_directory`
   all came back as named domain refusals through the MCP surface.
 - **The three-outcome discipline earned itself.** Every failure below reported
-  as "the peer-messaging module did not answer ... This is not a refusal", which
+  as "the peer-messaging module did not answer ..; this is not a refusal", which
   is what made it instantly separable from a domain no. Had the client collapsed
   the two, this would have read as the module rejecting the messages.
 
@@ -608,12 +608,12 @@ What it is NOT, each ruled out by measurement rather than by argument:
 
 And the control that makes it specific: **`aimee-peerprobe`, an external bus
 client, ran the same operation against the same module process at the same
-instant and delivered successfully every time** — including `DELIVERED: the
+instant and delivered successfully every time**, including `DELIVERED: the
 recipient drains the sender's exact text`. Same module, same db1, same second.
 The variable is which process originated the call.
 
 One further observation, from the ordering in the logs: `peer_inbox`, which
-makes ONE nested directory lookup, succeeded repeatedly — until the first
+makes ONE nested directory lookup, succeeded repeatedly, until the first
 `peer_send` hung, after which later lookups either hung too or returned
 `unavailable` fast. So the first wedge appears to poison the module's directory
 path for subsequent calls rather than failing in isolation.
@@ -622,9 +622,8 @@ path for subsequent calls rather than failing in isolation.
 differently when the daemon is the originator is a question about the bus host
 (`src/modules/audit/obs_bus.c` and the core event bus), not about peer
 messaging, and it is not answered here. Worth noting that the pool comment in
-`obs_bus.c` already describes this class of fault in a different guise — "the
-review waits on its own callback and nothing moves until something times out" —
-which was addressed by giving each concurrent call its own client. This looks
+`obs_bus.c` already describes this class of fault in a different guise, "the
+review waits on its own callback and nothing moves until something times out": which was addressed by giving each concurrent call its own client; this looks
 like the next instance of the same shape, one level deeper, and the earlier fix
 does not cover it.
 
@@ -639,7 +638,7 @@ existed, which is the argument for having built it.
 ### Rig faults, recorded because they nearly became findings
 
 - The first build **reported COMPLETE while `aimee-server` and `aimee-kb` did
-  not exist** — the make steps piped through `tail` and carried no `|| exit 1`.
+  not exist**. The make steps piped through `tail` and carried no `|| exit 1`.
   The rebuild checks every step by exit code and stops on the first failure.
 - The grant check used `realpath`, which SUCCEEDS on a path that does not exist.
   It printed "ALL GRANT EXECUTABLES RESOLVE" while five were missing, and the
@@ -648,7 +647,7 @@ existed, which is the argument for having built it.
   every fleet count by one and briefly suggesting duplicate modules. The
   `[/]`-bracket form was on the server and kb patterns and not the module ones.
 - `pkill -f aimee-module-aimee` matched its own `pct exec` shell and killed it
-  (exit 143) — the third instance of the same self-match this session.
+  (exit 143), the third instance of the same self-match this session.
 - Two frames refused as `ModuleStatusInvalidRequest` were **the probe's own
   deliberate malformed-frame check**, not a client fault. Nearly attributed to
   `peer_client` before the timestamps were lined up against the probe's run.
@@ -679,8 +678,8 @@ With both fixed, the answer took one run.
 
 ### The client could not say which failure it had
 
-`peer_client` collapsed five conditions into one sentence — "the module did not
-answer" — and logged them once per PROCESS. The first failure claimed the single
+`peer_client` collapsed five conditions into one sentence, "the module did not
+answer": and logged them once per PROCESS; the first failure claimed the single
 warning and every later one was silent, including a DIFFERENT failure needing a
 different repair. That is why an absent module and a rejected reply were
 indistinguishable for six container runs.
@@ -689,7 +688,7 @@ Fixed: the `aimee_module_call_result_t` is carried out through a `transport`
 out-param, named (`capability_absent`, `deadline_exceeded`, `capability_denied`,
 `protocol`, …), reported in the text a model reads, and warned once per DISTINCT
 code. A reply that arrived but could not be decoded reports `protocol` rather
-than an absent module — the module demonstrably replied, so sending the reader
+than an absent module, the module demonstrably replied, so sending the reader
 to check whether it is running is the wrong instruction.
 
 The very next run said `protocol`, **in 24 milliseconds**. Not a hang. The
@@ -698,7 +697,7 @@ module replies and the client rejects the reply.
 ### The defect
 
 `peerwire.Btoa` writes `"1"`/`"0"`. The C row reader accepted only `"true"` and
-`"false"` — words `Btoa` NEVER writes — so it rejected **every message row the
+`"false"` (words `Btoa` NEVER writes) so it rejected **every message row the
 module has ever sent**.
 
 `peerwire.Atob` is lenient and accepts `"true"`/`"false"` as well, so the C
@@ -707,7 +706,7 @@ conversation working is worse than none: at the caller it reads as the far side
 failing rather than as a grammar this side got wrong.
 
 Both test suites were green throughout. The C fixture spelled the cell
-`"false"` — it had been written from the same misreading as the code it was
+`"false"`. It had been written from the same misreading as the code it was
 meant to check, so every assertion passed against a row that cannot come off the
 wire. And `cwire_test.go`, the cross-language pin, checked the status numbers and
 the row width and stopped there: the two sides agreed on how many cells a row
@@ -717,7 +716,7 @@ has and disagreed about what is IN one.
 
 - `TestCClientSpeaksTheSameBooleanGrammar` asserts, against `Btoa`'s real output
   rather than a copied list, that whatever the module can write the C side can
-  read — and that whatever the C side writes, `Atob` accepts. Demonstrated red by
+  read, and that whatever the C side writes, `Atob` accepts. Demonstrated red by
   changing the C literal.
 - Five C checks drive every spelling `Atob` accepts through the reader.
 - The C fixture now carries the row the module actually sends.
@@ -726,8 +725,8 @@ has and disagreed about what is IN one.
 
 ### The feature, working
 
-Through `POST /v1/mcp/call` — the request `aimee mcp-serve` posts for a real MCP
-client — with sessions the server registered itself:
+Through `POST /v1/mcp/call`, the request `aimee mcp-serve` posts for a real MCP
+client, with sessions the server registered itself:
 
 ```
 gamma -> delta:   Delivered to delta (message pmsg-3, conversation conv-4).
@@ -740,14 +739,14 @@ delivered ONCE:   0 message(s) taken; 0 still waiting.
 Three sessions, not two, so the pair is not a special case: `epsilon drains: 2
 msg from ['delta', 'gamma']`. An 8192-byte body arrives with all 8192 bytes
 intact and 8193 is refused `too_long`. `self` refuses. peerprobe passes twice
-with **exit 0 captured before any pipe** — the earlier `probe exit=$?` after
+with **exit 0 captured before any pipe**. The earlier `probe exit=$?` after
 `| tail` had been reading tail's status.
 
 Negative control: with the module stopped the same send answers
 `deadline_exceeded` and with it back it delivers, so the success is not an
 absence of checking. `FLEET server=1 kb=1 pg=1 db1=1 aimee=1 config=2`,
 `db2_ok True`, `warnings []`, zero knowledge-unreachable lines, and exactly one
-`peer.client` line in the whole log — the negative control's own.
+`peer.client` line in the whole log. The negative control's own.
 
 ### Known and NOT fixed here
 
@@ -757,14 +756,14 @@ absence of checking. `FLEET server=1 kb=1 pg=1 db1=1 aimee=1 config=2`,
 mapping that to MISSING "would report a broken store as nothing recorded". The
 conservative answer is the right one, and its cost is that a caller is told to
 retry for a peer that will never exist. The repair belongs to db1's read
-contract — changing that return would touch every caller — and db1 is being
+contract (changing that return would touch every caller) and db1 is being
 absorbed into Go by another session, so it is raised there rather than patched
 around here.
 
 **peerprobe moved from principal ref 69 to 200.** 69 collided with the
 control-plane module's outbound identity, allocated by another session, and the
-collision surfaced as `attach denied` in the probe — a validation run reporting
-a bus problem that was really bookkeeping two repositories away. The guard that
+collision surfaced as `attach denied` in the probe. A validation run reporting
+a bus problem that was bookkeeping two repositories away. The guard that
 was supposed to prevent this read the contract for refs already DECLARED, which
 cannot see a ref someone is about to take; it now enforces a floor far above the
 range the contract allocates from, and fails if the contract ever grows into it.
@@ -777,19 +776,19 @@ were not touched.
 
 ## Reachability, and the gate I had broken (2026-08-24, CT 9102)
 
-The previous section said peer messaging "works end to end". It did — and no
+The previous section said peer messaging "works end to end". It did, and no
 agent would ever have found it.
 
 `peer_send` and `peer_inbox` sit outside `MCP_CORE_TOOLS`, so a client asking
 for the default profile is not shown them. CT 9100 reported exactly that
 (`peer_send: MISSING` from tools_list) and it was waved away as "discoverable
-via find_tools" without ever checking. `mcp_tool_profile.c` states the measured
+via find_tools" without ever checking; `mcp_tool_profile.c` states the measured
 conclusion two lines from the list it is about:
 
 > *A tool the agent cannot afford to reach is a tool it does not have.*
 
 Fixed by folding both into one `peer` family (`command=send|inbox`) and putting
-that on the floor — one entry for the capability. The argument that put `index`
+that on the floor, one entry for the capability. The argument that put `index`
 there applies harder: leaving `index` out did not reduce retrieval, it produced
 87 shell searches. A worse fallback, but a fallback. **Peer messaging has none.**
 The alternative to being shown it is not coordinating at all.
@@ -802,13 +801,13 @@ to an agent wanting to reach another session, exactly like the tool for that.
 
 `unit-test-mcp-client-registry` holds a golden signature snapshot of every
 served tool. Adding two MCP tools took it from 53 to 55 and **it had been
-failing since `93aadf6076`** — three commits shipped over it, because the MCP
+failing since `93aadf6076`**, three commits shipped over it, because the MCP
 surface test was never run after adding MCP tools. Regenerated to 54.
 
 That is also why the test's mirror of `MCP_CORE_TOOLS` is not the check. The
 file already carries that lesson for `roundtable_review`: mirrored but not
 served, drift unnoticed, measured cost 74 tool calls with the review never
-invoked. `peer` now gets the same treatment — build the real list, assert the
+invoked. `peer` now gets the same treatment. Build the real list, assert the
 family is present, assert both commands are in its enum, assert every parameter
 survives the fold, and assert the demux resolves each command and refuses an
 unknown one with `-1` rather than falling through.
@@ -830,7 +829,7 @@ unknown command:       peer requires a valid 'command' (see describe_tool)
 `conversation_id` was advertised and had never been exercised. It threads: first
 send opened `conv-4`, a second carrying `conversation_id=conv-4` stayed on
 `conv-4`, and the recipient drained two messages on one conversation.
-`expect_reply` now travels as `"1"` — the spelling `Btoa` writes — asserted in
+`expect_reply` now travels as `"1"` (the spelling `Btoa` writes) asserted in
 the unit tests rather than inferred.
 
 Probe green with its exit captured before any pipe, `db2_ok True`, `warnings
@@ -844,10 +843,10 @@ were found by running the product, not by a gate.
 
 `check-native-tool-parity.py` now refuses a native row naming a toolset that
 does not exist. `toolset_register_native_tool` silently ignores an unknown name,
-so such a row registers into nothing — counted as native by the parity
+so such a row registers into nothing, counted as native by the parity
 arithmetic, offered to no role, and silent about it. Demonstrated by marking
 `peer_send` native against `"kore"`; the gate names the row and lists the real
-toolsets. Its first form also failed open — the regex matched tool names inside
+toolsets. Its first form also failed open, the regex matched tool names inside
 each toolset's arrays as well as the toolset names, making the accepted set a
 superset in which a marker misspelled as `read_file` would have passed. Anchored
 to struct entries, `declared` is the 12 real toolsets.
@@ -861,7 +860,7 @@ CT 9102 destroyed and purged, watchdog stopped, `/root` clean. Containers 8150,
 
 **No in-process aimee agent has called these tools.** They are registered native
 into `core` (inherited by `readonly`→review and by `code`), and the new gate
-proves the toolset is real — but whether a given delegate's `dispatch_sid` is
+proves the toolset is real, but whether a given delegate's `dispatch_sid` is
 present in `server_sessions` depends on its path. Chat-driven sessions register
 via `chat_session_register`; a delegate that never drives a chat turn may not.
 Exercising that needs a live model provider, and a failure there reports
@@ -869,10 +868,9 @@ honestly (`unknown_sender` / `unavailable`) rather than silently.
 
 **`OpReply` is not implemented in the C client.** The module serves it; nothing
 calls it. So `is_reply` can only ever be `0` through this surface, and threading
-is done with `conversation_id` instead. The field is still reported honestly —
-it says what the module stamped — but it is unexercised in production.
+is done with `conversation_id` instead. The field is still reported honestly (it says what the module stamped) but it is unexercised in production.
 
-## The live-model attempt (2026-08-24, CT 9104) — what it settled and what it did not
+## The live-model attempt (2026-08-24, CT 9104): what it settled and what it did not
 
 The operator supplied a one-session MiniMax key to close the last gap: a REAL
 MODEL calling `peer_send` through aimee's own agent loop, rather than curl
@@ -888,7 +886,7 @@ listener|mcp|uid:0
 ```
 
 `driver` is the session a native chat turn ran as, registered by
-`chat_session_register`. So **a native aimee session IS addressable by peers** —
+`chat_session_register`. So **a native aimee session IS addressable by peers**,
 previously an open question I could only reason about. The tool being registered
 into a real toolset was already gated; this shows the other half, that the
 identity a native caller would send as reaches the directory.
@@ -899,7 +897,7 @@ messaging. The turn ends `no agent available for role 'code'`, which resolves to
 `AGENT_ROUTE_NO_CREDENTIALS` from `agent_has_resolvable_credentials`: the env
 importer stores `MINIMAX_API_KEY` under the vault's `environment` agent slot
 (`ENV_AGENT`), while the routing probe asks
-`vault_service_has_server_principal(agent->name, ...)` — a slot named for the
+`vault_service_has_server_principal(agent->name, ...)`, a slot named for the
 agent. The roster is fine: `/v1/agents` shows `mm | enabled True | roles ['all']
 | provider minimax`.
 
@@ -910,8 +908,7 @@ was out of scope.
 
 - `run()` wraps its argument in double quotes for `pct exec ... bash -lc "$1"`,
   so a `"$MINIMAX_API_KEY"` written inside the command expanded on the HOST,
-  where it is unset. The container received an empty value. The correct form —
-  `set -a` plus sourcing — is also the one that never puts the value on a
+  where it is unset. The container received an empty value. The correct form (`set -a` plus sourcing) is also the one that never puts the value on a
   command line.
 - `p=$(pgrep -f ...)` returning several pids makes `/proc/$p/environ` invalid and
   the grep count zero, which reads exactly like "the variable is absent".
@@ -943,7 +940,7 @@ tool and the message landed in another session's inbox with the sender stamped
 by the module. Two provider round trips (the tool call, then the final answer),
 and the turn closed with `DONE` as instructed.
 
-That is the native path — aimee's own agents, not an external MCP client — and
+That is the native path (aimee's own agents, not an external MCP client) and
 it was the one thing repeatedly recorded here as unverified.
 
 ### Five layers of first-run configuration, none of them peer messaging
@@ -951,17 +948,17 @@ it was the one thing repeatedly recorded here as unverified.
 Each was found by fixing the one before it, and none was a defect in the feature:
 
 1. **The credential.** A literal `api_key` in `agents.json` is LOADED but never
-   PERSISTED — the writer keeps `$VAR` references only, because a literal key
+   PERSISTED. The writer keeps `$VAR` references only, because a literal key
    belongs in the vault. The first save stripped it and the next load had none,
    so routing refused the agent as `AGENT_ROUTE_NO_CREDENTIALS`. Installed via
    `POST /v1/vault/set_server {agent, cred, secret}` instead.
 2. **Delegate policy.** `server.c` installs a filter whose rule is "the primary
-   never delegates to itself". The roster held one agent and it was the primary,
+   never delegates to itself"; the roster held one agent and it was the primary,
    so the delegate role `code` had no candidate. A second seat fixed it.
 3. **The primary agent.** Set via the `set_primary_agent` MCP tool, so the turn
    is answered in-process rather than delegated at all.
 4. **Role permissions.** `delegate_permissions_resolve` needs a registered
-   provider — the **governance** module. `aimee-module` is a multicall binary
+   provider, the **governance** module. `aimee-module` is a multicall binary
    keyed on `argv[0]`, so the same build serves it under another name.
 5. **DNS**, which is the one that turned out to be an aimee defect. Below.
 
@@ -970,7 +967,7 @@ Each was found by fixing the one before it, and none was a defect in the feature
 `AGENT_HTTP_CONNECT_TIMEOUT_MS` is 5000, and that control is built BEFORE
 `getaddrinfo` while bounding the connect that follows. On this network the
 container's first nameserver does not answer for `api.minimax.io`, so every
-lookup cost ~5s falling back to the second — the entire connect budget. The
+lookup cost ~5s falling back to the second, the entire connect budget. The
 address loop's first check then found the budget gone and **dialled nothing**,
 while the caller logged `TCP connect failed: api.minimax.io:443`: a claim about
 a connection that was never attempted.
@@ -987,8 +984,8 @@ Measured, at the same moment, in the same container:
 Fixed by excluding resolution from the connect budget: the deadline handed to
 the address walk is pushed out by however long the lookup actually took, in a
 LOCAL copy, so the caller's own control is never mutated and an unbounded caller
-still gets no deadline. Applied to both the POSIX and Windows entry points —
-they are separate implementations in one file, and the first version of this fix
+still gets no deadline. Applied to both the POSIX and Windows entry points.
+They are separate implementations in one file, and the first version of this fix
 landed only in the Windows one and changed nothing.
 
 **Verified by restoring the broken resolver**, one variable, same binary
@@ -1000,14 +997,14 @@ http_retry: attempt 1/3: HTTP 200 (provider=minimax model=MiniMax-M3)
 messages: 1  from driver | text 'through a slow resolver'
 ```
 
-First attempt, no retries, no `TCP connect failed` — where the same
+First attempt, no retries, no `TCP connect failed`, where the same
 configuration previously failed three times in a row.
 
 ### A second, smaller robustness change in the same file
 
 Each candidate address now gets a bounded SHARE of the connect budget rather
 than all of it, so one unreachable address cannot starve the rest. **This did
-not fix anything observed** — it came from an earlier, wrong diagnosis of the
+not fix anything observed**, it came from an earlier, wrong diagnosis of the
 same symptom, and is kept because the property is worth having, not because it
 explained the failure. Said plainly so the record does not credit it with the
 repair.
@@ -1019,7 +1016,7 @@ repair.
   instantly rather than slowly. The ~5s was always DNS.
 - The first fix landed in the `#ifdef _WIN32` branch of a file with two
   implementations. It compiled, the tests passed, and the behaviour was
-  unchanged — visible only because the hardware run still failed.
+  unchanged, visible only because the hardware run still failed.
 - A probe script named `enum.py` shadowed Python's stdlib `enum` and broke every
   later probe in that container with an unrelated-looking traceback.
 
@@ -1036,7 +1033,7 @@ and the original ask: two sessions talking to each other.
 
 - **alpha's model** was told to ask beta *"what is the capital of France?"* and
   called `peer command=send`.
-- **beta's model** was told ONLY to read its inbox and answer the sender — not
+- **beta's model** was told ONLY to read its inbox and answer the sender, not
   what the question was.
 - **alpha received:** `The capital of France is Paris.`
 
@@ -1049,12 +1046,12 @@ the defect below.
 ### The defect this found: a native tool that returns the size of its answer
 
 `mcp_native_call` passes `structured = NULL`, and the native dispatch flattens
-the CONTENT array alone -- an in-process agent never sees `structuredContent`.
+the CONTENT array alone. An in-process agent never sees `structuredContent`.
 `peer_inbox` put the message bodies only there, and a COUNT in the text.
 
 So aimee's own agents received `1 message(s) taken; 0 still waiting.` and no
-mail. The first conversation run produced a perfect-looking transcript -- two
-200s, `SENT`, `REPLIED`, four provider calls, zero errors -- and beta's reply
+mail. The first conversation run produced a perfect-looking transcript, two
+200s, `SENT`, `REPLIED`, four provider calls, zero errors, and beta's reply
 said it plainly:
 
 > *"I received the message, but its contents were not available to me."*
@@ -1064,7 +1061,7 @@ provenance, refusals, the probe. The external MCP path carries
 `structuredContent` and was the only path anything had tested.
 
 Fixed by rendering sender, conversation id and body into the text. Sender and
-conversation travel with it because a reply needs both -- who to answer, and
+conversation travel with it because a reply needs both, who to answer, and
 which thread to answer on. Verified with the same prompts and the same models,
 one code change:
 
@@ -1076,7 +1073,7 @@ one code change:
 ### And a harness that ate the thing it was measuring
 
 The first attempt failed for a different reason: between alpha's turn and
-beta's, the script "looked at" beta's inbox -- with `peer inbox`, which TAKES
+beta's, the script "looked at" beta's inbox, with `peer inbox`, which TAKES
 messages. That is the delivered-once guarantee this branch asserts by name, and
 the check consumed the message before beta's model could read it.
 
@@ -1095,8 +1092,8 @@ in the C client", with the note that threading works via `conversation_id` so
 the gap was cosmetic. That was wrong, and the reason is worth stating.
 
 **`peer send` always declares hop 0.** So two sessions answering each other with
-`send` reset the count on every message, and `DefaultMaxHops` (16) — the bound
-that stops a conversation looping forever — **could never be reached by any
+`send` reset the count on every message, and `DefaultMaxHops` (16), the bound
+that stops a conversation looping forever, **could never be reached by any
 caller that existed.** A guard that cannot fire, in the middle of a feature
 whose whole risk is two agents talking past each other indefinitely.
 
@@ -1105,8 +1102,8 @@ real, and that is why the gap was not cosmetic.
 
 ### The handle
 
-`Registry.Reply` reads five things off the answered message — id, correlation,
-conversation, origin session, and hop — and a model-facing tool cannot sensibly
+`Registry.Reply` reads five things off the answered message, id, correlation,
+conversation, origin session, and hop, and a model-facing tool cannot sensibly
 ask for five fields. So `peer inbox` prints one opaque token beside each message
 and `peer reply` takes it back verbatim:
 
@@ -1118,14 +1115,14 @@ handle probe
 
 A field containing the separator refuses the handle rather than escaping it: an
 escape scheme is a second grammar, and this one crosses a model. A handle that
-will not parse is refused as `bad_request` — the caller's error — rather than as
+will not parse is refused as `bad_request` (the caller's error) rather than as
 a transport failure, which would send them to check a module the call never
 reached.
 
 ### Verified on hardware, with the properties a send cannot produce
 
 Two live models. alpha asked, beta read its inbox and used `command=reply` with
-the token — never told what the token means:
+the token, never told what the token means:
 
 ```
 from beta | conv conv-4 | hop 1 | is_reply True
@@ -1138,7 +1135,7 @@ HOP ADVANCED (hop >= 1):               True
 
 The last two are the assertion. A `send` always produces hop 0 and
 `is_reply` false, so a "reply" that quietly behaved like a send would satisfy
-every other check in this run — including the Paris one. This is also the first
+every other check in this run, including the Paris one. This is also the first
 time `is_reply` has ever been true in production; it was previously a field that
 could only ever read false.
 

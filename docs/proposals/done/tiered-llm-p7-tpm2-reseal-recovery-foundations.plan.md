@@ -204,7 +204,7 @@ evidence, and evidence loss fail the table constraint. Exact terminal replay
 matches operation, consumed fence, failure class, source phase, preserved
 evidence, and deterministic outbox row before consulting the advanced live fence.
 Earlier transition replays use `failure_from_state` plus the applicable
-resealed/completed checkpoint to prove the requested transition really committed
+resealed/completed checkpoint to prove the requested transition committed
 before quarantine; full digests alone are not accepted as provenance.
 
 All new functions remain owner/migration-orchestrator only: pinned search path,

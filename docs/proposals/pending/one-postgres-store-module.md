@@ -11,19 +11,19 @@
 3,978 `sqlite3_` call sites. This replaces it with Go over PostgreSQL and deletes
 the C.
 
-**There is no db1/db2/db3 any more.** That split was historical — SQLite on the
-server, PostgreSQL on the KB — and it is gone. There is **one PostgreSQL store
+**There is no db1/db2/db3 any more.** That split was historical. SQLite on the
+server, PostgreSQL on the KB, and it is gone. There is **one PostgreSQL store
 module**, and both daemons run it against their own database. Nothing in the
 module is named for a daemon, and the DSN is `AIMEE_STORE_URL` rather than
 anything per-process: the module is the same, the database it points at is not.
 
 A different engine is a **different module**. Swapping PostgreSQL out means
-installing that engine's module, not configuring this one — which is what makes
+installing that engine's module, not configuring this one, which is what makes
 the store pluggable without this package having to know it might be replaced.
 
 It is a replacement, not a port: no translation layer, no dual-run comparator,
-no compatibility shim. An earlier attempt built exactly that apparatus — a SQL
-translator, five dual-run suites, a dialect ledger, two semantic audits — and it
+no compatibility shim. An earlier attempt built exactly that apparatus. A SQL
+translator, five dual-run suites, a dialect ledger, two semantic audits, and it
 has been deleted. It was machinery for preserving SQLite's behaviour, and some
 of that behaviour (NULLs-first ordering, case-insensitive `LIKE`) is SQLite's
 quirk rather than anything worth carrying forward.
@@ -32,7 +32,7 @@ quirk rather than anything worth carrying forward.
 
 **The callers already speak the bus.** All 19 families are active and all 62
 declared daemon-side C sources are retired. Nothing calls the C store directly
-any more — callers exchange frames. This changes an implementation behind a
+any more, callers exchange frames. This changes an implementation behind a
 contract that already exists.
 
 **`bus_host_serve_kind` binds one kind to exactly one serving slot,** so the Go
@@ -65,7 +65,7 @@ server-go/modules/postgres/
 
 The roundtable family's four entities carry 36, 33, 22 and 15 columns. Writing
 those out by hand at every read and write is 106 chances to transpose two of
-them — and a transposition would be *consistently* wrong in the SELECT, the row
+them, and a transposition would be *consistently* wrong in the SELECT, the row
 reader and the UPDATE at once, so no behavioural test would notice.
 
 So the shape is declared once per entity as a column spec, and the SELECT list,
@@ -111,7 +111,7 @@ and `ON CONFLICT DO NOTHING`, where zero rows affected *is* the replay answer.
 
 **Three latent bugs fixed.** The session-prefix lookup built `"<prefix>%"` by
 concatenation and bound it into `LIKE` unescaped, so a prefix containing `%` or
-`_` matched more than it asked for — and a bare `%` resolved an abbreviation to
+`_` matched more than it asked for, and a bare `%` resolved an abbreviation to
 an arbitrary session. It now escapes and matches literally. Separately, several
 `LIMIT 1` reads had no `ORDER BY`, so they could return a different row on
 successive calls with no write in between. And the guardrail family's collection
@@ -119,16 +119,16 @@ counts were trusted as sent: a count larger than the fixed number of wire slots
 read past the frame, which mutation testing confirmed panics the module on a
 request a caller can construct. And the sessions list emitted ten cells per row
 from a query that selected eight, so `source` and `chat_key` were structurally
-always blank — the query had not been updated when the columns were added.
+always blank. The query had not been updated when the columns were added.
 
 **Six statements stopped being built by string concatenation.** Age thresholds
-were spliced into SQL text with `snprintf` — the session expiry sweep, the spawn
-and job stale sweeps, the unassigned cancel, the heartbeat staleness check — and
+were spliced into SQL text with `snprintf`, the session expiry sweep, the spawn
+and job stale sweeps, the unassigned cancel, the heartbeat staleness check, and
 so was a `LIMIT`. All of it because a TEXT timestamp column left no interval
 arithmetic to do. With `TIMESTAMPTZ` every threshold is a bound parameter and
 every statement is a constant.
 
-**The recursive tree walks were unbounded — and this one is fixed in the C too.**
+**The recursive tree walks were unbounded, and this one is fixed in the C too.**
 
 Both `delegation_spawns.parent_delegation_id` and `lifecycle_work_item.parent_id`
 are walked by recursive CTEs, and neither column has any cycle prevention on
@@ -140,7 +140,7 @@ That is a live hang rather than a migration concern, so it is repaired in the C
 rather than left until each family is ported:
 
 - Eight of the nine collect rows that repeat exactly on a cycle, so `UNION` is
-  sufficient — a recursive CTE stops when an iteration yields no *new* rows, and
+  sufficient. A recursive CTE stops when an iteration yields no *new* rows, and
   on a well-formed tree `UNION` and `UNION ALL` return the same set.
 - The ninth carries an incrementing `depth`, so its rows never repeat and
   `UNION` cannot help it. That one takes an explicit bound.
@@ -151,12 +151,12 @@ four-node tree both forms answer 4, so the change is behaviour-preserving on
 well-formed data. `scripts/probe-c-recursion-bound.sql` is that check.
 
 The Go replacements carry the same bounds, and their suite asserts the negative
-half — that the *unguarded* form gets cancelled — because otherwise the positive
+half (that the *unguarded* form gets cancelled) because otherwise the positive
 half would pass whether or not the bound did anything.
 
 **One search stayed case-insensitive on purpose.** SQLite's `LIKE` ignores ASCII
 case, so the session title search silently matched regardless of case. That is a
-person typing into a search box, so it is `ILIKE` rather than `LIKE` — one of
+person typing into a search box, so it is `ILIKE` rather than `LIKE`. One of
 the few places where preserving SQLite's behaviour is the right call, because
 the behaviour is what the feature is.
 
@@ -164,17 +164,17 @@ the behaviour is what the feature is.
 is an FNV-1a value the C prints with `%llu`, so it runs past 2^63-1. The
 SQLite-derived schema made the column TEXT, storing a number as a string. It is
 `BIGINT` holding the bits, converted at the boundary and exact in both
-directions — the value is opaque and compared only for equality, so its
+directions. The value is opaque and compared only for equality, so its
 magnitude never matters, only its round trip.
 
 **Types are native.** `created_at` columns were `TEXT DEFAULT to_char(now() AT
-TIME ZONE 'utc', ...)` — timestamps that sort correctly only by accident of
+TIME ZONE 'utc', ...)`, timestamps that sort correctly only by accident of
 format, cannot be compared against an interval, and drop the zone. They are
 `TIMESTAMPTZ`, formatted back to the wire's spelling at the boundary. Digests are
 `BYTEA` with a length constraint rather than hex text.
 
 **Singleton tables say what they mean.** Three declared `singleton BIGINT
-GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY CHECK (singleton = 1)` — an identity
+GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY CHECK (singleton = 1)`, an identity
 sequence on a column whose every generated value past the first violates its own
 CHECK. They are now `BOOLEAN PRIMARY KEY DEFAULT true CHECK (singleton)`.
 
@@ -187,7 +187,7 @@ compared against each other, never against the database's clock.
 
 ### Deliberately unchanged
 
-The wire, because the wire is the contract — the C *clients* are still on the
+The wire, because the wire is the contract. The C *clients* are still on the
 other end and stay there.
 
 The status conventions, including the awkward ones. Several families answer
@@ -212,7 +212,7 @@ container, because the test host reaps them between runs.
 ### What a Go test cannot check
 
 The depth guard exposed a real limit. The Go test asserts the guard is textually
-present and its bound is a parameter — and a mutation writing `true OR d.depth <
+present and its bound is a parameter, and a mutation writing `true OR d.depth <
 $2` satisfies every one of those checks while removing the guard entirely. It
 went unnoticed.
 
@@ -220,12 +220,12 @@ Whether a recursion terminates is a database behaviour, so the assertion with
 teeth lives in the SQL suite: it builds an actual cycle, runs the walk *without*
 the guard under a short statement timeout and requires it to be cancelled, then
 runs the guarded one and requires an answer. The negative half is the part that
-matters — without it the positive half would pass whether or not the guard did
+matters, without it the positive half would pass whether or not the guard did
 anything.
 
 **Every guard is mutation-tested.** Three findings worth recording: a mutation that
 removed a check made a variable unused, so the *build* failed rather than the
-test — a false "caught" — and dropping `peer_fingerprint` from the nonce binding
+test (a false "caught") and dropping `peer_fingerprint` from the nonce binding
 comparison went **unnoticed**, revealing a real coverage gap that is now closed.
 A fixture bug surfaced the same way: an all-digit bearer digest is unchanged by
 `ToUpper`, so the uppercase-rejection case was asserting nothing. And the
@@ -253,10 +253,10 @@ Downstream of finishing:
 
 - **Test fixtures.** `server-go/internal/db1/db1test` reaches into the store
   *file* to move the clock. Under PostgreSQL there is no path, only a DSN. They
-  are the last SQLite in Go — production Go is already clean.
+  are the last SQLite in Go, production Go is already clean.
 - **Deleting the C.** `src/modules/db1` goes once every kind is served natively,
   along with the 54 files in `src/tests` that test it.
-- **The `db1` names in the contract itself** — `server-go/db1`, the
-  `AIMEE_DB1_*` wire constants, the catalog's own vocabulary — are the caller-side
+- **The `db1` names in the contract itself**: `server-go/db1`, the
+  `AIMEE_DB1_*` wire constants, the catalog's own vocabulary, are the caller-side
   contract and its generator. Renaming them is a separate change with a much
   wider blast radius than the store.

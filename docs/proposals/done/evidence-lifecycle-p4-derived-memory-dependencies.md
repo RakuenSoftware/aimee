@@ -1,9 +1,9 @@
-# Proposal: P4 — explicit dependencies and computed staleness for derived memory
+# Proposal: P4: explicit dependencies and computed staleness for derived memory
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 4 of 9.
 - **Author:** JBailes
@@ -13,8 +13,8 @@
 
 ## Problem and boundary
 
-Derived knowledge — summaries, patterns, preference projections, entity profile
-cards, "mental models" — is prose that *asserts* something about a factual basis
+Derived knowledge, summaries, patterns, preference projections, entity profile
+cards, "mental models", is prose that *asserts* something about a factual basis
 it does not name. When that basis moves, the prose does not.
 
 This is the most dangerous quiet failure in the system, because derived items
@@ -25,7 +25,7 @@ survives the invalidation of the document that produced eight of them; a learned
 recommendation about a function survives the rewrite of that function.
 
 At the pin the substrate is close but incomplete: several derived surfaces record
-a *bundle* hash or an `input_hash` — enough to detect "something changed" — but
+a *bundle* hash or an `input_hash` (enough to detect "something changed") but
 none records *which* inputs, at which versions, under which extractor and policy.
 A bundle hash cannot tell an operator which input moved, cannot support partial
 re-derivation, and cannot answer "what depends on this document" in the direction
@@ -39,11 +39,11 @@ keeps conservative; re-derivation scheduling is slice 5 and nothing more.
 
 | Piece | Where | Gap |
 |---|---|---|
-| `artifacts.source_bundle_hash`, `model_version`, `prompt_version` | `src/modules/db2/c/schema.sql` | Whole-bundle change detection with generator identity — the right instinct, no per-input granularity. |
+| `artifacts.source_bundle_hash`, `model_version`, `prompt_version` | `src/modules/db2/c/schema.sql` | Whole-bundle change detection with generator identity: the right instinct, no per-input granularity. |
 | `artifact_citations` (artifact_id, source_kind, source_id, span) | `src/modules/db2/c/schema.sql` | Real per-source links for artifacts; not present for non-artifact derived rows, and citations are evidence, not a declared dependency with a version. |
-| `report_enrichments.input_hash`, `schema_version`, `expires_at` | `src/modules/db2/c/schema.sql` | Per-subject enrichment invalidation — the closest existing precedent. |
+| `report_enrichments.input_hash`, `schema_version`, `expires_at` | `src/modules/db2/c/schema.sql` | Per-subject enrichment invalidation: the closest existing precedent. |
 | `memory_summaries`, `entity_profiles.card_json`, `workflow_patterns`, `anti_patterns`, `lessons_outcome_ledger` | `src/modules/db2/c/schema.sql` | Derived rows with no declared inputs at all. |
-| `memory_lineage` (object_type, object_id, source_kind, source_ref) | `src/modules/db2/c/schema.sql` | Lineage exists as a shape — no input version, no hash, no extractor or policy version, and no consumer that acts on it. |
+| `memory_lineage` (object_type, object_id, source_kind, source_ref) | `src/modules/db2/c/schema.sql` | Lineage exists as a shape: no input version, no hash, no extractor or policy version, and no consumer that acts on it. |
 | `curator_invalidation_events` | `src/modules/db2/c/schema.sql` | Counts stale artifacts per source; no per-item edges. |
 | `code_projection_generations`, `files.hash` | `src/modules/db2/c/schema.sql` | Precise code-side change detection already available for the code-staleness rule. |
 
@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS derived_memory_dependencies (
 
 `contribution` is the field that keeps staleness from becoming noise. An input
 marked `essential` means the derived item does not stand without it; `supporting`
-means it contributed. The producer declares this at derivation time — it is the
+means it contributed. The producer declares this at derivation time. It is the
 only moment the distinction is knowable.
 
 ### When a derived item becomes stale
@@ -118,8 +118,8 @@ one of the recorded dependencies.
 
 The table is queried in both directions and is indexed for both:
 
-- **Forward** ("is this item stale?") — recall and ranking.
-- **Reverse** ("what depends on this document / assertion / file?") — P3's
+- **Forward** ("is this item stale?"), recall and ranking.
+- **Reverse** ("what depends on this document / assertion / file?"). P3's
   blast-radius preview and P2's `preview_revert` dependents list. This direction
   is the reason P3 must not report an empty dependents list before P4 lands.
 
@@ -129,7 +129,7 @@ The pin's derived profile surfaces are views over sourced assertions, not
 replacement rows, and that discipline is retained. P4 does not turn mental models
 into stored assertion rows; it records what a *materialized* derived item was
 built from, so the materialization can be invalidated. A derived item must never
-be promotable into an assertion by any path in this proposal — that promotion is
+be promotable into an assertion by any path in this proposal. That promotion is
 an explicit governance decision and belongs to P7.
 
 ## Non-goals

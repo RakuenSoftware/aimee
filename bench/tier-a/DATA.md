@@ -35,13 +35,13 @@ bench/tier-a/
 
 For every model and condition:
 
-- `*.pred.jsonl` — **one row per note**: the model's raw text, the parsed facts
+- `*.pred.jsonl`: **one row per note**: the model's raw text, the parsed facts
   before and after the confidence floor, latency, token counts, whether the JSON
   parsed, whether it carried the `facts` array, and whether it truncated. This is
   the primary record; every aggregate is derived from it.
-- `*.score.json` — production scoring (confidence floor applied).
-- `*.score.nofloor.json` — identical run with `MF_CONF_FLOOR` lifted.
-- `*.log` — stdout/stderr, including model load and any recovery paths taken.
+- `*.score.json`: production scoring (confidence floor applied).
+- `*.score.nofloor.json`: identical run with `MF_CONF_FLOOR` lifted.
+- `*.log`: stdout/stderr, including model load and any recovery paths taken.
 
 Raw predictions are committed deliberately. A benchmark table nobody can dispute
 in detail is not evidence, and several conclusions here (the confidence-0.0
@@ -61,11 +61,11 @@ python3 harness/capture_provenance.py   # provenance (needs network)
 
 | field | meaning |
 |---|---|
-| `f1_strict` | **the headline.** Both endpoints must name the labelled entity (surface variation absorbed by normalisation); only the predicate may vary. Measures extraction, full stop — it assumes no downstream entity resolution, because none is being measured |
-| `f1_production` | what the drain would actually commit — floor applied |
+| `f1_strict` | **the headline.** Both endpoints must name the labelled entity (surface variation absorbed by normalisation); only the predicate may vary. Measures extraction, full stop: it assumes no downstream entity resolution, because none is being measured |
+| `f1_production` | what the drain would actually commit: floor applied |
 | `f1_no_floor` | same extraction, `MF_CONF_FLOOR` lifted |
 | `schema_rate` | fraction of notes where the model emitted `{"facts":[...]}` |
-| `abstention_on_factless` | of the 23 notes asserting no durable fact, the fraction where the model correctly emitted nothing. **Only meaningful alongside a non-zero F1** — a model that outputs nothing anywhere scores 1.00 here |
+| `abstention_on_factless` | of the 23 notes asserting no durable fact, the fraction where the model correctly emitted nothing. **Only meaningful alongside a non-zero F1**: a model that outputs nothing anywhere scores 1.00 here |
 | `dropped_by_conf_floor` | facts extracted correctly then discarded at the floor |
 | `cpu_est_ms_per_note` | derived: 400-token prompt at `pp` + 48 generated at `tg` |
 
@@ -82,6 +82,6 @@ python3 harness/capture_provenance.py   # provenance (needs network)
   vocabulary. It does not generalise to "which small model is best".
 - **Two generations mixed.** Models tagged `superseded` in `models.json` are from
   the first pass, kept to show the generational delta. Do not chart them
-  alongside current models without saying so — the first pass baselined the wrong
+  alongside current models without saying so. The first pass baselined the wrong
   incumbent (Gemma 3n E4B rather than Gemma 4 E4B) and that error is preserved in
   the record on purpose.

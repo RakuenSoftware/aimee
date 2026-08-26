@@ -148,7 +148,7 @@ Every D2/D3 mutation already takes the conflicting exclusive control gate.
 Reserve durable relevance now rather than treating any historical completion as
 pending forever. Add `last_opened_rewrap_fence BIGINT NOT NULL DEFAULT 0` to
 `kb_vault_control`, bounded by the current fencing token. Make operation fencing
-tokens unique and define canonical recency as the greatest fencing token—never a
+tokens unique and define canonical recency as the greatest fencing token, never a
 timestamp. D3b's atomic open edge will set `last_opened_rewrap_fence` to the exact
 completed operation fence. Until then it remains zero.
 
@@ -209,8 +209,8 @@ or recovery obligation as shown above.
 ## 3. Proven pinned single-runtime eligibility
 
 D2b's local guard is safe only for the documented single active kb runtime on one
-locally pinned TPM. Every production kb process selecting TPM2 custody—whether or
-not D3 or its operator listener is configured—must acquire a daemon-lifetime
+locally pinned TPM. Every production kb process selecting TPM2 custody, whether or
+not D3 or its operator listener is configured, must acquire a daemon-lifetime
 nonblocking lock before custody selection, primary-epoch initialization, and every
 public or operator listener. A D3-disabled process and D3-enabled process therefore
 conflict exactly like two D3-enabled processes.

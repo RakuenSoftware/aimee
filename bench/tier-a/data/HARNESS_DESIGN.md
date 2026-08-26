@@ -34,7 +34,7 @@ triple is mechanical. This is the difference between a 70-note set and a
 
 Each note carries a `tier` field (1/2/3). small = tier 1; mid = tiers 1-2;
 large = all. Assignment is **stratified at generation time**, so every tier holds
-the same domain and category proportions — taking a prefix of a generated file
+the same domain and category proportions, taking a prefix of a generated file
 would give small a skewed mix and make the tiers incomparable.
 
 **Nesting is a feature and a trap.** The feature: a cheap small-tier run is
@@ -79,8 +79,8 @@ surface is untested. Target mix, applied within every tier:
 
 The category taxonomy (`first_person`, `multi_fact`, `negation`, `transient`,
 `ambiguous`, …) applies **within** each domain, because the failure modes differ
-by domain. Sales notes are dense with non-durable optimism — "might close by
-Friday", "the call went really well" — and over-extracting a deal that never
+by domain. Sales notes are dense with non-durable optimism, "might close by
+Friday", "the call went really well": and over-extracting a deal that never
 closed is the graph-poisoning case that `transient` exists to catch.
 
 Business and sales entities are invented. That is an external-validity limit and
@@ -114,12 +114,12 @@ Mitigations, all mandatory:
 ## Gold error is estimated, not assumed
 
 Correct-by-construction does not mean correct. The generator can be wrong
-systematically — a template that phrases a fact ambiguously produces notes whose
+systematically, a template that phrases a fact ambiguously produces notes whose
 "correct" triple is not what a careful reader would extract.
 
 So: an **audit subsample** of ~200 notes, stratified across domains and
-categories, gets independently labelled — by the operator and/or delegates from
-model families not under test — and the disagreement rate is reported as the
+categories, gets independently labelled, by the operator and/or delegates from
+model families not under test, and the disagreement rate is reported as the
 gold error estimate. No model on the leaderboard may label, for the obvious
 reason.
 
@@ -128,12 +128,12 @@ into a number attached to each tier.
 
 ## Build order
 
-1. `mine_entities.py` — entity and fact inventory from git and configs. Real.
-2. `synth_entities.py` — business/sales inventory. Seeded, consistent.
-3. `templates/` — per (domain, category) template bank.
-4. `generate_gold.py` — seeded, stratified, emits `tier` and `provenance`.
-5. `check_diversity.py` — the gates above; fails loudly.
-6. `validate_gold.py` — extend the existing structural checks to tiers.
+1. `mine_entities.py`: entity and fact inventory from git and configs. Real.
+2. `synth_entities.py`: business/sales inventory. Seeded, consistent.
+3. `templates/`: per (domain, category) template bank.
+4. `generate_gold.py`: seeded, stratified, emits `tier` and `provenance`.
+5. `check_diversity.py`: the gates above; fails loudly.
+6. `validate_gold.py`: extend the existing structural checks to tiers.
 7. Audit subsample and the first inter-rater number.
 
 Nothing is published against these sets until 5, 6 and 7 have run.

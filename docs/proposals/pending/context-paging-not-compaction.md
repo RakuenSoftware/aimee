@@ -8,7 +8,7 @@ Three properties, in dependency order:
 
 1. **An agent can recall on demand anything that was evicted.** Eviction is
    reversible.
-2. **We compact better than the clients do** — from state we recorded as it
+2. **We compact better than the clients do**: from state we recorded as it
    happened, not from a retrospective reading of the transcript.
 3. **The user never feels a compaction.** No multi-minute stall, no visible
    boundary event.
@@ -16,7 +16,7 @@ Three properties, in dependency order:
 These are not three parallel goals. (1) licenses (3): if eviction is reversible,
 we can evict early and continuously instead of waiting for a cliff, so the
 transcript never approaches the wall and there is no compaction *event* to feel.
-(2) is what makes (1) reliable — you can only page something back in if you
+(2) is what makes (1) reliable. You can only page something back in if you
 conserved an exact coordinate for it, not a model's paraphrase of it.
 
 The deliverable is therefore not a better compactor. It is turning compaction
@@ -29,7 +29,7 @@ Compaction today is an event: `maybe_compact_before_request()`
 (`SESSION_PRESSURE_COMPACT`) rewrites history in one destructive pass. The
 summarised messages are deleted. Anything the summary failed to capture is gone.
 
-Because it is destructive it must be *late* — you delay an irreversible lossy
+Because it is destructive it must be *late*, you delay an irreversible lossy
 step as long as possible. Because it is late it is *large*. Because it is large
 it is a cliff. Every property we want is blocked by the irreversibility.
 
@@ -45,16 +45,16 @@ the system recorded first-hand and then discarded.
 
 Meanwhile the economizer records those facts exactly:
 
-- `coord_closet` — uuids, shas, paths, refs, handles extracted **verbatim before
+- `coord_closet`: uuids, shas, paths, refs, handles extracted **verbatim before
   truncation**, stamped `{lane, turn, tool_call, result}`, secrets redacted at
-  render, and — critically — `COORD_EVICT_FAIL` rather than silent loss.
-- `fold_register` — each assistant turn classified settled (verdict/hazard) vs
+  render, and, critically, `COORD_EVICT_FAIL` rather than silent loss.
+- `fold_register`: each assistant turn classified settled (verdict/hazard) vs
   transient (in-progress/executing/blocked), from the agent's own tagging.
-- `task_rail` — the plan as a locked state machine with per-step state and
+- `task_rail`: the plan as a locked state machine with per-step state and
   evidence, explicitly designed to live *outside* the prompt.
-- `episode_seal` — file inventory plus conclusion, with a file-touch auto-recall
+- `episode_seal`: file inventory plus conclusion, with a file-touch auto-recall
   predicate.
-- `fold_recall` — a page table of evicted coordinates with a residency TTL and a
+- `fold_recall`: a page table of evicted coordinates with a residency TTL and a
   refetch path.
 
 `session_compact` consumes **none** of it. Verified: no reference to closet,
@@ -69,7 +69,7 @@ compactor shipped as separate slices and were never joined.
 | B1 | `task_rail` has zero live callers; DB1 target exists, unbound | `src/db1/checkpoints.c:30` has `session_id` + `snapshot` |
 | B2 | `episode_seal` has zero live callers; DB2 target exists, unbound | `memory_units`, `unit_type="episode_seal"` |
 | B3 | `fold_recall` has zero live callers, default-off, resolver never wired | `fold_recall.h` "Default-off" |
-| C | `reduce_state_t` is a stack local — no record survives the run | `src/posix/agent_runtime.c:600` |
+| C | `reduce_state_t` is a stack local: no record survives the run | `src/posix/agent_runtime.c:600` |
 | D1 | `gw_mutate_upstream_ok` refuses Anthropic egress unconditionally | `gateway_mutate_wire.c:52` |
 | D2 | Gateway session key is per-identity, not per-conversation | `msg_session_disable.h:33` |
 | D3 | Gateway is compress-only, fold deferred | `gateway_mutate_wire.c:113` |
@@ -82,7 +82,7 @@ and it needs no new recording to start.
 
 ## Slices
 
-### S0 — Settle the unverified premise (E)
+### S0: Settle the unverified premise (E)
 
 Run a long Codex session through the gateway with mutation enabled and observe
 whether its compaction fires at the usual point. The relay is confirmed
@@ -94,17 +94,17 @@ trusts that number or maintains its own local estimate.
 Decisive and cheap. If clients estimate locally, all of D is dead and slices 1-3
 stand on their own merits. **Nothing in D may be built before this returns.**
 
-### S1 — Compact from the record, not the transcript (A)
+### S1: Compact from the record, not the transcript (A)
 
 Rewrite the summary builder to consume closet coordinates, register
 classifications and rail steps. Delete the prose-scraping heuristics as they are
 superseded, not alongside them.
 
 Highest value, no new recording required, and it is the change that makes the
-summary deterministic-from-record. Behaviour change only — no refactor in the
+summary deterministic-from-record. Behaviour change only, no refactor in the
 same commit.
 
-### S2 — Turn the recorders on (B1, B2, B3, C)
+### S2: Turn the recorders on (B1, B2, B3, C)
 
 - Bind `task_rail` to DB1 `checkpoints.snapshot` keyed by `session_id`.
 - Bind `episode_seal` to DB2 `memory_units`.
@@ -114,7 +114,7 @@ same commit.
 C is the one that makes the record survive a session boundary, which is what
 turns a per-run structure into an actual memory hierarchy.
 
-### S3 — Continuous paging (the goal)
+### S3: Continuous paging (the goal)
 
 With recall reliable, move eviction off the 80% trigger and onto a continuous
 low-water/high-water discipline: evict steadily from the moment the transcript
@@ -125,14 +125,14 @@ eviction stays prompt-cache-warm rather than thrashing it.
 This is where "the user never feels a compaction" is actually delivered: there
 is no cliff because occupancy never approaches one.
 
-### S4 — Gateway (D1, D2, D3) — **conditional on S0**
+### S4: Gateway (D1, D2, D3), **conditional on S0**
 
 Make the Anthropic refusal conditional on pressure rather than absolute: the
 cache argument that justifies it inverts once the client is about to compact,
 because the client's own compaction rewrites the prefix anyway. Key sessions by
 message-prefix digest rather than credential. Enable fold at the wire.
 
-### S5 — Measurement (F)
+### S5: Measurement (F)
 
 Run the outstanding baseline from `compaction-quality-baseline.md` and wire
 `rounds-to-resume` (`session_compact_result_t.readonly_sigs`) to consume it as a
@@ -146,7 +146,7 @@ regression gate on S1 and S3.
 - **S3 recall thrash.** Aggressive eviction with an unreliable resolver degrades
   worse than a late cliff. S3 is gated on S2's resolver being wired and on the
   residency TTL demonstrably preventing re-surfacing loops.
-- **S0 kills S4.** Accepted and by design — that is why S0 is first and why S4 is
+- **S0 kills S4.** Accepted and by design. That is why S0 is first and why S4 is
   last.
 
 ## Acceptance

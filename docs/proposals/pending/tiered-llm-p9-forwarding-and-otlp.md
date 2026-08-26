@@ -1,6 +1,6 @@
 # P9 residual: telemetry forwarding and OTLP
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`tiered-llm-p9-telemetry-tiering.md`](../done/tiered-llm-p9-telemetry-tiering.md)
 

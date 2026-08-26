@@ -1,4 +1,4 @@
-# P6c-egress transport plan — strict Bedrock HTTPS + CT260 composition
+# P6c-egress transport plan: strict Bedrock HTTPS + CT260 composition
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current

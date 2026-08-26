@@ -17,7 +17,7 @@ prefixes depress BOTH models' absolute scores, but Qwen3 still wins (+13pt mine,
 +19pt published). On text, Qwen3-0.6B ties nomic on SciFact/NFCorpus and wins the
 rest (per published: FiQA +9, SCIDOCS +7, ArguAna +19, TREC-COVID +27).
 
-## Code retrieval (published MTEB nDCG@10) -- the domain aimee embeds code in
+## Code retrieval (published MTEB nDCG@10): the domain aimee embeds code in
 | task | nomic | Qwen3-0.6B | Qwen3-4B | Qwen3-8B |
 |---|---|---|---|---|
 | CodeSearchNet        | 0.856 | 0.943 | 0.960 | 0.966 |

@@ -1,9 +1,9 @@
 # Proposal: the server serves its own thin client
 
-- **State:** PENDING — design only, no code in this PR. Two of its three
+- **State:** PENDING. Design only, no code in this PR. Two of its three
   preconditions already landed (see *Where this starts from*); the third
   (release signing) does not exist yet and gates the final stage.
-- **Owns:** the distribution edge for the thin-client **binary** — how a client
+- **Owns:** the distribution edge for the thin-client **binary**. How a client
   obtains a build matched to the Runtime it talks to, and the trust model under
   which a client may replace its own executable.
 - **Consumes (does not redefine):** the client↔Runtime registration edge and its
@@ -24,7 +24,7 @@ that would fix the drift already sits inside the server image and is never
 offered to the client that needs it.
 
 This is not a hypothetical. On 2026-08-08 a client seven days behind its server
-rendered nothing at all for commands whose printers existed only server-side —
+rendered nothing at all for commands whose printers existed only server-side,
 `exit 0`, no output, no signal. It was diagnosed first as a vault gate bug and
 then as a remote read-scoping gap before anyone compared build dates. The whole
 time, `/usr/local/bin/aimee` **inside the server container** was the exact
@@ -36,15 +36,15 @@ Three things must be true for "the server keeps its clients current" to work.
 Two are already true:
 
 1. **Detection.** The drift check orders a non-semver `testing-<sha>` pair by
-   `commit_time` from `server.info`, and says so at session start. *(Landed —
-   PR #2417.)*
+   `commit_time` from `server.info`, and says so at session start. *(Landed,
+PR #2417.)*
 2. **Obtainability.** `publish-testing.yml` publishes a Linux thin client on the
    same cadence as the images, so a current build exists between releases.
-   *(Landed — PR #2418.)*
+   *(Landed, PR #2418.)*
 3. **Delivery + trust.** The server hands over a matched binary and the client
    may install it. **This proposal.**
 
-The server image already carries a matched client — `Dockerfile.server` installs
+The server image already carries a matched client, `Dockerfile.server` installs
 it at `/usr/local/bin/aimee`, stamped with the same version as the server. No
 new build pipeline is required for the common case; the artifact exists.
 
@@ -55,7 +55,7 @@ design.** Today a compromised Runtime can serve wrong data and read whatever the
 vault gates let it read. Under naive auto-replacement it additionally owns every
 machine that runs `aimee`, as that user, silently, on the next invocation. That
 is a categorical escalation of what compromising a Runtime is worth, and it is
-the whole design problem — the file transfer is trivial.
+the whole design problem. The file transfer is trivial.
 
 Therefore:
 
@@ -63,9 +63,9 @@ Therefore:
 
 The bundle is signed in CI with a release key the Runtime never holds; the
 client verifies against a public key compiled into itself. A compromised server
-can then serve only genuine, signed builds — it can withhold or delay an update,
+can then serve only genuine, signed builds. It can withhold or delay an update,
 which is a denial-of-service, not a takeover. Signing does not exist today
-(`cmd_self_update.c` verifies a SHA-256 published by the GitHub API — keyless,
+(`cmd_self_update.c` verifies a SHA-256 published by the GitHub API, keyless,
 and explicitly noted there as pending a key-based signature), so **stage P3 is
 blocked on it and must not ship without it.**
 
@@ -87,10 +87,10 @@ blocked on it and must not ship without it.**
    invoking user, print the instruction and stop. A self-update that prompts for
    privilege is a phishing lesson taught by our own tooling.
 5. **Staged, and the stages are separable:**
-   - **P2 — `aimee self-update --from-server`.** Explicit, user-invoked, verified
+   - **P2, `aimee self-update --from-server`.** Explicit, user-invoked, verified
      against the manifest. No ambient authority; the user chose the moment. This
      is shippable before signing exists, because the human is the gate.
-   - **P3 — automatic under `update_mode: apply`.** Same path, no prompt.
+   - **P3, automatic under `update_mode: apply`.** Same path, no prompt.
      **Requires signing.** Opt-in, never the default.
 6. **Platform honesty.** The image ships a Linux client of the image's own
    architecture. The manifest advertises only what is actually present; a macOS
@@ -117,7 +117,7 @@ blocked on it and must not ship without it.**
    event with an overlap window.
 3. **Does P2 want the manifest at all, or just `server.info`?** `server.info`
    already reports version and `commit_time`. The manifest earns its place only
-   when there is more than one artifact or a signature to carry — which is
+   when there is more than one artifact or a signature to carry, which is
    exactly P3. P2 may be able to skip it.
 4. **Is `:testing` a legitimate update source?** A floating channel that moves on
    every merge is not obviously something a client should chase automatically,
@@ -130,6 +130,6 @@ blocked on it and must not ship without it.**
   shown to refuse each of: a bad signature, a bad digest, an older
   `commit_time`, and a non-writable install path.
 - The refusal paths are exercised by tests that fail when the corresponding check
-  is removed — mutation-verified, not merely present.
+  is removed, mutation-verified, not merely present.
 - A macOS or Windows client against a Linux server image receives an explicit
   "no artifact for your platform" and a pointer to the release channel.

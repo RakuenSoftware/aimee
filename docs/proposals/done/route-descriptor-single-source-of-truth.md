@@ -8,7 +8,7 @@
 > specification for work already delivered. Remaining work is tracked in
 > [`route-descriptor-single-source-of-truth-residual.md`](../pending/route-descriptor-single-source-of-truth-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   parallel hand-maintained `/v1` route/dispatch tables into one descriptor that
   the others are generated from. Builds on the already-landed declarative route
   table (`server_http_routes` `g_v1_routes[]`, WP0.2 / #2531) and the two drift
@@ -28,12 +28,12 @@
 ## Thesis
 
 Adding or changing **one** `/v1` route today requires hand-editing the same fact
-— a method name, its HTTP verb+path, timeout, output shape — into **eight to nine
+(a method name, its HTTP verb+path, timeout, output shape) into **eight to nine
 parallel tables across six files plus an OpenAPI spec**, all keyed on the same
 magic method string. The project already knows this hurts: it built **two** CI
 drift-checkers whose entire job is to catch the tables falling out of sync, and
-`docs/v1-op-parity-buildout.md` documents the per-route ritual ("1. One table
-row. 2. One OpenAPI path…"). This proposal makes one table the source of truth
+`docs/v1-op-parity-buildout.md` documents the per-route ritual ("1; one table
+row. 2. One OpenAPI path…"); this proposal makes one table the source of truth
 and *generates* the rest, turning "9 edits + 2 tripwires" into "1 row."
 
 ## The current sync surface (verified against `testing` @ this branch's base)
@@ -46,11 +46,11 @@ One logical route is hand-registered in each of these:
 | 2 | `marshal_request()` `strcmp` chain (method → marshaler) | `src/cli_v1_routes_b.c:1182` | **128 branches** | method |
 | 3 | per-method `marshal_*()` functions | `src/cli_v1_routes*.c` | dozens | method |
 | 4 | `pt_print_table[]` (method → human formatter) | `src/cli_v1_routes_d.c:27` | ~122 rows | method |
-| 5 | `CLI_V1_GEN_ROUTES[]` (method → verb+path) — **already generated** | `src/cli_v1_routes_d.c:552` | ~205 rows | method |
+| 5 | `CLI_V1_GEN_ROUTES[]` (method → verb+path): **already generated** | `src/cli_v1_routes_d.c:552` | ~205 rows | method |
 | 6 | `g_v1_routes[]` (verb+path → method → handler) | `src/server/server_http_routes.c:1351` | ~323 rows | path+method |
 | 7 | `server_dispatch_table[]` (method → handler fn) | `src/server/server.c:1378` | ~230 rows | method |
 | 8 | OpenAPI contract | `api/openapi-server-v1.yaml` | ~301 paths | path |
-| 9 | Top-level command routing + help text | `src/cli_main.c` | — | cmd |
+| 9 | Top-level command routing + help text | `src/cli_main.c` | n/a | cmd |
 
 The two drift-guards are the load-bearing evidence that this is a real, recurring
 cost, not a hypothetical: `scripts/check-cli-v1-routes.py` and
@@ -62,7 +62,7 @@ Crucially, **#5 is already the pattern this proposal generalizes.**
 `@@GEN-CLI-V1-ROUTES BEGIN/END` markers (`src/cli_v1_routes_d.c:536–767`),
 emitted from `g_v1_routes[]` (#6) by `scripts/gen-cli-v1-routes.py`, and
 `check-cli-v1-routes.py` *regenerates the block and diffs it against what is
-committed* — it is already a generator self-test, not a manual tripwire. So one
+committed*. It is already a generator self-test, not a manual tripwire. So one
 derived table (#5) is generated from one source (#6) today; this proposal is the
 same move applied to the whole set, with the source raised to a dedicated
 descriptor instead of #6.
@@ -71,8 +71,8 @@ descriptor instead of #6.
 
 ### 1. One descriptor per route
 
-Define a single array of route descriptors — a `.def`/X-macro list or a small
-declarative table compiled at build time — carrying every fact the nine tables
+Define a single array of route descriptors, a `.def`/X-macro list or a small
+declarative table compiled at build time, carrying every fact the nine tables
 today each hold a slice of:
 
 ```
@@ -82,9 +82,9 @@ today each hold a slice of:
 
 ### 2. Generate, don't hand-sync
 
-A build-time generator — the same shape as the **already-working**
+A build-time generator. The same shape as the **already-working**
 `scripts/gen-cli-v1-routes.py`, which today emits `CLI_V1_GEN_ROUTES[]` (#5)
-from `g_v1_routes[]` (#6) between in-file markers — emits from that descriptor:
+from `g_v1_routes[]` (#6) between in-file markers, emits from that descriptor:
 
 - the CLI `rpc_routes[]` (#1) and the `marshal_request` dispatch (#2, as a
   keyed lookup rather than a 128-way `strcmp` chain),
@@ -92,8 +92,7 @@ from `g_v1_routes[]` (#6) between in-file markers — emits from that descriptor
 - the server `g_v1_routes[]` (#6) and `server_dispatch_table[]` (#7),
 - the OpenAPI paths (#8), reconciled with the existing generator.
 
-The per-method `marshal_*` / `print_*` *function bodies* (#3) stay hand-written —
-they encode genuine per-method logic — but they are *referenced* by the
+The per-method `marshal_*` / `print_*` *function bodies* (#3) stay hand-written (they encode genuine per-method logic) but they are *referenced* by the
 descriptor, so a method with no special marshaling defaults to `marshal_no_args`
 and needs no row at all.
 
@@ -102,7 +101,7 @@ and needs no row at all.
 `check-cli-v1-routes.py` **already** works this way for #5 (regenerate-and-diff
 against the committed block); the proposal generalizes that stance so
 `check-api-conformance-server.py` and the other tables' checks likewise verify
-generated-output-matches-descriptor — protecting the generator, not policing a
+generated-output-matches-descriptor, protecting the generator, not policing a
 human's manual sync.
 
 ## Incremental migration path (each step ships green behind the existing gates)
@@ -114,7 +113,7 @@ byte-identical to the hand-maintained one it replaces, and the checker proves it
 1. **Descriptor + generator, generating nothing yet.** Land the descriptor
    populated from the current tables and a generator that emits each table to a
    `*.gen` file. A new check asserts every `*.gen` equals the checked-in
-   hand-written table — zero behavior change, pure proof the descriptor is
+   hand-written table, zero behavior change, pure proof the descriptor is
    faithful.
 2. **Repoint the existing generator + generate the other CLI tables.** #5 is
    already generated from #6 by `gen-cli-v1-routes.py`; repoint it to read the
@@ -122,7 +121,7 @@ byte-identical to the hand-maintained one it replaces, and the checker proves it
    generator. Lowest risk (CLI-only, and #5's machinery already exists).
 3. **Flip the CLI dispatch** (#1/#2), collapsing the 128-branch `strcmp` into a
    generated keyed lookup.
-4. **Flip the server tables** (#6/#7) — the highest blast radius, done last,
+4. **Flip the server tables** (#6/#7), the highest blast radius, done last,
    with `server-api-conformance-check` + `v1-method-coverage-check` as the net.
    Note the data-flow inversion: today #6 is the *source* that #5 is generated
    from, so this step is where #6 stops being the root and becomes a generated
@@ -133,7 +132,7 @@ byte-identical to the hand-maintained one it replaces, and the checker proves it
    *schemas* the compact descriptor row does not hold. The realistic scope here
    is generating the path/verb/method skeleton from the descriptor and keeping
    the schema bodies in their own source, reconciled by the existing conformance
-   check — not folding OpenAPI wholesale into the descriptor.
+   check, not folding OpenAPI wholesale into the descriptor.
 
 Any step can stop and ship; the descriptor and the hand tables coexist until
 each is flipped.

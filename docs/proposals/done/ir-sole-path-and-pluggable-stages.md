@@ -1,4 +1,4 @@
-# Aimee IR as the sole path — finish the response half, retire raw-passthrough, and make modules pluggable
+# Aimee IR as the sole path: finish the response half, retire raw-passthrough, and make modules pluggable
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -8,7 +8,7 @@
 > specification for work already delivered. Remaining work is tracked in
 > [`ir-sole-path-residual.md`](../pending/ir-sole-path-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   (completed) canonical-IR proposal, which made the IR the default request-build path. This
   proposal makes the IR the sole core codepath in both directions, retires the legacy translators
   and the raw-passthrough bypasses, and adds a pluggable stage registry so modules (memory,
@@ -23,7 +23,7 @@
 Two codepaths still run in shadow. The canonical IR is the default REQUEST-build path (legacy
 demoted to `if (!prov_body) build_provider_body(...)` fallback), but the live system also still
 runs the legacy translators AND keeps a raw-passthrough bypass that skips the core. Two paths in
-shadow is the most expensive steady state — double maintenance and a whole class of divergence
+shadow is the most expensive steady state, double maintenance and a whole class of divergence
 bugs that only appear on one path.
 
 A live, real streaming bug sits at the un-migrated REQUEST-build seam today:
@@ -31,27 +31,27 @@ A live, real streaming bug sits at the un-migrated REQUEST-build seam today:
 - Buffered-replay sends the provider body with `stream:true`. Both legacy
   `build_provider_body(...,1)` and the IR build via `openai_backend_build` faithfully carry
   `stream:true`.
-- The non-responses branch then does `cJSON_Parse(buf_resp)` — the provider was asked to STREAM and
+- The non-responses branch then does `cJSON_Parse(buf_resp)`. The provider was asked to STREAM and
   the reply is parsed as a single JSON object → `primary provider returned an unparseable reply`.
 - Not an IR-vs-legacy difference; both paths hit it. Both are wrong at REQUEST-build.
-- Correct: `stream = responses_wire ? 1 : (buffered_replay ? 0 : 1)` — responses/codex genuinely
+- Correct: `stream = responses_wire ? 1 : (buffered_replay ? 0 : 1)`, responses/codex genuinely
   needs `stream:true` because its replay parses raw SSE; the buffered-replay non-responses wire
   must carry `stream:false`. Both signals are knowable at REQUEST-build time:
   `responses_wire` from the URL, and `buffered_replay = gateway_prevent_subagents_enabled() ||
   responses_wire`.
-- The seam being hand-rolled per driver is why this class exists — fold the flag into the IR
+- The seam being hand-rolled per driver is why this class exists, fold the flag into the IR
   build and the seam stops being bespoke. This is a live bug and ships on its own before the
   larger response-parse work.
 
-## Current state — the trace (all file:line verified on branch `claude/forge-default-on`)
+## Current state: the trace (all file:line verified on branch `claude/forge-default-on`)
 
 REQUEST build (client -> provider): DONE, default-ON, legacy demoted to fallback-only.
 - `aimee_ir_path_enabled()` returns 1 by default (`src/server/aimee_ir_serve.c:22`; `AIMEE_IR_PATH=0` forces legacy).
 - Four request-build seams route through the IR with `if (!prov_body) build_provider_body(...)` fallback:
-  - `src/server/anthropic_http.c:384` — buffered `/v1/messages`
-  - `src/server/anthropic_http.c:888` — streaming `/v1/messages`
-  - `src/server/openai_chat.c:900` — `aimee_ir_build_from_chat` (agent chat path)
-  - `src/server/openai_chat.c:1106` — `aimee_ir_responses_to_chat` (`/v1/responses` client ingress)
+  - `src/server/anthropic_http.c:384`: buffered `/v1/messages`
+  - `src/server/anthropic_http.c:888`: streaming `/v1/messages`
+  - `src/server/openai_chat.c:900`: `aimee_ir_build_from_chat` (agent chat path)
+  - `src/server/openai_chat.c:1106`: `aimee_ir_responses_to_chat` (`/v1/responses` client ingress)
 
 RESPONSE parse (provider -> client): NOT on the IR at all. This is the real gap.
 - `openai_backend_parse` / `anthropic_backend_parse` / `responses_backend_parse` are defined and
@@ -66,7 +66,7 @@ Incremental streaming relay (provider SSE -> client SSE): built but DARK.
   incremental non-codex OpenAI-chat relay. (Codex/delegate boxes take buffered-replay, which
   bypasses this relay.)
 
-Raw-passthrough bypasses (the thing to eliminate — user directive: eliminate raw-passthrough):
+Raw-passthrough bypasses (the thing to eliminate, user directive: eliminate raw-passthrough):
 1. Anthropic->Anthropic parity build: both build sites branch
    `if (driver_is_anthropic(driver)) build_anthropic_provider_body(req, ...)` which duplicates
    `req` directly and NEVER enters the IR. This is the same-protocol raw fast-path the
@@ -81,17 +81,17 @@ Coupling to cut:
   legacy-fallback args. Dead work per IR request, and a dependency that blocks deleting
   `build_provider_body`.
 
-Observability — current state (mixed; see Slices 1 + 2 for the gap closure):
+Observability, current state (mixed; see Slices 1 + 2 for the gap closure):
 - REQUEST-side parity counters ARE observable in the field. `src/server/server_state.c:1454-1464`
   dumps every metric via `aimee_ir_metric_total(...)` under an `ir` object on
   `GET /v1/dashboard/metrics` (`src/server/server_http_routes.c:1576`). The request-side deletion
-  gate — `AIMEE_IR_M_BODY_MISMATCH == 0` and `AIMEE_IR_M_LEGACY_FALLBACK == 0` over a stated
-  window — is measurable today.
+  gate, `AIMEE_IR_M_BODY_MISMATCH == 0` and `AIMEE_IR_M_LEGACY_FALLBACK == 0` over a stated
+  window, is measurable today.
 - RESPONSE-side shadow is NOT wired live. `AIMEE_IR_M_RESP_MATCH` / `AIMEE_IR_M_RESP_MISMATCH`
   are only incremented inside `src/server/aimee_ir_shadow.c:155-190`; there is NO live caller
   of a response-shadow observe. Only `aimee_ir_shadow_observe_request` is wired
   (`src/server/anthropic_http.c:424` and `:801`). So response-parse parity is currently
-  UNMEASURABLE on live traffic — and that is the metric that gates Slice 1 (response-parse) and
+  UNMEASURABLE on live traffic, and that is the metric that gates Slice 1 (response-parse) and
   the response-translator deletion.
 - `aimee_ir_metric_get` (per-WIRE granularity, `src/headers/aimee_ir_metrics.h:29`) still has no
   non-test caller; the dashboard uses `aimee_ir_metric_total` (summed across wires). Per-wire
@@ -102,7 +102,7 @@ Observability — current state (mixed; see Slices 1 + 2 for the gap closure):
 The IR (`aimee_request_t` / `aimee_response_t`, `src/headers/aimee_ir.h`) becomes the SOLE core
 codepath in BOTH directions. No client-shape->provider-shape translation, and no same-protocol
 raw-passthrough that skips the core. Same-protocol correctness is enforced by committing to IR
-byte-fidelity — which shadow mode already measures via `ir_rebuild_mismatch` — rather than by
+byte-fidelity (which shadow mode already measures via `ir_rebuild_mismatch`) rather than by
 keeping a bypass.
 
 **Roundtable-decision framing.** Dropping the raw fast-path trades a small same-protocol
@@ -110,7 +110,7 @@ re-serialize cost + the cJSON-double precision caveat for a single codepath. Sta
 let the table rule. Until the table ratifies, the raw fast-path remains in tree as fallback
 behind `AIMEE_IR_PATH=0` (mirrors the parent's rollout discipline).
 
-## Pluggable module stages (NEW — first-class requirement)
+## Pluggable module stages (NEW: first-class requirement)
 
 Cross-cutting features become STAGES over the IR that can be added or removed from the path at
 will: memory injection, delegates, workflows, guardrails. A stage is a pure
@@ -126,7 +126,7 @@ will: memory injection, delegates, workflows, guardrails. A stage is a pure
 ### Design decisions (roundtable-ratified)
 
 - **Trust boundary at backend-build, not at stage chain.** The opaque tool id / tool name rule
-  (per `aimee_ir.h`) is enforced at the BACKEND-BUILD boundary — the last step before the IR
+  (per `aimee_ir.h`) is enforced at the BACKEND-BUILD boundary. The last step before the IR
   leaves the proxy. All stages see and may stage opaque ids/names freely; a misordered stage
   cannot leak raw client tool ids into provider JSON because the backend adapter re-validates /
   re-emits opaque at the seam. This is not negotiable per stage.
@@ -146,20 +146,20 @@ will: memory injection, delegates, workflows, guardrails. A stage is a pure
 Open design points for the table:
 - Stage ordering semantics and guarantees (strict ordering, allow-list per stage).
 - Whether third-party/plugin stages are in scope or core-only for v1.
-- Failure semantics: a stage that errors — fail-closed vs skip.
+- Failure semantics: a stage that errors, fail-closed vs skip.
 - How stage toggles interact with the shadow/parity gate (a toggled-off stage must not be
   observable in parity metrics; otherwise its absence is masked).
 
-## Slices (each: pure cores + tests first, then wire, roundtable before PR — mirror the parent's discipline)
+## Slices (each: pure cores + tests first, then wire, roundtable before PR: mirror the parent's discipline)
 
 1. **Fix the buffered-replay stream flag at request-build.** Compute
    `stream = responses_wire ? 1 : (buffered_replay ? 0 : 1)` inside the IR build path
    (`openai_backend_build`, reached by the already-IR-routed request seams at
    `src/server/openai_chat.c:900`, `:1106`, and `src/server/anthropic_http.c:384`, `:888`),
    where `buffered_replay = gateway_prevent_subagents_enabled() || responses_wire`. The
-   Anthropic-parity build is NOT touched here — it does not route through the IR until Slice 5,
+   Anthropic-parity build is NOT touched here. It does not route through the IR until Slice 5,
    which carries this same stream-flag rule to that path when it lands.
-   Standalone slice — this is a live bug, independently shippable, and must not wait on the
+   Standalone slice. This is a live bug, independently shippable, and must not wait on the
    larger response-parse migration. **Slice 1 owns the stream-flag deterministic tests for
    BOTH wires:** (a) non-responses wire + `gateway_prevent_subagents_enabled() == 1` carries
    `stream:false`; (b) responses / codex wire carries `stream:true`. Slice 3 only asserts
@@ -170,13 +170,13 @@ Open design points for the table:
    `aimee_ir_shadow_observe_response(...)` next to the existing
    `aimee_ir_shadow_observe_request` sites so `AIMEE_IR_M_RESP_MATCH` /
    `AIMEE_IR_M_RESP_MISMATCH` are incremented on real traffic. Surface already handled by the
-   existing `ir` dashboard block (`src/server/server_state.c:1454-1464`) — do NOT reimplement
+   existing `ir` dashboard block (`src/server/server_state.c:1454-1464`). Do NOT reimplement
    request-side observability, which is already live. Unblocks evidence-gating for Slice 1.
 
 3. **Response-parse through the IR.** Wire `*_backend_parse` into the live response path,
    replacing `driver->parse_response -> parsed_response_t -> emit_message_as_sse` with
    `provider-JSON -> IR -> emit`. PHYSICAL DELETION of the codex `raw_responses` branch happens
-   here and ONLY here — this slice owns the response-parse seam where codex SSE becomes IR.
+   here and ONLY here. This slice owns the response-parse seam where codex SSE becomes IR.
    **Done-gate for the codex bypass removal:** Slice 1's codex-replay deterministic test
    passes (stream flag set correctly on the responses wire), `AIMEE_IR_M_RESP_MISMATCH == 0`
    over a stated window (e.g. 24h / N requests) during the shadow run, and a deterministic

@@ -57,10 +57,10 @@ also has no production caller in this slice.
 |---|---|---|---|---|
 | `provision` | idempotent provision/reconcile | atomic envelope + ref checkpoint to `staged` | `failed(provision)` | remain `provision`, reconcile by operation key |
 | `staged` | audited staged-key probe | `probed` | `failed(probe)` | remain `staged`, repeat idempotent probe |
-| `probed` | none; core claims activation | `activating` | — | retry core claim |
-| `activating` | signed HWM read/CAS | `activated` | — | resume from verified anchor |
+| `probed` | none; core claims activation | `activating` | n/a | retry core claim |
+| `activating` | signed HWM read/CAS | `activated` | n/a | resume from verified anchor |
 | `activated` | idempotent revoke/query-status | `revoked` with receipt | remain `activated` | remain `activated`, reconcile by operation key |
-| `revoked` | no external call | `retired` | — | retry local transition |
+| `revoked` | no external call | `retired` | n/a | retry local transition |
 | `failed` | explicit reconcile + anchor check | audited `retired` and inert-row purge | remain `failed` | remain `failed` |
 
 Claims never create another active rotation; the existing unique active-slot

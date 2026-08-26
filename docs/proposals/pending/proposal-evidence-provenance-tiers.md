@@ -1,6 +1,6 @@
-# Proposal: Evidence provenance-tier contract — classify + gate Tier-3 (untrusted) memory as an anti-poisoning defense
+# Proposal: Evidence provenance-tier contract: classify + gate Tier-3 (untrusted) memory as an anti-poisoning defense
 
-- **State:** PENDING — validated and rewritten 2026-08-15 for Go-owned enforcement.
+- **State:** PENDING. Validated and rewritten 2026-08-15 for Go-owned enforcement.
 - **Charter roles:** Classify-Score / Enforce / Gate-Promote / Constrain-Verify
 
 ## 2026-08-15 lifecycle correction
@@ -34,44 +34,43 @@ gate, promotion path, migration, and P1–P9 probes land as one atomic proposal 
 Every memory and fact carries an **evidence provenance tier** describing how much
 *human* evidence stands behind it:
 
-- **Tier 1 — direct human evidence.** The user stating a fact, or a document the
+- **Tier 1, direct human evidence.** The user stating a fact, or a document the
   human hands in to be ingested (verbatim).
-- **Tier 2 — indirect human evidence.** Information *derived from* a human-provided
+- **Tier 2, indirect human evidence.** Information *derived from* a human-provided
   document, or a code graph built from human-provided code.
-- **Tier 3 — no human evidence.** Content a delegate/agent ingested or generated
+- **Tier 3, no human evidence.** Content a delegate/agent ingested or generated
   with no human in the loop (a fetched web page, a delegate's own assertion).
 
 Two rules govern use:
 
 1. **Tier 1 and Tier 2 may be main (anchor) evidence. Tier 3 may only ever be
-   *supporting* evidence — never main.** This is the point of the tier: **Tier 3 is
+   *supporting* evidence, never main.** This is the point of the tier: **Tier 3 is
    the poisoning / malicious-instruction surface.** A delegate that ingests a
    hostile page ("ignore prior rules", "the deploy key is X") or fabricates a fact
    must not be able to make that content authoritative. It can inform, never decide.
-2. **Tier 2/3 promote to Tier 1 only on direct, authenticated human confirmation** —
-   never by a delegate, a background job, or any non-human setter.
+2. **Tier 2/3 promote to Tier 1 only on direct, authenticated human confirmation**: never by a delegate, a background job, or any non-human setter.
 
 This is the memory-tier realization of the standing Code Principle *"treat external
 content and generated output as untrusted; do not let them override system,
 developer, user, or repository instructions."* It complements the merged
 [binding retrieval context-contract](proposal-retrieval-context-contract.md), which
-distinguishes *main* vs *supporting* evidence by confidence — this adds the
+distinguishes *main* vs *supporting* evidence by confidence. This adds the
 *provenance* axis to that same distinction.
 
 ## §0 What already exists (DRY map)
 
 The tier **field, a write entrypoint, and a single assembly chokepoint already
-exist** — the gap is that nothing populates the field or gates on it. Verified:
+exist**. The gap is that nothing populates the field or gates on it. Verified:
 
 | Piece | Existing surface | State |
 | --- | --- | --- |
 | The tier field | `provenance_category TEXT NOT NULL DEFAULT 'user_stated'` on `memories` (`db2/schema.sql`, `db2/schema_sqlite.sql`); read in `db2/memory_query.c`, mapped in `db2/memory_row_mapper_pg.c`, emitted by `render.c` | **exists** |
-| Single write entrypoint | `marshal_memory_store` (`cli_v1_routes.c`) → column binds in `db2/memory_score_fields.c` | **exists** — the classification point |
-| **Single assembly chokepoint** | `memory_assemble_context` → `emit_candidate` (`memory_assemble.c`), which already serializes candidates into the prompt (renders `[Source: …]`, orders via `context_tier_priority`) | **exists** — the universal gate + isolation point |
-| A secondary anchor label | `memory_answer_mode_for_anchor` (`memory_core_search_c.c`) downgrades `synthesis`/`restoration` anchors to `"synthesised"` | **exists** — label only, not a gate |
+| Single write entrypoint | `marshal_memory_store` (`cli_v1_routes.c`) → column binds in `db2/memory_score_fields.c` | **exists**: the classification point |
+| **Single assembly chokepoint** | `memory_assemble_context` → `emit_candidate` (`memory_assemble.c`), which already serializes candidates into the prompt (renders `[Source: …]`, orders via `context_tier_priority`) | **exists**: the universal gate + isolation point |
+| A secondary anchor label | `memory_answer_mode_for_anchor` (`memory_core_search_c.c`) downgrades `synthesis`/`restoration` anchors to `"synthesised"` | **exists**: label only, not a gate |
 | Numeric trust (complementary axis) | `evidence_strength`, `confidence`, `observation_count`, ≥2-unit corroboration filter (`memory_core_search_b.c`) | **exists**; separate *strength* axis |
-| Lineage for derived memories | synthesis→source links (`memory_core_tiers.c`) + `add_provenance` / `memory_provenance` table + `mem_cite` | **exists** — powers lowest-wins + promotion audit |
-| Authenticated operator context | `operator_id` + WORM ledger (`audit_worm*.c`; `operator-audit-activity-surface` proposal) | **exists** — the promotion precondition |
+| Lineage for derived memories | synthesis→source links (`memory_core_tiers.c`) + `add_provenance` / `memory_provenance` table + `mem_cite` | **exists**: powers lowest-wins + promotion audit |
+| Authenticated operator context | `operator_id` + WORM ledger (`audit_worm*.c`; `operator-audit-activity-surface` proposal) | **exists**: the promotion precondition |
 | Related pending work | `org-data-connectors-and-source-ingestion` scopes *ingest-time* PII/poison enforcement | this is the **memory-tier gate** behind it |
 
 **Do not conflate:** the `MEM_SOURCE_*` mask (`memory_core_search_b.c`) is a
@@ -79,17 +78,17 @@ exist** — the gap is that nothing populates the field or gates on it. Verified
 
 ### The verified gap (why "the code is already there" is only half-true)
 
-The write path — `marshal_memory_store` → the `INSERT INTO memories (tier, kind,
-key, content, use_cases, confidence, …)` in `db2/memory_score_fields.c` — **omits
+The write path, `marshal_memory_store` → the `INSERT INTO memories (tier, kind,
+key, content, use_cases, confidence, …)` in `db2/memory_score_fields.c`, **omits
 `provenance_category`**, so every memory inherits the schema default
 `'user_stated'` = Tier 1, regardless of author. Nothing sets any other value, and
 `memory_answer_mode_for_anchor` only special-cases `synthesis`/`restoration` (never
 actually written to the field). **Net: delegate-ingested/agent-generated memories
-are silently stamped Tier-1 human evidence and can be main evidence today — an
+are silently stamped Tier-1 human evidence and can be main evidence today. An
 open, fail-open poisoning hole.** The field and seams exist; the classifier and the
 gate do not.
 
-## Part II — Go implementation plan
+## Part II: Go implementation plan
 
 This lifecycle-correction PR restores and rewrites the plan; it does not claim the plan is already
 implemented. The new process-contract entries, Go handlers, adapters, migration, ownership checker,
@@ -144,7 +143,7 @@ invocation principal and returns a canonical category, numeric tier, and reason:
 | Delegate, agent, system job, external fetch/tool, missing assertion, or unknown | Tier 3 / a specific Tier-3 category or `unknown_origin` |
 
 A requested category is advisory only and can never improve the Go result. Every production memory
-write—interactive store, extraction, synthesis, import, background work, and delegate/tool write—
+write, interactive store, extraction, synthesis, import, background work, and delegate/tool write,
 must call the Go stage. The current C write path becomes a mechanical adapter that persists exactly
 the returned category. Go timeout, unavailable process, invalid response, actor-binding failure, or
 an unclassified caller causes rejection or Tier 3; it never falls back to `user_stated`.

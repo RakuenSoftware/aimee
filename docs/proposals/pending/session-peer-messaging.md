@@ -1,19 +1,19 @@
-# Proposal: session peer messaging — one aimee session addresses another
+# Proposal: session peer messaging: one aimee session addresses another
 
-- **State:** DRAFT — 2026-08-23; awaiting roundtable review. P1/P2 implemented in the `aimee`
+- **State:** DRAFT. 2026-08-23; awaiting roundtable review. P1/P2 implemented in the `aimee`
   module (see [Implementation status](#implementation-status)).
 - **Owner:** the **`aimee` module** (principal ref 31, outbound client ref 67), Go, sources under
   `server-go/modules/aimee/`, declared in `src/modules/aimee/module.yaml` and
   `src/modules/process-contracts.json`, documented in [`docs/modules/aimee.md`](../../modules/aimee.md).
-  See [Ownership and language](#ownership-and-language) — this is the section a reviewer should read
+  See [Ownership and language](#ownership-and-language). This is the section a reviewer should read
   first, because two earlier drafts of this proposal got the placement wrong in two different ways.
-- **Owns:** the verb by which one aimee session addresses another as a **peer** — the peer
+- **Owns:** the verb by which one aimee session addresses another as a **peer**. The peer
   message envelope and its provenance, the inbox, cross-owner grants, the three interaction modes
   (send / ask / channel), and the loop-and-deadlock bounds that keep peer traffic from eating the
-  appliance. It solely owns that state. It does **not** own the session directory — `db1`'s
+  appliance. It solely owns that state. It does **not** own the session directory, `db1`'s
   `server_sessions` already does, and a second directory would mean two tables disagreeing about
   which sessions exist.
-- **Consumes (does not modify):** [`docs/dev/GO_REWRITE.md`](../../dev/GO_REWRITE.md) — the
+- **Consumes (does not modify):** [`docs/dev/GO_REWRITE.md`](../../dev/GO_REWRITE.md). The
   language-ownership decision and its non-negotiable contracts; the unified-presence registry
   (`src/headers/presence.h`, still C-owned) for turn arbitration, attachments, and the
   presence-event stream, **read only**, over `/v1`; the module event bus and its governance/audit
@@ -33,7 +33,7 @@ Every inter-agent path in aimee today is **hierarchical and outbound**. A sessio
 An editor attaches *to* a session (`src/modules/protocols/acp/acp_server.c`). In every case the
 relationship is parent→child or client→session.
 
-There is no verb by which a session addresses another session **as a peer** — no way for the model
+There is no verb by which a session addresses another session **as a peer**. No way for the model
 driving session A to say "ask B" where B is a running, independently-owned, equally-capable session
 with its own transcript, workspace, and operator.
 
@@ -50,7 +50,7 @@ proposal adds that, and the verbs over it.
 > architecture. […] a C process […] must not remain authoritative for state, scheduling, artifacts,
 > credentials, policy, or recovery.
 
-Peer messaging introduces new session control-plane state — a directory, inboxes, an authorization
+Peer messaging introduces new session control-plane state, a directory, inboxes, an authorization
 table. Migration step 3 of that document is explicitly "Move the remaining DB1 API families and
 session/auth control plane to Go one family at a time, maintaining one writer per family."
 Implementing peer messaging in C would create exactly the C-owned state that step then has to
@@ -70,13 +70,13 @@ acceptance A2 (a peer message must not preempt or race a turn in flight) needs t
 turn lock. It does not, because **delivery is pull-based**: `Send` appends to an inbox and returns,
 and the receiver drains it at a moment of its own choosing via `Take`. A message is never atomic
 with a turn, so it does not need to live where the turn lock lives. The same property is why `Ask`
-cannot wedge a peer that is busy — it waits on its *own* inbox, never on the peer's turn.
+cannot wedge a peer that is busy. It waits on its *own* inbox, never on the peer's turn.
 
 The only real coupling is the live announcement (D3), which is one outbound call across the seam,
 not a reason to own state in C.
 
 **Contract 1 (no silent truncation) is honored directly.** An over-long message body is
-`ErrTooLong` — an explicit refusal — never a stored prefix. The bounded `Preview` on a live
+`ErrTooLong` (an explicit refusal) never a stored prefix. The bounded `Preview` on a live
 notification is labelled an excerpt and is never the artifact; the inbox always holds the full text.
 
 ## Topology: the Runtime is the sole broker
@@ -95,13 +95,13 @@ Two agents running on different physical hosts converse because both their sessi
 in the same broker. There is no Runtime↔Runtime federation, no peer-to-peer socket between clients,
 and no second message path to govern.
 
-This is what makes the feature safe to build. A direct agent-to-agent channel would be a second,
+The brokering is what makes the feature safe to build. A direct agent-to-agent channel would be a second,
 ungoverned path; brokering through the Runtime keeps capture structural rather than inventoried
 (`event-bus-governance-and-capture.md`).
 
 ## Why "Codex talks to Claude" needs no vendor-specific code
 
-In aimee's model Codex and Claude are not sessions — they are **backends** driven by a session
+In aimee's model Codex and Claude are **backends** driven by a session
 (`cli_codex.c` spawns `codex app-server`; `cli_acp.c` drives an ACP agent; `provider_cli_adapter.c`
 / `AGENT_BACKEND_CLI_STDIO` is the generic spawn path). A peer message is addressed to a *session*
 id, and which backend that session happens to be running is invisible to the sender.
@@ -112,7 +112,7 @@ a third vendor adds a driver, not a peering path.
 
 ## Design
 
-### D1 — Peer identity and the directory
+### D1: Peer identity and the directory
 
 A peer is addressed by **session id**, with a **label** as the ergonomic handle (`"reviewer"`,
 `"codex-main"`). Models pick peers by role; ids stay the wire identity.
@@ -121,18 +121,18 @@ A peer is addressed by **session id**, with a **label** as the ergonomic handle 
 - `SetLabel` / `Lookup` resolve labels. Labels are **unique per owner**: a label already held by a
   different session of the same owner is refused, not silently reassigned, because a directory that
   lies about which session is "reviewer" is worse than one that refuses the collision.
-- `Directory(owner)` lists peers with `label`, `surface`, `inbox`, `idle_ms`, and — enriched
-  through the read-only `Live` hook across the C seam — `attachments`, `turn_in_flight`, `turn_id`,
+- `Directory(owner)` lists peers with `label`, `surface`, `inbox`, `idle_ms`, and, enriched
+  through the read-only `Live` hook across the C seam, `attachments`, `turn_in_flight`, `turn_id`,
   so a caller can avoid addressing a session with nothing live behind it.
 
 **Visibility defaults to same-owner.** A session sees, and may address, peers sharing its owner
-principal. Cross-owner peering requires an explicit grant (D5) and is off by default — on a
+principal. Cross-owner peering requires an explicit grant (D5) and is off by default, on a
 multi-user appliance, agent-to-agent reachability across principals is a capability, not a default.
 
-### D2 — Delivery is pull-based, and the broker is the only path
+### D2: Delivery is pull-based, and the broker is the only path
 
 There is no delivery-target plumbing and no push. `Send` stamps an envelope, appends it to the
-receiver's inbox, and returns. The receiver drains with `Take` when it chooses — canonically at the
+receiver's inbox, and returns. The receiver drains with `Take` when it chooses, canonically at the
 head of its next turn.
 
 This is the load-bearing simplification. It removes the need for peer delivery to interlock with
@@ -146,24 +146,24 @@ Timing, in full:
 - receiver **detached** → its directory entry is kept alive by the non-empty inbox, so the message
   is there when it re-registers. Nothing is silently dropped.
 
-### D3 — Peer traffic is announced live
+### D3: Peer traffic is announced live
 
 Every delivery fires the `Notify` hook with the receiver's session id and the message. The Runtime
 wires it to the receiver's presence-event stream, so **every attached surface sees peer traffic as
-it happens** — the human watching session B sees "session A (reviewer) asked: …" arrive.
+it happens**. The human watching session B sees "session A (reviewer) asked: …" arrive.
 
 Agent-to-agent conversation a human cannot observe in real time is a trust failure; making the
 announcement part of delivery rather than an audit query is what prevents it. The notification
 carries the envelope and a bounded `Preview`; the inbox holds the authoritative text.
 
-### D4 — The verbs
+### D4: The verbs
 
 All share one envelope and one inbox; they differ only in how the caller waits.
 
 #### `Send(from, to, text, opts) → Message`
 
 Fire and forget, as described in D2. `opts.ConversationID` continues an exchange (empty opens one);
-`opts.Hop` is the sender's current hop — 0 for an opener, N+1 when relaying something received at
+`opts.Hop` is the sender's current hop, 0 for an opener, N+1 when relaying something received at
 hop N. A hop at the ceiling is refused with `ErrHopLimit`, which is what terminates a ping-pong.
 
 #### `Ask(ctx, from, to, text) → (reply, askID, error)`
@@ -172,7 +172,7 @@ Blocking, the tool-call mental model. Sends with a fresh correlation id, then wa
 own inbox** for the correlated reply, bounded by `ctx`. It never takes the peer's turn lock.
 
 An ask that would close a cycle in the wait-for graph is **refused immediately** with `ErrCycle`
-(D7). **On timeout the ask degrades to a send** — `ErrTimeout` comes back *with the question's id*,
+(D7). **On timeout the ask degrades to a send**, `ErrTimeout` comes back *with the question's id*,
 the question stays in the peer's inbox, and a late reply lands in the asker's inbox still carrying
 that correlation id. A slow peer costs latency, never a lost answer.
 
@@ -184,7 +184,7 @@ Answers a message taken from the inbox, routing back with its correlation and co
 #### Channels
 
 `ChannelJoin` / `ChannelLeave` / `ChannelSend` / `ChannelMembers` over a named membership set.
-Deliberately **thin — addressing sugar over `Send`**, not a new transport: a channel owns membership
+Deliberately **thin, addressing sugar over `Send`**, not a new transport: a channel owns membership
 and fan-out and nothing else. No history, no ordering guarantee stronger than each recipient's own
 inbox order, and every delivery is an ordinary peer message subject to the same authorization, hop
 ceiling and inbox bound.
@@ -197,22 +197,22 @@ Three properties are load-bearing:
   terminates on the same budget as a direct exchange rather than escaping it.
 - **`ChannelSend` reports PER RECIPIENT, not one status.** The interesting case is partial: a
   five-member channel where two deliveries were denied for want of a cross-owner grant and three
-  landed. A single "sent" would hide precisely what the sender needs to know — the silent
+  landed. A single "sent" would hide precisely what the sender needs to know. The silent
   partial-success shape this design keeps running into. A member whose session has gone is reported
   as `no_peer` rather than skipped, because the sender asked to reach it and did not.
 
 A session whose entry is removed is dropped from its channels, so membership can never name a
-recipient that can never receive — the in-memory form of the orphan-row problem.
+recipient that can never receive, the in-memory form of the orphan-row problem.
 
-### D5 — Provenance, and the rule that a peer is not an operator
+### D5: Provenance, and the rule that a peer is not an operator
 
 Every message carries an immutable envelope: `message_id`, `correlation_id`, `conversation_id`,
 `from_session`, `from_owner`, `from_label`, `origin_session`, `hop`, `is_reply`, `sent_at`.
 
-The envelope is **stamped by the broker, never by the sender** — `from_*` are read out of the
+The envelope is **stamped by the broker, never by the sender**, `from_*` are read out of the
 sender's own directory entry under the lock, so a session cannot forge who it is.
 
-The message is rendered into the receiver's context as a **distinct role** — not a user turn, not
+The message is rendered into the receiver's context as a **distinct role**, not a user turn, not
 tool output. This is the single most important safety property in this proposal:
 
 > **A peer is not an operator.** Peer content carries no authority. It cannot grant, widen, or
@@ -221,7 +221,7 @@ tool output. This is the single most important safety property in this proposal:
 
 Concretely, that forbids: a peer message being treated as an approval; a peer message satisfying a
 confirmation prompt; a peer's owner principal being substituted for the receiver's in any policy
-check. A compromised or merely confused peer can waste a receiver's turn — it cannot escalate it.
+check. A compromised or merely confused peer can waste a receiver's turn. It cannot escalate it.
 
 **Cross-owner grants** are *directed*: `Grant(X, Y)` lets X address Y and says nothing about the
 reverse, which needs its own grant. Recorded, revocable, and surfaced in the audit stream.
@@ -230,24 +230,24 @@ reverse, which needs its own grant. Recorded, revocable, and surfaced in the aud
 charged to. `Send` stamps the sender; `Reply` propagates it, so the origin survives every hop and a
 runaway ping-pong exhausts an allowance someone is watching rather than the appliance's.
 
-### D6 — Governance
+### D6: Governance
 
 Peer sends are **action-class events on the module event bus**, published through the Go bus client
 in `server-go/bus`, so the tap in `event-bus-governance-and-capture.md` captures every one and
 applies a synchronous pre-delivery verdict through `execution-policy`. Because the broker is the
-only path, there is no peer route that bypasses the tap — capture stays structural, and
+only path, there is no peer route that bypasses the tap, capture stays structural, and
 `uncovered_enforcers` stays a mechanical descriptor check rather than a manual sweep.
 
 *Not yet wired; see [Implementation status](#implementation-status). The `Notify` seam is where it
 attaches.*
 
-### D7 — Deadlock and loop control
+### D7: Deadlock and loop control
 
 Three hazards, each with a bound.
 
 **Wait-for cycles.** A blocking `Ask` running on session A's worker while B asks A back would wedge
-both. The broker maintains a **wait-for graph** — each session records the peer its in-flight ask is
-blocked on — and an ask that would close a cycle is **refused immediately** with `ErrCycle`, naming
+both. The broker maintains a **wait-for graph**. Each session records the peer its in-flight ask is
+blocked on, and an ask that would close a cycle is **refused immediately** with `ErrCycle`, naming
 nothing to guess at. Detection walks the edges forward from the target; a walk longer than the
 session count is itself treated as a cycle, because a false positive costs a fallback to `Send`
 while a missed one costs two wedged sessions. The refusal is a normal error result; the asking model
@@ -264,7 +264,7 @@ the same counter.
 `ErrInboxFull` **and counted** (`Dropped`), so a peer that stopped being heard is diagnosable rather
 than invisible.
 
-### D8 — Surfaces
+### D8: Surfaces
 
 **Bus stages** are the module's interface to other modules (`server-go/modules/aimee/module.go`).
 Event kinds derive from the bus formula `4096 + principal_ref*256 + stage` rather than being written
@@ -277,7 +277,7 @@ by hand, so a module's identity and the kinds it answers on cannot drift apart:
 | `peer-grant` | 12035 | `OpGrant`, `OpRevoke`, `OpGrantExists` |
 | `peer-channel` | 12036 | `OpChannelJoin`, `OpChannelLeave`, `OpChannelSend`, `OpChannelMembers` |
 
-The wire is `db1-fields-v2`, reused rather than reinvented — one dialect in the tree beats two.
+The wire is `db1-fields-v2`, reused rather than reinvented, one dialect in the tree beats two.
 
 **No stage blocks, and that is a hard constraint rather than a preference.** The bus caps a module
 at `moduleMaxInFlight` (16) and **refuses** the seventeenth invocation rather than queueing it, with
@@ -286,16 +286,16 @@ for another agent" must therefore never hold a handler slot while it waits: sixt
 would wedge the module, and the next caller's cheap inbox-length check would look like a crash.
 
 So an ask is split. `OpSend` with `expect_reply` performs the cycle check and records the wait-for
-edge — server-side, where that state lives — and returns immediately; the caller waits by polling
+edge (server-side, where that state lives) and returns immediately; the caller waits by polling
 its own inbox. The edge carries an expiry (`DefaultWaitExpiry`) so a caller that dies mid-ask does
 not leave behind an edge that makes every later ask along that path look like a cycle that no longer
 exists.
 
 **Outcomes come at three levels, not two.** `bus.ModuleStatus` says only whether the module could
-understand the question. A *refusal* — hop ceiling, cycle, denied, inbox full — is a **successful**
+understand the question. A *refusal* (hop ceiling, cycle, denied, inbox full) is a **successful**
 invocation carrying a domain status, because collapsing those two would leave the governance tap
 unable to tell "the module is broken" from "the module said no". And a question whose truthful
-answer is negative — does this grant exist, is there mail — answers `StatusOK` with the "no" in a
+answer is negative (does this grant exist, is there mail) answers `StatusOK` with the "no" in a
 field, because a tap seeing a steady rate of non-OK cannot tell working-as-designed from broken
 either.
 
@@ -303,7 +303,7 @@ The test for the last two is whether the caller must do something differently. `
 a refusal; `grant_exists` returning false is an answer. One case sits on the line and is
 deliberately a refusal: reading the inbox of a session that does not exist. "No such session" and
 "no mail" are indistinguishable as a count, and answering `StatusOK` with zero rows is precisely how
-a caller polling for its reply (see above) waits forever on a session that was torn down — the
+a caller polling for its reply (see above) waits forever on a session that was torn down, the
 hang-shaped failure again, one level down.
 
 **HTTP edge** for thin clients, in `server-go/modules/aimee/peer/http.go`:
@@ -323,12 +323,12 @@ surface that authorizes by accident is worse than one that is switched off.
 
 **Status codes carry the distinction a caller acts on:** 403 "you need a grant", 404 "no such peer",
 409 "restructure the conversation" (cycle, label collision), 413 over-long body, 429 "you are over a
-budget" (inbox full, hop ceiling). A timed-out ask is **200 with `status: "timeout"`** — it degraded
+budget" (inbox full, hop ceiling); A timed-out ask is **200 with `status: "timeout"`**; it degraded
 to a send, which is not a failure.
 
 Still to build (P4): the same verbs mirrored as MCP tools on the gateway and over ACP, so an
-**external** Codex or Claude session that reaches aimee over MCP — but is not itself an aimee-hosted
-session — gets peer addressing without any change to that agent.
+**external** Codex or Claude session that reaches aimee over MCP, but is not itself an aimee-hosted
+session, gets peer addressing without any change to that agent.
 
 ## Implementation status
 
@@ -338,8 +338,8 @@ component at principal ref 31 in `src/modules/process-contracts.json`, the inven
 `server-go/cmd/aimee-module/main.go`, and `docs/modules/aimee.md`.
 
 **Peer messaging is reachable and works through the product.** Two aimee
-sessions exchange messages in both directions over `POST /v1/mcp/call` -- the
-request `aimee mcp-serve` posts for a real MCP client -- on a clean container
+sessions exchange messages in both directions over `POST /v1/mcp/call`, the
+request `aimee mcp-serve` posts for a real MCP client, on a clean container
 with the full stack up. `peer_send` and `peer_inbox` are in the MCP tool table,
 folded into one `peer` family (`command=send|inbox`) that sits in
 `MCP_CORE_TOOLS`, so a client asking for the default profile is SHOWN it.
@@ -351,7 +351,7 @@ the whole exercise.** It read: nothing registers a session, no session can
 exist, every session-scoped stage answers `no_directory`, and the `/v1` routes
 are "mounted by nothing at all". All of that was true when written. It stayed on
 the page while three separate things were fixed, which is its own instance of
-the shape this proposal keeps running into -- a record that describes a state
+the shape this proposal keeps running into, a record that describes a state
 nobody has re-checked.
 
 Two defects were found only by building the caller, and neither could have been
@@ -377,26 +377,26 @@ container validation passed over a module no client could reach.
 
 | Slice | Built | Reachable as deployed |
 |---|---|---|
-| The `aimee` module itself — descriptor, contract, inventory, dispatch, docs | **done** | yes — the module runs and serves |
-| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no — no caller sets a label |
-| D2 pull-based delivery, inbox lifetime | **done** | **YES** — `peer command=inbox`, drained once |
-| D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring outstanding | no — nothing to announce, and no subscriber |
-| D4 `Send` / `Reply` | **done** — both; `peer command=send` and `command=reply` | **YES** — a live model replied via the inbox handle, arriving at hop 1 with `is_reply` true |
-| D4 channels | **done** — `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no — no caller joins a channel |
-| D5 envelope, provenance, grants | **done** | **YES** — the envelope is stamped and returned; `from_owner` comes from db1 |
-| D6 bus tap / `execution-policy` verdict | **not started** — attaches at the `Notify` seam | no |
+| The `aimee` module itself: descriptor, contract, inventory, dispatch, docs | **done** | yes: the module runs and serves |
+| D1 labels and lookup | **done** in-module; directory moves to `db1` (see below) | no: no caller sets a label |
+| D2 pull-based delivery, inbox lifetime | **done** | **YES**: `peer command=inbox`, drained once |
+| D3 live announcement (`Notify` seam) | **done** in the registry; Runtime wiring outstanding | no: nothing to announce, and no subscriber |
+| D4 `Send` / `Reply` | **done** (both; `peer command=send` and `command=reply` | **YES**) a live model replied via the inbox handle, arriving at hop 1 with `is_reply` true |
+| D4 channels | **done**: `peer/channel.go`, stage `peer-channel`, per-recipient outcomes | no: no caller joins a channel |
+| D5 envelope, provenance, grants | **done** | **YES**: the envelope is stamped and returned; `from_owner` comes from db1 |
+| D6 bus tap / `execution-policy` verdict | **not started**: attaches at the `Notify` seam | no |
 | D7 cycle refusal, hop budget, inbox bound, wait-edge expiry | **done** | `too_long`/`self` refuse a real caller, and the HOP BUDGET is now reachable: `send` always declares hop 0, so until `reply` existed two sessions answering each other reset the count and `DefaultMaxHops` could never be hit. Cycle refusal still needs an `Ask`. |
-| D8 bus stages | **done** — 12033/12034/12035/12036 | **YES** — both delivery and inbox serve real callers |
-| D8 `/v1` routes | **done** and MOUNTED BY NOTHING — no caller constructs `Registry.Handler` | no — superseded by the MCP surface, which is what callers use |
-| D8 MCP surface | **done** — `peer_send`/`peer_inbox`, `peer` family, on the core floor, `src/peer_client` | **YES** — this is the reachable path |
+| D8 bus stages | **done** (12033/12034/12035/12036 | **YES**) both delivery and inbox serve real callers |
+| D8 `/v1` routes | **done** and MOUNTED BY NOTHING: no caller constructs `Registry.Handler` | no: superseded by the MCP surface, which is what callers use |
+| D8 MCP surface | **done** (`peer_send`/`peer_inbox`, `peer` family, on the core floor, `src/peer_client` | **YES**) this is the reachable path |
 | D8 ACP mirroring | not started (P4) | no |
-| Directory read from `db1` | **written and tested, deliberately not wired** — `DB1Directory`; see below | no — one line away, once db1 runs the Go store |
-| Durable inboxes | **not started** — needs the `postgres` generic storage wire | no |
+| Directory read from `db1` | **written and tested, deliberately not wired**: `DB1Directory`; see below | no: one line away, once db1 runs the Go store |
+| Durable inboxes | **not started**: needs the `postgres` generic storage wire | no |
 
 88 Go tests green under `-race`, plus 55 C checks in `test_peer_client.c` for the
 client that reaches the module. Verified by mutation, not only by passing:
 
-- removing the cycle walk makes both cycle tests fail (they hang to their deadlines — the exact
+- removing the cycle walk makes both cycle tests fail (they hang to their deadlines; the exact
   wedge the check prevents);
 - un-advertising one declared stage fails three independent tests with the precise diagnostic
   "declares `peer-grant` (event 12035) … but never advertises it".
@@ -412,23 +412,23 @@ ten-cell reply with `principal` at index 2. Nothing about the absorption is
 required to call it.
 
 What is missing is the outcome this design rests on. `db1_server_session_get`
-returns 0 only on `SQLITE_ROW` and -1 for everything else -- null argument, no
-connection, prepare failure, **and no row found** -- and the stage maps a
+returns 0 only on `SQLITE_ROW` and -1 for everything else, null argument, no
+connection, prepare failure, **and no row found**, and the stage maps a
 non-zero rc to `STATUS_FAILED`. An absent session and an unreachable store
 arrive as one status.
 
 The catalog states this honestly: `server_session_get` lists results
 `["ok", "invalid", "failed"]`, with no `"missing"`. Sibling operations in the
-same family DO distinguish -- `primary_session_load`,
-`webchat_claude_session_get` and `webchat_live_get` all list `"missing"` -- so
+same family DO distinguish, `primary_session_load`,
+`webchat_claude_session_get` and `webchat_live_get` all list `"missing"`, so
 this is one operation's gap rather than a limit of the wire, and the contract was
 written down correctly. The false premise was in this design's own
 `DirectorySource` comment, which asserted the distinction from the shape of the
 family without checking the operation.
 
 **Correction, from the module's owner.** The handler was never the problem. The
-GO store has answered three outcomes since the port -- `StatusMissing` for no
-row, `StatusFailed` for a broken store -- and the CATALOG was what said
+GO store has answered three outcomes since the port, `StatusMissing` for no
+row, `StatusFailed` for a broken store, and the CATALOG was what said
 `["ok", "invalid", "failed"]`. So reading the contract and believing it was the
 right move and still produced the wrong conclusion, because the contract
 disagreed with its own implementation and nothing compared the two. The owner
@@ -447,8 +447,8 @@ lifts it, because the absorption is what makes the Go store the one answering.
 maps all four db1 statuses plus the transport outcome, addresses the stage by
 the bus formula rather than a transcribed kind, and is asserted against db1's
 own declaration in `process-contracts.json`. Against the Go store it is exact.
-Against the C store it would degrade safely -- absence reads as unavailable, so
-nothing concludes a session is gone and no mail is destroyed -- but every unknown
+Against the C store it would degrade safely, absence reads as unavailable, so
+nothing concludes a session is gone and no mail is destroyed, but every unknown
 session would become a retry that never terminates, and the module would report
 directory trouble about a session that simply does not exist. `no_directory` is
 true today, and replacing a true statement with a plausible one is not progress.
@@ -461,7 +461,7 @@ all until it was found by asking what CALLS this in production, rather than
 whether the tests pass.
 
 As deployed, the module cannot have a session. `DirectorySource` is unimplemented,
-and nothing else populates the registry either -- `Register` has no caller outside
+and nothing else populates the registry either, `Register` has no caller outside
 tests, and no bus op reaches it. So peer messaging is INERT in the shipped
 artifact, and was inert throughout the container validation that reported fifteen
 green checks.
@@ -471,7 +471,7 @@ unregistered sender and a module that can never have a sender both answer
 `unknown_sender`. The channel row is worse than a refusal: "members of an absent
 channel answers OK with none" is a SUCCESS, and the same success a working module
 would print. The module now answers `no_directory` for session-scoped stages --
-a fact about the module rather than about the caller's session -- and the probe
+a fact about the module rather than about the caller's session, and the probe
 establishes which configuration it is talking to before asserting any refusal.
 
 The remaining gaps, unchanged: inboxes do not survive a process restart; the
@@ -492,7 +492,7 @@ kinds move and 461 C call sites move with them.
 **Neither tree can do the renumber alone**, for mirrored reasons. This tree still
 has db1 at ref 30, so taking that ref here means performing the absorption twice.
 The other tree has no peer-messaging code, so declaring stages 20/21/22 there
-would declare stages nothing serves — which both trees' contract tests correctly
+would declare stages nothing serves, which both trees' contract tests correctly
 refuse, since a declared-but-unadvertised stage routes and then answers
 `CAPABILITY_ABSENT` from a module that is plainly running. It happens at merge,
 in the first tree containing both, and the deployment validation is then repeated
@@ -505,7 +505,7 @@ an incident:
 | Gate | Merged value |
 |---|---|
 | `canonical-inventory.yaml` required | contains `aimee`, not `db1`; `principal_refs: aimee: 30` |
-| `REQUIRED_COUNT` | **19** — `aimee` takes db1's slot rather than joining it |
+| `REQUIRED_COUNT` | **19**: `aimee` takes db1's slot rather than joining it |
 | `OPTIONAL_COUNT` | 11 |
 | `PROCESS_REQUIRED` | `aimee`, no `db1` |
 | `GO_PROCESSES` | exactly one `aimee`, no `db1` |
@@ -518,16 +518,16 @@ is exactly the shape that gets "fixed" in the wrong direction.
 
 Names that stay: `db1-fields-v2`, `server-go/db1`, `AIMEE_DB1_EVENT_*` and
 `SchemaOwner = "db1"`. A name in a contract belongs to the contract, not to
-whoever implements it — and `SchemaOwner` is not a label but the key recorded
+whoever implements it, and `SchemaOwner` is not a label but the key recorded
 against every applied migration, so renaming it would not rename those rows, it
 would make them invisible.
 
 ## Phasing
 
-- **P1 — Directory, send, inbox, provenance.** D1, D2, D3, `Send`, D5. ✅
-- **P2 — Blocking ask.** `Ask`, the wait-for graph, `ErrCycle`, hop budget (D7). ✅
-- **P3 — Channels.** `Channel*`, membership.
-- **P4 — External agents and governance.** MCP/ACP mirroring (D8) and the bus tap (D6).
+- **P1. Directory, send, inbox, provenance.** D1, D2, D3, `Send`, D5.
+- **P2, Blocking ask.** `Ask`, the wait-for graph, `ErrCycle`, hop budget (D7).
+- **P3. Channels.** `Channel*`, membership.
+- **P4. External agents and governance.** MCP/ACP mirroring (D8) and the bus tap (D6).
 
   **Deliberately sequenced after the merge, not merely unfinished.** Mirroring the
   verbs onto MCP means C call sites in the `protocols` module invoking these
@@ -536,7 +536,7 @@ would make them invisible.
   the second edit is the kind that leaves one constant behind. The precondition
   that matters is already true: nothing on the peering path is vendor-aware, so
   the work is wiring rather than design.
-- **P5 — Durability.** DB1-backed inboxes.
+- **P5. Durability.** DB1-backed inboxes.
 
 ## Non-goals
 
@@ -565,7 +565,7 @@ would make them invisible.
   derived from sorted filenames. No API changes when it lands.
 - **Orphan inbox rows.** `db1` carries no cross-family foreign keys, so `peer_inbox` cannot
   reference `server_sessions` and nothing cascades when a session is deleted. Decided rather than
-  left open: such a row is **undeliverable, not delivered** — nobody drained it, so recording it as
+  left open: such a row is **undeliverable, not delivered**. Nobody drained it, so recording it as
   delivered would put a falsehood in the audit trail. The sweep runs after
   `server_session_delete_expired` rather than on its own timer, so it cannot race ahead of the
   lifecycle that creates the orphans. Unimplemented until inboxes are durable.
@@ -579,15 +579,15 @@ would make them invisible.
 
 ## Acceptance
 
-Marked ✅ where a test in `server-go/modules/aimee/` asserts it today.
+Marked where a test in `server-go/modules/aimee/` asserts it today.
 
 The path in this line used to read `server-go/internal/peer`, which has not
 existed since the code moved into the module. A citation to a directory that is
 gone is the cheapest kind of stale, and it survived because nothing reads a
 prose path.
 
-**✅ means A TEST ASSERTS IT IN PROCESS.** That is still what the mark means, and
-it is still not the same claim as "a caller can do it" -- but the gap it once
+** means A TEST ASSERTS IT IN PROCESS.** That is still what the mark means, and
+it is still not the same claim as "a caller can do it", but the gap it once
 described has closed for the delivery path.
 
 This paragraph used to say every two-session criterion was asserted against a
@@ -597,43 +597,43 @@ artifact. That was true and is no longer: sessions register themselves
 turn), `AIMEE_PEER_DIRECTORY=db1` resolves them, and A1/A2-shaped exchanges have
 been driven end to end through `POST /v1/mcp/call` on hardware.
 
-What a reader should still not read into a ✅: the criteria involving channels,
+What a reader should still not read into a : the criteria involving channels,
 hop budget and cycle refusal have no caller that exercises them, because the MCP
 surface exposes send and inbox only. Those remain asserted in process.
 
-- **A1** ✅ Two sessions with the same owner discover each other by label, and a message appears with
+- **A1** Two sessions with the same owner discover each other by label, and a message appears with
   an envelope the receiver did not author and the sender could not forge.
   (`TestDirectoryAndProvenance`)
-- **A2** ✅ A session mid-turn receives a peer message without the in-flight turn being preempted or
+- **A2** A session mid-turn receives a peer message without the in-flight turn being preempted or
   raced; the message is drained when the receiver chooses. (`TestDeliveryDoesNotPreempt`)
-- **A3** ✅ A message to a detached session is delivered on re-registration, not dropped.
+- **A3** A message to a detached session is delivered on re-registration, not dropped.
   (`TestMessageSurvivesUnregister`)
-- **A4** ✅ `Ask` returns the peer's reply; a timed-out ask returns `ErrTimeout` with the question id
+- **A4** `Ask` returns the peer's reply; a timed-out ask returns `ErrTimeout` with the question id
   and the late reply arrives in the asker's inbox with the original correlation id.
   (`TestAskAndTimeout`, `TestHandlerAskTimeoutIsNotAnError`)
-- **A5** ✅ Mutual asks are refused with `ErrCycle`. Neither session deadlocks; both remain able to
+- **A5** Mutual asks are refused with `ErrCycle`. Neither session deadlocks; both remain able to
   serve their own operators. Driven as a deliberate race, and transitively (A→B→C→A).
   (`TestAskCycleRefused`, `TestAskCycleTransitive`)
-- **A6** ✅ A ping-pong terminates at the hop ceiling and `origin_session` rides every hop.
+- **A6** A ping-pong terminates at the hop ceiling and `origin_session` rides every hop.
   (`TestHopBudgetTerminatesPingPong`)
 - **A7** A peer message cannot satisfy a confirmation, grant a capability, or cause an
   `execution-policy` decision to be evaluated against the sender's principal. **Not assertable
-  here** — it binds the context-rendering and policy call sites, and lands with D6/P4.
-- **A8** ✅ Cross-owner addressing is refused without a grant, grants are directed, and revocation
+  here**. It binds the context-rendering and policy call sites, and lands with D6/P4.
+- **A8** Cross-owner addressing is refused without a grant, grants are directed, and revocation
   takes effect. (`TestCrossOwnerGrants`, `TestHandlerGrants`)
 - **A9** Every peer send appears in the event-bus capture with its verdict; no peer path exists that
   the tap does not see. **Pending D6.**
 - **A10** A Codex-backed session and a Claude-backed session complete an ask/reply exchange with no
   vendor-specific code on the peering path. **Pending P4** (needs the MCP/ACP mirroring); nothing on
   the peering path is vendor-aware today, which is the precondition.
-- **A11** ✅ Authorization fails closed: without an `Authorize` hook every session route refuses.
+- **A11** Authorization fails closed: without an `Authorize` hook every session route refuses.
   (`TestHandlerFailsClosedWithoutAuthorize`, `TestHandlerRefusesUnauthorizedSession`)
-- **A12** ✅ Over-long bodies are refused, never truncated; concurrent senders and drainers neither
+- **A12** Over-long bodies are refused, never truncated; concurrent senders and drainers neither
   lose nor duplicate a message under `-race`. (`TestNoSilentTruncation`,
   `TestConcurrentSendAndDrain`)
-- **A13** ✅ The three outcome levels stay distinguishable, and reading the inbox of a session that
-  does not exist refuses rather than reporting an empty one — so a caller polling for a reply learns
+- **A13** The three outcome levels stay distinguishable, and reading the inbox of a session that
+  does not exist refuses rather than reporting an empty one, so a caller polling for a reply learns
   its session is gone instead of hanging. (`TestThreeOutcomeLevelsStayDistinct`,
   `TestUnknownSessionIsNotAnEmptyInbox`)
-- **A14** ✅ A stage declared in `process-contracts.json` but not advertised fails the build.
+- **A14** A stage declared in `process-contracts.json` but not advertised fails the build.
   (`TestAdvertisedStagesMatchTheContract`, plus the two in `cmd/aimee-module`)

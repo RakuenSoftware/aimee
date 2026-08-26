@@ -1,6 +1,6 @@
 # Go config field descriptors: editable flat-scalar save residual
 
-- **State:** PENDING — restored after rejection audit on 2026-08-15.
+- **State:** PENDING. Restored after rejection audit on 2026-08-15.
 - **Archived parent:** [config-field-descriptor-table.md](../done/config-field-descriptor-table.md).
 - **Corrective history:** PR #2655 rejected this live objective because its old wording assigned
   save generation to C. That was an ownership error, not evidence that descriptor-owned

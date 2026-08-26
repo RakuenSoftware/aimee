@@ -1,9 +1,9 @@
-# Proposal: Evidence and lifecycle layer — series charter
+# Proposal: Evidence and lifecycle layer: series charter
 
 > **Archived proposal.** This records the implemented design. Current behaviour
 > is defined by the schema, API and validation report linked below.
 
-- **State:** done (2026-08-21) — all nine members implemented in PR #2831; see
+- **State:** done (2026-08-21). All nine members implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Author:** JBailes
 - **Date:** 2026-08-21
@@ -13,8 +13,7 @@
 
 ## Problem and boundary
 
-The next priority for Aimee's knowledge base is not another retrieval algorithm.
-It is a complete evidence and lifecycle layer around **every** memory mutation,
+The next priority for Aimee's knowledge base is a complete evidence and lifecycle layer around **every** memory mutation,
 so that a governance claim about the knowledge base is answerable from stored
 state rather than asserted from architecture.
 
@@ -23,7 +22,7 @@ Authority is derived from authentication and can no longer be nominated by a
 caller; a functional relation cannot be silently overwritten by a lower class;
 semantic edges carry valid time, transaction time, tombstones, and a typed
 relation gate. But there is no uniform answer to "what changed, who changed it,
-on what evidence, and what would undo it" — the assertion layer records the
+on what evidence, and what would undo it": the assertion layer records the
 *resulting state*, not the *event that produced it*, and prose memories,
 documents, entities, the ontology, and derived artifacts each keep a different
 partial history or none at all.
@@ -44,7 +43,7 @@ Every member proposal is checked against this rule. A design that collapses two
 of the four dimensions into one column is rejected on that ground alone, even
 when it is simpler and even when the collapse is currently lossless.
 
-## §0 What already exists — do not rebuild
+## §0 What already exists: do not rebuild
 
 Verified at the pin. The right column is the substrate; members extend it and
 are forbidden from re-implementing it.
@@ -81,7 +80,7 @@ Decision records that own parts of the above and must not be contradicted:
 [kb_hybrid outcome wiring](../done/kb-hybrid-outcome-wiring.md),
 [memory db1/db2 architecture](../done/memory-db1-db2-architecture.md).
 
-### §0.1 Prior art in flight — reconcile, do not duplicate
+### §0.1 Prior art in flight: reconcile, do not duplicate
 
 An unmerged branch (`agent/fact-authority-lifecycle`, commit `1a842a3d`, cut
 from an older `testing`) implements a large part of P1 and P2 **for semantic
@@ -94,9 +93,9 @@ predates the `src/modules/db2/c` relocation.
 P1 and P2 must therefore choose one of two paths, in the open, before any new
 table is created:
 
-1. **Adopt and generalize** — land that branch's assertion-scoped seam first,
+1. **Adopt and generalize**: land that branch's assertion-scoped seam first,
    then widen it to the remaining object kinds. Preferred if the branch merges.
-2. **Design forward** — build the general ledger directly, treating the branch
+2. **Design forward**: build the general ledger directly, treating the branch
    as a reviewed reference implementation of the assertion slice.
 
 What is not acceptable is a second, parallel ledger that leaves two sources of
@@ -127,7 +126,7 @@ P9  (independent; strictly richer once P4 and P5 land)
 ```
 
 P1, P2 and P3 are foundational. Without them, P5 and P7 create more state
-without making that state governable — the exact failure this series exists to
+without making that state governable. The exact failure this series exists to
 prevent. P9 has no hard dependency and may be pulled forward if retrieval
 debugging becomes the pressing need.
 
@@ -157,7 +156,7 @@ may merge with a later member's table present but unwritten.
 | Revert used to rewrite history | Every revert is a compensating changeset. Original events are immutable and are never deleted or edited. |
 | Derived prose outliving its factual basis | P4 makes staleness a computed consequence of input movement rather than a periodic guess. |
 | An outcome overlay laundering a model claim into truth | P5's projection is structurally unable to write authority or lifecycle columns. |
-| Evidence tables becoming a second copy of the corpus | Evidence rows store ids, spans and hashes — never content. P3's purge depends on this. |
+| Evidence tables becoming a second copy of the corpus | Evidence rows store ids, spans and hashes: never content. P3's purge depends on this. |
 
 ## §5 Compatibility and migration
 

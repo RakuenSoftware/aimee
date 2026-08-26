@@ -15,7 +15,7 @@ away:
 
 - `prune_models.sh` deletes every quant except the one under test, so a six-arm
   sweep re-downloads six times. It was added because `.253` has a 240 GB disk and
-  a full quant ladder fills it — a correct fix for the wrong layer.
+  a full quant ladder fills it, a correct fix for the wrong layer.
 - Each host keeps its own `HF_HOME`, so `.254` having a model does nothing for
   `.253`.
 - The E4B arms were unavailable later the same day because the earlier sweep had

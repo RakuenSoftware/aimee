@@ -1,6 +1,6 @@
 # Runtime and Control product boundary: Go residual
 
-- **State:** PENDING — corrective Go-owned residual restored 2026-08-16 after rejection #2690.
+- **State:** PENDING. Corrective Go-owned residual restored 2026-08-16 after rejection #2690.
 
 **Archived source:** [`product-governance-web-and-config.md`](../done/product-governance-web-and-config.md)
 

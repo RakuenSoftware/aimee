@@ -1,9 +1,9 @@
-# Proposal: P9 — a complete, persisted recall explanation
+# Proposal: P9: a complete, persisted recall explanation
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 9 of 9.
 - **Author:** JBailes
@@ -13,7 +13,7 @@
 
 ## Problem and boundary
 
-Aimee's ranking is richer than most systems it is compared against — multiple
+Aimee's ranking is richer than most systems it is compared against, multiple
 lanes, scope enforcement before ranking, graph traversal, temporal reasoning,
 relation gravity, authority classes, outcome-driven demotion. All of it is
 opaque. A result arrives as an ordered list with a score, and the score is a
@@ -21,7 +21,7 @@ number nobody can decompose after the fact.
 
 Two costs follow. The first is debugging: when a bad memory surfaces, or a good
 one does not, there is no way to attribute the failure to a lane, a scope
-decision, a score feature, a graph edge, or a gate — so the correction lands on
+decision, a score feature, a graph edge, or a gate, so the correction lands on
 the *answer*, which teaches the system nothing about the mechanism.
 
 The second cost is evaluation, and it is the larger one. Every outcome label
@@ -39,10 +39,10 @@ recall returns or how it ranks.
 | Piece | Where | Gap |
 |---|---|---|
 | Turn-keyed `retrieval_event` with merged typed surfaced refs | `src/modules/db2/c/demotion.c` | Records *what* was surfaced; nothing about why, or what was rejected. |
-| `/v1/audit/trace`, `/v1/audit/provenance` | `src/server/server_state_audit.c`, `src/server/server_http_routes.c` | The read surfaces exist and already resolve refs to sources and versions — the natural home for the trace. |
+| `/v1/audit/trace`, `/v1/audit/provenance` | `src/server/server_state_audit.c`, `src/server/server_http_routes.c` | The read surfaces exist and already resolve refs to sources and versions: the natural home for the trace. |
 | `feature_rows` (subject, kind, feature_set_version, features JSONB) | `src/modules/db2/c/schema.sql` | Per-subject features for the fitter; not per-query, and not the applied contributions |
 | Hybrid fusion across lanes | `src/kb/kb_fusion.c` | Computes exactly the decomposition this proposal wants to persist, then discards it |
-| `memory_recall_shadow_deltas` (bounded top-K rank deltas, capped retention) | `src/modules/db2/c/schema.sql` | An existing precedent for bounded, retention-capped recall diagnostics — the right sizing model to copy |
+| `memory_recall_shadow_deltas` (bounded top-K rank deltas, capped retention) | `src/modules/db2/c/schema.sql` | An existing precedent for bounded, retention-capped recall diagnostics: the right sizing model to copy |
 | Scope query path | `src/modules/db2/c/` memory scope query | Enforces scope before ranking; the decision is not reported |
 
 ## Decision
@@ -55,7 +55,7 @@ For each recalled result, capture and persist:
 |---|---|
 | Candidate source and lane | Which retrieval lane produced it (semantic, keyword, graph, temporal, shortcut) and its rank within that lane |
 | Scope decision | Which scope rule admitted it, and for rejected candidates, which excluded them |
-| Score contributions | Semantic, keyword, graph, temporal — each as its own value, with the weight applied |
+| Score contributions | Semantic, keyword, graph, temporal: each as its own value, with the weight applied |
 | Traversed graph path | The node and edge sequence, when the graph lane contributed |
 | Relation gravity | The gravity term and the relation that produced it |
 | Authority class | The candidate's authority and confidence class as read at recall time |
@@ -96,7 +96,7 @@ fault:   { kind: feature, value: temporal }    -- the temporal term was mis-weig
 fault:   { kind: policy,  value: scope_rule_7 }
 ```
 
-This is what turns a label into a fix. Without it, every negative outcome lands
+The label becomes a fix here. Without it, every negative outcome lands
 on the final answer, which is the least actionable place it can land.
 
 ### One definition of each reported value
@@ -122,7 +122,7 @@ operator expects is worse than one that says it does not know.
 ## Owners and dependencies
 
 - **Owner:** kb retrieval, with memory.
-- **Depends on:** nothing hard — it can land at any point in the series. Fields
+- **Depends on:** nothing hard. It can land at any point in the series. Fields
   from P3, P4 and P5 are reported as `not-computed` until those land.
 - **Depended on by:** nothing. P5 and P7 become more useful with it.
 

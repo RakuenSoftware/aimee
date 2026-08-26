@@ -14,14 +14,14 @@ family claims them:
 | `server_mgmt_jwks_cache.c` | 3 | `server_management_jwks_cache` |
 
 This is the same gap `db1-transactions-across-the-boundary.md` noted in passing
-("some of those tables have no family yet, so they are not blocked today -- but
-they are the same shape"). They are now the only thing between this migration
+("some of those tables have no family yet, so they are not blocked today, but
+they are the same shape"); they are now the only thing between this migration
 and the doctrine it exists to serve, which is that the daemon holds no state.
 
 ## What is NOT the problem
 
 Transactions. Every `BEGIN IMMEDIATE` in all three files opens and commits
-inside a single function -- `persist_cert_row`, `pki_revoke`,
+inside a single function, `persist_cert_row`, `pki_revoke`,
 `pki_mtls_ramp_init`, `pki_mtls_note_presentation`, `pki_mtls_ramp_ready`,
 `pki_mtls_ramp_advance`, `server_mgmt_nonce_issue_purpose`,
 `server_mgmt_nonce_issue`, `server_mgmt_jwks_cache_install`. That is the case
@@ -29,7 +29,7 @@ the boundary already serves, and it is what made guardrail_state and lifecycle
 migratable once the claim was checked rather than assumed.
 
 Nor is it size. Most of `server_mgmt_jwks_cache.c` is bundle loading and
-signature checking -- 780 lines of which three functions touch the database.
+signature checking, 780 lines of which three functions touch the database.
 The storage seam is small, as it was for ensemble.
 
 ## What IS the problem: binary does not cross this wire
@@ -43,7 +43,7 @@ The storage seam is small, as it was for ensemble.
     envelope_bytes    BLOB
 
 `db1-fields-v2` carries length-prefixed fields, so bytes CAN travel, but every
-payload kind the generator has is NUL-terminated text -- a digest containing a
+payload kind the generator has is NUL-terminated text. A digest containing a
 zero byte would arrive truncated, and `CRYPTO_memcmp` against a truncated digest
 compares 32 bytes of which some are whatever was in the buffer. That is a
 silent-comparison failure in the management-token trust path, which is the worst
@@ -60,7 +60,7 @@ lowercase hex and convert only where they bind SQLite. Hex is a bijection with a
 self-checking length, the daemon still holds bytes, and the JWKS comparison is
 still `CRYPTO_memcmp` over the same 32 bytes.
 
-`pki_certs` -- predicted below to be "bytes all the way down" -- turned out to
+`pki_certs` (predicted below to be "bytes all the way down") turned out to
 hold no blobs at all. Serial and CN are TEXT and the timestamps are integers;
 the certificates themselves live on disk, not in the row. The prediction was
 made from what the table is *for* rather than from its columns.
@@ -86,7 +86,7 @@ puts a digest containing an embedded zero byte through the wire and back.
 
 All three, and with them the last direct `db1_conn()` calls in the daemon. The
 only DB1 sources it links now are `db1_init`, `db1_write`, `diagnostics` and
-`maintenance` -- infrastructure rather than storage -- and `secrets.c`, which
+`maintenance`, infrastructure rather than storage, and `secrets.c`, which
 never touched DB1 at all.
 
 Two things were harder than this document expected, and neither was binary:

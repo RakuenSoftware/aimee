@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — shipped LTR substrate archived 2026-08-04; activation/IPW residual extracted.
+- **State:** DONE. Shipped LTR substrate archived 2026-08-04; activation/IPW residual extracted.
 
 > **Archived after partial delivery.** Retrieval events/outcomes, fused feature persistence, the
 > fitter, pairwise weighting, offline serving path, and a measured promotion gate are shipping.
@@ -17,7 +17,7 @@ Written 2026-07-30 out of the retrieval measurement campaign
 - **Depends on:** `kb_bandit` (decision points, reward recording, IPW replay) and
   the FTS lexical leg.
 
-> ## ⚠️ Correction, 2026-07-30 — most of this is already built
+> ## Correction, 2026-07-30. Most of this is already built
 >
 > This proposal was drafted without auditing the tree, and it materially
 > understates what exists. The serving path, the label channel, the fitter, and the
@@ -40,11 +40,11 @@ Written 2026-07-30 out of the retrieval measurement campaign
 >    (`src/modules/config/config_fields.c:297`), so no labels accumulate.
 > 2. Capture is wired only into the agent search tool
 >    (`src/modules/tools/agent_tools_dispatch.c:1957`) and is capped at **8 docs**
->    of a pool that can hold 100 — so only the head of the ranking is ever labelled.
+>    of a pool that can hold 100, so only the head of the ranking is ever labelled.
 > 3. IPW propensity logging is unimplemented; the fitter already consumes the
 >    weight. (Item 1 of the done proposal's own remaining-work list.)
 > 4. ~~The promotion gate was a 5-query fixture with a 1e-6 lift epsilon.~~
->    **Fixed 2026-07-30** — the gate now requires a minimum query count, a
+>    **Fixed 2026-07-30**. The gate now requires a minimum query count, a
 >    shippable mean lift, and a paired per-query win/loss majority. See
 >    [the gate section](#the-promotion-gate-fixed-2026-07-30).
 >
@@ -53,14 +53,14 @@ Written 2026-07-30 out of the retrieval measurement campaign
 > `sketch.distinct_sources_hll` (`FEATURE_KEYS` in `kb_ranker_fit.c`).
 >
 > **Read the sections below as design rationale, not as a work plan.** The
-> remaining work is a config change, a cap, and IPW — not a build.
+> remaining work is a config change, a cap, and IPW, not a build.
 
 ## Problem
 
 Final ranking is decided by **fixed, untuned rules**. Fusion of the dense and
 lexical legs uses Reciprocal Rank Fusion with a textbook constant, and that
 constant is measurably wrong for this corpus: sweeping it moved every metric at
-once (`k=10` beat `k=60` on R@1 **and** R@10 — 0.3709/0.8984 against
+once (`k=10` beat `k=60` on R@1 **and** R@10, 0.3709/0.8984 against
 0.3639/0.8642). A hand-picked constant is leaving quality on the table, and no
 amount of hand-tuning generalises across corpora, tenants, or query mixes.
 
@@ -80,12 +80,10 @@ Three findings from 10,000-query evaluations bound what is worth building:
    the labelled document entirely for **12.6%** of queries. Adding a lexical leg
    raised pool recall from 0.8735 to **0.9735**. Nothing that merely reorders a
    fixed candidate set can recover those.
-3. **Fusion is where the leverage is.** RRF gave **+0.1168 R@10** over dense —
-   roughly 35x the best reranker result — using a rule nobody tuned.
+3. **Fusion is where the leverage is.** RRF gave **+0.1168 R@10** over dense (roughly 35x the best reranker result) using a rule nobody tuned.
 
-**The conclusion this proposal rests on:** the win is not a better model scoring
-`(query, document)` text. It is learning how to **weight signals already
-computed**. That is a learning-to-rank problem, and it is the one form of
+**The conclusion this proposal rests on:** the win is learning how to **weight signals already
+computed**, and not a better model scoring `(query, document)` text. That is a learning-to-rank problem, and it is the one form of
 "reranking" the evidence does not rule out.
 
 ## Decision
@@ -137,26 +135,26 @@ real notion of relevance.
 
 | feature | source | available today |
 | --- | --- | --- |
-| dense similarity score | retrieval | **no — rank is kept, score is discarded** |
+| dense similarity score | retrieval | **no: rank is kept, score is discarded** |
 | lexical/BM25 score | FTS leg | yes |
 | rank in each leg, RRF rank | fusion | computed |
 | doc_kind, length, age | corpus | yes |
 | project / workspace match | request scope | yes |
-| prior citation count for the doc | usage history | **no — needs logging** |
+| prior citation count for the doc | usage history | **no: needs logging** |
 | query length, term rarity | query | derivable |
 
 **The blocking gap is logging, not learning.** Note the first row: the retrieval
 path keeps candidate *ranks* but discards the underlying *scores*. This exact
 gap blocked score-fusion analysis during the measurement campaign, and it would
 make LTR untrainable after the fact. Persisting scores should land regardless of
-whether this proposal proceeds — training data cannot be recovered
+whether this proposal proceeds, training data cannot be recovered
 retroactively.
 
 ## Failure model
 
 - **Feedback loop.** The ranker trains on impressions it produced, so documents
   it never surfaces can never be learned. Mitigation: a small randomised
-  exploration fraction plus **inverse propensity weighting** — machinery
+  exploration fraction plus **inverse propensity weighting**, machinery
   `kb_bandit` already has (`tools/bandit_replay.py`, IPW replay recorded as
   benchmark evidence).
 - **Position bias.** Weaker than with human clicks but non-zero; LLMs show
@@ -173,24 +171,24 @@ retroactively.
 
 ## Bounded slices
 
-**S1 — log what training needs (no model).** Persist per-impression: query,
+**S1. Log what training needs (no model).** Persist per-impression: query,
 candidate ids, per-leg scores *and* ranks, fusion rank, doc features, and the
 citation outcome. Ship behind a flag; verify volume and cardinality. *This slice
 has standalone value and unblocks everything else.*
 
-**S2 — offline dataset + baseline replay.** Build a training set from logged
+**S2, offline dataset + baseline replay.** Build a training set from logged
 impressions. Reproduce current production ordering as a baseline, and confirm an
 IPW replay of a *known-worse* ranking scores worse. Establishes the harness is
 sensitive before any model is trusted.
 
-**S3 — train and evaluate offline only.** LambdaMART/XGBoost ranker. Report
+**S3, train and evaluate offline only.** LambdaMART/XGBoost ranker. Report
 NDCG@10 and Recall@{1,5,10,20} against the fixed-rule fusion baseline, per
 segment. No serving.
 
-**S4 — shadow serving.** Score live traffic, log the ranking, serve the existing
+**S4, shadow serving.** Score live traffic, log the ranking, serve the existing
 order. Compare offline predictions against observed citations.
 
-**S5 — gated rollout.** Promote through the existing bandit decision-point
+**S5, gated rollout.** Promote through the existing bandit decision-point
 machinery with exploration, per-tenant guardrails, and automatic rollback on
 metric regression.
 
@@ -214,7 +212,7 @@ metric regression.
 - Is citation the right label, or should "answer quality" (however scored) be
   the target, with citation as an intermediate?
 - How much traffic is needed before the ranker beats tuned RRF? Tuning RRF is
-  nearly free, so it is the honest baseline — not untuned RRF.
+  nearly free, so it is the honest baseline, not untuned RRF.
 - Should ranking be per-tenant, or global with tenant features?
 - Does exploration cost enough answer quality to matter to users?
 
@@ -237,18 +235,18 @@ gate's own unit tests used a **1-query** fixture.
 Every candidate appears in both legs, so pool recall is 1.0 by construction and the
 fusion constant cannot reorder anything. The fixture is blind to the largest effect
 the measurement campaign found. And at 1e-6, "beats the incumbent" meant "is not
-bit-identical to the incumbent" — on a 5-query fixture NDCG@5 is quantised, so one
+bit-identical to the incumbent": on a 5-query fixture NDCG@5 is quantised, so one
 query's reordering promoted a model.
 
 **What it is now.** Three conditions, all required, all recorded in the
 `benchmark_trace` artifact:
 
-1. **`n_queries >= 30`** (`RANK_FIT_MIN_BENCH_QUERIES`) — otherwise
+1. **`n_queries >= 30`** (`RANK_FIT_MIN_BENCH_QUERIES`), otherwise
    `benchmark_underpowered`, and the model is held `proposed`. An underpowered gate
    fails closed: it cannot detect a regression, so it must not authorise one.
-2. **mean lift > `1e-3`** (was `1e-6`) — below any effect worth shipping, but far
+2. **mean lift > `1e-3`** (was `1e-6`), below any effect worth shipping, but far
    above the floating-point noise the old value actually measured.
-3. **paired win/loss majority** — candidate and incumbent score the *same* query
+3. **paired win/loss majority**: candidate and incumbent score the *same* query
    before moving on, and `wins > losses` is required. A mean alone cannot separate
    "better on most queries" from "much better on one and worse on the rest"; the
    latter is what overfitting a small fixture looks like. Failing only this
@@ -267,7 +265,7 @@ held-out fixture via `kb_ranker_fit_benchmark` is now a prerequisite for the ran
 which is the correct ordering.
 
 **Tests.** `test_ranker_fit.c` gained `gate_refuses_underpowered_benchmark` (a model
-that wins its single query outright is still refused — refusal is on power, not
+that wins its single query outright is still refused, refusal is on power, not
 merit) and `gate_refuses_minority_gain` (+0.0998 mean NDCG from 12 wins against 20
 losses is refused). The two pre-existing gate tests were moved off the 1-query
 fixture onto a generated 32-query one, so they now exercise the real gate.

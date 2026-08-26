@@ -20,8 +20,8 @@ The run used Codex CLI `0.145.0`, model `gpt-5.6-sol` at medium reasoning, Ponyt
 The result checkout was intentionally left uncommitted when the KB failed. The complete source
 artifacts remain at:
 
-- results: `/home/virant/dev/ponytail-codex-benchmark/battery/codex_results/` — 986 files;
-- raw Codex streams: `/tmp/ptcodex/raw/` — 194 files; and
+- results: `/home/virant/dev/ponytail-codex-benchmark/battery/codex_results/`, 986 files;
+- raw Codex streams: `/tmp/ptcodex/raw/`, 194 files; and
 - representative readiness:
   `battery/codex_results/cells/aimee__t06_semver__r1/aimee-readiness.json`.
 

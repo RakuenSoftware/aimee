@@ -1,9 +1,9 @@
-# Proposal: P2 — knowledge changesets with diff and compensating revert
+# Proposal: P2: knowledge changesets with diff and compensating revert
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 2 of 9. Foundational.
 - **Author:** JBailes
@@ -17,8 +17,7 @@ P1 makes every knowledge mutation an event. Events alone answer "what changed";
 they do not answer "what did *this operation* change", and they cannot be undone
 as a unit.
 
-The strongest idea available to borrow here is not tombstones. It is treating
-graph changes as **commits**: one operation produces one changeset, the changeset
+The strongest idea available to borrow here is treating graph changes as **commits**: one operation produces one changeset, the changeset
 has a diff, and undoing it produces a compensating changeset rather than erasing
 history.
 
@@ -36,7 +35,7 @@ transitions are P3; derived-item staleness is P4.
 
 | Piece | Where | Gap |
 |---|---|---|
-| `code_project_generations`, `code_projection_generations` | `src/modules/db2/c/schema.sql` | Generation-scoped replacement for code projections — a working precedent for versioned bulk change, but confined to code. |
+| `code_project_generations`, `code_projection_generations` | `src/modules/db2/c/schema.sql` | Generation-scoped replacement for code projections: a working precedent for versioned bulk change, but confined to code. |
 | `entity_merges.undone` + `db2_entity_unmerge` | `src/modules/db2/c/entity_registry.c` | Real reversibility for exactly one operation kind, with no shared abstraction. |
 | `entity_edges.superseded_at` / `suppressed` | `src/modules/db2/c/schema.sql` | Per-row reversibility, not per-operation. |
 | `corpus_stage_events` | `src/modules/db2/c/schema.sql` | Per-document stage journal; not a transactional grouping of the writes a stage produced. |
@@ -86,8 +85,8 @@ CREATE TABLE IF NOT EXISTS knowledge_change_items (
 );
 ```
 
-`before_state` / `after_state` hold the object's **envelope** — lifecycle state,
-authority, confidence, valid-time bounds, version — in a fixed field order, not
+`before_state` / `after_state` hold the object's **envelope**, lifecycle state,
+authority, confidence, valid-time bounds, version, in a fixed field order, not
 an opaque JSON audit string. The reason is concrete: a revert must restore exact
 prior state without reparsing prose, and a reviewer must be able to diff two
 changesets without a schema archaeology exercise.
@@ -104,21 +103,21 @@ correction; one maintenance sweep. A changeset that would span two of these is a
 bug, not a convenience.
 
 Nesting is not supported in P2. A drain triggered by an ingest opens its own
-changeset with `parent_changeset` set — a link, not containment — so that
+changeset with `parent_changeset` set (a link, not containment) so that
 reverting the ingest can report the drain as an affected dependent rather than
 silently reverting it too.
 
 ### The four operations
 
-- `changeset.show` — the changeset, its actor, status, and its items.
-- `changeset.diff` — the envelope-level before/after for every item, plus counts
+- `changeset.show`: the changeset, its actor, status, and its items.
+- `changeset.diff`: the envelope-level before/after for every item, plus counts
   by object kind and action.
-- `changeset.preview_revert` — what a revert would do: items it would invert,
+- `changeset.preview_revert`: what a revert would do: items it would invert,
   items it cannot invert and why, objects changed *since* by another changeset
   (the conflict set), and dependents affected (P4's dependency edges, once P4
   lands; until then, an explicit `dependents: not-computed` marker rather than an
   empty list that reads as "none").
-- `changeset.revert` — applies the inverse of each item **as a new changeset**
+- `changeset.revert`: applies the inverse of each item **as a new changeset**
   with `reverts_changeset` set and `operation='revert'`. The original changeset's
   status becomes `reverted`; its rows are never edited or deleted.
 
@@ -127,7 +126,7 @@ silently reverting it too.
 1. **A revert never erases.** It composes. Reverting a revert is legal and
    produces a third changeset.
 2. **A revert is authority-bounded.** It may not undo a change made under a
-   higher authority than the reverting actor holds — the same rule the pin
+   higher authority than the reverting actor holds, the same rule the pin
    already applies to retraction, applied to batches.
 3. **A conflicting revert is refused by default.** If an object changed after the
    target changeset, the revert stops and reports the conflict set.
@@ -143,12 +142,12 @@ silently reverting it too.
 Each of these is currently unanswerable at the pin, and each becomes a single
 query:
 
-- What did this document add? — items of the ingest changeset for that `doc_key`.
-- Which facts changed after this agent turn? — items where `origin_ref = turn_id`.
-- Why did this relationship become current? — the item whose `after_state` set
+- What did this document add?, items of the ingest changeset for that `doc_key`.
+- Which facts changed after this agent turn?, items where `origin_ref = turn_id`.
+- Why did this relationship become current?, the item whose `after_state` set
   it, its event, its actor and its evidence.
-- What would reverting this ingestion affect? — `preview_revert`.
-- Which memories depend on the entity merge I am undoing? — the merge changeset's
+- What would reverting this ingestion affect?, `preview_revert`.
+- Which memories depend on the entity merge I am undoing?, the merge changeset's
   dependents (P4).
 
 ## Non-goals

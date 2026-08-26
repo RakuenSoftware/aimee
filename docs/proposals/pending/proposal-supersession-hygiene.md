@@ -1,17 +1,17 @@
-# Proposal: Proposal-supersession hygiene — same-commit move + a documented rule
+# Proposal: Proposal-supersession hygiene: same-commit move + a documented rule
 
-- **State:** proposed (pending — not started)
+- **State:** proposed (pending; Not started)
 
 ## Thesis
 
 `docs/proposals/pending/` is only useful as signal if a finished or superseded
 proposal *leaves* it. `check-proposal-reconcile.py` already catches one drift
-class — a pending/accepted proposal that has actually shipped (classified
+class. A pending/accepted proposal that has actually shipped (classified
 "terminal-done"). But the specific drift the roadmap flagged is different and
 still unguarded: a PR that **supersedes** a proposal (deletes/replaces its
 subject) without moving the old file, so a dead proposal lingers in `pending/`
 (the roadmap cites the pluggable-db proposal doing exactly this). And there is **no
-`CONTRIBUTING.md`** stating the rule, so contributors have no norm to follow —
+`CONTRIBUTING.md`** stating the rule, so contributors have no norm to follow,
 only a lint that fires after the fact on one of two failure modes.
 
 ## Goal
@@ -42,7 +42,7 @@ header. Reference the PR template so it is seen at author time, not review time.
 Teach `check-proposal-reconcile.py` a second failure mode: a `pending/`/`accepted/`
 proposal whose declared subject/anchor no longer resolves (the code, doc, or
 sibling proposal it proposes has been removed or replaced) is "superseded, not
-moved" → fail with the remediation ("move it to rejected/ or deferred/"). Keep the
+moved" → fail with the remediation ("move it to rejected/ or deferred/"); keep the
 existing `--plant-test` self-check so the guard itself stays honest.
 
 ## §3 One-time sweep
@@ -54,4 +54,4 @@ precondition for the rule to mean anything.
 ## Non-goals
 
 Not a workflow engine and not auto-moving files in CI (moves stay author-driven,
-reviewed) — just a written norm plus a lint that makes violating it visible.
+reviewed), just a written norm plus a lint that makes violating it visible.
