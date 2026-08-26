@@ -234,9 +234,11 @@ def main() -> None:
     rows = []
     started = time.monotonic()
     for ordinal, (repeat, condition, messages) in enumerate(plan):
+        cache_nonce = f"{run_id}:repeat-{repeat}"
         prompt = (
             SYSTEM_PROMPT
-            + "\n\nThe message history is this JSON array:\n"
+            + f"\n\nExperiment cache-isolation nonce: {cache_nonce}"
+            + "\nThe message history is this JSON array:\n"
             + json.dumps(messages, separators=(",", ":"))
             + "\n\nDo not use tools. Return only the exact requested identifier."
         )
@@ -245,6 +247,7 @@ def main() -> None:
             "run_id": run_id,
             "call_id": f"{run_id}:{repeat}:{ordinal}:{condition}",
             "repeat": repeat,
+            "cache_isolation_nonce": cache_nonce,
             "condition": condition,
             "task_id": task.task_id,
             "model": args.model,
