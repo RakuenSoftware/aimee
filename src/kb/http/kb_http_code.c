@@ -25,6 +25,7 @@
 #include "modules/db2/c/lessons.h" /* §3 actuation: earned-trust tie-break */
 #include "kb/lessons_reflect.h"    /* reflect the ledger into per-node trust */
 #include "kb_reqctx.h"
+#include "kb_scope.h"
 #include <time.h>
 #include "kb/kb_graph_analytics.h"
 #include "kb/kb_service_graph.h"
@@ -126,7 +127,12 @@ int code_request_project(const char *query_string, char *project, size_t project
                   "one current project\"}}");
          return 400;
       }
-      if (has_verified_scope)
+      /* The managed server's service credential is the deployment data-plane
+       * identity. It spans projects (kb_scope_authorized makes the same
+       * distinction for named targets), so it may perform an explicitly-wide
+       * read inside the tenant selected by the authenticated service/caller
+       * intersection. Project and other limited credentials remain fenced. */
+      if (has_verified_scope && strcmp(verified_kind, KB_SCOPE_KIND_SERVICE) != 0)
       {
          snprintf(out_buf, (size_t)out_cap,
                   "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential cannot "
