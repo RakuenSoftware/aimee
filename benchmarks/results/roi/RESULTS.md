@@ -60,6 +60,35 @@ product-quality result; it identifies the recovery-aware workload required for
 the next pilot. Both uncommitted calibration artifacts were excluded because
 they could not meet the source-lineage gate.
 
+### Codex high-coordinate calibration
+
+A clean-lineage, one-task Codex calibration is retained as a negative result:
+
+- Run ID: `roi-codex-pilot-c12ce099ab67460c`
+- Source pin: `3938b55fc9eae5058d3e1d2dde2844d980cc2daf`
+- Contract: Codex CLI authenticated through ChatGPT; actual marginal cash cost
+  `$0.00`, with API rates reported only as a price equivalent
+- Outcome: both off and full resolved the exact-answer task
+- Off: 17,690 input (9,984 cached), 14 output, `$0.0350976` API equivalent
+- Full: 17,838 input (9,984 cached), 14 output, `$0.0356896` API equivalent
+
+The economized prompt was 2,880 UTF-8 bytes shorter and the economizer forecast
+875 fewer tokens, yet GPT-5.6 Sol reported **148 more input tokens**. The
+high-coordinate folded summary contains many conserved unique identifiers and
+Unicode placeholders; those were cheaper than the original repetitive log text
+under Qwen's tokenizer but not under GPT-5.6's. This is evidence that the local
+chars-per-token forecast is not a provider bill and that savings are not
+provider-neutral.
+
+The result is a calibration, not a regression estimate: it has one task and one
+repeat. It motivates a preregistered coordinate-density stratum and repeated
+Codex pairs.
+
+- Raw artifact: `current-stack-codex-sol-tail-calibration.json`
+- Preflight: `current-stack-codex-sol-tail-calibration.preflight.json`
+- Raw artifact SHA-256:
+  `63e477561a147cedbd90ee10b187e508efbdfb9fa8584126f006e21d4fa9fc5f`
+
 ## What this supports
 
 This run supports only the narrow statement that the current economizer can
