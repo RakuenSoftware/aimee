@@ -1,6 +1,6 @@
 # Synthesis sidecar throughput validation
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:**
   [`synthesis-sidecar-and-embedder-axis.md`](../done/synthesis-sidecar-and-embedder-axis.md).
 

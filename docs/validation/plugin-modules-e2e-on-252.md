@@ -11,10 +11,10 @@
 
 ## What was exercised
 
-Two suites, both over **real processes and the real bus** — no mocks at the seams that
+Two suites, both over **real processes and the real bus**, no mocks at the seams that
 matter. Run twice each to check stability.
 
-`unit-test-bus-plugin-process` — the single-instance vertical:
+`unit-test-bus-plugin-process`, the single-instance vertical:
 
 | Assertion | Result |
 |---|---|
@@ -30,7 +30,7 @@ matter. Run twice each to check stability.
 | A **refused** plugin never executes (observed via a sentinel file) | pass |
 | A real **pluggy** plugin declares and is invoked through the UNCHANGED MCP module | pass |
 
-`unit-test-bus-plugin-scale` — the deployment's target shape and the ugly cases:
+`unit-test-bus-plugin-scale`, the deployment's target shape and the ugly cases:
 
 | Assertion | Result |
 |---|---|
@@ -41,7 +41,7 @@ matter. Run twice each to check stability.
 | A plugin emitting non-JSON leaves 0 commands, module survives | pass |
 | A collider on an already-allocated event base does not displace the owner | pass |
 
-`test_pluggy_host.py` — the pluggy shim against **real pluggy 1.5.0**, 15 assertions, all
+`test_pluggy_host.py`, the pluggy shim against **real pluggy 1.5.0**, 15 assertions, all
 passing: MCP handshake, hookspec→tool reflection, `firstresult` returning a single value
 while a plain hook returns the list, wrapper-only and unimplemented hooks correctly NOT
 exposed, unknown hook/argument reported rather than silently empty, and all three pin
@@ -50,7 +50,7 @@ refusals (version mismatch, missing distribution, no plugin selected).
 The claim being checked there is *"pluggy is not a protocol"*. It holds: the pluggy plugin
 is started by the same Go module, over the same two stages, and its hooks arrive through
 the same `DCMD`/`DCMR` declaration. There is **no pluggy-specific code above
-`scripts/aimee-pluggy-host.py`** — the Go module needed no change at all to host it.
+`scripts/aimee-pluggy-host.py`**, the Go module needed no change at all to host it.
 
 pluggy is vendored into the shipped package rather than installed on the target: `.252`
 hosts a live aimee deployment and this must not alter its system packages.
@@ -61,15 +61,15 @@ hosts a live aimee deployment and this must not alter its system packages.
 `client.Ready()` and served `client.Tools()` from cache. Neither changes when the plugin
 process exits, so the module went on declaring commands for a plugin that was gone. The
 first e2e run failed exactly there. Fixed by re-listing tools on every declaration rather
-than trusting the cache — which also covers a hung or broken plugin, not just an exited
-one — and detaching when the plugin cannot answer. This is the finding that justified
+than trusting the cache, which also covers a hung or broken plugin, not just an exited
+one, and detaching when the plugin cannot answer. This is the finding that justified
 building the process-level test at all: every unit test passed with the bug present.
 
 **2. Event kinds could not be package constants.** Found by reading
 `bus_host_serve_kind()` (`core/event_bus/bus_route.c:109`) before testing: one event kind
 binds to exactly ONE serving slot. Ten instances sharing package-level kinds would mean
 the first attaches and the rest are refused. Corrected to a per-instance allocated pair.
-The scale suite now asserts the constraint directly with a deliberate collider — and the
+The scale suite now asserts the constraint directly with a deliberate collider, and the
 empirical result was **stronger than predicted**: the collider is denied at *attach*
 (`mcp-collider attach: bus: attach denied`), not merely refused a serve binding.
 
@@ -80,7 +80,7 @@ individually allocated entries so each `ud` is stable.
 
 **4. The harness orphaned processes on failure.** Cleanup ran only at the end of a
 successful `main`; a failing assertion calls `abort()` and never reaches it. Every failed
-run therefore left its module processes (and their plugin children) running — found by
+run therefore left its module processes (and their plugin children) running, found by
 `pgrep` after the debugging runs, which had accumulated ~20 of them. This matters here
 more than usual: `.252` hosts a live aimee deployment, and a test that leaks on failure is
 exactly the one that will be run repeatedly while something is broken. Fixed with
@@ -100,7 +100,7 @@ match the module executables. A check that cries wolf gets ignored, which defeat
 **Slice 4 note.** The refusal assertion is the one that matters, and it is checked by
 observing that the code did not run rather than by trusting a status code: the refused
 instance's plugin would create a sentinel file as its first action, and the file never
-appears. Mutation-verified — flipping the verdict from refuse to allow makes the sentinel
+appears. Mutation-verified, flipping the verdict from refuse to allow makes the sentinel
 appear and the assertion fire.
 
 Two of Slice 4's three claimed deliverables turned out to be vacuous on inspection:
@@ -113,8 +113,8 @@ parity, and it is now the same function on both paths rather than a copy.
 
 `GET /v1/dashboard/metrics` carries a `plugins` array: one row per attached instance
 with its event base, group, command count, state and last error. The state is the part
-that matters — `refused` (blocked by the supply-chain gate), `silent` (admitted, plugin
-gone), `pending`, `active`, `error` — because all of them otherwise present as "zero
+that matters, `refused` (blocked by the supply-chain gate), `silent` (admitted, plugin
+gone), `pending`, `active`, `error`, because all of them otherwise present as "zero
 commands" and each needs a different action.
 
 ## Reproducing
@@ -143,7 +143,7 @@ work:
 - `aimee_command_find_method` and a command's own handler had **no production caller**,
   so a registered command was listed everywhere and invocable nowhere. `POST
   /v1/commands/<group>.<verb>` now dispatches through the registry.
-- The manifest advertised a bare `/v1/commands/` prefix — **a route no client could
+- The manifest advertised a bare `/v1/commands/` prefix, **a route no client could
   reach**. That is precisely the "listed but unroutable" failure the registry exists to
   remove, and I had added it. Fixed to the full path and documented in the OpenAPI spec;
   `server-api-conformance-check` caught the undocumented route and now covers it.

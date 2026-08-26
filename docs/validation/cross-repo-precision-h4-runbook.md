@@ -1,7 +1,7 @@
-# H4 — cross-repo precision live re-validation runbook (.254)
+# H4: cross-repo precision live re-validation runbook (.254)
 
 The full precision-hardening build is merged to `testing` (PRs #824, #825, #827,
-#828, #830, #831, #832, #835 — H0a–H0d, H1, H2, H3a, H3b). H4 deploys it to the
+#828, #830, #831, #832, #835. H0a–H0d, H1, H2, H3a, H3b). H4 deploys it to the
 split stack on `.254` (192.168.1.254), repopulates the index-time metadata, and
 spot-checks that the known live false-positive classes collapse while the true
 dependencies survive.
@@ -20,13 +20,13 @@ Decision (this session): ground truth = **spot-check the known FP classes only**
 `.254` plugins are pinned to the moving `:testing` tag, so they auto-track merges,
 but the running containers must pull + update:
 1. Pull the new images on `.254`: `sudo docker pull <registry>/aimee-kb:testing`
-   and `aimee-server:testing` (the GPU `aimee-llm` image is unchanged — no re-pull).
+   and `aimee-server:testing` (the GPU `aimee-llm` image is unchanged, no re-pull).
 2. Update + bounce via tierd (plugadm) so the kb + server plugins run the new image.
 3. Verify versions: the kb/server should report a build at or after `9c6bd56`.
 
 ## 2. Repopulate metadata (the re-scan)
-The H0 per-file metadata — `terms.def_kind` (H0a), `files.language` + `files.vendored`
-(H0b) — is written at SCAN time (`canonical_index_scan_project`), so a re-scan of
+The H0 per-file metadata, `terms.def_kind` (H0a), `files.language` + `files.vendored`
+(H0b), is written at SCAN time (`canonical_index_scan_project`), so a re-scan of
 the corpus is required:
 1. Re-scan all indexed repos (the `~/dev` + `~/gow` workspaces, ~40 repos) so the
    files/terms rows carry def_kind/language/vendored.
@@ -50,12 +50,12 @@ The CLI targets `.254` via `~/.config/aimee/remote.conf`. Run:
 - `aimee index deps smoothnas-plugin-aimee` → expect aimee / smoothnas.
 - Reverse: dependents of `moonlight-common-c` include `moonlight-qt`.
 - Confirm the specific live FPs from §0 collapsed: `DEFINE_GUID`→Sunshine,
-  `authenticate` (generic), cross-language `motion` (C++ vs Rust) — none has a real
+  `authenticate` (generic), cross-language `motion` (C++ vs Rust), none has a real
   `cross_repo_route`, so each is now LOW-unresolved (not emitted).
 
 ## 4. Recall sanity
 On `.254`, grep the kb log for `low-unresolved (no route)` (the H1 instrumentation)
-to see which would-be edges were dropped for lack of a route — distinguishes the
+to see which would-be edges were dropped for lack of a route, distinguishes the
 build/link-only recall loss (CMake `target_link_libraries` with no source include,
 which H0d does not model) from genuine no-dependency. If a known true dep is
 missing AND appears in that log, it is the link-only class (a follow-on, not a
@@ -79,10 +79,10 @@ blocked_symbols=244**. Spot-check of the known FP classes:
 
 | query | result | verdict |
 |---|---|---|
-| `moonlight-qt → Sunshine` | **MEDIUM** via DEFINE_GUID (+ cuda.h/input.h/nvhttp.h/vaapi.h routes) | FP — reduced (was HIGH; §5 macro cap worked) but NOT eliminated |
-| `wolf → Sunshine` | **HIGH** via buffer_descriptor_t (route: config.h) | FP — persists at HIGH |
-| `wolf → inputtino` | HIGH, 13 symbols / 32 sites | TRUE POSITIVE ✓ |
-| `moonlight-qt → moonlight-common-c` | **absent** | TRUE POSITIVE MISSING — recall loss |
+| `moonlight-qt → Sunshine` | **MEDIUM** via DEFINE_GUID (+ cuda.h/input.h/nvhttp.h/vaapi.h routes) | FP: reduced (was HIGH; §5 macro cap worked) but NOT eliminated |
+| `wolf → Sunshine` | **HIGH** via buffer_descriptor_t (route: config.h) | FP: persists at HIGH |
+| `wolf → inputtino` | HIGH, 13 symbols / 32 sites | TRUE POSITIVE |
+| `moonlight-qt → moonlight-common-c` | **absent** | TRUE POSITIVE MISSING: recall loss |
 
 ### Two diagnosed root causes (both NEW work, beyond H1–H3b)
 
@@ -99,7 +99,7 @@ blocked_symbols=244**. Spot-check of the known FP classes:
      …) never forms a cross-repo route → kills wolf→Sunshine.
 
 2. **Recall loss = the angle-bracket blanket-drop.** moonlight-qt depends on
-   moonlight-common-c via `#include <Limelight.h>` (angle brackets — an installed
+   moonlight-common-c via `#include <Limelight.h>` (angle brackets; an installed
    lib), and the C extractor (`c_import_line`) records ONLY quoted `#include "..."`,
    skipping `<...>`. So `<Limelight.h>` never becomes a file_import → 0 routes
    moonlight-qt→moonlight-common-c → the real edge is dropped. (verified: 0
@@ -112,7 +112,7 @@ blocked_symbols=244**. Spot-check of the known FP classes:
      flag), and form a route when a `<Foo.h>` resolves to a repo that PROVIDES
      Foo.h (repo-identity / non-ubiquitous), keeping the SDK reject via the
      system-header list + IDF. Needs extractor + file_imports column + re-scan +
-     route logic — the H0e/§2 work previously deferred.
+     route logic. The H0e/§2 work previously deferred.
 
 ### Status
 Build (H1–H3b) measurably improved precision (DEFINE_GUID HIGH→MEDIUM;
@@ -131,16 +131,16 @@ full `--force` re-scan + kb restart (routes=63):
 
 | query | result | verdict |
 |---|---|---|
-| `aimee` | No cross-repo dependencies | `<process.h>`→Sunshine FP GONE ✅ |
-| `moonlight-qt` | → moonlight-common-c HIGH (44 syms / 93 sites) | true dep RECOVERED ✅ (was missing; `<Limelight.h>`) |
-| `wolf` | → inputtino HIGH (13 syms / 32 sites) | true dep intact ✅ |
-| routes INTO Sunshine | 0 rows | all Sunshine FPs eliminated ✅ |
+| `aimee` | No cross-repo dependencies | `<process.h>`→Sunshine FP GONE |
+| `moonlight-qt` | → moonlight-common-c HIGH (44 syms / 93 sites) | true dep RECOVERED (was missing; `<Limelight.h>`) |
+| `wolf` | → inputtino HIGH (13 syms / 32 sites) | true dep intact |
+| routes INTO Sunshine | 0 rows | all Sunshine FPs eliminated |
 
 Before (H1–H3b only): moonlight-qt→Sunshine MEDIUM (FP), wolf→Sunshine HIGH (FP),
 moonlight-qt→moonlight-common-c MISSING. After (H1–H7): every known FP collapsed,
 the recall loss recovered, true deps intact.
 
-PASS — acceptance bar (this session's choice: spot-check the known FP classes).
+PASS, acceptance bar (this session's choice: spot-check the known FP classes).
 The full Wilson-CI N≥100 precision/recall measurement (proposal §9) remains the
 formal acceptance for a future pass; the structural mechanisms (§1–§6) are all
 implemented + verified-already-satisfied and live-validated on the known cases.
@@ -169,20 +169,20 @@ built recall ground truth from intra-corpus `GIT_REPOSITORY` build deps.
 | gst-wayland-display → smithay (167 syms) | TRUE |
 | moonlight-qt → moonlight-common-c (44 syms) | TRUE |
 | wolf → inputtino (13 syms) | TRUE |
-| inputtino → wolf (2 syms, create_touch_screen) | **FALSE** — wrong direction; create_touch_screen is defined in inputtino + used by wolf. Arises from wolf's vendored/duplicate inputtino copies (incl. indexed `.aimee/worktrees/` pollution) |
+| inputtino → wolf (2 syms, create_touch_screen) | **FALSE**: wrong direction; create_touch_screen is defined in inputtino + used by wolf. Arises from wolf's vendored/duplicate inputtino copies (incl. indexed `.aimee/worktrees/` pollution) |
 
-### §4 precision — NOT MEASURABLE at the required N
+### §4 precision: NOT MEASURABLE at the required N
 Gate: N≥100 HIGH edges, Wilson-95% lower bound ≥90%, AMBIGUOUS in denominator.
-Only **4** HIGH edges exist corpus-wide — cannot sample 100. Observed precision
+Only **4** HIGH edges exist corpus-wide, cannot sample 100. Observed precision
 3/4 = 75% (Wilson-95% LB on 3/4 ≈ 30%, but driven entirely by N=4). The gate is
 UNREACHABLE because edge VOLUME collapsed, not because precision is poor.
 
-### §5 recall — FAILS
+### §5 recall: FAILS
 Ground truth (intra-corpus declared deps via GIT_REPOSITORY URLs): 11 pairs;
 emitted: 2 → **recall ≈ 18%** (gate: HIGH ≥70%, HIGH+MED ≥85%). Missed real deps
 include wolf→{mdns_cpp, moonlight-common-c, gst-wayland-display, eventbus},
 smoothnas→{inputtino, smoothfs, eventbus, …}, aimee→smoothgui. (Ground truth is a
-lower bound — git-URL scan; submodule/path deps like moonlight-qt→moonlight-common-c
+lower bound, git-URL scan; submodule/path deps like moonlight-qt→moonlight-common-c
 are additional and ARE emitted.)
 
 ### §6 latency / negatives
@@ -204,7 +204,7 @@ N≥100/recall bar does NOT.
    mdns_cpp, moonlight-common-c, inputtino, gst-wayland-display via CMake
    FetchContent into `_deps/` (vendored); the caller's use resolves to the vendored
    copy, and H2 canonical-preference only routes to the canonical repo when a
-   structural route to it exists — which it usually doesn't (the include points at
+   structural route to it exists, which it usually doesn't (the include points at
    the FetchContent path, not a basename that matches the canonical repo).
 2. **Build/link-only deps not modelled.** target_link_libraries + find_package +
    FetchContent declare deps with NO matching source `#include` route; H0d builds
@@ -216,7 +216,7 @@ N≥100/recall bar does NOT.
 4. **Indexing pollution.** wolf indexes its own `.aimee/worktrees/` copies (other
    sessions' worktrees), duplicating symbols and producing the inputtino→wolf FP.
 
-### Recommended follow-up (recall recovery — a new effort)
+### Recommended follow-up (recall recovery: a new effort)
 - Exclude `.aimee/worktrees/` (and similar) from indexing (cheap; kills the
   inputtino→wolf FP class).
 - Build-link route extraction: parse CMake FetchContent_Declare GIT_REPOSITORY +

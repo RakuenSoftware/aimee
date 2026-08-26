@@ -187,7 +187,7 @@ CFG_KEY_DESC = {
     "extended_thinking_enabled": (
         "Ask for extended thinking on aimee's OWN Anthropic requests (default off). "
         "Sends the adaptive thinking config, and only to a model whose capabilities "
-        "report that it accepts it -- a model nobody has reported that for is left "
+        "report that it accepts it. A model nobody has reported that for is left "
         "alone rather than sent a shape the provider would reject. Off by default "
         "because thinking tokens are billed: enabling it changes spend, not just "
         "visibility."

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 as partially implemented. The 62-slice source
+- **State:** DONE. Archived 2026-08-04 as partially implemented. The 62-slice source
   modularization, ownership ledgers, checks, and event-bus foundation landed; process isolation,
   profile parity, recovery, and compatibility closeout continue in
   [`modular-refactor-completion-residual.md`](../pending/modular-refactor-completion-residual.md).
@@ -22,7 +22,7 @@
 > must therefore add and order these slices, which this proposal does not yet detail and which reopen
 > it for re-review: (1) the descriptor/build machinery and canonical inventory; (2) the **bus wire
 > spec**, the single in-source **C bus host**, the **C and Go reference clients**, and the
-> cross-language conformance vectors — the foundation everything else attaches to; (3) migrating
+> cross-language conformance vectors, the foundation everything else attaches to; (3) migrating
 > modules onto the bus, **`memory` first** as the hub, gated by the committed performance-budget
 > baseline before that slice may land; (4) the optional **`module-loader`** (OS-sandbox and WASM
 > hosts, artifact verification); (5) **`event-bus-governance-and-capture`**, after the bus and the
@@ -32,13 +32,13 @@
 > `plugin-loader`→`module-loader` rename. Until re-reviewed, treat this proposal's sequence as
 > pre-amendment.
 >
-> **2026-07-24 update.** Step (2) — the bus wire spec, the single in-source C host, the C and Go
-> reference clients, and the cross-language conformance vectors — is **implemented and merged** on
+> **2026-07-24 update.** Step (2), the bus wire spec, the single in-source C host, the C and Go
+> reference clients, and the cross-language conformance vectors, is **implemented and merged** on
 > `feat/event-bus` as its own twelve-slice tree
 > ([`docs/dev/EVENT_BUS_FEATURE_TREE.md`](../../dev/EVENT_BUS_FEATURE_TREE.md);
 > [`event-bus-wire-spec.md`](../done/event-bus-wire-spec.md) Implementation status). It also delivered the
 > committed performance-budget baseline that gates step (3), and the governance/audit **tap** the
-> child in step (5) consumes. The bus is deliberately linked into **no** shipping binary — the D7
+> child in step (5) consumes. The bus is deliberately linked into **no** shipping binary. The D7
 > blast-radius gate holds that until step (3), the `memory`-first migration, is the tree that links
 > it onto the hot path. Steps (3)–(6) remain open.
 
@@ -127,7 +127,7 @@ replace their stricter feature gates.
 Every PR records production additions, deletions, consolidations, remaining fallbacks, and why net
 growth is necessary. Feature-specific tests leave with deleted features. A move may not introduce
 global headers, broad service locators, parallel registries, pass-through layers, or feature code in
-base/composition roots. Success is fewer concepts, ownership edges, and production paths—not code
+base/composition roots. Success is fewer concepts, ownership edges, and production paths, not code
 golf or directory churn. Binding check 4 accounts for production growth, consumers, and blast
 radius. Reducing concepts and ownership edges is a review target recorded in each PR's cleanup
 ledger, not a mechanically comparable scalar; human review judges whether a surviving abstraction

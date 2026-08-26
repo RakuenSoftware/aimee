@@ -1,27 +1,27 @@
-# Embedder choice — baseline-gated validation (text BEIR + code)
+# Embedder choice: baseline-gated validation (text BEIR + code)
 
-> **⚠️ SUPERSEDED / NO LONGER THE EMBEDDER DECISION (2026-07-29).** The standing
-> decision is **nomic-embed-text-v2-moe at a uniform 768-d on every tier** — see
+> ** SUPERSEDED / NO LONGER THE EMBEDDER DECISION (2026-07-29).** The standing
+> decision is **nomic-embed-text-v2-moe at a uniform 768-d on every tier**. See
 > [embedder-selection-frozen-ab-v1](embedder-selection-frozen-ab-v1.md), decided
 > on a 10,000-case / 26,473-document suite built from aimee's own corpus.
 >
 > **This is not a reversal of the finding below, because it is a different
-> model.** The model dropped here was `nomic-embed-text-v1.5` — text-only, no
-> code training — and that finding stands: it lost to Qwen3 on code by a wide
+> model.** The model dropped here was `nomic-embed-text-v1.5`, text-only, no
+> code training, and that finding stands: it lost to Qwen3 on code by a wide
 > margin. `nomic-embed-text-v2-moe` is a different, later, retrieval-trained
 > multilingual MoE model, and it beats the Qwen3 ladder on aimee's own code
 > (`code_unit_body` 0.8086) as well as on prose.
 >
-> Retained as evidence: the baseline-gating methodology here — trusting a score
-> only after it reproduces the model's published result on the same harness — is
+> Retained as evidence: the baseline-gating methodology here, trusting a score
+> only after it reproduces the model's published result on the same harness, is
 > what caught the withdrawn capped-corpus numbers, and remains the standard.
 
-**Superseded decision (2026-06-24): drop nomic; use Qwen3-Embedding — 0.6B (CPU
+**Superseded decision (2026-06-24): drop nomic; use Qwen3-Embedding, 0.6B (CPU
 default, 1024-d), 4B (GPU default, 2560-d), 8B (operator opt-in, 4000-d trunc).**
 This superseded the LoCoMo screen
 ([embedder-gate-locomo](embedder-gate-locomo.md)) **and** the earlier
 capped-corpus SciFact numbers that once lived in this file (the "0.883 / 0.820 /
-0.799" table — withdrawn; it was a capped-corpus artifact, see below).
+0.799" table, withdrawn; it was a capped-corpus artifact, see below).
 
 Every number below is **baseline-gated**: each model's score is trusted only after
 it reproduces its *published* result on the same harness. Harness:
@@ -34,7 +34,7 @@ it reproduces its *published* result on the same harness. Harness:
 
 The configured embedder is used for **code**, not just memory text:
 `kb_service_code_embed.c` writes code-chunk vectors (`code_embeddings`), and
-`kb_curator_index_code_unit.c` writes three named vectors per code unit —
+`kb_curator_index_code_unit.c` writes three named vectors per code unit,
 `intent_vec` (NL summary), `sig_vec` (signature), **`body_vec` (raw code body)**.
 So **code-retrieval quality is a first-class selection axis**, and a text-only
 model is the wrong tool.
@@ -48,7 +48,7 @@ model is the wrong tool.
 3. **On code**, Qwen3 dominates, and **quality plateaus at 4B**: 4B ≈ 8B, so 4B is
    the GPU default and 8B is an opt-in for the last ~0.2 nDCG.
 
-## Text BEIR — baseline reproduction (full corpus)
+## Text BEIR: baseline reproduction (full corpus)
 
 Mine (this harness) vs **published** MTEB nDCG@10. nomic = mean-pool 768-d (docs
 truncated to its ~2048-token limit, its real behavior); Qwen3-0.6B = last-pool
@@ -73,7 +73,7 @@ SCIDOCS (+7), ArguAna (+19), TREC-COVID (+27); SciFact/NFCorpus are the rare tie
 > their published numbers. SciFact alone does **not** justify Qwen3; the code
 > evidence does.
 
-## Code retrieval — the decisive axis
+## Code retrieval: the decisive axis
 
 ### Published MTEB code tasks (nDCG@10)
 
@@ -94,7 +94,7 @@ CodeSearchNet-CC +3.4, CodeTransOcean +4.9); **4B→8B is ≤+0.5** everywhere.
 ### On aimee's OWN code (the real proxy)
 
 1864 functions from `src/**/*.c`: a leading block comment is the query, the
-function signature+body is the relevant doc (1:1) — i.e. NL-intent → code-body
+function signature+body is the relevant doc (1:1), i.e. NL-intent → code-body
 retrieval, exactly the `intent_vec`→`body_vec` match aimee performs. Docs capped
 to 2000 chars (one clean sequence per doc). Artifacts in
 [`benchmarks/results/embedder-gate/aimee-code/`](../../benchmarks/results/embedder-gate/aimee-code/).
@@ -116,25 +116,25 @@ to 2000 chars (one clean sequence per doc). Artifacts in
 
 | tier | model | dim | when |
 |---|---|---|---|
-| CPU default | Qwen3-Embedding-0.6B | 1024 | auto (no GPU) — matches pplx-embed's 1024-d, no schema change |
-| GPU default | Qwen3-Embedding-4B | 2560 | auto (any GPU) — 8B-grade quality, indexed natively (<4000-d `halfvec` ceiling) |
-| GPU opt-in | Qwen3-Embedding-8B | 4000 (trunc 4096→4000) | operator must explicitly configure — buys ~0.2 nDCG for 4096-d native + 2× VRAM |
+| CPU default | Qwen3-Embedding-0.6B | 1024 | auto (no GPU): matches pplx-embed's 1024-d, no schema change |
+| GPU default | Qwen3-Embedding-4B | 2560 | auto (any GPU): 8B-grade quality, indexed natively (<4000-d `halfvec` ceiling) |
+| GPU opt-in | Qwen3-Embedding-8B | 4000 (trunc 4096→4000) | operator must explicitly configure: buys ~0.2 nDCG for 4096-d native + 2× VRAM |
 
 8B is **not** auto-selected by VRAM: 4B already captures its quality at 1.6× smaller
 vectors and ~1.4× faster embed. See
-[unified-llm-container](../proposals/pending/unified-llm-container.md) for the
+[unified-llm-container](../proposals/done/unified-llm-container.md) for the
 truncation machinery (only the 8B opt-in needs it).
 
 ## Serving / harness gotchas
 
 - **Serving (production, HTTP):** `llama-server --embeddings -np 1 --cache-ram 0
-  --no-cache-idle-slots` — the default prompt cache fragments the embedding KV cache
+  --no-cache-idle-slots`. The default prompt cache fragments the embedding KV cache
   (`GGML_ASSERT(task)` crash); keep `-ub` ≤ 2048 (RADV per-buffer limit). The
   `/v1/embeddings` endpoint returns one vector per input by construction.
 - **Code embedding via the CLI harness needs `--no-escape`.** `llama-embedding`
   expands literal `\n`/`\t` (ubiquitous in C string literals) into real newlines,
   splitting one code prompt into many embeddings (1864 docs → 2889). `--no-escape`
-  fixes it. **CLI-only** — the HTTP server is unaffected (JSON inputs are discrete).
+  fixes it. **CLI-only**. The HTTP server is unaffected (JSON inputs are discrete).
 - **Token density:** C code is ~1.8 chars/token; cap code docs ~2000 chars so each
   stays one sequence (else llama-embedding chunk-splits >ctx prompts).
 - **The Qwen3 query instruction contains a newline** (`Instruct: …\nQuery: `);

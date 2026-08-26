@@ -60,13 +60,13 @@ The follow-up removes chain construction from every PostgreSQL producer:
 - Drain, chain append, witness append, and immutable delivery acknowledgement
   commit together. A crash leaves either all of them or none of them.
 
-The worker preserves the established canonical row bytes — same action and
-same `commit_id=<id>` detail — so `db2_kb_audit_verify_chain()` continues to
+The worker preserves the established canonical row bytes, same action and
+same `commit_id=<id>` detail, so `db2_kb_audit_verify_chain()` continues to
 verify the resulting trail.
 
 ## Verified
 
-- `make changeset-worm-seal-check` — 6 unit tests pass; the check resolves 5
+- `make changeset-worm-seal-check`: 6 unit tests pass; the check resolves 5
   close sites in `schema.sql`, all sealed.
 - The gate reports the real defect. Run against the pre-change schema at
   `origin/testing`, it resolves the same 5 sites and reports **5 of 5 unsealed**,
@@ -80,7 +80,7 @@ verify the resulting trail.
   the reverting changeset's seal. A unit test pins that.
 - `schema-sync-check`, `db2-contract-check`, `db2-declaration-ledger-check`,
   `db2-activation-check`, `line-check` pass.
-- `make worm-worker-boundary-check` — 7 unit tests plus a structural gate pin
+- `make worm-worker-boundary-check`: 7 unit tests plus a structural gate pin
   the runtime revoke, enqueue-only C production branch, narrow fact seal,
   separate credential requirement, isolated API schema, and one-object worker
   link surface.
@@ -127,8 +127,8 @@ new seal wiring rather than an unrelated audit row.
 
 The gate proves runtime has no INSERT on the chain, outbox, or delivery ledger
 and cannot execute the internal appender or drainer. It also proves that the
-worker cannot resolve `public` at all—closing PostgreSQL's default-EXECUTE
-function leak—and can resolve only its one-function API schema. It then injects
+worker cannot resolve `public` at all, closing PostgreSQL's default-EXECUTE
+function leak, and can resolve only its one-function API schema. It then injects
 a failure after chain insertion but before delivery acknowledgement. The
 complete drain transaction rolls back, the two intents remain pending, restart
 seals them exactly once, and a second restart is a no-op.

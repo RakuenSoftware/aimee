@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implementation, adversarial branch review, local/ASAN/fuzz gates, and exact-head CT260 validation passed.
+- **State:** DONE. Implementation, adversarial branch review, local/ASAN/fuzz gates, and exact-head CT260 validation passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P5-C1a strict verifier and durable server replay consume.
 - **Followed by:** P5-C1c primary/WORM action journal, P5-C2 custody-backed signing and signed

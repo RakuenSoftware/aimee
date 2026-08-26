@@ -1,4 +1,4 @@
-## GPU accuracy — production prompt
+## GPU accuracy: production prompt
 
 | model | params | licence | F1 capability | F1 committed | precision | recall | schema | abstain | med ms |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|
@@ -20,7 +20,7 @@
 | unsloth/gemma-3-270m-it | 270M | gemma | 0.000 | 0.000 | 0.000 | 0.000 | 0.00 | None | 270.8 |
 
 
-## GPU accuracy — confidence-literal ablation (NOT production)
+## GPU accuracy: confidence-literal ablation (NOT production)
 
 | model | params | licence | F1 capability | F1 committed | precision | recall | schema | abstain | med ms |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|

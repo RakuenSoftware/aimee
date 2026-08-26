@@ -1,6 +1,6 @@
 # Remote session start: workspace context residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`remote-first-session-start.md`](../done/remote-first-session-start.md)
 

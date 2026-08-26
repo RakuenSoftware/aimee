@@ -1,12 +1,12 @@
-# P10/P7 slice 2 implementation plan — kb vault foundation (Postgres store)
+# P10/P7 slice 2 implementation plan: kb vault foundation (Postgres store)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
 Slice 2 of P10+P7. Branch off `testing` (P1, P3a, P10-slice-1 merged). Goal: give
-aimee-kb a **working credential vault** — the vault core linked into the kb binary, a
-Postgres storage backend, and kb binding it at startup — so later slices (CA-key-in-
+aimee-kb a **working credential vault**, the vault core linked into the kb binary, a
+Postgres storage backend, and kb binding it at startup, so later slices (CA-key-in-
 vault, seal/unseal, use-in-place, WORM audit, rotation) have a real vault to harden.
 This slice is the **file-custody, Postgres-store** kb vault: functional, not yet
 hardened. It handles **no org vendor keys yet** (that is P2b); slice 3 moves the kb CA
@@ -19,14 +19,14 @@ key in as the first real consumer.
   (`CORE_SRCS`/`KB_CORE_OBJS`). No `db1_`/`sqlite3_` symbols; `modules/vault/` is not a
   forbidden prefix; `--gc-sections` drops the unreferenced `jsonfile_*` code once the
   pg backend is bound. **No jsonfile split required.** `server/server_vault*.c` stay
-  server-only (the `server/` prefix is forbidden in the kb link — correct, they're glue).
+  server-only (the `server/` prefix is forbidden in the kb link, correct, they're glue).
 - kb serving init: `db2_init()` loop at `kb/kb_main.c:747`; one-time post-DB2 wiring runs
   right after (`db2_rel_types_ensure_seed()` at `:769`). The vault bind goes there.
 - db2 boundary: `db2_conn()` (opaque `PGconn*`) + `aimee_pg_exec/prepare/bind_*/step/
   column_*` (`db2/db_postgres.h`); canonical use in `db2/db2_tenant.c:45-85` (lease_begin
   → conn → exec/prepare/step → lease_end). Schema applied by `db_apply_schema_postgres`
   from `db2/schema.sql`.
-- No existing db2 vault/secret table — genuinely new schema + code.
+- No existing db2 vault/secret table, genuinely new schema + code.
 
 ## Design decisions (the seam serves both profiles; kb uses a single-KEK model)
 
@@ -36,7 +36,7 @@ key in as the first real consumer.
    like jsonfile, and additionally derives a `team_id` column (from the principal, when it
    is `team:<n>`) for RLS tenant scoping. `org:pki:ca-key` (slice 3) is a platform-scoped
    slot (team_id 0 / NULL).
-2. **Single-KEK model, KEK from custody — not per-principal password KDF.** The server
+2. **Single-KEK model, KEK from custody, not per-principal password KDF.** The server
    profile derives a per-principal KEK from a stored salt + password/root. The kb org
    vault (P7 §1) derives **one** KEK from the custody anchor and wraps every per-key DEK
    under it. So in the kb profile the KEK is supplied by `vault_custody_provider_t.get_kek()`
@@ -47,31 +47,31 @@ key in as the first real consumer.
    (one per deployment); `unlock_check` uses the existing `kek_check` verifier.
 3. **The pg backend implements the kb-relevant ops; server-dual-wrap ops are unsupported.**
    `get_or_create_salt, salt_readonly, unlock_check, set, get, has_entry, list, delete,
-   rekey, rekey_field, list_principals` — full envelope round-trip against Postgres. The
+   rekey, rekey_field, list_principals`, full envelope round-trip against Postgres. The
    **server-autonomous dual-wrap ops** (`set_dual, set_server, get_server,
    add_server_wraps`) return `VAULT_ERR`/unsupported: they encode the server's "server can
    read a user credential without the user unlocking" model, which the org vault does not
    use (its single KEK is anchor-derived, not a second server-KEK wrap). A `NULL` slot in
    the vtable is not an option (facade would crash), so they are explicit stubs returning a
    typed unsupported error. Documented in the backend.
-4. **Envelope crypto is byte-identical to jsonfile** — same `vault_crypto` (random DEK,
+4. **Envelope crypto is byte-identical to jsonfile**: same `vault_crypto` (random DEK,
    AES-KW wrap under KEK, AES-256-GCM secret with AAD, `kek_check` sentinel). Only the
    PERSISTENCE differs (Postgres rows vs a JSON file). So a change to core crypto is
-   exercised by both backends — the P10 anti-drift property.
+   exercised by both backends, the P10 anti-drift property.
 
 ## Scope (slice 2)
 
-1. **db2 schema** (`db2/schema.sql`): `org_vault_secret` — the kb ciphertext store.
+1. **db2 schema** (`db2/schema.sql`): `org_vault_secret`, the kb ciphertext store.
    Columns: `id`, `principal` (slot key, NOT NULL), `team_id BIGINT` (FK kb_team, NULL =
    platform-scoped like the CA key), `agent`, `cred`, `version BIGINT` (immutable version
-   rows for the future rotation/anti-rollback slice — slice 2 always writes version 1 and
+   rows for the future rotation/anti-rollback slice, slice 2 always writes version 1 and
    upserts), `wrapped_dek BYTEA`, `nonce BYTEA`, `ciphertext BYTEA`, `tag BYTEA`,
    `kek_check BYTEA` (per-deployment verifier row), `created_at`. Unique `(principal, agent,
    cred)` (slice 2 single-version); a separate `org_vault_salt(principal PK, salt BYTEA)`
    for the salt/verifier. **RLS** (invariant #10): `FORCE ROW LEVEL SECURITY`, tenant read
    scoped to `team_id ∈ principal's teams OR team_id IS NULL` (platform slots) via the P1
    `set_tenant_context`/`aimee.principal` pattern; writes admin/writer-gated. **Ciphertext
-   only** — never a plaintext key, never the KEK (the KEK lives behind custody, off-DB).
+   only**, never a plaintext key, never the KEK (the KEK lives behind custody, off-DB).
 2. **Postgres storage backend** `db2/vault_pg.c` (+ header) implementing
    `vault_store_backend_t`, using `db2_conn()` + `aimee_pg_*` (the db2_tenant.c pattern),
    with a `ctx` carrying nothing in slice 2 (uses the process db2 connection). kb-only
@@ -116,18 +116,18 @@ the pg backend.
 
 Panel found no blocking issue, but these repeated signals are baked in:
 
-- **CRITICAL — platform-scoped rows are NEVER a tenant read.** The v1 predicate
+- **CRITICAL, platform-scoped rows are NEVER a tenant read.** The v1 predicate
   `team_id ∈ principal's teams OR team_id IS NULL` leaks every `team_id IS NULL` row
   (the CA key) to every tenant. Corrected RLS:
   - tenant SELECT policy: `team_id IS NOT NULL AND team_id ∈ principal's teams`
     (via the P1 membership subquery on `aimee.principal`).
   - platform-scoped (`team_id IS NULL`) rows are readable ONLY by
     `kb_principal_is_admin()` and written/read by the SECURITY DEFINER vault-service
-    path — never by an ordinary tenant session. The CA key (slice 3) is such a row and
+    path, never by an ordinary tenant session. The CA key (slice 3) is such a row and
     is thus invisible to tenants at the DB layer.
   - `org_vault_secret` uses `FORCE ROW LEVEL SECURITY`; writes go through a SECURITY
     DEFINER writer function (like P3a's metering fns), no direct tenant DML.
-- **CRITICAL — sequencing / P7 §3.** Slice 2 stores **no keys** — it is plumbing +
+- **CRITICAL (sequencing / P7 §3.** Slice 2 stores **no keys**) it is plumbing +
   tests only. Storing the kb CA key (slice 3) or any org vendor key under **bare file
   custody** is what P7 §3 forbids on a key-holding kb. Therefore: (a) the file-custody
   kb vault is explicitly **single-instance dev mode**; (b) slice 3's CA-key-in-vault
@@ -144,11 +144,11 @@ Panel found no blocking issue, but these repeated signals are baked in:
   Slice 2 writes version 1 and reads via the pointer; rotation later is purely additive.
 - **AAD binds version.** AAD = `principal|agent|cred|version` (not just
   `principal|agent|cred`), so a restored older-version ciphertext cannot be presented as
-  current — the AAD itself refuses it. Cheap now, essential for the rotation/anti-rollback
+  current. The AAD itself refuses it. Cheap now, essential for the rotation/anti-rollback
   slice.
 - **Single `kek_check` verifier, not per-secret.** The per-deployment KEK verifier lives
   as ONE row in `org_vault_salt(principal, salt, kek_check)` (or a dedicated verifier
-  row), not duplicated per `org_vault_secret` row — removes the guess-a-KEK oracle the
+  row), not duplicated per `org_vault_secret` row, removes the guess-a-KEK oracle the
   panel flagged.
 - **Typed unsupported error.** The four server-dual-wrap ops return
   `VAULT_ERR_UNSUPPORTED_OP` (a distinct code), so the kb vault service fails loud/clear,

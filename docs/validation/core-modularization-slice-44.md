@@ -53,7 +53,7 @@ Every declared source is live:
 
 Make's `DATA_SRCS` compiles all eleven sources and carries the `-Imodules/workspace` include path.
 CMake compiles four: `cli_workspace_serve.c`, `workspace.c`, `workspace_manifest.c`, and
-`workspace_provider_detached.c` — the entry, the core, the manifest, and the one provider the thin
+`workspace_provider_detached.c`, the entry, the core, the manifest, and the one provider the thin
 `aimee` client instantiates when it serves a detached workspace. It omits the seven server/runner-side
 units: `workspace_handle.c`, `workspace_mirror.c`, `workspace_provider_container.c`,
 `workspace_runner_queue.c`, `workspace_runner_registry.c`, `workspace_scope.c`, and
@@ -87,8 +87,8 @@ changes.
 
 ## Why declare without latching
 
-The latch asserts the descriptor exhaustively covers the module root. That is true today — the module
-root holds exactly these eleven sources and eleven headers — so the latch would pass. It is deferred
+The latch asserts the descriptor exhaustively covers the module root. That is true today. The module
+root holds exactly these eleven sources and eleven headers, so the latch would pass. It is deferred
 because declaring the files and asserting completeness are distinct claims, and the roundtable required
 the completeness audit to review declarations merged on their own first rather than authored in the
 same change. The validator accepts a declared-but-unlatched descriptor: it checks each declared path
@@ -100,8 +100,8 @@ true.
 The declaration is covered by the existing descriptor validation: every declared path must exist and
 resolve within the module, and the regenerated test-registration baseline pins the eleven workspace
 tests' per-suite registration. The empty-domain guard from slice 39 does not apply, because the module
-root is not empty. The latch mutation coverage — source removal, private-header removal, planted files,
-cleared latch — is deferred to slice 45, where `ownership_complete` is set and those mutations become
+root is not empty. The latch mutation coverage, source removal, private-header removal, planted files,
+cleared latch, is deferred to slice 45, where `ownership_complete` is set and those mutations become
 meaningful.
 
 ## Verification

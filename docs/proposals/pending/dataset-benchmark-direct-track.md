@@ -1,6 +1,6 @@
 # Restore dataset-driven direct retrieval benchmarks in Go
 
-- **State:** PENDING — restored after rejection audit on 2026-08-16.
+- **State:** PENDING. Restored after rejection audit on 2026-08-16.
 - **Corrective history:** PR #2662 rejected this objective because its archived implementation
   used a retired C binary and the broken C/SQL scratch store. That was an ownership error, not
   evidence that deterministic LoCoMo and LongMemEval retrieval measurement was obsolete. This

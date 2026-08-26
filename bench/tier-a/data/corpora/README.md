@@ -6,13 +6,13 @@ result records which one produced it.
 
 | version | prompt | notes |
 | --- | --- | --- |
-| v1 | prompt v1 | first generated corpus. `novel_pred` is unusable — see below. |
+| v1 | prompt v1 | first generated corpus. `novel_pred` is unusable: see below. |
 | v2 | prompt v2 | `novel_pred` rebuilt; retraction guidance added to the prompt. |
 
 **Note ids are NOT stable across versions.** Regenerating shuffles and renumbers,
 so `g000123` in v1 and v2 are different notes. Zero of 1000 ids kept their text
 between v1 and v2. Scoring a v1 prediction file against v2 gold silently produces
-nonsense — the ids line up and the notes do not.
+nonsense. The ids line up and the notes do not.
 
 That nearly happened here: v2 was generated while a Q4 run against v1 was still
 in flight. The run was saved because the file was versioned rather than replaced.
@@ -21,7 +21,7 @@ reading.** Write a new version and switch deliberately.
 
 ## What changed in v2
 
-`novel_pred` in v1 asked for predicates a seed relation could reasonably cover —
+`novel_pred` in v1 asked for predicates a seed relation could reasonably cover,
 `technical_contact_for` for "X is the technical contact for Y". The prompt tells
 the model to prefer a canonical predicate "when one reasonably applies" and to
 mint only "if NONE fits", so a model obeying the prompt answers `works_for`, and

@@ -4,19 +4,19 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 as partially implemented. Capture/replay and multiple audit,
+- **State:** DONE. Archived 2026-08-04 as partially implemented. Capture/replay and multiple audit,
   guardrail, memory, tool, vault, and sandbox sinks landed; structural all-event capture,
   synchronous action authorization, and attestation integration continue in
   [`event-bus-enforcement-and-attestation-residual.md`](../pending/event-bus-enforcement-and-attestation-residual.md).
-- **Historical state:** DRAFT — 2026-07-23; awaiting roundtable review. A later-drafted consuming child; it does
+- **Historical state:** DRAFT. 2026-07-23; awaiting roundtable review. A later-drafted consuming child; it does
   not inherit any prior approval.
 - **Parent:** [`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md)
 - **Owns:** how governance and audit observe, record, and enforce over the core-owned module event
-  bus — the single tap through which every inter-module message is captured, action-class events are
+  bus. The single tap through which every inter-module message is captured, action-class events are
   authorized before delivery, and the stream is fed to the durable ledger and the attestation bundle.
 - **Consumes (does not modify):** the shared-memory event bus, the governance/audit tap, and
   invariants 13/17/18 from the modularization suite; the **in-flight** attestable-enforcement work
-  ([`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)) — its hash-chained
+  ([`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md)), its hash-chained
   WORM ledger, `policy_rev`, `uncovered_enforcers` inventory, and `aimee audit attest` bundle.
 - **Implementation dependencies:** the modularization suite's event bus and `execution-policy`/`audit`
   contracts; the attestable-enforcement deltas A1–A5 landing in code.
@@ -39,7 +39,7 @@ miss a site. The modularization suite removes that problem at the root: once the
 C and every module is a separate program on a core-owned shared-memory event bus, **every
 inter-module message is a typed event on that single bus**, and no module-to-module path exists
 outside it (suite invariants 12–13). That makes the bus the one place to govern and log the entire
-cross-module message stream — capture and enforcement stop being scattered and become a property of
+cross-module message stream, capture and enforcement stop being scattered and become a property of
 the substrate.
 
 ## Decision
@@ -53,12 +53,12 @@ events authorizes, each event using the enforcement contracts the attestable-enf
   interception, integrity gate, native gate, vault, trigger/forge, guard) become event kinds on the
   bus rather than bespoke side logs. An enforcer that acts without publishing a bus event cannot act
   at all, so `uncovered_enforcers` collapses from "sites we remembered to wire" to "declared event
-  kind never chained" — a mechanical descriptor check, not a manual sweep.
+  kind never chained": a mechanical descriptor check, not a manual sweep.
 - **Enforcement is a bus concern, within budget.** An action-class event carries a synchronous
   pre-delivery verdict through `execution-policy` before the bus delivers it; the verdict and its
   `policy_rev` ride the same event record. Non-action, high-frequency events (for example `memory`
   recall) are observed and recorded, not synchronously gated, so completeness stays inside the bus
-  performance budget (suite invariant 15) — the same asynchronous, batched recording the
+  performance budget (suite invariant 15). The same asynchronous, batched recording the
   attestable-enforcement *Risks* note already assumes for the WORM hot path.
 - **One record shape.** Each governed bus event chains a row carrying the event kind, the publishing
   and serving module, the actor/principal, the verdict, and `policy_rev`, so `aimee audit attest`
@@ -74,7 +74,7 @@ The tap runs inside the audited service's own process (core), so it does not cha
 guarantee. The out-of-process sealer and off-host anchor from attestable-enforcement A4 remain the
 actual trust anchor; this proposal improves capture completeness and uniformity, not resistance to a
 compromised host. The tap is trust-kernel infrastructure, not a feature module, and is the single
-full-stream observer permitted by suite invariant 18 — modules still see only their authorized slice.
+full-stream observer permitted by suite invariant 18, modules still see only their authorized slice.
 
 ## Non-goals
 

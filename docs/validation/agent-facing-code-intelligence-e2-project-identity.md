@@ -1,6 +1,6 @@
 # Agent-facing code-intelligence E2 validation
 
-- **Slice:** E2 — current-project identity and lifecycle
+- **Slice:** E2. Current-project identity and lifecycle
 - **Based on:** E1-memory merge `ea612958`
 - **Policy authority:** proposal merge `5cdb681` and local-first amendment merge `e9626cd`
 - **Untreated control:**

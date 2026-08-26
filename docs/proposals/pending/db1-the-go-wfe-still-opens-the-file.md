@@ -1,14 +1,14 @@
 # Proposal: the Go WFE opens DB1 directly, and it is now the last one that does
 
 - **State:** RESOLVED. The engine reaches DB1 through the module now, and
-  `scripts/validation/db1-module-wfe-coexistence.sh` -- which was written to
-  fail while this was true -- passes. What follows is kept as the record of what
+  `scripts/validation/db1-module-wfe-coexistence.sh`, which was written to
+  fail while this was true, passes. What follows is kept as the record of what
   was wrong and how it was closed, because the reasoning about WHY two writers
   was unacceptable is the part worth keeping.
 
 ## What is true
 
-`aimee-server` no longer opens DB1 — the symbol is not in the binary. One
+`aimee-server` no longer opens DB1. The symbol is not in the binary. One
 process in a deployed appliance still does, and it is not the module:
 
 - `Dockerfile.server` builds `server-go/cmd/aimee-server` as `/out/aimee-wfe`.
@@ -22,7 +22,7 @@ process in a deployed appliance still does, and it is not the module:
 
 The tables it reads and writes are `lifecycle_work_item`, `lifecycle_event`,
 `lifecycle_stage_attempt`, `lifecycle_delegate_job`, `agent_jobs` and
-`wfe_convergence` -- which is to say, precisely the tables the `lifecycle` and
+`wfe_convergence`, which is to say, precisely the tables the `lifecycle` and
 `delegation` families now serve.
 
 ## Why this is not a regression
@@ -31,7 +31,7 @@ Nothing here changed. The Go WFE has always opened the file, and SQLite in WAL
 mode makes concurrent process access safe at the storage level: this is not
 corruption waiting to happen.
 
-What it does mean is that the doctrine's claim -- all state behind the module --
+What it does mean is that the doctrine's claim. All state behind the module --
 is true of C and not yet true of the appliance. Two implementations of the same
 tables run side by side, and the atomicity the C side gained does not extend
 across the Go writer. `db1_work_item_record_outcome` applies a step's whole
@@ -42,10 +42,10 @@ notions of "a step is applied" are enforced independently rather than jointly.
 ## Why it was invisible
 
 `db1-as-a-go-module.md` measured the surface as "63 C translation units linked
-into aimee-server" and "2,888 call sites outside src/db1", all of them C. A Go
+into aimee-server" and "2,888 call sites outside src/db1", all of them C; A Go
 service with its own SQLite handle is not a call site in that count, so the
 proposal that scoped this migration could not see it, and neither could any of
-the sweeps I ran -- until I stopped grepping C and asked which processes open
+the sweeps I ran, until I stopped grepping C and asked which processes open
 the file.
 
 ## How it was closed
@@ -53,7 +53,7 @@ the file.
 The first direction: DB1 owns the state, the engine became a client.
 
 Every statement the engine ran against the file is an operation the module
-serves -- 45 of them across five module sources, with each of the engine's
+serves, 45 of them across five module sources, with each of the engine's
 transactions kept whole as ONE operation rather than decomposed, because a
 transaction assembled from separate calls across a wire is not a transaction.
 The Go client is generated from the same catalog as the C one, for the same
@@ -66,8 +66,8 @@ the module's schema, so the module creates 105 tables where it created 102 --
 exactly what the Go side used to add. There is nothing left for a second writer
 to create or alter.
 
-Porting from the SQL alone was not enough, and the Go tests -- which now run
-against a real module -- caught five behaviours that reading statements had
+Porting from the SQL alone was not enough, and the Go tests, which now run
+against a real module, caught five behaviours that reading statements had
 lost: reconcile answering the wrong question entirely, budget parks stranding a
 sibling's authorised money, resume clearing pauses only the engine may clear, a
 lost create race reading as a broken store, and a found retry detail reported as
@@ -78,8 +78,7 @@ a miss. Each is in the commit that fixed it.
 Before costing the work, there is a question underneath it that decides which
 work to do, and getting it wrong means doing a large migration twice.
 
-`aimee-wfe` is not the daemon. It is a separate process, launched by the same
-supervisor, with its own grant and its own principal -- which is to say it is a
+`aimee-wfe` is a separate process, launched by the same supervisor, with its own grant and its own principal, which is to say it is a
 module by every structural test this codebase applies. The doctrine says state
 lives in modules, and the WFE is one. The defect is not that a non-C process
 holds state; it is that **two modules claim the same tables**, and they resolve
@@ -90,13 +89,13 @@ So there are two ways to close this, and they are not variations on each other:
 **DB1 owns it; the WFE becomes a client.** Port `internal/db1/store.go` onto the
 Go bus client. 1738 lines, ~40 live methods, **18 transactions** and **17
 recursive CTEs**. Every one of those transactions has to become a single module
-operation -- the same redesign `wfe_engine.c` needed when its sixteen writes
-across two transactions became `db1_work_item_record_outcome` -- and every
+operation. The same redesign `wfe_engine.c` needed when its sixteen writes
+across two transactions became `db1_work_item_record_outcome`, and every
 recursive CTE has to move into C. The methods at risk are the ones that matter:
 budget reservation with leases, cancellation trees, orphan reconciliation.
 
 **The WFE owns it; the daemon becomes a client.** Remove `lifecycle` and
-`delegation` from DB1 -- they were migrated *into* it on this branch -- give the
+`delegation` from DB1 (they were migrated *into* it on this branch) give the
 WFE its own store, and point the daemon's work-item reads at the WFE over the
 bus. That is **~106 C call sites**: 45 in `wfe_autonomy.c`, 35 in
 `server_workflow_api.c`, and the rest across `server_ci_route.c`,
@@ -127,7 +126,7 @@ same problem with an extra hop.
 
 So: grow `server-go/db1/client.go` to cover lifecycle and delegation, and move
 `internal/db1/store.go` onto it. The contract those methods are written against
-is settled -- 19 families, 425 operations -- which is what makes this a port
+is settled (19 families, 425 operations) which is what makes this a port
 rather than a design. The 18 transactions are the work: each becomes one
 operation, the way `db1_work_item_record_outcome` did, and that is a redesign of
 the Go engine's write path rather than a translation of it. That is why it is
@@ -138,16 +137,16 @@ two schema authorities, and it is not corrupting anything.
 
 ## What closing it costs
 
-Not small, and not this change. `server-go/db1/client.go` -- the Go bus client
-`cmd/aimee-module` already uses -- exposes two methods, `LoadState` and
+Not small, and not this change. `server-go/db1/client.go`. The Go bus client
+`cmd/aimee-module` already uses, exposes two methods, `LoadState` and
 `SaveState`, the economizer keyed-blob pair. `server-go/internal/db1/store.go`
 exposes 47. Closing the gap means growing the Go client to cover the lifecycle
 and delegation families and moving the WFE onto it.
 
 That is the phase the original proposal already named: "the boundary moves
 FIRST, with the existing C behind it; the language port follows, per domain,
-against a contract that is already settled." The contract is settled now -- 19
-families, 425 operations -- which is exactly what such a port would be written
+against a contract that is already settled." The contract is settled now, 19
+families, 425 operations, which is exactly what such a port would be written
 against. It is the next project, not the tail of this one.
 
 ## What was verified, and what was not
@@ -157,7 +156,7 @@ concurrent-writer behaviour explicitly NOT verified, on the grounds that the
 claim did not depend on it.
 
 It has since been measured. `scripts/validation/db1-module-wfe-coexistence.sh`
-runs the three-process topology on a clean container -- C daemon, DB1 module,
+runs the three-process topology on a clean container. C daemon, DB1 module,
 and `aimee-wfe` started the way `server-entrypoint.sh` starts it, with the
 `wfe.grant` the bundle generates. Results:
 
@@ -168,25 +167,25 @@ an inference: the module is not the store's sole owner in the appliance.
 
 **The Go side amends the module's schema.** Starting the WFE against a store the
 module had already created took it from 102 tables to 105, and added five
-columns to `lifecycle_work_item` -- `source_path`, `reserved_cost_usd`,
+columns to `lifecycle_work_item`, `source_path`, `reserved_cost_usd`,
 `reservation_state`, `reservation_owner`, `reservation_lease_until`. The C
 module references none of the five, so this is additive rather than conflicting,
 but the ALTER ladder that produced them belongs to a different codebase than the
 one that created the table.
 
 **It happens even when the WFE cannot work.** The first run had no `wfe.grant`
-installed, so the WFE died on `bus: attach denied` -- after opening the store
+installed, so the WFE died on `bus: attach denied`, after opening the store
 and running its migrations. A WFE that fails to start still rewrites the schema.
 
 **Either process will create the store.** Started first on an empty home, the Go
 WFE creates seven tables on its own; the module then joins and completes the
 schema to the same 105. The store works in both orders and
-`lifecycle_work_item` ends up with the same column *set* -- but in a different
+`lifecycle_work_item` ends up with the same column *set*, but in a different
 column *order*, which is a fair summary of the situation: two authorities, and
 which one got there first is visible in the file afterwards.
 
 **Contention did not bite at the rates tested.** Both sides are configured for
-multi-process access deliberately -- the module uses `journal_mode=WAL` with
+multi-process access deliberately. The module uses `journal_mode=WAL` with
 busy timeouts of 5s and 15s, the Go store uses WAL with a 5s busy timeout,
 `MaxOpenConns(1)` and `_txlock=immediate`. `db1-module-write-contention.sh`
 drives external writers against `lifecycle_work_item` while the module takes

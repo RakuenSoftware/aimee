@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — sidecar substrate delivered and archived 2026-08-04; deployment/migration residual extracted.
+- **State:** DONE. Sidecar substrate delivered and archived 2026-08-04; deployment/migration residual extracted.
 
 > **Archived after partial delivery.** Two baked embedder images, their guarded publish workflow,
 > stunnel mTLS proof, KB-issued sidecar identity, serving-identity drift checks, and curator replay on
@@ -44,7 +44,7 @@ and two model changes become supported, signposted operations rather than dead e
 That comment must be rewritten, not left to contradict the code. The reasons for going
 back to a sidecar are different from the reasons it was retired:
 
-- **The kb image stops fetching from Hugging Face at all.** Not "less often" — the kb
+- **The kb image stops fetching from Hugging Face at all.** Not "less often". The kb
   build has no model step left. The embedder weights move to a tag whose inputs change
   on the order of never, exactly as `aimee-model-*` did for synthesis.
 - **The kb image loses CPU torch and the weights**, roughly a gigabyte, from every
@@ -55,7 +55,7 @@ back to a sidecar are different from the reasons it was retired:
 embedding happens on every search, not only on ingest. That is precisely what the
 retirement comment objected to. The mitigation is that the hop is a sidecar on the same
 host over loopback-equivalent networking, the same shape as `aimee-llm`, and the
-embedder is small — but this is a latency regression on the hottest path in the product
+embedder is small, but this is a latency regression on the hottest path in the product
 and should be measured, not assumed. If it does not hold up, the honest fallback is the
 build-input image (weights baked, no hop), which gets the Hugging Face win and not the
 swappability.
@@ -76,7 +76,7 @@ were expensive to learn are worth naming so they are not re-learned:
 
 - the kb owns the CA and issues the sidecar's server certificate, because the kb is the
   client on the hop (`kb_synthesis_identity_ensure` is the model)
-- the client must *present* its certificate — `agent_http`'s default context presents
+- the client must *present* its certificate, `agent_http`'s default context presents
   nothing, which is #2284, and it made synthesis fail silently for an entire deployment
 - the identity is loaded lazily on first use, because it does not exist yet when
   `agent_http_init()` runs (#2276)
@@ -91,7 +91,7 @@ Follow `aimee-llm`, which is the working precedent in this tree:
 - Terminated by stunnel with `verifyChain = yes`; the embedder binds loopback inside its
   own namespace and is reachable only through the terminator. The kb owns the CA and
   issues the sidecar's certificate, as it already does for synthesis
-  (`kb_synthesis_identity_ensure`) — this needs the equivalent for the embedder, and the
+  (`kb_synthesis_identity_ensure`). This needs the equivalent for the embedder, and the
   client must present its certificate, which is the bug fixed in #2284. Do not
   re-discover that: `agent_http`'s default context presents nothing.
 - Deployment order: server, wizard, kb, then the sidecars. A missing identity is an
@@ -103,10 +103,10 @@ Follow `aimee-llm`, which is the working precedent in this tree:
 
 ### Embedder change
 
-`db2_reembed.c` already drops and recreates the ten derived vector tables —
+`db2_reembed.c` already drops and recreates the ten derived vector tables,
 `kb_embeddings`, `kb_pdf_embeddings`, `memory_embeddings`,
 `curator_{entity,narrative,claim,code_unit}_vectors`, `exemplar_vectors`,
-`evidence_vectors`, `code_embeddings` — and refuses if it meets a halfvec table it does
+`evidence_vectors`, `code_embeddings`, and refuses if it meets a halfvec table it does
 not recognise rather than risk destroying source it does not understand. Each rebuilds
 from an authoritative source, so no source data is lost.
 
@@ -134,13 +134,13 @@ Which stages actually need regenerating is worth being precise about:
 The operator's instruction is to re-synthesise, and the defensible reading of it is:
 re-embed everything, re-index everything, and regenerate the retrieval-dependent
 stages. Regenerating the per-chunk stages as well costs synthesis time and changes
-nothing that was correct — but it is simpler to explain and to verify. Pick one and say
+nothing that was correct, but it is simpler to explain and to verify. Pick one and say
 which.
 
 ### Synthesis model change
 
 Different mechanics, and nothing implements it today. A new synthesis model does not
-invalidate any *vector width* — embeddings are the embedder's output — but it does
+invalidate any *vector width* (embeddings are the embedder's output) but it does
 invalidate every artifact the old model wrote, because that text is what changes.
 
 So: discard the synthesis-derived artifacts and regenerate them, then re-index the new
@@ -159,12 +159,12 @@ Note the asymmetry, because it is the thing most likely to get conflated:
 Today the cost is discoverable only by hitting it: the wizard's embedder picker says
 nothing about discarding data, and `aimee config set embedder_model` accepted any string
 until recently (a typo produced a deployment that searched lexically while reporting
-healthy — fixed in #2283).
+healthy, fixed in #2283).
 
 This has to be stated where the choice is made: the wizard's embedder and synthesis
 steps, `aimee config set` for either key when the value differs from the recorded one,
 `aimee kb reembed`'s plan output, and the deployment docs. Two losses need
-distinguishing, because they are not equally recoverable — **derived vectors** rebuild
+distinguishing, because they are not equally recoverable, **derived vectors** rebuild
 from source and lose nothing permanently, while **regenerated artifacts** are new text
 that will not match the old.
 

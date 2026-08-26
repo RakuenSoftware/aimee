@@ -12,7 +12,7 @@
   criteria 1–4 met and unit-verified; criterion 5 (re-provision the live `.254`
   server) is deployment-time validation. WP-D (remote provisioning over native TLS)
   is an explicit optional follow-on, tracked by
-  [native-tls-thin-client-backends.md](../pending/native-tls-thin-client-backends.md).
+  [native-tls-thin-client-backends.md](native-tls-thin-client-backends.md).
 - **Scope:** deterministic / server bootstrap + credential vault. Not an
   intelligence-surface proposal (no Architecture Charter role).
 - **Author:** JBailes, 2026-06-17.
@@ -34,7 +34,7 @@ so with an empty vault every `aimee delegate` / roundtable call fails
 Today the only ways to populate the vault are **manual and co-located**:
 
 - `aimee vault set <agent> <name> <secret>` / `aimee agent add --key`, which call
-  `handle_vault_set` and require an **attested local identity** — they refuse the
+  `handle_vault_set` and require an **attested local identity**. They refuse the
   remote TCP transport (`vault: this connection has no attested local identity`).
 - So an operator must shell into the server host/container and run the vault
   commands by hand after every fresh deploy.
@@ -44,7 +44,7 @@ the **sealing/storage mechanism shipped** (`handle_vault_set_server`, the
 server-master-key dual-access wrap), but **nothing provisions the vault at
 standup**, so the directive ("a new server should just work") is unmet. The
 container entrypoints already seed `aimee.yaml` and ship `agents.json`
-(definitions only — no secrets), but there is no equivalent step for secrets.
+(definitions only; no secrets), but there is no equivalent step for secrets.
 
 ## Goal
 
@@ -66,11 +66,11 @@ secrets into the per-server vault via the existing **server-principal** write pa
 
 Resolve secrets at boot from, in precedence order:
 
-1. **A mounted secrets file** — `AIMEE_DELEGATE_SECRETS_FILE` (default e.g.
+1. **A mounted secrets file**: `AIMEE_DELEGATE_SECRETS_FILE` (default e.g.
    `/run/secrets/aimee-delegates.json`), a `{ "<agent>": "<key>", … }` map. This
    is the Docker/compose/SmoothNAS-native path (Docker secret or bind-mounted
    file), mirroring how `agents.json` already supplies definitions.
-2. **Environment variables** — `AIMEE_DELEGATE_KEY_<AGENT>` (e.g.
+2. **Environment variables**: `AIMEE_DELEGATE_KEY_<AGENT>` (e.g.
    `AIMEE_DELEGATE_KEY_MISTRAL`), for quick `docker run` / env-only deploys.
 
 For each `(agent, secret)` whose agent exists in `agents.json` and which is **not
@@ -82,7 +82,7 @@ operator-owned/read-only; we never copy plaintext into `$AIMEE_HOME`).
 
 - **Server boot** (`src/server/…` startup, after vault unseal, before the compute
   pool accepts delegate work): the bootstrap pass is in-process so it uses the
-  server principal directly — no attested-client requirement, no RPC.
+  server principal directly, no attested-client requirement, no RPC.
 - **Container entrypoints** (`deploy/container/combined-entrypoint.sh`,
   `server-entrypoint.sh`): document/pass `AIMEE_DELEGATE_SECRETS_FILE`; the
   compose files and the SmoothNAS plugin config gain an optional secrets mount.
@@ -100,9 +100,9 @@ operator-owned/read-only; we never copy plaintext into `$AIMEE_HOME`).
 
 - The vault sealing/storage mechanism itself (already shipped:
   `handle_vault_set_server`, server-master-key wrap).
-- OAuth/subscription delegates that mint per-request creds (codex OAuth) — those
+- OAuth/subscription delegates that mint per-request creds (codex OAuth). Those
   follow their own path; this is for static API-key delegates.
-- Multi-user/`uid:`/`webuser:` principal vaults — this provisions the **server
+- Multi-user/`uid:`/`webuser:` principal vaults. This provisions the **server
   principal** vault that backgrounded delegates and roundtables use.
 - Key rotation UX (covered by existing `vault set` / `vault rekey`).
 
@@ -133,4 +133,4 @@ operator-owned/read-only; we never copy plaintext into `$AIMEE_HOME`).
 4. A secret naming an agent absent from `agents.json` warns and is skipped; boot
    still succeeds.
 5. The remote roundtable path that 401'd against `.254` (v0.2.85) succeeds once
-   the server is re-provisioned this way — verified end to end.
+   the server is re-provisioned this way, verified end to end.

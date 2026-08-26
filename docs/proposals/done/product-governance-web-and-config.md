@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 as partially implemented. Runtime/control web ownership and
+- **State:** DONE. Archived 2026-08-04 as partially implemented. Runtime/control web ownership and
   initial decision surfaces landed. Product naming, separately hosted processes, optional lifecycle,
   truthful effective-config parity, transport, and packaging remain in the restored
   [Go-owned residual](../pending/runtime-control-product-boundary-residual.md).
@@ -25,12 +25,12 @@
 > ([`core-substrate-and-source-module-boundaries.md`](core-substrate-and-source-module-boundaries-residual.md))
 > makes them concrete in three ways to re-check on re-review: (1) `runtime-web` and `control-web` are
 > **separate programs on the shared-memory event bus**, admitted and routed like any module, not
-> in-process handlers; (2) each product — Runtime and Control — **hosts its own bus** (the single
+> in-process handlers; (2) each product. Runtime and Control, **hosts its own bus** (the single
 > in-source C bus host), and cross-product paths use the existing network transport, so this
 > proposal's admission/topology wording should reference the bus host explicitly; (3) the advertised
 > **effective configuration** surface and the runtime **capability advertisement** to clients are the
-> same capability data observed at two ends — modules publish capabilities to core over the bus, and
-> [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md) projects them,
+> same capability data observed at two ends, modules publish capabilities to core over the bus, and
+> [`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md) projects them,
 > so this proposal's config-surface ownership and that advertisement must not diverge.
 
 ## Decision

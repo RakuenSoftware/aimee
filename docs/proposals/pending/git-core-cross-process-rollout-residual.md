@@ -1,6 +1,6 @@
 # Git core contract: cross-process rollout residual
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`git-core-contract-runtime-residual.md`](../done/git-core-contract-runtime-residual.md)
 

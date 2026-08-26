@@ -9,7 +9,7 @@ than its name: a counted reply, and a rule that a struct is its members.
 ## What the payloads actually are
 
 Ninety-two structs are declared across DB1's headers. **Eighty-two contain no
-pointer at all** — fixed `char` arrays and scalars. Of the ten that do, nine
+pointer at all**, fixed `char` arrays and scalars. Of the ten that do, nine
 carry `const char *` strings, which are values like any other. The tenth is
 `db1_secret_backend_t`, a vtable of function pointers, and **no operation with a
 linked caller takes it**.
@@ -35,7 +35,7 @@ Median struct size is seven members; the largest is thirty-six.
 Nothing about a struct needs to cross as a struct. The catalog already describes
 an operation's fields as a list of `{name, type, required}`, and a struct is a
 list of exactly that shape. So a struct parameter contributes its members to the
-frame, and the generated code marshals them at the boundary — the domain still
+frame, and the generated code marshals them at the boundary. The domain still
 sees the struct it has always seen.
 
 This needs no frame change. It needs the member list in the catalog, which is
@@ -55,7 +55,7 @@ waits on:
 
 A single value becomes `count = 1`. A struct out-parameter becomes its members.
 A list of rows becomes `rows * members`, with the row width implied by the
-operation's declared member list rather than sent separately — an operation
+operation's declared member list rather than sent separately. An operation
 knows how wide its rows are.
 
 An allocated out-parameter (`T **out`, `char **out`) is not a wire shape at all:
@@ -76,8 +76,7 @@ unlock seven more sources on the way.
 Three things stay outside the wire, and none of them are payload shapes:
 
 - A return contract richer than success/failure still needs somewhere to put the
-  distinction. A counted reply gives it one — a status field beside the values —
-  but choosing what `db1_wfe_bind`'s -2 becomes is a contract decision per
+  distinction. A counted reply gives it one (a status field beside the values) but choosing what `db1_wfe_bind`'s -2 becomes is a contract decision per
   operation, not a frame feature.
 - `delegation` remains coupled to `agent_jobs` for reasons recorded in
   `coupled_sources`, and needs an idempotency story before it crosses.
@@ -88,7 +87,7 @@ Three things stay outside the wire, and none of them are payload shapes:
 1. ~~**Counted reply.**~~ Done: the reply is `status | count | (len | bytes) *
    count`, and the format is named `db1-fields-v2` because the frame changed.
    Family 1's keyed blob is a different format and did not move.
-1. **Superseded — kept for the sequence.** One frame change, both generated sides, family 1's keyed
+1. **Superseded, kept for the sequence.** One frame change, both generated sides, family 1's keyed
    blob untouched. Unlocks the seven sources the survey attributed to T2, and is
    prerequisite for everything below.
 2. ~~**Struct flattening.**~~ Done: a struct parameter contributes its members
@@ -101,7 +100,7 @@ Three things stay outside the wire, and none of them are payload shapes:
    on both sides, and the catalog declares a ceiling for it.
 
    One thing this design did not anticipate: a list whose row is a *single
-   value* rather than a struct — `int64_t *out, int max`, or
+   value* rather than a struct, `int64_t *out, int max`, or
    `char (*out)[N], int max`. Same shape, width one, but the generator builds a
    row from a declared member list and a bare scalar has no members to declare.
 
@@ -109,12 +108,12 @@ Three things stay outside the wire, and none of them are payload shapes:
    member list, and the value lands straight in the caller's fixed-width row.
    It was a smaller change than the name suggests, because a column is a list
    of width one and the arithmetic was already right. The NUMERIC form
-   (`int64_t *out`) is generated but not enabled — no family that can be
+   (`int64_t *out`) is generated but not enabled. No family that can be
    activated yet has one, and shipping a path nothing exercises is how the
    unreachable stage happened. Lifting one check enables it.
 4. **Migrate**, now by whole source, since that is the unit that can move.
 
-Steps 1 and 2 are each a day's work of the kind already done twice — the integer
+Steps 1 and 2 are each a day's work of the kind already done twice. The integer
 and optional-field changes have the same shape, and the same proof is available:
 generate, diff the shipped output for byte-identity, and run the existing suites
 against generated code.
@@ -123,5 +122,5 @@ against generated code.
 
 `scripts/survey_db1_wire.py` reports readiness per whole source. If this design
 is right, implementing steps 1 and 2 should move the sources that are reachable
-in principle into sources reachable in practice — and those numbers should be
+in principle into sources reachable in practice, and those numbers should be
 re-derived from the script rather than read from this document.

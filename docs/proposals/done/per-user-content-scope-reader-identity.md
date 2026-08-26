@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — all six bounded reader-context slices delivered and archived 2026-08-15.
+- **State:** DONE. All six bounded reader-context slices delivered and archived 2026-08-15.
 - **Owner:** KB request identity and content scope.
 
 > **Archived after delivery.** This record covers the authenticated request-context half only. The

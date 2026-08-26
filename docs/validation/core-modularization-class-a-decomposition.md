@@ -9,7 +9,7 @@ that these files are the module's, exclusively or at all. A migration slice must
 itself."
 
 This document performs that establishment for the three the migration register calls out as
-"decomposition questions" — `tools`, `routing`, and `execution-policy` — by reading each named file
+"decomposition questions" (`tools`, `routing`, and `execution-policy`) by reading each named file
 and classifying it as **module-core** (the module's own implementation, a migration candidate) or
 **consumer/foreign** (code that *uses* the module, or that belongs to another module, and must stay
 put). It moves no code. Its output is a recommended migration boundary per module and the specific
@@ -33,12 +33,12 @@ from both the `tools` and `execution-policy` domains before either migration beg
 | path | lines | classification | evidence |
 |---|---|---|---|
 | `src/posix/agent_tools_dispatch.c` | 2230 | module-core | "the tool-call dispatcher … routes by name and applies the shared guardrails/snapshot/slop hooks" |
-| `src/posix/agent_tools.c` | — | module-core | the dispatcher's own header: "each tool's implementation lives in `agent_tools.c`" |
-| `src/posix/agent_tools_anchored.c` | — | module-core | anchored-edit tool implementations, sibling of the dispatcher |
-| `src/modules/config/config_fields.c`, `config_sections.c` | — | consumer (config) | tool-related config fields; owned by `config` (see shared finding) |
+| `src/posix/agent_tools.c` | n/a | module-core | the dispatcher's own header: "each tool's implementation lives in `agent_tools.c`" |
+| `src/posix/agent_tools_anchored.c` | n/a | module-core | anchored-edit tool implementations, sibling of the dispatcher |
+| `src/modules/config/config_fields.c`, `config_sections.c` | n/a | consumer (config) | tool-related config fields; owned by `config` (see shared finding) |
 
 **Boundary:** the module is the `agent_tools*` family under `src/posix/`. The boundary is the
-cleanest of the three — no file needs splitting.
+cleanest of the three. No file needs splitting.
 
 **The obstacle is extraction, not identification.** The `agent_tools*` files are compiled inside the
 core posix agent-runtime bundle in both build systems (Make `CORE_SRCS` and CMake list them beside
@@ -59,19 +59,19 @@ should be defined around what it actually owns rather than by moving runtime cod
 
 | path | lines | classification | evidence |
 |---|---|---|---|
-| `src/server/agent_config.c` | 2376 | **mixed** — routing functions embedded in a config file | header: "config loading/saving, agent routing, role checking, auth resolution"; defines `agent_route_with_caps`, `agent_routing_block_reason` among config/auth code |
+| `src/server/agent_config.c` | 2376 | **mixed**: routing functions embedded in a config file | header: "config loading/saving, agent routing, role checking, auth resolution"; defines `agent_route_with_caps`, `agent_routing_block_reason` among config/auth code |
 | `src/headers/agent_config.h` | 189 | **mixed** contract | declares the `agent_route_*` and `delegate_pick_for_role` routing surface alongside the config contract |
-| `src/modules/delegates/delegate_routing.c` | 432 | module-core **or** delegates | "shared delegate route override helpers": `delegate_filter_route_capabilities`, `delegate_route_by_provider`, `delegate_apply_route_overrides` — routing logic that currently lives in the `delegates` module |
+| `src/modules/delegates/delegate_routing.c` | 432 | module-core **or** delegates | "shared delegate route override helpers": `delegate_filter_route_capabilities`, `delegate_route_by_provider`, `delegate_apply_route_overrides`: routing logic that currently lives in the `delegates` module |
 
 **Boundary:** there is no `routing.c` to move. The routing surface is (a) a *subset* of
-`agent_config.c` — the `agent_route_*` functions interleaved with config load/save, role checking, and
-auth resolution — and (b) `delegate_routing.c`, which is delegate-specific routing sited in the
+`agent_config.c`, the `agent_route_*` functions interleaved with config load/save, role checking, and
+auth resolution, and (b) `delegate_routing.c`, which is delegate-specific routing sited in the
 `delegates` module.
 
 **Decision the migration needs:** two, before any code moves. First, whether to split
 `agent_config.c` (extract the `agent_route_*` functions and their header declarations into a `routing`
 module) or to leave routing as a server-config concern. Second, whether `delegate_routing.c` belongs
-to `routing` or stays with `delegates` — it is delegate route-override logic, so the honest default is
+to `routing` or stays with `delegates`. It is delegate route-override logic, so the honest default is
 that it is `delegates`' and `routing` owns only the general `agent_route_*` surface. This is a
 file-split plus a boundary call, not a file move.
 
@@ -79,9 +79,9 @@ file-split plus a boundary call, not a file move.
 
 | path | lines | classification | evidence |
 |---|---|---|---|
-| `src/server/agent_policy.c` | 1197 | **mixed** — policy embedded with unrelated concerns | header: "validation, policy, trace, metrics, env, manifest, contract"; defines `tool_validate`, `tool_suggest`, `tool_side_effect` among trace/metric/manifest code |
-| `src/modules/guardrails/guardrails_action_audit.c` | 146 | consumer (guardrails) | "the per-action governed-action audit (P2 / S2)"; `pre_tool_check` is "a thin wrapper around the verdict logic (`pre_tool_check_inner` in `guardrails_orchestrator.c`)" — guardrails enforcement that *applies* policy |
-| `src/modules/config/config_fields.c`, `config_sections.c` | — | consumer (config) | policy config fields; owned by `config` (see shared finding) |
+| `src/server/agent_policy.c` | 1197 | **mixed**: policy embedded with unrelated concerns | header: "validation, policy, trace, metrics, env, manifest, contract"; defines `tool_validate`, `tool_suggest`, `tool_side_effect` among trace/metric/manifest code |
+| `src/modules/guardrails/guardrails_action_audit.c` | 146 | consumer (guardrails) | "the per-action governed-action audit (P2 / S2)"; `pre_tool_check` is "a thin wrapper around the verdict logic (`pre_tool_check_inner` in `guardrails_orchestrator.c`)": guardrails enforcement that *applies* policy |
+| `src/modules/config/config_fields.c`, `config_sections.c` | n/a | consumer (config) | policy config fields; owned by `config` (see shared finding) |
 
 **Boundary:** the most distributed of the three, matching the register's note that "the policy surface
 is distributed rather than sited." The only genuinely policy-owned code is a *subset* of
@@ -98,11 +98,11 @@ architecture decision.
 
 ## Tractability ranking and recommendation
 
-1. **`tools`** — cleanest boundary (the `agent_tools*` family is the module); blocked only by an
+1. **`tools`**: cleanest boundary (the `agent_tools*` family is the module); blocked only by an
    extraction-vs-keep decision and build coupling. The one candidate whose migration could be a
    bounded slice once the dispatch-location question is answered.
-2. **`routing`** — requires splitting `agent_config.c` plus a routing-vs-delegates boundary call.
-3. **`execution-policy`** — requires splitting `agent_policy.c` and drawing lines across three modules;
+2. **`routing`**: requires splitting `agent_config.c` plus a routing-vs-delegates boundary call.
+3. **`execution-policy`**: requires splitting `agent_policy.c` and drawing lines across three modules;
    highest dependent count; do last, if at all, as a deliberate decomposition.
 
 `control-web` and `runtime-web` remain un-analysable here: their canonical documents name no source
@@ -112,7 +112,7 @@ contract-only rows the register already characterizes and are not decomposition 
 
 ## What this does not do
 
-No production code, build membership, descriptor, or public symbol changes here — this is analysis.
+No production code, build membership, descriptor, or public symbol changes here. This is analysis.
 The recommended boundaries are inputs to a future migration slice and an operator decision, not
 ownership assignments. When a migration slice acts on one of these modules it should cite the relevant
 section, record what it actually moved, and update both this file and the migration register.

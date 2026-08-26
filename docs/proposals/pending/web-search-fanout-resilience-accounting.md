@@ -1,6 +1,6 @@
 # Design brief: multi-engine fanout, circuit-breaking, provenance, accounting
 
-- **State:** PENDING — decision brief; the proposed default path, resilience, provenance, and
+- **State:** PENDING. Decision brief; the proposed default path, resilience, provenance, and
   accounting changes remain open.
 
 Items 3–6 of [web-retrieval-capability-map.md](../done/web-retrieval-capability-map.md).
@@ -10,7 +10,7 @@ This brief asks for decisions on seven points. Each states what I propose and
 what I am unsure about. Where I have measurements I give them; where I am
 guessing I say so.
 
-## D0. The fusion path built in #1830 has no caller — what should the default be?
+## D0. The fusion path built in #1830 has no caller: what should the default be?
 
 **This is the most consequential item here and it is not one of 3–6.**
 
@@ -26,7 +26,7 @@ Options:
 - **(a) Default on.** Every `web_search` fetches the top 3 results and returns
   extracted page text after the snippet block. Best token-per-answer and the
   agent stops making a second `web_read` round trip. Costs several seconds on
-  every search — measured design budget is 3s/page, 8s total, serial.
+  every search, measured design budget is 3s/page, 8s total, serial.
 - **(b) Default off, model-controlled parameter.** Add `fetch_pages` to the tool
   schema. Zero latency regression; relies on the model choosing it, and a
   capability the model must opt into is usually a capability that goes unused.
@@ -70,18 +70,18 @@ belongs" verdict implies.
 
 `kb_rrf_item_t.id` is `char[256]`, compared with `strcmp` and copied with
 `snprintf`. Normalised URLs can exceed 255 bytes, and truncation would **merge
-distinct URLs sharing a long prefix** — a correctness bug, silently fusing two
+distinct URLs sharing a long prefix**, a correctness bug, silently fusing two
 different pages into one candidate.
 
-Options: truncate (rejected — the failure is silent and wrong); hash to 64-bit
+Options: truncate (rejected; the failure is silent and wrong); hash to 64-bit
 hex (collisions merge distinct pages, same failure at lower probability); or
 **assign each distinct normalised URL a first-seen index and use a zero-padded
 decimal as the RRF id** (`"%03d"`).
 
 **I propose the index.** It is exact, needs no change to `kb_rrf.c`, and
 zero-padding makes `strcmp` order equal numeric order, so RRF's documented
-`id asc` final tie-break resolves toward the URL seen earliest — i.e. the
-higher-ranked hit from the first engine — instead of resolving arbitrarily.
+`id asc` final tie-break resolves toward the URL seen earliest, i.e. the
+higher-ranked hit from the first engine, instead of resolving arbitrarily.
 
 ## D3. How aggressive should URL normalisation be?
 
@@ -101,7 +101,7 @@ content). I lean conservative because a false merge loses a result silently,
 while a missed merge only costs a duplicate line. **Is that the right side to
 err on here?** `db1_web_page_canonical_url` already implements exactly the
 conservative rules, so reusing it keeps cache identity and dedup identity the
-same — which I think is worth more than marginal dedup.
+same, which I think is worth more than marginal dedup.
 
 ## D4. Circuit breaker: where does the state live?
 
@@ -119,23 +119,23 @@ The design question is state location:
 
 **I propose (a).** The breaker's whole purpose is to avoid hammering a dead
 engine inside a working session; forgetting on restart is acceptable and
-arguably correct. I want this checked — the counter-argument is that a server
+defensible. I want this checked. The counter-argument is that a server
 restarting frequently never accumulates enough state for the breaker to fire.
 
 Thresholds (all guesses, and I will label them as such in the header): 3
 consecutive failures to open, 60s cooldown, one half-open probe.
 
-## D5. Provenance — what is actually left
+## D5. Provenance: what is actually left
 
 Cache age is already emitted (`web_read.c:570`, "served from cache, fetched N
-seconds ago"). The source URL is **not** inside the extract block; it appears
+seconds ago"); the source URL is **not** inside the extract block; it appears
 only in the fusion caller's `[N] url` line, and `web_extract.h` documents `url`
 as "used only for a log line".
 
 **Proposed:** emit the source URL in the extract block header so a block is
 self-describing wherever it is quoted. Small. Anything more?
 
-## D6. Savings accounting — what is a fact and what is a story
+## D6. Savings accounting: what is a fact and what is a story
 
 The map is explicit that this must report **observed** quantities, not a
 counterfactual "what hosted search would have cost", which is unfalsifiable.
@@ -146,7 +146,7 @@ over the network, extracted bytes returned vs page bytes stripped.
 **Explicitly refused:** any "you saved $X" figure.
 
 Open: **where does this surface?** A log line (invisible), the tool output
-(costs the agent tokens to report token savings — self-defeating), or DB1
+(costs the agent tokens to report token savings, self-defeating), or DB1
 counters queryable by `aimee insights` (consistent with existing token
 accounting, more work). **I propose DB1 counters + `aimee insights`**, but this
 is the item I am least confident is worth building at all. If the panel thinks
@@ -155,6 +155,6 @@ item 6 is not worth its complexity, I would rather hear that than build it.
 ## What I am not proposing
 
 Items 7–13 keep their map verdicts. In particular no Playwright (item 7), no
-semantic cache (item 9), and no model-contributed cache (item 11) — the last
+semantic cache (item 9), and no model-contributed cache (item 11). The last
 being actively unsafe until artifacts carry a source-trust dimension, because
 `learning_judge_commit` promotes on corroboration count alone.

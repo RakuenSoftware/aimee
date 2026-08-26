@@ -9,7 +9,7 @@
 > - It ran `feature/db1-module-migration` at `0e44f5a08d`. The store was a C
 >   module over **SQLite**; it is now a Go module over PostgreSQL that opens no
 >   database at all and reaches the postgres module over the bus.
-> - Every count below -- 23 checks, 43 commands, 102 tables -- is from that run.
+> - Every count below (23 checks, 43 commands, 102 tables) is from that run.
 >   The scripts it names have since been rewritten and now refuse to start
 >   without `AIMEE_STORE_URL`; `db1-module-e2e.sh` today makes 12 checks, not 23,
 >   and `db1-module-upgrade.sh` no longer exists.
@@ -41,7 +41,7 @@ migrated build on a machine that had never seen the source.
   carried in as binaries. Nothing was compiled on the host or in the container,
   and nothing was installed on the Proxmox host itself.
 - **Installed**: `aimee` and `aimee-server` into `/usr/local/bin`,
-  `aimee-module-db1` into `/usr/local/libexec/aimee-modules/` -- the path the
+  `aimee-module-db1` into `/usr/local/libexec/aimee-modules/`. The path the
   image build uses. The grant came from
   `scripts/export_c_repositories.py --runtime-bundle`, unmodified, so the served
   kinds are the ones the build declares: 11777-11795, nineteen families.
@@ -60,11 +60,11 @@ empty home:
 
 - the daemon starts with no database present and **creates none**
 - the daemon holds **no descriptor on any `.db`**, before or after the module
-  attaches or during a workload -- read from `/proc/<pid>/fd`, so it is a
+  attaches or during a workload. Read from `/proc/<pid>/fd`, so it is a
   property of the process, not of the code that was read
 - with nothing serving the store, health says `unavailable` and a session create
   **fails** rather than fabricating, and the daemon survives the attempt
-- the module creates the store -- **102 tables** -- and is the process holding it
+- the module creates the store (**102 tables**) and is the process holding it
   open
 - a session created over the API comes back from `/v1/sessions/list` **and** is
   on disk in `server_sessions` in the module's file
@@ -86,7 +86,7 @@ not evidence that each family works.
 
 `unit-test-db1-module-bus` takes the module path as its argument, so the built
 test was carried in and pointed at `/usr/local/libexec/aimee-modules/`. All 24
-checks passed, covering every family's shapes across the real bus -- nested
+checks passed, covering every family's shapes across the real bus, nested
 rows, allocated lists, nine-parameter updates, refusals that are answers rather
 than errors. This is the real cross-family evidence; the sweep above is not.
 
@@ -100,7 +100,7 @@ writes sessions through it, stops it, and brings the migrated build up on the
 same file.
 
 - the old daemon held **3 open descriptors** on `aimee.db`; the new one holds
-  **0** on the same store -- the migration's central claim, measured across the
+  **0** on the same store, the migration's central claim, measured across the
   upgrade rather than asserted about a fresh file
 - the new build **starts** on a store it did not create
 - **no table lost**: 102 before, 102 after
@@ -124,14 +124,14 @@ records that. The finding, in the tense it was found in:
 Every script above runs two processes: the daemon and the module. The container
 runs **three**. `server-entrypoint.sh` defaults `AIMEE_WFE_ENGINE=go` and
 launches `aimee-wfe` with `--home` and no `--db`, so `cmd/aimee-server` falls
-back to `$home/aimee.db` -- the module's file -- and opens it with `sql.Open`.
+back to `$home/aimee.db`, the module's file, and opens it with `sql.Open`.
 The bundle generates a `wfe.grant` for it (principal_ref 64), and that grant
 requests kinds 6657, 6678 and 9474 and **no DB1 kinds at all**: the Go WFE does
 not reach the store through the module, it reaches it through the filesystem.
 
 Run with all three up, on a clean container:
 
-- **two processes hold `aimee.db`** -- `aimee-module-db` and `aimee-wfe`, read
+- **two processes hold `aimee.db`**: `aimee-module-db` and `aimee-wfe`, read
   from `/proc/*/fd`. The module is not the store's sole owner in the shipped
   configuration, and that is the migration's central claim not holding for the
   appliance
@@ -140,12 +140,12 @@ Run with all three up, on a clean container:
   `reservation_state`, `reservation_owner`, `reservation_lease_until`). The C
   module references none of the five, so it is additive, not conflicting
 - it does this **even when it cannot run**: the first attempt had no `wfe.grant`
-  installed, so the WFE died on `bus: attach denied` -- after opening the store
+  installed, so the WFE died on `bus: attach denied`, after opening the store
   and running its migrations
 - **either process will create the store**: started first on an empty home the
   Go WFE creates seven tables on its own, and the module then completes the
   schema to the same 105. Both orders work, and `lifecycle_work_item` ends with
-  the same column set in a different column order -- two authorities, and which
+  the same column set in a different column order, two authorities, and which
   arrived first stays visible in the file
 
 This is not corruption waiting to happen: both sides are configured for
@@ -163,7 +163,7 @@ carries these measurements in place of the reasoning it was written from.
 ### `scripts/validation/db1-module-write-contention.sh` -- 7 checks, all passing
 
 Whether two owners is also an operational problem, not just a doctrinal one.
-Four external writers insert into `lifecycle_work_item` -- a Go-owned table --
+Four external writers insert into `lifecycle_work_item`. A Go-owned table --
 while the module takes writes through the daemon. At 4x40 external rows against
 40 module writes: **no write failed on either side, no row was lost, no
 lock/busy complaint, `PRAGMA integrity_check` clean**, store healthy afterwards.
@@ -180,12 +180,12 @@ Two things happened during this work that are worth writing down, because both
 would have produced confident and wrong conclusions:
 
 **Containers disappeared.** CT 9001, 9002 and the 9010 created for this were all
-gone partway through, with the Proxmox host itself up for 2 days -- so not a
+gone partway through, with the Proxmox host itself up for 2 days, so not a
 reboot. Something else manages this host.
 
 **A foreign binary was installed into the container mid-run.** A re-run of the
 e2e script suddenly reported 17 passed / 6 failed, including "daemon created a
-database on its own" and "daemon holds 3 open database descriptors" -- the
+database on its own" and "daemon holds 3 open database descriptors": the
 migration's central claim failing outright. It was not failing:
 `/usr/local/bin/aimee-server` had been replaced with
 `pre-merge-safety-2546-gc8d90b60d5`, a build from another branch, timestamped
@@ -201,14 +201,14 @@ it tested is not evidence.
 ## What it turned up
 
 **One finding in the product, found here and fixed here.** After the module
-died, `/v1/server/health` kept reporting `"state":"ok"` for ~37s -- 30s of bus
-heartbeat staleness plus up to 7.5s of reap interval -- while every store call
+died, `/v1/server/health` kept reporting `"state":"ok"` for ~37s, 30s of bus
+heartbeat staleness plus up to 7.5s of reap interval, while every store call
 was already failing. Health was reading module availability, which is registry
 state, and the registry is only corrected by the reaper.
 
 It is now probed rather than inferred: `db1_store_probe()` asks the store a real
 question and caches the verdict for a second, and only the health handler uses
-it -- `db1_store_ready()` stays the cheap predicate in front of every
+it, `db1_store_ready()` stays the cheap predicate in front of every
 store-backed command. **Measured on the same container by the same script: 1s.**
 `test_integration.sh` kills the module and asserts health stops saying "ok"
 within five seconds, so a regression to inferring fails by twenty seconds rather
@@ -231,7 +231,7 @@ module binary and the generated grant were genuinely absent at the point this
 was found.
 
 Several failures in the first runs were the validation scripts' own bugs, not
-the product's -- `/v1/sessions/list` is a POST route, create answers with
+the product's, `/v1/sessions/list` is a POST route, create answers with
 `session_id` rather than `id`, the table is `server_sessions`, and asserting
 readiness the instant the module's socket appears races the daemon's dial. They
 are noted because a validation script that is wrong in the product's favour is
@@ -240,7 +240,7 @@ worth more suspicion than one that is wrong against it, and two of these were.
 ## After the engine moved
 
 The section above is the measurement that justified the work. The engine reaches
-DB1 through the module now, and the same script -- unchanged -- is the check
+DB1 through the module now, and the same script (unchanged) is the check
 that says so. What changed underneath it:
 
 - `server-go/internal/db1` is a mapping onto module operations rather than a
@@ -268,7 +268,7 @@ because there is nothing left for the engine to create or alter. The e2e suite i
 unchanged at 23/0.
 
 The Go tests now run against a real module rather than a temp SQLite file, and
-that is what caught the five behaviours the port had lost -- reconcile answering
+that is what caught the five behaviours the port had lost, reconcile answering
 the wrong question, budget parks stranding a sibling's authorised money, resume
 clearing pauses only the engine may clear, a lost create race reading as a
 broken store, and a found retry detail reported as a miss. Each is named in the
@@ -283,7 +283,7 @@ engine, but only to see whether it opens the file. None of them drives the
 engine's own API, so none of them proved the thing the port was actually for.
 
 This one submits a real run over the deployed engine's socket and checks each
-answer against the module's store read independently with sqlite3 -- the API
+answer against the module's store read independently with sqlite3. The API
 agreeing with itself is not evidence; the API agreeing with the file the module
 owns is. It covers submit, list, fetch by id, event history, pause, resume and
 stop, and re-checks after every mutation that the engine holds no descriptor and

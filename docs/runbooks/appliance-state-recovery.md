@@ -22,7 +22,7 @@ Throughout this runbook:
 All commands assume shell expansion of these variables. Run them as the
 server runtime user.
 
-## Failure Mode 1 -- Lost or absent `agents.json`
+## Failure Mode 1: Lost or absent `agents.json`
 
 ### Symptom
 
@@ -45,7 +45,7 @@ ls -1 "$AIMEE_HOME"/agents.json.bak-*
 
 If the second command prints the literal `agents.json.bak-*` pattern (i.e.
 no siblings exist), there is no `agents.json` to restore in this runbook.
-**Stop and escalate** -- recovering the agent configuration without an
+**Stop and escalate**, recovering the agent configuration without an
 existing sibling backup is out of scope for this runbook. Only proceed
 with the Restore step below when at least one `agents.json.bak-*` sibling
 is present.
@@ -78,10 +78,10 @@ is present.
    non-empty `agents` array.
 
 API keys live in the vault keyed by agent name, not in `agents.json`. A
-restored config needs no secrets re-entered -- the vault lookups continue
+restored config needs no secrets re-entered, the vault lookups continue
 to resolve unchanged.
 
-## Failure Mode 2 -- Stale but present `agents.json`
+## Failure Mode 2: Stale but present `agents.json`
 
 ### Symptom
 
@@ -101,10 +101,10 @@ stat -c '%Y %s %i %n' "$AIMEE_HOME/agents.json"
 
 The four whitespace-separated columns are, in order:
 
-1. `%Y` -- mtime in epoch seconds (the freshness signal the cache keys on).
-2. `%s` -- size in bytes.
-3. `%i` -- inode number.
-4. `%n` -- file name.
+1. `%Y`: mtime in epoch seconds (the freshness signal the cache keys on).
+2. `%s`: size in bytes.
+3. `%i`: inode number.
+4. `%n`: file name.
 
 Stale-mtime symptom: column 1 predates the current `date +%s` while
 columns 2 and 3 are unchanged between repeated `stat` calls.
@@ -122,7 +122,7 @@ curl -fsS "${AIMEE_BASE_URL}/v1/agents"
 Success is HTTP 200 with a JSON object containing `default` and a non-empty
 `agents` array.
 
-## Failure Mode 3 -- Corrupt or lost workspace repo git dir
+## Failure Mode 3: Corrupt or lost workspace repo git dir
 
 ### Symptom
 
@@ -149,7 +149,7 @@ git -C "$PROBE" ls-remote origin HEAD
 
 Sanity checks before you proceed with the real recovery:
 
-- `[ "$(stat -c '%d' "$PROBE")" = "$WS_DEV" ]` -- the probe and the
+- `[ "$(stat -c '%d' "$PROBE")" = "$WS_DEV" ]`: the probe and the
   broken repo share a filesystem (same device id). This audit is the whole
   point of the probe: if it fails, the workspace storage itself is
   the fault, not `$WS/.git`.
@@ -170,7 +170,7 @@ storage layer is fine; the on-disk `$WS/.git` is the fault.
 Move the broken repo aside to preserve any uncommitted state, then clone
 a clean single-branch repo from the canonical HTTPS URL into `$WS`. Do
 **not** edit `$WS/.git` in place and do **not** `rm -rf` the workspace
-root -- `mv` keeps the broken copy recoverable:
+root, `mv` keeps the broken copy recoverable:
 
 ```bash
 ts=$(date +%s)

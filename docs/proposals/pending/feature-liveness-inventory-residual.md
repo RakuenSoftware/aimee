@@ -1,6 +1,6 @@
 # Suite-wide feature-liveness inventory residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parent:**
   [`feature-liveness-and-background-curator-removal.md`](../done/feature-liveness-and-background-curator-removal.md).
 

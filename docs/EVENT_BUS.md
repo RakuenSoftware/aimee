@@ -39,42 +39,44 @@ Eighteen production C-to-Go process batches now cover every supervised process:
 `runtime-web`, `control-web`, and `benchmarks`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
-fixtures; the bounded memory rerank, response-composition key, roundtable
-verification-rubric, and benchmark IR-scoring stages do not mean those modules'
-storage-heavy or daemon orchestration code has all moved to Go. Governance moves
-the bounded response tool-policy decision; parsed-response mutation and its
-broader identity/OIDC plane remain in their current C owners. Workflows moves
-only the pure advance admission classification; the Go WFE remains the sole
-lifecycle, persistence, scheduling, and transition owner. KB synthesis moves
-only the deterministic code-unit grounding gate; curator queues, model calls,
-storage, linking, promotion, and scheduling remain in their current owners.
-Runtime web moves the bounded RPC-fault-to-HTTP-status decision. The server asks
-that process over the event bus and places the returned status in its error
-envelope; the physical Go HTTPS provider consumes the result without importing
-or reimplementing the policy. Listener, authentication, sessions, proxying, and
-assets remain provider-owned.
-Control web moves bounded console-admin and fleet proxy-route authorization; its
-physical Go provider and isolated process consume the same policy package. The
-KB requests console-admin decisions from that process over its local event bus
-and keeps no duplicate C allowlist. The production `memory.benchmark` RPC also
-requests its MRR/NDCG/recall scoring from the benchmarks process; missing or
-invalid module responses fail the benchmark instead of falling back locally.
-Skills trigger-frontmatter matching is also process-owned: the filesystem resolver
-loads the bounded skill body, then guardrails requests the match over event `7682`.
-There is no local trigger parser on the production path; a missing or malformed
-reply emits the conservative advisory rather than silently skipping it.
-Learning signal sink selection is likewise event-bus-only. Before a signal is
-persisted or any reranker, supersede, rule, or workflow proposal is queued, the
-router requests the sink mask from the supervised learning process over event
-`6145`. A missing or invalid response aborts ingestion; the C router keeps no
-local signal-to-sink table.
-Memory pre-injection confidence comes only from event `5893`. The server does
-not replace an unavailable or malformed response with a locally selected tier;
-it omits the context envelope, and the formatter rejects missing confidence.
-The final tool authorization decision comes only from the required Go
-`execution-policy` process on event `8449`. The C enforcement caller applies
-the verdict and fails closed on absence, timeout, cancellation, or malformed
-output; it contains no local policy decision fallback.
+fixtures.
+
+A moved stage is a bounded decision, and the storage-heavy or daemon
+orchestration code around it stays where it was. The memory rerank, the
+response-composition key, the roundtable verification rubric, and benchmark
+IR scoring are all decisions of that shape.
+
+- **Governance** moves the bounded response tool-policy decision. Parsed-response
+  mutation and its broader identity/OIDC plane remain in their current C owners.
+- **Workflows** moves only the pure advance admission classification. The Go WFE
+  remains the sole lifecycle, persistence, scheduling, and transition owner.
+- **KB synthesis** moves only the deterministic code-unit grounding gate. Curator
+  queues, model calls, storage, linking, promotion, and scheduling remain in their
+  current owners.
+- **Runtime web** moves the bounded RPC-fault-to-HTTP-status decision. Listener,
+  authentication, sessions, proxying, and assets remain provider-owned. The server
+  places the returned status in its RPC error envelope, and the physical Go HTTPS
+  provider consumes it without reimplementing the policy.
+- **Control web** moves bounded console-admin and fleet proxy-route authorization.
+  Its physical Go provider and isolated process consume the same policy package,
+  and the KB requests console-admin decisions over its local event bus rather than
+  keeping a duplicate C allowlist.
+- **Benchmarks** scores the production `memory.benchmark` RPC. A missing or invalid
+  module response fails the benchmark rather than falling back to local scoring.
+- **Skills** matches trigger frontmatter. The filesystem resolver loads the bounded
+  skill body, then guardrails requests the match over event `7682`. No local trigger
+  parser exists on the production path, and a missing or malformed reply emits the
+  conservative advisory rather than silently skipping it.
+- **Learning** selects the signal sink. Before a signal is persisted or any reranker,
+  supersede, rule, or workflow proposal is queued, the router requests the sink mask
+  over event `6145`. A missing or invalid response aborts ingestion, and the C router
+  keeps no local signal-to-sink table.
+- **Memory** supplies pre-injection confidence over event `5893`. An unavailable or
+  malformed response omits the context envelope, and the formatter rejects missing
+  confidence rather than substituting a locally selected tier.
+- **Execution policy** makes the final tool authorization decision over event `8449`.
+  The C enforcement caller applies the verdict and fails closed on absence, timeout,
+  cancellation, or malformed output, with no local fallback.
 
 ## What is on it now
 

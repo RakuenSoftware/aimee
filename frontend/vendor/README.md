@@ -2,8 +2,8 @@
 
 `@rakuensoftware/smoothgui` is published to **GitHub Packages**, whose npm
 registry requires an auth token even for public reads. To keep the webchat image
-buildable with **no credentials** — so anyone can `docker pull` (or build from
-source) and get the browser UI by default — the package is vendored here as a
+buildable with **no credentials**, so anyone can `docker pull` (or build from
+source) and get the browser UI by default. The package is vendored here as a
 tarball and referenced from `frontend/package.json` via a `file:` dependency.
 
 ## Refreshing to a new smoothgui version

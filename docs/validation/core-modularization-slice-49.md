@@ -30,7 +30,7 @@ already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
 the cmd/server/UI config-facing code outside the module root has been moved in, and it does not claim
-identical build-product membership across Make and CMake — `config_fields.c`, `config_mode.c`, and
+identical build-product membership across Make and CMake, `config_fields.c`, `config_mode.c`, and
 `config_server_api.c` are Make-only.
 
 ## Regression controls

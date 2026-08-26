@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — stale-tip, terminal-conflict, and sibling-freeze collision fixes delivered.
+- **State:** DONE. Stale-tip, terminal-conflict, and sibling-freeze collision fixes delivered.
 
 > **Archived after delivery.** New slices now branch from and integrate the fetched remote
 > feature tip, and content merge conflicts terminate rather than retry forever. The proposal's
@@ -46,7 +46,7 @@ All five slice branches were cut from the feature branch at the same instant
 slice is now based on a feature branch that has moved, and its diff touches the
 file that moved.
 
-Crucially, the slices do not *edit* a shared file — they each **create** it. A
+Crucially, the slices do not *edit* a shared file, they each **create** it. A
 rebase therefore cannot help. Tested in a throwaway clone:
 
 ```
@@ -58,7 +58,7 @@ AA docs/runbooks/appliance-state-recovery.md
 
 `add/add` means two full, independently authored versions of the same document
 with no common ancestor for the content. There is nothing to replay cleanly onto.
-Resolving it requires deciding what the merged document should say — a content
+Resolving it requires deciding what the merged document should say, a content
 decision, not a mechanical one.
 
 Two gaps combine:
@@ -75,7 +75,7 @@ Two gaps combine:
 
 Both slices that have reached merge have failed there, and neither failure is a
 flake or load-dependent. Whether slices 3 and 4 fail the same way is a
-prediction, not an observation — see the assumptions below.
+prediction, not an observation. See the assumptions below.
 
 **The engine retries the unresolvable conflict indefinitely.** Measured on the
 live run more than three hours after the first failure:
@@ -87,7 +87,7 @@ live run more than three hours after the first failure:
 
 Fifteen attempts, roughly one every 25 minutes, none of which can ever succeed:
 the conflict is a property of the two trees, so it is identical on every retry.
-The run neither completes nor fails — it occupies the single active-root slot
+The run neither completes nor fails, it occupies the single active-root slot
 (`autonomy.concurrency: 1`, `trigger.max_concurrent: 1`) indefinitely, blocking
 every other work item behind it. A merge conflict is not a transient forge error
 and should not be retried as one.
@@ -108,7 +108,7 @@ cannot be merged after the first one lands.** Three narrowings matter:
 
 This is separate from, and additional to, the panel-seating defect in
 [wfe-panel-cannot-seat-under-self-load.md](wfe-panel-cannot-seat-under-self-load.md).
-Fixing that one alone lets slices reach merge faster and fail there — as slice 1
+Fixing that one alone lets slices reach merge faster and fail there, as slice 1
 demonstrated, passing `rt_gate` on its fourth attempt and then hitting this.
 
 ## Options
@@ -120,24 +120,24 @@ demonstrated, passing `rt_gate` on its fourth attempt and then hitting this.
    limitation as option 1 for add/add.
 3. **Reject the unsafe intersection at slice time**: refuse to emit a plan in
    which more than one slice *creates* the same path. **Not implementable
-   against the current schema — see below.** Prevents the diagnosed class
+   against the current schema. See below.** Prevents the diagnosed class
    without touching plans whose slices edit distinct regions of an existing file,
    but only if slice-time path data exists, and it does not.
 3c. **Detect the collision at freeze time, before merge.** After `impl` each
    slice has a frozen diff, so its actual created/modified paths are known. If
    two slices in the same run create the same path with divergent content, fail
-   them *there* — with the conflicting path named — instead of letting each
+   them *there* (with the conflicting path named) instead of letting each
    reach `merge` and surface a bare forge 400. Implementable with data the
    engine already has.
 3b. **Reject *all* owned_files intersections at slice time.** Stricter and
    simpler to implement, but it forbids the distinct-region-edit case this
-   proposal says can merge normally. Adopting it needs a separate justification
-   — e.g. that region-level disjointness cannot be verified reliably at slice
-   time — which this proposal does not make.
+   proposal says can merge normally. Adopting it needs a separate justification,
+e.g. that region-level disjointness cannot be verified reliably at slice
+   time, which this proposal does not make.
 4. **Retry with a rebase on conflict.** Cheapest, but for add/add the retry lands
    on the same unresolvable conflict.
 5. **Leave as-is.** Not viable: a content-divergent create/create plan, such as
-   the observed run, fails **late and opaquely** — after all implementation cost
+   the observed run, fails **late and opaquely**, after all implementation cost
    has been paid, at the last stage, as a bare `forge resource 400` that names
    neither the conflicting path nor the sibling it collides with. The failure is
    reported (there are explicit merge pauses), but not in a form an operator can
@@ -151,7 +151,7 @@ Established:
 - PR #2013 is `CONFLICTING`.
 - Slice 0 and slice 2 change exactly the same one path.
 - All five slices were created at `20:09:34`; slice 0 merged at 21:03.
-- The rebase produces `CONFLICT (add/add)` — tested, quoted above.
+- The rebase produces `CONFLICT (add/add)`, tested, quoted above.
 - No rebase or branch-update step exists in the slice-merge path.
 - Two of the four post-slice-0 slices (1 and 2) have failed at merge, and **both
   were independently confirmed to have the same cause**, not merely the same
@@ -183,14 +183,14 @@ There is no path or file field in the packet schema. Confirming it from the othe
 direction: `owned_files` appears only in the delegate/roadmap subsystem
 (`src/modules/delegates/delegate_plan.c`, `src/modules/roadmap/roadmap_decompose.c`
 and neighbours) and **nowhere** under `src/modules/workflows/`. The overlap test
-cited earlier is real — `src/tests/test_delegate_plan.c:116`,
-`test_plan_flags_overlapping_owned_files` — but it guards the *delegate planner*,
+cited earlier is real, `src/tests/test_delegate_plan.c:116`,
+`test_plan_flags_overlapping_owned_files`, but it guards the *delegate planner*,
 not the WFE slicer. They are different code paths, and the WFE one has no
 per-slice path data to check.
 
 So a slice-time rejection would first require extending the packet schema to
 carry intended paths and getting the architect delegate to populate them
-reliably — a larger change than this proposal originally implied, and one whose
+reliably, a larger change than this proposal originally implied, and one whose
 reliability depends on a model's self-declaration.
 
 Assumed, NOT established:
@@ -222,16 +222,15 @@ Option 3c catches the same defect at the first point where the engine actually
 has the facts. After `impl`, each slice's frozen diff names the paths it created.
 Comparing a freshly frozen slice against its already-frozen siblings is a local
 computation on data already in hand, and it fires **as the second colliding slice
-freezes** — before that slice reaches `merge`. The operator sees "slices 1 and 2
+freezes**, before that slice reaches `merge`. The operator sees "slices 1 and 2
 both create docs/runbooks/…, content differs" instead of a bare forge 400 at the
 last stage.
 
 Stated at that scope on purpose: the check is anchored to the per-slice freeze
 transition, not to a run-level gate. Whether the engine has a run-level gate
-between freeze and merge — which could fail the entire run in one place rather
-than per-slice — was not verified, and nothing here depends on it.
-
-It is strictly worse than option 3 in one respect: the implementation cost has
+between freeze and merge, which could fail the entire run in one place rather
+than per-slice, was not verified, and nothing here depends on it. That option is strictly worse than
+option 3 in one respect: the implementation cost has
 already been paid by the time it fires. It does not prevent five delegates
 authoring five versions of one document; it prevents the run from ending in an
 unresolvable merge, and it explains why.
@@ -245,14 +244,14 @@ Option 3b (reject all ownership intersections) is not recommended: it would
 forbid the distinct-region edits this proposal says merge fine, and it faces the
 same missing-data problem as option 3.
 
-**Optional, on its own merits — option 1.** Scoped to ordinary shared-base
+**Optional, on its own merits, option 1.** Scoped to ordinary shared-base
 staleness: a long-running slice whose base moved while it touched different
 files. This is a real improvement but it is *not* a fix for this defect, and
 should not be adopted as a substitute for option 3.
 
 **Execution order, if both are taken:** option 3c's sibling-freeze check first;
-rebase-before-merge applies only to slices that survive it. That ordering matters
-— rebasing a slice whose frozen diff already collides with a sibling's just moves
+rebase-before-merge applies only to slices that survive it. That ordering matters,
+rebasing a slice whose frozen diff already collides with a sibling's just moves
 the failure later.
 
 Slice-time rejection is deliberately **not** part of this ordering. It is not
@@ -271,7 +270,7 @@ For option 3c, the remedy proposed here:
 
 - When two sibling slices in a run have frozen diffs that both **create** the
   same path with **divergent** content, the later freeze is rejected and the
-  root run fails at that point, naming the path and the slices involved — before
+  root run fails at that point, naming the path and the slices involved, before
   that later slice reaches `merge`. A sibling that already merged before the
   later freeze is not rolled back; avoiding that would require the cohort-wide
   freeze/CI barrier this proposal deliberately does not adopt.
@@ -281,7 +280,7 @@ For option 3c, the remedy proposed here:
   this rule.
 - Replaying `wi_f96d4b18…` against the fix fails **when the second slice
   freezes**, naming `docs/runbooks/appliance-state-recovery.md` and the sibling
-  it collides with — instead of two PRs left `CONFLICTING`.
+  it collides with, instead of two PRs left `CONFLICTING`.
 
   Scoped deliberately to the per-slice freeze transition, which is state the
   engine already holds. Whether a *run-level* gate exists between freeze and
@@ -290,8 +289,8 @@ For option 3c, the remedy proposed here:
   there would be preferable and this criterion should be revisited.
 - **The check is atomic with respect to concurrent freezes.** Two sibling slices
   that freeze simultaneously must not both pass by each failing to observe the
-  other. This requires serialising the compare-and-record step — a per-run freeze
-  lock, a single-writer freeze queue, or equivalent — so that for any colliding
+  other. This requires serialising the compare-and-record step. A per-run freeze
+  lock, a single-writer freeze queue, or equivalent, so that for any colliding
   pair exactly one slice observes the other's recorded paths and fails.
   Without this, the fix is a time-of-check/time-of-use race that the observed run
   did not happen to exercise, because its slices froze minutes apart
@@ -310,7 +309,7 @@ Independently of which option is chosen:
   (Observed: 15 retries over 3 hours, blocking every other work item behind the
   single `autonomy.concurrency: 1` slot.)
 
-Deferred — follow-up acceptance criteria for whichever implementation is chosen,
+Deferred, follow-up acceptance criteria for whichever implementation is chosen,
 not claims about this proposal:
 
 - No run terminates in a state requiring a manual content-merge step, and no

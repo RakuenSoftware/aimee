@@ -1,10 +1,10 @@
-# Proposal: config as single source of truth — env/CLI surface audit
+# Proposal: config as single source of truth: env/CLI surface audit
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — initial audit and first safety fix archived 2026-08-04; residual extracted.
+- **State:** DONE. Initial audit and first safety fix archived 2026-08-04; residual extracted.
 
 > **Archived after partial delivery.** The audit established the durable-config versus
 > deployment-only doctrine and the falsey anti-pattern bypass bug is fixed and regression-tested.
@@ -19,7 +19,7 @@
 ## Method and its limits
 
 258 distinct `AIMEE_*` vars are read in `src/`. Naive name-matching (`AIMEE_FOO_BAR` → `foo_bar`)
-produced 217 apparent gaps and was **wrong** — it misses config keys whose name differs from the env
+produced 217 apparent gaps and was **wrong**, it misses config keys whose name differs from the env
 name. `memory.citations.mode`, `memory.cognify.async.enabled`, `memory.pagerank.relations`, and the
 `transport.*` flags all matched nothing by name yet are fully config-backed. Every finding below was
 re-verified by reading the call site and the corresponding parser. Anything unverified is marked.
@@ -28,7 +28,7 @@ re-verified by reading the call site and the corresponding parser. Anything unve
 Hardcoded tunables were not systematically swept. Go sources (`server-go/`, `webchat/`,
 `kb-console/`) contribute only 6 env reads and were not analyzed.
 
-## The doctrine already exists — and it is not "everything in config"
+## The doctrine already exists: and it is not "everything in config"
 
 `src/posix/web_egress.c:183` states the rule for security-disabling switches:
 
@@ -44,7 +44,7 @@ documented decision*. The reference implementation of the first half is `config_
 (`src/modules/config/config.c:2048`): config snapshot is authoritative, an exported env var wins only
 if it parses, and garbage falls through to the config value.
 
-## Finding 1 (bug) — `AIMEE_ANTIPATTERNS_BYPASS` is gated on presence, not value
+## Finding 1 (bug): `AIMEE_ANTIPATTERNS_BYPASS` is gated on presence, not value
 
 `src/modules/guardrails/guardrails_orchestrator.c:1644`:
 
@@ -54,31 +54,31 @@ if (!getenv("AIMEE_ANTIPATTERNS_BYPASS"))
 
 The comment two lines above (and the operator-facing message at :1689) both document it as
 `AIMEE_ANTIPATTERNS_BYPASS=1`. But the guard tests only **presence**, so
-`AIMEE_ANTIPATTERNS_BYPASS=0` and `=false` *disable the anti-pattern check* — the opposite of what an
+`AIMEE_ANTIPATTERNS_BYPASS=0` and `=false` *disable the anti-pattern check*, the opposite of what an
 operator setting `0` intends. Every other boolean env in the tree validates its value
 (`AIMEE_KB_HARDENED`, `AIMEE_DELEGATE_SANDBOX`, `AIMEE_ALLOW_MAIN_CHECKOUT`, the
 `config_autonomy_lookup` path). This one is inconsistent and fails open.
 
 Fix: validate the value. This is a bug fix, independent of the rest of this proposal.
 
-## Finding 2 (bug) — `kb_cache_ttl_s` can never be set from config
+## Finding 2 (bug): `kb_cache_ttl_s` can never be set from config
 
 `kb_cache_configure(int ttl_s)` (`src/modules/kb_client/kb_client_cache.c:29`) falls back to
 `AIMEE_KB_CACHE_TTL_S` only when `ttl_s < 0`. Its sole caller is
 `src/server/server_main.c:301`: `kb_cache_configure(-1);`
 
-So the parameter exists to accept a configured value and nothing ever passes one — the KB result
+So the parameter exists to accept a configured value and nothing ever passes one. The KB result
 cache TTL is env-only in practice. The plumbing is already there; only the call site is wrong.
 
-## Finding 3 — split authority on main-checkout edits
+## Finding 3: split authority on main-checkout edits
 
 `require_session_worktree` is a config key (default true) enforcing that mutating sessions run in an
 isolated worktree. `aimee_main_clone_edits_allowed` (`src/util.c:1167`) grants the same permission
 from `AIMEE_ALLOW_MAIN_CHECKOUT` (value-validated) *or* a `.git/aimee-allow-main-edits` marker file.
 Three independent authorities over one boundary, only one of which is visible to config review.
-Not necessarily wrong — but it should be a stated decision, and today it is not documented anywhere.
+Not necessarily wrong, but it should be a stated decision, and today it is not documented anywhere.
 
-## Finding 4 — the autonomy family is split in half
+## Finding 4: the autonomy family is split in half
 
 Eleven autonomy knobs are config-backed and live via `config_autonomy_lookup`. Seven are env-only,
 and `config.c:2084` self-documents the split (`/* not a config-backed autonomy var (e.g. USD_PER_SEC)
@@ -98,7 +98,7 @@ A per-run dollar ceiling and the branch autonomous work merges into cannot be se
 audited through config. `autonomy.max_usd` and `autonomy.usd_per_sec` need a `double` variant of
 `config_autonomy_lookup` (today it returns `long`); the other five fit the existing path.
 
-## Finding 5 — verified gaps outside autonomy
+## Finding 5: verified gaps outside autonomy
 
 Each verified at its call site; all are durable tunables with no config key.
 
@@ -107,7 +107,7 @@ Each verified at its call site; all are durable tunables with no config key.
 | `workflow_lease_ttl_secs` | `AIMEE_WORKFLOW_LEASE_TTL_SECS` | `3600` | `wfe_enforce.c:199` |
 | `wfe_worktree_gc_grace_secs` | `AIMEE_WFE_WORKTREE_GC_GRACE_SECS` | `3600` | `wfe_scheduler.c:305` |
 | `workflow_autonomous_router_enabled` | `AIMEE_WORKFLOW_AUTONOMOUS_ROUTER` | off | `server_dev_submit.c:44` |
-| `workflow_enforce_stage` | `AIMEE_WORKFLOW_ENFORCE_STAGE` | — | 6 sites incl. `cmd_hooks.c:225` |
+| `workflow_enforce_stage` | `AIMEE_WORKFLOW_ENFORCE_STAGE` | n/a | 6 sites incl. `cmd_hooks.c:225` |
 | `wfe_engine` | `AIMEE_WFE_ENGINE` | C engine | `trigger_scheduler.c:1368`, `wfe_scheduler.c:536` |
 | `verify_parallel` | `AIMEE_VERIFY_PARALLEL` | derived, capped 4 | `git_verify.c:1017` |
 | `verify_step_timeout_ms` | `AIMEE_VERIFY_STEP_TIMEOUT_MS` | `VERIFY_STEP_TIMEOUT_MS_DEFAULT` | `git_verify_step.c:20` |
@@ -131,10 +131,10 @@ Two notes on this table:
   inconsistent treatment.
 - `log_level` is the one confirmed CLI-axis gap: settable per-invocation (`--log-level=`) and by env,
   but an operator cannot set a persistent default in config.
-- `mcp_tool_profile`'s own comment says *"Operators set `full` to opt out"* — describing a config
+- `mcp_tool_profile`'s own comment says *"Operators set `full` to opt out"*, describing a config
   knob that is not one.
 
-## Confirmed correct — do not "fix" these
+## Confirmed correct: do not "fix" these
 
 - **Config-backed with validated env override** (the target pattern): `background_threads`,
   `compute_threads`, `session_threads`, `db2_pool_size`, `delegate_max_inflight` (`config.h:89-143`);
@@ -144,23 +144,23 @@ Two notes on this table:
 - **Env-only by design:** real secrets (`AIMEE_*_TOKEN`, `*_PIN`, `*_SECRET`, `vault_kms_*`);
   bootstrap values read before `legacy_config_read` (`AIMEE_HOME`, `AIMEE_RUNTIME_DIR`,
   `AIMEE_SERVER_STARTUP_FD`); per-process propagation between parent and delegate
-  (`AIMEE_DELEGATE_DEPTH`, `AIMEE_PARENT_DELEGATION_ID`, `AIMEE_DELEGATE_SOURCE_*` — these are
+  (`AIMEE_DELEGATE_DEPTH`, `AIMEE_PARENT_DELEGATION_ID`, `AIMEE_DELEGATE_SOURCE_*`; these are
   `setenv`'d by aimee itself, not operator input); `AIMEE_TEST_*` hooks; and
   `AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT` per the documented doctrine above.
 
 ## Sequencing
 
-1. **Findings 1 and 2** — two independent bug fixes, each a few lines with a regression test. No
+1. **Findings 1 and 2**: two independent bug fixes, each a few lines with a regression test. No
    config-surface change. Land first.
-2. **Finding 4** — the autonomy seven, following the existing `autonomy.*` section pattern
+2. **Finding 4**: the autonomy seven, following the existing `autonomy.*` section pattern
    (`config_sections.c:806`). Needs a `double` lookup variant for the two USD fields. Highest value:
    these are spend and admission rails.
-3. **Finding 5** — the remaining nineteen, in family-sized batches (workflow/wfe, verify, db2,
+3. **Finding 5**: the remaining nineteen, in family-sized batches (workflow/wfe, verify, db2,
    retrieval, runtime). Each is the standard six-site add, now cheaper for flat scalars via
    `config_flat_defaults[]` + `config_parse_flat_fields`.
-4. **Finding 3** — document the intended authority for main-checkout edits, then reconcile.
+4. **Finding 3**: document the intended authority for main-checkout edits, then reconcile.
 
 Each config key added must keep env as a *validated* override (the `config_autonomy_lookup`
 contract), not a bypass, and must land with a `test_config.c` round-trip asserting the non-default
-value survives save+reload — the failure mode `require_aimee_git` and `server_api_remote_writes`
+value survives save+reload, the failure mode `require_aimee_git` and `server_api_remote_writes`
 already hit.

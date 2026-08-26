@@ -22,39 +22,39 @@ enforce, so this table cannot drift from what is scoreable.
 | ablation-conf | ibm-granite_granite-4.1-3b | 70 | VALID | MF_CONF_FLOOR ablation |
 | ablation-conf | unsloth_gemma-3-270m-it | 70 | VALID | MF_CONF_FLOOR ablation |
 | ablation-conf | unsloth_gemma-3n-E4B-it | 70 | VALID | MF_CONF_FLOOR ablation |
-| ceiling | google_gemma-4-12B-it | 70 | VALID | thinking OFF — SUPERSEDED |
-| ceiling | google_gemma-4-26B-A4B-it | 1 | INVALID: incomplete (1/70) | thinking OFF — SUPERSEDED |
-| ceiling | google_gemma-4-E4B-it.nf4 | 70 | VALID | thinking OFF — SUPERSEDED |
-| challenger-254 | GLM-4.7-Flash.q6 | 70 | INVALID: errored x70 | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX — speed/fit claims void |
-| challenger-254 | Magistral-Small-2509.q6 | 13 | INVALID: incomplete (13/70) | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX — speed/fit claims void |
-| challenger-254 | gemma-4-12B-it.q6 | 70 | VALID | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX — speed/fit claims void |
+| ceiling | google_gemma-4-12B-it | 70 | VALID | thinking OFF: SUPERSEDED |
+| ceiling | google_gemma-4-26B-A4B-it | 1 | INVALID: incomplete (1/70) | thinking OFF: SUPERSEDED |
+| ceiling | google_gemma-4-E4B-it.nf4 | 70 | VALID | thinking OFF: SUPERSEDED |
+| challenger-254 | GLM-4.7-Flash.q6 | 70 | INVALID: errored x70 | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX: speed/fit claims void |
+| challenger-254 | Magistral-Small-2509.q6 | 13 | INVALID: incomplete (13/70) | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX: speed/fit claims void |
+| challenger-254 | gemma-4-12B-it.q6 | 70 | VALID | MISMEASURED: ran on an 8GB iGPU, not the 7900 XTX: speed/fit claims void |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap2048 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.cap512 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
 | diagnostics | HuggingFaceTB_SmolLM2-360M-Instruct.reppen1.1 | 12 | INVALID: incomplete (12/70) | cap and repetition-penalty variants |
 | diagnostics | LiquidAI_LFM2-350M-Extract.cap2048 | 12 | INVALID: incomplete (12/70), truncated x10 | cap and repetition-penalty variants |
 | diagnostics | LiquidAI_LFM2-350M-Extract.cap512 | 12 | INVALID: incomplete (12/70), truncated x12 | cap and repetition-penalty variants |
 | diagnostics | LiquidAI_LFM2-350M-Extract.reppen1.1 | 12 | INVALID: incomplete (12/70), truncated x3 | cap and repetition-penalty variants |
-| gpu | HuggingFaceTB_SmolLM2-360M-Instruct | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | LiquidAI_LFM2-350M-Extract | 70 | INVALID: truncated x60 | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | LiquidAI_LFM2.5-230M | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | Qwen_Qwen3-0.6B | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | Qwen_Qwen3-1.7B | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | Qwen_Qwen3.5-0.8B | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | Qwen_Qwen3.5-2B | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | google_gemma-4-E2B-it | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | google_gemma-4-E4B-it | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | ibm-granite_granite-4.0-1b | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | ibm-granite_granite-4.0-350m | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | ibm-granite_granite-4.0-h-1b | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | ibm-granite_granite-4.0-h-350m | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | ibm-granite_granite-4.1-3b | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | unsloth_gemma-3-270m-it | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | unsloth_gemma-3n-E4B-it | 70 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| llamacpp | Qwen3.6-27B | 70 | VALID | thinking OFF — SUPERSEDED; device varies, see defect 15 |
-| llamacpp | Qwen3.6-35B-A3B | 70 | VALID | thinking OFF — SUPERSEDED; device varies, see defect 15 |
-| llamacpp | gemma-4-26B-A4B-it | 70 | VALID | thinking OFF — SUPERSEDED; device varies, see defect 15 |
-| llamacpp | gemma-4-31B-it | 70 | VALID | thinking OFF — SUPERSEDED; device varies, see defect 15 |
-| llamacpp | gemma-4-E4B-it | 70 | VALID | thinking OFF — SUPERSEDED; device varies, see defect 15 |
+| gpu | HuggingFaceTB_SmolLM2-360M-Instruct | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | LiquidAI_LFM2-350M-Extract | 70 | INVALID: truncated x60 | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | LiquidAI_LFM2.5-230M | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | Qwen_Qwen3-0.6B | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | Qwen_Qwen3-1.7B | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | Qwen_Qwen3.5-0.8B | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | Qwen_Qwen3.5-2B | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | google_gemma-4-E2B-it | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | google_gemma-4-E4B-it | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | ibm-granite_granite-4.0-1b | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | ibm-granite_granite-4.0-350m | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | ibm-granite_granite-4.0-h-1b | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | ibm-granite_granite-4.0-h-350m | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | ibm-granite_granite-4.1-3b | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | unsloth_gemma-3-270m-it | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | unsloth_gemma-3n-E4B-it | 70 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| llamacpp | Qwen3.6-27B | 70 | VALID | thinking OFF: SUPERSEDED; device varies, see defect 15 |
+| llamacpp | Qwen3.6-35B-A3B | 70 | VALID | thinking OFF: SUPERSEDED; device varies, see defect 15 |
+| llamacpp | gemma-4-26B-A4B-it | 70 | VALID | thinking OFF: SUPERSEDED; device varies, see defect 15 |
+| llamacpp | gemma-4-31B-it | 70 | VALID | thinking OFF: SUPERSEDED; device varies, see defect 15 |
+| llamacpp | gemma-4-E4B-it | 70 | VALID | thinking OFF: SUPERSEDED; device varies, see defect 15 |
 | noconf | gemma-4-26B-A4B-it | 70 | VALID | confidence floor removed |
 | noconf | gemma-4-E4B-it | 70 | VALID | confidence floor removed |
 | promptfix | Qwen_Qwen3.5-0.8B | 70 | VALID | prompt correction |
@@ -71,34 +71,34 @@ enforce, so this table cannot drift from what is scoreable.
 | sub1b | granite-4.0-350m | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-1b | 70 | VALID | sub-1B ladder, thinking ON |
 | sub1b | granite-4.0-h-350m | 70 | VALID | sub-1B ladder, thinking ON |
-| thinking | GLM-4.7-Flash.gv05 | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192 — CURRENT |
-| thinking | GLM-4.7-Flash | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3-1.7B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3.5-0.8B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3.6-27B | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192 — CURRENT |
-| thinking | Qwen3.6-35B-A3B | 70 | INVALID: errored x64 | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-3n-E4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-26B-A4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-31B-it | 70 | INVALID: errored x12 | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-E2B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | gemma-4-E4B-it | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | granite-4.0-1b | 70 | VALID | thinking ON, cap 8192 — CURRENT |
-| thinking | granite-4.1-3b | 70 | VALID | thinking ON, cap 8192 — CURRENT |
+| thinking | GLM-4.7-Flash.gv05 | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192: CURRENT |
+| thinking | GLM-4.7-Flash | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | Qwen3-1.7B | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | Qwen3.5-0.8B | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | Qwen3.5-2B | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | Qwen3.6-27B | 1 | INVALID: incomplete (1/70) | thinking ON, cap 8192: CURRENT |
+| thinking | Qwen3.6-35B-A3B | 70 | INVALID: errored x64 | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-3n-E4B-it | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-4-12B-it | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-4-26B-A4B-it | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-4-31B-it | 70 | INVALID: errored x12 | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-4-E2B-it | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | gemma-4-E4B-it | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | granite-4.0-1b | 70 | VALID | thinking ON, cap 8192: CURRENT |
+| thinking | granite-4.1-3b | 70 | VALID | thinking ON, cap 8192: CURRENT |
 
 ## tier-b
 
 | lane | model | rows | status | lane note |
 | --- | --- | ---: | --- | --- |
 | cpufit | Qwen3.6-27B | 6 | VALID | declared CPU lane, model does not fit the card |
-| gpu | Qwen3.6-35B-A3B | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | gemma-4-12B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | gemma-4-26B-A4B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | gemma-4-E2B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | gemma-4-E4B-it | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | granite-4.0-1b | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
-| gpu | granite-4.1-3b | 6 | VALID | thinking OFF (disable_thinking) — SUPERSEDED |
+| gpu | Qwen3.6-35B-A3B | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | gemma-4-12B-it | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | gemma-4-26B-A4B-it | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | gemma-4-E2B-it | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | gemma-4-E4B-it | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | granite-4.0-1b | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
+| gpu | granite-4.1-3b | 6 | VALID | thinking OFF (disable_thinking): SUPERSEDED |
 | sub1b | LFM2-350M-Extract | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | LFM2.5-230M | 6 | VALID | sub-1B ladder, thinking ON |
 | sub1b | Qwen3-0.6B | 6 | VALID | sub-1B ladder, thinking ON |

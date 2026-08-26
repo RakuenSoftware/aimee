@@ -25,7 +25,7 @@ equals `["docs/modules/workspace.md"]`, as the latch requires.
 Slice 44 established the liveness, build-membership, and test-classification evidence, and the
 slice-decision roundtable approved the three scoping calls: all eleven headers stay privately declared;
 `test_workspace_memory.c` is a memory test, not a module test; and the CMake four-of-eleven membership
-is an intentional thin-client boundary. It also carried one item forward to this slice — make the
+is an intentional thin-client boundary. It also carried one item forward to this slice. Make the
 `workspace_runner_queue.c` wiring explicit. `workspace_runner_queue.h` is included by
 `workspace_runner_registry.h`, so the runner queue is part of the runner registry's compiled surface;
 the registry has external callers in the runner and serve paths, so the queue is reachable in
@@ -43,7 +43,7 @@ Governance latched with one source and one header; learning with four of each. `
 set-equality check eleven declared entries against eleven actual files, the largest in the program. The
 regression suite removes `workspace_turn.c` from `sources` and requires `rule=ownership-complete` on
 `/sources` with the source named missing, and removes `workspace_provider.h` from `private_headers`
-and requires the same rule on `/private_headers` with the header named missing — confirming the checks
+and requires the same rule on `/private_headers` with the header named missing, confirming the checks
 bite when one element of an eleven-element declared set is dropped.
 
 ## Regression controls

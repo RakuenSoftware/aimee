@@ -1,4 +1,4 @@
-# Proposal: sliced-lifecycle "build" workflow — proposal → plan → per-slice sub-PRs → acceptance → feature PR
+# Proposal: sliced-lifecycle "build" workflow: proposal → plan → per-slice sub-PRs → acceptance → feature PR
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -7,7 +7,7 @@
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Author:** JBailes (via Claude Code)
 - **Date:** 2026-07-09
 - **Scope:** rework aimee's default full-lifecycle development workflow so it runs a
@@ -35,7 +35,7 @@ the workflow demands a human:
    is the code quality sound, are any tests missing? Findings are fixed and resubmitted
    under standard roundtable behavior.
 6. The end step opens a **PR from the feature branch to the default branch**, fixes on any
-   roundtable feedback, then a **human-gated approval** of that PR — and it merges only
+   roundtable feedback, then a **human-gated approval** of that PR, and it merges only
    once its **CI is fully green**.
 
 The default workflow holds no special engine privilege; it is one composition of the
@@ -58,7 +58,7 @@ and the autonomous-base merge rail all exist and are exercised by tests.
    cannot be composed today.
 
 2. **The roundtable cannot review "plan + proposal" together.** `exec_roundtable`
-   (`src/workflow/wfe_roundtable.c:80`) reviews only `row.content_hash` — the work item's
+   (`src/workflow/wfe_roundtable.c:80`) reviews only `row.content_hash`. The work item's
    single current content blob. It ignores its `in:` bindings entirely, so two inputs
    (plan *and* proposal, or feature-diff *and* proposal) cannot both reach the panel. The
    block catalog already *allows* multiple accepted input types; the executor just doesn't
@@ -66,7 +66,7 @@ and the autonomous-base merge rail all exist and are exercised by tests.
 
 3. **No live panel + no feature-branch/base targeting.** `wfe_autonomy_register`
    (`src/server/wfe_live_delegate.c:429`) installs every provider **except**
-   `wfe_set_panel_provider` — so the roundtable is fail-closed (`live_panel_run` returns
+   `wfe_set_panel_provider`, so the roundtable is fail-closed (`live_panel_run` returns
    `-1`, "§0: panel not composable yet") and never actually convenes. Separately, `pr.open`
    always targets `wfe_autonomous_base()`; there is no way to point sub-PRs at a durable
    **feature branch** while the final PR targets the default branch.
@@ -83,7 +83,7 @@ and the autonomous-base merge rail all exist and are exercised by tests.
   (plan → roundtable → feature branch → split → *foreach slice run a child workflow* →
   acceptance roundtable → final PR → human gate → green CI → merge). Each slice runs a
   **child workflow instance** whose body is the sub-PR cycle. Per-slice PRs and roundtables
-  are therefore first-class, validator-checked, and inspectable in YAML — not hidden inside a
+  are therefore first-class, validator-checked, and inspectable in YAML, not hidden inside a
   provider.
 - **Make the roundtable real.** Teach `gate.roundtable` to consume multiple bound inputs and
   hand their actual content to the panel, and wire a live panel provider off the ensemble
@@ -121,21 +121,21 @@ merge    merge                      merge sub-PR into the feature branch   (term
 
 ### Engine features to add
 
-- **E1 — Multi-input roundtable.** `exec_roundtable` resolves each `node->ins[]` binding to its
+- **E1. Multi-input roundtable.** `exec_roundtable` resolves each `node->ins[]` binding to its
   producer's artifact content from the store and assembles a composite review packet
   (`{proposal, plan}` or `{proposal, frozen_diff}`) instead of one bare content hash. Add an
   optional `focus`/`review_lens` param so the acceptance gate is framed as
   "completion + code quality + missing tests." Fully unit-testable with the existing mock panel.
-- **E2 — Live panel provider.** Register `wfe_set_panel_provider` in `wfe_autonomy_register` with a
+- **E2. Live panel provider.** Register `wfe_set_panel_provider` in `wfe_autonomy_register` with a
   provider that convenes the ensemble roundtable (`delegate_ensemble` / `roundtable_pipeline`),
   passing the composite packet + required/eligible personas and returning per-persona verdicts.
   Fail-closed when the panel can't compose (unchanged posture).
-- **E3 — Feature branch + base targeting.** A `branch.open` block that creates/returns a durable
+- **E3. Feature branch + base targeting.** A `branch.open` block that creates/returns a durable
   feature branch as `WFE_ART_BRANCH`, and a `base:` binding on `pr.open`/`merge` so a PR can
   target the feature branch (sub-PRs) or the default branch (final PR). Forge seam extended to
   push/open/merge against an explicit base; the protected-branch guard still refuses autonomous
   merges to `main`/`master`/`release*`, so the final PR to the default branch stays human-gated.
-- **E4 — Sub-workflow-per-slice.** A `foreach.workflow` construct: for each packet emitted by
+- **E4. Sub-workflow-per-slice.** A `foreach.workflow` construct: for each packet emitted by
   `split`, instantiate a child work item running the `slice` workflow bound to that packet + the
   feature branch; the parent parks (`WFE_STEP_PENDING`) until all children reach terminal, then
   aggregates (all-merged → advance; any parked/failed → park for a human). Requires parent↔child
@@ -143,7 +143,7 @@ merge    merge                      merge sub-PR into the feature branch   (term
 
 ### Non-goals / preserved invariants
 
-- No change to the narrow `wfe_iface.h` execution seam contract (W1) — new behavior rides existing
+- No change to the narrow `wfe_iface.h` execution seam contract (W1), new behavior rides existing
   block/artifact enums where possible; any new block/artifact is appended, never reordered.
 - Canonical-form/version hashing (`wfe_canonical.c`) and the typed validator remain the source of
   truth; every new block declares typed I/O and is validator-checked.
@@ -154,12 +154,12 @@ merge    merge                      merge sub-PR into the feature branch   (term
 
 - **E4 is genuinely new control flow.** Parent-parks-until-children and child fan-in must not
   deadlock or double-advance. Mitigation: model child state in DB1, drive children through the
-  existing autonomy driver, and gate parent advance on an explicit aggregate predicate — mock-tested
+  existing autonomy driver, and gate parent advance on an explicit aggregate predicate, mock-tested
   before any live run.
 - **Canonical hashing / validator churn.** Appending blocks/artifacts must not renumber existing
   enum members (would break stored versions). Mitigation: append-only + a version-stability test.
 - **Live panel is integration-gated.** E2's real convening depends on the ensemble path; its logic
-  is mock-tested now and only the live wiring waits on a reachable panel — same posture as the
+  is mock-tested now and only the live wiring waits on a reachable panel, same posture as the
   original W5.
 
 See `sliced-lifecycle-build-workflow.plan.md` for the slice-by-slice implementation plan.

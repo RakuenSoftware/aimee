@@ -1,6 +1,6 @@
 # Operator audit activity: unified surface residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`operator-audit-activity-surface.md`](../done/operator-audit-activity-surface.md)
 

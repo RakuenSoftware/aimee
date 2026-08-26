@@ -1,12 +1,12 @@
 # Proposal: what the identity family needs before it can migrate
 
 - **State:** PARTLY RESOLVED. remote_client_grant is migrated and served. The
-  secrets question dissolved on inspection -- there was no security decision to
+  secrets question dissolved on inspection. There was no security decision to
   make, only a mis-filing to correct. The JTI question stands, in a reserved
   family of its own ('jti_replay').
 
-`identity` is the smallest reserved DB1 family — four sources, nine
-operations — and it is the next one the wire can carry. It is written up rather
+`identity` is the smallest reserved DB1 family, four sources, nine
+operations, and it is the next one the wire can carry. It is written up rather
 than migrated because two of its four sources are not what the family name
 suggests, and both questions change behaviour rather than plumbing.
 
@@ -22,7 +22,7 @@ sources it SERVES; secrets.c has zero references to db1_conn or sqlite3, so
 there was nothing for this family to serve. It is now in
 `infrastructure_sources`, which is where the catalog already keeps the sources
 that live under src/modules/db1 without being DB1 storage. Nothing about how a
-secret is stored, or which process can read one, changed -- the daemon links it
+secret is stored, or which process can read one, changed, the daemon links it
 exactly as before.
 
 Whether secrets should eventually own a module is still a real question. It is
@@ -43,8 +43,8 @@ neither of those makes it DB1 storage.
 Migrating it as declared would move secret reads and writes into the module
 process: a different uid boundary, a different set of processes that can open
 the files, and a different answer to "who can read a secret at rest". That may
-well be the right end state — a module that owns secrets is easier to reason
-about than a library every binary links — but it is a security decision, not a
+well be the right end state, a module that owns secrets is easier to reason
+about than a library every binary links, but it is a security decision, not a
 mechanical one.
 
 The alternatives are (a) migrate it and accept the process boundary change,
@@ -69,7 +69,7 @@ protection path.
 
 The `_for_test` twin exists to drive the saturation branch with a small limit.
 Once the real one is served by the module, the test twin either crosses too --
-declaring a test-only operation on a production wire -- or the saturation test
+declaring a test-only operation on a production wire, or the saturation test
 loses its handle. Neither is obviously right.
 
 A replay check that answers "storage error" and one that answers "replay" must
@@ -86,7 +86,7 @@ Both extensions this section predicted turned out to be unnecessary:
   and the grant together, because they are one decision, and the public
   `db1_remote_client_claim` is a thin unpacking of it beside the caller.
 - `db1_remote_client_bind` answers 1 / 0 / -2 / -1, which `negatives: data`
-  already covers -- the same declaration db1_wfe_bind needed for its
+  already covers, the same declaration db1_wfe_bind needed for its
   single-writer refusal.
 
 The fixture asserts the three claim verdicts from the states that produce them,
@@ -104,7 +104,7 @@ because dead generator paths are how a shape gets its first bug:
 - the returned value casting to the header's declared type rather than to
   int64_t, which is what an enum-returning domain needs;
 - a struct reply that carries the return in one more cell, which is what
-  `db1_remote_client_claim` needs — it fills a grant AND says whether the
+  `db1_remote_client_claim` needs. It fills a grant AND says whether the
   claim was new, unbound, bound or owned by somebody else.
 
 Both are small and both are only worth writing once there is an operation to

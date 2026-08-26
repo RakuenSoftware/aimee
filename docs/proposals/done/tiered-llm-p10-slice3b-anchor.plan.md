@@ -1,4 +1,4 @@
-# P10/P7 slice 3b implementation plan — vault custody selection + seal barrier (P7 §2-3)
+# P10/P7 slice 3b implementation plan: vault custody selection + seal barrier (P7 §2-3)
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
@@ -8,9 +8,9 @@ Slice 3b of P10+P7. Branch off `testing` (P1, P3a, P10 s1, P10/P7 s2 merged). Th
 prerequisite the deferred CA-key slice revealed: **a live key (CA key, org vendor keys)
 may only live in the vault under an external anchor, never bare `file` custody** (P7 §3).
 This slice builds the **custody selection + seal/unseal barrier + P7 §3 dev-vs-hardened
-enforcement**, testable via a **mock anchor** (real `tpm2`/`pkcs11`/`kms` need hardware —
+enforcement**, testable via a **mock anchor** (real `tpm2`/`pkcs11`/`kms` need hardware,
 deferred; P7's Testing section explicitly plans "tpm2/pkcs11/kms behind build flags with a
-mock anchor"). Multi-instance coordination (seal-epoch-in-pg, auto-unseal, wrapped-root,
+mock anchor"); Multi-instance coordination (seal-epoch-in-pg, auto-unseal, wrapped-root,
 singleton lease, witness) is a further slice.
 
 ## What exists
@@ -26,12 +26,12 @@ singleton lease, witness) is a further slice.
    `mock` (test/dev anchor) | `tpm2` | `pkcs11` | `kms`. Read once at kb startup; selects
    the custody provider bound via `vault_custody_set_provider()`. `tpm2`/`pkcs11`/`kms`
    are **declared but unimplemented → fail closed at startup** with a clear typed error
-   ("custody 'kms' not yet implemented; use file (dev) or mock (test)") — real anchors land
+   ("custody 'kms' not yet implemented; use file (dev) or mock (test)"), real anchors land
    with hardware. This keeps the config surface honest and forward-compatible.
 2. **Seal state in the custody layer.** Add to the seam (or a thin `vault_seal.{c,h}`):
    `vault_seal_status() -> {SEALED, UNSEALED}`, `vault_unseal(secret,len)`,
    `vault_seal()`. Rules:
-   - **`file` custody is always UNSEALED** (self-unseal from the master-key file — today's
+   - **`file` custody is always UNSEALED** (self-unseal from the master-key file, today's
      low-ops behavior, unchanged).
    - **A non-`file` (anchor) custody starts SEALED**: `get_kek` fails
      (`VAULT_ERR_SEALED`) until `vault_unseal` invokes the anchor. This is P7 §3's "starts
@@ -40,16 +40,16 @@ singleton lease, witness) is a further slice.
 3. **Mock anchor provider** (`vault_custody_mock.{c,h}`, compiled always but only bound
    when `vault.custody=mock`; test/dev only): its `get_kek` returns a KEK derived (HKDF,
    `vault_crypto`) from a root that the mock "unwraps" ONLY after `vault_unseal` is called
-   with the configured unseal secret — modelling an external anchor's `Decrypt`. Sealed →
+   with the configured unseal secret, modelling an external anchor's `Decrypt`. Sealed →
    `get_kek` returns `VAULT_ERR_SEALED`. Proves the seam + seal/unseal barrier work with a
    non-file custody, without real hardware.
 4. **P7 §3 enforcement** (`kb_vault_policy.{c,h}` or in the kb bind path):
-   - `kb_vault_live_keys_allowed()` — **false under `file` custody**, true under a
+   - `kb_vault_live_keys_allowed()`: **false under `file` custody**, true under a
      non-file custody that is currently UNSEALED. A live key (CA key / org vendor key) may
      be provisioned/loaded ONLY when this is true.
    - **Fail-closed at boot**: a `file`-custody kb that finds live-key ciphertext already in
      `org_vault_secret` (any `org:pki:*` or `org:`/`team:` secret slot) **refuses to serve
-     org egress** (typed startup error) — matching §3 "fails closed at boot if such
+     org egress** (typed startup error), matching §3 "fails closed at boot if such
      ciphertext is present." (It still serves non-secret paths.)
    - A non-`file` kb that comes up and cannot unseal refuses org egress until unsealed.
 5. **`VAULT_ERR_SEALED`** added to `vault_status_t` (mirrors slice-2's
@@ -65,7 +65,7 @@ singleton lease, witness) is a further slice.
 4. `kb_vault_live_keys_allowed()` + the §3 boot fail-closed check (query `org_vault_secret`
    for live-key rows under file custody via the slice-2 definer read path).
 5. `VAULT_ERR_SEALED`.
-6. Tests: unit — mock anchor seal/unseal state machine (sealed → `get_kek` fails; unseal
+6. Tests: unit, mock anchor seal/unseal state machine (sealed → `get_kek` fails; unseal
    → succeeds; re-seal → fails again); `file` custody always unsealed; the §3 gate
    (`kb_vault_live_keys_allowed` false under file, true under unsealed mock); config
    selection incl. the unimplemented-anchor fail-closed. A real-PG-gated test that the §3
@@ -97,7 +97,7 @@ Panel found no blocking issue; these repeated signals reshape the slice:
 
 - **`mock` NEVER satisfies the §3 live-key gate.** `kb_vault_live_keys_allowed()` requires
   custody ∈ {`tpm2`,`pkcs11`,`kms`} (a REAL external anchor) AND unsealed. `file` AND
-  `mock` both → **false**. `mock` is a **test/dev provider only** — it exists to exercise
+  `mock` both → **false**. `mock` is a **test/dev provider only**. It exists to exercise
   the seal state machine, and is compiled in but can NEVER be the basis for holding a live
   key. (Closes "a hardened kb bypasses §3 with vault.custody=mock".)
 - **Seal flushes + zeroizes the KEK.** `vault_seal()` (or the provider's seal) calls
@@ -116,7 +116,7 @@ Panel found no blocking issue; these repeated signals reshape the slice:
 - **Unseal is provider-specific, not a universal passphrase.** The mock unseals from a
   config secret; the real anchors (deferred) define their own unseal (workload-identity
   `Decrypt` / TPM policy session / PKCS#11 login). The seam's unseal is an opaque
-  provider callback — do NOT bake `vault_unseal(secret,len)` as THE contract.
+  provider callback. Do NOT bake `vault_unseal(secret,len)` as THE contract.
 - **`VAULT_ERR_SEALED` scoping.** Returned only by an anchor provider's `get_kek` when
   sealed; the file provider never returns it (server unaffected).
 

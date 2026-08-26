@@ -1,6 +1,6 @@
 # Retire the legacy eval temp store behind a Go-owned disposable-run contract
 
-- **State:** PENDING — restored after rejection audit on 2026-08-15.
+- **State:** PENDING. Restored after rejection audit on 2026-08-15.
 - **Corrective history:** PR #2660 rejected this live objective because the archived plan described
   a C/SQL scratch-store repair. That was an ownership error, not evidence that benchmark isolation
   was obsolete. This rewrite chooses the proposal's retirement branch, assigns benchmark-run

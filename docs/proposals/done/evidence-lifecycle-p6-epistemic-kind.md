@@ -1,9 +1,9 @@
-# Proposal: P6 — epistemic kind as a dimension separate from authority and tier
+# Proposal: P6: epistemic kind as a dimension separate from authority and tier
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 6 of 9.
 - **Author:** JBailes
@@ -17,15 +17,15 @@ Aimee currently answers "what kind of thing is this memory?" with three columns
 that each mean something different and are each used as a proxy for the others:
 `memories.tier` (a storage/promotion level), `memories.kind` (a loose label
 defaulting to `'fact'`), and `confidence_class` (a provenance-keyed authority
-class). None of them says what *epistemic* kind of claim the row makes — and that
+class). None of them says what *epistemic* kind of claim the row makes, and that
 is the property that should decide whether the row can be contradicted, whether
 it has valid time, whether it expires, and whether correcting it even makes sense.
 
 The concrete failure: "The deploy failed after migration X" and "Migration X is
 unsafe" are treated the same way because both mention the same event and arrive
-through the same path. The first is an **episode** — an observation of something
+through the same path. The first is an **episode**, an observation of something
 that happened, which is immutable except for redaction and can never be "wrong"
-in the way a claim can. The second is a **mental model** — a derived explanatory
+in the way a claim can. The second is a **mental model**. A derived explanatory
 synthesis, which absolutely can be wrong, should carry its derivation, and should
 go stale when its basis moves. Applying the same correction and expiry rules to
 both means either episodes get incorrectly retracted, or models never do.
@@ -40,9 +40,9 @@ not change what any existing rule does for `world_fact`.
 |---|---|---|
 | `confidence_class` A/B/C, provenance-keyed | `src/modules/db2/c/fact_lifecycle.h` | Authority, correctly. Frequently *read* as if it also said what kind of claim the row makes. |
 | `memories.kind` (default `'fact'`), `cognified_memory_kind` | `src/modules/db2/c/schema.sql` | Loose labels with no closed set and no rule attached. |
-| `memories.tier` L0/L1/…, `kind_lifecycle` promote/demote/expire thresholds | `src/modules/db2/c/schema.sql` | Lifecycle policy keyed on `kind` — the right mechanism attached to the wrong dimension. |
+| `memories.tier` L0/L1/…, `kind_lifecycle` promote/demote/expire thresholds | `src/modules/db2/c/schema.sql` | Lifecycle policy keyed on `kind`: the right mechanism attached to the wrong dimension. |
 | `memory_units.memory_kind` (`episodic`), `is_episode_card`, `memory_episodes` | `src/modules/db2/c/schema.sql` | Episodes exist as a *storage* concept; nothing keys correction rules off them. |
-| `epistemic_directives`, `prospective_memories`, `rules`, `collab_rules` | `src/modules/db2/c/schema.sql` | Instruction-like and policy-like content already lives in separate tables — evidence that the distinction is real and currently expressed by table choice rather than by a dimension. |
+| `epistemic_directives`, `prospective_memories`, `rules`, `collab_rules` | `src/modules/db2/c/schema.sql` | Instruction-like and policy-like content already lives in separate tables: evidence that the distinction is real and currently expressed by table choice rather than by a dimension. |
 | `rel_types.correction_behavior` (`supersede`, `hard_delete`, `immutable`) | `src/modules/db2/c/schema.sql` | Correction policy per relation; no per-claim-kind policy. |
 | `memories.provenance_category` | `src/modules/db2/c/schema.sql` | Who wrote it, not what kind of claim it is. |
 
@@ -71,19 +71,19 @@ epistemic kind × authority × confidence × scope × lifecycle state × tier
 Six independent axes. Concretely, and each of these is a legal combination that
 the system must represent without contradiction:
 
-- a **user-authored** `hypothesis` with **low** confidence in **project** scope —
-  high authority, explicitly unresolved;
-- a **model-derived** `policy` **candidate** awaiting operator promotion —
-  policy-kind content that carries no policy force until promoted;
-- an **operator-authored** `preference` scoped to one team — maximal authority,
+- a **user-authored** `hypothesis` with **low** confidence in **project** scope,
+high authority, explicitly unresolved;
+- a **model-derived** `policy` **candidate** awaiting operator promotion,
+policy-kind content that carries no policy force until promoted;
+- an **operator-authored** `preference` scoped to one team, maximal authority,
   strictly bounded scope;
-- an `episode` at **L0** tier with **A**-class authority — immutable, cheap, and
+- an `episode` at **L0** tier with **A**-class authority, immutable, cheap, and
   authoritative all at once.
 
 No column may be derived from another. In particular: `epistemic_kind` must never
 be inferred from `provenance_category`, and authority must never be inferred from
 `epistemic_kind`. A `policy` row written by a model is a *proposed* policy with
-model authority — that is precisely the combination P7 exists to adjudicate, and
+model authority. That is precisely the combination P7 exists to adjudicate, and
 collapsing it would let a model write policy by choosing a label.
 
 ### What changes behaviourally
@@ -98,7 +98,7 @@ Only three things, each small and each testable:
    than on the free-text `kind`, with migrated rows keeping today's effective
    thresholds so no row's expiry behaviour changes at migration.
 3. **Recall labelling.** P9's trace reports the kind, so an answer can say "this
-   is a derived model, not an observation" — which is the user-visible payoff and
+   is a derived model, not an observation": which is the user-visible payoff and
    the reason the distinction is worth storing at all.
 
 Ranking is untouched. `epistemic_kind` is not a score input in this proposal.

@@ -62,15 +62,15 @@ There are **no fully-dead features**. There are **5 inert toggles** (see §Inert
 
 Legend, Tier: **A**=harness exists, run it · **B**=harness needs a per-flag knob ·
 **C**=no harness, build it · **S**=safety, two-stage · **X**=do-not-auto-flip ·
-**0**=inert toggle (wire-or-remove). Tests: ✓ good · ~ light · ✗ none/smoke.
+**0**=inert toggle (wire-or-remove). Tests: good · ~ light · none/smoke.
 
 ### Tier A, flip-ready, just run against pinned criteria
 
 | Flag | Harness (isolates it today) | Tests | Pinned criteria | Next action |
 |---|---|---|---|---|
 | `ingress_preinject_enabled` | `bench/ingress_token_bench.py` (per-request on/off) | ~ | lower p95 bytes, **correctness Δ ≥ 0** | bench measures bytes only, add a correctness arm (LongMemEval/coding on/off), then run |
-| `demotion_enabled` (0→1→2) | `benchmarks/memory/poison_gate.py` (deterministic) | ✓ | clean-accuracy Δ ≥ −noise; poison gate PASS | run shadow(1) on real recall, then live(2) |
-| `bandit_live_decision_enabled` | `aimee memory benchmark code-graph-fusion --arm …` | ✓ | MRR/nDCG@5 ≥ baseline at fixed explore budget | pin floor, run ablation arms |
+| `demotion_enabled` (0→1→2) | `benchmarks/memory/poison_gate.py` (deterministic) | good | clean-accuracy Δ ≥ −noise; poison gate PASS | run shadow(1) on real recall, then live(2) |
+| `bandit_live_decision_enabled` | `aimee memory benchmark code-graph-fusion --arm …` | good | MRR/nDCG@5 ≥ baseline at fixed explore budget | pin floor, run ablation arms |
 
 ### Tier B, add a per-flag on/off knob to an existing suite, then becomes Tier A
 
@@ -89,12 +89,12 @@ Legend, Tier: **A**=harness exists, run it · **B**=harness needs a per-flag kno
 
 | Flag | Suite it rides | Tests | Next action |
 |---|---|---|---|
-| `memory_rerank_enabled` (+`_mode`,`_top_k`,`_mix`) | LongMemEval/LocOMo | ✗ | add variant knob; A/B on retrieval suites |
-| `memory_query_expansion_mode` | LongMemEval/LocOMo | ✗ | same |
-| `memory_rewrite_enabled`/`_hyde`/`_decompose` | long-context suites | ✗ | same |
-| `kb_ranker_enabled` | code-graph-fusion | ✗ | add as an ablation arm |
+| `memory_rerank_enabled` (+`_mode`,`_top_k`,`_mix`) | LongMemEval/LocOMo | none | add variant knob; A/B on retrieval suites |
+| `memory_query_expansion_mode` | LongMemEval/LocOMo | none | same |
+| `memory_rewrite_enabled`/`_hyde`/`_decompose` | long-context suites | none | same |
+| `kb_ranker_enabled` | code-graph-fusion | none | add as an ablation arm |
 | `cache_aware_rewrite_enabled` |, (needs **cost** harness) | ~ | build cache-hit/token A/B; correctness must be neutral |
-| `memory_recall_lanes_enabled` | LongMemEval | ✓ | add variant knob |
+| `memory_recall_lanes_enabled` | LongMemEval | good | add variant knob |
 
 ### Tier C, no harness; build the eval before any flip discussion
 
@@ -103,32 +103,32 @@ These are **wired** (gate real code) but unmeasurable today.
 | Flag | Prod reader | Tests | Build needed |
 |---|---|---|---|
 | `learning_synthesize_enabled` + 6 `learning_implicit_*` | `learning_router.c`, `kb_curator_drain.c` | ~ | runner landed: `learning_replay.py` + `make learning-citation-eval`. **Citation detectors GRADED PASS** (see Executed validation). Stateful heuristics + substrate promotion still need a live-router replay entry |
-| `memory_scenes_enabled` | `memory_core_helpers.inc` | ✗ | labelled scene-retrieval corpus + runner |
-| `memory_negation_enabled` | `memory_core_helpers.inc` | ✗ | negation/absence corpus + runner |
-| `memory_salience_enabled` | `memory_core_helpers.inc` | ✗ | per-flag arm in retrieval suite |
-| `memory_surprise_enabled` | `memory_core_helpers.inc` | ✗ | same |
-| `memory_pagerank_enabled` | `memory_core_helpers.inc` | ✗ | same |
-| `memory_derive_facts_enabled` | `memory_assemble.c` | ✗ | date/quant-arithmetic Q&A corpus |
-| `memory_failure_detection_enabled` | `memory_assemble.c` | ✗ | abstention corpus (see retrieval-abstention proposal) |
-| `memory_fetch_budget_enabled` | `memory_core_search.inc` | ✗ | cost/correctness A/B |
-| `memory_context_budget_enabled` | `memory_assemble.c` | ✗ | assembly-mode A/B (top-K vs token-budget) |
-| `memory_aggregation_enabled` | `memory_core_search.inc` | ✗ | coverage-query corpus |
-| `memory_episode_summaries_enabled` | `cmd_memory_vector.c` | ✗ | session-close summary quality eval |
-| `memory_lifecycle_enabled` (+`_hide_archived`) | `memory_core_helpers.inc` | ✗ | recall-with-archival A/B |
-| `memory_cognify_enabled`/`_async` | `memory_improve.c`, `kb.c` | ✗(0 asserts) | extraction-quality eval |
-| `identity_working_profile_injection_enabled` | `prompts.c` | ✗(smoke) | task-accuracy A/B with/without injection |
+| `memory_scenes_enabled` | `memory_core_helpers.inc` | none | labelled scene-retrieval corpus + runner |
+| `memory_negation_enabled` | `memory_core_helpers.inc` | none | negation/absence corpus + runner |
+| `memory_salience_enabled` | `memory_core_helpers.inc` | none | per-flag arm in retrieval suite |
+| `memory_surprise_enabled` | `memory_core_helpers.inc` | none | same |
+| `memory_pagerank_enabled` | `memory_core_helpers.inc` | none | same |
+| `memory_derive_facts_enabled` | `memory_assemble.c` | none | date/quant-arithmetic Q&A corpus |
+| `memory_failure_detection_enabled` | `memory_assemble.c` | none | abstention corpus (see retrieval-abstention proposal) |
+| `memory_fetch_budget_enabled` | `memory_core_search.inc` | none | cost/correctness A/B |
+| `memory_context_budget_enabled` | `memory_assemble.c` | none | assembly-mode A/B (top-K vs token-budget) |
+| `memory_aggregation_enabled` | `memory_core_search.inc` | none | coverage-query corpus |
+| `memory_episode_summaries_enabled` | `cmd_memory_vector.c` | none | session-close summary quality eval |
+| `memory_lifecycle_enabled` (+`_hide_archived`) | `memory_core_helpers.inc` | none | recall-with-archival A/B |
+| `memory_cognify_enabled`/`_async` | `memory_improve.c`, `kb.c` | none (0 asserts) | extraction-quality eval |
+| `identity_working_profile_injection_enabled` | `prompts.c` | smoke only | task-accuracy A/B with/without injection |
 | `drift_detect_shadow_enabled` | `kb_detect.c` | ~ | already shadow-only by design; needs precision eval |
-| `kb_curator_*` (10 flags) | `kb_curator_drain.c` + pass files | ~/✗ | per-pass artifact-quality (LLM-judge) + **cost budget**; `curator_eval.py` exists but doesn't isolate passes |
-| `review_scheduler_enabled` | `kb_reflection.c` | ✗ | reflection-usefulness eval (hard) |
+| `kb_curator_*` (10 flags) | `kb_curator_drain.c` + pass files | light or none | per-pass artifact-quality (LLM-judge) + **cost budget**; `curator_eval.py` exists but doesn't isolate passes |
+| `review_scheduler_enabled` | `kb_reflection.c` | none | reflection-usefulness eval (hard) |
 | `skills_review/curator/manage/eval_gate` | `server.c`, `skill_*.c` | ~ | skill-lifecycle outcome eval |
 
 ### Tier S, safety, two-stage flip
 
 | Flag | Harness | Tests | Path |
 |---|---|---|---|
-| `guardrails_semantic_enabled`→drop `_dry_run`→drop `_advisory_only` | `tools/guardrails_replay.py` (55 fixtures, precision/recall) | ✓(18) | run replay → pin precision floor on 35 yellow-zone + 0 regressions on 10 benign → enable advisory; block only if precision clears `_allow_ml_only_block` |
-| `integrity_enabled`→drop `integrity_dry_run` | none yet | ✓(14) | **build ingest-pattern fixture corpus**; run dry-run shadow → drop dry-run if FP≈0 |
-| `calibration_enabled` (0→1→2→3) | none isolated | ✓(14) | use built-in shadow(1)→A/B(2) ladder; pin promotion-threshold agreement |
+| `guardrails_semantic_enabled`→drop `_dry_run`→drop `_advisory_only` | `tools/guardrails_replay.py` (55 fixtures, precision/recall) | (18) | run replay → pin precision floor on 35 yellow-zone + 0 regressions on 10 benign → enable advisory; block only if precision clears `_allow_ml_only_block` |
+| `integrity_enabled`→drop `integrity_dry_run` | none yet | (14) | **build ingest-pattern fixture corpus**; run dry-run shadow → drop dry-run if FP≈0 |
+| `calibration_enabled` (0→1→2→3) | none isolated | (14) | use built-in shadow(1)→A/B(2) ladder; pin promotion-threshold agreement |
 
 ### Tier X, do NOT auto-flip (opt-in by design)
 
