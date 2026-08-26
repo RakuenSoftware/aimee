@@ -196,7 +196,7 @@ reset_learning_state
 seed_setup_failures
 run_consumers control
 check "control exposes no recalled failures" "0" \
-    "$(awk -F, 'NR>1 && $1==\"control\" {s+=$7} END {print s+0}' "$RESULTS")"
+    "$(awk -F, 'NR>1 && $1=="control" {s+=$7} END {print s+0}' "$RESULTS")"
 
 section "treatment: the same failures become negative knowledge"
 reset_learning_state
@@ -209,9 +209,9 @@ check "treatment retains both observations" "48" \
     "$(q 'SELECT coalesce(sum(occurrences),0) FROM approach_failures')"
 run_consumers treatment
 check "treatment exposes one recalled failure per repeated task" "24" \
-    "$(awk -F, 'NR>1 && $1==\"treatment\" && $2==\"repeat\" {s+=$7} END {print s+0}' "$RESULTS")"
+    "$(awk -F, 'NR>1 && $1=="treatment" && $2=="repeat" {s+=$7} END {print s+0}' "$RESULTS")"
 check "treatment exposes no failure on novel tasks" "0" \
-    "$(awk -F, 'NR>1 && $1==\"treatment\" && $2==\"novel\" {s+=$7} END {print s+0}' "$RESULTS")"
+    "$(awk -F, 'NR>1 && $1=="treatment" && $2=="novel" {s+=$7} END {print s+0}' "$RESULTS")"
 
 python3 - "$RESULTS" "$OUTPUT_DIR/summary.json" <<'PY'
 import csv
