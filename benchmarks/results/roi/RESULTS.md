@@ -72,6 +72,11 @@ A clean-lineage, one-task Codex calibration is retained as a negative result:
 - Off: 17,690 input (9,984 cached), 14 output, `$0.0350976` API equivalent
 - Full: 17,838 input (9,984 cached), 14 output, `$0.0356896` API equivalent
 
+API equivalents use the [official GPT-5.6 Sol model
+rates](https://developers.openai.com/api/docs/models/gpt-5.6-sol) accessed on
+2026-08-26: `$4.00/M` uncached input, `$0.40/M` cached input, and `$20.00/M`
+output below the long-context threshold.
+
 The economized prompt was 2,880 UTF-8 bytes shorter and the economizer forecast
 875 fewer tokens, yet GPT-5.6 Sol reported **148 more input tokens**. The
 high-coordinate folded summary contains many conserved unique identifiers and
@@ -126,6 +131,31 @@ API-price-equivalent delta is not a clean causal estimate and is rejected.
 - Raw artifact: `current-stack-codex-sol-low-coordinate-k3.json`
 - Raw artifact SHA-256:
   `36d3b43f4aefb43f25ccd12c35d5f82336bf41483cff29dc8f7de5c1cd78ada1`
+
+The cache-isolated rerun added one shared nonce per repeat before the condition
+histories. Cache reads then matched within every pair: 9,984 / 9,984, 9,984 /
+9,984, and 12,032 / 12,032.
+
+| condition | resolved | input | cache read | uncached input | output | API equivalent |
+|---|---:|---:|---:|---:|---:|---:|
+| off | 3 / 3 | 51,474 | 32,000 | 19,474 | 42 | $0.091536 |
+| full | 3 / 3 | 47,187 | 32,000 | 15,187 | 42 | $0.074388 |
+
+Across the three repeats, economization removed 4,287 total input tokens
+(8.33%) and 4,287 uncached input tokens (22.0%), while outputs and exact-answer
+quality were identical. At the pinned GPT-5.6 Sol API rates, the price
+equivalent fell by `$0.017148` (18.7%). The actual marginal cash charge remained
+`$0.00` because the CLI was authenticated through ChatGPT.
+
+This is repeatability evidence for one synthetic task, not three independent
+tasks and not a population estimate.
+
+- Run ID: `roi-codex-pilot-299e09879a4b4eb8`
+- Source pin: `09fa898d95fe8aa9d6da5efee38d61223c8de177`
+- Raw artifact: `current-stack-codex-sol-low-coordinate-k3-cache-isolated.json`
+- Preflight: `current-stack-codex-sol-low-coordinate-k3-cache-isolated.preflight.json`
+- Raw artifact SHA-256:
+  `4176a7edcda71555669ca83c8c1255561a46f7d2c7df569cc0bfc0830fca0219`
 
 ## What this supports
 
