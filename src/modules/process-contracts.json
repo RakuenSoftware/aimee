@@ -1116,6 +1116,14 @@
           "emitter": "obs_bus_emit_durable_event"
         }
       ]
+    },
+    {
+      "id": "observability",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ]
     }
   ],
   "clients": [
