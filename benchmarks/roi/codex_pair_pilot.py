@@ -138,6 +138,7 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="gpt-5.6-sol")
+    parser.add_argument("--coordinate-density", choices=("low", "high"), default="high")
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--actual-marginal-budget-usd", required=True, type=float)
     parser.add_argument("--api-equivalent-budget-usd", required=True, type=float)
@@ -186,7 +187,7 @@ def main() -> None:
     if args.actual_marginal_budget_usd < 0 or args.api_equivalent_budget_usd < hard_api:
         raise SystemExit("budget limit is below hard maximum; no Codex inference dispatched")
 
-    task = build_tasks(1, "tail")[0]
+    task = build_tasks(1, "tail", args.coordinate_density)[0]
     args.output.parent.mkdir(parents=True, exist_ok=True)
     preflight = args.output.with_suffix(".preflight.json")
     preflight.write_text(json.dumps({
@@ -194,6 +195,7 @@ def main() -> None:
         "created_at": datetime.now(timezone.utc).isoformat(),
         "commit": commit,
         "model": args.model,
+        "coordinate_density": args.coordinate_density,
         "task_corpus_sha256": sha256_json([task.__dict__]),
         "budget": budget,
         "dispatch_started": False,
@@ -257,6 +259,7 @@ def main() -> None:
         "run_id": run_id,
         "seed": SEED,
         "model": args.model,
+        "coordinate_density": args.coordinate_density,
         "task_corpus_sha256": sha256_json([task.__dict__]),
         "budget": budget,
         "calls": rows,

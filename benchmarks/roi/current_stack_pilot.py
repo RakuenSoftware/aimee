@@ -38,7 +38,13 @@ class Task:
     messages: list[dict[str, Any]]
 
 
-def _filler(task_index: int, turn: int) -> str:
+def _filler(task_index: int, turn: int, coordinate_density: str) -> str:
+    if coordinate_density == "low":
+        sentence = (
+            "The queue remained healthy throughout this checkpoint. "
+            "The platform team observed no retries and no ownership changes."
+        )
+        return "\n".join(sentence for _ in range(14))
     lines = []
     for line in range(14):
         lines.append(
@@ -48,9 +54,13 @@ def _filler(task_index: int, turn: int) -> str:
     return "\n".join(lines)
 
 
-def build_tasks(count: int, fact_position: str = "tail") -> list[Task]:
+def build_tasks(
+    count: int, fact_position: str = "tail", coordinate_density: str = "high",
+) -> list[Task]:
     if fact_position not in {"folded", "tail"}:
         raise ValueError("fact_position must be 'folded' or 'tail'")
+    if coordinate_density not in {"low", "high"}:
+        raise ValueError("coordinate_density must be 'low' or 'high'")
     fact_turn = 1 if fact_position == "folded" else 9
     tasks = []
     for task_index in range(count):
@@ -61,7 +71,7 @@ def build_tasks(count: int, fact_position: str = "tail") -> list[Task]:
                 "role": "user",
                 "content": f"Review deployment checkpoint {turn} for service svc-{task_index:02d}.",
             })
-            detail = _filler(task_index, turn)
+            detail = _filler(task_index, turn, coordinate_density)
             if turn == fact_turn:
                 detail += f"\nAUTHORITATIVE_ROLLBACK_TOKEN={expected}\n"
             messages.append({
@@ -218,6 +228,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--tasks", type=int, default=6)
     parser.add_argument("--fact-position", choices=("folded", "tail"), default="tail")
+    parser.add_argument("--coordinate-density", choices=("low", "high"), default="high")
     parser.add_argument("--max-output-tokens", type=int, default=32)
     parser.add_argument("--budget-limit-usd", type=float, required=True)
     parser.add_argument("--marginal-input-usd-per-million", type=float, default=0.0)
@@ -236,7 +247,7 @@ def main() -> None:
     if dirty:
         raise SystemExit("source worktree is dirty; commit the runner before recording lineage")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
-    tasks = build_tasks(args.tasks, args.fact_position)
+    tasks = build_tasks(args.tasks, args.fact_position, args.coordinate_density)
     model_catalog = http_json(args.base_url.rstrip("/") + "/v1/models")
     model_ids = [entry.get("id") for entry in model_catalog.get("data", [])]
     if args.model not in model_ids:
@@ -282,6 +293,7 @@ def main() -> None:
         "commit": commit,
         "model": args.model,
         "fact_position": args.fact_position,
+        "coordinate_density": args.coordinate_density,
         "task_corpus_sha256": sha256_json([asdict(task) for task in tasks]),
         "calls_planned": calls_planned,
         "budget": budget,
@@ -379,6 +391,7 @@ def main() -> None:
         "seed": SEED,
         "model": args.model,
         "fact_position": args.fact_position,
+        "coordinate_density": args.coordinate_density,
         "chat_template_kwargs": {"enable_thinking": False},
         "model_catalog": model_catalog,
         "task_corpus_sha256": sha256_json([asdict(task) for task in tasks]),

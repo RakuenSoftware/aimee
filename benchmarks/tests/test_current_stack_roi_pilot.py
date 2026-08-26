@@ -19,6 +19,15 @@ class CurrentStackROIPilotTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             build_tasks(1, "elsewhere")
 
+    def test_coordinate_density_changes_folded_workload(self):
+        high = build_tasks(1, "tail", "high")[0]
+        low = build_tasks(1, "tail", "low")[0]
+        self.assertIn("check=00-00-00", high.messages[1]["content"])
+        self.assertNotIn("check=", low.messages[1]["content"])
+        self.assertIn("queue remained healthy", low.messages[1]["content"])
+        with self.assertRaises(ValueError):
+            build_tasks(1, "tail", "medium")
+
     def test_exact_grader_rejects_extra_text_and_wrong_answers(self):
         answers = {"RBK-00-7F39A2", "RBK-01-7F39A2"}
         self.assertTrue(exact_grade("RBK-00-7F39A2", "RBK-00-7F39A2", answers))
