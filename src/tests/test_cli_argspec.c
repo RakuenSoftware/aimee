@@ -121,6 +121,7 @@ static const sample_t SAMPLES[] = {
     {"index.find", {"", NULL}},
     {"index.find", {"foo", "--scope", "", NULL}},
     {"index.find", {"--json", "foo", NULL}},
+    {"index.find", {"foo", "--project", "explicit-project", NULL}},
 
     {"memory.list", {NULL}},
     {"memory.list", {"--tier", "L2", NULL}},
@@ -149,6 +150,7 @@ static const sample_t SAMPLES[] = {
     {"index.find_callers", {"", "", NULL}},
     {"index.find_callers", {"p0", "p1", "p2", NULL}},
     {"index.find_callers", {"--unknown-flag", "x", NULL}},
+    {"index.find_callers", {"p0", "--project", "explicit-project", NULL}},
     {"kb.search", {NULL}},
     {"kb.search", {"--project", "v", NULL}},
     {"kb.search", {"--scope", "v", NULL}},
@@ -424,6 +426,7 @@ static const sample_t SAMPLES[] = {
     {"session.brief", {"p0", "p1", NULL}},
     {"index.deps", {"p0", NULL}},
     {"index.deps", {"p0", "p1", NULL}},
+    {"index.deps", {"--project", "explicit-project", "--scope", "all", NULL}},
     {"session.close", {"p0", NULL}},
     {"session.close", {"p0", "p1", NULL}},
     {"session.get", {"p0", NULL}},
@@ -438,6 +441,7 @@ static const sample_t SAMPLES[] = {
     {"index.blast_radius", {"", NULL}},
     {"index.blast_radius", {"", "", NULL}},
     {"index.blast_radius", {"--unknown-flag", "x", NULL}},
+    {"index.blast_radius", {"p0", "--project", "explicit-project", "--scope", "all", NULL}},
     {"index.hybrid", {NULL}},
     {"index.hybrid", {"--scope", "v", NULL}},
     {"index.hybrid", {"--scope", "v", NULL}},
@@ -447,11 +451,7 @@ static const sample_t SAMPLES[] = {
     {"index.hybrid", {"p0", "p1", NULL}},
     {"index.hybrid", {"", NULL}},
     {"index.hybrid", {"--unknown-flag", "x", NULL}},
-    {"index.investigate", {NULL}},
-    {"index.investigate", {"p0", NULL}},
-    {"index.investigate", {"p0", "p1", NULL}},
-    {"index.investigate", {"", NULL}},
-    {"index.investigate", {"--unknown-flag", "x", NULL}},
+    {"index.hybrid", {"p0", "--project", "explicit-project", NULL}},
     {"index.structure", {NULL}},
     {"index.structure", {"p0", NULL}},
     {"index.structure", {"p0", "p1", NULL}},
@@ -459,6 +459,7 @@ static const sample_t SAMPLES[] = {
     {"index.structure", {"", NULL}},
     {"index.structure", {"", "", NULL}},
     {"index.structure", {"--unknown-flag", "x", NULL}},
+    {"index.structure", {"p0", "--project", "explicit-project", "--scope", "all", NULL}},
     {"skill.pin", {NULL}},
     {"skill.pin", {"--unknown-flag", "x", NULL}},
     {"skill.unpin", {NULL}},
@@ -2288,6 +2289,11 @@ int main(void)
     * unnoticed when it was planted. Set it to something no sample passes as a
     * flag, and the samples below separate the three steps. */
    setenv("AIMEE_SESSION_ID", "env-session-id", 1);
+   /* The project source has the same fixed-context property: an explicit flag
+    * wins, otherwise the launcher-provided project id is sent. A nonempty env
+    * value makes every shared index-context sample prove the fallback rather
+    * than accidentally agreeing when both sides omit it. */
+   setenv("AIMEE_PROJECT_ID", "env-project-id", 1);
 
    test_every_shipped_spec_is_sampled();
    for (size_t i = 0; i < sizeof(SAMPLES) / sizeof(SAMPLES[0]); i++)

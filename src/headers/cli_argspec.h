@@ -85,6 +85,10 @@
  * A constant concatenation and a length limit are less computation than the
  * clamp above, and neither consults another field.
  *
+ * The fixed `cwd`, `session`, and `project` sources are named client facts. The
+ * project source reproduces the CLI's `--project` then `AIMEE_PROJECT_ID`
+ * precedence without exposing a general environment-variable reader.
+ *
  * So: a field's rule may depend on its own value, its own flags, named client
  * facts the SERVER asked for, and the invocation's ARITY. It may not depend on
  * another field's value, and it may not compute one. That still forbids things:
