@@ -1524,13 +1524,19 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
     -- so every vector write would fail until they are gone. The DROPs stay
     -- because a schema apply is how an existing deployment upgrades, and they
     -- cost nothing once there is nothing to drop.
+    --
+    -- LIKE 'db3%' with no ESCAPE clause on purpose. The first version of this
+    -- matched 'db3\_capture\_%' ESCAPE '\\', which PostgreSQL rejects --
+    -- "escape string must be empty or one character" -- so the whole schema
+    -- apply aborted and no installed deployment could start. Underscores are
+    -- single-character wildcards here, which only widens the match within the
+    -- db3 prefix, and nothing else is named that.
     FOR v_table IN
       SELECT c.relname FROM pg_trigger t
         JOIN pg_class c ON c.oid = t.tgrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE NOT t.tgisinternal AND n.nspname = 'public'
-        AND (t.tgname LIKE 'db3\\_capture\\_%' ESCAPE '\\'
-             OR t.tgname = 'db3_capture_row' OR t.tgname = 'db3_reject_truncate')
+        AND t.tgname LIKE 'db3%'
       GROUP BY c.relname
     LOOP
         EXECUTE format('DROP TRIGGER IF EXISTS db3_capture_row ON %I', v_table);
@@ -1538,7 +1544,7 @@ DO $pgvec_setup$ DECLARE v_ok BOOLEAN := FALSE; v_table TEXT; p RECORD; BEGIN
         FOR p IN SELECT t.tgname FROM pg_trigger t
                    JOIN pg_class c ON c.oid = t.tgrelid
                    WHERE NOT t.tgisinternal AND c.relname = v_table
-                     AND t.tgname LIKE 'db3\\_capture\\_%' ESCAPE '\\'
+                     AND t.tgname LIKE 'db3%'
         LOOP
             EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', p.tgname, v_table);
         END LOOP;
@@ -1548,13 +1554,24 @@ END $pgvec_setup$;
 -- The DB3 control plane, dropped for the same reason as its triggers: an
 -- installed database still has these, and they are now unreferenced. Order
 -- matters only because of the foreign keys between them.
-DROP FUNCTION IF EXISTS public.db3_backfill_provider_chunk(BIGINT,INT);
-DROP FUNCTION IF EXISTS public.db3_admit_provider(BIGINT,BIGINT,BIGINT,BIGINT,BIGINT);
-DROP FUNCTION IF EXISTS public.db3_capture_vector_row();
-DROP FUNCTION IF EXISTS public.db3_reject_vector_truncate();
-DROP FUNCTION IF EXISTS public.db3_enqueue_vector(SMALLINT,TEXT,BIGINT,TEXT,JSONB);
-DROP FUNCTION IF EXISTS public.db3_enqueue_vector_to(SMALLINT,TEXT,BIGINT,TEXT,JSONB,BIGINT);
-DROP FUNCTION IF EXISTS public.db3_projection_labels(JSONB,JSONB);
+-- By NAME, not by signature. The first version of this named an argument list
+-- per function and got three of the seven wrong, so db3_admit_provider,
+-- db3_enqueue_vector and db3_enqueue_vector_to survived the upgrade -- proven
+-- against a real database rather than reasoned about. Signatures also differ
+-- between deployments that upgraded through different versions, and DROP
+-- FUNCTION IF EXISTS with a wrong signature succeeds silently, which is the
+-- worst combination: it reports success and leaves the function behind.
+DO $db3_functions$
+DECLARE r RECORD;
+BEGIN
+    FOR r IN
+      SELECT p.oid::regprocedure AS sig
+        FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname LIKE 'db3%'
+    LOOP
+        EXECUTE format('DROP FUNCTION IF EXISTS %s CASCADE', r.sig);
+    END LOOP;
+END $db3_functions$;
 DROP TABLE IF EXISTS public.db3_backfill;
 DROP TABLE IF EXISTS public.db3_delivery;
 DROP TABLE IF EXISTS public.db3_outbox;
