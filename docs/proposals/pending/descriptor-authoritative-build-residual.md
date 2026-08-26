@@ -1,6 +1,6 @@
 # Descriptor-authoritative builds: residual work
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`module-runtime-source-ownership-and-build-residual.md`](../done/module-runtime-source-ownership-and-build-residual.md)
 

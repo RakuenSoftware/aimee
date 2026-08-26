@@ -15,7 +15,7 @@ build against a real deployment rather than the test shim.
   carried in. Nothing was compiled in the container.
 - **Installed**: `aimee`, `aimee-server`, `aimee-kb` into `/usr/local/bin`; PostgreSQL
   17.11 with pgvector from Debian packages.
-- **Topology**: the default local one — `aimee-server` reaching `aimee-kb` over plain
+- **Topology**: the default local one, `aimee-server` reaching `aimee-kb` over plain
   loopback HTTP, which is what `install.sh` and `scripts/aimee-local-stack-e2e.sh
   --mode full` produce.
 
@@ -23,22 +23,22 @@ Scripts are in `scripts/validation/fact-authority/`.
 
 ## The two gaps
 
-**Gap 1 — declared authority.** The retraction path took `authority` from the request
+**Gap 1, declared authority.** The retraction path took `authority` from the request
 body. `{"authority":"user"}` bought the right to delete a user-stated Class-A fact and
-to override an `immutable` relation. Worse, `db2_typed_fact_ingress` — reached by the
-`get_context_block` MCP tool, whose `query` the *model* composes — passed a hardcoded
+to override an `immutable` relation. Worse, `db2_typed_fact_ingress`, reached by the
+`get_context_block` MCP tool, whose `query` the *model* composes, passed a hardcoded
 `FACT_AUTHORITY_USER`, so an agent could retract the user's facts by writing "forget my
 email" into a query nobody asked for.
 
-**Gap 2 — outranked supersede.** On a FUNCTIONAL (single-valued) relation, a new object
+**Gap 2, outranked supersede.** On a FUNCTIONAL (single-valued) relation, a new object
 contradicts the old one, so the commit path applies the relation's
 `correction_behavior`. It did that without checking who was writing, so an ordinary
 Class-B model write silently superseded the user's Class-A fact. No retraction endpoint
-involved — just a normal write.
+involved, just a normal write.
 
 ## What was checked, and what it found
 
-### Gap 2 on the real engine — the guard is SQL, so the shim proves nothing
+### Gap 2 on the real engine: the guard is SQL, so the shim proves nothing
 
 The guard is a CASE-rank comparison inside the UPDATE and its probe. `make unit-tests`
 runs against the sqlite shim, which *translates* DB2's SQL rather than executing it as
@@ -54,13 +54,12 @@ Both typed-fact suites pass against real PostgreSQL 17.11:
 **Negative control.** Reverting the guard, rebuilding against libpq and re-running gives
 
     test_fact_lifecycle.c:262: main: Assertion `strcmp(cur, "acme") == 0' failed.
-
-— the model's `globex` had replaced the user's `acme`. So the assertions genuinely run
+The model's `globex` had replaced the user's `acme`. So the assertions genuinely run
 in postgres mode (they are not silently skipped, as some shim tests are), and they fail
 exactly when the guard is absent. Restoring it makes them pass again.
 
 The suite asserts the surviving **target**, not a row count, so "the user's value
-stands" cannot be confused with "both values are current" — which is the other way this
+stands" cannot be confused with "both values are current": which is the other way this
 could have been wrong, since an outranked write must be *dropped* rather than inserted
 alongside.
 
@@ -80,7 +79,7 @@ The last row is the fix: the same credential, the same request body asking for `
 refused because the peer is not local. The Class-B control succeeding in that same run
 is what makes the 0 meaningful.
 
-The TCP row is a pre-existing defence (write-tier grants), not this change — worth
+The TCP row is a pre-existing defence (write-tier grants), not this change, worth
 recording because it means an agent on the network never reaches the retraction path at
 all; the fix matters for the paths that *do* get through.
 ### `get_context_block` no longer speaks as the user
@@ -113,7 +112,7 @@ outranking the user's own.
 
 The last line is the column default, now `agent_message`. The `SET DEFAULT` migration
 applies to future inserts only; existing rows keep what they were stored with, which is
-the right behaviour for an upgrade — pre-existing Class-A facts are exactly what gap 2's
+the right behaviour for an upgrade, pre-existing Class-A facts are exactly what gap 2's
 guard is there to protect.
 
 ### memory.delete destroys only for an attested person
@@ -122,13 +121,13 @@ A third instance of the same shape, found while sweeping for the pattern:
 `memory_delete_command` hardcoded `MEMORY_AUTHORITY_USER`, so any caller clearing
 `CAP_MEMORY_ADMIN` hard-destroyed the row and its provenance. The capability is
 the right answer to "may this caller delete" and the wrong one to "is this caller
-the user" — it sits inside `CAPS_AUTHENTICATED`, so a bearer clears it, and the
+the user": it sits inside `CAPS_AUTHENTICATED`, so a bearer clears it, and the
 destroy is irreversible with an audit event carrying only the id.
 
 The authority now comes from the connection's attestation, the same rule
 `facts.retract` and `memory.store` use. A caller that clears the capability but
-is not attested as a person still deletes — it retires the row, which
-`memory.fact_history` can still read — so this narrows the blast radius, not the
+is not attested as a person still deletes. It retires the row, which
+`memory.fact_history` can still read, so this narrows the blast radius, not the
 feature. The response reports which happened as `destroyed`.
 
     UDS, kernel-attested uid:  {"deleted":true,"destroyed":true}   row gone
@@ -140,8 +139,8 @@ gate, and reaching that decision needs a KB-signed identity token this container
 has no tenancy to issue. So on a default deployment this change is defence in
 depth; it becomes load-bearing the moment an operator issues a grant. The retire
 path itself is covered by `test_mcp_memory_gate.c`, which asserts the mapping for
-all six `attested_transport_t` values — including `ATTEST_NONE`, the value a
-missed hop collapses to — with a negative control confirming the test fails when
+all six `attested_transport_t` values, including `ATTEST_NONE`, the value a
+missed hop collapses to, with a negative control confirming the test fails when
 the mapping is broken.
 
 ### Gap 2 through the REAL commit path, and the placement fix that unblocked it
@@ -149,13 +148,13 @@ the mapping is broken.
 `aimee-module-memory` is a required module serving 5889-5894, but its
 `placements` were `["server"]` while the caller
 (`src/kb/kb_module_stage_adapters.c`) runs in kb. aimee-kb called three stages
-nothing served there -- `EXTRACT_INDEX` (extraction + retraction scan), `WRITE`
-(the typed-fact write gate) and `EMBED` -- each failing as TRANSPORT, so all of
+nothing served there, `EXTRACT_INDEX` (extraction + retraction scan), `WRITE`
+(the typed-fact write gate) and `EMBED`, each failing as TRANSPORT, so all of
 them silently did nothing. `memory` is now placed in `["server", "kb"]`.
 
 The module is stateless: its stages are pure decisions plus one outbound HTTP
 call, and "storage, graph, and lifecycle units likewise remain C". So there is no
-sqlite-on-server / postgres-on-kb split to reconcile -- the generated kb grant is
+sqlite-on-server / postgres-on-kb split to reconcile. The generated kb grant is
 byte-identical to the server one and requests nothing. Verified on the container
 rather than on paper: built from `server-go/cmd/aimee-module`, installed with its
 generated grant, attached to kb's bus, after which the scan stopped answering
@@ -169,9 +168,9 @@ attempts, each of which produced a green-looking result that proved nothing:
 - `city` is not FUNCTIONAL, so two values legitimately accumulate and no
   correction ever applies;
 - `has_hostname` is functional, but the extractor turns "my X is Y" into rel_type
-  X verbatim, so that text yields `hostname` -- a different, novel relation, which
+  X verbatim, so that text yields `hostname`, a different, novel relation, which
   §5 forces to Class C whatever the authority;
-- `age` is functional, seed, and extractable -- but produced NO row, because it
+- `age` is functional, seed, and extractable, but produced NO row, because it
   declares tail `NODE_SCALAR` while the extractor classifies a bare number as
   `NODE_OTHER`, so the gate rejected it before the guard was ever consulted.
 
@@ -194,7 +193,7 @@ With `age` finally reachable, gap 2 on the real path:
 The control is what makes this evidence: it commits through the same gate on the
 same drain, so "41 is absent" is the guard dropping an outranked write rather
 than nothing having happened. The last line closes the provenance loop in the
-READ direction -- the drain took USER authority from the row's recorded
+READ direction, the drain took USER authority from the row's recorded
 provenance, not from the hardcoded constant it used before.
 
 ## What this did not cover
@@ -223,7 +222,7 @@ because each produced a plausible-looking failure:
   appends `/v1` itself and `provider_client` then appends `/chat/completions`, so
   a value ending in `/v1/chat/completions` becomes
   `.../v1/chat/completions/v1/chat/completions` and every call fails as
-  `provider HTTP -1` -- a transport error that reads like the endpoint is down.
+  `provider HTTP -1`. A transport error that reads like the endpoint is down.
 - `start-kb.sh` had no `pkill`, the same trap as `start-server.sh`, so a changed
   endpoint appeared to be ignored while the ORIGINAL kb kept running with the old
   environment. Both scripts restart properly now.
@@ -235,7 +234,7 @@ show the entire authority model in one table:
     user | email     | ctl@example.com | B   pattern extractor, agent_message note
     user | has_email | ctl@example.com | C   REAL LLM extraction, novel rel_type
     user | city      | Berlin          | A   the user's, still current
-    user | city      | Paris           | B   model's, alongside -- city is not functional
+    user | city      | Paris           | B   model's, alongside, city is not functional
 
 The third row is the LLM's own extraction, which chose a relation the seed does
 not define; §5 forces a novel rel_type to Class C whatever the authority, so it
@@ -251,7 +250,7 @@ real defect, not just configuration.
 
 `aimee_ir_apply_request_stages()` inserts the persona onto the first user message
 BEFORE running the stage list, and `ir_stage_memory` then took its query from
-`aimee_ir_last_user_text()` -- the whole message, persona included, up to 16384
+`aimee_ir_last_user_text()`, the whole message, persona included, up to 16384
 bytes. So on any turn delivering a persona, which is the opening turn of every
 session, the "query" put to recall was thousands of characters of persona with
 the real question buried at the end.
@@ -260,7 +259,7 @@ Measured on the box: the same question recalls **1 row** asked plainly and
 **0 rows** asked the way the stage asked it (5773 chars). Recall returned empty,
 the block assembled empty, and `ingress_preinject_build` returned NULL before it
 ever reached the confidence call. Memory pre-injection was silently dead on the
-first turn of every session -- with no error logged anywhere, because "recall
+first turn of every session, with no error logged anywhere, because "recall
 found nothing" is not an error.
 
 The caller now captures the user's query before the persona is prepended and
@@ -299,12 +298,12 @@ the preview and facts layers.
 
 The mirror of the placement gap, found by asking who actually calls each stage.
 
-`RETRIEVE` is the §7 PII recall gate, and its only callers -- `fact_recall`,
-`fact_ingest`, `rel_types_store` -- are db2 code that runs in the **kb**. But the
+`RETRIEVE` is the §7 PII recall gate, and its only callers, `fact_recall`,
+`fact_ingest`, `rel_types_store`, are db2 code that runs in the **kb**. But the
 kb registered no provider for it, so `memory_pii_turn_requests_sensitive()` and
 the sensitivity batch silently fell back to the hardcoded cue list in
 `pii_classifier_primitives.c`. Meanwhile aimee-**server** registered the
-module-backed providers and calls `RETRIEVE` -- but nothing in the server invokes
+module-backed providers and calls `RETRIEVE`, but nothing in the server invokes
 the gate. The capability was wired on one side and consumed on the other, so the
 module never decided anything.
 
@@ -332,13 +331,13 @@ locally. It is not.
   confidence tier). All four are now exercised: EXTRACT_INDEX and WRITE are the
   same code paths proven on the kb side, RETRIEVE by the PII cycling above, and
   RERANK by the envelope cycling under "the persona was the query". EMBED (5891)
-  is NOT exercised -- it needs an embedder, and none is configured here.
+  is NOT exercised. It needs an embedder, and none is configured here.
 
   An attempt to call them directly over the bus was abandoned. It needs a second
   principal granted `request=` for those events, and the grant written for it was
-  refused -- which does not merely skip that module: the whole module endpoint
+  refused, which does not merely skip that module: the whole module endpoint
   fails and the daemon exits ("obs_bus: module endpoint failed", then "server:
-  shut down"). One malformed file in `modules.d` takes the daemon with it, which
+  shut down"); one malformed file in `modules.d` takes the daemon with it, which
   is worth knowing independently of this work. The grants were removed and both
   daemons restored, with the full e2e suite re-run afterwards to confirm the
   restore rather than assume it.
@@ -365,7 +364,7 @@ specific thing an exploratory pass exists to catch.
 
 `status` said `DB2 schema not ready` / `store: unavailable` while memory
 store, list and search demonstrably worked against that same database. A false
-negative, and an expensive one -- it points an operator at the database when the
+negative, and an expensive one. It points an operator at the database when the
 database is fine.
 
 The cause is the `postgres` module. Its manifest places it in kb
@@ -377,7 +376,7 @@ and two things had to be right:
 - the grant must exist **before** the kb starts, or the attach is denied;
 - the module is a separate process with its own environment, so it needs its own
   `AIMEE_DB2_URL`. Without it the probe answers `AIMEE_DB2_URL is unset` and the
-  kb reports the same "schema not ready" -- the deployment fault and the database
+  kb reports the same "schema not ready". The deployment fault and the database
   fault are indistinguishable from the operator's side.
 
 With the module up, `store: ok`.
@@ -393,7 +392,7 @@ construction rather than empty by circumstance.
 It is not a hazard to the authority work and not on this charter's path: the only
 consumer (`cmd_memory_vector.c`) omits an informational `schema_rules` array when
 the list is empty, and nothing enforces anything from it. The kind constraints
-that *are* enforced -- including the kind fixup added on the pattern path -- come
+that *are* enforced (including the kind fixup added on the pattern path) come
 from the compiled `rel_types_seed_lookup` table, which is populated. Recorded
 because a reader of that surface would reasonably conclude the graph has no
 relation schema at all.
@@ -401,7 +400,7 @@ relation schema at all.
 ### `memory.entity_profile` cannot see the typed-fact graph
 
 `entity_profile` 404s for `user` and `Dana` while returning a card for
-`deployment runbook` -- even though `user` and `Dana` are both sources of live
+`deployment runbook`, even though `user` and `Dana` are both sources of live
 `entity_edges` rows and `deployment runbook` has `relation_count: 0`.
 
 `db2_memory_entity_profile_stats` (`memory_relations.c`) counts mentions from
@@ -431,7 +430,7 @@ the print-table entry (`cli_v1_routes_d.c:51`), and the KB endpoints
 (`kb_http_grants.c`: `POST /v1/write-tier-grants/set`, `/revoke`, `GET
 /v1/write-tier-grants`). What is missing is the connection: there are no
 `{"kb", "grant ...", "kb.grant.*"}` rows in `cli_dispatch_defs_data.h`, and
-**no handler anywhere resolves the method `kb.grant.set`** -- the KB exposes the
+**no handler anywhere resolves the method `kb.grant.set`**, the KB exposes the
 capability under REST paths that nothing maps those methods onto.
 
 So an operator who hits the 403 is sent to a command that cannot dispatch. Not
@@ -441,14 +440,14 @@ the defect repair this charter covers.
 
 ## What the transport test does and does not prove
 
-`test-transport-authority.sh` sends the *same* retraction body -- including
-`"authority":"user"` -- over both transports:
+`test-transport-authority.sh` sends the *same* retraction body, including
+`"authority":"user"`, over both transports:
 
     TCP  127.0.0.1:8740   ATTEST_TCP_BEARER     not a person -> MODEL
     UDS  aimee-http.sock  ATTEST_UDS_PEERCRED   a person     -> USER
 
 Result: TCP retracted nothing, UDS retracted the Class A fact. The security
-property holds end to end -- **a network caller cannot retract a Class A fact by
+property holds end to end. **A network caller cannot retract a Class A fact by
 asserting authority in the body, and a real person can.**
 
 The reason it holds is worth stating precisely, because two earlier versions of
@@ -456,7 +455,7 @@ this test passed for reasons that proved nothing:
 
 1. with no bearer, TCP was refused at the **authentication** wall;
 2. with a bearer, TCP was refused at the **write-tier capability** wall
-   (`server_http.c:1673`) -- over the network a bearer is read/query only.
+   (`server_http.c:1673`), over the network a bearer is read/query only.
 
 Neither reached `server_attested_memory_authority`. The third wall, the
 derivation itself, is therefore *not* what stops the TCP caller here; it is
@@ -486,7 +485,7 @@ Config became a process module. Both daemons now refuse to run without it:
 both buses and starts an instance on each. The ordering is awkward enough to
 deserve its own script: the grant must exist **before** the daemon starts (a
 daemon reads `modules.d` once), and the module can only attach **after**, once
-the daemon has created the bus socket -- so the start scripts launch it in the
+the daemon has created the bus socket, so the start scripts launch it in the
 background while their daemon is still coming up.
 
 ### A migration that its own trigger refuses
@@ -506,13 +505,13 @@ and because the apply is one transaction the **entire schema rolls back**:
 
 aimee-kb never becomes ready. The server's knowledge calls then fail
 (`TCP connect failed: 127.0.0.1:8741`) and every memory write answers
-`failed to store memory` -- three layers away from the cause.
+`failed to store memory`, three layers away from the cause.
 
 It is invisible on an empty database, because the UPDATE touches no rows. It
 fires on any database that already holds semantic facts: every real deployment,
 every upgrade. CI against a fresh template will not catch it.
 
-The UPDATE also looks redundant -- the `ALTER TABLE ... ADD COLUMN IF NOT EXISTS
+The UPDATE also looks redundant, the `ALTER TABLE ... ADD COLUMN IF NOT EXISTS
 epistemic_kind TEXT NOT NULL DEFAULT 'world_fact'` immediately above it already
 gives every existing row that value. (The sibling UPDATE on `memories` is not
 redundant; it also computes `expiry_days_migration_override`.) So dropping the
@@ -525,7 +524,7 @@ it does not fix it.
 
 Retraction now sets `lifecycle_state='invalidated'` and `invalidated_at`. Only a
 supersession sets `superseded_at`. Every test here judged "current vs gone" by
-`superseded_at='' AND suppressed=0`, which is true of an invalidated row -- so a
+`superseded_at='' AND suppressed=0`, which is true of an invalidated row, so a
 **successful** retraction read as a blocked one, and `seed-facts.sh` reported
 rows as freshly seeded when they were the previous run's invalidated ones.
 
@@ -536,7 +535,7 @@ redirected to `/dev/null`:
 
 - `entity_edges` carries more than one write guard --
   `entity_edges_semantic_guard` and `semantic_evidence_event_guard` ("semantic
-  assertion mutation committed without its evidence event"). Both refuse a raw
+  assertion mutation committed without its evidence event"); both refuse a raw
   INSERT or DELETE of a semantic edge. Suspending one leaves the other, so the
   seed now suspends every user trigger on the table and restores them
   immediately. That is the right call here specifically: the premise of the test
@@ -557,13 +556,13 @@ memory module on both buses and the postgres and config modules attached:
 
 | probe | result |
 |---|---|
-| `test-retract` (kb, loopback owner bearer = a person) | PASS -- retracts Class A, control retracts too |
-| `test-server-retract` (agent over TCP) | PASS -- refused; UDS person retracts both |
-| `test-transport-authority` (same body, both transports) | PASS -- TCP 1->1, UDS 1->0 |
-| `test-drain-supersede` (gap 2) | PASS -- Class A `age=30` survives and stands ALONE; positive control commits a Class B fact, so the drain demonstrably ran |
-| `test-provenance` | PASS -- `user_stated` vs `agent_message` vs column default |
-| `test-memory-delete` | PASS -- TCP refused above the authority decision, UDS person destroys |
-| `test-context-block` | **FAILS LOUDLY** -- see below |
+| `test-retract` (kb, loopback owner bearer = a person) | PASS: retracts Class A, control retracts too |
+| `test-server-retract` (agent over TCP) | PASS: refused; UDS person retracts both |
+| `test-transport-authority` (same body, both transports) | PASS: TCP 1->1, UDS 1->0 |
+| `test-drain-supersede` (gap 2) | PASS: Class A `age=30` survives and stands ALONE; positive control commits a Class B fact, so the drain demonstrably ran |
+| `test-provenance` | PASS: `user_stated` vs `agent_message` vs column default |
+| `test-memory-delete` | PASS: TCP refused above the authority decision, UDS person destroys |
+| `test-context-block` | **FAILS LOUDLY**: see below |
 
 `test-retract` was also relabelled. It called the loopback-owner-bearer leg "the
 attack" and expected refusal, which became wrong once the policy settled that an
@@ -582,7 +581,7 @@ It passed. It was passing for the wrong reason:
 module's EXTRACT_INDEX stage. When that stage does not answer it returns without
 reaching the authority decision at all, so both facts survive no matter what the
 authority rules say. The test now counts those warnings across the run and fails
-if any appeared -- and it does fail, which is the honest result.
+if any appeared, and it does fail, which is the honest result.
 
 The same stage backs pattern extraction, which reports the same thing:
 
@@ -607,7 +606,7 @@ Once obs_bus started naming its own failures (see below), one line settled it:
 Not a protocol mismatch. The kb-side memory module was not on the bus at all.
 The cause was ordinary and mundane: `test-p6-migration.sh` restarts aimee-kb to
 apply the schema, every module attached to that bus dies with it, and nothing
-brought them back -- so the rest of the run executed with memory and postgres
+brought them back, so the rest of the run executed with memory and postgres
 detached. `run-suite.sh` now re-attaches after any daemon restart and counts
 `capability_absent` across the run, because a probe whose stage never ran still
 prints PASS.
@@ -631,7 +630,7 @@ Authentication happens **once, at message receipt**. The channel (mTLS), the
 session (bearer) and the account (OIDC or PAM) are each verified there, and a
 request that fails any of them never reaches a handler. By the time a surface
 asks who the caller is, identity is already proven. Re-deriving it per surface
-spends work to re-learn something already established -- and, worse, arrived at a
+spends work to re-learn something already established, and, worse, arrived at a
 different answer.
 
 What the transport table got wrong:
@@ -645,7 +644,7 @@ What the transport table got wrong:
   caller could be a person to one daemon and an agent to the other.
 - `vault_capability.c:255` had it right the whole time, placing a verified client
   cert with UDS/webchat precisely because holding `cert:<CN>` "makes the grant
-  expressible per client, which a bearer -- carrying no principal at all --
+  expressible per client, which a bearer, carrying no principal at all --
   cannot be."
 
 `server_attested_is_person(transport)` is now
@@ -654,8 +653,8 @@ place every surface below ingress asks who the caller is. It reads the account
 ingress already carried on the request: a thread-local read, no verification
 repeated. `facts_retract_command` and `memory_delete_command` take the account
 rather than the transport enum. On the kb, `kb_memory_request_authority` accepts
-any authenticated principal -- OIDC, PAM host account, verified cert, or the
-single-org owner -- where `KB_PRIN_CERT` had been excluded for the same reason
+any authenticated principal, OIDC, PAM host account, verified cert, or the
+single-org owner, where `KB_PRIN_CERT` had been excluded for the same reason
 `ATTEST_MTLS_CLIENT` was.
 
 The account is verify-then-trust at every entry: a kernel-verified UDS peer uid
@@ -673,8 +672,8 @@ different contract from who the caller is.
 
 The kb's owner case previously required loopback. That qualifier was the same
 transport reasoning and is gone. A bearer reaching the kb over the network still
-has to pass the write-tier capability gate before it can write at all -- as every
-run above shows, that gate refuses first -- so this does not open the destructive
+has to pass the write-tier capability gate before it can write at all, as every
+run above shows, that gate refuses first, so this does not open the destructive
 path. It is still a widening, and it is called out rather than buried.
 
 ### What is proven live, and what is not
@@ -693,7 +692,7 @@ IdP, so no request has actually arrived here bearing `cert:<CN>` or
 using a PAM host account on one side and a bare bearer on the other. The claim
 that a cert or OIDC caller is now treated as that account rests on
 `server_account_is_person` being account-keyed plus the unit matrix over all
-four account forms -- which is a much smaller inferential step than the transport
+four account forms, which is a much smaller inferential step than the transport
 table required, but it is not the same as having run one.
 
 ## mTLS and OIDC, proven live
@@ -731,7 +730,7 @@ component:
   the chain against `mtls_client_ca`, then the serial against the durable roster
   (`pki_cert_check` then `db1_pki_cert_check`). An openssl-made cert clears the
   first and fails the second as "no longer valid (revoked, expired, or
-  unrecognized)" -- which reads like a revocation rather than a cert that was
+  unrecognized)": which reads like a revocation rather than a cert that was
   never aimee's.
 - **The server identity must NOT be hand-made.** An existing `server.crt` is
   authoritative and its key is sealed into the Vault on first load, with the
@@ -784,7 +783,7 @@ now a 400 that says so rather than a 401 that misattributes it.
 
 ### What that leaves
 
-Both account forms the design names -- OIDC and PAM host accounts -- and the
+Both account forms the design names, OIDC and PAM host accounts, and the
 machine identity that accompanies them are now exercised against running
 daemons, not asserted. The one account form still covered by unit assertion
 alone is a **PAM host account presented to aimee-server over TCP**: that path
@@ -838,15 +837,15 @@ pinning an Ed25519 manifest key, then loads a **signed publication envelope**
 from DB1 and validates it against that bundle.
 
 The tree already has the rig for it. `write-tier-enforce-live provision` builds
-the chain with the production functions -- real Ed25519 manifest signing, the
-real envelope encoder, a real DB1 row -- so a change that breaks the real
+the chain with the production functions, real Ed25519 manifest signing, the
+real envelope encoder, a real DB1 row, so a change that breaks the real
 publication path breaks this too. `provision-mgmt-trust.sh` drives it and records
 the three variables the server then needs (`AIMEE_SERVER_ID` as the token
 audience, `AIMEE_SERVER_TEAM_ID`, and the bundle path).
 
 Building that rig first required a Makefile fix. The Makefile already documents
 this failure and lists the auxiliary drivers that need the core archive as an
-order-only prerequisite -- and `write-tier-enforce-live` and `identity-mint-live`
+order-only prerequisite, and `write-tier-enforce-live` and `identity-mint-live`
 were not on the list. So on a clean tree the one driver that can prove a minted
 token reaches a live server could not itself be built.
 
@@ -870,12 +869,12 @@ Two things about how a caller presents one, neither obvious:
   request: `server_http_authorize` wants a credential equal to the configured
   bearer, and `server_http_resolve_write_tier` reads the identity token out of
   `Authorization`. The token alone gets a 401 from the bearer check before the
-  account is ever resolved -- a refusal that proves nothing.
+  account is ever resolved, a refusal that proves nothing.
 - **`aimee.api.mtls` must be `off` for this probe**, and that is a real behaviour
   worth recording rather than a test convenience. `server_http_effective_conn_caps`
   gives a caller presenting no client certificate `CAPS_READ_ONLY` whenever mTLS
-  is in optional mode, whatever its token says -- "optional-mode bearer fallback
-  is deliberately weaker than a client cert". Only with mTLS off does the token's
+  is in optional mode, whatever its token says, "optional-mode bearer fallback
+  is deliberately weaker than a client cert"; only with mTLS off does the token's
   per-user tier reach the route gate. The first run of this test was refused for
   precisely that reason and looked like a broken account path.
 
@@ -909,7 +908,7 @@ Nothing in the authority path is now covered by assertion alone.
 
 The `ALTER TABLE ... ADD COLUMN ... DEFAULT 'world_fact'` immediately above
 already gives every existing row that value, so on the ordinary upgrade path the
-predicate matches zero rows and the statement is a no-op -- the guard never
+predicate matches zero rows and the statement is a no-op, the guard never
 fires and the schema applies. The predicate is kept rather than the statement
 deleted so a database carrying other values is still corrected, and if those rows
 are semantic it is still refused loudly, which is what the guard is for.
@@ -946,8 +945,8 @@ Class-A facts from model-composed text:
 Row 44 is why this passed before: memories queued before the actor table existed
 fall back to MODEL, so the earlier green was partly luck.
 
-Two derivations of one fact -- `provenance_category` from the write's authority,
-the actor row from the request -- could disagree about the same memory. They no
+Two derivations of one fact, `provenance_category` from the write's authority,
+the actor row from the request, could disagree about the same memory. They no
 longer can: the write's own authority now CAPS the captured actor. A caller's
 identity may lower the recorded authority, never raise it above what the note
 claims. A person storing agent-composed text is still storing agent-composed
@@ -959,15 +958,15 @@ superseded the user's value. With the cap the note mints Class B and cannot.
 
 ### Not a defect: my original guard is now dead code
 
-The merge wrapped the old `db2_entity_edge_upsert_semantic` body -- including the
-class-rank guard added for gap 2 -- in `#if 0 /* superseded by fact_mutation;
+The merge wrapped the old `db2_entity_edge_upsert_semantic` body, including the
+class-rank guard added for gap 2, in `#if 0 /* superseded by fact_mutation;
 retained temporarily for blame continuity */`, leaving that function a
 compatibility shim that delegates to `db2_fact_mutation_assert`. The guard is
 therefore unreachable.
 
 That is fine, and the replacement is better. `db2_fact_mutation_assert` runs an
 authority-rank check over the functional-relation priors and, when the incoming
-actor cannot outrank the incumbent, QUARANTINES the write -- inserting it as a
+actor cannot outrank the incumbent, QUARANTINES the write, inserting it as a
 `candidate` rather than dropping it, so the proposal stays on record for review
 instead of vanishing. The original guard simply discarded it.
 
@@ -975,7 +974,7 @@ instead of vanishing. The original guard simply discarded it.
 
 `show()` judged currency by `superseded_at`/`invalidated_at`/`suppressed`, none
 of which a quarantined row sets. A `candidate` therefore read as a live fact
-sitting beside the user's value -- reporting a breach of gap 2 that had not
+sitting beside the user's value, reporting a breach of gap 2 that had not
 happened. Currency is `lifecycle_state IN ('persistent','promoted')`, the
 product's own definition in `db2_fact_current_count`, and the test now prints the
 lifecycle rather than collapsing it. It also asserts and exits non-zero instead
@@ -994,7 +993,7 @@ Asserting absence would fail on correct behaviour.
 - `test-oidc-authority.sh` now mints its own tokens. kb applies a hard token-age
   ceiling on `iat` (`AIMEE_KB_OIDC_MAX_TOKEN_AGE`, default 900s) independently of
   `exp`, so a token minted at setup was refused once the run happened more than
-  fifteen minutes later -- with the same `unauthorized` a forged token gets, so
+  fifteen minutes later, with the same `unauthorized` a forged token gets, so
   the suite read as a broken account path when nothing was broken.
 - The Authorization-truncation defect was swept for other instances, as a
   pattern rather than a single site. Every other Authorization buffer in the tree
@@ -1043,7 +1042,7 @@ on a kb running Postgres. The log named the real code:
 
     WARN kb.grants: tenant scope refused for team 7 (rc=-104)
 
-`DB2_ERR_TENANT_DENIED` -- "team not in principal memberships". An ordinary
+`DB2_ERR_TENANT_DENIED`, "team not in principal memberships". An ordinary
 authorization refusal, reported as a deployment fault.
 
 `map_db_failure` mapped `rc < -1` to "requires the postgres backend", which
@@ -1123,7 +1122,7 @@ Both were recorded earlier as data-model judgement calls. They turned out to be
 different from each other: one was a defect with a small correct fix, the other
 is genuinely a decision, and the attempt to treat it as a defect was wrong.
 
-### `memory.entity_profile` could not see typed facts — fixed
+### `memory.entity_profile` could not see typed facts: fixed
 
 `db2_memory_entity_profile_stats` counted relations from `memory_relations`
 only. The typed-fact layer writes `entity_edges`. Because the "found" test is
@@ -1147,7 +1146,7 @@ The probe deliberately picks an entity with typed-fact edges and NO mentions,
 because an entity with mentions would have been found either way and would prove
 nothing.
 
-### `relations.schema_list` is empty for a reason — and my fix was wrong
+### `relations.schema_list` is empty for a reason: and my fix was wrong
 
 I tried to make this surface truthful by serving the compiled seed ontology when
 `memory_relation_schema` is empty, on the reasoning that the seed is what the
@@ -1158,7 +1157,7 @@ CODE-GRAPH ontology (`depends_on`, `implements`, `fixes`, `calls`, `tests`,
 `authored_by`). The typed-fact seed is a different vocabulary entirely
 (`works_for`, `has_email`, `lives_in`). Feeding seed relations through that
 struct mapped every one of them through `memory_ontology_relation_from_text`,
-which returns `REL_OTHER` (99) for a name it does not know — so the surface
+which returns `REL_OTHER` (99) for a name it does not know, so the surface
 reported seventeen rows all saying "other".
 
 That is worse than empty, because it looks like an answer. Reverted.
@@ -1224,7 +1223,7 @@ carries a loopback control, so neither outcome can be read off an empty table.
 The qualifier is back for `KB_PRIN_OWNER` alone, and the reason is a distinction
 the account model makes rather than an exception to it. An account NAMES someone:
 
-    OIDC   an issuer-scoped subject -- the same person over any socket
+    OIDC   an issuer-scoped subject, the same person over any socket
     HOST   a local host account PAM accepted
     CERT   a verified peer, naming one enrolled machine
     OWNER  a SHARED install credential, naming nobody in particular
@@ -1301,13 +1300,13 @@ Two things learned that are worth keeping:
 - The two endpoints take DIFFERENT body shapes. `/embed_batch` takes a JSON array
   of strings; `/embed` takes **the raw text**, not JSON
   (`memory_core_scope_embed.c`: "the polarity rides in the query string because
-  the body is the raw text itself"). A stub that assumes JSON on both answers 400
+  the body is the raw text itself"); A stub that assumes JSON on both answers 400
   to every single-text call.
 - Those 400s then trip the embedding circuit breaker, which keeps refusing for a
   while: `WARN memory: embedding dependency unavailable; retry after 1237 ms`.
   So a later, CORRECT attempt fails for a reason that has nothing to do with it.
   The probe therefore starts the embedder BEFORE the kb, and the first version of
-  it -- which took a baseline with the embedder down -- was tripping the breaker
+  it (which took a baseline with the embedder down) was tripping the breaker
   itself and then measuring the result.
 
 ## Suite
@@ -1317,7 +1316,7 @@ Two things learned that are worth keeping:
 ### EMBED persistence: a correction, and an open observation
 
 The entry above said persistence was "not claimed" because the run "produced no
-rows I could attribute with confidence". That was true by accident. I counted
+rows I could attribute with confidence"; that was true by accident; I counted
 `memory_vectors`, which does not exist; the query errored, the count read as
 zero, and I recorded a limitation on the strength of a typo. The table is
 `PGVEC_MEMORY_TABLE` in `pgvec_transport.h`, i.e. `memory_embeddings`.
@@ -1337,8 +1336,8 @@ But a NEW store does not add one. Measured at 5, 10, 15, 20, 30 and 40 seconds
 after storing a memory, the count did not move, while the endpoint took 15
 successful embed calls in the same window and `vector_index_ops` sat at the same
 16. The existing rows look like the product of a bulk path that ran when the
-embedder first became available -- `db2_init` records the serving identity and
-dim at that point -- rather than of the store.
+embedder first became available, `db2_init` records the serving identity and
+dim at that point, rather than of the store.
 
 This is left as an observation, not a verdict. It may be correct: a queue this
 probe does not wait long enough for, or a sync deliberately kept off the store
@@ -1376,8 +1375,8 @@ exist; `parse_grant_file` resolves `executable` with `realpath()`, an
 unresolvable path makes the grant invalid, and ONE invalid grant fails the whole
 module endpoint. The kb refused to start.
 
-This is the failure mode documented much earlier in this record -- "one bad file
-in modules.d takes the daemon with it" -- reached for real, from the one
+This is the failure mode documented much earlier in this record, "one bad file
+in modules.d takes the daemon with it": reached for real, from the one
 direction that had never been tried. The binary is now ensured before the grant
 names it, in both the install script and at deploy-time unpack.
 
@@ -1394,7 +1393,7 @@ A list maintained by hand is a list that will be wrong, and its being wrong is
 invisible until someone starts from nothing. It now copies whatever is staged.
 
 `write-tier-enforce-live` was likewise never shipped, so the account-over-TCP
-probe failed with "not installed" -- a deployment gap reporting as a test
+probe failed with "not installed", a deployment gap reporting as a test
 failure.
 
 ### The detector counted its own warm-up
@@ -1422,7 +1421,7 @@ stages missing *while probes run*.
 
 `prepare-suite.sh` now collects the steps a bare deployment does not provide --
 API bearer, management trust chain, mTLS identity, first-user enrollment, OIDC
-issuer, chat provider, capture proxy, seeded facts -- and makes their ORDER
+issuer, chat provider, capture proxy, seeded facts, and makes their ORDER
 explicit, since several depend on each other and on a restart in between.
 
 ### One hypothesis disproved
@@ -1435,16 +1434,16 @@ unstaged, now for a reason that has been tested rather than assumed.
 
 ## Final round: the last read surface, and three probes that lied
 
-### `relations.schema_list` — settled, and not by populating the table
+### `relations.schema_list`: settled, and not by populating the table
 
 This was the one item left standing as "a data-model decision, recorded rather
-than guessed at". It is now decided, and the answer was neither of the two
+than guessed at"; it is now decided, and the answer was neither of the two
 obvious ones.
 
 `memory_relation_schema` has a `CREATE TABLE`, an index, and **no writer
 anywhere in the tree**. Nothing inserts a row. Meanwhile
-`memory_ontology_validate()` — the function that actually decides whether a
-triple is allowed — never reads that table. It enforces a static C table in
+`memory_ontology_validate()`, the function that actually decides whether a
+triple is allowed, never reads that table. It enforces a static C table in
 `memory_episodes.c`.
 
 So the surface was served from one place and enforced from another, and the
@@ -1457,7 +1456,7 @@ Two fixes were considered and both are wrong:
 
 1. **Serve the typed-fact seed through it.** Tried earlier and reverted.
    `memory_relation_schema` is keyed by `memory_relation_kind_t`, the code-graph
-   ontology (`depends_on`, `implements`, `fixes`, `calls`, `tests`) — a
+   ontology (`depends_on`, `implements`, `fixes`, `calls`, `tests`), a
    different vocabulary from the typed-fact seed (`works_for`, `has_email`,
    `lives_in`). Every seed relation mapped to `REL_OTHER(99)`, producing
    seventeen rows all saying "other": worse than empty, because it looks like an
@@ -1481,13 +1480,13 @@ asserting against it.
 
 A unit test in `test_db2_node_kind_text_support.c` now ties the published set to
 the enforced one: every advertised triple must pass `memory_ontology_validate()`,
-the sentinel must not be published, and the list must be non-empty — an empty
+the sentinel must not be published, and the list must be non-empty, an empty
 list being the exact symptom of the defect.
 
 The CLI cannot reach this surface (`aimee memory ontology list` is not in the
 `/v1` route map, and the thin client only addresses `/v1` routes). That is
 existing, lint-enforced design rather than a regression, and the surface is
-reachable by the path the product itself uses — the kb action endpoint.
+reachable by the path the product itself uses, the kb action endpoint.
 
 ### Three probes that reported failures the product did not have
 
@@ -1498,13 +1497,13 @@ in this branch, so each fix names it.
 **1. `test-embed-persist.sh` stored a fixed key.** It stored
 `persist-probe-up` with fixed content, which works exactly once. On the second
 run the key and text already exist, the store is a no-op, no memory row appears,
-so no embedding rows appear — and the probe reported "nothing persisted with the
+so no embedding rows appear, and the probe reported "nothing persisted with the
 embedder reachable" on a system where embedding was working perfectly.
 
 This false failure was expensive because the kb log was full of `embedding HTTP
 request failed` lines that looked like corroboration. They were the probe's own
 leg-2 control, which kills the embedder on purpose. A direct `curl` to the stub
-then returned an empty body — taken after leg 2 had already killed it, so that
+then returned an empty body, taken after leg 2 had already killed it, so that
 measurement was of a closed port, not a bad reply.
 
 The key is now unique per run. Re-measured: 60 → 82 rows (+22: one `memory` row
@@ -1518,7 +1517,7 @@ distinguish "wrong reply" from "nothing listening" cannot diagnose anything, and
 both were reached inside one run.
 
 **2. `enroll-first-user.sh` read success as failure.** The enrollment bearer is
-returned only *until the identity is paired* — after that the standing grant
+returned only *until the identity is paired*, after that the standing grant
 lives on the mTLS certificate, so there is nothing to hand back. A container
 that has enrolled once answers `{"state":"paired","tier":"full"}` with no
 bearer, and the script called that "no enrollment bearer in the response",
@@ -1533,7 +1532,7 @@ mTLS precondition.
 
 **3. `run-suite.sh` discarded the seed's exit status.** `seed()` was
 `bash seed-facts.sh >/dev/null 2>&1`. `seed-facts.sh` already asserts that two
-live rows landed — the runner just was not listening. When a seed failed, the
+live rows landed. The runner just was not listening. When a seed failed, the
 next probe found nothing to retract and reported *its own* assertion failing,
 pointing at the authority code rather than the setup. That produced one
 unexplained intermittent failure of "same body, both transports" before being
@@ -1572,7 +1571,7 @@ so it was searched for rather than assumed unique.
 Method: every `CREATE TABLE` in `schema.sql`, cross-referenced against writers
 (`INSERT INTO` / `UPDATE` / `COPY` / `DELETE FROM` in C, Go and SQL, including
 the SECURITY DEFINER functions inside `schema.sql` itself) and readers
-(`SELECT ... FROM`). `src/schema_data.h` has to be excluded from both sides — it
+(`SELECT ..; FROM`). `src/schema_data.h` has to be excluded from both sides, it
 embeds the entire schema as one C string literal, so it matches every table name
 and turns the whole scan into false positives.
 
@@ -1586,7 +1585,7 @@ Two have real production readers, and **neither is the same defect**, for a
 reason worth stating rather than waving at:
 
 **`memory_scenes` / `memory_scene_members`** back `aimee memory scene list|show`
-and a retrieval boost in `memory_core_search_b.c`. Nothing writes them — and the
+and a retrieval boost in `memory_core_search_b.c`. Nothing writes them, and the
 reason is explicit: `memory_cluster_scenes()` and `memory_assign_scene()` in
 `memory_episodes.c` are stubs that `return 0`. The whole feature is gated behind
 `config_memory_scenes_enabled()`, which reads a config key that is absent by
@@ -1595,13 +1594,13 @@ switched off**, whose read surface is correspondingly and correctly empty.
 
 **`stopwords`** is read by `memory_core_search.c` to filter search terms. With
 zero rows the filter passes every term through. The column comment calls these
-"promoted" stopwords — learned data an optional process would populate. Absent
+"promoted" stopwords, learned data an optional process would populate. Absent
 data here degrades the ranking; it does not produce a wrong answer, and no
 surface anywhere claims stopwords are in effect.
 
 What made `relations.schema_list` a defect was not that its table was empty. It
-was that **the system enforced a rule set and published a different, empty one**
-— the surface contradicted the behaviour. Neither of these two contradicts
+was that **the system enforced a rule set and published a different, empty one**,
+the surface contradicted the behaviour. Neither of these two contradicts
 anything: one is a feature that does not run, the other is optional data whose
 absence is honest. Fixing them would mean implementing scene clustering and a
 stopword-promotion process, which are features, not repairs.
@@ -1620,7 +1619,7 @@ and then found something worse than the failure.
 ### The earlier diagnosis was wrong
 
 I had previously seen this probe fail once, attributed it to a failed seed, and
-added a seed-failure detector. This time the detector did not fire — so the seed
+added a seed-failure detector. This time the detector did not fire, so the seed
 was fine and that explanation had been wrong. It was a guess that fitted the one
 data point I had.
 
@@ -1646,15 +1645,15 @@ Fixing the ordering exposed the real problem. "It did not retract" is only
 evidence about authority if the request actually REACHED the authority
 derivation, and over TCP there are two walls in front of it:
 
-- **mTLS** — in `optional`/`required` mode a caller with no client certificate is
+- **mTLS**: in `optional`/`required` mode a caller with no client certificate is
   capped by `server_http_effective_conn_caps` before the route gate.
-- **write-tier** — with mTLS off, the per-subject tier reaches the gate. A plain
+- **write-tier**: with mTLS off, the per-subject tier reaches the gate. A plain
   API bearer carries **no subject**, so it can never hold a write-tier grant, and
   the gate refuses it permanently.
 
 The second is structural: this leg **cannot** reach the authority decision with a
 plain bearer. Measured directly, the refusal is `permission_error` naming the
-write-tier grant — the request never got near the authority code. Yet the probe
+write-tier grant, the request never got near the authority code. Yet the probe
 printed:
 
     PASS: TCP caller could not retract by assertion
@@ -1670,7 +1669,7 @@ The probe now classifies WHICH wall stopped it and reports accordingly:
           shows defence in depth and NOT that authority is derived from the
           connection.
 
-### Gap 1 over TCP is still proven — by the probe that clears the walls
+### Gap 1 over TCP is still proven: by the probe that clears the walls
 
 The claim is not lost, it just belongs somewhere else.
 `test-account-tcp-authority.sh` presents a KB-issued identity token whose subject
@@ -1694,13 +1693,13 @@ The sweep also turned up a line that had not appeared before:
     ERROR coord_dispatcher: failed to persist boot claim owner; dispatcher not started
 
 `server_coord_dispatcher_init()` is called once from `server.c`, calls
-`db1_runtime_state_set()`, and has **no retry** — so when it fails the dispatcher
+`db1_runtime_state_set()`, and has **no retry**, so when it fails the dispatcher
 is down for the whole process lifetime behind that single line.
 
 Tested rather than assumed (`test-coord-dispatcher-boot.sh`): restarting with the
 modules already attached starts the dispatcher every time. It is a race in MY
-bring-up — `imms.sh` attaches modules after `start-server.sh`, so the server can
-initialise before the db1 module is on the bus — and not a product defect. But a
+bring-up, `imms.sh` attaches modules after `start-server.sh`, so the server can
+initialise before the db1 module is on the bus, and not a product defect. But a
 suite that runs against a deployment with a subsystem silently down is measuring
 the wrong box, so `run-suite.sh` now detects the line, restarts once with modules
 attached, and fails the run if it persists.
@@ -1765,7 +1764,7 @@ layer down, in `db2_typed_fact_ingress()`:
 
 `db2_fact_actor_from_request()` is tried FIRST, and it returns `FACT_ACTOR_USER`
 for ANY authenticated principal. The declared `authority` was only a fallback for
-when that failed — so whenever a request context existed, the deliberate MODEL was
+when that failed, so whenever a request context existed, the deliberate MODEL was
 overridden. And a request context always exists here: the call is an MCP tool
 invocation inside an authenticated human's turn. The parameter was passed
 correctly and honoured never.
@@ -1779,8 +1778,8 @@ it: under anything but `FACT_AUTHORITY_USER`, the actor is built internally at
 This is the same shape, and the same reasoning, as the already-fixed
 `db2_fact_actor_capture_memory()` sitting a few lines away in `fact_mutation.c`:
 "a note stored at MODEL authority is model-composed text, whoever was
-authenticated when it was stored". That principle had been applied to the
-memory-write path and not to the retraction path — the defect repeating at a
+authenticated when it was stored"; that principle had been applied to the
+memory-write path and not to the retraction path. The defect repeating at a
 sibling call site, which is exactly where this class of bug hides.
 
 Verified after the fix, same measurement:
@@ -1792,7 +1791,7 @@ Verified after the fix, same measurement:
 
 Every other caller of `db2_fact_actor_from_request()` was examined. The
 `ontology_evolution.c` (×3) and `kb_http_console.c` (×5) sites pass
-`require_operator=1` and REFUSE when it fails — they demand an operator rather
+`require_operator=1` and REFUSE when it fails, they demand an operator rather
 than accepting a declared authority, a materially different contract.
 `kb_service_memory.c:63` gates a read-only diagnostic trace and mutates nothing.
 `db2_fact_ingest_text_with_evidence()` uses only the declared authority and never
@@ -1830,7 +1829,7 @@ pass without checking the thing it exists to check.
 
 ## Validation on a genuinely fresh environment (CT 9080)
 
-Both previous containers had accumulated state — 9078 across the whole session,
+Both previous containers had accumulated state, 9078 across the whole session,
 and 9079 which started clean but has since been through dozens of runs, manual
 restarts and hand-applied fixes. Neither is a clean-install proof any more. So
 CT 9080 was created from `pct create` and taken all the way up.
@@ -1841,7 +1840,7 @@ CT 9080 was created from `pct create` and taken all the way up.
 
     enrolled by the real flow: tier=full bound to F050F945FF51D6D3A499FB12A4FC5D95
 
-On 9078 and 9079 this step always answered `state=paired` — they had enrolled
+On 9078 and 9079 this step always answered `state=paired`. They had enrolled
 long ago, so every later run took the already-enrolled shortcut and the full path
 (`/v1/deploy/apply` → enrollment bearer → `/v1/cert/sign` → grant bound to the
 certificate serial) had not actually been exercised since it was written. On a
@@ -1857,21 +1856,21 @@ the gap-1 fix verified directly on it:
 
 `make-mtls-certs.sh` printed a bare `ls: cannot access
 '/root/tls/client-ca.crt'` in the middle of a successful setup. The client CA is
-written by aimee's own PKI when it signs the first client certificate — which
+written by aimee's own PKI when it signs the first client certificate, which
 happens in `enroll-first-user.sh`, a LATER step. On a box that had enrolled
 before, the file was already there and this always printed a reassuring line.
 
 The ordering cannot be reversed: enrollment itself requires
-`config_server_api_mtls() > 0`, so mTLS must be configured — pointing at the
-not-yet-existing path — before the enrollment that creates it. The server
+`config_server_api_mtls() > 0`, so mTLS must be configured, pointing at the
+not-yet-existing path, before the enrollment that creates it. The server
 tolerates the dangling path at startup, which is what makes the sequence work.
 The script now says so instead of printing an error during a healthy run.
 
 ### An open finding: the sqlite shim and real Postgres disagree
 
-`run-pg-tests.sh` exists to catch exactly this class of thing — "a guard that is
+`run-pg-tests.sh` exists to catch exactly this class of thing, "a guard that is
 correct under the shim and wrong under libpq would look green all the way to
-deployment" — and on the fresh box it caught something:
+deployment": and on the fresh box it caught something:
 
     unit-test-fact-lifecycle     PASS
     unit-test-fact-ingest        FAIL
@@ -1888,7 +1887,7 @@ What is established about it:
 
 - **Not caused by this branch.** The pre-change binary, built from `HEAD~1`,
   fails at the identical assertion under Postgres. (My first attempt at this
-  control was wrong — `git checkout` reverts to HEAD, which already contained my
+  control was wrong, `git checkout` reverts to HEAD, which already contained my
   committed change, so the "pristine" build was my own. Rebuilt from `HEAD~1`
   explicitly.)
 - **Not a build artifact.** Reproduced with a clean `OBJDIR`, which rules out the
@@ -1914,7 +1913,7 @@ Chasing it exposed a defect in the code this branch already touches.
 
     (void)db2_fact_mutation_invalidate(&actor, "user", attr, NULL, NULL);
 
-throwing away every outcome the function distinguishes — `-2` for an
+throwing away every outcome the function distinguishes, `-2` for an
 episode/experience that may only be annotated, `-1` for a policy needing operator
 authority or a failed write. The turn then completed normally with the fact still
 standing, so "I forgot it" and "I refused to forget it" were indistinguishable
@@ -1922,8 +1921,7 @@ from outside and left nothing in the log. That is the same silent-failure family
 as the rest of this branch, and it is precisely why the divergence above took so
 long to characterise.
 
-Refusals are legitimate outcomes here — an annotate-only target SHOULD survive —
-so the fix logs rather than fails the turn. What it must not do is stay silent.
+Refusals are legitimate outcomes here (an annotate-only target SHOULD survive) so the fix logs rather than fails the turn. What it must not do is stay silent.
 
 (Note for anyone re-running the instrumentation: `LOG_WARN` produces no output in
 the unit-test binaries. Even the three deliberately-triggered "retraction scan
@@ -1954,7 +1952,7 @@ The instrumentation that settled it:
 
 Two lessons worth keeping. First, the control has to differ in exactly one thing;
 mine differed in two. Second, an earlier attempt at the same control was also
-invalid — I reverted with `git checkout`, which restores HEAD, and HEAD already
+invalid. I reverted with `git checkout`, which restores HEAD, and HEAD already
 contained the change I was trying to remove. The valid control had to come from
 `HEAD~1` explicitly.
 
@@ -1966,7 +1964,7 @@ correction visible rather than quietly editing it.
 
 The C side's `DB2_RUNTIME_CONFIG` is a zero-initialised static, so
 `config_typed_facts_enabled()` reads 0 in any process that never receives a
-config snapshot — which is exactly the unit-test binaries, and why they failed
+config snapshot, which is exactly the unit-test binaries, and why they failed
 when run outside `make unit-tests`. But the external config module ships
 `"typed_facts_enabled": 1` in its `defaults.json`, so a real deployment reads
 ON. That is consistent with the live evidence gathered all through this branch:
@@ -1974,10 +1972,10 @@ retraction demonstrably worked on every container before this change.
 
 So the accurate statement is: the layer was ON by default in production, and the
 gate was a switch an operator could use to turn a correctness feature into a
-silent no-op. That is still worth removing — but it is a smaller claim than the
+silent no-op. That is still worth removing, but it is a smaller claim than the
 one I first made, and the difference matters.
 
-`config.typed_facts_enabled` gated the entire typed-fact layer — §4 retraction,
+`config.typed_facts_enabled` gated the entire typed-fact layer, §4 retraction,
 §6 ingest, §7 recall, class keying. With it off:
 
 - `db2_typed_fact_ingress()` returned 0 at its first line, so a turn asking to
@@ -1990,13 +1988,13 @@ one I first made, and the difference matters.
   transport failure*, so a briefly-unreachable KB silently stopped per-turn fact
   injection.
 
-Every one of those is a silent no-op — the failure mode this whole branch exists
+Every one of those is a silent no-op. The failure mode this whole branch exists
 to remove. A correctness feature that an operator can switch off, with no signal
 anywhere that it is off, is one setting away from not being a feature.
 
 The generated `docs/gen/configuration.md` describes the key as "master gate;
-default off", which disagrees with the module's own `defaults.json` (`1`). That
-description was already wrong before this change, and it is what I read first —
+default off", which disagrees with the module's own `defaults.json` (`1`); that
+description was already wrong before this change, and it is what I read first,
 a reminder that a generated doc is only as true as the metadata behind it.
 
 ### What was done
@@ -2009,7 +2007,7 @@ The flag is retired, not defaulted-on. There is no longer an option to disable:
   guarantee available here.
 - `config_set_typed_facts()` loses its `enabled` parameter entirely.
 - `POST /v1/console/typed_facts/config` **refuses** a request carrying `enabled`
-  with a 400 rather than ignoring it — a caller trying to disable the layer must
+  with a 400 rather than ignoring it. A caller trying to disable the layer must
   be told it did not happen. The two real knobs (auto-promote, threshold) are
   unaffected.
 - `kb_client_typed_facts_enabled()` returns 1 without a round trip, removing both
@@ -2051,7 +2049,7 @@ genuinely outside this repository.
 
 I reported that `config.typed_facts_enabled` "defaulted to off". That is wrong
 for the shipped product: the C struct zero-initialises to 0, but that only
-applies to a process that never receives a config snapshot — the unit-test
+applies to a process that never receives a config snapshot, the unit-test
 binaries. The external config module ships `"typed_facts_enabled": 1`, and the
 live evidence agrees, since retraction demonstrably worked on every container
 before the retirement. The accurate claim is smaller: the layer was on by
@@ -2066,20 +2064,20 @@ Two separate faults, both of which manufacture confident wrong answers:
 `AIMEE_CONFIG_TEST_DEFAULTS` and `AIMEE_CONFIG_TEST_MODULE`; this runner exported
 only the template URL, so every config accessor fell back to the zero-initialised
 struct. That is what produced the false failure I misdiagnosed as a shim/Postgres
-divergence — I ran one binary inside the harness and the other outside it. Fixed,
+divergence. I ran one binary inside the harness and the other outside it. Fixed,
 and when the module or defaults are absent the runner now says so rather than
 running anyway.
 
 **A broken template did not stop the run.** The builder's output went through
 `tail -3` with its exit status ignored. On a container where `db2_test_reset.sql`
 had not been staged, the builder printed "cannot read ..." and then seven tests
-failed against an unmigrated schema — reading exactly like product failures — and
+failed against an unmigrated schema (reading exactly like product failures) and
 one *passed*, which is worse. The run now refuses to start without the reset SQL
 and stops on a failed build.
 
 **Coverage.** It ran two tests and called that "the typed-fact tests".
 `unit-test-typed-facts` was not run at all, nor recall, entity, ontology or
-rel-types-store — precisely the ones whose assertions rest on DB2's SQL. All
+rel-types-store, precisely the ones whose assertions rest on DB2's SQL. All
 eight now run on all three containers, and an unstaged binary is reported
 MISSING rather than skipped.
 
@@ -2090,8 +2088,8 @@ same shape appears twice more on this path, and both matter more now the layer
 actually does work:
 
 - `db2_kb_service_memory_facts_json()` discarded `db2_fact_recall_in_query()`'s
-  return, so a DB failure produced `facts=""` inside a `"status":"ok"` response —
-  indistinguishable from "no facts", on the path `ingress_preinject` calls every
+  return, so a DB failure produced `facts=""` inside a `"status":"ok"` response,
+indistinguishable from "no facts", on the path `ingress_preinject` calls every
   turn. `db2_typed_fact_ingress()` already logged this exact condition, with the
   reasoning written down; the sibling call site was left silent.
 - On `memory.store`, a failed actor capture skipped the extraction enqueue and a
@@ -2111,7 +2109,7 @@ is about that copy.
 
 This is not hypothetical: a probe was corrected, appeared to deploy, and the old
 version kept running and kept failing. Three runs were spent on code that was not
-the code being executed. The file had never reached the host — the `scp` carrying
+the code being executed. The file had never reached the host. The `scp` carrying
 it had its output redirected to `/dev/null`, so a failed transfer looked exactly
 like a successful one. The Proxmox host also cleans `/tmp`, which is where
 everything was being staged.
@@ -2125,16 +2123,16 @@ product was sitting in the tooling used to validate it.
 
 The `typed_facts_enabled` key is owned by the external pure-Go
 `aimee-module-config`, pinned in `server-go/go.mod` with no `replace` directive
-and no sibling checkout — a read-only module-cache entry. Nothing in this
+and no sibling checkout. A read-only module-cache entry. Nothing in this
 repository reads it, and the symbol is deleted so reintroduction fails to
 compile, but retiring the key at source is a change in that module.
 `docs/gen/configuration.md` is generated from its metadata and still describes it
-as "master gate; default off" — a description that disagrees with the module's
+as "master gate; default off", a description that disagrees with the module's
 own `defaults.json` and was wrong before any of this.
 
 ### Final verification
 
-All three containers — 9078, 9079, and CT 9080 built from `pct create` — on the
+All three containers (9078, 9079, and CT 9080 built from `pct create`) on the
 same hash-verified build:
 
     suite                          17 pass / 0 fail / 1 skip   (each)

@@ -54,9 +54,26 @@ COMPONENT_GUIDE_PREFIXES = (
 )
 BANNED = re.compile(
     r"\b(?:revolutionary|game[ -]changing|seamless|powerful|robust|"
-    r"very|extremely|incredibly|massively)\b",
+    r"very|extremely|incredibly|massively|highly|truly|really|"
+    r"significantly|substantially|dramatically|vastly|hugely|enormously|"
+    r"cutting[ -]edge|state[ -]of[ -]the[ -]art|world[ -]class|best[ -]in[ -]class|"
+    r"blazing(?:ly)?|effortless(?:ly)?|unparalleled|industry[ -]leading|"
+    r"next[ -]generation|elegant|utilis[ez]|leverages|leveraged|leveraging)\b",
     re.IGNORECASE,
 )
+# A doubled hyphen between words is an em dash wearing ASCII. Shell option
+# separators keep theirs, so this only fires between two ordinary words.
+ASCII_DASH = re.compile(r"(?<=[A-Za-z0-9,)\'\"]) -- (?=[A-Za-z0-9(\'\"])")
+# A tick, cross, or warning sign in a table cell is carrying a verdict. Write the
+# verdict. Circled numerals and pointer arrows are the same habit.
+MARKS = re.compile("[\u2705\u274c\u2713\u2714\u2717\u2718\u26a0\u2b50\u2757\u25b8\u2460-\u2473]")
+# "That is why" announces a link that position on the page already carries.
+DEMONSTRATIVE = re.compile(
+    r"^\s*(?:[-*+]\s+)?(?:That is why|That is what|That's why|That's what|"
+    r"Which is why|This is the part|In other words)\b")
+# The negation that sets up an assertion, in the two-sentence form.
+NEGATION_FRAME = re.compile(
+    r"\b(?:is|are|was|were)\s+not\s+[^.;:]{1,60}\.\s+(?:It|They|That)\s+(?:is|are)\b")
 INLINE_LINK = re.compile(r"!?(?:\[[^\]]*\])\((<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)")
 REFERENCE_TARGET = re.compile(r"^\s*\[[^\]]+\]:\s*(<[^>]+>|\S+)")
 IMAGE = re.compile(r"!\[([^\]]*)\]\((<[^>]+>|[^\s)]+)(?:\s+[^)]*)?\)")
@@ -128,19 +145,37 @@ def is_maintained(path: Path) -> bool:
 
 
 def visible_lines(text: str):
-    """Yield non-fenced prose with source line numbers."""
+    """Yield non-fenced prose with source line numbers.
+
+    A four-space indented block after a blank line is a Markdown code block, so
+    it is skipped for the same reason a fenced one is.
+    """
     fenced = False
     marker = ""
+    blank_before = True
+    indented = False
     for number, line in enumerate(text.splitlines(), 1):
         stripped = line.lstrip()
         if not fenced and (stripped.startswith("```") or stripped.startswith("~~~")):
             fenced = True
             marker = stripped[:3]
+            blank_before = False
             continue
         if fenced:
             if stripped.startswith(marker):
                 fenced = False
             continue
+        if not stripped:
+            blank_before = True
+            indented = False
+            yield number, line
+            continue
+        if line.startswith("    ") and (blank_before or indented) and not line.lstrip().startswith(("-", "*", "+", "|", ">")):
+            indented = True
+            blank_before = False
+            continue
+        indented = False
+        blank_before = False
         yield number, line
 
 
@@ -175,8 +210,12 @@ def check_voice(errors: list[str], path: Path, number: int, line: str) -> None:
     match = BANNED.search(plain)
     if match:
         add_error(errors, path, number, f"avoid '{match.group(0)}' in maintained prose")
-    if EMOJI.search(plain):
+    if ASCII_DASH.search(plain):
+        add_error(errors, path, number, "doubled hyphen reads as an em dash")
+    if EMOJI.search(plain) or MARKS.search(plain):
         add_error(errors, path, number, "emoji violates the project voice")
+    if DEMONSTRATIVE.match(plain):
+        add_error(errors, path, number, "demonstrative opener; start with the subject")
 
 
 def check_link(errors: list[str], source: Path, line: int, raw: str, images: set[Path]) -> None:
@@ -196,6 +235,19 @@ def check_link(errors: list[str], source: Path, line: int, raw: str, images: set
         images.add(resolved)
 
 
+def check_negation_frame(errors: list[str], path: Path, lines) -> None:
+    """Catch "X is not A. It is B." across the line wrap it usually straddles."""
+    joined, starts = [], []
+    for number, line in lines:
+        starts.append((len(" ".join(joined)) + (1 if joined else 0), number))
+        joined.append(prose(line).strip())
+    text = " ".join(joined)
+    for match in NEGATION_FRAME.finditer(text):
+        number = next((n for offset, n in reversed(starts) if offset <= match.start()), 1)
+        add_error(errors, path, number,
+                  "negation that sets up an assertion; say the thing positively")
+
+
 def check_file(path: Path, errors: list[str], images: set[Path]) -> None:
     try:
         text = path.read_text(encoding="utf-8")
@@ -210,6 +262,7 @@ def check_file(path: Path, errors: list[str], images: set[Path]) -> None:
             add_error(errors, path, h1[0][0] if h1 else 1, f"expected one H1, found {len(h1)}")
         for number, line in lines:
             check_voice(errors, path, number, line)
+        check_negation_frame(errors, path, lines)
 
     if not is_maintained(path):
         return

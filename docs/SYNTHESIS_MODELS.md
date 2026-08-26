@@ -52,9 +52,9 @@ QAT weights, not for this particular requant of them, and the old 0.72 belongs t
 non-QAT build that no longer ships. Quoting either as the shipped figure would be
 inventing a measurement. E4B's 0.81 is unaffected: that image is unchanged.
 
-Be careful reading the Q6/Q4 result as "Q4 is free for E2B". It is not measured to be
-equal. It is measured to be *indistinguishable*, which is a statement about the set as
-much as the model, and `QUANT_DECISION.md` argues the opposite call on a directional
+Be careful reading the Q6/Q4 result as "Q4 is free for E2B". It is measured to be
+*indistinguishable*, which is a weaker claim than equal and is a statement about the set as much as
+the model, and `QUANT_DECISION.md` argues the opposite call on a directional
 prior (pooled P(Q6 > Q4) = 0.946). The full six-arm table, the memory figures, and what
 would resolve the E2B half are in
 [`bench/tier-a/QUANT_DECISION.md`](../bench/tier-a/QUANT_DECISION.md).
@@ -112,8 +112,8 @@ So E4B genuinely beats E2B. But **this set cannot separate E4B from either
 reference model**: both intervals span zero. Earlier drafts of this page read
 those gaps as "E4B is within 0.026 F1 of a 12B", which states a closeness the
 data does not measure. The defensible claim is stronger and simpler: on a
-69-note extraction set, a 7.5B model is not distinguishable from a 12B or a 26B
-one. That is partly a statement about the models and partly about the set:
+69-note extraction set, a 7.5B model is indistinguishable from a 12B or a 26B one. That is partly a
+statement about the models and partly about the set:
 67 gold triples means one triple is worth about 0.01 F1, so a 0.02 gap is two
 facts.
 
@@ -300,7 +300,7 @@ Two further warnings that are not about size:
   | E2B | +0.0812 | [−0.0337, +0.2091] | not resolved |
 
   Both resolved deltas sit close to their interval edge, so read them as "the
-  sign is right", not as a magnitude. E2B's gain is the same size as E4B's and
+  sign is right", not as a magnitude; E2B's gain is the same size as E4B's and
   still fails to resolve, because E2B is noisier on this set. aimee no longer
   suppresses thinking, which the E4B result supports; if you point synthesis at
   a large external model, prefer it with thinking off. These on/off pairs come

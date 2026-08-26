@@ -8,7 +8,7 @@
 > specification for work already delivered. Remaining work is tracked in
 > [`user-selectable-fusion-surface-residual.md`](../pending/user-selectable-fusion-surface-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 ## Thesis
 
@@ -16,10 +16,10 @@ There is no universally-best retrieval fusion mode. `rrf` is a safe rank-blend;
 `static_alpha` fixes a lexical/dense weight; `dynamic_alpha` predicts that weight
 per query (high alpha → boost the lexical leg for identifier/exact-token queries,
 low alpha → favour dense for prose). Which wins is **corpus- and query-mix-
-dependent** — dynamic alpha helps identifier lookups and can hurt purely semantic
+dependent**, dynamic alpha helps identifier lookups and can hurt purely semantic
 questions. The right design is therefore not "pick a default and flip it," but:
 make the mode **user-selectable**, and give the user a **benchmark they run on
-their own data** to see the tradeoff and choose — including choosing per-scope
+their own data** to see the tradeoff and choose, including choosing per-scope
 defaults. The engine for that benchmark now exists (`benchmarks/kb/dynamic-alpha/
 run.py`); this proposal wires it into a product surface.
 
@@ -28,7 +28,7 @@ run.py`); this proposal wires it into a product surface.
 An operator can (1) switch the KB fusion mode among `rrf` / `static_alpha` /
 `dynamic_alpha` from the GUI, (2) run a fusion A/B benchmark against their own KB
 and query set from the same surface, and (3) see a per-shape better/worse split
-that recommends a default — set with one click. No code change to try a mode; no
+that recommends a default. Set with one click. No code change to try a mode; no
 guesswork to pick one.
 
 ## §0 What already exists
@@ -54,7 +54,7 @@ surface.
 Extend the webchat settings model with an `enum` field type (options + current
 value); render it as a `<select>`. Add `kb_fusion_mode` as an allowlisted enum
 (`rrf` / `static_alpha` / `dynamic_alpha`). `config.set` already persists it, and
-the search default already reads it — so selection takes effect on the next query
+the search default already reads it, so selection takes effect on the next query
 with no restart. Expose `kb_fusion_static_alpha` as a companion numeric when
 `static_alpha` is chosen.
 
@@ -62,7 +62,7 @@ with no restart. Expose `kb_fusion_static_alpha` as a companion numeric when
 
 Surface the engine two ways:
 
-- **CLI:** `aimee kb fusion-bench [--fixtures FILE] [--k N]` — routes to the KB,
+- **CLI:** `aimee kb fusion-bench [--fixtures FILE] [--k N]`. Routes to the KB,
   runs the modes, prints the report. `--fixtures` defaults to the charter set but
   accepts the operator's own labelled queries (the format is a small JSON: query +
   `expected_top_path_substring` + `shape`), so it runs on **their** corpus.
@@ -83,7 +83,7 @@ so a code-heavy project can run `dynamic_alpha` while a prose corpus stays `rrf`
 Two honest gates (documented in the benchmark README):
 
 - The benchmark is only meaningful against a KB whose curator/doc-embed drain has
-  fully drained — on a degraded corpus every query misses in every mode
+  fully drained, on a degraded corpus every query misses in every mode
   (inconclusive, not evidence). Gate the GUI panel on a corpus-health check.
 - `/v1/search` ranks `doc_chunk`s; identifier→code fixtures need a code-search
   variant against `/v1/code/*`. Ship the doc benchmark first; add the code variant
@@ -92,5 +92,5 @@ Two honest gates (documented in the benchmark README):
 ## Non-goals
 
 Not changing the fusion algorithms, and not auto-flipping a default without the
-operator's confirmation — the whole point is to put the choice, and the evidence
+operator's confirmation. The whole point is to put the choice, and the evidence
 for it, in the operator's hands.

@@ -4,26 +4,26 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** ✅ **IMPLEMENTED** — all seven packets (P1–P7) merged to `testing`
+- **State:** **IMPLEMENTED**. All seven packets (P1–P7) merged to `testing`
   (2026-06-23). The **live production cutover** (GPU deploy + corpus re-embed) is
-  deliberately **operator-gated** — see
-  [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md).
-  — **rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
+  deliberately **operator-gated**. See
+  `docs/runbooks/unified-llm-cutover.md` (runbook retired with the inference container).,
+**rev 7** · **roundtable SIGNED OFF at rev 6** (round 5: 0
   blocking / 0 high / 0 medium, converged). Arc: r1 10 blocking → r2 7 blocking +
   8 high → r3 1 blocking + 1 high + 2 medium → r5 **0 blocking**. rev 7 closes the
-  two open questions (synth models BENCHMARKED grammar-enforced + judged —
-  Gemma-4-E4B CPU / Gemma-4-12B unified-GPU (Gemma-4-26B-A4B dedicated), Qwen3.6
+  two open questions (synth models BENCHMARKED grammar-enforced + judged.
+Gemma-4-E4B CPU / Gemma-4-12B unified-GPU (Gemma-4-26B-A4B dedicated), Qwen3.6
   dropped on JSON-reliability, dense 31B dominated; decouples + shrinks the
-  reranker to Ettin ModernBERT — 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
+  reranker to Ettin ModernBERT, 400m GPU / 68m CPU, both `-fa on`, Qwen3-Reranker
   dropped from the real-time path; E4B-ungated CPU default). See "Decisions
   taken" and "Changelog".
-- **Implementation update (2026-06-23) — P2 `.254` Vulkan serving validation
+- **Implementation update (2026-06-23). P2 `.254` Vulkan serving validation
   (see [`benchmarks/results/unified-llm/P2-serving-validation.md`](../../../benchmarks/results/unified-llm/P2-serving-validation.md)).**
   Two design refinements from empirical validation on the 7900XTX:
   1. **Reranker is served as ENCODER + a gateway-side Dense head, not native
      `/v1/rerank`.** `cross-encoder/ettin-reranker-{400m,68m}-v1` are
      sentence-transformers models whose score head (`2_Dense`→GELU→`3_LayerNorm`→
-     `4_Dense`→1) does **not** survive `convert_hf_to_gguf.py` — a naive GGUF is
+     `4_Dense`→1) does **not** survive `convert_hf_to_gguf.py`. A naive GGUF is
      encoder-only and misranks. The validated path: llama.cpp serves the ettin
      encoder (`/v1/embeddings --pooling cls` on `query</s>doc`), and the gateway
      applies the ~4 MB Dense head (pure numpy, no torch). Ettin reranks correctly +
@@ -48,13 +48,13 @@
   (`llama.cpp:server` running **Gemma E4B** over OpenAI `/v1`).
 - **Companions:**
   - [curator-llm-backend](curator-llm-backend.md) **(pin: rev as of 2026-06-14
-    READY)** — its **shared LLM-provider client** (§1), **stage→provider routing**
+    READY)**, its **shared LLM-provider client** (§1), **stage→provider routing**
     (§2), **health four-state contract** (§4), and **drain policy** (§4/§5) are
     **reused as the foundation**. This proposal **amends its §3 packaging**: the
     shared client ships as a **library**, and the curator runs as an **isolated
     s6-supervised process inside `aimee-llm`** (§6). A gateway **contract test**
     asserts the imported four-state + typed-error shapes match that pinned version.
-  - [embedder-runtime-fetch-autodim](embedder-runtime-fetch-autodim.md) — its
+  - [embedder-runtime-fetch-autodim](embedder-runtime-fetch-autodim.md), its
     runtime-fetch-once posture, the **auto-dim handshake**, and the
     `schema_embedding_dim` **drift guard** (PR #337) are reused and **extended to a
     `(model_id, dim)` guard for both embedder and reranker** (§2).
@@ -63,14 +63,14 @@
 
 **Delete the standalone embedder container and the standalone E4B `llm`
 container.** Replace both with **one** `aimee-llm` container that is the single
-gateway for **every** LLM use in aimee — embeddings, reranking, and synthesis. For
+gateway for **every** LLM use in aimee, embeddings, reranking, and synthesis. For
 each use, the container is backed by one of **four modes**, chosen by config:
 
-1. **local-CPU** — run the model in-container on CPU (a `llama-server` GGUF).
-2. **local-GPU** — run it in-container on GPU (`--n-gpu-layers`, by detected VRAM).
-3. **forward** — proxy to *another local* OpenAI-compatible server
+1. **local-CPU**: run the model in-container on CPU (a `llama-server` GGUF).
+2. **local-GPU**: run it in-container on GPU (`--n-gpu-layers`, by detected VRAM).
+3. **forward**: proxy to *another local* OpenAI-compatible server
    (llama.cpp / vllm / Ollama / …).
-4. **external** — proxy to an external API (**Codex/OpenAI** = `openai` wire;
+4. **external**: proxy to an external API (**Codex/OpenAI** = `openai` wire;
    **Claude** = `anthropic` wire).
 
 aimee-kb and aimee-server always talk to **one endpoint** (the `aimee-llm`
@@ -81,7 +81,7 @@ container); the container decides per-role whether to serve locally or forward.
 - **One access layer for credentials, routing, auth, budget, and observability.**
 - **Kills the torch dependency and the two-container split.**
 - **The fold does not block off-box synth.** Running synth on a different GPU host
-  is the `forward`/`external` mode — no second container needed. The unified
+  is the `forward`/`external` mode, no second container needed. The unified
   container is the *control plane*; heavy synth can live elsewhere. Blast-radius
   tradeoff handled in §6, not waved away.
 
@@ -93,7 +93,7 @@ One image: the **llama.cpp runtime** + a **role-based gateway** (reworked
 `scripts/embedder-server.py`) under **s6-overlay**. Endpoints:
 
 - **Retrieval (unchanged for the kb):** `POST /embed`, `POST /embed_batch`,
-  `POST /rerank` — `embed-remote.py`, `rerank-remote.py`, kb config defaults, and
+  `POST /rerank`, `embed-remote.py`, `rerank-remote.py`, kb config defaults, and
   `AIMEE_EMBEDDER_URL` are **untouched**.
 - **Synthesis:** OpenAI-compatible `POST /v1/chat/completions` (grammar/JSON-schema
   via `--jinja`). **Streaming is disabled in the first release**: `stream=true`
@@ -114,7 +114,7 @@ One image: the **llama.cpp runtime** + a **role-based gateway** (reworked
 | `external` | proxy/translate to Codex (`openai`) / Claude (`anthropic`) | no | per §1a (operator secret or hardened per-user pass-through) |
 
 A **local** role runs its own inner `llama-server` (one model+mode per process). A
-**forward/external** role runs no local process — the gateway translates wire
+**forward/external** role runs no local process, the gateway translates wire
 formats via curator-llm-backend's shared client. **`/embed_batch`** reuses the
 embed handler with a **concrete per-call cap of 512 vectors/call** and a stated
 p95 latency budget (a distinct bulk-backfill load profile in the sizing table,
@@ -125,10 +125,10 @@ cap and the `413` path.
 each local role's `llama-server` as an independent service. Two *separate*
 mechanisms (do not conflate):
 
-- **Restart isolation — from s6:** restart-on-failure *per role*; an embed crash
+- **Restart isolation, from s6:** restart-on-failure *per role*; an embed crash
   restarts embed and does **not** take down rerank or synth. The router maps a
   dead child to that role's `down` health state.
-- **Memory isolation — from compose, not s6:** cgroup v2 caps come from per-child
+- **Memory isolation, from compose, not s6:** cgroup v2 caps come from per-child
   `mem_reservation`/`mem_limit` in compose (§5), so one role cannot starve the
   others.
 
@@ -140,7 +140,7 @@ cgroup isolation, synth falls back to a separate sidecar container sharing the
 image (config-only; §6).
 
 **Gateway module decomposition:** `router` · per-role `handlers` · `wire-adapters`
-· `child-supervisor` shim · `observability` — each independently testable.
+· `child-supervisor` shim · `observability`, each independently testable.
 
 ### 1a. Security & access control (the gateway is privileged)
 
@@ -167,7 +167,7 @@ image (config-only; §6).
   3. container disables **core dumps** and runs **no swap**;
   4. the credential page is **`mlock`-ed** and **zeroed via `ctypes.memmove` over
      a `bytearray`** after completion (CPython strings are immutable, and no-swap
-     alone is insufficient — a page can be read back from swap; hence mlock). A CI
+     alone is insufficient. A page can be read back from swap; hence mlock). A CI
      **memory-scrape test** injects a canary token, then scans post-completion RSS
      and asserts the canary is absent from every mapped page;
   5. an `Authorization`-derived value is **never** a cache key;
@@ -180,13 +180,13 @@ image (config-only; §6).
   justification** (the justification lives as a deploy-time annotation in the
   config repo / runbook entry; a CI lint **fails if the flag is enabled with an
   empty justification**). Even on the direct path, aimee-server emits a **thin
-  audit row** — scope, provider, outcome, request-id, byte counts, **and a
+  audit row**. Scope, provider, outcome, request-id, byte counts, **and a
   `user_id` (or salted `session_id_hash`)** so per-user attribution and the §4
-  per-scope spend budget still work on the path that most needs them — **never**
+  per-scope spend budget still work on the path that most needs them, **never**
   creds. A CI assertion requires any non-`curator`-scope direct-path row to carry a
   non-empty user identifier; retention follows the §4 audit-row lifecycle.
 
-### 2. Model registry — two independent ladders, sized by GPU capability
+### 2. Model registry: two independent ladders, sized by GPU capability
 
 Embed/rerank and synth scale on **separate** ladders, selected independently at
 install by detected VRAM (§5).
@@ -199,7 +199,7 @@ install by detected VRAM (§5).
 | GPU (**default**) | `Qwen/Qwen3-Embedding-4B-GGUF` | 2560 | auto (any GPU install) |
 | GPU (**opt-in**) | `Qwen/Qwen3-Embedding-8B-GGUF` | **4000** (trunc 4096→4000) | operator must explicitly configure |
 
-> **Basis (2026-06-22, baseline-gated — supersedes every earlier embed-ladder note,
+> **Basis (2026-06-22, baseline-gated, supersedes every earlier embed-ladder note,
 > including PR #613's "nomic-everywhere" and #617's capped-SciFact revert).** The
 > embedder was re-validated end-to-end against **published** baselines; full data,
 > the four-model ladder, and the harness are in
@@ -216,11 +216,11 @@ install by detected VRAM (§5).
 >   TREC-COVID +27). The earlier "0.820 > 0.799 SciFact" was a **capped-corpus
 >   artifact** and is withdrawn.
 > - **Quality scales then plateaus.** aimee-code nDCG@10: 0.6B **0.697** → 4B
->   **0.759** → 8B **0.761**. The **0.6B→4B step is +6.2; 4B→8B is +0.16 (noise)** —
+>   **0.759** → 8B **0.761**. The **0.6B→4B step is +6.2; 4B→8B is +0.16 (noise)**,
 >   confirmed f16-vs-f16, and 4B-Q8 == 4B-f16 (quantization lossless here). So **4B
 >   is the GPU default**: it delivers 8B-grade quality at **2560-d vs 4096-d**
 >   (1.6× smaller pgvector index, indexed natively under the 4000-d `halfvec`
->   ceiling — no truncation), ~1.4× faster embed, ~½ the VRAM.
+>   ceiling, no truncation), ~1.4× faster embed, ~½ the VRAM.
 > - **8B is an operator opt-in**, not auto-selected by VRAM. It buys only the last
 >   ~0.2 nDCG and costs a 4000-d (truncated) index; a deployment that wants it must
 >   **explicitly configure** the 8B tier (see "The 8B truncation" below). 0.6B and
@@ -228,7 +228,7 @@ install by detected VRAM (§5).
 >
 > **Required serving config** (the proposal's `aimee-llm` must launch the embedder
 > with these, or it crashes/slows on llama.cpp + Vulkan):
-> `--ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots` — the default
+> `--ctx-size 8192 -ub 512 -np 1 --cache-ram 0 --no-cache-idle-slots`, the default
 > prompt cache fragments the embedding KV cache (→ `GGML_ASSERT(task)` crash) and
 > continuous batching across slots hangs the server. Keep `-ub` ≤ 2048 (RADV
 > per-buffer limit). (The HTTP `/v1/embeddings` path returns one vector per input by
@@ -239,17 +239,17 @@ install by detected VRAM (§5).
 > (BEIR text + aimee's own code), not yet the full-pipeline ship-floor gate
 > (rerank + fusion vs the pplx baseline), which remains the ship precondition.
 
-**Reranker — decoupled, not part of the embed ladder.** The reranker scores
+**Reranker, decoupled, not part of the embed ladder.** The reranker scores
 `(query, candidate)` text pairs, so it is **dimension-agnostic** and need not scale
 with the embedder. It runs **in the retrieval path of a user turn, so it must be
 real-time** (<~1s for the candidate set). That requirement **rules out the
-generative Qwen3-Reranker** — measured on the 7900XTX, its correct (yes/no-logit)
+generative Qwen3-Reranker**, measured on the 7900XTX, its correct (yes/no-logit)
 scoring is ~320 ms/candidate → **top-20 = 4.4s**, and llama.cpp's native
 `/v1/rerank` scores it **incorrectly** (it is a yes/no causal LM, not a
-classifier-head cross-encoder, so the rank-pooling path is invalid — verified: an
+classifier-head cross-encoder, so the rank-pooling path is invalid, verified: an
 irrelevant doc scored highest).
 
-The reranker is therefore **Ettin** (2025 ModernBERT cross-encoders — *already the
+The reranker is therefore **Ettin** (2025 ModernBERT cross-encoders, *already the
 pplx/ettin baseline family*; llama.cpp has native ModernBERT support). It is
 **correct *and* fast** via the native `/v1/rerank` endpoint, and is higher
 quality-per-param than both Qwen3-Reranker and bge-reranker-v2-m3 (published
@@ -267,33 +267,33 @@ MTEB(eng, v2) nDCG@10: ettin-150m **0.599 > Qwen3-Reranker-0.6B 0.594**; ettin-3
 | CPU strict top-20 <1s | `ettin-reranker-32m` | top-20 ~0.76s | ~0.578 |
 | GPU max quality (opt-in) | `ettin-reranker-1b` | slower; = mxbai-large quality | ~0.611 |
 
-Both default tiers run the **native `/v1/rerank`** endpoint — one relevance score
+Both default tiers run the **native `/v1/rerank`** endpoint, one relevance score
 per `(query, candidate)` pair, **no chat template and no yes/no-logprob transform**
 (that machinery was specific to the rejected Qwen3-Reranker). Qwen3-Reranker is
 dropped from the real-time path; it remains usable only **async** (e.g. background
 memory re-ranking) where its quality is worth seconds of latency.
 
 **Synth ladder** (benchmarked grammar-enforced + judged on the curator's real
-extraction task — see below):
+extraction task. See below):
 
 | Install | Synth model (GGUF) | arch |
 |---------|--------------------|------|
-| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B — ungated mirror, no `HF_TOKEN`) | ~7B raw / E4B effective |
-| GPU — unified (**default**) | **`unsloth/gemma-4-12b-it-GGUF`** (Gemma 4 12B) | 12B dense, ~8 GB |
-| GPU — dedicated synth host | **`unsloth/gemma-4-26B-A4B-it-GGUF`** (Gemma 4 26B-A4B) | 26B MoE / ~4B active, ~17 GB |
+| CPU-only (**default**) | **`ggml-org/gemma-4-E4B-it-GGUF`** (Gemma 4 E4B: ungated mirror, no `HF_TOKEN`) | ~7B raw / E4B effective |
+| GPU: unified (**default**) | **`unsloth/gemma-4-12b-it-GGUF`** (Gemma 4 12B) | 12B dense, ~8 GB |
+| GPU: dedicated synth host | **`unsloth/gemma-4-26B-A4B-it-GGUF`** (Gemma 4 26B-A4B) | 26B MoE / ~4B active, ~17 GB |
 
 > **Basis (2026-06-23, grammar-enforced + judged).** The curator does **async
 > structured-JSON extraction** (`scripts/curator-extract.py`: doc/code → a schema'd
 > `{"artifacts":[…]}` object). Throughput-bound (drains a queue), not latency-bound.
-> The first pass was **confounded** — it scored `response_format=json_object`, which
+> The first pass was **confounded**, it scored `response_format=json_object`, which
 > b9761 silently ignores, so it measured freeform-JSON luck. Redone with a
 > **sampler-level GBNF grammar** (guaranteed valid JSON) over a **60-sample corpus
 > drawn from the real ~/dev + ~/gow workspace** (every aimee-supported language),
 > scored on three uniform layers: a strict de-saturated schema rubric, a corpus-wide
 > valid-JSON rate, and a **blind Claude content judge**. Full data + harness in
-> [`benchmarks/results/synth/RESULTS.md`](../../benchmarks/results/synth/RESULTS.md).
+> [`benchmarks/results/synth/RESULTS.md`](../../../benchmarks/results/synth/RESULTS.md).
 >
-> Headline: under grammar enforcement **faithfulness is universal** — no model
+> Headline: under grammar enforcement **faithfulness is universal**. No model
 > hallucinates; the differentiators are **structure** and **reliability**. The old
 > "every Qwen slips" / "Granite wins" findings were harness artifacts. Corrected:
 > - **GPU quality ties** across gemma-4 12B/26B-A4B/31B (all perfect schema +
@@ -301,28 +301,28 @@ extraction task — see below):
 >   co-hosts embed + rerank: **gemma-4-12B** (~8 GB, 53 tok/s) for the *unified* GPU;
 >   **gemma-4-26B-A4B** (MoE, ~4B active → 84 tok/s, ~17 GB) when synth has a GPU to
 >   itself. Dense **gemma-4-31B** is dominated (slower *and* larger).
-> - **Qwen3.6 dropped on reliability** — content is strong but 8–12% of outputs
+> - **Qwen3.6 dropped on reliability**, content is strong but 8–12% of outputs
 >   **truncate** even under grammar (valid-JSON 0.88–0.92) → ~1-in-10 lost extractions.
 > - **CPU stays gemma-4-E4B.** A 2026 ≤4B bake-off (granite-4.0-micro/h-micro,
 >   nemotron-3-nano-4b, phi-4-mini, smollm3-3b, lfm2.5-1.2b/8b-a1b) found **none beats
->   it** — each trades gemma's one weakness (it flattens `doc_summary`) for a worse one
+>   it**, each trades gemma's one weakness (it flattens `doc_summary`) for a worse one
 >   (placeholder-echoed or malformed code, or sub-0.4 doc). E4B keeps perfect code +
 >   100% valid JSON. `smollm3-3b` is the alternative for doc-heavy / code-light hosts.
 >
 > Pin each to a specific **commit sha + quant**.
 
-#### The 8B truncation — why 4000, and how it must be done
+#### The 8B truncation: why 4000, and how it must be done
 
 > **Scope (2026-06-22):** the **GPU default is Qwen3-4B at 2560-d, which needs no
 > truncation** (it is under the 4000-d `halfvec` ceiling). This 4096→4000 machinery
 > applies **only when an operator opts into the 8B tier** (see the embed-ladder
-> "Basis" above — 8B buys ~0.2 nDCG over 4B for a 4096-d native vector). It is kept
+> "Basis" above, 8B buys ~0.2 nDCG over 4B for a 4096-d native vector). It is kept
 > because the 8B opt-in must store an indexable vector.
 
 Qwen3-Embedding-8B is **MRL-trained** (loss on first 512/1024/2048 + full 4096),
 so information front-loads into early dims; published guidance shows truncating to
 **1024 retains ~95%**. Trimming only **4096→4000 (last 96 dims, ~2.3%)** costs far
-less — expected **<1% nDCG/MRR**. The "safer" alternatives are worse: 2048 is a
+less, expected **<1% nDCG/MRR**. The "safer" alternatives are worse: 2048 is a
 50% cut; capping at 4B/2560 forfeits the 8B→4B gap. **4000 is the most recall the
 index allows.**
 
@@ -341,9 +341,9 @@ index allows.**
   **not** for raw dot-product / L2-distance. Any consumer using those must account
   for the renormalization; documented here and in `docs/retrieval-stack.md`.
 
-#### Model-drift guard — embedder `(model_id, dim)`, reranker `(model_id, scoring-contract)`
+#### Model-drift guard: embedder `(model_id, dim)`, reranker `(model_id, scoring-contract)`
 
-A dim-only guard is insufficient — two different models can share a dim:
+A dim-only guard is insufficient, two different models can share a dim:
 `pplx-embed` and the default `Qwen3-Embedding-0.6B` are **both 1024-d**, so a
 dim-only check would silently mix incompatible spaces on that exact swap. The
 guard therefore records and compares **embedder model identity
@@ -357,7 +357,7 @@ A `schema_embedding_dim_compat` allow-list permits deliberate upgrades **only**
 under a codified admission rule, asserted at load: admit a model iff **cosine ≥
 0.99 on a fixed aimee probe set vs the prior model**, *or* it is a documented
 parameter-identical retraining (same base repo, new sha). A compat-listed model
-that fails the probe is **refused** — so the list cannot re-open the same-dim /
+that fails the probe is **refused**, so the list cannot re-open the same-dim /
 different-space footgun it exists to manage.
 
 **Migration is a controlled drop-and-rebuild, never an in-place rewrite:**
@@ -369,42 +369,42 @@ replay source rows through the new embedder (bounded batch) → **gate the kb to
 #### Reranker contract + embedding acceptance gates (named, distinct)
 
 The reranker mapping is **pinned, not deferred**: Ettin runs as a ModernBERT
-cross-encoder over the **native `/v1/rerank`** endpoint with **`--flash-attn on`** —
+cross-encoder over the **native `/v1/rerank`** endpoint with **`--flash-attn on`**,
 one relevance score per `(query, candidate)` pair, **no chat template and no
 yes/no-logprob transform** (that machinery was specific to the rejected generative
 Qwen3-Reranker and is removed). The scoring contract the drift guard pins is
 therefore `(model_id, rerank-endpoint=/v1/rerank, fa=on)`. Two **distinct** quality
 gates (do not conflate):
 
-- **Ship-floor gate (≥95%)** — gates *replacing* pplx/ettin, and it is a
+- **Ship-floor gate (≥95%)**: gates *replacing* pplx/ettin, and it is a
   **pre-cutover precondition** evaluated in staging/CI against the real corpus
   **before** the production migration runs (the pplx/ettin baseline numbers are
   recorded as fixtures once, so nothing needs pplx/ettin running in production):
   nDCG@10 / MRR@10 ≥ 95% of baseline on a representative set, **plus**
-  rank-agreement (top-k agreement ≥ 0.95 *or* Spearman ≥ 0.9 — distribution-only
+  rank-agreement (top-k agreement ≥ 0.95 *or* Spearman ≥ 0.9, distribution-only
   checks can pass while ranking regresses). **Gate failure → freeze and
   investigate; do not cut over.** Because the gate is upstream of the cutover,
   **pplx/ettin is removed completely** with no in-release retention (see "What this
   removes").
   - **Reproducibility:** the baseline is a **checked-in fixture**
-    (`tests/fixtures/pplx_baseline.json`) pinned by content hash — pplx/ettin GGUF
+    (`tests/fixtures/pplx_baseline.json`) pinned by content hash, pplx/ettin GGUF
     SHA256s, corpus-snapshot id, the pinned query set + expected metric values, and
     the staging config (llama.cpp version, quant, hardware class) that produced
     them; CI asserts the gate evaluates against the pinned hash.
   - **Staging↔production parity** (what makes the gate predictive): matching
     hardware class, llama.cpp version pin, the corpus snapshot id at cutover, and
-    the query-set composition — documented as the gate's validity precondition.
+    the query-set composition, documented as the gate's validity precondition.
   - **Freeze semantics:** a named operator owns declare/unfreeze; unfreeze requires
     a root cause **and** a fix re-validated against the same corpus+queries; the
     staging env is held for investigation. The freeze blocks only the cutover, not
     ongoing pplx/ettin production serving (which still exists until cutover).
-- **Tier-cutoff gate (≥99%)** — to *enable the 8B truncated tier* (above).
+- **Tier-cutoff gate (≥99%)**: to *enable the 8B truncated tier* (above).
 
 ### 3. Synthesis on both credential scopes
 
-- **kb-level curator synth** — operator secret in gateway config; runs in the
+- **kb-level curator synth**: operator secret in gateway config; runs in the
   isolated **curator process** (§6).
-- **per-user `aimee-server` synth** (`reflect`, `synthesize`, MoA) — client-held /
+- **per-user `aimee-server` synth** (`reflect`, `synthesize`, MoA), client-held /
   session-cached, governed by the §1a pass-through controls + escape hatch.
 
 ### 4. Health, degradation & observability
@@ -434,7 +434,7 @@ gates (do not conflate):
   / oneAPI)**; picks the matching llama.cpp build; maps VRAM → registry row. **CPU
   is the explicit final branch**, not a silent fallthrough; unsupported
   accelerators are documented. (**Apple Metal** is a *native-dev-only* manual
-  override, not an `install.sh` branch — the Linux/Docker deployment target never
+  override, not an `install.sh` branch. The Linux/Docker deployment target never
   exercises it, so it stays out of the tested path.)
 - **Startup validation + swap transition.** At start (before launching `llama-server`)
   the gateway validates **available VRAM vs the model's need**; if insufficient it
@@ -451,7 +451,7 @@ gates (do not conflate):
   RAM-constrained CPU box, **CPU-synth is opt-in** (default synth → forward/external).
 - **CPU synth = Gemma 4 E4B, ungated, no token.** The CPU default is the
   **`ggml-org/gemma-4-E4B-it-GGUF`** mirror, already pulled **unauthenticated** in
-  the current compose — so a fresh CPU-only install is turnkey with **no `HF_TOKEN`
+  the current compose, so a fresh CPU-only install is turnkey with **no `HF_TOKEN`
   and no license step** (§2). `HF_TOKEN`-as-a-Docker-secret handling is retained
   **only** for operators who opt into a *gated* model (e.g. an official Google repo
   or another gated GGUF): supplied as a **Docker secret / mounted file, not an env
@@ -464,13 +464,13 @@ We take the fold but pay down its cost:
 
 - **One image, isolated processes.** The shared client is a **library**; curator
   runs as its **own s6-supervised process** (own restart policy; memory cap from
-  its compose child limits, per §1 wording) — *not* the same process as user-synth.
-- **Cred-path separation by RBAC** — operator-cred (curator) and user-cred
+  its compose child limits, per §1 wording), *not* the same process as user-synth.
+- **Cred-path separation by RBAC**: operator-cred (curator) and user-cred
   (per-user synth) run in **different processes**, separated by the derived
   `X-Aimee-Scope` (§1a).
-- **Off-box scaling preserved** via `forward`/`external` — no un-folding.
+- **Off-box scaling preserved** via `forward`/`external`, no un-folding.
 - **Residual, stated honestly.** A single *container* is one restart/upgrade unit,
-  and RBAC is **logical, not OS-level** — a *kernel-level* exploit in curator has
+  and RBAC is **logical, not OS-level**. A *kernel-level* exploit in curator has
   the same blast radius as one in user-synth. The **sidecar fallback** (synth as a
   separate container sharing the image, config-only) is the **documented response
   to a suspected kernel-level compromise**.
@@ -484,26 +484,26 @@ We take the fold but pay down its cost:
 - **New/rework:** `Dockerfile.aimee-llm` (llama.cpp + s6-overlay + gateway);
   `scripts/embedder-server.py` → decomposed gateway. `embed-remote.py` /
   `rerank-remote.py` **unchanged**.
-- `.github/workflows/publish-images.yml` — one `aimee-llm` image (CPU / CUDA /
+- `.github/workflows/publish-images.yml`: one `aimee-llm` image (CPU / CUDA /
   ROCm variants) + the new CI tests (bind-validator, canary-log, memory-scrape,
   kill-a-child, load-sequence, contract).
-- `install.sh` — multi-vendor GPU detection + per-role mode/model/dim env.
-- `src/headers/aimee.h` — `EMBED_MAX_DIM` 2560 → **4000 (exact)**.
+- `install.sh`: multi-vendor GPU detection + per-role mode/model/dim env.
+- `src/headers/aimee.h`: `EMBED_MAX_DIM` 2560 → **4000 (exact)**.
 - Drift guard → `(model_id, dim)` for embedder **and** reranker + compat-list +
   admission rule; shared-client library extraction (curator-llm-backend §1).
-- `docs/retrieval-stack.md` — Qwen3 tables; unified container; 4000 truncation +
+- `docs/retrieval-stack.md`: Qwen3 tables; unified container; 4000 truncation +
   index-vs-storage note.
 
 ## What this removes
 
-- The torch embedder container/image and the `pplx`/`ettin` pairing — **removed
+- The torch embedder container/image and the `pplx`/`ettin` pairing, **removed
   completely in the cutover release.** No retention, no built-but-non-default
   image, no in-image rollback flag. Rollback does **not** depend on keeping the old
   embedder around: the ship-floor gate is a **pre-cutover precondition** (§2,
   validated in staging against the real corpus *before* the production migration),
   so a regression never ships; and a post-cutover revert is a **deploy-level
   rollback to the prior release tag** (which still contains pplx/ettin) plus the
-  reverse re-embed — an explicit maintenance op. This resolves the
+  reverse re-embed, an explicit maintenance op. This resolves the
   rollback-vs-removal contradiction by moving the gate upstream of the cutover, not
   by retaining pplx/ettin.
 - The standalone `llm` container (Gemma 4 E4B is **retained as the default CPU
@@ -520,7 +520,7 @@ We take the fold but pay down its cost:
   **pplx/ettin is removed completely**; the ship-floor gate (§2) is validated
   **pre-cutover** in staging against the real corpus, so a regression never ships.
   A post-cutover revert, if ever needed, is a **deploy-level rollback to the prior
-  release tag** (which still contains pplx/ettin) plus the reverse re-embed — an
+  release tag** (which still contains pplx/ettin) plus the reverse re-embed, an
   explicit, gated maintenance operation, not an instant in-image toggle.
 - **The deploy-tag-revert is a one-time safety net** for the *initial* cutover
   only: once the first post-cutover release is validated, no prior tag still
@@ -535,16 +535,16 @@ We take the fold but pay down its cost:
 
 ## Decisions taken (through rev 7)
 
-- **pplx/ettin is removed completely** in the cutover release — no retention, no
+- **pplx/ettin is removed completely** in the cutover release, no retention, no
   in-image rollback flag. The ship-floor gate is a **pre-cutover staging
   precondition** (freeze-investigate on failure); any post-cutover revert is a
-  deploy-level rollback to the prior release tag + reverse re-embed — a **one-time**
+  deploy-level rollback to the prior release tag + reverse re-embed, a **one-time**
   safety net for the cutover release, with the prior tag retained in the registry
   for a defined window.
 
 - **Embed = `Qwen3-Embedding-0.6B` CPU default (1024-d), `Qwen3-Embedding-4B` GPU
   default (2560-d), `Qwen3-Embedding-8B` operator opt-in (4000-d trunc).** Baseline-
-  gated against published numbers — see embedder-gate-scifact. Decisive axis is
+  gated against published numbers. See embedder-gate-scifact. Decisive axis is
   **code** (aimee embeds raw code): nomic is text-only and loses by +9..+63 nDCG on
   code (and +12.7 on aimee's own code), so **nomic is dropped**. On aimee-code the
   ladder is 0.6B 0.697 → 4B 0.759 → 8B 0.761, i.e. **4B≈8B (+0.16, noise)** so 4B is
@@ -563,7 +563,7 @@ We take the fold but pay down its cost:
 - **Auth default = mTLS**; bearer dev-only.
 - **CPU synth default = Gemma 4 E4B** via the ungated `ggml-org` GGUF mirror (no
   `HF_TOKEN`); the separate "ungated fallback" model is dropped.
-- **Synth models — benchmarked grammar-enforced + judged** (2026-06-23; the
+- **Synth models, benchmarked grammar-enforced + judged** (2026-06-23; the
   2026-06-22 pass was confounded by an ignored `json_object` and is superseded):
   **CPU = Gemma 4 E4B** (best ≤4B vs the 2026 field), **GPU = Gemma 4 12B** for the
   unified container (~8 GB, co-resides with embed+rerank) / **Gemma 4 26B-A4B** (MoE)
@@ -573,8 +573,8 @@ We take the fold but pay down its cost:
   + Qwen3.6 ladder. See `benchmarks/results/synth/RESULTS.md`. **Reranker = Ettin (ModernBERT
   cross-encoder), NOT Qwen3-Reranker**: GPU default `ettin-reranker-400m`, CPU-only
   `ettin-reranker-68m`, both `--flash-attn on`. Real-time on the 7900XTX (ettin-400m
-  top-20 0.34s; ettin-68m top-10 0.60s) and correct/fast via native `/v1/rerank` —
-  Qwen3-Reranker is generative (~320 ms/cand, top-20 4.4s) and llama.cpp's native
+  top-20 0.34s; ettin-68m top-10 0.60s) and correct/fast via native `/v1/rerank`.
+Qwen3-Reranker is generative (~320 ms/cand, top-20 4.4s) and llama.cpp's native
   rerank scores it wrong, so it is dropped from the real-time path. The reranker
   guard is keyed on `(model_id, scoring-contract)`, not dim.
 - **Streaming disabled** in the first release.
@@ -583,24 +583,24 @@ We take the fold but pay down its cost:
 
 ## Open questions
 
-1. **Commit-sha + quant pins** — model *names* are fixed (§2); implementation pins
+1. **Commit-sha + quant pins**: model *names* are fixed (§2); implementation pins
    each to a specific commit sha and selects the quant per tier (Q4_K_M vs Q5/Q6).
    Mechanical, not a design decision.
-2. **Reranker re-rank pass cost** on a reranker-only swap — confirm recomputing
+2. **Reranker re-rank pass cost** on a reranker-only swap. Confirm recomputing
    cached top-K rerank scores is cheap (it should be: the reranker writes no corpus
    vectors, so a swap needs no re-embed/re-index, only a score refresh).
 
 ## Risks
 
-- **Embedding-quality regression** pplx/ettin → Qwen3 — gated by the named §2
+- **Embedding-quality regression** pplx/ettin → Qwen3, gated by the named §2
   acceptance gates, validated **pre-cutover** in staging (freeze-investigate on
   failure); post-cutover revert is the one-time deploy-tag rollback (§Migration).
-- **Gateway as privileged single point** — mitigated by §1a (auth/budget/scope),
+- **Gateway as privileged single point**: mitigated by §1a (auth/budget/scope),
   §4 (circuit breakers + per-role health + audit), §6 (process isolation);
   residual: one restart/upgrade unit + logical-not-kernel RBAC → sidecar fallback.
-- **Per-user credential exposure** — mitigated by §1a controls + canary +
+- **Per-user credential exposure**: mitigated by §1a controls + canary +
   memory-scrape tests; residual handled by the audited direct-to-provider escape.
-- **`halfvec` at exactly 4000** — zero index headroom; enforced by the proxy
+- **`halfvec` at exactly 4000**: zero index headroom; enforced by the proxy
   `≤4000` assertion.
 - **Turnkey "no `HF_TOKEN`" depends on the ungated `ggml-org` E4B mirror staying
   available + ungated.** If the mirror is removed or later gated, the CPU default
@@ -610,26 +610,25 @@ We take the fold but pay down its cost:
 
 ## Changelog
 
-- **IMPLEMENTED (2026-06-23):** all seven work packets merged to `testing` —
-  P1 dim foundation + `(model_id,dim)` drift guard; P2 `.254` Vulkan serving
+- **IMPLEMENTED (2026-06-23):** all seven work packets merged to `testing`. P1 dim foundation + `(model_id,dim)` drift guard; P2 `.254` Vulkan serving
   validation + fixture; P3/P4 role-based gateway + `Dockerfile.aimee-llm`
   (CPU+GPU Vulkan, baked GGUFs, ettin encoder + gateway Dense head); P5 gateway
   completion (synth proxy, streaming-400, per-role health, modes); P6 §1a
   security hardening (bearer auth, bind guard, derived scope, audit, circuit
   breaker); P7 drift-guard activation + profile-gated `aimee-llm` compose service
   + operator cutover runbook. The **live cutover** (GPU deploy + corpus re-embed)
-  remains operator-gated per [`docs/runbooks/unified-llm-cutover.md`](../../runbooks/unified-llm-cutover.md).
+  remains operator-gated per `docs/runbooks/unified-llm-cutover.md` (runbook retired with the inference container).
 - **rev 7 (2026-06-21):** reduced the open questions to mechanical items
   (commit-sha/quant pins + a reranker-swap-cost confirmation). **Pinned synth
   models** to the
   benchmark (re-run grammar-enforced + judged 2026-06-23; the 2026-06-22 pass was
-  confounded by an ignored `json_object`) — **CPU = Gemma 4 E4B** (ungated `ggml-org`
+  confounded by an ignored `json_object`), **CPU = Gemma 4 E4B** (ungated `ggml-org`
   mirror → no `HF_TOKEN`; rev-5 "ungated fallback" dropped; best ≤4B vs the 2026 field),
   **GPU = Gemma 4 12B** (unified) / **Gemma 4 26B-A4B** (dedicated synth host); replaces
   the rev-7 Gemma-12B/26B + Qwen3.6 ladder (Qwen dropped on JSON-reliability, dense 31B
   dominated). **Decoupled the
   reranker** from the embed ladder (it is dimension-agnostic): **Ettin ModernBERT
-  cross-encoder — `ettin-reranker-400m` (GPU) / `ettin-reranker-68m` (CPU), both
+  cross-encoder, `ettin-reranker-400m` (GPU) / `ettin-reranker-68m` (CPU), both
   `-fa on`; Qwen3-Reranker dropped from the real-time path** (too slow + native
   rerank scores it wrong).
   Embed GGUF repos named. Updated §2 ladders, §5 (retitled "GPU detection &
@@ -639,7 +638,7 @@ We take the fold but pay down its cost:
   hashed fixture; staging↔production parity precondition; freeze semantics
   (owner/unfreeze criteria); deploy-tag-revert flagged as a **one-time** cutover
   safety net + image-retention window; re-embed cost/maintenance-window note.
-- **rev 5 (2026-06-21):** operator directive — **pplx/ettin removed completely**
+- **rev 5 (2026-06-21):** operator directive. **pplx/ettin removed completely**
   (no one-release retention). Resolved the round-3 rollback-vs-removal
   contradiction by moving the **ship-floor gate upstream of the cutover** (staging
   precondition, freeze-investigate on failure) instead of retaining the old

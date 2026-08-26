@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implemented, validated, and archived 2026-08-04.
+- **State:** DONE. Implemented, validated, and archived 2026-08-04.
 
 > **Archived as complete.** The first-install/first-write bootstrap contract shipped in
 > `498ebab2d` and `a8b1a5d47`, and the executed evidence recorded below covers the scoped
@@ -215,24 +215,24 @@ rejection.
 
 ### Executed validation
 
-- `make -C src wizard-bootstrap-e2e` — PASS: bearer-only write denied, bound mTLS write accepted,
+- `make -C src wizard-bootstrap-e2e`: PASS: bearer-only write denied, bound mTLS write accepted,
   hash-only DB1 state verified, ownership conflict denied, and revoked certificate denied.
-- `src/build/obj/tests/unit-test-deploy-apply` — PASS: generated service identity is private, stable,
+- `src/build/obj/tests/unit-test-deploy-apply`: PASS: generated service identity is private, stable,
   scoped, override-safe, and probed without a host-argv secret.
-- `src/build/obj/tests/unit-test-kb-curator-provider` — PASS: unified endpoint and service bearer reach
+- `src/build/obj/tests/unit-test-kb-curator-provider`: PASS: unified endpoint and service bearer reach
   both curator tiers.
-- `src/build/obj/tests/unit-test-memory-embed-http-auth` — PASS: the native embed/batch client attaches
+- `src/build/obj/tests/unit-test-memory-embed-http-auth`: PASS: the native embed/batch client attaches
   its bearer and refuses missing or oversized managed credentials before transport.
-- `python3 scripts/check-sidecar-clients.py` — PASS: embed and rerank clients attach the bearer and
+- `python3 scripts/check-sidecar-clients.py`: PASS: embed and rerank clients attach the bearer and
   fail before transport when managed auth is required but absent.
-- `python3 -m unittest -v scripts.tests.test_gateway scripts.tests.test_gateway_security` — 56 PASS,
+- `python3 -m unittest -v scripts.tests.test_gateway scripts.tests.test_gateway_security`: 56 PASS,
   2 dependency-only skips; every inference route rejects absent/wrong managed tokens, the correct
   token succeeds, and a pinned dimension mismatch is a typed `503`.
-- `python3 scripts/check-kb-container-packaging.py --root .` and `--plant-test` — PASS: the complete
+- `python3 scripts/check-kb-container-packaging.py --root .` and `--plant-test`. PASS: the complete
   managed role/identity contract is now a guarded packaging invariant.
 - `frontend` tests/check, `runtime-web` Go tests, `make -C src all`, `make -C src lint`,
-  `make -C src aimee-home-check`, and `git diff --check` — PASS.
-- Isolated `.210` Docker validation — PASS using a unique project, network, and fresh volumes:
+  `make -C src aimee-home-check`, and `git diff --check`. PASS.
+- Isolated `.210` Docker validation. PASS using a unique project, network, and fresh volumes:
   propagated identity and exact role config; missing/wrong tokens 401; authenticated embed, batch,
   rerank, and synth; empty-token wildcard bind refused. Test containers, image, network, volumes, and
   transferred source were removed; the production `aimee` project and volumes were untouched.

@@ -1,6 +1,6 @@
 # Agent-facing code-intelligence E1-memory validation
 
-- **Slice:** E1-memory — local-first memory returns
+- **Slice:** E1-memory. Local-first memory returns
 - **Based on:** E1 merge `a8d3214c2d057fa95820e6acb60b788e403d7c68`
 - **Policy authority:** local-first amendment merge
   `e9626cda560b7e9b1bbf96e48c05c94b62a72c8a`

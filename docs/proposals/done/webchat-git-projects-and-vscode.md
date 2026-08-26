@@ -16,7 +16,7 @@
 - **Builds on:** the existing workspace/project model (`aimee workspace add
   [--repo]`, `project_info_t`, `index_list_projects`), the git CLI surface
   (`cmd_git`: status/commit/push/pull/branch/pr/clone/…), the forge-token
-  broker (`forge_credentials.c` — provider-agnostic git auth), the
+  broker (`forge_credentials.c`, provider-agnostic git auth), the
   workspace-resource-plane (detached provider / runner queue), the per-principal
   credential vault, and webchat's existing multi-user PAM auth + sessions.
 
@@ -32,7 +32,7 @@ only *chat*. They cannot:
    short-lived forge token over `/v1` (`forge_credentials.c`). A browser user
    has no CLI and no local filesystem, so neither path is reachable. There is
    also **no `/v1` git surface** at all (`cli_v1_routes_gen.inc` has no `git.*`
-   routes) — `cmd_git` shells out locally.
+   routes), `cmd_git` shells out locally.
 
 2. **Edit those repos.** There is no editor surface in webchat.
 
@@ -68,7 +68,7 @@ a **project** is a cloned git repo within it (already exactly `project_info_t`
   `gh auth token`) **in memory only**, injected as `GH_TOKEN` + a `GIT_ASKPASS`
   shim. Scope lattice: global < workspace < project < user.
 - **Per-principal credential vault:** encrypted-at-rest, keyed by principal
-  (`uid:`/`webuser:`) — the natural durable home for a user's git credential.
+  (`uid:`/`webuser:`), the natural durable home for a user's git credential.
 - **Co-located execution:** the shared workspace provider runs ops directly on
   the server filesystem (no detached/reverse-channel needed when the files live
   server-side, which is our case).
@@ -79,7 +79,7 @@ editor.
 
 ## Design
 
-### 0. Per-user workspaces (the foundational gap — shared by G and V)
+### 0. Per-user workspaces (the foundational gap: shared by G and V)
 
 aimee's workspace registry is global/single-user. Webchat is multi-user, so a
 user's projects must be **isolated per principal** on disk and in config.
@@ -91,7 +91,7 @@ user's projects must be **isolated per principal** on disk and in config.
   `workspace_count`/`workspaces[]` partition keyed by the authenticated
   principal, or (b) keep the global registry but tag each workspace/project with
   an owning principal and filter every read/write by the caller's principal.
-  Recommendation: **(b)** — least churn to the existing config + index, and the
+  Recommendation: **(b)**, least churn to the existing config + index, and the
   index already stores absolute roots we can prefix-match per user.
 - Every `/v1` workspace/git call resolves its target from `(principal, project)`
   → absolute root, and **rejects** roots outside the caller's own tree (mirrors
@@ -108,7 +108,7 @@ provides **either**:
 The credential is POSTed over the authed webchat session to a new
 `/v1/forge/credential` route and stored **exclusively in the per-principal
 credential vault** (encrypted at rest, keyed by `webuser:<name>`). **All
-credentials live in the vault — PATs, SSH private keys, and any later OAuth
+credentials live in the vault. PATs, SSH private keys, and any later OAuth
 tokens alike.** There is no other store: no plaintext on disk, no
 `agent-keys.json`-style sidecar, no config file. Scope defaults to `user`;
 credentials are never returned to the browser after store, and zeroed from
@@ -120,7 +120,7 @@ any session/cookie-derived secret. A `webuser:<name>` principal's vault entries
 are sealed server-side and decryptable only by the co-located server, never by
 the browser.
 
-> **PREREQUISITE — SATISFIED (verified against `origin/testing`).** This design
+> **PREREQUISITE, SATISFIED (verified against `origin/testing`).** This design
 > depends on a *persistent, per-principal, encrypted* credential vault, and it
 > already exists in mainline: `src/server/server_vault.c`,
 > `vault_principal.{c,h}`, `vault_crypto.c`, `vault_server_key.c`
@@ -128,13 +128,13 @@ the browser.
 > `vault_capability.c`. Critically, the vault is **already keyed by a
 > `webuser:<name>` principal** for webchat users (`vault_principal.h`;
 > `ATTEST_WEBCHAT_TRUSTED`), asserted via the `server.token`-gated
-> `X-Aimee-Webuser` header — the exact integration seam this feature needs. It
+> `X-Aimee-Webuser` header. The exact integration seam this feature needs. It
 > also already refuses a **tokenless** webuser as a spoof rather than leaking
 > across users (a threat the security lens raised). So Phase 1 *uses* the vault
 > as-is; the work is wiring webchat's credential-intake/`GIT_ASKPASS`/ssh-agent
 > through this existing `webuser:` vault, not building or forward-porting one.
 
-### G1b. Credential injection — never on disk, even for code-server
+### G1b. Credential injection: never on disk, even for code-server
 
 The roundtable's central blocker: a transient temp file is still a plaintext
 sidecar, and a long-lived code-server needs its *own* git auth. Both are solved
@@ -143,7 +143,7 @@ sidecar, and a long-lived code-server needs its *own* git auth. Both are solved
 - **HTTPS tokens (PAT / OAuth):** a `GIT_ASKPASS` shim binary that, on demand,
   fetches the live token from the in-memory broker (populated from the vault)
   over a per-process authenticated channel and echoes it. The token reaches git
-  via the askpass stdout only — never a file, never a logged arg.
+  via the askpass stdout only, never a file, never a logged arg.
 - **SSH keys:** a **per-user in-memory `ssh-agent`** (its own Unix-domain socket
   under a `0700` per-principal runtime dir, ideally on `tmpfs`). The private key
   is loaded into the agent **from the vault, in memory** (`ssh-add` from a pipe /
@@ -151,13 +151,13 @@ sidecar, and a long-lived code-server needs its *own* git auth. Both are solved
   `SSH_AUTH_SOCK`; nothing touches `~/.ssh`.
 - **code-server gets the same seam:** its process environment carries
   `GIT_ASKPASS` (the vault-backed shim) and `SSH_AUTH_SOCK` (the user's agent).
-  Editor-side git (terminal, SCM push) authenticates through exactly these — so
+  Editor-side git (terminal, SCM push) authenticates through exactly these, so
   a long-lived editor never holds a plaintext credential and the vault-only
   invariant holds end-to-end.
 
 The in-memory `forge_credentials` broker / ssh-agent are **transient caches**
-populated *from* the vault, scoped per principal, zeroed on revoke/session close
-— never the source of truth, never persisted. No credential ever appears as a
+populated *from* the vault, scoped per principal, zeroed on revoke/session close,
+never the source of truth, never persisted. No credential ever appears as a
 file or a process arg; logging masks all credential material.
 
 **G2. Connect a repo = clone as project.** `POST /api/git/connect {url, name?}`
@@ -192,21 +192,21 @@ criteria) asserts no credential ever reaches a log or the filesystem.
 
 **V1. Editor engine: code-server**, full VSCode, running on aimee-server (per
 the decided approach). Open VSX registry only; no MS Marketplace / MS-branded
-binaries (licensing — both code-server and openvscode-server share that
+binaries (licensing, both code-server and openvscode-server share that
 constraint).
 
 **V2. Per-user process, OS-isolated.** webchat launches/owns a **code-server
 process per active user**, bound (`--user-data-dir`, `--extensions-dir`, working
 dir) under that user's per-principal workspace root, listening on a loopback
 port. Crucially, isolation is enforced at the **OS level, not just by path
-binding** (roundtable blocker — the editor terminal can otherwise `cd` out):
+binding** (roundtable blocker; the editor terminal can otherwise `cd` out):
 each code-server runs **as the user's own PAM UID** (webchat already creates a
 per-user OS account) so filesystem permissions deny cross-user reads, and is
 additionally confined to the workspace subtree via a namespace/bind jail
 (`bwrap`/`unshare`) where available. Telemetry off; no MS Marketplace. Its
 `--user-data-dir` lives under the user's tree (or is ephemeral) so editor state
 never captures another user's data. Credential env per G1b (`GIT_ASKPASS` +
-`SSH_AUTH_SOCK`) — no plaintext at rest. Lifecycle: lazily started on first
+`SSH_AUTH_SOCK`), no plaintext at rest. Lifecycle: lazily started on first
 `/vscode` open; **idle = no HTTP/WebSocket traffic for N minutes** (not UI focus,
 so an open-but-quiet editor isn't killed); torn down on logout. A supervisor in
 webchat (mirroring `webchat-lib.sh`) tracks `{principal → port, pid, agent
@@ -218,7 +218,7 @@ webchat session** (`requireAuth`) so code-server is never directly reachable and
 inherits webchat's PAM identity. The proxy resolves `{session cookie →
 principal → that principal's port}` **per request** (never a client-supplied
 port/path), and the **WebSocket upgrade traverses the same `requireAuth` gate**
-(no unauthenticated upgrade path). Because the editor terminal is a powerful
+(no unauthenticated upgrade path). Because the editor terminal runs anything the session user can run, it is a
 sink reachable over a same-cookie WebSocket, the upgrade path **also enforces a
 same-origin `Origin` allow-list** (webchat's own host): a cross-origin or
 missing-`Origin` upgrade is rejected, closing the cross-origin WS-CSRF surface
@@ -233,7 +233,7 @@ load failure degrades gracefully instead of blanking the app.)
 
 **V5. Shared filesystem = agent + editor coherence.** Because projects live in
 the user's server-side workspace root and aimee already indexes that root, the
-chat agent and the editor operate on **the same files** — edits in VSCode are
+chat agent and the editor operate on **the same files**, edits in VSCode are
 visible to `code_search`/ingest and vice versa.
 
 ## Deployment (aimee-combined / .254)
@@ -252,36 +252,36 @@ visible to `code_search`/ingest and vice versa.
   the same vault seam later).
 - Multi-tenant resource isolation beyond per-user dirs + per-process code-server
   (no per-user containers/cgroups in v1).
-- Merge-conflict UI, code review UI, terminal-sharing — code-server's built-in
+- Merge-conflict UI, code review UI, terminal-sharing, code-server's built-in
   terminal/SCM covers the editor side.
 - Thin-client (CLI) users: they keep the existing detached-workspace path; this
   proposal is the **server-hosted browser** path.
 
 ## Risks
 
-- **Multi-user isolation.** Per-principal path scoping must be airtight —
-  every git/workspace/proxy route rejects cross-principal roots/ports. A bug
+- **Multi-user isolation.** Per-principal path scoping must be airtight.
+Every git/workspace/proxy route rejects cross-principal roots/ports. A bug
   here is a cross-tenant file/edit leak. (Mirror `reject_foreign_cwd`; add
   tests.)
 - **Credential durability vs. exposure.** Moving credentials into a *persistent*
   vault (vs. the pre-existing in-memory-only `forge_credentials` broker this
   design builds on) widens their lifetime, so the mitigation is the **vault-only
   invariant**: encryption-at-rest, per-principal keys, never-return-to-browser,
-  never-logged, and exec-time materialization that — *as the target* — never
+  never-logged, and exec-time materialization that (*as the target*) never
   reaches the filesystem or a child's environment.
   **Status by credential type at close-out:**
-  - *SSH keys — invariant MET.* Loaded into the per-user in-memory ssh-agent over
+  - *SSH keys, invariant MET.* Loaded into the per-user in-memory ssh-agent over
     a non-filesystem channel (`memfd`/agent-protocol, decrypt buffer zeroed after
     load, `RLIMIT_CORE=0`), never written as a named path (G1b).
-  - *HTTPS tokens — PARTIAL.* Reach git via the `GIT_ASKPASS` shim **and** as
+  - *HTTPS tokens, PARTIAL.* Reach git via the `GIT_ASKPASS` shim **and** as
     `GH_TOKEN` in the git child's environment, so the token is visible in that
     short-lived child's `/proc/<pid>/{cmdline,environ}` (cmdline is argv-only and
     clean; environ is not). Moving HTTPS auth to the broker-fed askpass channel
-    the G1b design describes — so `GH_TOKEN` never enters a child env — is
+    the G1b design describes (so `GH_TOKEN` never enters a child env) is
     **deferred item 3**.
 
   The **binding acceptance check** (a build-integrity / leak test) is the *target*
-  gate: no credential material outside the sealed vault — not a file (incl.
+  gate: no credential material outside the sealed vault, not a file (incl.
   `/tmp`, `~/.ssh`, `--user-data-dir`), not a log, not `/proc/<pid>/{environ,fd,
   maps}` — surviving a mid-exec `SIGKILL` with no orphaned key file. The shipped
   `test_webchat_git_leak.c` covers the no-file-under-`$AIMEE_HOME` + vault
@@ -302,8 +302,8 @@ visible to `code_search`/ingest and vice versa.
   **only** in the encrypted per-principal vault, persists across sessions, and is
   never returned to the client. Verified by an automated leak check: after a
   connect + a git push from both the API and the code-server terminal, **no
-  credential material exists anywhere outside the sealed vault** — not as a file
-  (incl. `/tmp`, `~/.ssh`, code-server's `--user-data-dir`), not in any log, and
+  credential material exists anywhere outside the sealed vault**, not as a file
+  (incl; `/tmp`, `~/.ssh`, code-server's `--user-data-dir`), not in any log, and
   not in a process arg/`/proc/<pid>/environ`. The SSH key is present only inside
   the in-memory ssh-agent (reachable via `SSH_AUTH_SOCK`), never on disk. The
   check survives a mid-exec `SIGKILL` (no orphaned key file).
@@ -325,7 +325,7 @@ The rev.2 panel converged on a **gating prerequisite** plus a set of
 mechanism-level hardening items that belong in the **implementation plan** (which
 gets its own roundtable), not the proposal:
 
-- **Gating prerequisite — persistent vault.** See the PREREQUISITE box in §G1.
+- **Gating prerequisite, persistent vault.** See the PREREQUISITE box in §G1.
   Resolve before Phase 1 implementation.
 - **No-plaintext-window on key load.** Loading the SSH key from the vault into the
   ssh-agent must avoid *any* filesystem-backed plaintext: prefer `memfd`/agent
@@ -334,7 +334,7 @@ gets its own roundtable), not the proposal:
 - **Extension-host credential containment.** code-server's extension host is
   untrusted: sanitize `GIT_ASKPASS`/`SSH_AUTH_SOCK` out of the extension-host
   environment, disable git `credential.helper` caching, and forbid
-  credential-caching extensions — a malicious/over-eager extension must not be
+  credential-caching extensions. A malicious/over-eager extension must not be
   able to read or persist credentials.
 - **Per-process credential scoping.** The askpass channel and agent socket are
   per-principal, `0700`, owned by that user's UID (not a shared global path); a
@@ -362,29 +362,29 @@ design) drove the last two hardening PRs (#877, #878) before close-out.
 
 ### Shipped
 
-- **§0 per-user workspaces** — WP-A (#451): `workspace_scope.{c,h}` resolves
+- **§0 per-user workspaces**: WP-A (#451): `workspace_scope.{c,h}` resolves
   `(principal, project) → root` from the *attested* `webuser:` principal (never a
   client-supplied path), with `realpath` + `O_NOFOLLOW`/`openat` containment.
   Every `/v1` workspace/git route resolves through it; cross-principal denial is
   tested (`test_workspace_scope`, `test_webchat_git_leak`).
-- **G1 credential intake + vault** — per-host token store + GitHub OAuth
+- **G1 credential intake + vault**: per-host token store + GitHub OAuth
   device-flow sign-in (#486–#489), keyed by the `webuser:` principal, write-only
   (host list returns names, never secrets; tokens never returned to the browser).
-- **G1b injection** — `GIT_ASKPASS` shim + a per-user in-memory `ssh-agent`
+- **G1b injection**: `GIT_ASKPASS` shim + a per-user in-memory `ssh-agent`
   (`memfd_create`, `RLIMIT_CORE=0`, `PR_SET_DUMPABLE=0`, key buffer zeroed after
   `ssh-add`); git's on-disk `credential.helper` disabled; per-principal runtime
   dir is **tmpfs-mandatory, fail-closed** (`webuser_runtime.c`).
-- **G2/G3 clone + git ops** — `/v1/workspace/clone` (clone → `register_and_index`)
+- **G2/G3 clone + git ops**: `/v1/workspace/clone` (clone → `register_and_index`)
   and `/v1/workspace/git` (status/log/diff/branch/fetch/pull/commit/push/checkout),
   argv-only (no shell), with per-session worktree isolation (#611).
-- **G4 UI** — Projects panel (`Projects.tsx`); **G5 revoke** — vault delete +
+- **G4 UI**: Projects panel (`Projects.tsx`); **G5 revoke**, vault delete +
   editor/ssh-agent recycle so no live handle survives revocation (#877).
-- **V code-server** — per-webuser supervisor WP-I (`webuser_editor.c`) + reverse
+- **V code-server**: per-webuser supervisor WP-I (`webuser_editor.c`) + reverse
   proxy WP-J (#467); `/vscode` tab; loopback-only bind; `requireAuth` **plus** a
   same-origin gate on the WS upgrade (#877); idle-reaping wired (#878);
   `WITH_VSCODE` image flag. The editor process env is curated of the server's own
   secrets (`AIMEE_DB2_URL`, `AIMEE_SERVER_TOKEN`, provider keys) and hardened
-  with `no_new_privs`/`DUMPABLE=0` — but `GIT_ASKPASS`/`SSH_AUTH_SOCK` are still
+  with `no_new_privs`/`DUMPABLE=0`, but `GIT_ASKPASS`/`SSH_AUTH_SOCK` are still
   inherited by the untrusted extension host (deferred item 4), and the process
   runs as the server UID with the server `PATH` (deferred item 5).
 
@@ -405,15 +405,15 @@ design) drove the last two hardening PRs (#877, #878) before close-out.
   loopback/proxy boundary above is the *route-level* guarantee, not yet an
   OS-jail one (deferred items 4, 5). **Open-PR** from the UI is not wired
   (deferred item 2).
-- **DEVIATION (deliberate):** *default-off behind a flag* — the feature ships
+- **DEVIATION (deliberate):** *default-off behind a flag*. The feature ships
   **default-ON**, an operator decision (branch `feat/webchat-git-editor-default-on`).
   The two surfaces are asymmetric and an operator should know it:
   - the **editor** is toggleable (`AIMEE_WEBCHAT_EDITOR=0` disables it);
   - the **git surface** (`/v1/git/*`, `/v1/workspace/{clone,git}`) ships
     **always-on with no operator opt-out**.
-  Because two of the default-ON decision's risk-mitigating prerequisites —
-  extension-host credential containment (item 4) and editor OS-jail hardening
-  (item 5) — are themselves deferred, the default-ON posture carries a residual
+  Because two of the default-ON decision's risk-mitigating prerequisites,
+extension-host credential containment (item 4) and editor OS-jail hardening
+  (item 5), are themselves deferred, the default-ON posture carries a residual
   risk window; re-evaluating it is **deferred item 7**.
 
 ### Deferred follow-ups (future work; not blocking close-out)
@@ -421,7 +421,7 @@ design) drove the last two hardening PRs (#877, #878) before close-out.
 1. **SSH private-key web intake.** The ssh-agent load path is fully built +
    tested but unreachable from the browser (only PAT/token + OAuth have intake).
    Add `POST/DELETE /v1/git/credential {type:"ssh_key"}` writing the SSH-key cred
-   under the `webuser:` principal + a UI key field — completes G1's SSH option.
+   under the `webuser:` principal + a UI key field, completes G1's SSH option.
 2. **Open-PR op.** `/v1/workspace/git` has no `pr` op end-to-end; provider-specific
    (`gh`/`glab`), needs a real forge to validate.
 3. **HTTPS token out of `/proc/<pid>/environ`.** Move the askpass to a
@@ -441,5 +441,5 @@ design) drove the last two hardening PRs (#877, #878) before close-out.
    `SIGKILL` survival (the binding acceptance check above).
 7. **Re-evaluate the default-ON posture** once the extension-host containment (4)
    and editor OS-jail hardening (5) land, and add an operator opt-out for the
-   git surface (it ships always-on today) — see the DEVIATION note.
+   git surface (it ships always-on today). See the DEVIATION note.
 </content>

@@ -1,10 +1,10 @@
-# Proposal: Gateway mutation — primary-agent context reduction
+# Proposal: Gateway mutation: primary-agent context reduction
 
 > **Archived proposal.** This records the design as it was agreed, not the
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** done — implemented + merged to `testing` behind `reduce_gateway_mutate`
+- **State:** done. Implemented + merged to `testing` behind `reduce_gateway_mutate`
   (default OFF, zero behavior change when off), across 7 roundtable-reviewed PRs
   (#1015 config, #1017 session-breaker+telemetry, #1018 decision helpers, #1019
   Anthropic buffered, #1021 Anthropic streaming, #1022 OpenAI `/v1/responses` buffered,
@@ -14,13 +14,13 @@
   default-ON at the delegate seam). Design roundtable-reviewed (3 rounds; all decisions
   D1–D6 + the `should_apply`/snapshot/hard-bypass refinements incorporated below).
 - **Thesis:** the economizer reduces the **delegate** (sub-agent) turn loop, but the
-  inbound `/v1` **gateway** — the path that serves the **primary** agent (including
-  Claude-Code-through-aimee) — runs the economizer in **shadow** (`measure_only=1`
+  inbound `/v1` **gateway**, the path that serves the **primary** agent (including
+  Claude-Code-through-aimee), runs the economizer in **shadow** (`measure_only=1`
   hardcoded: `anthropic_http.c:254`, `openai_chat.c:906`). It measures the primary
   agent's reduction opportunity and records a forecast, but never applies it, so the
   primary agent's tokens are not reduced. This proposal makes the gateway **apply** the
-  reduced messages to the live request — under a default-off flag, compress-only,
-  behind a per-session circuit breaker — so the primary agent reduces too.
+  reduced messages to the live request, under a default-off flag, compress-only,
+  behind a per-session circuit breaker, so the primary agent reduces too.
 
 ## Charter roles
 Reduce (the context economizer) extended to the **inbound** request-assembly seam. Reuses
@@ -31,13 +31,13 @@ and the hard-bypass contract. No new reduction algorithm.
 Primary-agent context reduction that **cannot *persistently* break live client traffic
 without circuit-breaking subsequent turns**: a reduced request the provider rejects is
 caught (buffered: retried from the pristine original; streaming: the offending session is
-disabled for **subsequent** turns — the current stream completes as the upstream
+disabled for **subsequent** turns, the current stream completes as the upstream
 delivered it, per §7 R1), the working set is never elided, and the whole feature is
 default-off behind a flag with numeric `.254` validation gates before any default-on
 decision.
 
 ## §0 Why this is higher-risk than the delegate seam
-The delegate seam mutates a sub-agent's request — a contained blast radius. The gateway
+The delegate seam mutates a sub-agent's request, a contained blast radius. The gateway
 mutates the **live client-serving** request (`/v1/messages`, `/v1/responses`). A reduction
 bug there surfaces to the end user. The design is therefore correctness-first and
 default-off, and treats streaming and buffered paths separately because their recovery
@@ -58,27 +58,27 @@ options differ fundamentally (§2).
 ## §2 Design
 
 ### §2.1 Decisions (roundtable D1–D6)
-- **D1 — Streaming mutates** under reduction-correctness guarantees + per-session disable;
+- **D1, Streaming mutates** under reduction-correctness guarantees + per-session disable;
   **no mid-stream retry.** This is the same contract the delegate seam already operates
-  under (it mutates with no 400-from-pristine either — only hard-bypass + repair).
-- **D2 — New flag `reduce_gateway_mutate` (default OFF)**, separate from the existing
+  under (it mutates with no 400-from-pristine either, only hard-bypass + repair).
+- **D2. New flag `reduce_gateway_mutate` (default OFF)**, separate from the existing
   shadow `reduce_gateway_seam`. `mutate=1` implies `seam=1` (auto-enable + a single
   startup WARN), so the shadow baseline the validation gates need always exists.
-- **D3 — Compress-only at the gateway in v1.** Fold is deferred to a follow-up
-  (`reduce_gateway_fold`) — its boundary edge-cases concentrate the mutation risk.
+- **D3. Compress-only at the gateway in v1.** Fold is deferred to a follow-up
+  (`reduce_gateway_fold`), its boundary edge-cases concentrate the mutation risk.
   Compress-only captures ~30–50% of the saving with the smallest blast radius.
-- **D4 — Per-session disable** (in-process LRU, §2.4).
-- **D5 — No inbound header opt-in in v1** (`X-Aimee-Reduce` may be added later as an
+- **D4, Per-session disable** (in-process LRU, §2.4).
+- **D5. No inbound header opt-in in v1** (`X-Aimee-Reduce` may be added later as an
   additive filter).
-- **D6 — Provenance reuse** (`reduce_state.reduced`) is sufficient across the seam
+- **D6. Provenance reuse** (`reduce_state.reduced`) is sufficient across the seam
   boundary, subject to a CI verification gate (§2.6); **clear-on-restore is mandatory**.
 
-### §2.2 The mutation gate — `should_apply()` + hard-bypass
+### §2.2 The mutation gate: `should_apply()` + hard-bypass
 `should_apply(reduced, pristine)` returns true **only if**: the reduce reported no internal
 error; the result is a genuine net shrink (a no-op reduce is not a mutation); a
 `message_history_repair` run on the reduced result reports no structural violation (no
 tool_use/tool_result split); and the replace installs cleanly. Otherwise the site
-**hard-bypasses** — forwards the pristine request, records the reason, and skips the
+**hard-bypasses**, forwards the pristine request, records the reason, and skips the
 restore path. Hard-bypass is not itself a disable trigger.
 
 The reduce **internal-error** enum is explicit and is the same set surfaced in
@@ -91,9 +91,9 @@ tag).
 
 **Construction-failure invariant (blocking).** The "never send an un-restorable reduced
 payload" rule extends *past* `should_apply`: **if any step after `should_apply` returns
-true fails before the upstream request is fully constructed and dispatched — OOM during
+true fails before the upstream request is fully constructed and dispatched, OOM during
 header/body serialization, JSON-encode failure of the reduced body, transport setup error,
-any construction-time error — the gateway MUST fall back to the pristine snapshot and abort
+any construction-time error. The gateway MUST fall back to the pristine snapshot and abort
 the mutation** (reason `construct_failed`). This is a §5 step-11 fixture that injects a
 failure between `should_apply` and dispatch and asserts pristine was sent.
 
@@ -113,7 +113,7 @@ a post-v1 optimization, gated on the §9 O2 benchmark.
 
 On the **streaming** path the snapshot exists *solely* to enforce the un-restorable
 invariant (it is held as a reference and freed after the reduce/replace decision; it is
-**never restored** — streaming recovery is disable-only). Its latency/memory cost is
+**never restored**, streaming recovery is disable-only). Its latency/memory cost is
 included in the §9 O2 benchmark, not just the buffered path.
 
 ### §2.4 Per-session disable (D4)
@@ -121,18 +121,17 @@ New module `msg_session_disable.{c,h}`:
 - **Mutation requires a resolvable per-identity session key.** The key is derived (ordered)
   from: an inbound `aimee-session-id` header **validated against the auth identity**, else
   `SHA-256(bearer_token)[16hex]`. **A request with neither a validated header nor a bearer
-  is NOT mutated** — it is a pristine passthrough, and **no disable state is written for
+  is NOT mutated**. It is a pristine passthrough, and **no disable state is written for
   it.** This removes the process-global `_anonymous` bucket entirely, so one caller's
   failure can never disable reduction for an unrelated caller (the §7 R5 cross-caller
   denial-of-feature hazard).
 - **Header format + validation:** the `aimee-session-id` value MUST equal
-  `SHA-256(auth_identity)[16hex]` (lowercase hex, exactly 16 chars). Any other value —
-  mismatch, wrong length, non-hex, control chars — is treated as **absent** (fall through
+  `SHA-256(auth_identity)[16hex]` (lowercase hex, exactly 16 chars). Any other value (mismatch, wrong length, non-hex, control chars) is treated as **absent** (fall through
   to the bearer hash), with at most one WARN per 60 s per source IP. An attacker holding a
   valid bearer therefore cannot forge another identity's session key.
 - **Storage:** bounded LRU (cap 10k, ~1 MB), value `{disabled, expires_at, reason}`. **Sweep
   cadence:** on insert when size exceeds cap/2, plus a coarse wall-clock sweep every 60 s.
-- **TTL:** `reduce_gateway_session_disable_ttl_ms` (default 1 h). **Must be > 0** — `0` and
+- **TTL:** `reduce_gateway_session_disable_ttl_ms` (default 1 h). **Must be > 0**. `0` and
   negative values are **rejected at config validation as startup-fatal** (a permanent-pin or
   breaker-off knob on a live path is disproportionate runtime risk; the diagnostic
   breaker-off mode, if ever needed, is a debug-only build flag, not a runtime knob).
@@ -141,21 +140,21 @@ New module `msg_session_disable.{c,h}`:
 ### §2.5 Path-by-path
 **Buffered (both providers):** `snapshot → reduce → should_apply → send`. On the upstream
 response of a **mutated** request:
-- **Any 4xx** (not just 400 — a reduction can alter serialization into 413/422/etc.):
-  restore pristine + `message_history_repair` (idempotent — the pristine is unmodified;
+- **Any 4xx** (not just 400; A reduction can alter serialization into 413/422/etc.):
+  restore pristine + `message_history_repair` (idempotent; the pristine is unmodified;
   defense-in-depth only, no signal of pristine corruption) + **resend once** + disable the
   session + clear `reduce_state.reduced`. Counter: `gateway_4xx_restore_resend`.
-- **5xx:** **disable the session only — do NOT resend** (provider state is uncertain after a
+- **5xx:** **disable the session only. Do NOT resend** (provider state is uncertain after a
   5xx; retrying from pristine is too speculative). Counter: `gateway_5xx_disable`. The 5xx is
   forwarded to the client as the provider returned it; it is never silently un-classified.
 
-OpenAI adds a **new** `gateway_retry_post_with_reduction()` wrapper — it does **not** modify
+OpenAI adds a **new** `gateway_retry_post_with_reduction()` wrapper. It does **not** modify
 `http_retry_post_context` (whose 4xx semantics must not change).
 
 **Streaming (both providers):** `snapshot (un-restorable-invariant only) → reduce →
 should_apply → open stream`. Failure detection is at the **SSE decoder layer, not a raw
 read loop**: events are reassembled across TCP boundaries (a split frame is held in a
-single-event classification buffer — no full-response buffering, no rewrite of
+single-event classification buffer. No full-response buffering, no rewrite of
 client-visible bytes), then forwarded as-is. Disposition of a **mutated** stream:
 - **Invalid-request-class error frame** (Anthropic `error.type` ∈ invalid_request /
   embedded 4xx status; OpenAI `error.code` invalid-request) → disable the session for
@@ -172,14 +171,14 @@ In all streaming cases the current turn completes as the upstream delivered it; 
 ### §2.6 Provenance across the seam (D6)
 | Scenario | `reduced` after gateway | Delegate seam | Correct? |
 |---|---|---|---|
-| Gateway reduced | `true` | skips | ✅ |
-| Gateway hard-bypassed | `false` | attempts | ✅ |
-| Gateway reduced → 400 → restored | **cleared** | attempts on the restored original | ✅ |
-| Session disabled | `false` | attempts | ✅ |
+| Gateway reduced | `true` | skips | yes |
+| Gateway hard-bypassed | `false` | attempts | yes |
+| Gateway reduced → 400 → restored | **cleared** | attempts on the restored original | yes |
+| Session disabled | `false` | attempts | yes |
 
 CI verifies clear-on-restore, clear-on-hard-bypass, clear-on-OOM, and the
 gateway→delegate hand-off in both directions. If the in-payload marker does not survive
-the actual boundary in code, add an internal portable marker — verification is the gate,
+the actual boundary in code, add an internal portable marker, verification is the gate,
 not assumption.
 
 ## §3 Configuration
@@ -216,7 +215,7 @@ is pure refactor. Steps 6–9 are the wiring; step 11 is the gate to `.254`.
 6. Anthropic buffered: mutate + restore + resend + disable + clear-provenance.
 7. Anthropic streaming: mutate + SSE error-frame inspect-as-forward + disable.
 8. OpenAI buffered: `gateway_retry_post_with_reduction()` wrapper.
-9. OpenAI streaming: symmetric to Anthropic (separate review — provider framing differs).
+9. OpenAI streaming: symmetric to Anthropic (separate review, provider framing differs).
 10. Telemetry.
 11. CI: snapshot/restore equivalence, OOM hard-bypass, repair idempotency, provenance
     across the seam, disable-map TTL/sweep, header-vs-auth validation, SSE error-frame
@@ -242,20 +241,20 @@ a non-disabling stream abort, or a 4xx/5xx that doesn't trip the breaker) → fl
 `reduce_gateway_mutate=0` pending investigation.
 
 ## §7 Risks
-- **R1 — Streaming without retry is new ground.** Per-session disable is the only runtime
+- **R1, Streaming without retry is new ground.** Per-session disable is the only runtime
   circuit breaker in v1; a global rolling-window flood-disable is designed and ready
-  (§9 O1) but deferred — reconsider after the first week of `.254` data.
-- **R2 — Snapshot cost on large contexts.** Deep copy at 1 M tokens is the open benchmark
+  (§9 O1) but deferred, reconsider after the first week of `.254` data.
+- **R2. Snapshot cost on large contexts.** Deep copy at 1 M tokens is the open benchmark
   (§9 O2); buffered p99 is a §6 gate. COW is a post-v1 optimization.
-- **R3 — `message_history_repair` after restore** — defense in depth; idempotency
+- **R3, `message_history_repair` after restore**: defense in depth; idempotency
   CI-verified.
-- **R4 — OpenAI streaming framing parity** — separate review; the only provider-specific
+- **R4. OpenAI streaming framing parity**: separate review; the only provider-specific
   catch in v1.
-- **R5 — Session-id spoofing + cross-caller denial-of-feature** — header-vs-auth validation
+- **R5. Session-id spoofing + cross-caller denial-of-feature**: header-vs-auth validation
   is mandatory; mutation requires a resolvable per-identity key and writes **no** disable
   state for identity-less requests (no shared `_anonymous` bucket, §2.4), so one caller can
   never disable another. Security review before `.254`.
-- **R6 — Default-ON** is a separate decision, out of scope for this proposal.
+- **R6. Default-ON** is a separate decision, out of scope for this proposal.
 
 ## §8 Non-goals
 Mid-stream/SSE retry (architecturally blocked); recovery of the current streaming turn
@@ -265,11 +264,11 @@ algorithms; inbound-header opt-in; the fold lever on the gateway path; default-O
 refcount/COW snapshots (correctness-first); the global flood-disable (§9 O1).
 
 ## §9 Open items
-- **O1 — Global rolling-window flood-disable** (second-order circuit breaker): a fixed
+- **O1. Global rolling-window flood-disable** (second-order circuit breaker): a fixed
   256-entry process-local ring buffer; if ≥ N disable events in M seconds, send everything
   pristine until the window drains. Defaults N=5/M=300 s. ~50 LOC. **Deferred**; ratify
   only if a model flap is a concern during validation.
-- **O2 — Snapshot benchmark** (200k/500k/1M tokens, deep-copy vs COW). Owned by perf;
+- **O2. Snapshot benchmark** (200k/500k/1M tokens, deep-copy vs COW). Owned by perf;
   must report before `.254`. Pass: p99 < +15 ms at 1 M tokens.
 
 ## §10 Acceptance
@@ -296,7 +295,7 @@ refcount/COW snapshots (correctness-first); the global flood-disable (§9 O1).
 
 ## Close-out
 
-Implemented as 8 planned slices (S7 subsumed — see below), each roundtable-reviewed and
+Implemented as 8 planned slices (S7 subsumed; see below), each roundtable-reviewed and
 merged to `testing` behind `reduce_gateway_mutate` (default OFF). Operator guide:
 `docs/features/economizer-gateway-mutation.md`.
 
@@ -316,15 +315,15 @@ telemetry + no-behavior-change test + docs (#1023).
 | `/v1/messages` buffered | `anthropic_http.c messages_buffered` | buffered | S4 (restore-resend / 5xx-disable) |
 | `/v1/messages` streaming | `anthropic_http.c messages_stream` | true SSE stream | S5 (disable-subsequent-turns) |
 | `/v1/responses` buffered + streaming | `openai_chat.c agent_execute_messages` | buffered (streaming replays) | S6 (restore-resend / 5xx-disable) |
-| `/v1/chat/completions`, `/v1/completions` | `chat_stream_handler`, `completion_stream_handler` | — | **out of scope** (no economizer shadow seam; not a primary-agent reduction path) |
+| `/v1/chat/completions`, `/v1/completions` | `chat_stream_handler`, `completion_stream_handler` | n/a | **out of scope** (no economizer shadow seam; not a primary-agent reduction path) |
 
-**S7 (OpenAI streaming) — subsumed by S6 (verified repo-wide).** A repo-wide search
+**S7 (OpenAI streaming), subsumed by S6 (verified repo-wide).** A repo-wide search
 confirms `agent_http_post_stream` (true token-by-token upstream streaming) exists **only**
-in `anthropic_http.c` — there is no OpenAI-family true upstream streaming anywhere in the
+in `anthropic_http.c`. There is no OpenAI-family true upstream streaming anywhere in the
 server. The `/v1/responses` streaming handler (`responses_stream_handler`) buffers upstream
 via `agent_execute_messages` then replays as SSE, so it inherits S6's full buffered
-mutation including the 4xx restore-resend — strictly better than the streaming
-disable-only contract — so no separate S7 code was written. A code comment in
+mutation including the 4xx restore-resend, strictly better than the streaming
+disable-only contract, so no separate S7 code was written. A code comment in
 `responses_stream_handler` records this as a regression guard.
 
 **Acceptance:**
@@ -342,11 +341,11 @@ disable-only contract — so no separate S7 code was written. A code comment in
   config error); `reduce.gateway_mutate=1` + valid ttl → **clean start** (server stayed
   up, the auto-enable-seam WARN fired, no fatal). Validates the config/startup wiring on
   the real binary.
-- **#7 (`.254` ≥7-day ≥10k/provider/mode live validation) — carried.** Deployment tier;
+- **#7 (`.254` ≥7-day ≥10k/provider/mode live validation), carried.** Deployment tier;
   gates the separate **default-ON** decision (R6, out of scope), and needs a priced
   provider + real workload for the net-token and 4xx-parity gates.
-- **#8 (snapshot-cost benchmark) — carried.** Hardware tier (O2, perf-owned).
-- **O1 global flood-disable — deferred by design** (§9).
+- **#8 (snapshot-cost benchmark), carried.** Hardware tier (O2, perf-owned).
+- **O1 global flood-disable, deferred by design** (§9).
 
 Everything is **default-OFF** with a proven zero-behavior-change gate, so this ships the
 mechanism; the default-ON flip is a separate, data-gated decision.

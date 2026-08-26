@@ -1,9 +1,9 @@
-# Proposal: P3 — an explicit document lifecycle contract with blast-radius preview
+# Proposal: P3: an explicit document lifecycle contract with blast-radius preview
 
 > **Archived proposal.** This records the implemented design; current behaviour
 > is defined by the code and acceptance validation.
 
-- **State:** done (2026-08-21) — implemented in PR #2831; see
+- **State:** done (2026-08-21). Implemented in PR #2831; see
   [acceptance validation](../../validation/evidence-lifecycle-acceptance.md).
 - **Series:** [Evidence and lifecycle layer](evidence-lifecycle-layer.md), member 3 of 9. Foundational.
 - **Author:** JBailes
@@ -19,7 +19,7 @@ and they are the object class with the weakest lifecycle contract.
 At the pin, `docs.state` is a free-text column defaulting to `'staged'`, with
 `'staged'` the only value any query filters on. There is no distinction between
 "this source is wrong, stop believing it", "this source was replaced by a newer
-version", and "this content must be physically removed" — the three operations a
+version", and "this content must be physically removed": the three operations a
 document actually needs, with three different consequences for derived
 knowledge and two different reversibility properties.
 
@@ -38,9 +38,9 @@ this proposal specifies the contract P4 implements against.
 | Piece | Where | Gap |
 |---|---|---|
 | `docs.state` (default `'staged'`), `review_needed`, `review_reason` | `src/modules/db2/c/schema.sql` | Free text; only `'staged'` is queried (`src/modules/db2/c/kb_docs.c`); no closed state machine. |
-| `document_versions` with `is_current`, `superseded_at`, `version_no` | `src/modules/db2/c/schema.sql` | Version supersession already exists — the `retire` half is mostly built and simply unnamed. |
+| `document_versions` with `is_current`, `superseded_at`, `version_no` | `src/modules/db2/c/schema.sql` | Version supersession already exists: the `retire` half is mostly built and simply unnamed. |
 | `docs` UNIQUE on (content_hash, converter, converter_version, scope) | `src/modules/db2/c/schema.sql` | Content-addressed identity, so re-ingest of identical content is already idempotent. |
-| `document_sections`, `kb_doc_regions`, `kb_table_cells`, `artifact_citations` | `src/modules/db2/c/schema.sql` | Span-level source links exist — the raw material for a blast-radius preview. |
+| `document_sections`, `kb_doc_regions`, `kb_table_cells`, `artifact_citations` | `src/modules/db2/c/schema.sql` | Span-level source links exist: the raw material for a blast-radius preview. |
 | `curator_invalidation_events` (source_kind, source_id, artifacts_stale) | `src/modules/db2/c/schema.sql` | Records that a source invalidated N artifacts; no per-object detail, no preview, no reversal. |
 | `corpus_processing_jobs`, `corpus_stage_events` | `src/modules/db2/c/corpus_jobs.c` | Stage machine for ingestion, not for post-ingestion lifecycle. |
 | `kb_documents.generation` | `src/modules/db2/c/schema.sql` | Generation scoping for project chunks; a precedent for bulk supersession. |
@@ -53,7 +53,7 @@ this proposal specifies the contract P4 implements against.
 
 | State | Meaning | In recall | Available for derivation | Source retained | Reversible |
 |---|---|---|---|---|---|
-| `active` | Believed and usable | yes | yes | yes | — |
+| `active` | Believed and usable | yes | yes | yes | n/a |
 | `invalidated` | Judged wrong or untrusted | no | no | yes | yes |
 | `retired` | Superseded by a newer version | no | no | yes | yes |
 | `purged` | Content physically removed | no | no | **no** | **no** |
@@ -72,22 +72,22 @@ this proposal specifies the contract P4 implements against.
 Every one of these runs as a P2 changeset and emits P1 events. Purge's changeset
 is created with `reversible=0` and an `irreversible_why`.
 
-### Blast-radius preview — required before invalidate and purge
+### Blast-radius preview: required before invalidate and purge
 
 `document.preview_lifecycle(doc_id, operation)` returns, before anything changes:
 
-- **Facts supported only by this document** — the set that would lose all
+- **Facts supported only by this document**: the set that would lose all
   supporting evidence.
-- **Facts with other surviving evidence** — the set that stays supported, counted
+- **Facts with other surviving evidence**: the set that stays supported, counted
   separately so an operator can see the difference between "this removes
   knowledge" and "this removes a citation".
-- **Derived items** — summaries, patterns, preference projections, mental models
+- **Derived items**: summaries, patterns, preference projections, mental models
   produced from it (P4's dependency edges; before P4 lands, reported as
   `derived: not-computed`, never as an empty list).
-- **Citations that will stop resolving** — `artifact_citations` and section
+- **Citations that will stop resolving**: `artifact_citations` and section
   references pointing into it.
 - **Code and entity links that will become unsupported.**
-- **Recall impact** — the count of currently-recallable items that would leave
+- **Recall impact**: the count of currently-recallable items that would leave
   recall, so the operator sees the size of the behavioural change, not only the
   size of the data change.
 
@@ -100,7 +100,7 @@ review surface (P7) as the mandatory step before either destructive operation.
 
 When a document leaves `active`, facts derived from it are **not deleted**. Each
 is marked `unsupported` (no surviving supporting evidence) or `stale` (evidence
-changed but some remains), and policy — not the lifecycle operation — decides
+changed but some remains), and policy (not the lifecycle operation) decides
 whether that removes them from recall. The default policy is:
 
 - `unsupported` + assertion authority no higher than model → excluded from recall,
@@ -119,7 +119,7 @@ Re-ingesting a changed document creates a new `document_versions` row, marks the
 prior version `retired`, recomputes derived knowledge against the new version,
 and records both the retirement and the recomputation in one changeset. Facts
 that the new version still supports keep their identity and history rather than
-being deleted and re-asserted — otherwise every re-ingest would reset the
+being deleted and re-asserted, otherwise every re-ingest would reset the
 corroboration and outcome history of everything the document touches.
 
 ### Purge
@@ -134,7 +134,7 @@ and any embedding derived from that content. It retains:
   rather than content, and which therefore survives purge intact by design.
 
 Purge is operator-authority only, requires a preview token from a preview issued
-within the same session, and refuses to run if the preview is stale — the same
+within the same session, and refuses to run if the preview is stale, the same
 confirm-before-destroy discipline the repository already applies to its
 irreversible vault operations.
 
@@ -170,7 +170,7 @@ irreversible vault operations.
 - Existing rows migrate to their most conservative reading: `staged` stays
   `staged`; everything else becomes `active`.
 - Recall paths gain a state filter. Because every migrated row is `active` or
-  `staged`, recall behaviour is unchanged at migration time — the filter is
+  `staged`, recall behaviour is unchanged at migration time. The filter is
   inert until an operator uses a new state.
 - `curator_invalidation_events` continues to be written during P3 and becomes a
   view over the ledger in a follow-up, not in this proposal.

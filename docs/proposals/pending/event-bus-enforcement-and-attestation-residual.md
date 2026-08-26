@@ -1,6 +1,6 @@
 # Event-bus enforcement and attestation: residual work
 
-- **State:** PENDING — residual scope created by the 2026-08-04 proposal audit.
+- **State:** PENDING. Residual scope created by the 2026-08-04 proposal audit.
 
 **Archived source:** [`event-bus-governance-and-capture.md`](../done/event-bus-governance-and-capture.md)
 

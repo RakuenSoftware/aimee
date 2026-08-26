@@ -120,7 +120,7 @@ gate) egress continue, but the alert must be actioned.
 | log line | meaning | action |
 |---|---|---|
 | `INTEGRITY: checkpoint refused ... head_log_mismatch` | a shard head diverged from its evidence log; the producer refused to sign over it | a local inconsistency; investigate the shard immediately because the latest signed root is stale until resolved |
-| `INTEGRITY: retained checkpoints failed verification (... bad_signature / unknown_key / continuity_broken ...)` | continuous verification found a bad signature, a foreign key, or an impossible chain | treat as tampering or a restored foreign DB; verify against retained copies (§3) |
+| `INTEGRITY: retained checkpoints failed verification (..; bad_signature / unknown_key / continuity_broken ...)` | continuous verification found a bad signature, a foreign key, or an impossible chain | treat as tampering or a restored foreign DB; verify against retained copies (§3) |
 | `checkpoint continuity UNPROVEN over the retained window` | a predecessor does not link (gap or fork) | operator work item; compare cross-gap leaves against a retained copy |
 | `INTEGRITY: witness record digest parity failed; emission halted` | a stored row and its canonical encoding disagree; emission stopped at that record | the store is corrupt or the encoder drifted; do not trust emitted bytes past this point, and investigate before resuming |
 | `evidence emission sink rejected a frame; backlog will retry` | the log/OTLP path is full or failing | fix the collector; the durable store is unaffected, the backlog gauge shows the lag |

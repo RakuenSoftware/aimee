@@ -3,12 +3,12 @@
 ## What this records
 
 Twenty-three module descriptors carry `ownership_complete: true`. Three do not. This document tracks
-those three, whose module root contains nothing but `module.yaml` — no implementation has ever been
+those three, whose module root contains nothing but `module.yaml`. No implementation has ever been
 moved under `src/modules/<id>/`. It exists so that gap is recorded in one place rather than inferred
 by re-measuring the tree, and so `rule=ownership-empty-domain` has somewhere to point.
 
-The Class B descriptors that once had undeclared implementation files in their roots — governance,
-learning, workspace, vault, config, git, delegates, workflows, memory — have since been declared and
+The Class B descriptors that once had undeclared implementation files in their roots, governance,
+learning, workspace, vault, config, git, delegates, workflows, memory, have since been declared and
 latched, as has `benchmarks` (the first Class A code migration). These three empty-root descriptors
 are the only remainder.
 
@@ -18,7 +18,7 @@ are the only remainder.
 matching file under the module root. For these three, both actual sets are empty, so set equality
 holds vacuously and the latch would pass on the source and private-header rules. Until slice 39 the
 only thing preventing it was the separate `docs == ["docs/modules/<id>.md"]` requirement, which none
-of them satisfies — one field away from a descriptor asserting completeness for a module that has not
+of them satisfies, one field away from a descriptor asserting completeness for a module that has not
 been migrated at all.
 
 `docs/modules/module-runtime.md` states that modules without the latch "remain migration debt and
@@ -27,8 +27,8 @@ the three modules furthest from done, and would do it for the three where the as
 true. Slice 39 therefore rejects `ownership_complete: true` whenever the module-local domain is
 empty, with `rule=ownership-empty-domain`.
 
-The rule is unconditional. A module that genuinely owned no module-local C — a header-only or
-pure-aggregation module — would also be rejected, and that is the intended behaviour: the right
+The rule is unconditional. A module that genuinely owned no module-local C. A header-only or
+pure-aggregation module, would also be rejected, and that is the intended behaviour: the right
 response to such a module would be to extend the completeness domain to cover what it actually owns,
 not to weaken the guard on the domain that exists. No current descriptor is a candidate, so that
 design question stays open rather than being pre-answered by an opt-out.
@@ -48,8 +48,8 @@ framework's API identity.
 `agent_tools_internal.h` seam) and the `agent_tools.h` contract were relocated under
 `src/modules/tools/` and latched. `src/server/agent_tools.c`, which implements the
 turn/snapshot/toolset session-state slice declared in `agent_tools.h`, was deliberately left in the
-server as a not-module-local implementation of the contract — the same arrangement by which DB1/DB2
-implement `memory`'s contract — so the `agent_tools.c` name collision between the posix and server
+server as a not-module-local implementation of the contract, the same arrangement by which DB1/DB2
+implement `memory`'s contract, so the `agent_tools.c` name collision between the posix and server
 files never arises.
 
 `routing` has since been migrated (pilot #3): the self-contained routing block of
@@ -57,7 +57,7 @@ files never arises.
 route-block reasons, and the route filters, ~503 lines) was extracted into
 `src/modules/routing/routing.c` and latched. The routing contract stays in the shared
 `src/headers/agent_config.h`, which the module implements while the config/auth half of
-`agent_config.c` remains in the server and is called through the same header — an established pattern
+`agent_config.c` remains in the server and is called through the same header. An established pattern
 (`delegate_routing.c`, a module, already calls those header predicates). The block's statics are
 module-local and no config function calls the routing functions, so the split is link-clean and
 `routing` has no module-private header.
@@ -69,17 +69,17 @@ module-local and no config function calls the routing functions, so the split is
 validation (`tool_validate`) and side-effect classification (`tool_side_effect`) were deliberately left
 with the server/`tools` surface, and the trace/metrics/manifest half of `agent_policy.c` stays too; all
 are reached through the shared `src/headers/agent_exec.h`, which the module implements. The
-enforcement points that consume the decision — guardrails' `pre_tool_check`, gateway policing — stay
+enforcement points that consume the decision (guardrails' `pre_tool_check`, gateway policing) stay
 where they are.
 
 `kb-synthesis` has since been migrated (pilot #5): the KB curator family (21 sources + 16 headers) was
-relocated from `src/kb/` into `src/modules/kb-synthesis/`. Unlike the earlier splits it is **KB-tier** —
+relocated from `src/kb/` into `src/modules/kb-synthesis/`. Unlike the earlier splits it is **KB-tier**,
 the sources include KB-internal service headers (`kb.h`, `index.h`, `kb_service_*`, `kb_mdl.h`, …), so
 they compile with the KB build flags into `$(OBJDIR)/kb/modules/kb-synthesis/` (the
 `KB_SYNTHESIS_SRCS`/`KB_SYNTHESIS_OBJS` pair) and link only into `aimee-kb`; `-Imodules/kb-synthesis`
 lets the in-KB consumers (`kb.c`, `cmd_kb.c`, the curator config/profile) resolve the curator headers.
 The DB2 artifact/link storage APIs and the core `kb_curator_provider.c` adapter stay their owners' and
-are consumed through their contracts. Three Class A modules remain — all three no-source.
+are consumed through their contracts. Three Class A modules remain, all three no-source.
 
 Locations below are what each module's own canonical document names. They are a starting inventory
 for a future migration slice, not an ownership assignment: no audit has confirmed that these files
@@ -94,7 +94,7 @@ are the module's, exclusively or at all. A migration slice must establish that i
 Two observations worth carrying forward:
 
 - `control-web` and `runtime-web` have canonical documents that identify no implementation location
-  at all — not a path, not a bare filename. Both specify their surface and lifecycle key and stop
+  at all, not a path, not a bare filename. Both specify their surface and lifecycle key and stop
   there. A migration slice for either starts with locating the code, not moving it. (`workflows.md`
   is the only other module document naming neither, and `workflows` is not in this class: its module
   root holds 30 sources and 24 private headers that its descriptor does not yet declare.) These two,
@@ -102,14 +102,13 @@ Two observations worth carrying forward:
   are **deliberately unlatched**: their code does not exist yet. `control-web`/`runtime-web` are the
   optional GUI modules owned by `docs/proposals/pending/product-governance-web-and-config.md`, which
   will supply their implementation. The correct disposition is to keep them as valid, unlatched
-  descriptors — not to write placeholder code purely to satisfy the completeness latch, and not to
+  descriptors, not to write placeholder code purely to satisfy the completeness latch, and not to
   remove the descriptors (their IDs are reserved by the owning proposals). A silent flip of any of the
   three to `ownership_complete: true` without real implementation would be a regression; the descriptor
   mutation suite and the empty-domain guard (slice 39) both defend against it.
 - All three remaining modules are **no-source**: `control-web`/`runtime-web`/`response-composition`
   have no located implementation, so there is nothing to migrate. The five modules whose code existed
-  and could physically move — `benchmarks`, `tools`, `routing`, `execution-policy`, `kb-synthesis` —
-  have all been migrated and latched.
+  and could physically move (`benchmarks`, `tools`, `routing`, `execution-policy`, `kb-synthesis`) have all been migrated and latched.
 
 ## What would change this document
 

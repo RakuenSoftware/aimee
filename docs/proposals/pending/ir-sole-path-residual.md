@@ -1,6 +1,6 @@
 # IR sole path: response and legacy-path residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`ir-sole-path-and-pluggable-stages.md`](../done/ir-sole-path-and-pluggable-stages.md)
 

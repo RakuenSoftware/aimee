@@ -38,8 +38,8 @@ Membership is asymmetric, and the asymmetry is policy rather than drift:
 
 `CMakeLists.txt` states the reason directly: CMake builds only the `aimee` thin client plus the
 unit-test suite, and the `aimee-server`, `aimee-kb`, `aimee-gateway`, and `aimee-webchat` targets were
-removed because CMake's source lists are not maintained for the full server build — they had drifted
-roughly 188 files behind `src/Makefile` — and no CI gate ever built them. Gateway policy is a
+removed because CMake's source lists are not maintained for the full server build. They had drifted
+roughly 188 files behind `src/Makefile`, and no CI gate ever built them. Gateway policy is a
 server-side concern, so its absence from the thin-client profile follows from that documented scope.
 This is therefore recorded as an intentional profile boundary, not as ordinary source-list drift, and
 it is not a blocker for the ownership latch: the validator's domain is the module root on disk, not
@@ -47,36 +47,36 @@ whichever profile a build selects.
 
 One structural consequence is worth recording, and is an inference rather than a reproduced result.
 CMake's `aimee-agent` static library includes `src/posix/agent_runtime.c`, which calls
-`gateway_delegate_run_request_pipeline` and `gateway_delegate_tool_shape` — symbols no CMake target
+`gateway_delegate_run_request_pipeline` and `gateway_delegate_tool_shape`, symbols no CMake target
 compiles. A static archive may contain unresolved references, so this is not in itself a build
 failure, and CI is green, which shows that no currently registered CTest binary links a consumer that
 pulls that object and leaves those symbols unresolved. A future test that does pull it would fail to
 link unless another linked object or library supplies the gateway symbols. `cmake` is unavailable in
 the environment used for this slice, so this was derived from the source lists plus green CI and was
-not reproduced locally. It is a latent build-boundary gap distinct from the intentional profile
-boundary above; the two should not be collapsed into "CMake absence is harmless".
+not reproduced locally. The gap is a latent build-boundary one, distinct from the intentional
+profile boundary above; the two should not be collapsed into "CMake absence is harmless".
 
 ## Source liveness and ownership
 
 Exports with tracked production consumers:
 
-- `gw_pipeline_run_request` — `src/server/anthropic_http.c`, `src/server/openai_chat.c`.
-- `gateway_delegate_run_request_pipeline` and `gateway_delegate_tool_shape` —
-  `src/posix/agent_runtime.c`.
-- `gateway_policy_apply_request` — `src/server/anthropic_http.c`, `src/server/openai_chat.c`, and
+- `gw_pipeline_run_request`: `src/server/anthropic_http.c`, `src/server/openai_chat.c`.
+- `gateway_delegate_run_request_pipeline` and `gateway_delegate_tool_shape`,
+`src/posix/agent_runtime.c`.
+- `gateway_policy_apply_request`: `src/server/anthropic_http.c`, `src/server/openai_chat.c`, and
   module-locally from `gateway_delegate.c`.
-- `gateway_policy_pin_model` — `src/server/anthropic_http.c`.
-- `gateway_prevent_subagents_enabled` — `src/server/anthropic_http.c`, plus module-local callers in
+- `gateway_policy_pin_model`: `src/server/anthropic_http.c`.
+- `gateway_prevent_subagents_enabled`: `src/server/anthropic_http.c`, plus module-local callers in
   `gateway_policy.c` and `gateway_delegate.c`.
-- `gateway_policy_set_delegates_available_provider` — `src/server/server_compute.c`.
-- `gateway_policy_police_parsed_response` — `src/modules/governance/gw_stage_governance.c` and
+- `gateway_policy_set_delegates_available_provider`: `src/server/server_compute.c`.
+- `gateway_policy_police_parsed_response`: `src/modules/governance/gw_stage_governance.c` and
   `src/posix/agent_runtime.c`.
-- `gateway_policy_strip_tools` — called module-locally from `gateway_policy.c`; externally only by
+- `gateway_policy_strip_tools`: called module-locally from `gateway_policy.c`; externally only by
   `src/tests/test_gateway_policy.c`.
 
 The single export with no tracked-tree caller outside tests:
 
-- `gateway_policy_is_denied_tool` — its only tracked caller is `src/tests/test_gateway_policy.c`. It
+- `gateway_policy_is_denied_tool`: its only tracked caller is `src/tests/test_gateway_policy.c`. It
   is a small predicate over the same gate `gateway_policy_strip_tools` applies, so it is a
   privatization or deletion candidate rather than a missing-feature signal. It remains a declared
   public export, so absence of a tracked-tree caller is liveness evidence, not proof that no
@@ -105,9 +105,9 @@ layer-ownership debt of the same kind recorded for `cmd_plugin.c` in slice 36, a
 this latch. The gateway-mutation family remains owned by economizer under
 `src/modules/economizer/gateway_mutate*.c`.
 
-Consumers that live outside the module root — `src/server/anthropic_http.c`,
+Consumers that live outside the module root, `src/server/anthropic_http.c`,
 `src/server/openai_chat.c`, `src/posix/agent_runtime.c`, `src/server/server_compute.c`, and
-`src/modules/governance/gw_stage_governance.c` — are callers, not implementation, and are outside the
+`src/modules/governance/gw_stage_governance.c`, are callers, not implementation, and are outside the
 completeness domain.
 
 ## Test membership
@@ -124,9 +124,9 @@ tests belong outside that suite. No CMake policy statement covers the question e
 `tests/baselines/refactor/module-test-registration.json`, so any change to it surfaces as a reviewed
 baseline diff.
 
-The remaining `unit-test-gateway*` targets — `test_gateway.c`, `test_gateway_telegram.c`,
+The remaining `unit-test-gateway*` targets, `test_gateway.c`, `test_gateway_telegram.c`,
 `test_gateway_ntfy_webhook.c`, `test_gateway_stt_pairing.c`, `test_gateway_mutate.c`, and
-`test_gateway_mutate_wire.c` — exercise the `src/gateway` delivery binary or the economizer mutation
+`test_gateway_mutate_wire.c`, exercise the `src/gateway` delivery binary or the economizer mutation
 family, not this module, and are correctly unclaimed. A shared filename prefix is not ownership.
 
 ## Regression controls

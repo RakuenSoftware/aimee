@@ -1,4 +1,4 @@
-# Proposal: Server-driven thin client — the client knows transport, nothing else
+# Proposal: Server-driven thin client: the client knows transport, nothing else
 
 - **State:** proposed.
 
@@ -9,7 +9,7 @@ implementation of the API.
 
 It carries a 245-entry map of `method -> /v1 route`, a set of argument marshallers, a help
 table, and a command table. None of that is knowledge the client can hold correctly, because
-all of it describes **what the server can do** — and the server it is talking to is a
+all of it describes **what the server can do**, and the server it is talking to is a
 different build, deployed separately, on another host.
 
 The client's only legitimate concerns are the ones that are genuinely local: reaching the
@@ -19,7 +19,7 @@ and the workspace filesystem via the existing reverse-channel).
 
 Everything else moves to the server. The test of success: **a new server capability is usable
 from an existing client with no client change.** A client upgrade should be required only when
-the transport or the wire contract itself changes — a large upgrade, not a routine one.
+the transport or the wire contract itself changes, a large upgrade, not a routine one.
 
 ## §0 What already exists
 
@@ -27,7 +27,7 @@ Most of the machinery is present. This proposal is mostly deletion plus one endp
 
 - **`command_registry.h` states the right invariant, but it is not in force yet:**
 
-  > "A capability is registered ONCE, here, by the module that owns it. CLI, the v1 RPC
+  > "A capability is registered ONCE, here, by the module that owns it; CLI, the v1 RPC
   > routes, MCP and ACP all route from this table. … A surface enumerates the registry; it
   > does not keep a list of its own."
 
@@ -40,12 +40,12 @@ Most of the machinery is present. This proposal is mostly deletion plus one endp
   This matters for phasing: **the registry cannot be the thing the server serves definitions
   from until something populates it.** Either populate it first, or serve each kind of
   definition from wherever it actually lives today (§1). Assuming the registry is authoritative
-  is the mistake to avoid — its docstring reads as though it already is.
+  is the mistake to avoid. Its docstring reads as though it already is.
 
 - **The server already publishes its own API**: `/v1/openapi.json` and `/v1/openapi.yaml`.
 - **The workspace reverse-channel already exists** (`cli_workspace_reverse_channel_start`,
   `modules/workspace/cli_workspace_serve.c`). This is the usual objection to a dumb-pipe client
-  — "the server cannot read the user's files" — and it is already solved and in use by
+("the server cannot read the user's files") and it is already solved and in use by
   `mcp-serve`.
 - **The marshalling grammar is already declarative.** `marshal_request` dispatches through
   tables (`MARSHAL_NO_ARGS[]` and siblings) plus prefix fallbacks, not bespoke code per
@@ -73,7 +73,7 @@ The guards work. That is not the problem. **The problem is what they can see.** 
 
 They compare *the source tree against itself*. They cannot compare a **deployed client**
 against a **deployed server**, which is the only comparison that matters at runtime. Each
-guard's docstring also records a breakage that shipped anyway — commands that routed but had
+guard's docstring also records a breakage that shipped anyway, commands that routed but had
 no marshaller, commands that worked but were invisible to `help`. Four tables and three
 checkers is the cost of holding this knowledge in two places; it is a permanent tax, not a
 one-off.
@@ -81,7 +81,7 @@ one-off.
 ### The failure this produces
 
 Observed on an operator's machine (2026-08-17): client `pre-merge-safety-1696`, server
-`pre-merge-safety-2020` — 324 commits apart. Every capability added server-side in that window
+`pre-merge-safety-2020`, 324 commits apart. Every capability added server-side in that window
 was unreachable from that client, and the client cannot say so usefully, because it does not
 know what it is missing. It reports "has no /v1 route", which reads as "that command does not
 exist" rather than "your client is old".
@@ -101,7 +101,7 @@ POST /v1/cli
 ```
 
 What that deletes from the client: the route map, the marshallers, the help table, the command
-table, argument validation, response profiles, and the three drift guards — because there is no
+table, argument validation, response profiles, and the three drift guards, because there is no
 longer a second copy to drift.
 
 `help`, `--help`, completion, and "did you mean" all become server responses. `aimee help` on an
@@ -119,7 +119,7 @@ This is the boundary, and it is short:
   This is the client's actual job.
 - **The terminal.** tty detection, width, colour, paging, prompts, signal handling, exit codes.
 - **Local resources the server cannot reach**: the workspace filesystem and local exec, served
-  back over the existing reverse-channel. Note this is *mechanism*, not *policy* — the client
+  back over the existing reverse-channel. Note this is *mechanism*, not *policy*. The client
   serves file operations, it does not decide which commands need them.
 - **Bootstrap that cannot require a server**: `aimee remote set`, `aimee version`, and the
   diagnostics that must work when no server is reachable. These must be explicitly enumerated
@@ -132,31 +132,31 @@ the reverse-channel covers them.
 ## §4 Versioning
 
 One negotiated number: the client sends its wire version, the server answers with what it
-speaks. A server too new for a client says so **in those words** — "this client speaks v1, this
-server requires v2, upgrade the client" — rather than the current "has no /v1 route", which
+speaks. A server too new for a client says so **in those words**, "this client speaks v1, this
+server requires v2, upgrade the client", rather than the current "has no /v1 route", which
 misattributes a version problem to a typo.
 
-This is what makes "no upgrade short of a large upgrade" true rather than aspirational: the
+It makes "no upgrade short of a large upgrade" true rather than aspirational: the
 wire contract is the only thing that can force an upgrade, so it is the only thing to version.
 
 ## Phasing
 
-1. **DONE — the route map is served, not compiled in.** `GET /v1/cli/manifest` emits
+1. **DONE. The route map is served, not compiled in.** `GET /v1/cli/manifest` emits
    `{op, verb, path, async?}` off the live `g_v1_routes`; the client's 245-row generated table
    and its drift guard are gone. Proof the copy had drifted: the served map carries
    `workspace.mirror-sync`, which the generated table was missing, so a route the server had all
    along became reachable.
-2. **DONE — the command catalogue is served.** The 67-row help table moved from
+2. **DONE. The command catalogue is served.** The 67-row help table moved from
    `src/cli_help_data.h` to `src/server/cli_command_defs_data.h` and rides the same manifest.
-   The client keeps a deliberately tiny bootstrap list (`remote`, `version`, `help`) — the
-   commands you need *before* you can reach a server — and renders the rest. `aimee help` on an
+   The client keeps a deliberately tiny bootstrap list (`remote`, `version`, `help`). The
+   commands you need *before* you can reach a server, and renders the rest. `aimee help` on an
    existing client lists a newer server's commands.
-3. **NEXT — modules own their rows.** The catalogue is still one hand-written table, just on the
+3. **NEXT, modules own their rows.** The catalogue is still one hand-written table, just on the
    correct side of the wire. `command_registry.h` says each module registers its own; modules are
    separate processes, so the natural home is the module descriptor (`module.json`), which today
    has no `commands` field. Adding one, and assembling the registry from the descriptors, is what
    makes "registration is the only way in" true rather than aspirational.
-4. **THEN — the marshallers**, the last body of server knowledge in the client. The registry
+4. **THEN, the marshallers**, the last body of server knowledge in the client. The registry
    already carries a `schema` per command, which is the shape an argument marshaller needs.
 5. **Version negotiation** beyond the current `manifest_version` refusal, and writing the
    bootstrap allowlist down as a contract rather than a convention.
@@ -173,7 +173,7 @@ Each phase is independently shippable and each removes more than it adds.
 
 - **Latency.** Today an unknown subcommand is rejected locally; server-side parsing costs a
   round trip to say "unknown command". Acceptable for a control-plane CLI, and it is the same
-  round trip every *valid* command already pays — but it is a real regression for typos.
+  round trip every *valid* command already pays, but it is a real regression for typos.
 - **Offline behaviour gets worse, visibly.** Today some commands appear to work with no server.
   After this, they fail. That is more honest, but it is a behaviour change and the
   bootstrap allowlist (§3) is what keeps it tolerable. It must be decided deliberately, not

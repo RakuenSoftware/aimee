@@ -1,4 +1,4 @@
-# Agentic supervised SWE-bench (#987) — live-wiring status
+# Agentic supervised SWE-bench (#987): live-wiring status
 
 Status of wiring the 7 live `NotImplementedError` stubs in the agentic supervised SWE-bench
 harness. Honest split of **implemented / locally-verified / validation-pending**. Written
@@ -22,12 +22,12 @@ runbook fast-check (161 tests) is green.
 |---|---|---|
 | `run_agentic_loop` | `swebench_agentic_harness.py` (S1) | wired: provision → dispatch `code --tools --worktree` → extract patch (workspace diff, else returned diff) |
 | `run_arm_a` | `swebench_arm_runner.py` (S2) | wired: composes the loop + job-id token headline; two wall-clocks |
-| `run_arm_c_supervised` | `swebench_supervision.py` (S3) | wired: Option A — N concurrent workers + tools-OFF supervisor + deterministic best-of-N + gated escalation |
+| `run_arm_c_supervised` | `swebench_supervision.py` (S3) | wired: Option A: N concurrent workers + tools-OFF supervisor + deterministic best-of-N + gated escalation |
 | `run_suite` | `swebench_suite.py` (S5) | wired: run-plan → arms → official grade (lease + retry) → K-aggregate → report; injected seams |
 | `run_live_matrix` | `swebench_live_attribution.py` (S0-live) | wired: dispatch primary+worker probe → verify L1–L4 over the real schema |
 | `_invoke_v1_runs`, `_invoke_agent_shell` | `swebench_transport_verify.py` (S0) | intentionally left raising, message updated to redirect to the sanctioned delegate transport (the `/v1/runs` EMPTY-polarity model is superseded) |
 
-New module: `swebench_live_transport.py` — the single live transport (argv build with the
+New module: `swebench_live_transport.py`. The single live transport (argv build with the
 tools⇒worktree invariant, dispatch/poll with an injectable runner, job-id token split, supervisor
 tool-row assertion). Fully unit-tested.
 
@@ -40,11 +40,11 @@ tool-row assertion). Fully unit-tested.
 - **Multi-provider consultation** (`aimee delegate aggregate`) engages all 6 providers
   (mimo-v2.5-pro, GLM-5.2, gpu-mid, MiniMax-M3, mistral, codex; 0 failed).
 
-## Validation-pending (needs hardware not reachable from this box) — **hypothesis, unverified**
+## Validation-pending (needs hardware not reachable from this box): **hypothesis, unverified**
 
 1. **End-to-end graded run + claim gate (acceptance #5/#6).** Requires the official SWE-bench
    grader on **CT 101** (real docker + py3.11). Verified 2026-07-08 that the `.253` host docker is
-   the **LXC2Docker shim** (mangles images) with py3.13 and ~14G root — unsuitable; confirms the
+   the **LXC2Docker shim** (mangles images) with py3.13 and ~14G root, unsuitable; confirms the
    documented CT-101-only rule. Grading was **not executed**; `official_grade_fn` parses the report
    `resolved_ids` but that parse is validated against the documented schema, not a live report.
 2. **Real-ledger token attribution.** The ledger lives on the fleet host
@@ -55,9 +55,9 @@ tool-row assertion). Fully unit-tested.
    co-located with where the delegate executes (server-side on the fleet). The provisioning +
    extraction functions are tested; the co-located server-side execution is the operator step.
 4. **The claim gate is human-gated by design** (S6 criterion 6: an independent reviewer who did not
-   author the harness) — it can never be auto-satisfied autonomously.
+   author the harness). It can never be auto-satisfied autonomously.
 
-## Multi-provider roundtable review (6 providers, 0 failed) — fixes applied
+## Multi-provider roundtable review (6 providers, 0 failed): fixes applied
 
 A full-panel `aimee delegate aggregate` review of the wiring plan (codex, GLM-5.2, MiniMax-M3,
 mistral, mimo-v2.5-pro, gpu-mid) flagged two real honesty issues, both **fixed**:
@@ -74,7 +74,7 @@ mistral, mimo-v2.5-pro, gpu-mid) flagged two real honesty issues, both **fixed**
 
 Panel items that are **validation-pending** (need the real ledger to confirm): arm-A token
 granularity (does the transport emit a `token_audit` row per internal sub-turn under one
-`delegation_id`? — the exact-delegation sum captures however many rows exist, but the per-sub-turn
+`delegation_id`? The exact-delegation sum captures however many rows exist, but the per-sub-turn
 emission itself is unconfirmed); and that $0-priced worker dispatches still emit realized rows.
 
 ## Why the proposal is NOT moved to `done`

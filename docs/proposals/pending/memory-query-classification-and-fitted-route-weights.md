@@ -1,6 +1,6 @@
 # Memory query classification correctness, fitted route weights, and a retrieval sufficiency gate
 
-- **State:** PENDING (proposed) — four defects and two structural gaps in the memory
+- **State:** PENDING (proposed). Four defects and two structural gaps in the memory
   query-planning path, found while auditing `Kitzkatz/memoria` against Aimee's memory module.
   Slice 1 is a live correctness bug with a repo-wide pattern sweep; Slices 2–5 are
   independently gated improvements. Each slice files per the repo's proposal lifecycle on
@@ -10,9 +10,9 @@
 
 ## Problem
 
-Aimee's memory retrieval classifies every query twice — once into a *route*
+Aimee's memory retrieval classifies every query twice, once into a *route*
 (`MEM_ROUTE_LEXICAL / SEMANTIC / GRAPH / HYBRID`) and once into an *intent*
-(`MEM_QUERY_GENERAL / TEMPORAL / ENTITY / PROCEDURAL`) — and both classifications steer
+(`MEM_QUERY_GENERAL / TEMPORAL / ENTITY / PROCEDURAL`), and both classifications steer
 ranking. Four things are wrong with how that happens:
 
 1. **The classifiers match substrings, not words.** `"update the candidate ranker"` is
@@ -33,11 +33,11 @@ ranking. Four things are wrong with how that happens:
 Items 1 and 2 are the load-bearing ones. Item 1 is a bug; item 2 is the reason the router
 cannot improve on its own.
 
-## Current state — the trace (all file:line verified on branch `agent/human-trigger-workflows`)
+## Current state: the trace (all file:line verified on branch `agent/human-trigger-workflows`)
 
 ### Classification
 
-`memory_query_intent()` — `src/modules/memory/memory_core_search.c:1004-1033`. A
+`memory_query_intent()`, `src/modules/memory/memory_core_search.c:1004-1033`. A
 first-match-wins cascade of raw `strstr` against `raw_query` and `norm_query`, with
 unanchored single-word needles:
 
@@ -51,23 +51,22 @@ strstr(norm_query, "setup") /* ⊂ setups */
 ```
 
 **A whole-token matcher already exists in the same translation unit, 2 lines below this
-function.** `memory_query_has_term()` — `memory_core_search.c:1035` — is
+function.** `memory_query_has_term()` (`memory_core_search.c:1035`) is
 `memory_token_in_norm(norm_query, term)`, and `memory_token_in_norm()`
 (`memory_core_search_b.c:339-354`) is a correct space-delimited whole-token/phrase matcher.
-The three functions immediately following the classifier —
-`memory_query_wants_recent/past/future()`, `memory_core_search.c:1040-1064` — already use it,
+The three functions immediately following the classifier (`memory_query_wants_recent/past/future()`, `memory_core_search.c:1040-1064`) already use it,
 over a vocabulary that overlaps the classifier's own (`"today"`, `"recent"`, `"latest"`,
 `"before"`, `"after"`, `"earliest"`, `"next"`). The classifier is the outlier, not the norm.
 
 ### What the misclassification costs
 
-`memory_unit_kind_intent_boost()` — `src/modules/memory/memory_core_helpers_b.c:942-967`:
+`memory_unit_kind_intent_boost()`, `src/modules/memory/memory_core_helpers_b.c:942-967`:
 
 | Intent | episodic | semantic | procedural | other |
 |---|---|---|---|---|
-| `TEMPORAL` | **+0.18** | −0.06 | — | — |
-| `ENTITY` / `GENERAL` | −0.03 | **+0.12** | — | — |
-| `PROCEDURAL` | — | — | **+0.22** | **−0.08** |
+| `TEMPORAL` | **+0.18** | −0.06 | n/a | n/a |
+| `ENTITY` / `GENERAL` | −0.03 | **+0.12** | n/a | n/a |
+| `PROCEDURAL` | n/a | n/a | **+0.22** | **−0.08** |
 
 Intent also sets semantic fetch floors in `memory_collect_candidates`
 (`memory_core_search_c.c:168-178`). So a misclassified code question is ranked as if it
@@ -78,31 +77,31 @@ asked when something happened, and fetches on the temporal budget.
 This is a pattern defect, not a single site. It appears in **three distinct forms**, which
 matters because the right fix differs per form:
 
-**Form A — no boundary at all** (bare `strstr` / `strcasestr`). Both edges unchecked.
+**Form A, no boundary at all** (bare `strstr` / `strcasestr`). Both edges unchecked.
 
 | Site | Needle | Collides with |
 |---|---|---|
 | `memory_core_search.c:1004` `memory_query_intent` | `date`, `ago`, `day`, `time` | candidate, Chicago, birthday, sometimes |
 | `memory_core_search.c:843` `memory_query_route` | `fixes` | prefixes, suffixes |
 | `memory_context.c:210` `quantitative_keywords` | `count`, `total`, `times` | account, totally, sometimes |
-| `memory_context.c:158` `temporal_phrases` | `lately`, `recently` | latent — the list is mostly multi-word, which is the only thing holding it up |
+| `memory_context.c:158` `temporal_phrases` | `lately`, `recently` | latent: the list is mostly multi-word, which is the only thing holding it up |
 | `memory_context.c:126` `session_keywords` | `recap` | recapture |
-| `memory_core_scope_embed.c:236` `shared_keywords` | `auth`, `cert` | **author**, **certain** — both very common; mis-tags ordinary memories as shared infrastructure |
-| `memory_advanced.c:507` `match_keywords` | `structured` | **`unstructured`** — the positive style marker is a substring of the negative one, so text complaining about unstructured output scores *both* sides of the dimension |
-| `memory_lifecycle.c:77,94` date/relative markers | — | none found; converted for uniformity |
+| `memory_core_scope_embed.c:236` `shared_keywords` | `auth`, `cert` | **author**, **certain**: both very common; mis-tags ordinary memories as shared infrastructure |
+| `memory_advanced.c:507` `match_keywords` | `structured` | **`unstructured`**: the positive style marker is a substring of the negative one, so text complaining about unstructured output scores *both* sides of the dimension |
+| `memory_lifecycle.c:77,94` date/relative markers | n/a | none found; converted for uniformity |
 
 **Explicitly excluded: `memory_assemble.c:557` `compute_term_overlap`.** It has the same
 shape but a materially different contract, and converting it is a regression. Its needles are
 **user query terms**, not a closed vocabulary, and the substring match is doing duty as a
 poor-man's stemmer: `"cert"` must cover `"certificate"`, `"auth"` must cover
-`"authentication"`. `test_context_assembly.c:91` pins exactly that — a query of
+`"authentication"`. `test_context_assembly.c:91` pins exactly that, a query of
 `"fix PostgreSQL cert auth"` must rank `"authentication flow validates certificate chain"`
 above an unrelated deploy memory. Whole-word matching drops that overlap to zero and the test
 fails. The cost of leaving it is that `"add"` also counts against `"address"`; removing that
 without losing the stemming needs a real stemmer, which is separate work. A closed keyword
 list has no such tension, which is why every site above converts and this one does not.
 
-**Form B — left boundary only, right boundary missing.** `count_keyword_matches()`
+**Form B, left boundary only, right boundary missing.** `count_keyword_matches()`
 (`memory_context.c:129`) *does* check `p == text || !isalpha(p[-1])`, so suffix collisions
 (`ship` in `relationship`, `times` in `sometimes`) were never live here. The live defect is
 the unchecked right edge:
@@ -113,23 +112,23 @@ the unchecked right edge:
 | `debug_keywords` | `fix` | **fixture** |
 | `review_keywords` | `check` | **checkout** |
 
-This form must keep prefix tolerance — `deploy`/`deployed`, `release`/`released`,
-`build`/`building` are the same word and should still match — so a strict whole-token test
+This form must keep prefix tolerance, `deploy`/`deployed`, `release`/`released`,
+`build`/`building` are the same word and should still match, so a strict whole-token test
 would trade one defect for a recall regression. The fix admits a common inflectional suffix
 (`s`, `es`, `ed`, `d`, `ing`) and rejects any other letter continuation.
 
-**Form C — awareness without the fix.** `memory_context.c:157` carries the comment *"Single-word
+**Form C, awareness without the fix.** `memory_context.c:157` carries the comment *"Single-word
 markers must match as whole tokens to avoid spurious hits (e.g. 'since' inside 'business')"*,
 but the mitigation applied was to make the list mostly multi-word phrases, not to use a
 matcher. The comment describes a rule the code does not enforce.
 
 Concrete impact outside the classifier: `count_keyword_matches()` feeds the recall-bundle kind
 budgets at `memory_context.c:509-540`. `"fix the address parsing"` scores `debug+1` **and**
-`plan+1` — the `plan` point comes entirely from `"add"` inside `"address"`.
+`plan+1`. The `plan` point comes entirely from `"add"` inside `"address"`.
 
 ### Route weights
 
-`memory_query_plan()` — `memory_core_search.c:918-976`. Four routes × four weights, plus six
+`memory_query_plan()`, `memory_core_search.c:918-976`. Four routes × four weights, plus six
 query-shape adjustments, all literals:
 
 ```c
@@ -146,21 +145,21 @@ case MEM_SHAPE_WHEN:
 
 Fitting infrastructure that exists and cannot reach them:
 
-- `src/kb/kb_ranker_fit.c` — reads a joined feature/outcome view, runs `scripts/rank-fit.py`,
+- `src/kb/kb_ranker_fit.c`: reads a joined feature/outcome view, runs `scripts/rank-fit.py`,
   gates on NDCG@k lift over the incumbent (`RANK_FIT_LIFT_EPSILON` 1e-3,
   `RANK_FIT_DEFAULT_MIN_GROUPS` 8), and promotes a `ranker_model` artifact only on measured
   lift.
-- `src/kb/kb_bandit.c` — contextual arm registration and reward feedback, arms persisted as
+- `src/kb/kb_bandit.c`: contextual arm registration and reward feedback, arms persisted as
   `policy_arm` artifacts.
-- `src/kb/kb_calibrate.c` — Bayesian promotion-threshold calibration per surface.
+- `src/kb/kb_calibrate.c`: Bayesian promotion-threshold calibration per surface.
 
 Only `config_memory_semantic_weight()` (`config.h:887`) can influence memory ranking from
 outside the binary, and it is a single global scalar applied at
-`memory_core_helpers.c:746` — not the per-route table.
+`memory_core_helpers.c:746`, not the per-route table.
 
 ### Lane sequence and the telemetry that already exists
 
-`memory_collect_candidates` — `memory_core_search_c.c:120-256` — runs, unconditionally and in
+`memory_collect_candidates` (`memory_core_search_c.c:120-256`) runs, unconditionally and in
 order: graph (route-gated) → variant → decomposition sub-queries → unit-semantic → semantic →
 negation FTS → negation vector → `LIKE` fallback.
 
@@ -174,7 +173,7 @@ Already collected, already unused as a control signal:
 
 ### Read-time assembly
 
-`recall_truncate_section()` — `memory_context.c:982` — trims the assembled bundle to the token
+`recall_truncate_section()` (`memory_context.c:982`) trims the assembled bundle to the token
 budget by section priority and score order. Write-time dedup (`memory_improve_dedupe()`,
 `db2_memory_active_kind_dedupe_candidates()`, `kb_neardup.c`) has no read-time counterpart.
 
@@ -187,7 +186,7 @@ budget by section priority and score order. Write-time dedup (`memory_improve_de
 ## Language and placement
 
 Standing direction: only the event bus and its communication surface stay in C; everything
-else becomes a Go module. That is already a documented, in-flight program — see
+else becomes a Go module. That is already a documented, in-flight program. See
 [`db2-as-a-go-module`](./db2-as-a-go-module.md) for the two-step pattern (C library → C module
 behind a frozen event contract → pure-Go module proven against it, *"no cgo bridge"*).
 
@@ -203,8 +202,8 @@ That splits this proposal cleanly:
   pattern the Go port is *proven against the C implementation*, so a defect left in C becomes
   the conformance baseline and gets faithfully reproduced. Fixing before the port is strictly
   cheaper than fixing after, and the fix is small and fully covered by deterministic tests.
-- **Slices 2–5 are Go work, and should not be built in C.** They add new behaviour —
-  scored classification, a fitted weight artifact, a sufficiency predicate, a diversity pass.
+- **Slices 2–5 are Go work, and should not be built in C.** They add new behaviour,
+scored classification, a fitted weight artifact, a sufficiency predicate, a diversity pass.
   Adding those in C creates debt that the port must then carry across. They belong in
   `server-go/modules/memory` behind the retrieval event contract, and they are gated on that
   contract existing.
@@ -234,13 +233,13 @@ Each slice: pure core + deterministic tests first, then wire, then gate. Slice 1
 correctness fix); Slices 2–5 are Go, behind the memory-retrieval module boundary, per
 **Language and placement** above.
 
-1. **[C — DONE] Whole-token classification, and the module-wide sweep.**
+1. **[C, DONE] Whole-token classification, and the module-wide sweep.**
    Rewrite `memory_query_intent()` to normalize once and match through
    `memory_query_has_term()`, which already sits 2 lines below it. Then sweep every site in
    the table above onto the same helper (or a shared `memory_keyword_hit()` wrapper for the
    `count_keyword_matches` / lowercased-buffer call shape, which matches against a
    lowercased raw buffer rather than a `normalize_key` output and therefore needs its own
-   boundary check — punctuation as well as space).
+   boundary check, punctuation as well as space).
    This slice owns the pattern sweep: `memory_core_search.c` ×2, `memory_context.c` ×5,
    `memory_core_scope_embed.c`, `memory_lifecycle.c` ×2. Verify no site remains with
    `scripts`-side grep for `strstr(` over a keyword-list identifier in
@@ -251,7 +250,7 @@ correctness fix); Slices 2–5 are Go, behind the memory-retrieval module bounda
    `"prefixes for the embedder"` → not `MEM_ROUTE_GRAPH`. Plus a regression assertion that
    every genuine temporal phrasing already covered still classifies `TEMPORAL`.
    **Gate:** existing memory suites stay green; `test_memory_retrieval_eval` shows no
-   regression. Independently shippable — a live bug, must not wait on the rest.
+   regression. Independently shippable. A live bug, must not wait on the rest.
 
 2. **[Go] Scored classification with exclusions and confidence.**
    Replace first-match-wins with an additive score per candidate class: keyword hit `+1.0`,
@@ -271,12 +270,12 @@ correctness fix); Slices 2–5 are Go, behind the memory-retrieval module bounda
    `RANK_FIT_LIFT_EPSILON` promotion rule unchanged.
    **Gate:** with no artifact present, `memory_query_plan()` output is byte-identical to the
    pre-slice behaviour (deterministic test over all 4 routes × 6 shapes). A fitted model
-   promotes only on measured NDCG lift on `benchmarks/memory/` — no promotion without
+   promotes only on measured NDCG lift on `benchmarks/memory/`, no promotion without
    evidence, exactly as on the KB path.
 
 4. **[Go] Retrieval sufficiency gate.**
-   Add a predicate evaluated between lanes — required sources present, ≥N distinct
-   `MEM_SOURCE_*` bits set, ≥M unique candidates — that can retire the `LIKE` fallback and
+   Add a predicate evaluated between lanes, required sources present, ≥N distinct
+   `MEM_SOURCE_*` bits set, ≥M unique candidates. That can retire the `LIKE` fallback and
    the decomposition sub-queries when earlier lanes already cleared the bar. Config-gated,
    **default off**.
    **Gate:** with the gate off, candidate sets are identical to today. With it on,
@@ -287,7 +286,7 @@ correctness fix); Slices 2–5 are Go, behind the memory-retrieval module bounda
    MMR pass in front of `recall_truncate_section()`, λ config-gated, **default off** (λ=1 is
    exactly today's behaviour). Sweep λ on `benchmarks/longmemeval/` and `benchmarks/locomo/`.
    **Gate:** measured lift on at least one suite with no regression on the others, and
-   `benchmarks/memory/poison_gate.py` still green — diversity that admits a poisoned
+   `benchmarks/memory/poison_gate.py` still green, diversity that admits a poisoned
    near-duplicate is worse than none.
 
 ## Risks / open questions
@@ -305,12 +304,12 @@ correctness fix); Slices 2–5 are Go, behind the memory-retrieval module bounda
 - **Slice 3's training signal.** The KB fitter consumes a joined feature/outcome view; the
   memory path's equivalent outcome labels need to be confirmed to exist at sufficient volume
   before the fit is meaningful. If they do not, Slice 3 lands the artifact plumbing plus
-  default fallback and the fit waits — the plumbing is still worth having, because it is what
+  default fallback and the fit waits. The plumbing is still worth having, because it is what
   makes the weights reachable at all.
 - **Slice 4 could mask a lane regression.** If a lane silently stops returning results, a
   sufficiency gate that short-circuits before it would hide the failure. The stage metrics
   must keep firing for skipped lanes with an explicit `skipped` disposition, not go quiet.
-- **Ordering.** Slices 1 and 2 are prerequisites for 3 — fitting weights on top of a
+- **Ordering.** Slices 1 and 2 are prerequisites for 3, fitting weights on top of a
   classifier that misroutes would fit the wrong thing.
 
 ## Acceptance

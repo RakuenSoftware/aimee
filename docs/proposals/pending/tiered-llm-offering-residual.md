@@ -1,6 +1,6 @@
 # Tiered LLM offering: remaining program scope
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parents:** [`tiered-llm-offering.md`](../done/tiered-llm-offering.md) and
 [`tiered-llm-offering.plan.md`](../done/tiered-llm-offering.plan.md)

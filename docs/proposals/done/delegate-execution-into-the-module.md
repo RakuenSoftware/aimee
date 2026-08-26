@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — Go producer and bus cutover landed.
+- **State:** DONE. Go producer and bus cutover landed.
 - **Date:** 2026-08-10.
 - **Charter roles:** Enforce / Constrain-Verify.
 - **Archived parent:**
@@ -39,8 +39,8 @@ directly, and every inter-module exchange goes over the bus so governance can se
 ## 2. Why roundtable cannot simply be rewired
 
 There is no bus stage to point it at. `server-go/modules/delegates/delegates.go` is 49
-lines and canonicalizes role names — its own comment says it "canonicalizes a delegate role
-**without invoking a delegate**". Execution is ~12,811 lines of C under
+lines and canonicalizes role names. Its own comment says it "canonicalizes a delegate role
+**without invoking a delegate**"; Execution is ~12,811 lines of C under
 `src/modules/delegates/`.
 
 So roundtable's HTTP client is a *symptom*. It can only be deleted once execution is
@@ -56,16 +56,16 @@ A delegate call is: **persona / model / prompt in, response out**, plus the dele
 `working / failed / done` status.
 
 Nothing about the caller crosses. `ReplayOnly`, `ExecutionVersion`, `WorkItemID`, `Stage`,
-`DurableSlot`, `RetryTag` and `Participant` — every one of which `plane.DelegateRequest`
-carries today — belong to whoever owns work items. A retry is not a field a delegate
+`DurableSlot`, `RetryTag` and `Participant`, every one of which `plane.DelegateRequest`
+carries today, belong to whoever owns work items. A retry is not a field a delegate
 interprets; it is the caller choosing to call again. Fifty resumptions are fifty
 independent calls that know nothing of each other.
 
 `plane.DelegateRequest` is therefore the wrong starting point for the wire contract. It is
 an HTTP API shaped around a workflow client, not a module contract.
 
-A caller may still put state-derived *content* in the request — "we have X, Y and Z, we now
-need A, B and C" is input the delegate consumes and forgets. What it must never do is make
+A caller may still put state-derived *content* in the request, "we have X, Y and Z, we now
+need A, B and C" is input the delegate consumes and forgets; What it must never do is make
 the delegate a custodian of the caller's state.
 
 ## 4. Ordering
@@ -82,7 +82,7 @@ Measured sizes, smallest first, as a starting decomposition:
 | `delegate_backend.c` | 250 | backend registry |
 | `delegate_economics.c` | 343 | cost/tier report over job+task rows |
 | `delegate_routing.c` | 483 | which delegate for a role |
-| `delegate_launch.c` | 488 | `delegate_launch_coord_job` — the entry point |
+| `delegate_launch.c` | 488 | `delegate_launch_coord_job`: the entry point |
 | `delegate_prompt.c` | 1,982 | prompt construction |
 | `delegate_backend_docker.c` | 1,635 | sandbox backend |
 
@@ -91,7 +91,7 @@ backends move last: they are where the real I/O lives, and they are what makes t
 point meaningful.
 
 `delegate_role.c` is a special case worth resolving early. Its alias table is byte-for-byte
-duplicated in the module adapter — the existing comment in `test_process_module_handlers.c`
+duplicated in the module adapter. The existing comment in `test_process_module_handlers.c`
 records that nothing in the build keeps them in step, and that the duplicate exists because
 the thin client hosts no bus. Deduplicating it needs a decision about whether the thin
 client should canonicalize roles at all.
@@ -101,7 +101,7 @@ client should canonicalize roles at all.
 - `server-go/modules/roundtable` contains no HTTP client and no import of another module.
 - Delegate execution is reachable only as a bus stage; `AIMEE_AGENT_SERVICE_SOCKET` and
   `AIMEE_AGENT_SERVICE_URL` are gone.
-- A delegate holds no caller state — only its own `working / failed / done`.
+- A delegate holds no caller state, only its own `working / failed / done`.
 - `check_go_module_boundary.py` lands with an **empty** allowlist, forbidding
   `server-go/modules/<a>` from importing `server-go/modules/<b>`.
 

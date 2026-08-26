@@ -1,6 +1,6 @@
-# Proposal: Attestable enforcement — complete the WORM trust anchor and make every verdict provable
+# Proposal: Attestable enforcement: complete the WORM trust anchor and make every verdict provable
 
-- **State:** PENDING — Part 1 of the three-part governance arc
+- **State:** PENDING. Part 1 of the three-part governance arc
   (this + [governance posture & policy surface](governance-policy-surface-and-posture.md)
   + [agent identity & artifact trust](governance-agent-identity-and-artifact-trust.md)).
 - **Origin:** autonomous overnight governance deep-dive commissioned by JBailes,
@@ -16,14 +16,13 @@
 
 ## Thesis
 
-The governance question the industry cannot yet answer is not *"do you enforce
-policy?"* — it is *"can you prove, without trusting the governed agent, that
-enforcement actually held?"* An enforcer that shares a trust boundary with the
+The governance question the industry cannot yet answer is *"can you prove, without trusting the
+governed agent, that enforcement actually held?"* An enforcer that shares a trust boundary with the
 workload it constrains can be subverted, not merely ignored; the trust anchor has
 to live outside the governed process or it doesn't exist.
 
 aimee is structurally ahead here. Its authoritative enforcers already sit outside
-the governed agent's process — `pre_tool_check` runs server-side for delegates and
+the governed agent's process, `pre_tool_check` runs server-side for delegates and
 MCP dispatch (`src/server/server.c:924`, `src/server/server_compute_async.c:206`),
 the gateway rewrites the primary's LLM traffic in aimee's own process
 (`src/modules/gateway/gateway_policy.c`), workflow gates are engine-owned and HMAC-non-forgeable
@@ -39,9 +38,9 @@ is the last mile that turns "we log verdicts" into "we can attest verdicts":
    trigger/forge ops each write their own side log or nothing);
 3. a verdict row does not record **which policy was in force**, so a row cannot
    prove what was enforced, only that something was;
-4. the two components that keep the chain trustworthy against a compromised host —
-   the **privileged sealer sidecar** (R2-5) and the **signed off-host anchor**
-   (R2-8) — shipped as carried follow-ups, not code.
+4. the two components that keep the chain trustworthy against a compromised host,
+the **privileged sealer sidecar** (R2-5) and the **signed off-host anchor**
+   (R2-8), shipped as carried follow-ups, not code.
 
 Close those four and aimee ships something none of the surveyed platforms ship:
 per-action, policy-versioned, hash-chained, externally-anchored enforcement
@@ -53,7 +52,7 @@ evidence, produced by enforcers that do not live in the governed agent's process
   out-of-loop policy** (Cedar-evaluated tool-call policy at a managed gateway,
   default-deny; control-plane guardrails per tool call; org-level model/tool-call
   screening with per-agent SPIFFE-based identity). "Don't let the agent police
-  itself" is now the shipped industry default — the architecture aimee already has.
+  itself" is now the shipped industry default; the architecture aimee already has.
 - **None of them attest enforcement.** The audit ceiling in shipping systems is
   integrity-validatable log digests; per-action hash-chained agent audit exists
   only as an unadopted IETF individual draft
@@ -62,11 +61,11 @@ evidence, produced by enforcers that do not live in the governed agent's process
   attest *code identity*, never per-action verdicts.
 - The trust-boundary framing (ARMO, 2026-05: "the trust anchor lives outside the
   agent's process, or it doesn't exist"; kernel-side evidence over workload
-  self-reports) matches the WORM proposal's own §7 out-of-band anchor design —
-  which is exactly the deferred piece.
+  self-reports) matches the WORM proposal's own §7 out-of-band anchor design,
+which is exactly the deferred piece.
 - OWASP Top 10 for Agentic Applications (2025-12) makes this ASI-legible:
   this proposal is the ASI10 (rogue agents) / ASI03 (identity & privilege abuse)
-  *evidence* layer — the ability to detect and prove, not just configure.
+  *evidence* layer, the ability to detect and prove, not just configure.
 
 Sources: armosec.io/blog/ai-agent-governance/ · federalregister.gov 2026-00206
 (NIST-2025-0035) · genai.owasp.org Top 10 for Agentic Applications (2026) ·
@@ -86,7 +85,7 @@ datatracker.ietf.org draft-sharif-agent-audit-trail.
 
 ## Deltas
 
-### A1 — One chain, default-on
+### A1: One chain, default-on
 
 Flip `audit_worm_enabled` default **on** (dual-write) after the deploy-tier live
 verify that the done audit proposal carried; then execute that proposal's own
@@ -97,7 +96,7 @@ tree. Rollout: `observe` (dual-write, file authoritative) → `standard` (WORM
 authoritative, fail-closed writer per the done proposal's §Durability). Profile
 naming is Part 2's; the flag flip is this proposal's.
 
-### A2 — Capture completeness: every enforcer reaches the chain
+### A2: Capture completeness: every enforcer reaches the chain
 
 The done WORM proposal's §4 inventory + CI lint guard, actually executed. Today's
 enforcement points that decide allow/block but never write a chained row:
@@ -105,26 +104,26 @@ enforcement points that decide allow/block but never write a chained row:
 | Enforcer | Today's sink | Delta |
 | --- | --- | --- |
 | Attention guard / session-worktree isolation (`src/cli_attention_guard.c:617-666`) | per-session JSON under `.cache/attention/` + stderr | emit `tool.guard` verdict via the existing hook→server report path; client-side blocks buffered and flushed on next server contact (hook subprocesses must not need DB access) |
-| Gateway policy (`src/modules/gateway/gateway_policy.c:94-211`: subagent strip, response police, model pin) | none | `gateway.policy` rows: what was stripped/pinned, request id — the gateway is aimee's own process; direct `audit_event()` |
+| Gateway policy (`src/modules/gateway/gateway_policy.c:94-211`: subagent strip, response police, model pin) | none | `gateway.policy` rows: what was stripped/pinned, request id: the gateway is aimee's own process; direct `audit_event()` |
 | Memory interception (`server_memory_intercept`, `src/server/server.c:729,907`) | `interception.jsonl` | `memory.intercept` rows (deny+redirect is a governed verdict); keep the jsonl as operational detail |
 | Integrity gate verdicts (`src/integrity_gate.c:247-315`) | returned struct only; caller decides | `ingest.integrity` rows at each wired call site (Part 2 wires the sites) with category + verdict + source class |
 | S2 native gate DENY / WOULD-DENY (`src/cmd_hooks.c:180-212`, `src/server/s2_native_gate_hook.c`) | `audit_log("s2-native-gate", …)` | route through `audit_event` like the other block sites |
 | Vault writes / capability grants (`src/server/server_vault.c`) | dedicated append-only file | dual-write `vault.write` / `vault.capability` rows (fingerprints only, per its existing redaction) |
-| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/modules/workflows/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision — autonomous runs are default-on (`wfe_live_forge_enabled = 1`, `src/modules/config/config.c:811`); their governed ops belong in the chain first |
+| Trigger fires + forge ops (`src/server/trigger_scheduler.c`, `src/modules/workflows/wfe_live_forge.c:35-47`) | lifecycle events | `trigger.fire` / `forge.op` rows incl. the `forge_allowed()` rail decision: autonomous runs are default-on (`wfe_live_forge_enabled = 1`, `src/modules/config/config.c:811`); their governed ops belong in the chain first |
 
 Plus the lint guard: mutation entry points in the audited domains must route
 through `audit_event`; a bypassing call site fails CI (per done proposal §4).
 
-### A3 — Policy-versioned verdicts ("what was in force")
+### A3: Policy-versioned verdicts ("what was in force")
 
 A row today proves *a* decision happened; it cannot prove *under which policy*.
 Add to the verdict row's allowlisted `detail`:
 
-- `policy_rev` — a short hash over the governance-relevant effective config
+- `policy_rev`: a short hash over the governance-relevant effective config
   (guardrail mode, enforcement-stage dial, integrity gate mode, toolset id, active
   profile), computed once per config load/reload and cached; live-reload bumps it.
-- `rule_id` — already exists as the stable `reason_code`; keep.
-- `stage` — the `AIMEE_WORKFLOW_ENFORCE_STAGE` dial value where relevant.
+- `rule_id`: already exists as the stable `reason_code`; keep.
+- `stage`: the `AIMEE_WORKFLOW_ENFORCE_STAGE` dial value where relevant.
 
 With A3, "show me every action allowed while the integrity gate was in shadow" is
 a chain query, and a compliance evidence export (time-window → policy revisions →
@@ -132,7 +131,7 @@ verdict counts → chain-verify status) is a report, not an investigation. Recor
 each `policy_rev`'s full flag set once as a `policy.snapshot` row so revisions are
 self-describing.
 
-### A4 — The out-of-process anchor pair (the actual trust anchor)
+### A4: The out-of-process anchor pair (the actual trust anchor)
 
 Execute the two carried follow-ups that make the chain trustworthy against a
 compromised aimee host, i.e. the literal "enforcer evidence outside the governed
@@ -144,13 +143,13 @@ trust domain":
 - **Signed off-host anchor (R2-8).** ed25519-signed
   `{seq, head_hash, key_id, mac}` pushed per checkpoint to a store the audited
   host cannot silently rewrite. Smallest deployable shape on today's topology:
-  **cross-service anchoring** — aimee-server anchors to a write-only append
+  **cross-service anchoring**, aimee-server anchors to a write-only append
   endpoint on aimee-kb and vice versa (they are already separate trust domains
   with separate WORM stores); on the combined CT, additionally to the Proxmox
   host (`pvesh`/ssh append-only drop) or the second CT. The anchor client is dumb
   (POST a signed tag); custody protocol per R2-8.
 
-### A5 — `aimee audit attest`
+### A5: `aimee audit attest`
 
 One operator/auditor command that answers the vendor-questionnaire question. Over
 a time window it produces a signed attestation bundle:
@@ -165,7 +164,7 @@ a time window it produces a signed attestation bundle:
 signed with the anchor key's public-verify counterpart. Green means: every
 governed action in the window is in an intact chain, anchored off-host, with the
 policy that judged it identified. That is "attest that enforcement held" in the
-strongest form available without TEEs — and stronger than anything surveyed
+strongest form available without TEEs, and stronger than anything surveyed
 shipping today.
 
 ## Non-goals
@@ -183,11 +182,11 @@ shipping today.
 
 ## Risks / honest limits
 
-- **Hot-path cost of default-on WORM**: synchronous fsync per governed action —
-  the done proposal's benchmark gate applies before the authoritative flip; A2's
+- **Hot-path cost of default-on WORM**: synchronous fsync per governed action,
+the done proposal's benchmark gate applies before the authoritative flip; A2's
   new sources (gateway, triggers) are lower-frequency than tool calls.
 - **Client-side buffering (A2 attention guard)**: a hook subprocess that blocks
-  and dies before flushing loses that row — fail-open audit, bounded and
+  and dies before flushing loses that row, fail-open audit, bounded and
   documented; the server-side enforcers (the authoritative tier) have no such
   window.
 - **Anchor availability**: cross-service anchoring fails amber (not closed) when

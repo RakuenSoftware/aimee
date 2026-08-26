@@ -27,13 +27,13 @@ embeds raw code bodies/signatures, so the default embedder must be code-capable.
 0.6B (NOT 13x; GPU compute-bound, sublinear), ~24x nomic. Real cost is dimension:
 4096-d = 4x pgvector storage/scan vs 0.6B's 1024-d, + 15GB VRAM resident.
 
-## + Qwen3-4B (Q8) — the high-tier sweet spot
+## + Qwen3-4B (Q8): the high-tier sweet spot
 | model | nDCG@10 | Recall@10 | wall | dim |
 |---|---|---|---|---|
 | Qwen3-Embedding-4B-Q8 (last) | 0.7592 | 0.8739 | 343.3s | 2560 |
 
 4B ~= 8B on nDCG (0.7592 vs 0.7608 = +0.16, noise) at 2560-d vs 4096-d (1.6x
-smaller index) and 1.4x faster — and 4B here is Q8 vs 8B f16, so f16-4B likely
+smaller index) and 1.4x faster, and 4B here is Q8 vs 8B f16, so f16-4B likely
 edges 8B. 0.6B->4B = +6.2 nDCG; 4B->8B = +0.16. => high tier should be 4B, not 8B.
 Ladder: default Qwen3-0.6B (1024-d), high Qwen3-4B (2560-d). nomic dropped.
 

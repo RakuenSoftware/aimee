@@ -1,6 +1,6 @@
 # Per-user remote writes: composed deployment validation residual
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 - **Archived parents:** [`per-user-remote-writes-authz.md`](../done/per-user-remote-writes-authz.md)
   and [`per-user-remote-writes-authz.acceptance.md`](../done/per-user-remote-writes-authz.acceptance.md).
 

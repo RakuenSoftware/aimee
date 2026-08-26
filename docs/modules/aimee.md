@@ -45,7 +45,7 @@ the same shape with a leading `status(u32)` for responses.
 - `module-runtime`: process lifecycle, admission, and the stage table.
 
 Consumers are the session/turn layer when a model invokes a peer verb, the `/v1`
-surface for thin clients, and `protocols` for MCP -- which is no longer future
+surface for thin clients, and `protocols` for MCP, which is no longer future
 work: `peer_send` and `peer_inbox` ship in the MCP tool table, and an external
 agent addresses another aimee session through them.
 
@@ -137,7 +137,7 @@ exactly that.
 native dispatch flattens the content array alone, so an in-process agent never
 sees `structuredContent`. `peer_inbox` put the message bodies only there and a
 COUNT in the text, so aimee's own agents received "1 message(s) taken; 0 still
-waiting." and no mail -- a tool reporting the size of an answer instead of the
+waiting." and no mail, a tool reporting the size of an answer instead of the
 answer.
 
 Every mechanical check passed while that was true: delivery, drain-once, counts,
@@ -150,7 +150,7 @@ Both tools are also NATIVE (`core`), so aimee's own agents get them. A live-mode
 run confirmed the identity half of that: a native chat turn's session reaches the
 directory, appearing in `server_sessions` as `driver|chat` via
 `chat_session_register`, so what a native caller sends as is addressable. What has
-never been observed is a MODEL choosing to emit the call -- that run stopped at
+never been observed is a MODEL choosing to emit the call. That run stopped at
 provider credential provisioning, not at anything here. See
 docs/validation/aimee-module-on-a-clean-container.md.
 
@@ -275,7 +275,7 @@ Failure behavior distinguishes three levels deliberately. A malformed frame is
 refusal (`hop_limit`, `cycle`, `denied`, `inbox_full`, `no_peer`) is a
 **successful** invocation carrying a domain status, because collapsing those two
 would leave the tap unable to tell "the module is broken" from "the module said
-no". And a question whose truthful answer is negative: does this grant exist,
+no"; and a question whose truthful answer is negative: does this grant exist,
 is there mail: answers `StatusOK` with the "no" in a field, because a tap
 seeing a steady rate of non-OK cannot tell working-as-designed from broken.
 
@@ -319,7 +319,7 @@ No handler here blocks, specifically so that ceiling is never reached by waiting
 Each check in this module was mutation-verified: the property it asserts was
 broken deliberately and the guard watched to fire. That is recorded because a
 guard nobody has seen fail is a guard nobody has evidence for, and this module
-found three of its own that could not have failed -- a probe that could not
+found three of its own that could not have failed, a probe that could not
 detect an inert module, a record satisfied by prose quoting it, and an
 experiment that passed because nothing reached the function it was testing.
 
@@ -339,9 +339,9 @@ classify them, and the question a caller actually has is not "what does this
 status mean" but "do I try again".
 
 That was answered by a doc comment on one constant claiming it was the only
-retryable status. The claim was false for four others -- an inbox drains, a
+retryable status. The claim was false for four others. An inbox drains, a
 timeout may be answered next time, a full channel loses a member, a full table
-frees a slot -- so a caller believing it would loop forever on an unreachable
+frees a slot, so a caller believing it would loop forever on an unreachable
 store and give up on an inbox that clears in seconds.
 
 `Status.Retryable()` is the answer that comment was pretending to be. The line is
@@ -349,14 +349,14 @@ the one this module draws everywhere: a decision about the REQUEST is permanent
 and the caller must change something or stop; a fact about the MOMENT is not.
 It is exhaustive rather than defaulting, and a test asserts every declared status
 is classified, because an unrecognised status returning "do not retry" is safe
-for the caller and wrong for the work -- it silently drops what would have
+for the caller and wrong for the work. It silently drops what would have
 succeeded.
 
 ### A refusal is not an outage
 
 The directory has FOUR outcomes, not three, and the fourth was found on the last
 pass of the night. `directory_refused` is db1 understanding a request and
-declining it -- the module asked for something the store will not accept.
+declining it. The module asked for something the store will not accept.
 
 It is distinct from `unavailable`, which means retry; from `bad_request`, which
 blames a caller whose request was fine; and from `unclassified`, which means an
@@ -378,7 +378,7 @@ both sides of it.
 
 `peerwire.Btoa` writes `"1"`/`"0"`; `Atob` reads those and `"true"`/`"false"`.
 The C client in `src/peer_client` accepted only the two words `Btoa` never
-writes, so it rejected every message row this module has ever sent -- while
+writes, so it rejected every message row this module has ever sent, while
 `Atob`'s leniency accepted the client's REQUESTS, so the send direction worked
 and only replies broke. Half a conversation working is worse than none: at the
 caller it reads as this module failing.
@@ -390,7 +390,7 @@ pinned the status numbers and the row width but nothing about what is IN a cell.
 output, in both directions.
 
 The lesson is not about booleans. Two sides agreeing on a frame's SHAPE and
-disagreeing about a cell's spelling produces no error anywhere -- the reply is
+disagreeing about a cell's spelling produces no error anywhere. The reply is
 well-formed, the count is right, and the value is unreadable.
 
 ### The earlier "daemon-originated send wedges the module" reading was wrong
@@ -409,8 +409,8 @@ five of them.
 ### The module as deployed has no session directory
 
 `aimee-module` builds the capability with `NoDirectory{}`, and that is accurate
-rather than provisional. There is no `DirectorySource` yet -- it needs db1's
-session family, which arrives with the absorption -- and nothing else populates
+rather than provisional. There is no `DirectorySource` yet. It needs db1's
+session family, which arrives with the absorption, and nothing else populates
 the registry: `Register` has no caller outside tests, and no bus op reaches it.
 No session can exist, so **peer messaging is inert in this configuration** and
 the session-scoped stages answer `no_directory`.
@@ -420,7 +420,7 @@ session directory. Refusing them would be a second wrong answer and would hide
 that the module is otherwise healthy.
 
 `no_directory` is deliberately not `unavailable`. Unavailable is the one status
-a caller should retry on -- a fact about this moment. This one is a fact about
+a caller should retry on, a fact about this moment. This one is a fact about
 how the module was built, and a caller retrying against it never stops.
 
 The reason this is written down rather than left to the code is that it was
@@ -428,7 +428,7 @@ invisible for a whole validation cycle. The construction site passed `nil`, and
 `nil` meant "answer existence from the registry's own map". Every session-scoped
 call then refused with `unknown_sender` or `no_peer`: answers about the CALLER'S
 session, from a module that could not know about any session. Fifteen checks in
-the container run passed against exactly that, and had to -- a correct refusal
+the container run passed against exactly that, and had to. A correct refusal
 and a module that can never do anything produce the same word. The channel case
 was worse than a refusal: `members` answered OK with none, a healthy-looking
 reply that read as the feature working.

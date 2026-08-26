@@ -5,7 +5,7 @@ measurement, and the part that is a judgement, so a later reader can tell them
 apart.
 
 > **SUPERSEDED IN PART, 2026-08-03.** The shipped images are E4B at UD-Q6_K_XL and
-> **E2B at UD-Q4_K_XL** — see `scripts/synthesis-model-table.sh`, which is the source
+> **E2B at UD-Q4_K_XL**. See `scripts/synthesis-model-table.sh`, which is the source
 > of truth. The E4B half of this document still stands and is the measured half. The
 > E2B half recommended Q6 as an explicitly JUDGED call on a directional prior, and
 > the operator has since taken Q4 for E2B instead: the gap is undecidable at n=69
@@ -70,7 +70,7 @@ Q6 − Q4:
 
 The Q4->Q6 step is worth 0.086 F1 and the Q6->Q8 step is worth 0.016, with an
 interval whose lower bound sits on zero. Read that interval carefully: it never
-goes NEGATIVE, so Q8 is probably very slightly better than Q6 — just not by
+goes NEGATIVE, so Q8 is probably slightly better than Q6, just not by
 enough to measure, and not by enough to pay 0.45 GB of host RSS for. A step that
 is real but too small to price is the strongest available form of "stop here",
 and it is why Q6 is a sweet spot rather than a compromise.
@@ -82,8 +82,7 @@ size whose comparisons all sit inside their own intervals, and it is a reason to
 trust the E4B numbers rather than the E2B ones when the two disagree.
 
 Together, the E4B Q6-Q4 and Q8-Q4 results are the only comparisons in this entire
-benchmark effort that cleared the significance bar. Everything else measured —
-runtime, thinking on a fixed prompt, quantisation at E2B — came back inside its
+benchmark effort that cleared the significance bar. Everything else measured (runtime, thinking on a fixed prompt, quantisation at E2B) came back inside its
 own interval.
 
 ## Memory, measured rather than inferred from file size
@@ -105,7 +104,7 @@ At E4B, Q6 costs 2.81 GB of host RSS over Q4 and buys a measured 0.086 F1. That
 is the one place in this benchmark where paying memory demonstrably buys quality.
 The next 0.45 GB, to Q8, buys 0.0155 F1 that the dataset cannot resolve.
 
-Resident is consistently BELOW the file size — mmap — so quoting a disk-size
+Resident is consistently BELOW the file size (mmap) so quoting a disk-size
 delta as a RAM saving overstates it. The KV cache at a fixed `-c` is identical
 across quants and does not shrink with the quant.
 
@@ -116,7 +115,7 @@ Q8 then adds only 0.0155 more, which does not. E4B is the default model, so
 those two together settle the default from both sides: Q4 is measurably worse,
 and Q8 is not measurably better.
 
-JUDGED: Q6 for E2B. Its own comparison is +0.0012 — the smallest gap between any
+JUDGED: Q6 for E2B. Its own comparison is +0.0012. The smallest gap between any
 two runs anywhere in this benchmark, and firmly undecidable at n=69. Three things
 carry the call instead:
 
@@ -139,7 +138,7 @@ stronger evidence than it would be under a stochastic decoder, not weaker.
 ## What would change this
 
 The E2B half rests on a family prior, not on E2B's own numbers. Resolving it on
-its own evidence needs a LARGER GOLD SET, not more runs — re-running a
+its own evidence needs a LARGER GOLD SET, not more runs, re-running a
 deterministic harness reproduces the same 0.0012 delta indefinitely. CI width
 falls with the square root of n: about 280 notes to resolve 0.05, about 1,100 to
 resolve 0.025. The existing 70 also have a single annotator and no inter-rater

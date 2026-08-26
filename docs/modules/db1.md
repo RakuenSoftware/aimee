@@ -31,7 +31,7 @@ Branch ownership's callers now cross the bus. The daemon links
 `src/db1_client/git_ownership.c` in place of the domain, so nothing that calls
 branch ownership changed: the same functions, the same contract, a different
 side of the boundary. Enforcement fails OPEN when the module is unreachable,
-which is what it has always done without a database -- but the failure surface
+which is what it has always done without a database, but the failure surface
 is larger now that it depends on a separate process, so the client says once,
 loudly, that the guard is off rather than letting it look quiet.
 
@@ -43,11 +43,11 @@ carried in and back out by the seam.
 The remaining domains are declared as reserved families in
 `src/modules/db1/eventcontract/operations.json`, the same shape DB2 uses. A
 family owns one event kind and its operations dispatch on an op id inside the
-payload, so DB1 needs one stage per domain rather than one per call -- roughly
+payload, so DB1 needs one stage per domain rather than one per call, roughly
 sixty domains against a ceiling of 255.
 
 Request fields carry a type. Half of what is left takes an integer argument --
-a job id, a spawn id, a threshold -- and those travel as decimal text: the
+a job id, a spawn id, a threshold, and those travel as decimal text: the
 client prints, the stage parses, and a field that is not exactly a number is
 refused rather than truncated, so "12abc" cannot become 12. A separate numeric
 type on the wire would buy nothing a printf does not, and the frame already
@@ -60,7 +60,7 @@ everything it dispatches TO is emitted. The domains themselves are untouched --
 only the wire around them is generated.
 
 The C client is generated too. There are 347 operations still to move, and
-`git_ownership` showed what one costs by hand -- five of them filled a pull
+`git_ownership` showed what one costs by hand, five of them filled a pull
 request. Every client body is the same three steps (reject unusable arguments,
 name the fields, map the status), so the catalog carries the C symbol and its
 parameter names and `scripts/gen_db1_contract.py --write` emits the file. The
@@ -68,7 +68,7 @@ generated client was checked against the hand-written one it replaced: same
 signatures, and it passes that client's own mutation-tested suite unchanged.
 
 The catalog is a complete map, not a wish list: every DB1 source belongs to
-exactly one family or to `infrastructure_sources` -- the connection, schema,
+exactly one family or to `infrastructure_sources`. The connection, schema,
 write path and the module's own handler, which have no callers to migrate. An
 unclaimed domain is one nobody is planning to move, and a twice-claimed one is
 two families expecting to own the same rows; both are refused.
@@ -83,7 +83,7 @@ one.
 
 Each family also records which DB1 sources the daemon has stopped linking, and
 that half IS machine-checked. The plan and the proof are separate on purpose: a
-DB1 source usually holds more than one domain, so "covers" over-states -- family
+DB1 source usually holds more than one domain, so "covers" over-states, family
 1 took the economizer's reducer state out of `checkpoints.c` while the rest of
 that file still serves callers in-process. The narrow claim, "this source is no
 longer in the daemon", is exact, and it is checked in both directions: a family
@@ -100,7 +100,7 @@ speak. `scripts/gen_db1_contract.py` GENERATES `db1_module_api.h` from the catal
 fails when the file on disk is not what the catalog produces, so the numbering
 and the wire cannot drift apart. Add a family or an operation to the catalog and
 run it with `--write`; never edit the header by hand. A reserved family emits
-nothing, and the wire bounds -- the widest reply and the widest request arity --
+nothing, and the wire bounds. The widest reply and the widest request arity --
 are derived rather than remembered, which is what stops a new family from
 overrunning the decoder's fixed array.
 

@@ -1,4 +1,4 @@
-# Tier-B synthesize gold — what is measured and why
+# Tier-B synthesize gold: what is measured and why
 
 The task under test is `KB_CURATOR_STAGE_SYNTHESIZE`, the highest-value Tier-B
 call: a topic plus `CURATOR_SYNTH_DEFAULT_K = 8` source artifacts in, one
@@ -10,8 +10,8 @@ grounded paragraph out. The contract is `CURATOR_SYNTH_SYSTEM_PROMPT` and
 
 Tier-A emits triples, so it can be scored by matching. Tier-B emits prose, and
 there is no single correct paragraph. Scoring free text against a reference
-answer measures style as much as substance, and the Tier-A experience — nine
-defects, most of them the grader punishing a correct answer phrased differently —
+answer measures style as much as substance, and the Tier-A experience, nine
+defects, most of them the grader punishing a correct answer phrased differently,
 argues strongly against building another matcher.
 
 So nothing here is matched against a reference synthesis. Three properties are
@@ -34,9 +34,9 @@ durable and carries citations that appear to support it.
 |---|---|
 | `factual` | ordinary synthesis over consistent sources |
 | `conflicting` | two sources disagree; a faithful synthesis reports the disagreement rather than silently picking one |
-| `thin` | sources carry very little; restraint is correct, padding is not |
+| `thin` | sources carry little; restraint is correct, padding is not |
 | `distractor` | sources include material only loosely related to the topic |
-| `numeric` | figures that must survive intact — the easiest thing to hallucinate |
+| `numeric` | figures that must survive intact: the easiest thing to hallucinate |
 
 ## Faithfulness: what counts as invented
 
@@ -48,7 +48,7 @@ sources. Deliberately narrow:
 - Sentence-initial capitalisation is not treated as an entity.
 - Restating a source's own wording is not invention.
 
-This will not catch a subtler failure — a true entity related in a way the
+This will not catch a subtler failure, a true entity related in a way the
 sources never claim. That limit is real and is why `conflicting` exists as a
 category: it catches the specific case where a model resolves a contradiction by
 asserting one side.
@@ -57,7 +57,7 @@ asserting one side.
 
 Each required fact lists surface forms that count as covering it, because there
 is no single right phrasing. The list is generous on wording and strict on
-substance — `"Rakuen Software"` and `"Rakuen"` both cover the employer fact,
+substance, `"Rakuen Software"` and `"Rakuen"` both cover the employer fact,
 `"a software company"` does not.
 
 ## Known limits

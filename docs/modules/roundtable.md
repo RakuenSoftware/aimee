@@ -126,12 +126,15 @@ executable discovery surfaces do not advertise unavailable functionality.
 State includes named JSON presets, DB1 ensemble/session records, panel assignments and contributions,
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
+
 Omitted Make builds retain the historical roundtable table declarations in the shared DB1 schema solely
 to preserve schema initialization, migration, and downgrade compatibility for existing databases. The
 declarations are dormant: the roundtable persistence implementation is not compiled and no live
 roundtable data provider is created. Removing those declarations requires a separate, versioned
 data-migration decision.
+
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
+
 The roundtable provider allocates the `aimee_panel_result_t.artifact` returned by a successful call and
 supplies the matching release callback. The caller must release the result exactly once through the
 delegates-owned `aimee_panel_result_release` facade, which dispatches that callback, before the provider is

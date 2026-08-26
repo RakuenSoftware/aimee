@@ -30,8 +30,8 @@ adds only the completeness assertion on the already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
 the durable delegate worker and HTTP/RPC orchestration in `src/server/server_compute*`, or the
-root-level `cmd_agent_delegate.c` entry point, have been moved in — the module document records those
-as relocation debt — and it does not claim identical build-product membership across Make and CMake,
+root-level `cmd_agent_delegate.c` entry point, have been moved in. The module document records those
+as relocation debt, and it does not claim identical build-product membership across Make and CMake,
 where four sources are Make-only.
 
 ## An absent role is enforced, not unchecked
@@ -48,7 +48,7 @@ slice was written and is re-proven by the mutation added here.
 
 The descriptor mutation suite removes `delegate_driver.c` and requires `rule=ownership-complete` on
 `/sources`. It plants `src/modules/delegates/undeclared.c` and `undeclared.h` and requires the rule on
-`/sources` and `/private_headers` respectively — the latter being the empty-set enforcement described
+`/sources` and `/private_headers` respectively, the latter being the empty-set enforcement described
 above. It removes `docs/modules/delegates.md` from the descriptor's `docs` field and requires the rule
 on `/docs`. The graph-derived latched-descriptor assertion from slice 43 now also covers `delegates`,
 so clearing the latch fails directly. There is no declared-private-header removal case, because the

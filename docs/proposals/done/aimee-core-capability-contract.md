@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — archived 2026-08-04 as partially implemented. The capability taxonomy,
+- **State:** DONE. Archived 2026-08-04 as partially implemented. The capability taxonomy,
   descriptors, source ownership, and initial module-event adapters landed; the required
   cross-process round trip remains in
   [`aimee-core-cross-process-contract-residual.md`](../pending/aimee-core-cross-process-contract-residual.md).
@@ -31,7 +31,7 @@ working reference implementation. None imports, links, loads, or requires an opt
 - **Communication core (C):** `module-runtime` (which also owns the shared-memory event bus and
   capability-state authority), `config`, `ir`, `translation`, `protocols`, and `gateway`.
 - **Required modules (Go reference):** `memory`, `learning`, `routing`, `delegates`, `tools`,
-  `workspace`, `git`, `skills`, and `response-composition` — always selected, separate programs
+  `workspace`, `git`, `skills`, and `response-composition`, always selected, separate programs
   reached only over the bus, authored in Go as the first-party reference but admitting any conforming
   language.
 - **Trust kernel:** `vault`, `execution-policy`, and `audit`. This proposal places them in the **C
@@ -142,9 +142,9 @@ Every stage records its component ID and input/output IDs. Required-provider fai
 fails readiness or the owning stage; silent passthrough is forbidden. The proof requires MCP and
 ACP coverage, response composition, and absence of `kb-synthesis` and every other optional module.
 
-**Bus-crossing proof (2026-07-23 amendment).** Every stage owned by a module — including the `memory`
+**Bus-crossing proof (2026-07-23 amendment).** Every stage owned by a module, including the `memory`
 stages (structured extraction/indexing, memory write, embedding, candidate retrieval, reranking) and
-the learning, routing, delegate, tool, workspace, skills, and response-composition stages — is
+the learning, routing, delegate, tool, workspace, skills, and response-composition stages, is
 dispatched as a typed event across the core↔module boundary over the shared-memory event bus, not as
 an in-process call. The trace records, per stage, the event kind, the publishing and serving module,
 and the trust-kernel verdict/record for the hop; a stage that reaches a module by any path other than

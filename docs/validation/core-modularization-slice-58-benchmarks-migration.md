@@ -54,7 +54,7 @@ headers are declared `private_headers`.
 The module root `src/modules/benchmarks/` contains exactly the four declared sources and two declared
 private headers (plus `module.yaml`), so the declared sets equal the actual sets and the latch is exact.
 `docs` equals `["docs/modules/benchmarks.md"]`. The empty-domain guard from slice 39 no longer applies
-because the root is no longer empty. `tests` is empty: the eval framework has no dedicated test — it is
+because the root is no longer empty. `tests` is empty: the eval framework has no dedicated test. It is
 a harness exercised indirectly by memory/server tests (e.g. `test_memory_retrieval_eval.c`, already
 claimed by `memory` in slice 56) whose subjects are those modules, not the framework; the
 test-registration baseline records no benchmarks test.

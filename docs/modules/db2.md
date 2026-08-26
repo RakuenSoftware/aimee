@@ -66,8 +66,9 @@ provider remains nonselected until full C-versus-Go replay and the atomic owners
 ## Providers and readiness
 
 The transitional provider is `aimee-module-db2`, built as an independent C process from the
-descriptor. DB2 continues to own PostgreSQL and pgvector. A future DB3 provider may serve portable
-vector capabilities, but transactional and relationally coupled pgvector operations remain here.
+descriptor. DB2 owns PostgreSQL and pgvector, and that is where vector work stays. An external
+provider was built and removed: the searches this tree runs do not reduce to points and labels, so
+nothing portable was left to serve.
 The process is not ready merely because it attached: successful backend health evidence is required.
 
 ## Configuration and activation
@@ -101,7 +102,7 @@ generated ledger accounts for all 1,397 non-static function declarations in all 
 records identical duplicate declarations by location, and fails on conflicting signatures. The
 ledger also tokenizes every frozen consumer so test-only and production references cannot be
 confused. Every catalog operation names its exact C backend symbols; generation fails unless each
-symbol has a signature-bound `wire-operation` review with the same family and DB3 placement, and
+symbol has a signature-bound `wire-operation` review with the same family, and
 also fails if a wire review has no catalog operation. At this checkpoint 153 declarations are
 unconsumed implementation details, 286 are used
 only by private implementation tests, 61 externally referenced `pgvec_*` declarations are
@@ -111,28 +112,19 @@ re-embedding-clear backends are reviewed wire operations, and 888
 production-consumed declarations remain
 without a reviewed disposition.
 
-The separate `vector-portability.json` audit covers all 76 declared `pgvec_*` symbols, including
-internal and currently unconsumed surfaces. It distinguishes provider-neutral candidate searches,
-post-commit mutation fanout, provider-local control, necessarily retained DB2 authority, and deferred
-analytics. The provider-specific C names remain private DB2 implementation details; the audit records
-which logical effects may later receive DB3 operations without leaking those names onto the wire.
-See `docs/db3.md` for routing, admission, fallback, and revalidation invariants.
+The 61 externally referenced `pgvec_*` declarations stay private DB2 implementation details. A
+typed operation names what a caller wants, not which index answers it, so the index and its
+extension stay inside the owner process.
 
-The descriptor also owns the database-free C reference route and wire codecs for the first portable
-memory-candidate operation. Its internal pgvector, external provider, and authoritative candidate
-checks are injected, so the route can be exhaustively tested before the private DB2 source closure is
-linked. This is not a production cutover: the module remains disabled and no provider grant ships.
+A `vector-portability.json` audit used to sit beside this, classifying which of those symbols could
+be served by an external vector database. It went with the subsystem it was written for.
 
-DB2's schema also contains the pre-activation DB3 durability owner. AFTER ROW triggers on the
-reviewed pgvector mutation relations create canonical apply-v2 operations and per-principal
-delivery obligations in the same PostgreSQL transaction as the authoritative vector write. A new
-apply-capable provider receives durable catalog-driven cursors under the same advisory transaction
-lock, then a Go worker backfills in bounded transactions while live writes also target that
-principal; it cannot advertise ready search evidence until that backfill is acknowledged. With no
-active or backfilling external provider, no outbox history is retained because a later snapshot is
-authoritative. The Go dispatcher uses bounded `SKIP LOCKED` leases and
-broadcasts over the event bus, while only authenticated per-principal applied acknowledgements
-complete delivery. These paths remain unselected until the standalone C DB2 activation gate.
+The schema used to carry a durability owner for that provider: AFTER ROW triggers on every
+reviewed pgvector relation, writing apply operations and per-principal delivery obligations in the
+same transaction as the vector write. Those triggers fired on every vector write whether or not a
+provider was ever provisioned. The schema now DROPs them, along with the tables and functions they
+called, because a database that already carries them would otherwise fail every vector write once
+the functions were gone.
 
 Link-closure audit:
 
@@ -526,25 +518,33 @@ activation.
 
 ## Tests and failure behavior
 
-Focused C tests cover every response flag combination, both embedding-dimension result shapes,
-pool counter widths and occupancy relations, and
-dimension bounds, malformed magic/version/length, unknown
-flags, reserved bytes, wrong stage, undersized output, cancellation, missing callbacks, backend
-failure, typed-client transport/protocol failures, and successful encode-handler-decode. A dedicated
-integration test crosses the real authenticated event bus from the generated client through the
-module runtime into the C handler and verifies non-zero evidence. Runtime-bundle tests compile the
-descriptor-owned C process from a clean tree with no `src/schema_data.h`. Generator tests pin
-UTF-8/C escaping, reproducibility, output location, path containment, ordering, duplicate symbols,
-and symlink rejection; an exported miniature CMake project exercises the same rule where CMake is
-available. Export tests pin compatibility-header path safety, ownership separation,
-materialization, manifest admission, and missing-file failure. Catalog tests mutate every closed
-field, process/descriptor binding, resource limit, and generated artifact. Boundary tests prohibit
-any direct import from `src/modules/db2/c` into private
-`src/kb`. Declaration-ledger tests cover C linkage blocks, multiline and callback declarations,
-comments/literals/directives, identical and conflicting duplicates, malformed nesting, resource
-limits, signature-bound review transitions, pgvector retention, output symlinks, reproducibility,
-and unchanged-output failure. Activation-gate mutation tests prove that an incomplete source list,
-weak backend, or remaining direct production caller prevents enablement.
+Each test family owns one boundary:
+
+- **Focused C tests** cover every response flag combination, both embedding-dimension
+  result shapes, pool counter widths and occupancy relations, dimension bounds,
+  malformed magic/version/length, unknown flags, reserved bytes, wrong stage,
+  undersized output, cancellation, missing callbacks, backend failure, typed-client
+  transport and protocol failures, and successful encode-handler-decode.
+- **A dedicated integration test** crosses the real authenticated event bus from the
+  generated client through the module runtime into the C handler and verifies
+  non-zero evidence.
+- **Runtime-bundle tests** compile the descriptor-owned C process from a clean tree
+  with no `src/schema_data.h`.
+- **Generator tests** pin UTF-8/C escaping, reproducibility, output location, path
+  containment, ordering, duplicate symbols, and symlink rejection. An exported
+  miniature CMake project exercises the same rule where CMake is available.
+- **Export tests** pin compatibility-header path safety, ownership separation,
+  materialization, manifest admission, and missing-file failure.
+- **Catalog tests** mutate every closed field, process/descriptor binding, resource
+  limit, and generated artifact.
+- **Boundary tests** prohibit any direct import from `src/modules/db2/c` into private
+  `src/kb`.
+- **Declaration-ledger tests** cover C linkage blocks, multiline and callback
+  declarations, comments/literals/directives, identical and conflicting duplicates,
+  malformed nesting, resource limits, signature-bound review transitions, pgvector
+  retention, output symlinks, reproducibility, and unchanged-output failure.
+- **Activation-gate mutation tests** prove that an incomplete source list, weak
+  backend, or remaining direct production caller prevents enablement.
 DB3-portability tests additionally prove exhaustive 76-symbol coverage, closed classification
 identities, fingerprint drift, duplicate/missing/extra detection, ordering, malformed JSON, resource
 limits, and copied-repository CLI behavior.

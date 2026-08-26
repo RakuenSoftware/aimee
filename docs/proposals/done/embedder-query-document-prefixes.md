@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implemented and archived 2026-08-04.
+- **State:** DONE. Implemented and archived 2026-08-04.
 
 > **Archived as complete.** `scripts/embedders.json` now owns both prefixes as part of the
 > vector-space identity, `embedder-server.py` applies a validated `query|document` polarity, and
@@ -49,7 +49,7 @@ that work.
 
 The benchmark measured every model **with** its prefixes. aimee serves **without**
 them. So for any prefix-dependent model, the deployed system does **not** reproduce
-its benchmark score — the selection number is not the number production gets.
+its benchmark score. The selection number is not the number production gets.
 
 This was measured directly on the frozen-ab-v1 suite, same harness, same corpus,
 varying only the prefix:
@@ -60,18 +60,17 @@ varying only the prefix:
 | bekko-a25m (card defines none) | 0.5892 | 0.5909 | ±0 (nothing to strip) |
 
 **The consequence is decision-changing.** nomic's margin over a25m exists only
-*with* prefixes. Strip them — which is what the current code does — and the
+*with* prefixes. Strip them (which is what the current code does) and the
 ordering inverts: 0.5823 against 0.5909. A model that needs no prefix carries its
 benchmark score into production intact; a prefix-dependent one does not.
 
-So this is not "upside we are leaving on the table". It is a **silent regression
-between what was measured and what is served**, and it is large enough to select
+So this is a **silent regression between what was measured and what is served**, and it is large enough to select
 the wrong model.
 
 ## Why it stayed invisible
 
 Nothing errors. The vectors are well-formed, correctly dimensioned, correctly
-pooled and correctly normalised — they are simply the vectors for a subtly
+pooled and correctly normalised. They are simply the vectors for a subtly
 different input than the one that was benchmarked. The same class of failure as
 the `AIMEE_LLM_EMBED_POOLING` default: silently wrong, not loudly broken.
 
@@ -82,8 +81,8 @@ one is taken:
 
 1. **Implement prefix support**, then a prefix-dependent model can be deployed at
    the score it was selected on.
-2. **Do not implement it**, and then only prefix-free models may be selected —
-   the selection must be re-ranked on prefix-free numbers, because those are the
+2. **Do not implement it**, and then only prefix-free models may be selected.
+The selection must be re-ranked on prefix-free numbers, because those are the
    ones production will deliver.
 
 What is *not* coherent is selecting on prefixed scores and serving prefix-free.
@@ -92,8 +91,7 @@ That is the current state, and it is how a 0.6058-vs-0.5892 win became a
 
 ## Migration cost, which is the real constraint
 
-Prefixes change every vector. Adopting them is not a config toggle — it is a
-**full re-embed** of the entire corpus, through the same double-gated dim-change
+Prefixes change every vector. Adopting them is a **full re-embed** of the entire corpus, through the same double-gated dim-change
 machinery used for a dimension change (`aimee kb reembed` /
 `db2_dim_change_reset`), even though the dimension itself is unchanged.
 
@@ -117,6 +115,6 @@ should be weighed alongside raw NDCG rather than treated as a tie-breaker.
 - Do the three code vector kinds want the document prefix, or something else?
   `body_vec` holds raw code, which is not natural-language prose.
 - How should a prefix be tied to the model identity so a future embedder swap
-  cannot silently inherit the wrong pair — the same failure mode as the
+  cannot silently inherit the wrong pair. The same failure mode as the
   `AIMEE_LLM_EMBED_POOLING` default, which was `last` and silently wrong for
   nomic until the cutover caught it?

@@ -15,8 +15,7 @@ models.
 
 Eight of the nine share one shape: **the metric punished a correct answer
 expressed differently from the label.** Once that pattern was named it became a
-search strategy — look for places where "different" was being scored as "wrong" —
-and it kept paying out.
+search strategy (look for places where "different" was being scored as "wrong") and it kept paying out.
 
 The ninth (incomplete gold) is worse and subtler: the metric punished answers
 that were correct and *not labelled at all*, which penalises the models that
@@ -29,8 +28,8 @@ extract most. That one biases the ranking rather than just depressing it.
 **Found by** hand-reading E4B's disagreements after its score looked low.
 
 `rel_type_def_t` carries `is_symmetric`, and the C comment states "one assertion
-implies both directions". `knows` and `spouse` are symmetric, so `(sarah, spouse,
-user)` is correct — but the scorer charged it twice, as a false positive *and* a
+implies both directions"; `knows` and `spouse` are symmetric, so `(sarah, spouse,
+user)` is correct, but the scorer charged it twice, as a false positive *and* a
 false negative.
 
 **Impact** E4B 0.623 → 0.656. **Lesson** the ontology already encoded the answer;
@@ -54,7 +53,7 @@ scalar to the ontology. Scored as a miss.
 
 ## 4. Fabrication metric raising false alarms
 
-**Found by** validating a brand-new metric before trusting it — the one time
+**Found by** validating a brand-new metric before trusting it, the one time
 checking happened *before* publishing rather than after.
 
 The grounding check flagged `kb_server` against "KB server", `7` against
@@ -63,7 +62,7 @@ The grounding check flagged `kb_server` against "KB server", `7` against
 
 **Lesson** a new metric deserves the same suspicion as a new model.
 
-## 5. Schema validity — the one that inverted a conclusion
+## 5. Schema validity: the one that inverted a conclusion
 
 **Found by** an observation from outside: schema validity fell monotonically with
 model size (1.00 → 0.96 → 0.84 → 0.77 across E4B, 12B, 26B, 35B), which is a
@@ -73,7 +72,7 @@ All 30 "schema failures" across all four models were the literal string `{}` or
 `[]`, on notes asserting no durable fact. **Zero were malformed.** The models
 were abstaining correctly and saying so tersely; the runner recorded anything
 without a `facts` array as a failure. Production agreed with the models, not the
-metric — `mf_commit_facts()` commits nothing either way.
+metric, `mf_commit_facts()` commits nothing either way.
 
 **Impact** all four models are 1.00. It also excluded those notes from the
 abstention denominator, understating abstention for exactly the models that
@@ -92,7 +91,7 @@ hyphens. Models write snake_case constantly.
 
 **Impact** narrow but real: only Qwen3.5-0.8B moved, +0.040.
 
-## 7. Incomplete gold — the largest single error
+## 7. Incomplete gold: the largest single error
 
 **Found by** auditing all 220 distinct false positives across 20 models, after
 being told that finding one bug this way justified checking the rest.
@@ -110,25 +109,25 @@ penalised more. A metric that is merely noisy is survivable; one that is biased
 against the thing you are trying to measure is not.
 
 **Fix** seven facts promoted to required gold (64 → 72 triples). Where two
-renderings are equally correct — naming a device by description rather than
-hostname — an `alt` attaches to the specific gold triple and scores as a true
+renderings are equally correct, naming a device by description rather than
+hostname, an `alt` attaches to the specific gold triple and scores as a true
 positive, rather than being excused from the denominator.
 
 ## 8. Equivalent predicates
 
 `speaks` vs `speaks_language`, `attends` vs `member_of`, `daughter` vs
-`child_of` — each cost a model both a false positive and a false negative for a
+`child_of`. Each cost a model both a false positive and a false negative for a
 naming choice carrying no information.
 
 Handled by an explicit equivalence table, kept deliberately narrow: `studied_at`
 is **not** equivalent to `studied`, because "studied medicine" and "studied at
-Otago" are different facts. Bare kinship terms were also missing from the
+Otago" are different facts; Bare kinship terms were also missing from the
 *production* alias table, so this one found a real product defect too.
 
 ## 9. Object containment
 
 `"2 of the junior engineers"` for `"junior engineers"`, `"proxmox host in the
-auckland rack"` for `"auckland rack"` — token-F1 0.5 and 0.571, just under the
+auckland rack"` for `"auckland rack"`, token-F1 0.5 and 0.571, just under the
 0.6 threshold, despite the gold being fully *contained* in the prediction.
 
 ---
@@ -143,7 +142,7 @@ Worth recording, because "we looked and found nothing" is evidence too:
 - **Arithmetic invariants.** `tp+fn` equals the gold total and `tp+fp` equals the
   prediction total for every model.
 - **False negatives.** Audited the same way as false positives. Unlike the FPs,
-  these were overwhelmingly *genuine model errors* — `lives_in` where the note
+  these were overwhelmingly *genuine model errors*, `lives_in` where the note
   said `born_in`, `works_for` for colleagues. One gold fix came out of it.
 
 ## Guards now in place
@@ -157,7 +156,7 @@ careful:
 | `score.py` row-count check | a partial run scoring as a bad result (a 1-note remnant once scored F1 0.031 for a model that scores 0.903) |
 | `validate_gold.py` | duplicate triples, blank fields, alternatives identical to their parent |
 | `rel_types_self_validate()` | an alias pointing at a non-existent or inactive relation |
-| `sync_results.sh` rescoring | the CT's stale scores silently reverting local fixes — this happened **three times** |
+| `sync_results.sh` rescoring | the CT's stale scores silently reverting local fixes: this happened **three times** |
 | `audit_errors.py`, `predicate_drift.py` | reclassifying every disagreement on demand |
 
 ## 10. Over-crediting, found by noticing all fixes moved one way
@@ -172,7 +171,7 @@ knows | anand's kids` credited for one about Anand.
 
 **The rule that came out of it, which is now enforced:** an alternative may
 differ ONLY in the predicate. Both endpoints must name the same entity. Surface
-variation is normalisation's job; predicate variation is expected and fine —
+variation is normalisation's job; predicate variation is expected and fine,
 `works_for` vs `member_of`, `born_in` vs `grew_up_in`. Renaming an endpoint is a
 different node and a different claim.
 
@@ -182,7 +181,7 @@ different node and a different claim.
 **A related error of framing.** I had defended endpoint leniency by noting that
 aimee has entity aliasing, so `build host` and `forge` would resolve to one node
 downstream. That is not a reason the extraction was correct. This benchmark
-measures extraction, not aimee's pipeline — and that aliasing code exists to
+measures extraction, not aimee's pipeline, and that aliasing code exists to
 compensate for an imperfect embedder, not to license loose scoring. **Strict is
 the headline metric**: both endpoints exact, predicate flexible, no assumption of
 a resolution step that is not being measured.
@@ -196,13 +195,13 @@ Three more:
 
 - **Containment belonged in strict too.** "2 of the junior engineers" for a gold
   of "junior engineers", "clinical director at st vincent's" for "clinical
-  director". In each case the model was MORE faithful to the note than the label
-  — the note says "mentors two of the junior engineers". Strict was penalising
+  director"; In each case the model was MORE faithful to the note than the label.
+The note says "mentors two of the junior engineers". Strict was penalising
   models for being more specific than an under-specified gold.
 - **Predicate equivalence was too thin.** Models write `joined` and
   `board_member` for `member_of`, `profession` for `has_role`, `met` for `knows`,
   `started_at` for attending, `located_in` for `lives_in`. Endpoints identical,
-  predicate different — which the rules already permit; the table just did not
+  predicate different, which the rules already permit; the table just did not
   cover them.
 - **Honorifics and converse predicates**, above.
 
@@ -210,13 +209,13 @@ Three more:
 0.920, 12B unchanged at 0.855) while the smaller models gained 0.02-0.05.
 Weaker models reach for non-canonical predicates more often, so a thin
 equivalence table was penalising them specifically. That is a *rank-distorting*
-bias, not a level shift — the same defect class as the incomplete gold, pointing
+bias, not a level shift, the same defect class as the incomplete gold, pointing
 the other way.
 
 Every credit granted by the new rules was audited individually. All legitimate;
 no over-crediting.
 
-## 12. The confidence floor was doing the measuring — and it overturned the headline
+## 12. The confidence floor was doing the measuring: and it overturned the headline
 
 **Found by** checking two harness parameters that had never been validated: the
 token cap and the confidence floor. The cap was fine (only LFM2's repetition loop
@@ -224,8 +223,8 @@ reaches it; every other model peaks at 254 tokens against a 512 limit). The floo
 was not.
 
 `MF_CONF_FLOOR` (0.6) discards any fact below the threshold. Scoring with it
-applied conflates two different things — whether a model can extract the fact,
-and whether it emits a usable confidence — and the conflation falls almost
+applied conflates two different things, whether a model can extract the fact,
+and whether it emits a usable confidence, and the conflation falls almost
 entirely on small models:
 
 | model | capability | committed | dropped |
@@ -239,8 +238,8 @@ entirely on small models:
 | gemma-4-12B | 0.855 | 0.855 | 0 |
 
 **What it cost: the central conclusion.** "Nothing at or below 600M produces a
-usable fact" was reported repeatedly across this whole exercise. It is false.
-Qwen3-0.6B extracts at 0.400 F1 and every one of those facts is correct — the
+usable fact" was reported repeatedly across this whole exercise; it is false.
+Qwen3-0.6B extracts at 0.400 F1 and every one of those facts is correct. The
 floor throws all 72 away because the model writes `confidence: 0.0`.
 
 The floor is a config value we choose, not a property of any model. The top four
@@ -252,8 +251,8 @@ was looking hardest.
 designed, filtering low-confidence noise. It is a precision filter that some
 models benefit from and others are destroyed by.
 
-Both numbers are now reported: **capability** (floor lifted — can the model do
-the task) and **committed** (floor applied — what the drain writes today). The
+Both numbers are now reported: **capability** (floor lifted, can the model do
+the task) and **committed** (floor applied, what the drain writes today). The
 gap between them is a config decision, and for the small models it is the whole
 story.
 
@@ -264,7 +263,7 @@ Two angles not tried before.
 **Gold triples no model produces.** If 23 models all miss the same labelled fact,
 the label is the likelier error. Exactly one triple qualified:
 `am05 ingrid|has_role|manager` from "My manager's manager is Ingrid." The models
-produced ten different readings, none more than twice, none matching the label —
+produced ten different readings, none more than twice, none matching the label.
 Ingrid is not "a manager" in the has_role sense, she is two levels up a reporting
 chain whose intermediate entity is unresolved, and the ontology has no reporting
 relation. Now empty, alongside the other ambiguous items.
@@ -281,7 +280,7 @@ credited, surface variation that must be free, equivalent and unrelated
 predicates, duplicates, factless notes, a terse `{}` counting as abstention, both
 confidence views, and refusal of an incomplete file.
 
-All pass. The single failure was in a test assertion, not the scorer — comparing
+All pass. The single failure was in a test assertion, not the scorer, comparing
 at 1e-6 against figures the scorer rounds to 4dp.
 
 That these pass does not retroactively validate the twelve defects above; most
@@ -299,13 +298,13 @@ attacked the scorer itself.
   model: identical F1 every time.
 - *Monotonicity of the relaxations.* Each rule may only ADD matches, never
   remove one. Checked per note and per model against exact-match-only:
-  **zero violations**. Worth knowing how much the rules carry — they add 3 to 11
+  **zero violations**. Worth knowing how much the rules carry. They add 3 to 11
   true positives per model, and granite-4.0-h-1b gains 46% (24 -> 35). Rules
   doing that much work had better be tested, which until now they were not.
 
 **Found:**
 - *The completeness guard was in the wrong place.* It lived in score.py's
-  main(), so every ad-hoc analysis importing the module skipped it — an
+  main(), so every ad-hoc analysis importing the module skipped it. An
   unfinished 31B run scored 0.527 in the order-invariance check before I noticed
   it was 49 notes of 70. Now a shared `load_pred_file()` that refuses.
 - *Endpoint asymmetry.* Containment applied to objects but not subjects, an
@@ -322,7 +321,7 @@ attacked the scorer itself.
 **The pattern worth naming:** every one of these was found by asking what the
 scorer must be *true of*, rather than by looking at what it produced. Output
 audits find the bugs your data happens to trip. Property checks find the ones it
-does not — yet.
+does not, yet.
 
 ## Known gotchas that are NOT fixed
 
@@ -330,7 +329,7 @@ Things a reader or a rerun will hit. None are bugs; all are limits.
 
 **The scoring rules were fitted to this data.** This is the biggest one and it
 has no clean fix here. Predicate equivalences, aliases and containment were added
-*because models produced them* — I read the disagreements and decided which were
+*because models produced them*. I read the disagreements and decided which were
 unfair. Measured against exact-match-only, those rules account for **6-13% of
 every top model's F1**:
 
@@ -342,7 +341,7 @@ every top model's F1**:
 | Qwen3.6-27B | 0.820 | 0.906 | 10% |
 | Qwen3.6-35B-A3B | 0.746 | 0.791 | 6% |
 
-Each rule is individually defensible — `met` really does mean `knows`. But they
+Each rule is individually defensible, `met` does mean `knows`. But they
 were chosen with the answers visible, which is the definition of fitting the
 grader to the test set. The proper control is a held-out set of notes the rules
 were never tuned against; it does not exist here. Anyone reproducing this should
@@ -351,7 +350,7 @@ effect is uneven (6% to 13%), so it distorts gaps as well as levels.
 
 **One author, no independent review.** Every gold label was written by one model
 (Claude Opus 5) and audited by the same one. The consensus check in defect 13
-helps — 23 models agreeing against a label is real evidence — but it cannot catch
+helps (23 models agreeing against a label is real evidence) but it cannot catch
 a mistake the models share.
 
 **n=69.** Differences under about 0.05 F1 are not meaningful. Several adjacent
@@ -359,7 +358,7 @@ pairs in the table are inside that.
 
 **Categories with no gold triples report null, not 0.** transient, and most of
 ambiguous and negation, have no gold triples, so P/R/F1 are undefined there.
-Reporting 0.0 inverted the meaning — fp=0 on a factless note is perfect
+Reporting 0.0 inverted the meaning, fp=0 on a factless note is perfect
 restraint, and a chart would have shown it as the worst category. Read
 `abstention_rate_on_schema` for those instead.
 
@@ -378,7 +377,7 @@ conclusions were retracted: the MoE discipline gap, "over-extraction is inherent
 to this prompt", and an 11.4% fabrication rate.
 
 The uncomfortable part is that for the first nine, **every single correction
-moved in the same direction** — the models were better than measured, every
+moved in the same direction**. The models were better than measured, every
 time. A grader with unbiased noise would have erred both ways.
 
 That one-sidedness was itself the clue, and it is what prompted the tenth: if
@@ -387,9 +386,8 @@ were. Looking specifically for over-crediting found it immediately. The lesson i
 not "audit your grader" but something narrower and more useful: **audit it in the
 direction your corrections have not been going.**
 
-The practical lesson for anyone building an eval: the failure mode is not models
-behaving unexpectedly. It is the grader being wrong in ways that correlate with
-model quality — and a benchmark cannot detect that about itself. Every defect
+The practical lesson for anyone building an eval: the failure mode is the grader being wrong in ways
+that correlate with model quality, and a benchmark cannot detect that about itself. Every defect
 here was found by reading raw outputs or by an outside observation that a number
 looked strange. None were found by the aggregate metrics, which looked entirely
 plausible throughout.
@@ -596,7 +594,7 @@ Nothing in the harness detected any of it. It was found by eye in a process
 listing, while looking at something else.
 
 Cost: none, as it turned out. The Q6 control was re-run under the lock and
-scored bit-identical to the first run — 0.8550 / 0.8750 / 0.8358, 64 triples,
+scored bit-identical to the first run, 0.8550 / 0.8750 / 0.8358, 64 triples,
 `strict` dict equal. That is luck. The control had completed before the second
 instance started, and a request landing on the wrong server would not have been
 visible in any output.
@@ -692,7 +690,7 @@ because half a ladder under one cap and half under another is not a ladder.
 
 `sweep_challenger_254.sh` invoked `run_llamacpp.py` without `--thinking` and
 without `--max-tokens`, so every model on .254 ran with reasoning suppressed
-against the runner's **default 512-token cap** — a sixteenth of production's
+against the runner's **default 512-token cap**, a sixteenth of production's
 `MF_LLM_OUT_CAP`. The .253 ladder it was meant to be compared against runs
 `--thinking --max-tokens 8192`.
 
@@ -706,7 +704,7 @@ against the runner's **default 512-token cap** — a sixteenth of production's
 
 The sweep existed to test reasoning-tuned models, and it ran them with reasoning
 off. Olmo-3.1-32B-**Think** truncated on 59 of 70 notes. Magistral scored 0.7376
-and I reported it as "works, clearly worse" — with its reasoning suppressed.
+and I reported it as "works, clearly worse", with its reasoning suppressed.
 
 The controls did not truncate, because 12B without thinking emits ~34 tokens, so
 nothing in the control's own numbers hinted at the problem. That is what made it
@@ -803,14 +801,14 @@ Three times now, a cleanup command of the form
 `pgrep -f <pattern> | xargs kill` has killed its own SSH session, because the
 pattern appears in the command line of the shell running it. Once it also failed
 to stop the target: `pgrep -f sweep_challenger_254 | head -1` returned my own
-wrapper first, killed that, and left the real sweep running — which is how two
+wrapper first, killed that, and left the real sweep running, which is how two
 sweeps ended up serving the same port a second time.
 
 Cost: one wasted .254 sweep, two interrupted sessions, and the invalid Magistral
 run above.
 
-The fix is not another kill loop. It is that a sweep should be stoppable by its
-own lockfile rather than by pattern-matching a process table.
+The fix is that a sweep should be stoppable by its own lockfile rather than by pattern-matching a
+process table. Another kill loop would not do it.
 
 ## What .254 is for
 
@@ -883,7 +881,7 @@ this task.
 `verify_and_heal.sh` asks the scorer whether each prediction file is scoreable
 and deletes the ones it refuses, so the next sweep pass re-runs them. An
 **in-progress** run is incomplete by definition, so the scorer refuses it, so
-the heal loop deleted it — while the runner was still writing.
+the heal loop deleted it, while the runner was still writing.
 
 The runner keeps its file descriptor. It went on writing to an unlinked inode,
 and every row would have vanished the moment it exited:
@@ -924,7 +922,7 @@ when it should not have, and it was the most destructive of them.
 Every `challenger-254` run was taken on an **8GB Phoenix iGPU sharing a 14GB
 host**, not the 24GB 7900 XTX the lane notes claim. The card is physically
 present at `0000:6b:00.0` (Navi 31, `1002:744c`) and had **no driver bound**, so
-`llama-server --list-devices` enumerated exactly one device — the iGPU — and
+`llama-server --list-devices` enumerated exactly one device (the iGPU) and
 llama.cpp took it by default. A reboot on 2026-08-01 bound `amdgpu` and both
 devices appeared:
 
@@ -939,7 +937,7 @@ in place, because the reasoning is instructive:
 **"GLM-4.7-Flash does not work on this hardware."** Recorded on three symptoms:
 `????????` from a raw completion, 7943 reasoning tokens with no content, and
 0.68 tok/s for a 30B-A3B MoE "resident on a 24GB card". It was never resident on
-any card — a ~19GB Q6 model against 8GB of shared memory on a swapping host
+any card, a ~19GB Q6 model against 8GB of shared memory on a swapping host
 explains all three without any architecture bug. GLM subsequently ran clean on
 `.253` under CUDA at 10.7 tok/s and scored **F1 0.7801**, the best recall in the
 benchmark. The Vulkan/RADV theory was invented to explain a fit problem.
@@ -948,7 +946,7 @@ benchmark. The Vulkan/RADV theory was invented to explain a fit problem.
 is what thrashing looks like, not what the model costs.
 
 `gemma-4-12B-it.q6` at 0.8630 stays in the index because accuracy plausibly
-survives — the same GGUF answers the same wherever its tensors sit — but its
+survives (the same GGUF answers the same wherever its tensors sit) but its
 speed and fit numbers are void.
 
 ### The general lesson

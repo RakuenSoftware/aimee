@@ -3,7 +3,7 @@
 Two hosts. Neither is a clean-room; both are machines that do other work, and
 that shows up in the timings.
 
-## .253 — Proxmox host, LXC 140 `aimee-tiera-bench`
+## .253: Proxmox host, LXC 140 `aimee-tiera-bench`
 
 | | |
 | --- | --- |
@@ -24,17 +24,17 @@ Q8_0 does not fit at all, and llama.cpp's auto-fit silently serves it from CPU
 instead. That produced a directory named `gpu` full of CPU runs. See
 MEASUREMENT_LOG.md defect 15.
 
-## .254 — SmoothNAS, bare metal
+## .254: SmoothNAS, bare metal
 
 | | |
 | --- | --- |
 | GPU | AMD Radeon RX 7900 XTX, 24GB (RADV NAVI31) |
-| second GPU | PHOENIX iGPU, 8GB — masked with `GGML_VK_VISIBLE_DEVICES=1` |
+| second GPU | PHOENIX iGPU, 8GB: masked with `GGML_VK_VISIBLE_DEVICES=1` |
 | CPU | 16 cores |
 | RAM | 14GB total, ~3GB free |
 | storage | `/mnt/media`, 43TB free |
 | backend | Vulkan (RADV) |
-| llama.cpp | build 10210, commit `0005475` — the same commit as .253 |
+| llama.cpp | build 10210, commit `0005475`: the same commit as .253 |
 | quantisation | Q6_K, and Q5_K_M for 32B dense |
 
 Runs unprivileged from prebuilt binaries and a userspace venv on `/mnt/media`.

@@ -4,7 +4,7 @@
 > system as it behaves today; parts of it have since diverged. For current
 > behaviour see `docs/`, or the code.
 
-- **State:** DONE — implemented, adversarially reviewed, and exact-commit validated on CT260.
+- **State:** DONE. Implemented, adversarially reviewed, and exact-commit validated on CT260.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.plan.md`, P5-B.
 - **Depends on:** P5-B3a and its B2a/B2b/B2c prerequisites.
 - **Followed by:** P5-B3c real two-node topology and adversarial outage/revocation closeout.

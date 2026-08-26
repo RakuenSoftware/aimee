@@ -1,6 +1,6 @@
 # Proposal: mirror-sync drops a client diff once the delta gets big enough
 
-- **State:** OPEN — reproduced and bounded, not diagnosed. Found while
+- **State:** OPEN. Reproduced and bounded, not diagnosed. Found while
   migrating db1's ensemble family; nothing here is caused by that work.
 
 Six integration checks around `MCP Git` and the workspace mirror fail whenever
@@ -12,8 +12,7 @@ the suite is usually run just after a push, when the delta is empty.
 
 `cli_workspace_reverse_channel_sync` ships the client's working-tree patch to
 `/v1/workspace/mirror-sync` so the server's reconstructed sandbox matches what
-the developer actually has. With a large delta that POST fails with **HTTP 0** —
-no response at all — and the client prints:
+the developer actually has. With a large delta that POST fails with **HTTP 0** (no response at all) and the client prints:
 
     aimee: could not ship the working-tree diff for <root> (HTTP 0); the
     server-side sandbox will be a clean checkout at HEAD and will NOT contain
@@ -52,7 +51,7 @@ That exhausts the cheap explanations. What is left is the write or the read on
 the socket: HTTP 0 is also what the client reports when the server closes the
 connection mid-request, which is the symptom `cli_v1_routes_internal.h` already
 warns about ("dropped by the listener before it is parsed, which the client can
-otherwise only report as 'could not reach the endpoint' -- blaming a server that
+otherwise only report as 'could not reach the endpoint', blaming a server that
 is up and answering").
 
 ## Why it matters beyond the test
@@ -62,7 +61,7 @@ path whose job is to carry uncommitted work to the server-side sandbox, and its
 failure mode is a warning line on stderr and a sandbox that is quietly a clean
 checkout at HEAD. An agent then works on a tree that is missing the developer's
 changes, and nothing downstream says so. The bigger the unpushed work, the more
-likely it is to be missing -- which is the wrong way round.
+likely it is to be missing, which is the wrong way round.
 
 ## Reproducing
 
@@ -79,5 +78,5 @@ whether `mirror-sync`'s chunked path (`server_runner_endpoints.c` already
 reassembles a chunked patch behind a transfer id) is what the client is supposed
 to be using above some size. `rc_ship_client_diff` sends the patch whole and
 never sets `seq`/`final`, so if chunking is expected past a threshold, the client
-is simply not doing it -- which would fit every observation above, including why
+is simply not doing it, which would fit every observation above, including why
 two halves succeed where the whole fails.
