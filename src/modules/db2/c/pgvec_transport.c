@@ -121,10 +121,21 @@ int pgvec_table_ready(const char *table)
    if (!pg)
       return -1;
 
+   /* Ask what the index IS, not what it was named.
+    *
+    * This matched indexname LIKE '%_hnsw' until pgvectorscale became the
+    * default: with it installed the index is created USING diskann and named
+    * ..._diskann, so the probe found nothing, memory_vector_ready() went false,
+    * and every search fell back to lexical -- no vector retrieval and no graph
+    * fusion, silently, on exactly the configuration the default recommends.
+    *
+    * The access method is the fact worth testing. A future third index type
+    * needs adding here, and naming it after its method keeps that visible. */
    char sql[256];
    char errbuf[256];
    snprintf(sql, sizeof(sql),
-            "SELECT 1 FROM pg_indexes WHERE tablename = :tbl AND indexname LIKE '%%_hnsw'");
+            "SELECT 1 FROM pg_indexes WHERE tablename = :tbl AND "
+            "(indexdef ILIKE '%%USING hnsw%%' OR indexdef ILIKE '%%USING diskann%%')");
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
    if (!stmt)
       return -1;

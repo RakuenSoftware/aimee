@@ -156,13 +156,24 @@ static void pgvec_register_functions(sqlite3 *db)
                            shim_noop_int_func, NULL, NULL);
    sqlite3_create_function(db, "set_config", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
                            shim_set_config_func, NULL, NULL);
-   /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
+   /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables.
+    *
+    * indexdef is carried, not just indexname, because the readiness probe reads
+    * the access method now. While this view returned only a name ending _hnsw it
+    * agreed with the probe's old assumption no matter what the real schema
+    * built -- so the shim reported the store ready on a deployment where the
+    * probe would have said no, and the whole suite stayed green through a
+    * regression that took every memory search down to lexical. A fake that
+    * cannot disagree with the code it stands in for tests nothing. */
    sqlite3_exec(
        db,
        "CREATE VIEW IF NOT EXISTS pg_indexes AS "
-       "SELECT 'memory_embeddings' AS tablename, 'idx_memory_embeddings_hnsw' AS indexname "
+       "SELECT 'memory_embeddings' AS tablename, 'idx_memory_embeddings_diskann' AS indexname, "
+       "'CREATE INDEX idx_memory_embeddings_diskann ON memory_embeddings USING diskann (embedding)'"
+       " AS indexdef "
        "UNION ALL "
-       "SELECT 'kb_embeddings', 'idx_kb_embeddings_hnsw'",
+       "SELECT 'kb_embeddings', 'idx_kb_embeddings_diskann', "
+       "'CREATE INDEX idx_kb_embeddings_diskann ON kb_embeddings USING diskann (embedding)'",
        NULL, NULL, NULL);
 }
 
