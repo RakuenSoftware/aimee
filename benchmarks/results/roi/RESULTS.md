@@ -89,6 +89,27 @@ Codex pairs.
 - Raw artifact SHA-256:
   `63e477561a147cedbd90ee10b187e508efbdfb9fa8584126f006e21d4fa9fc5f`
 
+The one-pair low-coordinate mechanism check held model, answer, and grader
+constant while replacing unique key/value log lines with verbose natural
+language:
+
+- Run ID: `roi-codex-pilot-35035e1ec10e4e36`
+- Source pin: `bf0c089a28f2bce3d4114e71ba324073333ecb79`
+- Off: 17,130 input (9,984 cached), 14 output, `$0.0328576` API equivalent
+- Full: 15,701 input (9,984 cached), 14 output, `$0.0271416` API equivalent
+- Both exact answers resolved
+
+That is 1,429 fewer total input tokens (8.34%), 1,429 fewer uncached input
+tokens (20.0%), and `$0.005716` lower API-price equivalent for the task. The
+opposite signs in the two coordinate-density strata confirm that provider-side
+tokenization and content shape are material factors; neither one-pair result is
+a population estimate.
+
+- Raw artifact: `current-stack-codex-sol-low-coordinate-calibration.json`
+- Preflight: `current-stack-codex-sol-low-coordinate-calibration.preflight.json`
+- Raw artifact SHA-256:
+  `60f564eae6b8450371960aab7c18eb32fb41ec5607c960a175aadb9b04733c13`
+
 ## What this supports
 
 This run supports only the narrow statement that the current economizer can
