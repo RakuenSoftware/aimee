@@ -1,0 +1,21 @@
+{
+  "budget": {
+    "actual_contract": "Codex CLI authenticated using ChatGPT; fixed-plan quota, no per-call cash charge",
+    "actual_marginal_budget_usd": 0.0,
+    "api_equivalent_budget_usd": 86.04,
+    "calls": 6,
+    "expected_actual_marginal_cash_usd": 0.0,
+    "expected_api_price_equivalent_usd": 0.26784,
+    "hard_actual_marginal_cash_usd": 0.0,
+    "hard_api_price_equivalent_usd": 86.03999999999999,
+    "pricing_generation": "official-gpt-5.6-sol-2026-08-26",
+    "retries": 0
+  },
+  "commit": "dc1a1d88a239d39b84123f799d380f2668b356cb",
+  "coordinate_density": "low",
+  "created_at": "2026-08-26T21:24:04.792553+00:00",
+  "dispatch_started": false,
+  "model": "gpt-5.6-sol",
+  "schema_version": 1,
+  "task_corpus_sha256": "6e2c49a3bde3b08fc74c60d1aa342d97184d5e955948a6e9bac6debe5d097f3b"
+}

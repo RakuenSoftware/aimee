@@ -110,6 +110,23 @@ a population estimate.
 - Raw artifact SHA-256:
   `60f564eae6b8450371960aab7c18eb32fb41ec5607c960a175aadb9b04733c13`
 
+The first three-repeat run reproduced the provider-token effect exactly in all
+three pairs: off was 17,130 input tokens and full was 15,701 every time, with
+3/3 exact resolutions in both conditions. Aggregate input fell from 51,390 to
+47,103, a reduction of 4,287 tokens (8.34%).
+
+It also exposed a cache-isolation defect in the runner. The final full call
+reused 13,056 cached tokens while the other calls reused 9,984 because identical
+treatment prompts could share cache state across repeats. Total input still
+includes cached tokens, so the 4,287-token delta is intact; the aggregate
+API-price-equivalent delta is not a clean causal estimate and is rejected.
+
+- Run ID: `roi-codex-pilot-b030d48865ad406d`
+- Source pin: `dc1a1d88a239d39b84123f799d380f2668b356cb`
+- Raw artifact: `current-stack-codex-sol-low-coordinate-k3.json`
+- Raw artifact SHA-256:
+  `36d3b43f4aefb43f25ccd12c35d5f82336bf41483cff29dc8f7de5c1cd78ada1`
+
 ## What this supports
 
 This run supports only the narrow statement that the current economizer can
