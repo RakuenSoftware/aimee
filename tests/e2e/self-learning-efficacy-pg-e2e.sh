@@ -126,7 +126,7 @@ export AIMEE_API_ENDPOINT="unix:$SRVSOCK"
 A="$AIMEE_ROOT/aimee"
 store_up=0
 for _ in $(seq 1 120); do
-    store_probe=$("$A" eval candidates --limit 1 2>&1 | head -1)
+    store_probe=$("$A" eval candidates --limit 1 2>&1) || true
     printf '%s' "$store_probe" | grep -q 'could not read candidates' || { store_up=1; break; }
     sleep 0.5
 done
