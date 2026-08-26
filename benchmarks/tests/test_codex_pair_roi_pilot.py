@@ -32,6 +32,8 @@ class CodexPairROIPilotTests(unittest.TestCase):
             })
         result = summarize(rows)
         self.assertEqual(result["input_token_delta"], -30)
+        self.assertEqual(result["by_condition"]["off"]["calls"], 1)
+        self.assertEqual(result["by_condition"]["full"]["resolved"], 1)
         self.assertTrue(result["quality_gate_equal_resolved"])
         self.assertTrue(result["unique_threads"])
 

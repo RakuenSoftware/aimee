@@ -115,11 +115,20 @@ def run_codex(prompt: str, model: str) -> dict[str, Any]:
 def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
     result = {}
     for condition in ("off", "full"):
-        row = next(item for item in rows if item["condition"] == condition)
+        selected = [item for item in rows if item["condition"] == condition]
         result[condition] = {
-            "resolved": row["resolved"],
-            **row["usage"],
-            "api_price_equivalent_usd": row["api_price_equivalent_usd"],
+            "calls": len(selected),
+            "resolved": sum(bool(row["resolved"]) for row in selected),
+            **{
+                key: sum(row["usage"][key] for row in selected)
+                for key in (
+                    "input_tokens", "cached_input_tokens", "cache_write_input_tokens",
+                    "output_tokens", "reasoning_output_tokens",
+                )
+            },
+            "api_price_equivalent_usd": sum(
+                row["api_price_equivalent_usd"] for row in selected
+            ),
             "actual_marginal_cash_usd": 0.0,
         }
     off, full = result["off"], result["full"]
@@ -130,7 +139,9 @@ def summarize(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "api_price_equivalent_delta_usd": (
             full["api_price_equivalent_usd"] - off["api_price_equivalent_usd"]
         ),
-        "quality_gate_equal_resolved": full["resolved"] == off["resolved"],
+        "quality_gate_equal_resolved": (
+            full["resolved"] == off["resolved"] == full["calls"] == off["calls"]
+        ),
         "unique_threads": len({row["thread_id"] for row in rows}) == len(rows),
     }
 
@@ -139,6 +150,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--coordinate-density", choices=("low", "high"), default="high")
+    parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--actual-marginal-budget-usd", required=True, type=float)
     parser.add_argument("--api-equivalent-budget-usd", required=True, type=float)
@@ -147,6 +159,8 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    if args.repeats < 1:
+        raise SystemExit("repeats must be positive")
     repo = Path(__file__).resolve().parents[2]
     dirty = subprocess.check_output(
         ["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo, text=True,
@@ -158,12 +172,12 @@ def main() -> None:
         raise SystemExit("Codex is not using the preregistered ChatGPT contract")
     commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip()
 
-    calls = 2
+    calls = 2 * args.repeats
     expected_usage = {
-        "input_tokens": 40_000,
-        "cached_input_tokens": 20_000,
+        "input_tokens": 40_000 * args.repeats,
+        "cached_input_tokens": 20_000 * args.repeats,
         "cache_write_input_tokens": 0,
-        "output_tokens": 64,
+        "output_tokens": 64 * args.repeats,
     }
     expected_api = api_equivalent_cost(expected_usage)
     hard_api_per_call = (
@@ -211,12 +225,15 @@ def main() -> None:
     if not reduced.get("mutated") or reduced.get("reason") != "reduced":
         raise RuntimeError(f"economizer activation failed: {reduced}")
 
-    plan = [("off", task.messages), ("full", reduced["messages"])]
-    random.Random(SEED).shuffle(plan)
+    plan = []
+    for repeat in range(args.repeats):
+        pair = [("off", task.messages), ("full", reduced["messages"])]
+        random.Random(SEED + repeat).shuffle(pair)
+        plan.extend((repeat, condition, messages) for condition, messages in pair)
     run_id = "roi-codex-pilot-" + uuid.uuid4().hex[:16]
     rows = []
     started = time.monotonic()
-    for ordinal, (condition, messages) in enumerate(plan):
+    for ordinal, (repeat, condition, messages) in enumerate(plan):
         prompt = (
             SYSTEM_PROMPT
             + "\n\nThe message history is this JSON array:\n"
@@ -226,7 +243,8 @@ def main() -> None:
         outcome = run_codex(prompt, args.model)
         row = {
             "run_id": run_id,
-            "call_id": f"{run_id}:{ordinal}:{condition}",
+            "call_id": f"{run_id}:{repeat}:{ordinal}:{condition}",
+            "repeat": repeat,
             "condition": condition,
             "task_id": task.task_id,
             "model": args.model,
@@ -258,6 +276,7 @@ def main() -> None:
         "commit": commit,
         "run_id": run_id,
         "seed": SEED,
+        "repeats": args.repeats,
         "model": args.model,
         "coordinate_density": args.coordinate_density,
         "task_corpus_sha256": sha256_json([task.__dict__]),
