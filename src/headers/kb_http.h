@@ -25,6 +25,10 @@ void kb_http_stop(void);
  * path (those routes are then org-admin only). Call once before kb_http_start. */
 void kb_http_set_telemetry_token(const char *hash);
 
+/* Disable telemetry scrape/ingest routes unless an explicit observability
+ * listener was configured for this process. */
+void kb_http_set_telemetry_enabled(int enabled);
+
 /* Route a single HTTP request and write the response into out_buf (null-
  * terminated). Returns the HTTP status code.
  * method, path, auth_header are null-terminated strings (auth_header may

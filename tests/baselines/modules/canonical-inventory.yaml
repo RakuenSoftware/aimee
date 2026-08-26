@@ -32,7 +32,8 @@
     "benchmarks",
     "economizer",
     "postgres",
-    "db2"
+    "db2",
+    "observability"
   ],
   "principal_refs": {
     "module-runtime": 1,
@@ -64,7 +65,8 @@
     "economizer": 27,
     "postgres": 28,
     "db2": 29,
-    "aimee": 30
+    "aimee": 30,
+    "observability": 31
   },
   "retired_principal_refs": [],
   "plugin_principal_ref_band": { "first": 200, "limit": 456 },

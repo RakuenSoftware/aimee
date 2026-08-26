@@ -26,6 +26,7 @@
 #include "project.h"
 #include "kb_enroll.h"
 #include "kb_http.h"
+#include "kb_metrics_listener.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h" /* host install:kb MCP plugins */
 #include "kb_tls.h"
 #include "kb_sidecar_identity.h"
@@ -1682,6 +1683,8 @@ int main(int argc, char **argv)
    int bootstrap_db2 = 0;
    int json_output = 0;
    int http_port_override = -1; /* -1 = use config */
+   kb_metrics_listener_config_t metrics_listener_config;
+   kb_metrics_listener_config_from_env(&metrics_listener_config);
    const char *fusion_probe_query = NULL;
 
    for (int i = 1; i < argc; i++)
@@ -1698,6 +1701,8 @@ int main(int argc, char **argv)
          json_output = 1;
       else if (strncmp(argv[i], "--http-port=", 12) == 0)
          http_port_override = atoi(argv[i] + 12);
+      else if (kb_metrics_listener_config_parse_arg(&metrics_listener_config, argv[i]))
+         ;
       else if (strncmp(argv[i], "--log-level=", 12) == 0)
       {
          if (log_parse_level(argv[i] + 12, &log_level) != 0)
@@ -1742,6 +1747,7 @@ int main(int argc, char **argv)
              "  --version            Print version\n"
              "  --help               Show this help\n";
          fputs(usage, stdout);
+         kb_metrics_listener_print_usage();
          return 0;
       }
       else
@@ -2279,13 +2285,6 @@ int main(int argc, char **argv)
     * file so all stateless kb instances agree on trusted keys and IdP rotation
     * converges within the bounded refresh. Falls back to the file when no PG rows. */
    kb_oidc_jwks_fleet_enable();
-   /* P9a: register the /v1/metrics + /v1/telemetry/metrics scrape/ingest token
-    * (config telemetry.metrics_token, a SHA-256 hex) before the listener accepts. */
-   char telemetry_token[256] = "";
-   (void)runtime_secret_get("AIMEE_TELEMETRY_METRICS_TOKEN", telemetry_token,
-                            sizeof(telemetry_token));
-   kb_http_set_telemetry_token(telemetry_token);
-   runtime_secret_wipe(telemetry_token, sizeof(telemetry_token));
    if (vault_tpm_runtime_lock &&
        kb_vault_tpm_runtime_lock_revalidate(vault_tpm_runtime_lock) != KB_VAULT_TPM_RUNTIME_LOCK_OK)
    {
@@ -2315,6 +2314,24 @@ int main(int argc, char **argv)
       agent_http_cleanup();
       return 1;
    }
+   if (kb_metrics_listener_start_from_runtime(&metrics_listener_config) != 0)
+   {
+      fprintf(stderr,
+              "aimee-kb: invalid observability listener or TLS/authentication configuration\n");
+      kb_management_runtime_stop();
+      kb_service_shutdown(&g_ctx);
+      kb_vault_operator_service_stop(vault_operator_service);
+      vault_operator_service = NULL;
+      kb_vault_operator_components_destroy(&vault_operator_components);
+      if (vault_operator_runtime_opened)
+         db2_vault_operator_runtime_close(&vault_operator_runtime);
+      db2_shutdown();
+      kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
+      obs_bus_stop();
+      audit_log_close();
+      agent_http_cleanup();
+      return 1;
+   }
    char kb_http_bearer[4096] = "";
    (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer, sizeof(kb_http_bearer));
    int kb_http_start_rc = kb_http_start(http_port, kb_http_bearer);
@@ -2326,6 +2343,7 @@ int main(int argc, char **argv)
       LOG_WARN("kb_http",
                "failed to start HTTP listener on port %d; another instance likely owns it",
                http_port);
+      kb_metrics_listener_stop();
       kb_management_runtime_stop();
       kb_service_shutdown(&g_ctx);
       kb_vault_operator_service_stop(vault_operator_service);
@@ -2443,6 +2461,7 @@ int main(int argc, char **argv)
    }
    int rc = 0;
    kb_mtls_stop();
+   kb_metrics_listener_stop();
    kb_http_stop();
    mcp_client_registry_shutdown(); /* stop kb-hosted MCP plugins (install: kb) */
    obs_bus_stop();
