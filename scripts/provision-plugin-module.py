@@ -55,27 +55,22 @@ STAGE_DECLARE = 2
 # in that file so no future module is assigned into it. The band is wider than the
 # real ceiling -- BUS_HOST_MAX_KINDS is 256 kinds per host, shared with every other
 # module -- so the band is never what binds.
-# A DB3 vector provider is provisioned exactly like a plugin instance -- an
-# operator installs Qdrant or Milvus, it attaches to a bus, and DB3Router keys it
-# by principal ref. The only differences are which band the ref comes from and
-# what the grant is called, so this script covers both rather than being copied.
-# A second copy is how the two allocators would drift, which is the defect this
-# whole derivation exists to remove.
+# The band MUST match tests/baselines/modules/canonical-inventory.yaml, which
+# enforces that no module ref falls inside it.
 #
-# The bands MUST match tests/baselines/modules/canonical-inventory.yaml, which
-# enforces that no module ref falls inside either and that they do not overlap.
+# There was a second band here, [456,512), for external vector database
+# providers. It went with them: the searches worth answering outside PostgreSQL
+# came to one curator lookup, because memory visibility is a rank over EXISTS
+# subqueries, kb reads its generation from a joined table, and code search is
+# one leg of a fusion whose other legs are relational. The band stays RESERVED
+# in the inventory rather than reused, so a ref from a grant written before the
+# removal can never collide with a plugin allocated after it.
 KINDS = {
     "plugin": {
         "first": 200,
         "limit": 456,
         "prefix": "mcp",
         "what": "plugin instances",
-    },
-    "db3-provider": {
-        "first": 456,
-        "limit": 512,
-        "prefix": "db3",
-        "what": "DB3 vector providers",
     },
 }
 
@@ -172,8 +167,7 @@ def main():
     ap.add_argument("--cwd", default="", help="working directory for the plugin")
     ap.add_argument("--daemon", default="server", help="daemon hosting it (default: server)")
     ap.add_argument("--kind", default="plugin", choices=sorted(KINDS),
-                    help="what is being provisioned: an MCP/pluggy plugin instance, "
-                         "or a DB3 vector provider (default: plugin)")
+                    help="what is being provisioned (default: plugin)")
     ap.add_argument("--config-dir", default=os.path.expanduser("~/.config/aimee"),
                     help="aimee config directory")
     ap.add_argument("--dry-run", action="store_true", help="print, write nothing")
@@ -239,16 +233,20 @@ def main():
     else:
         ref, invoke, declare = allocate(grants, grant_name, args.kind)
 
+    publish = ""
+    subscribe = ""
+    serve = f"{invoke},{declare}"
+
     grant = "\n".join([
         "version=1",
         "principal_class=1",
         f"principal_ref={ref}",
         "uid=self",
         f"executable={args.module_bin}",
-        "publish=",
-        "subscribe=",
+        f"publish={publish}",
+        f"subscribe={subscribe}",
         "request=",
-        f"serve={invoke},{declare}",
+        f"serve={serve}",
     ]) + "\n"
 
     grant_path = os.path.join(policy_dir, grant_name)

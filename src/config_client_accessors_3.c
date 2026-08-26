@@ -53,7 +53,18 @@ int config_set_code_span_max_lines(int value)
 
 int config_require_session_worktree(void)
 {
-   double value = 0;
+   /* Fail CLOSED. This is a guard rail, and it defaulted to 0 -- so a config
+    * service that was unreachable, or a key nobody had set, silently turned the
+    * guard OFF. The client-side accessor for the same setting has always passed
+    * a default of 1, so the two disagreed about what an absent value means, and
+    * the one that fails open is the one the server-side chokepoint uses.
+    *
+    * Two aimee sessions sharing one checkout collide on a single git HEAD, so one
+    * session's checkout moves the branch the other is mutating.
+    *
+    * read_number leaves value untouched when it cannot answer, so an explicit
+    * `require_session_worktree: false` still turns the guard off -- only silence enforces. */
+   double value = 1;
    (void)config_client_read_number("require_session_worktree", &value);
    return (int)value;
 }

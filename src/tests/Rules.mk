@@ -35,6 +35,7 @@ DB2_TEST_BACKEND_LIB = $(PQ_LIB)
 $(OBJDIR)/db2/db2_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
 endif
 
+
 # db2_test_shim.o's flags depend on AIMEE_TEST_PG, and a flag change is invisible to
 # make: its source and headers are untouched, so switching modes in the same OBJDIR
 # reuses the object built for the OTHER backend. Everything then links and 90-odd
@@ -873,8 +874,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-sketch-support \
                 $(TESTPREFIX)/unit-test-db2-text-support \
                 $(TESTPREFIX)/unit-test-db2-time-support \
-                $(TESTPREFIX)/unit-test-db3-route \
-                $(TESTPREFIX)/unit-test-bus-db3
 
 MODULE_HANDLER_TEST_OBJS = \
    $(OBJDIR)/tests/module_handlers/memory.o \
@@ -3108,7 +3107,11 @@ $(TESTPREFIX)/unit-test-bus-runtime: $(OBJDIR)/tests/test_bus_runtime.o \
 unit-test-bus-runtime: $(TESTPREFIX)/unit-test-bus-runtime
 	$<
 
-$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include
+# The conformance run drives every component in process-contracts.json, so this
+# test names their event kinds -- including execution-policy's, whose include
+# root is granted per-object rather than in the base flags.
+$(OBJDIR)/tests/test_module_runtime.o: C_FLAGS += -Icore/event_bus/include \
+                                                  -Imodules/execution-policy/include
 $(TESTPREFIX)/unit-test-module-runtime: $(OBJDIR)/tests/test_module_runtime.o \
                                         $(OBJDIR)/core/event_bus/module_client.o \
                                         $(OBJDIR)/core/event_bus/module_runtime.o \
@@ -3298,35 +3301,6 @@ unit-tests-pg:
 	$(MAKE) AIMEE_TEST_PG=1 db2-test-template
 	$(MAKE) AIMEE_TEST_PG=1 unit-tests
 
-$(OBJDIR)/tests/test_db3_route.o: C_FLAGS += -Imodules/db2/include
-$(OBJDIR)/modules/db2/db3_route.o: C_FLAGS += -Imodules/db2/include
-$(TESTPREFIX)/unit-test-db3-route: $(OBJDIR)/tests/test_db3_route.o \
-                                      $(OBJDIR)/modules/db2/db3_route.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
-
-.PHONY: unit-test-db3-route
-unit-test-db3-route: $(TESTPREFIX)/unit-test-db3-route
-	$<
-
-$(OBJDIR)/tests/test_bus_db3.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
-$(TESTPREFIX)/unit-test-bus-db3: $(OBJDIR)/tests/test_bus_db3.o \
-                                $(OBJDIR)/modules/db2/db3_route.o \
-                                $(OBJDIR)/core/event_bus/bus_runtime.o \
-                                $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                                $(OBJDIR)/core/event_bus/bus_client.o \
-                                $(OBJDIR)/core/event_bus/bus_attach.o \
-                                $(OBJDIR)/core/event_bus/bus_host.o \
-                                $(OBJDIR)/core/event_bus/bus_route.o \
-                                $(OBJDIR)/core/event_bus/bus_region.o \
-                                $(OBJDIR)/core/event_bus/bus_region_host.o \
-                                $(OBJDIR)/core/event_bus/bus_ring.o \
-                                $(OBJDIR)/core/event_bus/bus_arena.o \
-                                $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread -lm
-
-.PHONY: unit-test-bus-db3
-unit-test-bus-db3: $(TESTPREFIX)/unit-test-bus-db3
-	$<
 
 # Event-bus conformance host harness (feature tree slice 10). A test binary that
 # exposes the C host on a Unix socket so the Go reference client can interoperate
@@ -3345,26 +3319,6 @@ $(TESTPREFIX)/bus-conformance-host: $(OBJDIR)/tests/bus_conformance_host.o \
 
 .PHONY: bus-conformance-host
 bus-conformance-host: $(TESTPREFIX)/bus-conformance-host
-
-# Strict C host for the Go DB3 provider/router interoperability test. The host
-# owns transport only; every provider, selection, fallback, and idempotency
-# decision in the test runs in Go over authenticated grants.
-$(OBJDIR)/tests/test_bus_db3_go_host.o: C_FLAGS += -Icore/event_bus/include -Imodules/db2/include
-$(TESTPREFIX)/db3-go-host: $(OBJDIR)/tests/test_bus_db3_go_host.o \
-                            $(OBJDIR)/core/event_bus/bus_runtime.o \
-                            $(OBJDIR)/core/event_bus/bus_endpoint.o \
-                            $(OBJDIR)/core/event_bus/bus_attach.o \
-                            $(OBJDIR)/core/event_bus/bus_host.o \
-                            $(OBJDIR)/core/event_bus/bus_route.o \
-                            $(OBJDIR)/core/event_bus/bus_region.o \
-                            $(OBJDIR)/core/event_bus/bus_region_host.o \
-                            $(OBJDIR)/core/event_bus/bus_ring.o \
-                            $(OBJDIR)/core/event_bus/bus_arena.o \
-                            $(OBJDIR)/core/event_bus/bus_wire.o
-	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
-
-.PHONY: db3-go-host
-db3-go-host: $(TESTPREFIX)/db3-go-host
 
 # Event-bus capture + observational replay (feature tree slice 11).
 $(OBJDIR)/tests/test_bus_capture.o: C_FLAGS += -Icore/event_bus/include
@@ -5412,6 +5366,17 @@ $(TESTPREFIX)/unit-test-kb-vault-rotation-ops-live: \
 # AIMEE_TEST_PG_URL it actually connects to Postgres; without it the test SKIPs (exit 0).
 # Modeled on the negation-eval binary (full KB minus kb_main + a test main), which is
 # the established pattern for a real-libpq test target.
+# The kb/kb_pdf embedding write path, against real Postgres. It links the same
+# KB closure as the other *-pg fixtures because the upsert reaches db2_conn()
+# through the ordinary DB2 runtime rather than a shim.
+$(OBJDIR)/tests/test_pgvec_generation_pg.o: C_FLAGS += -Imodules/db2/include
+$(TESTPREFIX)/unit-test-pgvec-generation-pg: $(OBJDIR)/tests/test_pgvec_generation_pg.o \
+                              $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
+                              $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
+                              $(KB_DATA_OBJS) $(KB_CORE_OBJS) $(KB_DB2_PG_OBJS) $(KB_DB2_OBJS) \
+                              $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
+	$(TESTLINK) -o $@ $^ $(L_KB)
+
 $(TESTPREFIX)/unit-test-vault-pg: $(OBJDIR)/tests/test_vault_pg.o \
                               $(filter-out $(OBJDIR)/kb/kb_main.o,$(KB_OBJS)) $(OBJDIR)/dashboard_kb.o \
                               $(OBJDIR)/server/oauth_pkce.o $(OBJDIR)/server/embedder_probe.o \
@@ -8211,6 +8176,7 @@ $(TESTPREFIX)/unit-test-http-content-encoding: \
 TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-kb-audit-worm-pg \
   $(TESTPREFIX)/unit-test-content-scope-pg \
+  $(TESTPREFIX)/unit-test-pgvec-generation-pg \
   $(TESTPREFIX)/unit-test-kb-bedrock-live \
   $(TESTPREFIX)/unit-test-kb-p2b-egress-live \
   $(TESTPREFIX)/unit-test-kb-vault-key-use-live \
@@ -8224,6 +8190,14 @@ TEST_KB_RUNTIME_TARGETS = \
   $(TESTPREFIX)/unit-test-witness-tamper-pg
 $(filter-out $(TEST_KB_RUNTIME_TARGETS),$(TEST_TARGETS)): \
   $(OBJDIR)/modules/vault/runtime_secret.o
+
+# These fixtures link L_KB, which carries $(CORE_CONNECTION_LIB), but they are
+# NOT in TEST_TARGETS -- they need a live Postgres or a live service, so they are
+# built and driven separately. The order-only edge above that guarantees the
+# archive exists therefore never reached them, and on a cold tree each one fails
+# at the link with "cannot find build/obj/libaimee-core-connection.a" rather than
+# anything about the test. Give them the same edge, for the same reason.
+$(TEST_KB_RUNTIME_TARGETS): | $(CORE_CONNECTION_LIB)
 
 # ---------------------------------------------------------------- benchmark probes
 # Compaction retention probe: measures how much load-bearing detail survives a

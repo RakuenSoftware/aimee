@@ -83,6 +83,29 @@ def exemption(tree: str) -> str | None:
             "ruling. Enforced automatically once it declares any"
         )
 
+    if tree == "vectordb":
+        # Exempt only while there is no descriptor, and for a reason the tree
+        # cannot settle on its own: vectordb is a DB3 VECTOR PROVIDER, and a
+        # provider does not have a canonical identity to declare. Its principal
+        # ref is allocated at provision time from db3_provider_principal_ref_band,
+        # so writing a descriptor means adding it to the canonical inventory,
+        # which in turn means giving src/modules/process-contracts.json a
+        # component with a DECLARED ref and the event kinds carved from it --
+        # kinds no running provider would ever serve, because it attaches on the
+        # ref provisioning handed it. That contract would be fiction.
+        #
+        # The honest alternatives are to move the package out of
+        # server-go/modules/ (its location is what claims it is a module), or to
+        # decide that a provider implementation IS a canonical module and take
+        # the ref. Both are architectural calls, not a lint's. The day a
+        # descriptor appears, this is enforced.
+        if descriptor.exists():
+            return None
+        return (
+            "no descriptor exists: a DB3 provider's ref comes from the provider "
+            "band at provision time, not from the canonical inventory"
+        )
+
     if tree == "mcp":
         # Exempt only while there is no descriptor. Writing one means allocating
         # a principal ref and choosing dependency edges -- an architectural

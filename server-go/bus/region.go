@@ -9,17 +9,17 @@ import (
 
 // Control region layout, mirroring bus_control_t (96 bytes).
 const (
-	ctlMagic         uint32 = 0x4c544342 // "BCTL"
-	ctlOffMagic             = 0
-	ctlOffSpec              = 4
-	ctlOffLayout            = 8
-	ctlOffSlot              = 16
-	ctlOffInline            = 20
-	ctlOffQueueCap          = 24
-	ctlOffArena             = 32
-	ctlOffEpoch             = 40
-	ctlOffHeartbeat         = 48
-	ctlBytes                = 96
+	ctlMagic        uint32 = 0x4c544342 // "BCTL"
+	ctlOffMagic            = 0
+	ctlOffSpec             = 4
+	ctlOffLayout           = 8
+	ctlOffSlot             = 16
+	ctlOffInline           = 20
+	ctlOffQueueCap         = 24
+	ctlOffArena            = 32
+	ctlOffEpoch            = 40
+	ctlOffHeartbeat        = 48
+	ctlBytes               = 96
 
 	specVersion   uint32 = 1
 	layoutVersion uint32 = 1
@@ -28,16 +28,16 @@ const (
 // Queue-pair region layout, mirroring bus_qpair_hdr_t (96 bytes) followed by the
 // inbound and outbound rings.
 const (
-	qpMagic         uint32 = 0x52504251 // "QPBR"
-	qpOffMagic             = 0
-	qpOffSlot              = 4
-	qpOffCap               = 8
-	qpOffCtlCredits        = 16
-	qpOffCtlLost           = 20
-	qpOffInboundOff        = 24
-	qpOffOutboundOff       = 28
-	qpOffHeartbeat         = 32
-	qpBytes                = 96
+	qpMagic          uint32 = 0x52504251 // "QPBR"
+	qpOffMagic              = 0
+	qpOffSlot               = 4
+	qpOffCap                = 8
+	qpOffCtlCredits         = 16
+	qpOffCtlLost            = 20
+	qpOffInboundOff         = 24
+	qpOffOutboundOff        = 28
+	qpOffHeartbeat          = 32
+	qpBytes                 = 96
 )
 
 // ErrRegion is returned when a mapped region fails validation.

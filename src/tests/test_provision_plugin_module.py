@@ -179,48 +179,6 @@ def main():
     if failures:
         print(f"\n{len(failures)} failure(s)")
         return 1
-    # --- DB3 vector providers ---------------------------------------------
-    #
-    # A provider is provisioned by the same tool, from a DIFFERENT ref band. The
-    # bands must not overlap, or the two allocators collide exactly the way the
-    # retired 11264 plugin range collided with postgres.
-    with tempfile.TemporaryDirectory() as cfg:
-        module_bin = os.path.join(cfg, "aimee-module")
-        open(module_bin, "w").close()
-        os.chmod(module_bin, 0o755)
-
-        prov_refs = set()
-        for name in ("qdrant", "milvus"):
-            r = provision(cfg, name, module_bin, extra=("--kind", "db3-provider"))
-            check(r.returncode == 0, f"provisioned db3 provider {name}")
-            if r.returncode != 0:
-                print(r.stderr)
-                continue
-            f = grant_fields(cfg, name, prefix="db3")
-            ref = int(f["principal_ref"])
-            serve = [int(k) for k in f["serve"].split(",")]
-
-            check(456 <= ref < 512,
-                  f"{name} ref {ref} is inside the DB3 provider band [456,512)")
-            check(ref not in prov_refs, f"{name} got an unused ref ({ref})")
-            check(serve == [4096 + ref * 256 + 1, 4096 + ref * 256 + 2],
-                  f"{name} kinds are derived from its principal_ref")
-            prov_refs.add(ref)
-
-        # A provider ref must never land in the plugin band, and vice versa.
-        check(all(r >= 456 for r in prov_refs),
-              "no DB3 provider ref fell into the plugin band [200,456)")
-
-        # The two kinds write DIFFERENT grant files, so a plugin and a provider
-        # of the same name cannot overwrite one another.
-        r = provision(cfg, "qdrant", module_bin)
-        check(r.returncode == 0, "a PLUGIN may share a name with a provider")
-        plugin_ref = int(grant_fields(cfg, "qdrant")["principal_ref"])
-        check(200 <= plugin_ref < 456,
-              f"the same-named plugin got a plugin-band ref ({plugin_ref})")
-        check(plugin_ref not in prov_refs,
-              "the plugin and the provider did not collide on a ref")
-
     print("all provisioning tests passed")
     return 0
 

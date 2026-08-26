@@ -75,6 +75,7 @@ INFRASTRUCTURE = {
         "the emitter half; unit-test-bus-guardrail-durability runs it and verifies in SQL",
     "unit-test-bus-db2-process": "needs Postgres and the packaged DB2 executable",
     "unit-test-content-scope-pg": "needs Postgres",
+    "unit-test-pgvec-generation-pg": "needs Postgres and pgvector",
     "unit-test-kb-audit-worm-pg": "needs Postgres",
     "unit-test-vault-pg": "needs Postgres",
     "unit-test-witness-canary-pg": "needs Postgres",
@@ -82,6 +83,29 @@ INFRASTRUCTURE = {
     "unit-test-witness-emit-pg": "needs Postgres",
     "unit-test-witness-recovery-pg": "needs Postgres",
     "unit-test-witness-tamper-pg": "needs Postgres",
+
+    # Test binaries that are not named unit-test-*. They became visible when
+    # the pattern above stopped assuming that prefix, and each is a HARNESS: a
+    # program another script drives rather than a test that runs itself. The
+    # script that drives it is named, so "who runs this" has an answer that can
+    # be checked instead of assumed.
+    "bus-conformance-host": "the C half; test_bus_conformance.sh, run by make go-unit-tests",
+    "bus-bench": "a measurement; scripts/check_bus_perf_gate.sh drives it",
+    "db2-test-template": "builds the Postgres test template; unit-tests-pg drives it",
+    "aimee-witness-boot-tpm-harness": "needs swtpm; scripts/run-p7-witness-boot-tpm.sh drives it",
+    "aimee-witness-cadence-harness": "needs a live daemon; scripts/run-p7-witness-*.sh drive it",
+    "p7-tpm2-harness": "needs swtpm; scripts/p7_tpm2*_test.sh drive it",
+    "p7-pkcs11-harness": "needs SoftHSM; scripts/p7_pkcs11_softhsm_test.sh drives it",
+    "p7-reseal-d2b-live": "needs swtpm and Postgres; scripts/p7_reseal_d2b_swtpm_pg_test.sh drives it",
+    "virtual-context-inspect": "an inspection tool; `make virtual-context-inspect` runs it",
+
+    # Driven by NOTHING. Recorded as such rather than described as covered,
+    # because a target nobody runs cannot fail and therefore cannot tell you
+    # anything -- and reading it as coverage is worse than knowing it is absent.
+    "compaction-retention-probe": "UNRUN: a measurement with no driver; `make compaction-retention-probe`",
+    "learning-implicit-replay": "UNRUN: no driver in the tree",
+    "mock-mcp-server": "UNRUN: a fixture other tests exec; nothing runs it alone",
+    "p7-vault-rewrap-live": "UNRUN: needs swtpm and a live vault; no driver in the tree",
     "unit-test-kb-bedrock-live": "needs a live Bedrock endpoint",
     "unit-test-kb-mgmt-live": "needs a live management service",
     "unit-test-kb-p2b-egress-live": "needs a live egress path",
@@ -119,7 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     # this script's own history says was the expensive miss. A blind spot in a
     # guard is worth more than the thing it guards, because it makes the tree
     # look checked.
-    prefixed = set(re.findall(r"^\$\(TESTPREFIX\)/(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
+    # And it matched only names beginning "unit-test-", which was the SAME blind
+    # spot one layer out. A test binary is a test binary whatever it is called,
+    # and the ones that are not unit-test-* are disproportionately the expensive
+    # kind. One such harness, the C bus host for an external vector database
+    # proof, went unrun -- and broken -- for as long as it existed, because this
+    # check could not see the name. That is the third time the same shape has
+    # cost something here, so the pattern now takes any target under TESTPREFIX.
+    prefixed = set(re.findall(r"^\$\(TESTPREFIX\)/([a-z0-9][a-z0-9-]*)\s*:", joined, re.M))
     bare = set(re.findall(r"^(unit-test-[a-z0-9-]+)\s*:", joined, re.M))
     defined = prefixed | bare
     if not defined:

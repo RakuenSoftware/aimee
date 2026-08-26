@@ -121,10 +121,21 @@ int pgvec_table_ready(const char *table)
    if (!pg)
       return -1;
 
+   /* Ask what the index IS, not what it was named.
+    *
+    * This matched indexname LIKE '%_hnsw' until pgvectorscale became the
+    * default: with it installed the index is created USING diskann and named
+    * ..._diskann, so the probe found nothing, memory_vector_ready() went false,
+    * and every search fell back to lexical -- no vector retrieval and no graph
+    * fusion, silently, on exactly the configuration the default recommends.
+    *
+    * The access method is the fact worth testing. A future third index type
+    * needs adding here, and naming it after its method keeps that visible. */
    char sql[256];
    char errbuf[256];
    snprintf(sql, sizeof(sql),
-            "SELECT 1 FROM pg_indexes WHERE tablename = :tbl AND indexname LIKE '%%_hnsw'");
+            "SELECT 1 FROM pg_indexes WHERE tablename = :tbl AND "
+            "(indexdef ILIKE '%%USING hnsw%%' OR indexdef ILIKE '%%USING diskann%%')");
    aimee_pg_stmt_t *stmt = aimee_pg_prepare(pg, sql, errbuf, sizeof(errbuf));
    if (!stmt)
       return -1;
@@ -176,22 +187,41 @@ int pgvec_ensure_index(const char *table, int dim, int recreate)
          LOG_WARN("pgvec", "truncate %s failed: %s", table, errbuf);
          return -1;
       }
-      /* index name is idx_<table>_hnsw */
+      /* BOTH index names, because which one exists depends on whether
+       * pgvectorscale was present when it was built. Dropping only the HNSW
+       * name left a stale DiskANN index behind on a re-create, and the
+       * IF NOT EXISTS below then found it and did nothing -- so a re-create
+       * silently kept the old index. */
       snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_hnsw", table);
       if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
          LOG_WARN("pgvec", "drop index idx_%s_hnsw failed: %s", table, errbuf);
+      snprintf(sql, sizeof(sql), "DROP INDEX IF EXISTS idx_%s_diskann", table);
+      if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
+         LOG_WARN("pgvec", "drop index idx_%s_diskann failed: %s", table, errbuf);
    }
 
+   /* pgvectorscale's StreamingDiskANN is the index this system uses; HNSW is
+    * what a database without the extension gets.
+    *
+    * This path used to create HNSW unconditionally, never probing for the
+    * extension -- while schema.sql, which builds the very same indexes at apply
+    * time, chose DiskANN whenever it was installed. So the memory, kb and code
+    * tables got DiskANN from the schema and HNSW from here, and which one a
+    * deployment ended up with depended on whichever ran last. It also meant a
+    * corpus wider than 2000 dimensions, which HNSW cannot index at all, had its
+    * index quietly created by the one path that could not hold it. */
+   const char *index_type = pgvec_vectorscale_available() ? "diskann" : "hnsw";
    char sql[256];
    snprintf(sql, sizeof(sql),
-            "CREATE INDEX IF NOT EXISTS idx_%s_hnsw "
-            "ON %s USING hnsw (embedding vector_cosine_ops)",
-            table, table);
+            "CREATE INDEX IF NOT EXISTS idx_%s_%s "
+            "ON %s USING %s (embedding vector_cosine_ops)",
+            table, index_type, table, index_type);
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create hnsw index on %s failed: %s", table, errbuf);
+      LOG_WARN("pgvec", "create %s index on %s failed: %s", index_type, table, errbuf);
       return -1;
    }
+   LOG_INFO("pgvec", "vector index type=%s table=%s", index_type, table);
    return 0;
 }
 
@@ -214,17 +244,36 @@ int pgvec_vectorscale_available(void)
    return found;
 }
 
+/* pgvectorscale's StreamingDiskANN is the DEFAULT, and HNSW is the fallback for
+ * a database that does not have the extension.
+ *
+ * This function used to say the opposite: an unset setting meant HNSW, and
+ * "auto" reached DiskANN only above db2_vector_corpus_diskann_threshold, whose
+ * shipped default is a million rows. schema.sql has always disagreed with it --
+ * it creates `USING diskann` whenever the extension is present and only falls
+ * back to HNSW when CREATE EXTENSION vectorscale fails. So the tree carried two
+ * index policies that contradicted each other, and the contradiction went
+ * unnoticed because this one has no production caller: only tests reach it.
+ *
+ * corpus_rows and diskann_threshold remain in the signature and are deliberately
+ * unused. A corpus size threshold is the wrong shape for this decision: DiskANN
+ * is not a large-corpus optimisation to grow into, it is the access method this
+ * system indexes with, and it also lifts pgvector's 2000-dimension cap on HNSW
+ * -- so a small corpus with wide vectors is exactly the case a threshold would
+ * have sent to the index that cannot hold it. */
 const char *pgvec_corpus_index_type(const char *configured, int64_t corpus_rows,
                                     int vectorscale_available, int64_t diskann_threshold)
 {
-   if (!configured || !configured[0] || strcmp(configured, "hnsw") == 0)
+   (void)corpus_rows;
+   (void)diskann_threshold;
+   /* An explicit "hnsw" is honoured: an operator who asks for it has a reason,
+    * and overriding that would make the setting a lie. */
+   if (configured && strcmp(configured, "hnsw") == 0)
       return "hnsw";
-   if (strcmp(configured, "diskann") == 0)
-      return vectorscale_available ? "diskann" : "hnsw";
-   /* auto: pick diskann only when extension present and corpus exceeds threshold */
-   if (vectorscale_available && corpus_rows >= diskann_threshold)
-      return "diskann";
-   return "hnsw";
+   /* Everything else -- unset, "auto", "diskann" -- wants DiskANN, and gets it
+    * whenever the extension is there. Without the extension there is only one
+    * answer available, and pgvec_ensure_corpus_index warns when it takes it. */
+   return vectorscale_available ? "diskann" : "hnsw";
 }
 
 int pgvec_ensure_corpus_index(const char *table, const char *index_type, int recreate)
@@ -235,12 +284,13 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
    if (!pg)
       return -1;
 
-   const char *use_type = index_type;
-   if (use_type && strcmp(use_type, "diskann") == 0 && !pgvec_vectorscale_available())
-   {
+   /* Resolve through the policy rather than trusting the argument, so a caller
+    * that passes nothing gets the DEFAULT (DiskANN) instead of silently
+    * creating an HNSW index. Passing NULL used to mean HNSW here, which is the
+    * same inversion pgvec_corpus_index_type carried. */
+   const char *use_type = pgvec_corpus_index_type(index_type, 0, pgvec_vectorscale_available(), 0);
+   if (index_type && strcmp(index_type, "diskann") == 0 && strcmp(use_type, "hnsw") == 0)
       LOG_WARN("pgvec", "pgvectorscale unavailable; corpus table %s falls back to HNSW", table);
-      use_type = "hnsw";
-   }
 
    char errbuf[256];
    if (recreate)
@@ -253,7 +303,7 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
    }
 
    char sql[512];
-   if (use_type && strcmp(use_type, "diskann") == 0)
+   if (strcmp(use_type, "diskann") == 0)
       snprintf(sql, sizeof(sql),
                "CREATE INDEX IF NOT EXISTS idx_%s_diskann "
                "ON %s USING diskann (embedding vector_cosine_ops)",
@@ -266,11 +316,10 @@ int pgvec_ensure_corpus_index(const char *table, const char *index_type, int rec
 
    if (aimee_pg_exec(pg, sql, errbuf, sizeof(errbuf)) != 0)
    {
-      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s",
-               use_type ? use_type : "hnsw", table, errbuf);
+      LOG_WARN("pgvec", "create %s index on corpus table %s failed: %s", use_type, table, errbuf);
       return -1;
    }
-   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type ? use_type : "hnsw", table);
+   LOG_INFO("pgvec", "corpus index type=%s table=%s", use_type, table);
    return 0;
 }
 
@@ -422,13 +471,21 @@ int pgvec_kb_upsert(int64_t point_id, const float *vec, int dim, const char *pay
    if (!vec_text)
       return -1;
 
+   /* generation comes from the document being embedded, not from the caller:
+    * point_id IS kb_documents.id, so the authoritative value is one lookup away
+    * and cannot drift from what the search compares against. A missing document
+    * row leaves it NULL, which is an orphaned vector -- the pgvector join
+    * excludes it too. */
    static const char *sql = "INSERT INTO kb_embeddings "
-                            "  (point_id, embedding, project, payload_json) "
+                            "  (point_id, embedding, project, generation, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::vector, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, "
+                            "   (SELECT d.generation FROM kb_documents d WHERE d.id = :point_id), "
+                            "   :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
+                            "  generation = EXCLUDED.generation, "
                             "  payload_json = EXCLUDED.payload_json";
 
    char errbuf[256];
@@ -571,6 +628,11 @@ int pgvec_scroll(const char *table, int64_t offset, int64_t *ids_out, int max,
  * Search
  * ---------------------------------------------------------------------- */
 
+/* The pgvector implementation of a memory candidate search.
+ *
+ * Named separately from pgvec_memory_search because it is also the callback the
+ * DB3 route falls back to: the route needs a function it can call, and that
+ * function must not itself consult the route. */
 int pgvec_memory_search(const float *vec, int dim, const char *record_type,
                         const char *const *kinds, int n_kinds, const char *workspace,
                         const char *project, int limit, int64_t *ids, double *scores, int max)
@@ -831,13 +893,18 @@ int pgvec_kbpdf_upsert(int64_t point_id, const float *vec, int dim, const char *
    if (!vec_text)
       return -1;
 
+   /* As for kb_embeddings: the generation is the document's, looked up rather
+    * than passed in, so it cannot drift from what the search compares against. */
    static const char *sql = "INSERT INTO kb_pdf_embeddings "
-                            "  (point_id, embedding, project, payload_json) "
+                            "  (point_id, embedding, project, generation, payload_json) "
                             "VALUES "
-                            "  (:point_id, :embedding::vector, :project, :payload) "
+                            "  (:point_id, :embedding::vector, :project, "
+                            "   (SELECT d.generation FROM kb_documents d WHERE d.id = :point_id), "
+                            "   :payload) "
                             "ON CONFLICT (point_id) DO UPDATE SET "
                             "  embedding = EXCLUDED.embedding, "
                             "  project = EXCLUDED.project, "
+                            "  generation = EXCLUDED.generation, "
                             "  payload_json = EXCLUDED.payload_json";
 
    char errbuf[256];
