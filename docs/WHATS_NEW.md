@@ -24,7 +24,7 @@ this cycle.
   contracts.
 - The host stamps one sequence before routing and exposes one full-stream tap.
 - Capture materializes payloads into CRC-checked records for exact observational replay.
-- The measured dispatch path is about 134 ns per event against a 2,000 ns gate on the reference
+- The measured dispatch path is about 134 ns per event against a 1,000 ns gate on the reference
   host.
 
 The audit path is the first load-bearing consumer. Governed actions, memory mutations, semantic
