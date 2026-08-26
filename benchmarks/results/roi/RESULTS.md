@@ -64,8 +64,8 @@ they could not meet the source-lineage gate.
 
 A clean-lineage, one-task Codex calibration is retained as a negative result:
 
-- Run ID: `roi-codex-pilot-c12ce099ab67460c`
-- Source pin: `3938b55fc9eae5058d3e1d2dde2844d980cc2daf`
+- Run ID: `roi-codex-pilot-848b4adac3f242d6`
+- Source pin: `3938b55fc9a410c1b548ea7e8b2a40d7e5f264a7`
 - Contract: Codex CLI authenticated through ChatGPT; actual marginal cash cost
   `$0.00`, with API rates reported only as a price equivalent
 - Outcome: both off and full resolved the exact-answer task
