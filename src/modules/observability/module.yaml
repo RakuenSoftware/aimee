@@ -1,0 +1,29 @@
+{
+  "descriptor_version": 1,
+  "id": "observability",
+  "dependencies": [
+    "module-runtime"
+  ],
+  "enabled_by_default": false,
+  "runtime_toggle": {
+    "supported": true
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/observability/handler.go",
+    "server-go/modules/observability/metrics_server.go",
+    "server-go/modules/observability/observability.go",
+    "server-go/modules/observability/otlp_config.go",
+    "server-go/modules/observability/tap.go"
+  ],
+  "go_tests": [
+    "server-go/modules/observability/metrics_server_test.go",
+    "server-go/modules/observability/metrics_tls_test.go",
+    "server-go/modules/observability/observability_test.go",
+    "server-go/modules/observability/otlp_config_test.go",
+    "server-go/modules/observability/tap_test.go"
+  ],
+  "docs": [
+    "docs/modules/observability.md"
+  ]
+}

@@ -56,6 +56,7 @@ Start here:
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
+- [Observability security](runbooks/observability-security.md)
 - [Appliance state recovery](runbooks/appliance-state-recovery.md)
 - [Retrieval readiness and recovery](runbooks/retrieval-readiness-and-recovery.md)
 - [Virtual-context alerts](observability/virtual-context-alerts.md)
@@ -65,6 +66,7 @@ Start here:
 
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
+- [Observability module](modules/observability.md)
 - [Core C libraries](core/connection.md): [event bus](core/event-bus.md) and
   [repository extraction](core/repository-extraction.md)
 - [Turn integrity](architecture/turn-integrity.md)

@@ -1,0 +1,86 @@
+# Production template for otelcol-contrib. Every referenced environment variable
+# and mounted file is intentionally operator-supplied; there is no insecure fallback.
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+  file_storage:
+    directory: ${env:OTEL_COLLECTOR_STORAGE_DIRECTORY}
+    create_directory: false
+    max_size: ${env:OTEL_COLLECTOR_STORAGE_MAX_BYTES}
+    fsync: true
+    compaction:
+      on_start: true
+      directory: ${env:OTEL_COLLECTOR_STORAGE_DIRECTORY}
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTEL_RECEIVER_GRPC_ENDPOINT}
+        tls:
+          cert_file: ${env:OTEL_RECEIVER_TLS_CERTIFICATE}
+          key_file: ${env:OTEL_RECEIVER_TLS_KEY}
+          client_ca_file: ${env:OTEL_RECEIVER_TLS_CLIENT_CA}
+          min_version: "1.2"
+          reload_interval: 5m
+          client_ca_file_reload: true
+      http:
+        endpoint: ${env:OTEL_RECEIVER_HTTP_ENDPOINT}
+        tls:
+          cert_file: ${env:OTEL_RECEIVER_TLS_CERTIFICATE}
+          key_file: ${env:OTEL_RECEIVER_TLS_KEY}
+          client_ca_file: ${env:OTEL_RECEIVER_TLS_CLIENT_CA}
+          min_version: "1.2"
+          reload_interval: 5m
+          client_ca_file_reload: true
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 1024
+    spike_limit_mib: 256
+  batch:
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+    timeout: 5s
+
+exporters:
+  otlphttp/upstream:
+    endpoint: ${env:OTEL_UPSTREAM_ENDPOINT}
+    compression: gzip
+    timeout: 10s
+    tls:
+      ca_file: ${env:OTEL_UPSTREAM_TLS_CA}
+      cert_file: ${env:OTEL_UPSTREAM_TLS_CERTIFICATE}
+      key_file: ${env:OTEL_UPSTREAM_TLS_KEY}
+      min_version: "1.2"
+      reload_interval: 5m
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+      max_elapsed_time: 5m
+    sending_queue:
+      enabled: true
+      num_consumers: 10
+      queue_size: 10000
+      storage: file_storage
+
+service:
+  extensions: [health_check, file_storage]
+  telemetry:
+    logs:
+      level: info
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/upstream]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/upstream]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [otlphttp/upstream]

@@ -14,7 +14,7 @@ CONTRACTS = ROOT / "src/modules/process-contracts.json"
 INVENTORY = ROOT / "tests/baselines/modules/canonical-inventory.yaml"
 CORE = {
     "module-runtime", "ir", "translation", "protocols", "gateway",
-    "vault", "audit",
+    "vault", "audit", "observability",
 }
 PROCESS_REQUIRED = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",

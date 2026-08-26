@@ -37,7 +37,8 @@ func TestControlPlaneRemainsUnixSocketOnlyAndCredentialFree(t *testing.T) {
 	for _, forbidden := range []string{
 		`flag.String("listen"`,
 		`agent-service-bearer`,
-		`bearer-token`,
+		`flag.String("bearer-token"`,
+		`observability-bearer-token",`,
 		`AIMEE_AGENT_SERVICE_BEARER`,
 		`AIMEE_API_BEARER_TOKEN`,
 		`net.Listen("tcp"`,
@@ -49,5 +50,12 @@ func TestControlPlaneRemainsUnixSocketOnlyAndCredentialFree(t *testing.T) {
 	if !strings.Contains(text, `net.Listen("unix", *socket)`) ||
 		!strings.Contains(text, `os.Chmod(*socket, 0o600)`) {
 		t.Fatal("WFE control plane must bind an owner-only Unix socket")
+	}
+	if strings.Contains(text, `Handle("GET /metrics"`) {
+		t.Fatal("metrics must not be mounted on the WFE control-plane socket")
+	}
+	if !strings.Contains(text, `MetricsServerConfigFromEnv("AIMEE_SERVER")`) ||
+		!strings.Contains(text, `observability.StartMetricsServer`) {
+		t.Fatal("metrics exposure must use the shared opt-in observability listener")
 	}
 }

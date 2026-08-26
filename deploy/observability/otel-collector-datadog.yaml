@@ -1,0 +1,59 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: ${env:OTEL_RECEIVER_GRPC_ENDPOINT}
+        tls:
+          cert_file: ${env:OTEL_RECEIVER_TLS_CERTIFICATE}
+          key_file: ${env:OTEL_RECEIVER_TLS_KEY}
+          client_ca_file: ${env:OTEL_RECEIVER_TLS_CLIENT_CA}
+          min_version: "1.2"
+      http:
+        endpoint: ${env:OTEL_RECEIVER_HTTP_ENDPOINT}
+        tls:
+          cert_file: ${env:OTEL_RECEIVER_TLS_CERTIFICATE}
+          key_file: ${env:OTEL_RECEIVER_TLS_KEY}
+          client_ca_file: ${env:OTEL_RECEIVER_TLS_CLIENT_CA}
+          min_version: "1.2"
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+  batch:
+    send_batch_max_size: 100
+    send_batch_size: 10
+    timeout: 10s
+  cumulativetodelta:
+
+connectors:
+  datadog/connector:
+    traces:
+      compute_top_level_by_span_kind: true
+      peer_tags_aggregation: true
+      compute_stats_by_span_kind: true
+
+exporters:
+  datadog/exporter:
+    api:
+      key: ${env:DD_API_KEY}
+      site: ${env:DD_SITE}
+    sending_queue:
+      batch:
+        flush_timeout: 10s
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, datadog/connector]
+      processors: [memory_limiter, cumulativetodelta, batch]
+      exporters: [datadog/exporter]
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [datadog/connector, datadog/exporter]
+    logs:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [datadog/exporter]
