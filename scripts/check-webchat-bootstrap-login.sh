@@ -277,6 +277,7 @@ printf 'admin\n' > "$WEBCHAT_BOOTSTRAP_REPLACED"
 restore_log=$(webchat_provision_bootstrap_account 2>&1)
 # The operator's own account is back, with its own verifier...
 grep -Fq 'useradd' "$cleared_users"
+grep -Fq "useradd --create-home --gid $WEBCHAT_LOGIN_GROUP --groups $WEBCHAT_LOGIN_GROUP --shell /usr/sbin/nologin admin" "$cleared_users"
 grep -Fq -- "-aG $WEBCHAT_LOGIN_GROUP admin" "$cleared_users"
 # ...and is actually IN the group. Assert the RESULT, not the invocation: usermod
 # records its arguments before it can fail, so the line above passed even while the

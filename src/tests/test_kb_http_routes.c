@@ -5995,6 +5995,17 @@ static void test_service_scope_is_data_plane_not_admin(void)
                         sizeof(buf));
    assert(s != 403);
 
+   /* MAY: explicitly search across the tenant's projects. Managed server
+    * callers have no project-scoped credential to supply, so rejecting
+    * scope=all here makes the CLI's prescribed fallback unusable. */
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&scope=all", svc_auth, svc_tok, NULL,
+                        0, buf, sizeof(buf));
+   assert(s != 403);
+   const char *search_all = "{\"query\":\"needle\",\"scope\":\"all\"}";
+   s = kb_http_route_ex("POST", "/v1/search", NULL, svc_auth, svc_tok, search_all,
+                        (int)strlen(search_all), buf, sizeof(buf));
+   assert(s != 403);
+
    /* MUST NOT: any maintenance route. This is the boundary that makes a service
     * credential worth issuing instead of the owner token. */
    static const char *const admin_routes[] = {

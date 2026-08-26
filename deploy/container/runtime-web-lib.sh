@@ -250,7 +250,14 @@ webchat_restore_identities() {
             '!'* | '*'*) continue ;;
         esac
         getent passwd "$_wc_u" >/dev/null 2>&1 && continue
-        if ! useradd --create-home --shell /usr/sbin/nologin "$_wc_u" >/dev/null 2>&1; then
+        # Name the managed group as both primary and supplementary, matching
+        # runtime-web's live account-creation path. Otherwise useradd tries to
+        # allocate a same-named private group and restoration fails for standard
+        # operator names such as "operator" when that system group already
+        # exists in the image.
+        if ! useradd --create-home --gid "$WEBCHAT_LOGIN_GROUP" \
+                     --groups "$WEBCHAT_LOGIN_GROUP" \
+                     --shell /usr/sbin/nologin "$_wc_u" >/dev/null 2>&1; then
             webchat_log "WARNING: could not restore the login '$_wc_u'"
             continue
         fi
