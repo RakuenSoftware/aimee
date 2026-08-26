@@ -85,6 +85,27 @@ stale or contradicted records can decay without deleting their history.
 Working memory is not a lower-quality KB. It is session scratch and should not be promoted by
 accident.
 
+### Archival is a recall filter, not an access control
+
+Archived rows are hidden from the default recall surface only when **both** flags are set:
+
+| Key (`memory.lifecycle.*` in the config file) | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `0` | `0` leaves every row looking `active` and the TTL sweep never runs — byte-identical behaviour for operators who have not opted in. `1` runs the sweep each maintenance cycle and tags commitment-shaped statements `pending`. |
+| `hide_archived` | `0` | `1` filters `archived` rows out of default recall (`memory_list`, scored recall). `0` keeps them in recall. |
+
+Both default to `0`, so **archival hides nothing out of the box**. `hide_archived` is also inert on
+its own: it is read only after `enabled` passes, so setting it alone changes nothing.
+
+Even with both set, this is a **relevance filter, not a confidentiality boundary**. `memory_get()`
+returns archived rows by id regardless, by design — the filter keeps stale records out of ranked
+recall, it does not restrict who may read them. Anything that must actually be unreadable needs a
+deletion or retention contract, not archival.
+
+These two keys are parsed from the config file only (`memory.lifecycle` object). They are not
+registered in the flat config table, so they are not reachable through `aimee config get/set` and do
+not appear in the generated [configuration reference](gen/configuration.md).
+
 ## Commands
 
 ```bash

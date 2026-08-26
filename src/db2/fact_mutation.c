@@ -851,17 +851,26 @@ int db2_fact_mutation_invalidate(const fact_actor_t *actor, const char *source,
       fm_state_t after = rows[i];
       fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
       fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
+      /* Carry the retracting authority onto the row.  The reactivate gate in
+       * db2_fact_mutation_assert compares an incoming actor against the row's
+       * authority_rank, so leaving the original asserter's rank here would let
+       * the next extraction of the same text re-establish a retracted triple at
+       * the authority that first asserted it.  The selector loop above already
+       * refused any row outranking this actor, so this only ever raises. */
+      after.authority_rank = (int)actor->rank;
       after.version++;
       aimee_pg_stmt_t *u = aimee_pg_prepare(
           conn,
           "UPDATE entity_edges SET lifecycle_state='invalidated',invalidated_at=?2,"
-          " version=version+1,commit_id=?3 WHERE id=?1",
+          " authority_rank=?4,actor_principal=?5,version=version+1,commit_id=?3 WHERE id=?1",
           err, sizeof(err));
       if (!u)
          return fm_end(conn, 0);
       aimee_pg_bind_int64(u, "?1", rows[i].id);
       aimee_pg_bind_text(u, "?2", now);
       aimee_pg_bind_text(u, "?3", commit_id);
+      aimee_pg_bind_int(u, "?4", after.authority_rank);
+      aimee_pg_bind_text(u, "?5", actor->principal);
       int ok = aimee_pg_step(u, err, sizeof(err)) == AIMEE_PG_DONE;
       aimee_pg_finalize(u);
       if (!ok || fm_change(conn, commit_id, rows[i].id, "invalidate", &rows[i], &after,
@@ -1418,6 +1427,13 @@ int db2_fact_commit_rollback(const fact_actor_t *actor, const char *target_commi
          after = current;
          fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
          fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
+         /* Rolling an insertion back is an operator decision about the triple,
+          * not just about this commit's rows.  Record that authority so a later
+          * drain that re-extracts the same triple from new text is refused by
+          * the reactivate gate; the evidence-replay guard only covers an exact
+          * redelivery of the same mention. */
+         if ((int)actor->rank > after.authority_rank)
+            after.authority_rank = (int)actor->rank;
          after.version++;
       }
       else
@@ -1620,6 +1636,10 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
          after = current;
          fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
          fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
+         /* See db2_fact_commit_rollback: the operator's authority must land on
+          * the row so re-extraction cannot re-establish the rolled-back triple. */
+         if ((int)actor->rank > after.authority_rank)
+            after.authority_rank = (int)actor->rank;
          after.version++;
       }
       after.found = 1;

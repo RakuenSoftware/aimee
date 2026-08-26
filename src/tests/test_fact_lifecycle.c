@@ -197,6 +197,43 @@ int main(void)
    assert(s.superseded[0] == '\0' && s.suppressed == 0 && s.invalidated[0] != '\0');
    assert(strcmp(s.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
 
+   /* A user retraction must outrank later machine re-extraction.  ivan/works_for
+    * is MODEL-asserted (rank 10); the USER retraction must stamp USER authority
+    * (rank 30) onto the row, otherwise the row keeps the asserter's rank and the
+    * next SYSTEM drain (rank 20) that re-derives the same triple from new text
+    * clears invalidated_at and resurrects a fact the user deleted. */
+   assert(db2_fact_commit("ivan", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(scalar_int("SELECT authority_rank FROM entity_edges WHERE source='ivan'"
+                     " AND relation='works_for' AND edge_class='semantic'") == FACT_ACTOR_MODEL);
+   assert(db2_fact_retract("ivan", "works_for", NULL, FACT_AUTHORITY_USER) >= 1);
+   assert(scalar_int("SELECT authority_rank FROM entity_edges WHERE source='ivan'"
+                     " AND relation='works_for' AND edge_class='semantic'") == FACT_ACTOR_USER);
+   {
+      fact_actor_t sys;
+      assert(db2_fact_actor_internal(FACT_ACTOR_SYSTEM, &sys) == 0);
+      fact_evidence_input_t rev = {.source_kind = "message",
+                                   .source_id = "message:ivan-reextract",
+                                   .evidence_hash = "hash-ivan-reextract",
+                                   .observed_at = "2026-01-02 00:00:00"};
+      fact_assertion_input_t rai = {.source = "ivan",
+                                    .relation = "works_for",
+                                    .target = "acme",
+                                    .subject_kind = NODE_PERSON,
+                                    .object_kind = NODE_ORG,
+                                    .confidence_class = "B",
+                                    .confidence = 0.7,
+                                    .assertion_kind = FACT_KIND_WORLD_FACT,
+                                    .evidence = &rev,
+                                    .functional = 1};
+      fact_mutation_result_t rmr;
+      assert(db2_fact_mutation_assert(&sys, &rai, &rmr) == 0);
+      assert(strcmp(rmr.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
+      assert(db2_fact_current_count("ivan") == 0);
+      s = edge_state("ivan", "works_for");
+      assert(strcmp(s.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0 && s.invalidated[0] != '\0');
+   }
+
    /* §4 retract — immutable (parent_of): model refused, user wins. */
    assert(db2_fact_commit("ann", NODE_PERSON, "parent_of", "ben", NODE_PERSON, FACT_AUTHORITY_USER,
                           1) == FACT_GATE_ACCEPT);
@@ -330,6 +367,19 @@ int main(void)
    assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
    assert(db2_fact_current_count("rollback-subject") == 0);
    assert(scalar_int("SELECT COUNT(*) FROM fact_graph_commits") == commits_before_replay);
+
+   /* A later drain that re-extracts the same triple from NEW text is not a
+    * replay, so the evidence guard above does not apply.  The rollback recorded
+    * the operator's authority on the row, so the reactivate gate must refuse
+    * this SYSTEM re-assertion and the rolled-back triple stays retracted. */
+   fact_evidence_input_t reextract_ev = ev1;
+   reextract_ev.source_id = "message:rollback-reextract";
+   reextract_ev.evidence_hash = "hash-rollback-reextract";
+   ai.evidence = &reextract_ev;
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
+   assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
+   assert(db2_fact_current_count("rollback-subject") == 0);
+   ai.evidence = &ev1;
 
    /* One ingest-run id groups independently committed assertions into one
     * previewable, all-or-nothing rollback. */
