@@ -50,7 +50,7 @@ static char *artifact_realpath(const char *path, char *unused)
 #include <unistd.h>
 #endif
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(AIMEE_ARTIFACT_TRUST_NO_AUDIT)
 #ifdef __APPLE__
 #define AIMEE_OPTIONAL_SYMBOL __attribute__((weak_import))
 #else
@@ -245,21 +245,18 @@ int artifact_trust_verify_bytes(const char *artifact_class, const char *artifact
    int allowed = hardened
                      ? signed_manifest_allows(artifact_class, artifact_id, canonical_path, digest)
                      : standard_pin_allows(artifact_class, artifact_id, canonical_path, digest);
+#if !defined(_WIN32) && !defined(AIMEE_ARTIFACT_TRUST_NO_AUDIT)
    char detail[384];
    snprintf(detail, sizeof(detail),
             "{\"class\":\"%.48s\",\"id\":\"%.96s\",\"digest\":\"%s\","
             "\"mode\":\"%s\"}",
             artifact_class, artifact_id, digest, hardened ? "hardened" : "standard");
-   /* Server/KB builds reach the synchronous WORM bridge; thin/offline builds
-    * retain the same content-free verdict in their local audit log. */
-#ifndef _WIN32
+   /* Daemon builds emit the content-free verdict; the standalone client has
+    * no event-bus or daemon audit dependency. */
    if (obs_bus_emit_durable_event)
       obs_bus_emit_durable_event("artifact.load", artifact_class, allowed ? "allow" : "deny",
                                  detail);
-   else
-#endif
-#ifndef _WIN32
-       if (audit_action_log)
+   else if (audit_action_log)
    {
       char action_hash[68];
       snprintf(action_hash, sizeof(action_hash), "v1-%s", digest);
