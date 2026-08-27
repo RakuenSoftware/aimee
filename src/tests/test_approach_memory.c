@@ -187,7 +187,11 @@ static void test_no_progress_failure_becomes_retry_context(void)
    const char *failure =
        "no-progress circuit breaker tripped after 28 successful calls without an edit";
 
-   assert(approach_store_record_no_progress(goal, failure, "delegate:retry-1") == 0);
+   /* The source identifies who paid to discover the dead end. Recall below has
+    * no source/session/model filter: the lesson belongs to this shared KB and
+    * is available to another authorized consumer with a similar goal. */
+   assert(approach_store_record_no_progress(
+              goal, failure, "delegate:user-a/session-1/qwen-local") == 0);
 
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
    int n = approach_store_recall(
@@ -210,7 +214,8 @@ static void test_no_progress_failure_becomes_retry_context(void)
 
    /* A repeated stop reinforces the same learned approach rather than creating
     * an unbounded series of prose variants. */
-   assert(approach_store_record_no_progress(goal, failure, "delegate:retry-2") == 0);
+   assert(approach_store_record_no_progress(
+              goal, failure, "delegate:user-b/session-9/terra") == 0);
    n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    assert(n == 1);
    assert(hits[0].occurrences == 2);

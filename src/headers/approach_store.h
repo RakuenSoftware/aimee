@@ -30,9 +30,11 @@ extern "C"
    int approach_store_record(const char *goal, const char *approach, const char *failure_mode,
                              const char *source, const char *source_ref);
 
-   /* Record the controller's specific failed approach. The approach text is
-    * stable so a retry of the same goal reinforces one row instead of creating
-    * prose variants. */
+   /* Record the controller's specific failed approach in the shared KB. The
+    * source_ref is provenance, not a recall boundary: later authorized users,
+    * sessions, and models on the same KB can reuse the lesson when their goal
+    * is sufficiently similar. The approach text is stable so a retry of the
+    * same goal reinforces one row instead of creating prose variants. */
    int approach_store_record_no_progress(const char *goal, const char *failure_mode,
                                          const char *source_ref);
 

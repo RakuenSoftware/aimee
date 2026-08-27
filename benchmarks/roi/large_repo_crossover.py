@@ -843,7 +843,7 @@ def main() -> None:
 
     args.output.parent.mkdir(parents=True, exist_ok=True)
     preflight = args.output.with_suffix(".preflight.json")
-    preflight.write_text(json.dumps({
+    preflight_record = {
         "schema_version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
         "source_commit": source_commit, "model": args.model,
         "task_manifest_sha256": sha256_json(manifest), "tasks": selected,
@@ -851,7 +851,8 @@ def main() -> None:
         "learned_failure_artifact_sha256": learned_failure_sha256,
         "conditions": conditions, "repeats": args.repeats, "budget": budget,
         "dispatch_started": False,
-    }, indent=2, sort_keys=True) + "\n")
+    }
+    preflight.write_text(json.dumps(preflight_record, indent=2, sort_keys=True) + "\n")
 
     temporary = tempfile.TemporaryDirectory(prefix="aimee-large-repo-roi-")
     temp = Path(temporary.name)
@@ -860,6 +861,9 @@ def main() -> None:
     probe = EconomizerProbe(probe_path)
     plan = [(task, condition, repeat) for task in tasks for repeat in range(args.repeats) for condition in conditions]
     random.Random(SEED).shuffle(plan)
+    preflight_record["dispatch_started"] = True
+    preflight_record["dispatch_started_at"] = datetime.now(timezone.utc).isoformat()
+    preflight.write_text(json.dumps(preflight_record, indent=2, sort_keys=True) + "\n")
     cells = []
     try:
         for ordinal, (task, condition, repeat) in enumerate(plan, 1):

@@ -281,3 +281,55 @@ Raw artifacts:
 - `large-repo-qwen38-trust-fold-fixed.json`
 - Remediation artifact SHA-256:
   `2ef1e3727d261752f7dac81b72a16230eaa7ead9e506e3bffa12f8cba4efa17d`
+
+### Failure becomes shared cross-model capability
+
+The next stage tested a larger ROI loop than one-run compression: stop a
+non-progressing failure, preserve what failed in the shared Aimee KB, and give
+that lesson to later agents using different models.
+
+The stopped Qwen run completed 28 successful non-mutating calls, including nine
+repeated or overlapping retrievals, before Aimee terminated it with no patch.
+It used 512,545 provider-reported tokens. Against the earlier recorded plain
+failure at 577,214 tokens, that is 64,669 fewer tokens (11.2%). This is a
+descriptive comparison between recorded runs, not a stable paired estimate: a
+fresh plain arm diverged earlier and hit its context limit after 333,390 tokens.
+
+The important additional result is that the Qwen failure did not end as
+discarded transcript history. Its failed-approach lesson was sealed by artifact
+hash, then supplied unchanged to matched base/learned Codex arms:
+
+| model | base outcome | learned-retry outcome | observed gain |
+|---|---|---|---|
+| GPT-5.6 Luna | plausible patch/tests; stopped verification early; exact grader did not link | full server build and focused test execution; final patch still failed visible and hidden grading | implementation and verification capability increased, but no completion crossover |
+| GPT-5.6 Terra | self-selected tests passed; sealed hidden task test failed | visible grader passed; hidden grader passed; authored test-only patch failed on the buggy parent | completed a regression-sensitive repair the base arm missed |
+
+This is direct cross-model transfer: the lesson originated in a locally run
+Qwen trajectory and changed later Luna and Terra behavior. The Terra result is
+a completion crossover; the Luna result is a capability crossover and is still
+positive despite not completing the repair.
+
+The product mechanism is broader than model-to-model transfer. Approach
+failures are stored in the shared Aimee KB with source/session/model information
+as provenance, while recall is based on goal similarity rather than the identity
+of the agent that discovered the lesson. Consequently, an authorized user and
+model can pay the discovery cost once, and later authorized users and models on
+the same KB can reuse it. Storage-backed tests cover persistence, reinforcement
+without duplicate rows, similar-goal recall, unrelated-goal isolation, and
+source-independent retry injection.
+
+This is the Article Zero ROI loop:
+
+1. stop an unproductive run before it consumes more resources;
+2. turn the failure into durable, inspectable organizational knowledge;
+3. share that knowledge across authorized users, sessions, and models;
+4. enable later agents to perform work their base behavior did not—and, in the
+   Terra arm, complete work the base agent missed.
+
+Raw artifacts:
+
+- `large-repo-qwen38-trust-progress.preflight.json`
+- `large-repo-qwen38-trust-progress.json`
+- Qwen stopped-run artifact SHA-256:
+  `9f33c6e1949a1e53fab48ec7ea2baf50f92c1d8c60500b391d6f8b9ee4e1cbb4`
+- `cross-model-shared-learning-pilot.json`
