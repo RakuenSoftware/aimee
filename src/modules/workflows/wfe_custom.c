@@ -9,6 +9,7 @@
  */
 #include "wfe_def.h"
 #include "artifact_trust.h"
+#include "platform.h"
 
 #include <errno.h>
 #include <fcntl.h>
