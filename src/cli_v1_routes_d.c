@@ -1416,7 +1416,8 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
       return 1;
    }
 
-   if (cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "seal", s.scan_id, s.pushed, NULL) != 0)
+   if (cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "seal", s.scan_id, s.pushed, NULL) !=
+       0)
    {
       (void)cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "abort", s.scan_id, 0, NULL);
       return 1;

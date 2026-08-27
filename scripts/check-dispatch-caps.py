@@ -11,6 +11,7 @@ method to the dispatch table now *requires* a matching, intentional cap entry.
 Pure static check (no build) — mirrors check-module-boundary.py et al.
 """
 import argparse
+import os
 import re
 import sys
 
@@ -20,7 +21,14 @@ REGISTRY_RE = re.compile(r'\{"([a-z0-9_.*]+)",\s*[A-Z0-9_]+,')
 
 
 def parse_dispatch(server_c):
-    return DISPATCH_RE.findall(open(server_c, encoding="utf-8", errors="ignore").read())
+    # The rows were split into server/server_dispatch_defs_data.h to keep
+    # server.c under the line ceiling; read both so the table stays covered
+    # wherever a row is declared.
+    text = open(server_c, encoding="utf-8", errors="ignore").read()
+    rows = os.path.join(os.path.dirname(server_c), "server_dispatch_defs_data.h")
+    if os.path.exists(rows):
+        text += open(rows, encoding="utf-8", errors="ignore").read()
+    return DISPATCH_RE.findall(text)
 
 
 def parse_registry(server_auth_c):

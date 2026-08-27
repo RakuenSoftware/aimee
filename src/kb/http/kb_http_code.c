@@ -2259,4 +2259,3 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
    cJSON_Delete(root);
    return 200;
 }
-

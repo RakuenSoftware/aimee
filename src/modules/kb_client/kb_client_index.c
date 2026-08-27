@@ -407,8 +407,8 @@ char *kb_client_index_verify_json(const char *project, const char *root, int dee
    cJSON_AddStringToObject(req, "phase", "verify");
    if (deep)
       cJSON_AddBoolToObject(req, "deep", 1);
-   char *json = kb_client_v1_post_json("/v1/code/scan", req, kb_client_index_scan_timeout_ms(),
-                                       http_status);
+   char *json =
+       kb_client_v1_post_json("/v1/code/scan", req, kb_client_index_scan_timeout_ms(), http_status);
    cJSON_Delete(req);
    return json;
 }

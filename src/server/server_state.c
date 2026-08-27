@@ -518,30 +518,6 @@ int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
-int handle_index_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   const char *project = jo_str(req, "project", NULL);
-   const char *root = jo_str(req, "root", NULL);
-   if (!project || !project[0] || !root || !root[0])
-      return server_send_error(conn, "index.verify requires project and root", NULL);
-   int deep = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "deep")) ? 1 : 0;
-   int http_status = 0;
-   char *json = kb_client_index_verify_json(project, root, deep, &http_status);
-   cJSON *resp = json ? cJSON_Parse(json) : NULL;
-   free(json);
-   if (!resp)
-      return server_send_error(conn, "knowledge service unavailable", NULL);
-   cJSON *workspace = cJSON_GetObjectItemCaseSensitive(resp, "workspace_state");
-   if (http_status < 200 || http_status >= 300 || !cJSON_IsString(workspace) ||
-       strcmp(workspace->valuestring, "matched") != 0)
-   {
-      cJSON_ReplaceItemInObject(resp, "status", cJSON_CreateString("error"));
-      cJSON_AddStringToObject(resp, "message", "canonical index differs from workspace");
-   }
-   return send_and_free(conn, resp);
-}
-
 /* Agent-facing code-index query handlers live in server_state_index.c. */
 
 /* --- Graph code-projection handlers --- */
