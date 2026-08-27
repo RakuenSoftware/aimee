@@ -102,6 +102,13 @@ BEGIN
   REVOKE ALL ON FUNCTION set_tenant_context(TEXT, BIGINT) FROM PUBLIC;
   GRANT EXECUTE ON FUNCTION set_tenant_context(TEXT, BIGINT) TO aimee_kb_runtime;
 
+  -- memory_workspace_readable is the predicate future memory policies call. It
+  -- reads only the calling principal's own membership rows (it is STABLE, not
+  -- SECURITY DEFINER), but EXECUTE is still narrowed off PUBLIC to match every
+  -- other tenancy function here.
+  REVOKE ALL ON FUNCTION memory_workspace_readable(TEXT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION memory_workspace_readable(TEXT) TO aimee_kb_runtime;
+
   -- P5-A authoritative registry: runtime reaches state only through audited,
   -- bounded definer APIs; direct reads and writes are unavailable.
   REVOKE ALL ON kb_server_registry, kb_cert_revocation_generation FROM aimee_kb_runtime;

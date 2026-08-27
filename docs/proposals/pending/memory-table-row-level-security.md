@@ -60,6 +60,47 @@ no rows. Enabling FORCE RLS on `memories` before the memory paths set the contex
 would return **zero rows on every memory read** — the entire memory layer goes
 dark, silently and by design.
 
+## Decisions (settled)
+
+1. **A workspace is a collection of projects, and it may be owned by any entity
+   kind** — a principal, a team, an org, or a kind not yet defined. The owner is
+   therefore **polymorphic** `(owner_kind, owner_id)`, not a foreign key into one
+   table. `owner_kind` is deliberately unconstrained; the resolver fails closed on
+   a kind it cannot resolve, so an unknown kind is unreadable rather than wrongly
+   readable.
+2. **A workspace-less memory resolves to the global scope** — readable by any
+   authenticated principal. This is what makes the migration safe: existing
+   untagged rows stay visible rather than disappearing when policies go live.
+
+Consequences worth stating:
+
+- **`org` cannot be resolved yet.** There is no org membership table in this
+  schema — the `org_*` tables are budget, model, telemetry and vault records,
+  none of which record who belongs to an org. An org-owned workspace resolves to
+  unreadable until such a source exists. Known gap, not an oversight.
+- **An unmapped workspace fails closed.** A memory tagged with a workspace that
+  has no owner row is unreadable. Step 2's migration must therefore populate
+  owners for every workspace in use *before* step 5, and step 4's report-only
+  pass is what surfaces the stragglers.
+
+## Correction: the conversion surface is far smaller than 365 call sites
+
+The earlier count (267 `db2_*` entry points, 365 call sites) measures db2 *usage*,
+not the number of places a tenant scope must be opened. Memory operations already
+funnel their workspace/project context through a thread-local choke point,
+`db2_memory_scope_context_set()` (`src/db2/memory_scope_query.c`), and it has
+**two production callers**: `src/kb/kb_service_memory.c` and
+`src/modules/memory/memory_core_search_c.c`. Everything else is tests.
+
+The tenant GUC should be set per request/transaction, the way
+`db2_tenant_scope_begin()` already does for the control plane, rather than at each
+of 365 call sites. Step 3 is scoped to the request entry points plus that choke
+point.
+
+Also corrected: `memory_workspaces` is **legacy**. `memory_scopes`
+(`scope_type='workspace'`) is the canonical scope tag, so policies must predicate
+on `memory_scopes`, not the legacy table.
+
 ## Sequenced path
 
 Each step is independently shippable and observable; none of them is "add

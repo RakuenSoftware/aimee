@@ -169,6 +169,81 @@ BEGIN
   END;
 END $$;
 
+-- ---------------------------------------------------------------------------
+-- memory_workspace_readable(): the predicate future memory policies will call.
+-- No memory table has RLS enabled yet, so these assert the RESOLVER's behaviour
+-- directly. Each case is one rule from the ownership model.
+INSERT INTO memory_workspace_owner(workspace, owner_kind, owner_id) VALUES
+  ('ws_alice_owned', 'principal', 'oidc:test:alice'),
+  ('ws_alpha_team',  'team',      '900001'),
+  ('ws_beta_team',   'team',      '900002'),
+  ('ws_org_owned',   'org',       'org-1'),
+  ('ws_typo_kind',   'principle', 'oidc:test:alice');
+
+SELECT set_tenant_context('oidc:test:alice', 900001);
+DO $$
+BEGIN
+  -- Workspace-less is global scope: readable by an authenticated principal.
+  IF NOT memory_workspace_readable('') THEN
+    RAISE EXCEPTION 'FAIL: empty workspace not readable as global scope';
+  END IF;
+  IF NOT memory_workspace_readable(NULL) THEN
+    RAISE EXCEPTION 'FAIL: NULL workspace not readable as global scope';
+  END IF;
+  -- Principal-owned: the owning principal reads it.
+  IF NOT memory_workspace_readable('ws_alice_owned') THEN
+    RAISE EXCEPTION 'FAIL: owner principal cannot read own workspace';
+  END IF;
+  -- Team-owned: alice is a member of alpha (900001), not beta (900002).
+  IF NOT memory_workspace_readable('ws_alpha_team') THEN
+    RAISE EXCEPTION 'FAIL: team member cannot read team workspace';
+  END IF;
+  IF memory_workspace_readable('ws_beta_team') THEN
+    RAISE EXCEPTION 'FAIL: non-member read a foreign team workspace';
+  END IF;
+  -- An unmapped workspace has no owner row: fail closed.
+  IF memory_workspace_readable('ws_never_mapped') THEN
+    RAISE EXCEPTION 'FAIL: unmapped workspace was readable';
+  END IF;
+  -- org has no membership source in this schema yet: must fail closed.
+  IF memory_workspace_readable('ws_org_owned') THEN
+    RAISE EXCEPTION 'FAIL: org-owned workspace readable without a membership source';
+  END IF;
+  -- An owner_kind the resolver does not know must fail closed, not open.
+  IF memory_workspace_readable('ws_typo_kind') THEN
+    RAISE EXCEPTION 'FAIL: unknown owner_kind was readable';
+  END IF;
+END $$;
+
+-- bob is beta-only: the team cases invert for him.
+SELECT set_tenant_context('oidc:test:bob', 900002);
+DO $$
+BEGIN
+  IF memory_workspace_readable('ws_alpha_team') THEN
+    RAISE EXCEPTION 'FAIL: bob read alpha team workspace';
+  END IF;
+  IF NOT memory_workspace_readable('ws_beta_team') THEN
+    RAISE EXCEPTION 'FAIL: bob cannot read his own team workspace';
+  END IF;
+  IF memory_workspace_readable('ws_alice_owned') THEN
+    RAISE EXCEPTION 'FAIL: bob read alice''s principal-owned workspace';
+  END IF;
+END $$;
+
+-- Fail-closed with no tenant context: even global scope is unreadable.
+RESET ROLE;
+SET ROLE aimee_kb_runtime;
+SELECT set_config('aimee.principal', '', true);
+DO $$
+BEGIN
+  IF memory_workspace_readable('') THEN
+    RAISE EXCEPTION 'FAIL: global scope readable with no principal set';
+  END IF;
+  IF memory_workspace_readable('ws_alice_owned') THEN
+    RAISE EXCEPTION 'FAIL: owned workspace readable with no principal set';
+  END IF;
+END $$;
+
 RESET ROLE;
 ROLLBACK;
 
