@@ -511,6 +511,31 @@ int main(void)
    assert(db2_fact_current_count("rollback-subject") == 0);
    ai.evidence = &ev1;
 
+   /* The retract path needs the same guarantee the rollback above proves, and
+    * for a sharper reason: a USER retraction of a MODEL-asserted fact (rank 10)
+    * must stamp USER authority (rank 30) on the row.  Left at the asserter's
+    * rank, the next SYSTEM drain (rank 20) that re-derives the triple from new
+    * text satisfies 20 >= 10, clears invalidated_at, and resurrects a fact the
+    * user deleted. */
+   assert(db2_fact_commit("ivan", NODE_PERSON, "works_for", "acme", NODE_ORG, FACT_AUTHORITY_MODEL,
+                          1) == FACT_GATE_ACCEPT);
+   assert(scalar_int("SELECT authority_rank FROM entity_edges WHERE source='ivan'"
+                     " AND relation='works_for' AND edge_class='semantic'") == FACT_ACTOR_MODEL);
+   assert(db2_fact_retract("ivan", "works_for", NULL, FACT_AUTHORITY_USER) >= 1);
+   assert(scalar_int("SELECT authority_rank FROM entity_edges WHERE source='ivan'"
+                     " AND relation='works_for' AND edge_class='semantic'") == FACT_ACTOR_USER);
+   fact_evidence_input_t ivan_reextract_ev = ev1;
+   ivan_reextract_ev.source_id = "message:ivan-reextract";
+   ivan_reextract_ev.evidence_hash = "hash-ivan-reextract";
+   ai.source = "ivan";
+   ai.target = "acme";
+   ai.evidence = &ivan_reextract_ev;
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
+   assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
+   assert(db2_fact_current_count("ivan") == 0);
+   ai.source = "rollback-subject";
+   ai.evidence = &ev1;
+
    /* One ingest-run id groups independently committed assertions into one
     * previewable, all-or-nothing rollback. */
    fact_evidence_input_t batch_ev = ev1;
