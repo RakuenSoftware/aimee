@@ -7,12 +7,10 @@
 #endif
 
 #include "aimee.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/kb_service_backend.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/lifecycle.h"
-#endif
 #include "kb.h"
 #include "memory.h"
 #include "log.h"
@@ -21,8 +19,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#if !defined(AIMEE_DB2_DISABLED)
 
 /* ------------------------------------------------------------------ */
 /* Convention extraction: KB → memory                                   */
@@ -154,5 +150,3 @@ int kb_extract_convention_candidates(void)
       LOG_INFO("kb", "extract_convention_candidates: emitted %d L3 candidates", emitted);
    return emitted;
 }
-
-#endif /* !AIMEE_DB2_DISABLED */

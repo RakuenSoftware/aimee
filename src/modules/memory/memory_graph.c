@@ -4,11 +4,9 @@
  * (BFS, decay, key-token tokenisation, scoring). */
 #include "aimee.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/memory_query.h"
 #include "entity_edges.h"
-#endif
 #include "log.h"
 #include "memory.h"
 #include "memory_ontology.h"
@@ -19,57 +17,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#if defined(AIMEE_DB2_DISABLED)
-
-/* Server profile: entity graph storage is DB2-owned by aimee-kb. */
-int memory_extract_edges(int64_t window_id, char **file_refs, int file_count, char **terms,
-                         int term_count)
-{
-   (void)window_id;
-   (void)file_refs;
-   (void)file_count;
-   (void)terms;
-   (void)term_count;
-   return 0;
-}
-
-int memory_query_edges(const char *entity, edge_t *out, int max)
-{
-   (void)entity;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-void memory_graph_boost(char **query_terms, int term_count, boost_map_t *out)
-{
-   (void)query_terms;
-   (void)term_count;
-   if (out)
-      out->count = 0;
-}
-
-int memory_graph_related(char **seed_keys, int seed_count, graph_related_t *out, int max)
-{
-   (void)seed_keys;
-   (void)seed_count;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_graph_prune(void)
-{
-   return 0;
-}
-
-int memory_graph_normalize(void)
-{
-   return 0;
-}
-
-#else
 
 /* --- Entity Edge Extraction --- */
 
@@ -297,5 +244,3 @@ int memory_graph_normalize(void)
 {
    return db2_entity_edge_normalize_weights();
 }
-
-#endif

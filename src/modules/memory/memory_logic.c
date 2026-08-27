@@ -11,13 +11,11 @@
  */
 #include "aimee.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/calibration.h"
 #include "modules/db2/c/kind_lifecycle.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_promotion.h"
-#endif
 #include "config.h"
 #include "kb.h"
 #include "log.h"
@@ -30,7 +28,6 @@
 #include <time.h>
 #include <unistd.h>
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void calibration_trace_write(const char *kind, const char *path, double static_threshold,
                                     double calibrated_threshold, int changed)
 {
@@ -45,7 +42,6 @@ static void calibration_trace_write(const char *kind, const char *path, double s
    db2_artifact_write(art_id, "calibration_ab_trace", "committed", "memory", kind ? kind : "",
                       "system", 1.0, payload);
 }
-#endif
 
 /* --- Kind Lifecycle Configuration ---
  *
@@ -57,9 +53,6 @@ static void calibration_trace_write(const char *kind, const char *path, double s
 /* Promote L1 -> L2 per kind-specific thresholds */
 int memory_promote(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    char ts[32];
    now_utc(ts, sizeof(ts));
 
@@ -117,15 +110,11 @@ int memory_promote(void)
                                                  promote_threshold);
    }
    return total;
-#endif
 }
 
 /* Demote L2 -> L1 per kind-specific thresholds (with demotion resistance) */
 int memory_demote(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    char ts[32];
    now_utc(ts, sizeof(ts));
 
@@ -152,15 +141,11 @@ int memory_demote(void)
       db2_memory_promotion_demote_cascade(ts);
 
    return total;
-#endif
 }
 
 /* Expire L0 (all) and stale L1 per kind-specific thresholds */
 int memory_expire(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    /* Wipe all L0 (provenance + rows). */
    db2_memory_promotion_delete_l0_provenance();
    int total = db2_memory_promotion_delete_l0();
@@ -182,13 +167,11 @@ int memory_expire(void)
    }
 
    return total;
-#endif
 }
 
 /* Demote memories associated with failed agent executions.
  * Reduces confidence of memories that were used in contexts where
  * the agent failed, creating a negative feedback loop. */
-#if !defined(AIMEE_DB2_DISABLED)
 static void lowercase_copy(char *dst, size_t cap, const char *src)
 {
    if (!dst || cap == 0)
@@ -223,13 +206,9 @@ static int append_unique_int64(int64_t **ids, int *count, int *cap, int64_t id)
    (*ids)[(*count)++] = id;
    return 0;
 }
-#endif
 
 int memory_demote_from_failures(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    if (!db1_agent_log_list_recent_errors)
       return 0;
    db1_agent_log_recent_error_t errors[128];
@@ -272,7 +251,6 @@ int memory_demote_from_failures(void)
       changes += db2_memory_promotion_demote_id(matched_ids[i]);
    free(matched_ids);
    return changes;
-#endif
 }
 
 /* Synthesize L2 facts from delegation patterns in agent_log.
@@ -280,9 +258,6 @@ int memory_demote_from_failures(void)
  * summarizing success rate, avg turns, and common errors. */
 int memory_promote_delegation_patterns(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    if (!db1_agent_log_list_delegation_patterns)
       return 0;
    db1_agent_log_delegation_pattern_t patterns[128];
@@ -336,7 +311,6 @@ int memory_promote_delegation_patterns(void)
       }
    }
    return count;
-#endif
 }
 
 /* Synthesize L3 episode memories from recurring delegation failures.
@@ -344,9 +318,6 @@ int memory_promote_delegation_patterns(void)
  * FAILURE_EPISODE_WINDOW days, create a structured episode. */
 int memory_synthesize_failure_episodes(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    if (!db1_agent_log_list_failure_episode_seeds)
       return 0;
    db1_agent_log_failure_episode_seed_t seeds[128];
@@ -404,15 +375,11 @@ int memory_synthesize_failure_episodes(void)
       }
    }
    return count;
-#endif
 }
 
 /* Embed any L2 memories that lack embeddings (called after promotion). */
 void embed_unembedded_l2(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return;
-#else
    const char *embed_command = config_embedder_command_current(NULL);
    const char *embed_ver = config_embedder_model()[0] ? config_embedder_model() : embed_command;
 
@@ -422,5 +389,4 @@ void embed_unembedded_l2(void)
 
    for (int i = 0; i < count; i++)
       memory_embed(ids[i], embed_command);
-#endif
 }

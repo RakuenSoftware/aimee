@@ -12,7 +12,6 @@
 #include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/anti_patterns.h"
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/memory_query.h"
@@ -20,7 +19,6 @@
 #include "modules/db2/c/memory_relations.h"
 #include "modules/db2/c/memory_scope_query.h"
 #include "modules/db2/c/rules.h"
-#endif
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -32,55 +30,6 @@
  * wrongly suppressing a DISTINCT memory silently loses evidence, while admitting
  * a redundant one merely spends budget. */
 #define ASSEMBLE_NEAR_DUPLICATE_COSINE 0.94
-
-#if defined(AIMEE_DB2_DISABLED)
-static char *memory_empty_context(void)
-{
-   const char *body = "# Memory Context";
-   char *buf = malloc(strlen(body) + 1);
-   if (!buf)
-      return NULL;
-   snprintf(buf, strlen(body) + 1, "%s", body);
-   return buf;
-}
-
-char *memory_assemble_context(const char *task_hint)
-{
-   (void)task_hint;
-   return memory_empty_context();
-}
-
-char *memory_assemble_context_ws(const char *task_hint, const char *workspace)
-{
-   (void)workspace;
-   return memory_assemble_context(task_hint);
-}
-
-char *memory_assemble_context_explain(const char *task_hint,
-                                      context_assemble_explain_entry_t *explain, int *explain_count,
-                                      int explain_max, context_budget_metrics_t *metrics)
-{
-   (void)explain;
-   (void)explain_max;
-   if (explain_count)
-      *explain_count = 0;
-   if (metrics)
-   {
-      metrics->budget_tokens = 0;
-      metrics->used_tokens = 0;
-      metrics->rejected_for_budget = 0;
-   }
-   return memory_assemble_context(task_hint);
-}
-
-char *cache_input_hash(char *buf, size_t buf_len)
-{
-   if (buf && buf_len > 0)
-      snprintf(buf, buf_len, "db2-disabled");
-   return buf;
-}
-
-#else
 
 /* xml_escape_text and context_xml_tag_for_header now live in
  * memory_assemble_util.h (static inline, unit-tested). */
@@ -2009,8 +1958,6 @@ char *cache_input_hash(char *buf, size_t buf_len)
    snprintf(buf, buf_len, "%016lx", hash);
    return buf;
 }
-
-#endif
 
 /* memory_citation_gate_check: returns 1 if the answer string contains at
  * least one citation marker of the form [#<digits>], 0 otherwise.

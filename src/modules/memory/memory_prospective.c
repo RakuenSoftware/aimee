@@ -13,11 +13,9 @@
 #include "aimee.h"
 #include "util.h"
 #include "memory.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/prospective_memories.h"
 #include "dogfood.h"
 #include "log.h"
-#endif
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -64,70 +62,6 @@ void memory_prospective_metrics(int64_t *triggered_total, int64_t *completed_tot
    pthread_mutex_unlock(&s_pm_metrics_mu);
 }
 
-#if defined(AIMEE_DB2_DISABLED)
-/* Prospective memory storage and matching are DB2-owned. Server code must use
- * kb_client_* RPCs; these stubs keep the server object free of DB2 reach. */
-int memory_prospective_create(const char *trigger_text, const char *action_text,
-                              const char *anchor_entity, const char *anchor_file,
-                              const char *recurrence, const char *valid_until,
-                              const char *source_session, memory_prospective_t *out)
-{
-   (void)trigger_text;
-   (void)action_text;
-   (void)anchor_entity;
-   (void)anchor_file;
-   (void)recurrence;
-   (void)valid_until;
-   (void)source_session;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_prospective_get(int64_t id, memory_prospective_t *out)
-{
-   (void)id;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_prospective_list(const char *state, memory_prospective_t *out, int max)
-{
-   (void)state;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_prospective_complete(int64_t id)
-{
-   (void)id;
-   return -1;
-}
-
-int memory_prospective_sweep_expired(void)
-{
-   return 0;
-}
-
-int memory_prospective_match(const char *turn_text, const char *active_entity,
-                             const char *active_file, memory_prospective_t *out, int max)
-{
-   (void)turn_text;
-   (void)active_entity;
-   (void)active_file;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_prospective_mark_triggered(int64_t id)
-{
-   (void)id;
-   return -1;
-}
-#else
 static void pm_metrics_record_match(double ms)
 {
    pthread_mutex_lock(&s_pm_metrics_mu);
@@ -440,4 +374,3 @@ int memory_prospective_mark_triggered(int64_t id)
              (long long)id, is_once ? "once" : "repeat", cur.trigger_count + 1);
    return 0;
 }
-#endif

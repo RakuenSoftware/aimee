@@ -232,7 +232,7 @@ L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # Server (DB1 daemon) link flags — same as L_FULL minus libpq. The daemon
 # no longer carries DB2 code; the only postgres-bound work routes
 # through the kb client socket to aimee-kb, which carries libpq itself.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 -lm -lpthread -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
@@ -602,9 +602,7 @@ SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orc
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
                    $(OBJDIR)/server/modules/guardrails/guardrails_orchestrator.o
 # Cmd-layer objects the daemon links because hooks.session_start runs
-# session_start_emit (and its prune_stale_sessions
-# helpers) in-process. Compiled with -DAIMEE_DB2_DISABLED via the server/
-# pattern rule.
+# session_start_emit (and its prune_stale_sessions helpers) in-process.
 SERVER_CMD_OBJS = $(OBJDIR)/server/cmd_session_lifecycle.o \
                   $(OBJDIR)/server/cmd_hooks_scope.o \
                   $(OBJDIR)/modules/memory/memory_redirect.o \
@@ -775,6 +773,15 @@ KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_HOST_ADAPTER_OBJS = $(DB2_HOST_ADAPTER_SRCS:%.c=$(OBJDIR)/kb/%.o)
+# aimee-server links the SAME postgres + memory modules as aimee-kb. Both daemons
+# own the store directly; the server no longer compiles a DB2-disabled stub and
+# delegates every memory op to the sidecar. Separate $(OBJDIR)/server/ objects
+# because server and kb still differ in other compile flags, not in whether the
+# store exists.
+SERVER_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/server/%.o)
+SERVER_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/server/%.o)
+SERVER_MEMORY_OBJS = $(KB_MEMORY_SPLIT_SRCS:%.c=$(OBJDIR)/server/%.o)
+
 KB_MEMORY_SPLIT_SRCS = modules/memory/memory_core_search_c.c modules/memory/memory_core_search_b.c modules/memory/memory_core_helpers_b.c modules/memory/memory_core_helpers.c modules/memory/memory_core_crud.c modules/memory/memory_core_search.c modules/memory/memory_core_scope_embed.c modules/memory/memory_core_tiers.c
 # ^ KB-real only (#error-guarded); NEVER add to DATA_SRCS/server build.
 KB_DATA_SRCS = $(KB_MEMORY_SPLIT_SRCS) code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_activation.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
@@ -1435,7 +1442,7 @@ $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_DB2_OBJS) $(SERVER_DB2_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -1658,11 +1665,11 @@ $(OBJDIR)/server/server_cron.o: server/server_cron.c
 
 $(OBJDIR)/modules/kb_client/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/server/server_session_start_stubs.o: server/server_session_start_stubs.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 	@mkdir -p $(dir $@)
@@ -1686,7 +1693,7 @@ $(OBJDIR)/kb/kb_vault_tpm_runtime_lock.o: C_FLAGS += $(KB_TPM2_CFLAGS)
 
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -2005,6 +2012,12 @@ $(OBJDIR)/db2/db_schema.o: modules/db2/c/db_schema.c schema_data.h
 $(OBJDIR)/kb/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
+
+# The server object tree now carries db2 too, so it needs the same generated
+# schema dependency the kb and default trees already declare.
+$(OBJDIR)/server/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 # --- React webchat frontend (requires npm; optional) ---
 # Builds the React SPA into frontend/dist/ for use by aimee-runtime-web (Go).
@@ -2359,11 +2372,12 @@ schema-sync-check:
 # needs redoing against the new schema files. See the note in
 # server-go/modules/aimee/families/schema_*.sql.
 
-# A memory path that reaches the relational store must either branch on
-# AIMEE_DB2_DISABLED or report when the store is unreachable. Returning empty
-# with no indication is indistinguishable from a genuine absence, and on
-# aimee-server -- which links no libpq -- that is the normal case. Retires with
-# the fork itself at the S5 cutover.
+# A memory path that reaches the relational store must report when the store is
+# unreachable. Returning empty with no indication is indistinguishable from a
+# genuine absence. aimee-server now links the same postgres + memory modules as
+# aimee-kb, so an unreachable store is a real outage rather than the normal case
+# it used to be on a server built without them -- which makes saying so matter
+# more, not less.
 memory-store-degradation-check:
 	@python3 ../scripts/check-memory-store-degradation.py
 

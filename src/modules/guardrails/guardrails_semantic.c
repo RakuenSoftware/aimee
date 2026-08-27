@@ -12,9 +12,7 @@
 #include "guardrails_semantic.h"
 #include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
 #include "db1_client/guardrail_events.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/bandit.h"
-#endif
 #include "headers/log.h"
 #include "platform_process.h"
 #include <cJSON.h>
@@ -257,14 +255,10 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
  * own, which it was not before. */
 static int gsem_strict_arm_active(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    char arm[64] = "";
    if (db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
       return 0;
    return strcmp(arm, "strict") == 0;
-#endif
 }
 
 double gsem_effective_warn_threshold(void)
