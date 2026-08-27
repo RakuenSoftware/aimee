@@ -824,6 +824,13 @@ int kb_client_memory_get(int64_t id, memory_t *out);
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on
  * success (|out| filled if non-NULL) or -1 if kb is unreachable or
  * the gate rejected the write.  Mirrors memory_insert(). */
+/* Returned when memory content carries a secret/PII span that cannot be cleanly
+ * redacted. The write is REFUSED CLIENT-SIDE: no request is issued, so the text
+ * never reaches aimee-kb. Distinct from -1 (kb unreachable or kb-side rejection)
+ * so a caller can tell "we would not send this" from "we could not send this".
+ * Every content-carrying memory.* wrapper below returns it. */
+#define KB_CLIENT_MEMORY_WITHHELD_PII (-2)
+
 int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
                             const char *content, double confidence, const char *session_id,
                             memory_t *out);
