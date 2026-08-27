@@ -51,10 +51,15 @@ static char *artifact_realpath(const char *path, char *unused)
 #endif
 
 #ifndef _WIN32
-extern void obs_bus_emit_durable_event(const char *, const char *, const char *, const char *)
-    __attribute__((weak));
+#ifdef __APPLE__
+#define AIMEE_OPTIONAL_SYMBOL __attribute__((weak_import))
+#else
+#define AIMEE_OPTIONAL_SYMBOL __attribute__((weak))
+#endif
+extern void obs_bus_emit_durable_event(const char *, const char *, const char *,
+                                       const char *) AIMEE_OPTIONAL_SYMBOL;
 extern void audit_action_log(const char *, const char *, const char *, const char *, const char *,
-                             const char *, const char *, long long) __attribute__((weak));
+                             const char *, const char *, long long) AIMEE_OPTIONAL_SYMBOL;
 #endif
 
 #ifndef O_CLOEXEC
