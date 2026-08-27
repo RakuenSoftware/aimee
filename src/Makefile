@@ -2529,6 +2529,8 @@ format:
 
 # --- Fuzz testing (standalone mode, no libFuzzer required) ---
 
+.PHONY: fuzz-build fuzz-list
+
 FUZZ_EXTRACTOR_OBJS = $(OBJDIR)/tests/fuzz_extractors.o $(TEST_DATA_OBJS_MOCK)
 
 FUZZ_JSON_OBJS = $(OBJDIR)/tests/fuzz_json_parse.o $(OBJDIR)/cJSON.o
@@ -2669,6 +2671,11 @@ tests/fuzz_server_mgmt_action: $(FUZZ_SERVER_MGMT_ACTION_OBJS)
 
 tests/fuzz_server_mgmt_read_config: $(FUZZ_SERVER_MGMT_READ_CONFIG_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
+
+fuzz-build: $(FUZZ_TARGETS)
+
+fuzz-list:
+	@printf '%s\n' $(FUZZ_TARGETS)
 
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*
