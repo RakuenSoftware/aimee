@@ -27,6 +27,8 @@ const char *dl_failure_mode_to_string(dl_failure_mode_t mode)
       return "stall/slow-writes";
    case DL_MODE_MAX_TURNS:
       return "max-turns";
+   case DL_MODE_NO_PROGRESS:
+      return "no-progress/retrieval-loop";
    case DL_MODE_DRIFT_PREFLIGHT:
       return "drift/pre-flight";
    case DL_MODE_DRIFT_BRANCH:
@@ -50,6 +52,8 @@ dl_failure_mode_t dl_string_to_failure_mode(const char *s)
       return DL_MODE_STALL_SLOW_WRITES;
    if (strcmp(s, "max-turns") == 0)
       return DL_MODE_MAX_TURNS;
+   if (strcmp(s, "no-progress/retrieval-loop") == 0)
+      return DL_MODE_NO_PROGRESS;
    if (strcmp(s, "drift/pre-flight") == 0)
       return DL_MODE_DRIFT_PREFLIGHT;
    if (strcmp(s, "drift/branch") == 0)
@@ -68,7 +72,20 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
    if (!m->success)
    {
       /* Failure path — determine specific mode */
-      if (m->write_enforce_fired && !m->had_writes)
+      if (m->error && strstr(m->error, "no-progress circuit breaker") != NULL)
+      {
+         out->failure_mode = DL_MODE_NO_PROGRESS;
+         out->confidence = 0.95;
+         snprintf(out->lesson, sizeof(out->lesson),
+                  "A write-capable delegate repeatedly retrieved repository context without "
+                  "editing. On a similar goal, start from a concrete defect hypothesis and "
+                  "attempt the smallest justified edit or decisive test before broadening "
+                  "exploration.");
+         snprintf(out->evidence, sizeof(out->evidence),
+                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0}",
+                  m->error, m->turns, m->tool_calls);
+      }
+      else if (m->write_enforce_fired && !m->had_writes)
       {
          /* Stall with no writes */
          out->failure_mode = DL_MODE_STALL_NO_WRITES;

@@ -9,6 +9,7 @@ from benchmarks.roi.large_repo_crossover import (
     bounded_output,
     command_allowed,
     diff_metrics,
+    learned_failure_context,
     load_tasks,
     prepare_diff,
     summarize,
@@ -116,6 +117,23 @@ class LargeRepoCrossoverTests(unittest.TestCase):
         self.assertTrue(tool_result_usable("apply_patch", "[exit_code=0]\n[tool_output_ref=x]"))
         self.assertFalse(tool_result_usable("apply_patch", "patch failed\n[exit_code=1]\n[tool_output_ref=x]"))
         self.assertFalse(tool_result_usable("read_file", "read_file: no such file: missing"))
+
+    def test_learned_failure_context_is_derived_from_sealed_stop(self):
+        artifact = {"cells": [{
+            "task_id": "trust", "condition": "aimee_progress",
+            "terminal_reason": "progress_abort", "run_id": "run-1",
+            "progress_controller": {"calls_since_mutation": 28, "duplicate_hits": 9},
+        }]}
+        block, evidence = learned_failure_context(artifact, "trust")
+        self.assertIn("<prior_failure_learning>", block)
+        self.assertIn("28 successful calls", block)
+        self.assertIn("materially different plan", block)
+        self.assertEqual(evidence["source_run_id"], "run-1")
+        self.assertEqual(evidence["duplicate_hits"], 9)
+
+    def test_learned_failure_context_rejects_unsealed_or_ambiguous_source(self):
+        with self.assertRaises(ValueError):
+            learned_failure_context({"cells": []}, "trust")
 
 
 if __name__ == "__main__":

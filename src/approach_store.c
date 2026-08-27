@@ -20,6 +20,9 @@
  * overlap score, and a deeper pool can only add lower-ranked matches. */
 #define APPROACH_STORE_POOL 64
 
+static const char *const NO_PROGRESS_APPROACH =
+    "broad repository exploration with repeated or overlapping retrievals and no edit";
+
 int approach_store_record(const char *goal, const char *approach, const char *failure_mode,
                           const char *source, const char *source_ref)
 {
@@ -38,6 +41,16 @@ int approach_store_record(const char *goal, const char *approach, const char *fa
 
    return db1_approach_failure_record(goal_sig, goal, tokens, approach_sig, approach, failure_mode,
                                       source, source_ref);
+}
+
+int approach_store_record_no_progress(const char *goal, const char *failure_mode,
+                                      const char *source_ref)
+{
+   return approach_store_record(goal, NO_PROGRESS_APPROACH,
+                                failure_mode && failure_mode[0]
+                                    ? failure_mode
+                                    : "no-progress circuit breaker stopped the retrieval loop",
+                                "delegate_exit", source_ref ? source_ref : "");
 }
 
 /* The rarest-looking token of a goal, used only to narrow the candidate pool
@@ -173,4 +186,26 @@ int approach_store_render(const char *goal, char *out, size_t out_len, char *arm
                             hits[i].failure_mode[0] ? hits[i].failure_mode : "failed",
                             hits[i].occurrences, hits[i].occurrences == 1 ? "" : "s");
    return n;
+}
+
+char *approach_store_retry_context(const char *goal)
+{
+   char advisory[2048];
+   if (approach_store_render(goal, advisory, sizeof(advisory), NULL, 0) <= 0 || !advisory[0])
+      return NULL;
+
+   static const char prefix[] =
+       "<prior_failure_learning>\n"
+       "This is durable evidence from earlier attempts at a sufficiently similar goal.\n";
+   static const char suffix[] =
+       "\nChoose a materially different plan before using tools. When the prior approach was a "
+       "no-progress retrieval loop, form a concrete defect hypothesis and attempt the smallest "
+       "justified edit or decisive test before broadening exploration.\n"
+       "</prior_failure_learning>";
+   size_t size = strlen(prefix) + strlen(advisory) + strlen(suffix) + 1;
+   char *out = malloc(size);
+   if (!out)
+      return NULL;
+   snprintf(out, size, "%s%s%s", prefix, advisory, suffix);
+   return out;
 }

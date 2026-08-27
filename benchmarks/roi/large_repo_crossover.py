@@ -329,10 +329,11 @@ def execute_tool(name: str, args: dict[str, Any], root: Path,
     return visible + suffix, truncated
 
 
-def economize(probe: EconomizerProbe, messages: list[dict[str, Any]], state_key: str) -> dict[str, Any]:
+def economize(probe: EconomizerProbe, messages: list[dict[str, Any]], state_key: str,
+              system_prompt: str = SYSTEM_PROMPT) -> dict[str, Any]:
     request = {
         "messages": messages,
-        "system_prompt": SYSTEM_PROMPT,
+        "system_prompt": system_prompt,
         "seam": "delegate",
         "state_key": state_key,
         "history_fold": True,
@@ -353,6 +354,53 @@ def economize(probe: EconomizerProbe, messages: list[dict[str, Any]], state_key:
         "freeze_guard_horizon": 8,
     }
     return probe.reduce_request(request)
+
+
+def learned_failure_context(artifact: dict[str, Any], task_id: str) -> tuple[str, dict[str, Any]]:
+    """Render the same task-scoped no-progress lesson the product injects on retry."""
+    candidates = [
+        cell for cell in artifact.get("cells", [])
+        if cell.get("task_id") == task_id
+        and cell.get("condition") == "aimee_progress"
+        and cell.get("terminal_reason") == "progress_abort"
+    ]
+    if len(candidates) != 1:
+        raise ValueError(
+            f"expected one sealed aimee_progress/progress_abort cell for {task_id}, "
+            f"found {len(candidates)}"
+        )
+    cell = candidates[0]
+    progress = cell.get("progress_controller") or {}
+    calls = int(progress.get("calls_since_mutation") or 0)
+    duplicates = int(progress.get("duplicate_hits") or 0)
+    if calls <= 0:
+        raise ValueError("sealed failure has no successful retrieval count")
+    failure = (
+        f"no-progress circuit breaker tripped after {calls} successful calls without an edit "
+        f"({duplicates} repeated or overlapping retrievals)"
+    )
+    approach = (
+        "broad repository exploration with repeated or overlapping retrievals and no edit"
+    )
+    block = (
+        "<prior_failure_learning>\n"
+        "This is durable evidence from earlier attempts at a sufficiently similar goal.\n"
+        "Approaches already tried for a goal like this, and how they went:\n"
+        f"- {approach} -> {failure} (seen 1 time)\n"
+        "Choose a materially different plan before using tools. When the prior approach was a "
+        "no-progress retrieval loop, form a concrete defect hypothesis and attempt the smallest "
+        "justified edit or decisive test before broadening exploration.\n"
+        "</prior_failure_learning>"
+    )
+    return block, {
+        "source_run_id": cell.get("run_id"),
+        "source_terminal_reason": cell.get("terminal_reason"),
+        "approach": approach,
+        "failure": failure,
+        "calls_without_mutation": calls,
+        "duplicate_hits": duplicates,
+        "context_sha256": sha256_text(block),
+    }
 
 
 def call_provider(base_url: str, model: str, messages: list[dict[str, Any]],
@@ -472,15 +520,22 @@ def authored_test_sensitivity(repo: Path, task: Task, parent: str, test_patch: s
 
 def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str, model: str,
              max_turns: int, max_output_tokens: int, output_limit: int,
-             probe: EconomizerProbe, worktree_root: Path) -> dict[str, Any]:
+             probe: EconomizerProbe, worktree_root: Path,
+             learned_contexts: dict[str, tuple[str, dict[str, Any]]] | None = None) -> dict[str, Any]:
     run_id = f"large-repo-{uuid.uuid4().hex[:16]}"
     workspace = worktree_root / run_id
     parent = task.fix_commit + "^"
     add_worktree(repo, workspace, parent)
     messages: list[dict[str, Any]] = [{"role": "user", "content": task.prompt}]
+    learned_context, learned_evidence = (learned_contexts or {}).get(task.task_id, ("", {}))
+    if condition == "aimee_learned_retry" and not learned_context:
+        raise ValueError(f"no sealed prior-failure learning for {task.task_id}")
+    system_prompt = SYSTEM_PROMPT
+    if condition == "aimee_learned_retry":
+        system_prompt = SYSTEM_PROMPT + "\n\n" + learned_context
     outputs: dict[str, str] = {}
     progress = ProgressController()
-    progress_enabled = condition == "aimee_progress"
+    progress_enabled = condition in {"aimee_progress", "aimee_learned_retry"}
     turns = []
     terminal_reason = "max_turns"
     submitted = False
@@ -489,13 +544,13 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
         for turn in range(max_turns):
             activation: dict[str, Any]
             view = messages
-            if condition in {"aimee", "aimee_progress"}:
-                activation = economize(probe, messages, run_id)
+            if condition in {"aimee", "aimee_progress", "aimee_learned_retry"}:
+                activation = economize(probe, messages, run_id, system_prompt)
                 if activation.get("mutated"):
                     view = activation["messages"]
             else:
                 activation = {"mutated": False, "reason": "off", "byte_identical": True}
-            provider_messages = [{"role": "system", "content": SYSTEM_PROMPT}, *view]
+            provider_messages = [{"role": "system", "content": system_prompt}, *view]
             request_record = {
                 "turn": turn + 1,
                 "canonical_message_count": len(messages),
@@ -633,6 +688,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
                     for row in turns
                 ),
             },
+            "prior_failure_learning": learned_evidence if condition == "aimee_learned_retry" else None,
             "patch": patch,
             "patch_sha256": sha256_text(patch),
             "diff": metrics,
@@ -699,6 +755,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--conditions", default="off,aimee")
     parser.add_argument("--progress-preregistration", type=Path,
                         default=Path(__file__).with_name("large_repo_progress_preregistration.json"))
+    parser.add_argument("--learned-failure-artifact", type=Path)
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--max-turns", type=int, default=50)
     parser.add_argument("--max-output-tokens", type=int, default=2048)
@@ -715,8 +772,10 @@ def main() -> None:
     if args.repeats < 1 or args.max_turns < 1 or args.max_output_tokens < 1:
         raise SystemExit("repeats, max-turns, and max-output-tokens must be positive")
     conditions = [item.strip() for item in args.conditions.split(",") if item.strip()]
-    if set(conditions) - {"off", "aimee", "aimee_progress"} or not conditions:
-        raise SystemExit("conditions must be off, aimee, and/or aimee_progress")
+    if set(conditions) - {"off", "aimee", "aimee_progress", "aimee_learned_retry"} or not conditions:
+        raise SystemExit(
+            "conditions must be off, aimee, aimee_progress, and/or aimee_learned_retry"
+        )
     selected = [item.strip() for item in args.tasks.split(",") if item.strip()]
     manifest, tasks = load_tasks(args.task_manifest, selected)
     progress_preregistration = json.loads(args.progress_preregistration.read_text())
@@ -728,6 +787,24 @@ def main() -> None:
     }
     if progress_preregistration.get("controller") != expected_progress:
         raise SystemExit("progress preregistration does not match the implemented controller")
+    learned_contexts: dict[str, tuple[str, dict[str, Any]]] = {}
+    learned_failure_sha256 = None
+    if "aimee_learned_retry" in conditions:
+        if not args.learned_failure_artifact:
+            raise SystemExit("aimee_learned_retry requires --learned-failure-artifact")
+        failure_bytes = args.learned_failure_artifact.read_bytes()
+        learned_failure_sha256 = hashlib.sha256(failure_bytes).hexdigest()
+        registered_sha = progress_preregistration.get("source_failure_artifact_sha256")
+        if learned_failure_sha256 != registered_sha:
+            raise SystemExit("learned failure artifact does not match the preregistered SHA-256")
+        failure_artifact = json.loads(failure_bytes)
+        for task in tasks:
+            try:
+                learned_contexts[task.task_id] = learned_failure_context(
+                    failure_artifact, task.task_id
+                )
+            except ValueError as error:
+                raise SystemExit(str(error)) from error
     repo = Path(__file__).resolve().parents[2]
     dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo, text=True)
     if dirty:
@@ -771,6 +848,7 @@ def main() -> None:
         "source_commit": source_commit, "model": args.model,
         "task_manifest_sha256": sha256_json(manifest), "tasks": selected,
         "progress_preregistration_sha256": sha256_json(progress_preregistration),
+        "learned_failure_artifact_sha256": learned_failure_sha256,
         "conditions": conditions, "repeats": args.repeats, "budget": budget,
         "dispatch_started": False,
     }, indent=2, sort_keys=True) + "\n")
@@ -788,7 +866,7 @@ def main() -> None:
             cell = run_cell(
                 repo, task, condition, repeat, args.base_url, args.model,
                 args.max_turns, args.max_output_tokens, args.tool_output_max_bytes,
-                probe, temp,
+                probe, temp, learned_contexts,
             )
             cells.append(cell)
             print(json.dumps({
@@ -808,6 +886,7 @@ def main() -> None:
         "task_manifest_sha256": sha256_json(manifest), "seed": SEED,
         "progress_preregistration": progress_preregistration,
         "progress_preregistration_sha256": sha256_json(progress_preregistration),
+        "learned_failure_artifact_sha256": learned_failure_sha256,
         "budget": budget, "cells": cells, "summary": summarize(cells),
     }
     args.output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
