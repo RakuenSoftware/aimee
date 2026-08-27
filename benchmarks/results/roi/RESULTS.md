@@ -247,9 +247,37 @@ The forecast is not provider billing and is not reported as savings. A fresh
 paired provider rerun is required to learn whether the fix reduces billed input,
 improves cache behavior, stops the rereading loop, or enables completion.
 
+The fresh Aimee-only remediation run at source pin `c8daa4b3d5` answered the
+mechanism question but not the completion question:
+
+| treatment version | input | uncached input | cache read | output | total | max request | wall time | true folds | boundary reuses | patch/tests/hidden grade |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| before fix | 873,612 | 769,540 | 104,072 | 4,321 | 877,933 | 43,232 | 45.0 min | 0 | 0 | none / none / fail |
+| tool-cycle fold fix | 789,373 | 714,332 | 75,041 | 3,494 | 792,867 | 38,550 | 38.7 min | 25 | 18 | none / none / fail |
+
+The fixed run used 85,066 fewer total provider tokens (9.7%) and 377.5 fewer
+wall-clock seconds (14.0%) while again completing all 30 allowed turns without
+a context rejection. This is exploratory before/after evidence from one task,
+not a paired population estimate. It also proves that the fold fix alone does
+not create task ROI: the model still produced no diff, no authored test, and no
+hidden-grade pass.
+
+The remaining failure is liveness rather than context capacity. The fixed
+transcript reread `server_write_tier_db1.h` on turns 5, 13, and 30, reread
+`server_mgmt_jwks_cache.h` on turns 8 and 24, and repeatedly fetched overlapping
+ranges from the same implementation files. Aimee's current circuit breaker
+detects consecutive identical calls; this cycle is non-consecutive and therefore
+evades it. The next intervention must be preregistered separately: a bounded
+sliding-window duplicate/overlap detector plus a no-mutation checkpoint that
+requires the agent to edit and test, declare a concrete blocker, or escalate.
+
 Raw artifacts:
 
 - `large-repo-qwen38-trust-pilot.preflight.json`
 - `large-repo-qwen38-trust-pilot.json`
 - Raw artifact SHA-256:
   `c72c59ae5f93dc0d7842bdb7729c0ab7aae7095c94bada1985d05fc05412106d`
+- `large-repo-qwen38-trust-fold-fixed.preflight.json`
+- `large-repo-qwen38-trust-fold-fixed.json`
+- Remediation artifact SHA-256:
+  `2ef1e3727d261752f7dac81b72a16230eaa7ead9e506e3bffa12f8cba4efa17d`
