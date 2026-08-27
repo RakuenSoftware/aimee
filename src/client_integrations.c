@@ -1453,12 +1453,8 @@ static void remove_legacy_claude_settings_mcp(const char *settings_path)
    cJSON_Delete(root);
 }
 
-/* Ensure `hooks.<event>` contains an entry running
- * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`, optionally scoped to
- * `matcher` (NULL = fire on every event of this type). Idempotent (keyed on the
- * subcommand substring); sets *dirty when it adds the array or the entry. Used
- * for the context-pre-injection hooks (UserPromptSubmit, PreCompact — no
- * matcher) and the attention guard (PreToolUse — matcher-scoped). */
+/* Ensure `hooks.<event>` runs the aimee subcommand, optionally matcher-scoped.
+ * Idempotent by subcommand; used for context injection and the attention guard. */
 static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
                                     const char *matcher, int *dirty)
 {
@@ -2437,11 +2433,7 @@ static int client_command_installed(const char *name)
    size_t name_len = strlen(name);
    while (part)
    {
-#if defined(_WIN32) || defined(_WIN64)
-      const char *end = strchr(part, ';');
-#else
-      const char *end = strchr(part, ':');
-#endif
+      const char *end = strchr(part, platform_path_separator() == '\\' ? ';' : ':');
       size_t n = end ? (size_t)(end - part) : strlen(part);
       char candidate[MAX_PATH_LEN];
       if (n > 0 && n + 1 + name_len < sizeof(candidate))
