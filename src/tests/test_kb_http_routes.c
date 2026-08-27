@@ -311,6 +311,27 @@ typedef struct
 
 typedef struct
 {
+   long long revision;
+   int files_indexed;
+   int files_retracted;
+} canonical_index_seal_result_t;
+
+#define CANONICAL_INDEX_VERIFY_EXAMPLES 16
+typedef struct
+{
+   long long index_revision;
+   int indexed_files;
+   int workspace_files;
+   int modified_files;
+   int missing_files;
+   int unindexed_files;
+   int unavailable;
+   int example_count;
+   char examples[CANONICAL_INDEX_VERIFY_EXAMPLES][256];
+} canonical_index_verify_result_t;
+
+typedef struct
+{
    int rc;
    int64_t mem_pruned;
    int64_t mem_kept;
@@ -1364,6 +1385,57 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    if (inspected_out)
       *inspected_out = g_code_scan_files_inspected;
    return g_code_scan_files_rc;
+}
+
+int canonical_index_scan_begin(const char *name, const char *root_label, const char *scan_id,
+                               long long *baseline_revision_out)
+{
+   (void)name;
+   (void)root_label;
+   (void)scan_id;
+   if (baseline_revision_out)
+      *baseline_revision_out = 0;
+   return 0;
+}
+
+int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_input_t *files,
+                               int file_count, int *accepted_out)
+{
+   (void)scan_id;
+   (void)files;
+   if (accepted_out)
+      *accepted_out = file_count;
+   return 0;
+}
+
+int canonical_index_scan_seal(const char *scan_id, int expected_files,
+                              canonical_index_seal_result_t *out)
+{
+   (void)scan_id;
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->revision = 1;
+      out->files_indexed = expected_files;
+   }
+   return 0;
+}
+
+int canonical_index_scan_abort(const char *scan_id)
+{
+   (void)scan_id;
+   return 0;
+}
+
+int canonical_index_verify_project(const char *name, const char *root, int deep,
+                                   canonical_index_verify_result_t *out)
+{
+   (void)name;
+   (void)root;
+   (void)deep;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
 }
 
 int db2_kb_runtime_state_set_now(const char *key)
@@ -5715,6 +5787,38 @@ static void test_code_scan_pushed_files_rejects_invalid_item(void)
    assert(strstr(buf, "invalid files array") != NULL);
 }
 
+static void test_code_scan_phases_and_verify_states(void)
+{
+   char buf[1024];
+   g_db_initialized = 1;
+   const char *begin = "{\"project\":\"proj-alpha\",\"root_path\":\"remote\",\"phase\":\"begin\","
+                       "\"scan_id\":\"scan-1\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, begin, (int)strlen(begin),
+                            buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"phase\":\"begin\"") != NULL);
+   const char *stage = "{\"project\":\"proj-alpha\",\"phase\":\"stage\",\"scan_id\":\"scan-1\","
+                       "\"files\":[{\"rel_path\":\"a.c\",\"content\":\"int a;\"}]}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, stage, (int)strlen(stage), buf,
+                        sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"accepted\":1") != NULL);
+   const char *seal = "{\"project\":\"proj-alpha\",\"phase\":\"seal\",\"scan_id\":\"scan-1\","
+                      "\"expected_files\":1}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, seal, (int)strlen(seal), buf,
+                        sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"index_state\":\"current\"") != NULL);
+   assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
+   assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
+
+   const char *verify = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp\",\"phase\":\"verify\","
+                        "\"deep\":true}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, verify, (int)strlen(verify), buf,
+                        sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
+   assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
+}
+
 static void test_code_scan_db_unavailable(void)
 {
    char buf[256];
@@ -7304,6 +7408,7 @@ int main(void)
    test_code_scan_missing_root_path();
    test_code_scan_pushed_files_ok();
    test_code_scan_pushed_files_rejects_invalid_item();
+   test_code_scan_phases_and_verify_states();
    test_code_scan_db_unavailable();
    test_code_update_ok();
    test_ingest_enqueue_ok();

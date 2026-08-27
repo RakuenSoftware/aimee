@@ -24,6 +24,7 @@
 static int g_remote_mode = 0; /* controls kb_client_v1_base_url return */
 static char *g_last_path = NULL;
 static char *g_last_body = NULL;
+static char *g_last_files_body = NULL;
 static int g_post_calls = 0;
 static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
 static size_t g_max_body_bytes = 0;  /* largest single request body seen */
@@ -47,7 +48,11 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       g_max_body_bytes = strlen(g_last_body);
    cJSON *files = body ? cJSON_GetObjectItemCaseSensitive(body, "files") : NULL;
    if (cJSON_IsArray(files))
+   {
       g_files_pushed_total += cJSON_GetArraySize(files);
+      free(g_last_files_body);
+      g_last_files_body = cJSON_PrintUnformatted(body);
+   }
    if (status_out)
       *status_out = 200;
    return strdup(g_next_response);
@@ -71,8 +76,10 @@ static void reset_stub(void)
 {
    free(g_last_path);
    free(g_last_body);
+   free(g_last_files_body);
    g_last_path = NULL;
    g_last_body = NULL;
+   g_last_files_body = NULL;
    g_post_calls = 0;
    g_files_pushed_total = 0;
    g_max_body_bytes = 0;
@@ -201,10 +208,10 @@ static void test_remote_mode_pushes_files(void)
    kb_client_index_scan_result_t res;
    kb_client_index_scan("proj", tmpdir, 0, &res);
 
-   assert(g_post_calls == 1);
-   assert(g_last_body != NULL);
+   assert(g_post_calls == 3); /* begin, stage, seal */
+   assert(g_last_files_body != NULL);
 
-   cJSON *body = cJSON_Parse(g_last_body);
+   cJSON *body = cJSON_Parse(g_last_files_body);
    assert(body != NULL);
 
    /* files array must be present. */
@@ -267,12 +274,13 @@ static void test_remote_mode_empty_dir(void)
    kb_client_index_scan_result_t res;
    kb_client_index_scan("proj", tmpdir, 0, &res);
 
-   assert(g_post_calls == 1);
+   assert(g_post_calls == 2); /* begin + an authoritative empty seal */
    cJSON *body = cJSON_Parse(g_last_body);
    assert(body != NULL);
-   cJSON *files = cJSON_GetObjectItemCaseSensitive(body, "files");
-   assert(cJSON_IsArray(files));
-   assert(cJSON_GetArraySize(files) == 0);
+   cJSON *phase = cJSON_GetObjectItemCaseSensitive(body, "phase");
+   cJSON *expected = cJSON_GetObjectItemCaseSensitive(body, "expected_files");
+   assert(cJSON_IsString(phase) && strcmp(phase->valuestring, "seal") == 0);
+   assert(cJSON_IsNumber(expected) && expected->valueint == 0);
    cJSON_Delete(body);
 
    rmdir_r(tmpdir);
@@ -316,7 +324,7 @@ static void test_remote_mode_batches_large_tree(void)
 
    assert(rc == 0);
    assert(res.skipped == 0);
-   assert(g_post_calls >= 2);              /* batched, not one giant push */
+   assert(g_post_calls >= 4);              /* begin + multiple stages + seal */
    assert(g_files_pushed_total == NFILES); /* nothing dropped */
    assert(g_max_body_bytes < 1048576);     /* every body under the kb cap */
 

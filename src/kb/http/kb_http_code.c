@@ -2114,6 +2114,12 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
       return 503;
    }
 
+   int phase_status = code_scan_handle_phase(root, project, root_path, files_j, out_buf, out_cap);
+   if (phase_status)
+   {
+      cJSON_Delete(root);
+      return phase_status;
+   }
    int files = -1;
    int inspected = 0;
    int pushed_files = cJSON_IsArray(files_j);
@@ -2246,15 +2252,10 @@ int handle_post_code_scan(const char *body, char *out_buf, int out_cap)
 
    snprintf(out_buf, (size_t)out_cap,
             "{\"status\":\"ok\",\"skipped\":false,\"project\":\"%s\",\"files\":%d,"
-            "\"inspected\":%d,\"hook_installed\":%s}",
-            project, files, inspected, hook_installed ? "true" : "false");
+            "\"inspected\":%d,\"hook_installed\":%s,\"index_state\":\"current\","
+            "\"workspace_state\":\"%s\",\"verification\":\"%s\"}",
+            project, files, inspected, hook_installed ? "true" : "false",
+            pushed_files ? "unavailable" : "matched", pushed_files ? "none" : "content_hash");
    cJSON_Delete(root);
    return 200;
-}
-
-int handle_post_code_scan_route(const char *method, const char *body, char *out_buf, int out_cap)
-{
-   if (strcmp(method, "POST") != 0)
-      return code_method_not_allowed(out_buf, out_cap);
-   return handle_post_code_scan(body, out_buf, out_cap);
 }
