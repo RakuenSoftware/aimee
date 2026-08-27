@@ -6,12 +6,14 @@ from pathlib import Path
 
 from benchmarks.roi.large_repo_crossover import (
     ProgressController,
+    Task,
     bounded_output,
     command_allowed,
     diff_metrics,
     learned_failure_context,
     load_tasks,
     prepare_diff,
+    prepare_task_workspace,
     summarize,
     tool_result_usable,
 )
@@ -62,6 +64,27 @@ class LargeRepoCrossoverTests(unittest.TestCase):
             metrics = diff_metrics(root)
             self.assertEqual(metrics["test_files"], ["tests/test_regression.c"])
             self.assertEqual(metrics["added"], 1)
+
+    def test_setup_artifacts_are_available_but_excluded_from_diff(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.email", "roi@example.invalid"], cwd=root, check=True)
+            subprocess.run(["git", "config", "user.name", "ROI Test"], cwd=root, check=True)
+            (root / "README.md").write_text("base\n")
+            subprocess.run(["git", "add", "README.md"], cwd=root, check=True)
+            subprocess.run(["git", "commit", "-qm", "base"], cwd=root, check=True)
+            task = Task(
+                task_id="setup", fix_commit="abc", prompt="fix it",
+                languages=["C"], selection_stratum="test",
+                hidden_test_files=[], grader_commands=[],
+                setup_commands=["mkdir -p generated && touch generated/fixture.h"],
+                setup_artifact_paths=["generated/fixture.h"],
+            )
+            prepare_task_workspace(task, root)
+            self.assertTrue((root / "generated" / "fixture.h").exists())
+            prepare_diff(root, task.setup_artifact_paths)
+            self.assertEqual(diff_metrics(root)["files"], [])
 
     def test_summary_identifies_context_and_test_crossovers(self):
         def cell(condition, resolved, reason, authored, sensitive, tokens):

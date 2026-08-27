@@ -45,6 +45,11 @@
       "languages": ["C", "Go", "JSON"],
       "prompt": "Two DB1 work-item operations lose their return values across the module bus. A concurrency or rate-cap refusal reaches the workflow intake as a generic database failure instead of its distinct refusal, while a successful override increment is interpreted as failure rather than returning the new count. Audit the wire contract and both language boundaries, preserve true errors, add regression tests when appropriate, and run the relevant cross-language verification before finishing.",
       "hidden_test_files": ["src/tests/test_db1_module_bus.c"],
+      "setup_commands": [
+        "make -C src schema_data.h",
+        "ln -s ../schema_data.h src/modules/schema_data.h"
+      ],
+      "setup_artifact_paths": ["src/modules/schema_data.h"],
       "grader_commands": [
         "make -C src -j8 unit-test-db1-module-bus"
       ]

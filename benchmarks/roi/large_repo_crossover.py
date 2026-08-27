@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -71,6 +71,8 @@ class Task:
     selection_stratum: str
     hidden_test_files: list[str]
     grader_commands: list[str]
+    setup_commands: list[str] = field(default_factory=list)
+    setup_artifact_paths: list[str] = field(default_factory=list)
 
 
 class ProviderError(RuntimeError):
@@ -430,9 +432,20 @@ def remove_worktree(repo: Path, target: Path) -> None:
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def prepare_diff(root: Path) -> None:
+def prepare_task_workspace(task: Task, root: Path) -> list[dict[str, Any]]:
+    records = []
+    for command in task.setup_commands:
+        result = run_process(command, root, 1200, shell=True)
+        records.append({"command": command, **result})
+        if result["exit_code"]:
+            raise RuntimeError(f"task setup failed: {command}\n{result['output']}")
+    return records
+
+
+def prepare_diff(root: Path, excluded_paths: list[str] | None = None) -> None:
     """Make untracked files visible to diff without staging their contents."""
-    subprocess.run(["git", "add", "--intent-to-add", "--", "."], cwd=root, check=True,
+    pathspecs = [".", *[f":(exclude){path}" for path in (excluded_paths or [])]]
+    subprocess.run(["git", "add", "--intent-to-add", "--", *pathspecs], cwd=root, check=True,
                    stdout=subprocess.DEVNULL)
 
 
@@ -493,13 +506,14 @@ def authored_test_sensitivity(repo: Path, task: Task, parent: str, test_patch: s
     workspace = worktree_root / f"test-sensitivity-{uuid.uuid4().hex[:16]}"
     add_worktree(repo, workspace, parent)
     try:
+        setup = prepare_task_workspace(task, workspace)
         applied = run_process(["git", "apply", "--whitespace=nowarn", "-"], workspace, 90,
                               stdin=test_patch)
         if applied["exit_code"]:
             return {
                 "status": "test_patch_apply_failed", "candidate_passed": candidate_visible_passed,
                 "buggy_parent_failed": None, "regression_sensitive": False,
-                "apply": applied, "commands": [],
+                "setup": setup, "apply": applied, "commands": [],
             }
         commands = []
         for command in task.grader_commands:
@@ -512,7 +526,7 @@ def authored_test_sensitivity(repo: Path, task: Task, parent: str, test_patch: s
             "status": "measured", "candidate_passed": candidate_visible_passed,
             "buggy_parent_failed": parent_failed,
             "regression_sensitive": candidate_visible_passed and parent_failed,
-            "commands": commands,
+            "setup": setup, "commands": commands,
         }
     finally:
         remove_worktree(repo, workspace)
@@ -526,6 +540,11 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
     workspace = worktree_root / run_id
     parent = task.fix_commit + "^"
     add_worktree(repo, workspace, parent)
+    try:
+        setup = prepare_task_workspace(task, workspace)
+    except Exception:
+        remove_worktree(repo, workspace)
+        raise
     messages: list[dict[str, Any]] = [{"role": "user", "content": task.prompt}]
     learned_context, learned_evidence = (learned_contexts or {}).get(task.task_id, ("", {}))
     if condition == "aimee_learned_retry" and not learned_context:
@@ -635,7 +654,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
                 if action != "none":
                     messages.append({"role": "user", "content": progress.hint(action)})
 
-        prepare_diff(workspace)
+        prepare_diff(workspace, task.setup_artifact_paths)
         patch = subprocess.check_output(["git", "diff", "HEAD", "--no-ext-diff"], cwd=workspace, text=True)
         metrics = diff_metrics(workspace)
         test_patch = ""
@@ -658,6 +677,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
             "fix_commit": task.fix_commit,
             "languages": task.languages,
             "selection_stratum": task.selection_stratum,
+            "setup": setup,
             "terminal_reason": terminal_reason,
             "submitted": submitted,
             "resolved": grader["hidden_passed"],
@@ -742,6 +762,12 @@ def summarize(cells: list[dict[str, Any]]) -> dict[str, Any]:
     ]
     return {"by_condition": by_condition, "completion_crossovers": crossovers,
             "context_capacity_crossovers": context_crossovers}
+
+
+def write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")
+    os.replace(temporary, path)
 
 
 def parse_args() -> argparse.Namespace:
@@ -865,6 +891,7 @@ def main() -> None:
     preflight_record["dispatch_started_at"] = datetime.now(timezone.utc).isoformat()
     preflight.write_text(json.dumps(preflight_record, indent=2, sort_keys=True) + "\n")
     cells = []
+    checkpoint = args.output.with_suffix(".checkpoint.json")
     try:
         for ordinal, (task, condition, repeat) in enumerate(plan, 1):
             cell = run_cell(
@@ -873,6 +900,14 @@ def main() -> None:
                 probe, temp, learned_contexts,
             )
             cells.append(cell)
+            write_json_atomic(checkpoint, {
+                "schema_version": 1, "complete": False,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "source_commit": source_commit, "model": args.model,
+                "tasks": selected, "conditions": conditions, "repeats": args.repeats,
+                "completed_cells": len(cells), "planned_cells": len(plan),
+                "cells": cells, "summary": summarize(cells),
+            })
             print(json.dumps({
                 "completed": ordinal, "planned": len(plan), "task": task.task_id,
                 "condition": condition, "resolved": cell["resolved"],
@@ -893,7 +928,8 @@ def main() -> None:
         "learned_failure_artifact_sha256": learned_failure_sha256,
         "budget": budget, "cells": cells, "summary": summarize(cells),
     }
-    args.output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
+    write_json_atomic(args.output, artifact)
+    write_json_atomic(checkpoint, {**artifact, "complete": True})
     print(json.dumps({"artifact": str(args.output), "summary": artifact["summary"]}, indent=2))
 
 

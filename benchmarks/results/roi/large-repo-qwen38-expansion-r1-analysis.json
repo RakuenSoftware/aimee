@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "created_at": "2026-08-27T11:34:42Z",
+  "source_artifact": "large-repo-qwen38-expansion-r1.json",
+  "source_artifact_sha256": "b02243dcf615367cb05bf014dc9a7ce645f4b1a3d38cd5c993a2a97a848cb2ac",
+  "preflight_artifact": "large-repo-qwen38-expansion-r1.preflight.json",
+  "preflight_artifact_sha256": "1941579dbfcb6ebe22eaf1016152b0f497fabf24e5384cc9b189794f77082a05",
+  "claim_boundary": "Matched failure-cost containment only. Neither condition resolved either retained task, so this artifact makes no capability-uplift claim.",
+  "retained_tasks": [
+    "pool_lease_attribution",
+    "clone_fd_and_owner"
+  ],
+  "excluded_tasks": [
+    {
+      "task_id": "db1_outcome_codes",
+      "reason": "The historical checkout's generated schema header appeared at src/schema_data.h while the DB1 module expected src/modules/schema_data.h. Both matched cells lacked the required setup fixture, so their measurements are quarantined.",
+      "treatment_total_tokens": 327912,
+      "base_total_tokens": 719741
+    }
+  ],
+  "matched_results": [
+    {
+      "task_id": "pool_lease_attribution",
+      "base_terminal_reason": "context_limit",
+      "treatment_terminal_reason": "progress_abort",
+      "base_total_tokens": 428483,
+      "treatment_total_tokens": 371687,
+      "tokens_saved": 56796,
+      "reduction_percent": 13.255134976183419,
+      "base_resolved": false,
+      "treatment_resolved": false
+    },
+    {
+      "task_id": "clone_fd_and_owner",
+      "base_terminal_reason": "context_limit",
+      "treatment_terminal_reason": "progress_abort",
+      "base_total_tokens": 616577,
+      "treatment_total_tokens": 321292,
+      "tokens_saved": 295285,
+      "reduction_percent": 47.891017666893184,
+      "base_resolved": false,
+      "treatment_resolved": false
+    }
+  ],
+  "retained_pooled_result": {
+    "base_total_tokens": 1045060,
+    "treatment_total_tokens": 692979,
+    "tokens_saved": 352081,
+    "reduction_percent": 33.69002736684975,
+    "base_resolved_tasks": 0,
+    "treatment_resolved_tasks": 0
+  }
+}
