@@ -18,12 +18,16 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests/baselines/security/cppcheck-v1.json"
 
 
-def load_baseline() -> Counter[tuple[str, str]]:
+def load_baseline() -> tuple[str, Counter[tuple[str, str]]]:
     value = json.loads(BASELINE.read_text(encoding="utf-8"))
-    if not isinstance(value, dict) or set(value) != {"schema_version", "diagnostics"}:
+    expected_keys = {"schema_version", "cppcheck_version", "diagnostics"}
+    if not isinstance(value, dict) or set(value) != expected_keys:
         raise ValueError("baseline top level differs from v1")
     if value["schema_version"] != 1 or not isinstance(value["diagnostics"], list):
         raise ValueError("baseline schema_version must be 1 and diagnostics must be an array")
+    version = value["cppcheck_version"]
+    if not isinstance(version, str) or not version:
+        raise ValueError("cppcheck_version must be a non-empty string")
     result: Counter[tuple[str, str]] = Counter()
     for item in value["diagnostics"]:
         if not isinstance(item, dict) or set(item) != {"id", "file", "max_count"}:
@@ -39,7 +43,7 @@ def load_baseline() -> Counter[tuple[str, str]]:
         if key in result:
             raise ValueError(f"duplicate diagnostic baseline {identifier}:{path}")
         result[key] = count
-    return result
+    return version, result
 
 
 def parse_report(path: Path) -> tuple[Counter[tuple[str, str]], dict[tuple[str, str], list[str]]]:
@@ -84,7 +88,7 @@ def main() -> int:
     parser.add_argument("sources", nargs="*")
     args = parser.parse_args()
     try:
-        baseline = load_baseline()
+        expected_version, baseline = load_baseline()
     except (OSError, json.JSONDecodeError, ValueError) as exc:
         print(f"cppcheck-ratchet: invalid baseline: {exc}", file=sys.stderr)
         return 2
@@ -98,6 +102,17 @@ def main() -> int:
         return 0
     if not args.sources:
         parser.error("at least one source is required")
+    version = subprocess.run(
+        ["cppcheck", "--version"], capture_output=True, check=False, text=True
+    )
+    actual_version = version.stdout.strip()
+    if version.returncode != 0 or actual_version != f"Cppcheck {expected_version}":
+        print(
+            "cppcheck-ratchet: analyzer version mismatch: "
+            f"expected Cppcheck {expected_version}, got {actual_version or '<unavailable>'}",
+            file=sys.stderr,
+        )
+        return 2
     with tempfile.NamedTemporaryFile(prefix="aimee-cppcheck-", suffix=".xml") as report:
         command = [
             "cppcheck",
