@@ -229,9 +229,9 @@ L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
 L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
-# Server (DB1 daemon) link flags — same as L_FULL minus libpq. The daemon
-# no longer carries DB2 code; the only postgres-bound work routes
-# through the kb client socket to aimee-kb, which carries libpq itself.
+# Server link flags. The daemon owns the store directly: it links libpq and the
+# same postgres + memory modules as aimee-kb, so it no longer routes every
+# store-bound call through the kb client socket.
 L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
@@ -1108,7 +1108,9 @@ lean:
 	fi
 
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
-# daemon system libraries are dynamically linked. Only runs on Linux (ldd) and
+# daemon system libraries are dynamically linked. Daemons link with -s, so the
+# only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
+# such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
 check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
 ifeq ($(OS),Windows_NT)
@@ -1141,17 +1143,20 @@ else ifeq ($(UNAME_S),Darwin)
 		case "$$bin" in \
 			*aimee-server*) \
 				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: libpq linked into DB1-only server"; \
-					fail=1; \
+					echo "  libpq: dynamic (server owns DB2)"; \
 				else \
-					echo "  libpq: not found (server boundary ok)"; \
+					echo "  ERROR: libpq not linked into DB2-owning server"; \
+					fail=1; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && \
-				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: DB2 symbols present in DB1-only server"; \
-					fail=1; \
+				if command -v readelf >/dev/null 2>&1; then \
+					if readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
+						echo "  libpq imports: present (server calls DB2)"; \
+					else \
+						echo "  ERROR: server links libpq but imports no PQ symbol"; \
+						fail=1; \
+					fi; \
 				else \
-					echo "  DB2 symbols: not found (server boundary ok)"; \
+					echo "  libpq imports: not checked (no readelf)"; \
 				fi ;; \
 			*aimee-kb*) \
 				if echo "$$deps" | grep -q libsqlite3; then \
@@ -1220,17 +1225,20 @@ else
 		case "$$bin" in \
 			*aimee-server*) \
 				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: libpq linked into DB1-only server"; \
-					fail=1; \
+					echo "  libpq: dynamic (server owns DB2)"; \
 				else \
-					echo "  libpq: not found (server boundary ok)"; \
+					echo "  ERROR: libpq not linked into DB2-owning server"; \
+					fail=1; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && \
-				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: DB2 symbols present in DB1-only server"; \
-					fail=1; \
+				if command -v readelf >/dev/null 2>&1; then \
+					if readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
+						echo "  libpq imports: present (server calls DB2)"; \
+					else \
+						echo "  ERROR: server links libpq but imports no PQ symbol"; \
+						fail=1; \
+					fi; \
 				else \
-					echo "  DB2 symbols: not found (server boundary ok)"; \
+					echo "  libpq imports: not checked (no readelf)"; \
 				fi ;; \
 			*aimee-kb*) \
 				if echo "$$deps" | grep -q libsqlite3; then \
