@@ -167,7 +167,7 @@ This table is updated as findings are verified. Candidate issues stay out of the
 | ACG-015 | High | Audit completeness | Several live enforcement and privileged-action paths never reach the tamper-evident chain | source-remediated for enumerated paths; completeness rollout pending |
 | ACG-016 | High | Artifact trust | Project skills and other executable agent artifacts are unsigned, unpinned, and loaded as authoritative instructions | source-remediated across enumerated executable artifacts; negative tests pass |
 | ACG-017 | Medium | Accountability | Delegate and hook identity collapses to coarse or spoofable principals | source-remediated; session-scoped hook-token tests pass |
-| ACG-018 | Medium | Egress governance | Modules can make direct outbound calls and can silently omit the required governance event | ordinary Go process modules source-remediated; core-plane convergence/deployment evidence remain |
+| ACG-018 | Medium | Egress governance | Modules can make direct outbound calls and can silently omit the required governance event | ordinary Go modules source-remediated; trusted core source-constrained; deployment evidence remains |
 | ACG-019 | Medium | Change governance | Sensitive-code ownership and independent approval are prose-only or incomplete in CODEOWNERS | source-remediated; live separation and signed evidence remain open |
 | ACG-020 | Medium | Compliance readiness | Required organizational, privacy-lifecycle, and audit-evidence artifacts are absent from the source evidence set | source evidence added; organizational operation pending |
 | ACG-021 | Medium | Build parity | Make and CMake products expose different audit/WORM capabilities | remediated; Make/CMake parity tested |
@@ -224,7 +224,7 @@ claim. These residuals keep the proposal pending:
 
 | Residual | Required closure evidence |
 | --- | --- |
-| ACG-018 remaining core-plane/protocol convergence | Forge and MCP module credentials now resolve only in egress under caller-scoped, short-lived handles. Inventory and migrate or formally constrain trusted C server/KB protocols and separately declared store/proxy owners, and retain production proof that the Linux process guard and non-dumpable credential owner are active. |
+| ACG-018 production activation evidence | Forge and MCP module credentials resolve only in egress under caller-scoped, short-lived handles. The remaining trusted C/server/KB/store/proxy boundaries are formally constrained by a planted-test-backed exact source inventory. Retain production proof that the Linux process guard and non-dumpable credential owner are active. |
 | ACG-019/020 operating controls | Export live branch/ruleset/environment evidence, assign accountable people, exercise incident/restore/access-review procedures, and retain signed cadence evidence. |
 
 None of these residuals reopens the two original Critical sink conditions: ACG-001 and ACG-026 are
@@ -645,8 +645,12 @@ still requires the ACG-019/020 organizational records and operating cadence.
   only `mcp:<caller-ref>` and egress derives the one matching Vault name, while a helper rejects any
   parent other than the installed egress executable. The egress process disables dumpability before
   serving. This closes credential custody and outbound transport for ordinary Go process modules.
-  Closure is not claimed for trusted C server/KB protocols, separately declared store/proxy network
-  owners, or production activation evidence.
+  `src/modules/core-network-contracts.json` additionally binds all 58 remaining C-plane
+  file/primitive boundaries to an owner, direction, purpose, destination constraint, credential
+  constraint, audit disposition and required reviewer. The lint ratchets exact call counts for HTTP,
+  Internet sockets, DNS, PostgreSQL, TLS connect and credentialed Git and proves enforcement with a
+  planted unknown call. Trusted core traffic is formally constrained, not misrepresented as using
+  the Go transport. Closure is not claimed for production activation evidence.
 
 ### ACG-019 — Sensitive change approval is not mechanically separated
 
@@ -1581,7 +1585,7 @@ The source checks do not convert the explicitly documented organizational and ar
 residuals into operating evidence. The ACG-011 and ACG-031 source controls now have representative
 remote PostgreSQL acceptance evidence, but a production deployment must still prove its own
 migration, role posture, schedules and store inventory. External assurance additionally remains
-blocked on ACG-018 core-plane/protocol convergence and the ACG-019/020 live organizational evidence.
+blocked on ACG-018 production activation evidence and the ACG-019/020 live organizational evidence.
 
 Dynamic exploitation, authenticated penetration testing, production configuration/IAM, branch
 rules, environment reviewers, organization access, cloud/container runtime, external providers,

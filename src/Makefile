@@ -2174,6 +2174,8 @@ module-bus-boundary-check:
 module-egress-check:
 	@python3 -I -S ../scripts/check-module-egress.py
 	@python3 -I -S ../scripts/check-module-egress.py --plant-test
+	@python3 -I -S ../scripts/check-core-network-contracts.py
+	@python3 -I -S ../scripts/check-core-network-contracts.py --plant-test
 
 cleanup-ledger-check:
 	@python3 -I -S ../scripts/check_cleanup_ledger.py

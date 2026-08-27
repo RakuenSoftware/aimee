@@ -41,7 +41,8 @@ The runtime network-owner inventory is intentionally explicit:
 | `postgres` | PostgreSQL client transport | store-only process contract and DSN hardening |
 | `sandbox` / `aimee-delegate-egress` | isolated tool/delegate proxy transport | separate destination policy and sandbox boundary |
 | observability/browser/control listeners | inbound service sockets | declared core/listener ownership; not an ordinary outbound caller |
-| C server and KB planes | provider, peer/KB/database, forge/git and management protocols | trusted core-plane owners outside the Go process-module seccomp claim; convergence into this egress service remains proposal work |
+| C server and KB planes | provider, peer/KB/database, forge/git and management protocols | every remaining primitive is pinned by `core-network-contracts.json` to an owner, purpose, destination/credential constraint, audit disposition and review boundary; exact call counts are lint-ratcheted, while convergence into this egress service remains proposal work |
 
 This distinction matters: the enforced claim is complete for ordinary Go
-process modules, not yet for every core-daemon protocol in the product.
+process modules. Trusted core protocols are formally constrained and cannot grow
+silently, but are not represented as having traversed the Go egress transport.

@@ -172,10 +172,13 @@ environment name. Provisioning derives `mcp:<egress-ref>`, egress derives the so
 secret only to the non-dumpable egress process. Tests pin scope/expiry/tamper rejection and a real
 C-to-Go envelope vector.
 
-This still does not satisfy the proposal's product-wide acceptance section. The enforced boundary
-is complete for ordinary Go process modules, including their HTTP and SSE paths. Git-over-SSH,
-provider streaming, peer/KB/database traffic, management clients and other protocols owned by the
-trusted C server/KB planes or separately declared proxy/store processes have not all converged on
-this service. Production namespace/seccomp activation and throughput evidence also remain
-deployment work. The proposal therefore stays in flight rather than overstating a product-wide
-single-egress guarantee.
+This still does not satisfy the proposal's product-wide single-transport acceptance section. The
+enforced boundary is complete for ordinary Go process modules, including their HTTP and SSE paths.
+Git-over-SSH, provider streaming, peer/KB/database traffic, management clients and other protocols
+owned by trusted C server/KB planes or separately declared proxy/store processes have not all
+converged on this service. They are instead formally constrained by
+`src/modules/core-network-contracts.json`: lint matches every remaining HTTP, Internet socket, DNS,
+PostgreSQL, TLS-connect and credentialed-Git primitive by exact file and count to an owner, purpose,
+destination rule, credential rule, audit disposition and review boundary, with a planted bypass.
+Production namespace/seccomp activation and throughput evidence remain deployment work. The
+proposal therefore stays in flight rather than overstating a product-wide single-egress guarantee.
