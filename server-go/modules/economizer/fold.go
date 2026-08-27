@@ -53,9 +53,6 @@ type FoldResult struct {
 }
 
 // isCleanUserTurn reports whether m is a user turn carrying no tool_result.
-//
-// The fold may only split on one of these: cutting between a tool_use and its
-// tool_result would orphan the pair and every provider rejects that.
 func isCleanUserTurn(m *JSONValue) bool {
 	if m == nil || m.GetString("role") != "user" {
 		return false
@@ -73,6 +70,36 @@ func isCleanUserTurn(m *JSONValue) bool {
 		return true
 	}
 	return false
+}
+
+// isAssistantToolTurn reports whether m starts a provider-shaped tool cycle.
+// Splitting immediately before this message keeps the assistant call and every
+// following result together. This is the only recurring safe boundary in an
+// autonomous coding loop, which has one initial user request followed by
+// assistant(tool call) -> tool result cycles and no later plain user turn.
+func isAssistantToolTurn(m *JSONValue) bool {
+	if m == nil || m.GetString("role") != "assistant" {
+		return false
+	}
+	if calls := m.Get("tool_calls"); calls.IsArray() && calls.Len() > 0 {
+		return true
+	}
+	content := m.Get("content")
+	if !content.IsArray() {
+		return false
+	}
+	for _, block := range content.Items {
+		if block != nil && block.GetString("type") == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
+// isCleanFoldBoundary reports whether folding the messages before m cannot
+// separate a tool call from its result.
+func isCleanFoldBoundary(m *JSONValue) bool {
+	return isCleanUserTurn(m) || isAssistantToolTurn(m)
 }
 
 // appendExcerpt appends up to max bytes of s, single-lined, marking truncation
@@ -307,9 +334,9 @@ func compressMessageBodies(m *JSONValue, cc *CompactConfig, turn int, set *Coord
 //
 // Unlike FoldView this needs NO clean-user-turn boundary: it shrinks oversized
 // bodies in place while keeping the carrying message, its role/type and its
-// tool_use_id / tool_call_id, so a tool_use and its result are never split. That
-// is why it engages on autonomous tool-loops, where the fold's boundary never
-// appears.
+// tool_use_id / tool_call_id, so a tool_use and its result are never split. It
+// can engage before an autonomous tool loop has accumulated enough complete
+// cycles for FoldView to use an assistant-tool boundary.
 //
 // The conserved-identifier note is APPENDED at the tail, not prepended. That
 // placement is load-bearing (#2552): the note summarizes a region that GROWS as
@@ -448,7 +475,7 @@ func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResu
 	// than a false "reuse" claiming a warm cache it does not have.
 	if freeze != nil && freeze.Active {
 		fs := freeze.FrozenSplit
-		if fs >= minFold && fs < count && (count-fs) <= tailCap && isCleanUserTurn(messages.At(fs)) {
+		if fs >= minFold && fs < count && (count-fs) <= tailCap && isCleanFoldBoundary(messages.At(fs)) {
 			dig, foldedBytes = prefixDigest(messages, fs)
 			if dig == freeze.PrefixDigest {
 				split = fs
@@ -461,7 +488,7 @@ func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResu
 		// fresh boundary: first fold, freeze disabled, or an epoch advance
 		desired := count - retained
 		for s := desired; s >= minFold; s-- {
-			if isCleanUserTurn(messages.At(s)) {
+			if isCleanFoldBoundary(messages.At(s)) {
 				split = s
 				break
 			}
@@ -493,10 +520,16 @@ func FoldView(messages *JSONValue, cfg *FoldConfig, freeze *FoldFreeze) FoldResu
 	fm.Set("role", NewString("user"))
 	fm.Set("content", NewString(body.String()))
 	arr.Append(fm)
-	ack := NewObject()
-	ack.Set("role", NewString("assistant"))
-	ack.Set("content", NewString("Understood — continuing from the folded summary above."))
-	arr.Append(ack)
+	// A plain user boundary needs the acknowledgement to preserve the existing
+	// user/assistant transition. An assistant-tool boundary already supplies the
+	// response to the synthetic user summary; inserting an acknowledgement there
+	// would create consecutive assistant messages and weaken provider parity.
+	if !isAssistantToolTurn(messages.At(split)) {
+		ack := NewObject()
+		ack.Set("role", NewString("assistant"))
+		ack.Set("content", NewString("Understood — continuing from the folded summary above."))
+		arr.Append(ack)
+	}
 
 	for i := split; i < count; i++ {
 		if item := messages.At(i); item != nil {

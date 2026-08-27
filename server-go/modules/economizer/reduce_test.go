@@ -53,6 +53,66 @@ func appendTurn(m *JSONValue, k int) {
 		"now that the previous edit is confirmed good"))
 }
 
+// appendAutonomousToolTurn mirrors an OpenAI coding-agent loop: one user task
+// starts the transcript, then every subsequent model turn is an assistant tool
+// call followed by its tool result, with no new user message.
+func appendAutonomousToolTurn(m *JSONValue, k int) {
+	id := fmt.Sprintf("auto_%03d", k)
+	a := NewObject()
+	a.Set("role", NewString("assistant"))
+	tcs := NewArray()
+	tc := NewObject()
+	tc.Set("id", NewString(id))
+	tc.Set("type", NewString("function"))
+	fn := NewObject()
+	fn.Set("name", NewString("read_file"))
+	fn.Set("arguments", NewString(fmt.Sprintf(`{"path":"src/file_%d.c"}`, k)))
+	tc.Set("function", fn)
+	tcs.Append(tc)
+	a.Set("tool_calls", tcs)
+	m.Append(a)
+
+	tr := NewObject()
+	tr.Set("role", NewString("tool"))
+	tr.Set("tool_call_id", NewString(id))
+	tr.Set("content", NewString(strings.Repeat("source line and compiler output; ", 80)))
+	m.Append(tr)
+}
+
+func TestReduceAutonomousToolLoopFoldsAndReusesBoundary(t *testing.T) {
+	m := NewArray()
+	m.Append(mkUser("diagnose, patch, and test the repository"))
+	for k := 0; k < 8; k++ {
+		appendAutonomousToolTurn(m, k)
+	}
+	st := &ReduceState{Freeze: FoldFreeze{TailCapMsgs: 20}, Recall: NewRecallIndex()}
+	cfg := &ReduceConfig{
+		DelegateSeam: true, HistoryFold: true, Compress: true,
+		Fold: FoldConfig{
+			RetainedMsgs: 6, MinFoldMsgs: 4, ReasoningExcerptBytes: 80,
+			CompactHeadBytes: 80, CompactTailBytes: 80,
+			Closet: ClosetConfig{Enabled: true, BudgetBytes: 4096},
+		},
+	}
+	first := Reduce(m, "sys", SeamDelegate, cfg, st)
+	if !first.Mutated || first.Messages == nil || first.RetainedMsgs == 0 || first.Epochs == 0 {
+		t.Fatalf("first autonomous fold did not pin a boundary: %+v", first)
+	}
+	if repairs := MessageHistoryRepair(first.Messages.Clone()); repairs != 0 {
+		t.Fatalf("first autonomous fold needed %d structural repair(s)", repairs)
+	}
+
+	appendAutonomousToolTurn(m, 8)
+	st.Reduced = false // a fresh request; module state restore does this on the wire path
+	second := Reduce(m, "sys", SeamDelegate, cfg, st)
+	if !second.ReusedBoundary || second.Epochs != first.Epochs {
+		t.Fatalf("second autonomous fold did not reuse boundary: first=%+v second=%+v", first, second)
+	}
+	if repairs := MessageHistoryRepair(second.Messages.Clone()); repairs != 0 {
+		t.Fatalf("reused autonomous fold needed %d structural repair(s)", repairs)
+	}
+}
+
 // THE CACHE CLAIM, through the composed reducer. This is the Go form of the test
 // that found the compress-defeats-freeze bug (#2552).
 //
@@ -299,13 +359,14 @@ func TestReduceRecallInjectAppendsNotice(t *testing.T) {
 	}
 }
 
-// Compress engages where the fold cannot: a tool loop has no clean user-turn
-// boundary, so fold-only must no-op while compress still shrinks the bodies.
-func TestReduceCompressEngagesWhereFoldCannot(t *testing.T) {
+// Both levers engage on a complete autonomous tool loop: FoldView uses the
+// assistant call as a safe cycle boundary, while CompressView independently
+// shrinks oversized result bodies.
+func TestReduceFoldAndCompressEngageAutonomousLoop(t *testing.T) {
 	foldOnly := &ReduceConfig{DelegateSeam: true, HistoryFold: true,
 		Fold: FoldConfig{Closet: ClosetConfig{Enabled: true}}}
-	if out := Reduce(compressFixture(), "sys", SeamDelegate, foldOnly, &ReduceState{}); out.Mutated {
-		t.Error("fold found a boundary in a tool loop where none exists")
+	if out := Reduce(compressFixture(), "sys", SeamDelegate, foldOnly, &ReduceState{}); !out.Mutated || out.RetainedMsgs == 0 {
+		t.Fatalf("fold did not use the autonomous tool-cycle boundary: %+v", out)
 	}
 
 	compressOnly := &ReduceConfig{DelegateSeam: true, Compress: true,
