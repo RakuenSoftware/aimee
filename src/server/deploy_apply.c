@@ -19,6 +19,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -575,14 +576,72 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    return envp;
 }
 
-/* Run `docker <argv...>` with the given environment, capturing combined
- * stdout+stderr into out (truncated to out_cap). *exit_code gets the child's exit
- * status (-1 if it did not exit normally). Returns 0 on success, -1 on
- * fork/pipe/wait failure. envp may be NULL (inherit environ). */
-static int run_capture_input(const char *const argv[], char **envp, const void *input,
-                             size_t input_len, char *out, size_t out_cap, int *exit_code)
+/* Append DATA while retaining the newest out_cap-1 bytes. Deploy output is a
+ * diagnostic: when Compose emits more than the UI buffer can hold, its final
+ * error/result is more useful than the beginning of a pull progress stream. */
+static void capture_tail_append(char *out, size_t out_cap, size_t *len, const char *data,
+                                size_t data_len)
 {
-   if (out && out_cap)
+   if (!out || !out_cap || !len || !data || !data_len)
+      return;
+   const size_t keep = out_cap - 1;
+   if (!keep)
+   {
+      out[0] = '\0';
+      *len = 0;
+      return;
+   }
+   if (*len > keep)
+      *len = keep;
+   if (data_len >= keep)
+   {
+      memcpy(out, data + data_len - keep, keep);
+      *len = keep;
+      out[*len] = '\0';
+      return;
+   }
+   if (*len + data_len > keep)
+   {
+      size_t drop = *len + data_len - keep;
+      memmove(out, out + drop, *len - drop);
+      *len -= drop;
+   }
+   memcpy(out + *len, data, data_len);
+   *len += data_len;
+   out[*len] = '\0';
+}
+
+static void capture_tail_printf(char *out, size_t out_cap, const char *fmt, ...)
+{
+   char text[2048];
+   va_list ap;
+   va_start(ap, fmt);
+   int n = vsnprintf(text, sizeof(text), fmt, ap);
+   va_end(ap);
+   if (n <= 0)
+      return;
+   size_t text_len = (size_t)n < sizeof(text) ? (size_t)n : sizeof(text) - 1;
+   size_t len = strnlen(out, out_cap);
+   capture_tail_append(out, out_cap, &len, text, text_len);
+}
+
+/* Run `docker <argv...>` with the given environment, capturing combined
+ * stdout+stderr into out (retaining its newest out_cap-1 bytes). *exit_code gets
+ * the child's exit status (-1 if it did not exit normally). Returns 0 on
+ * success, -1 on fork/pipe/wait failure. envp may be NULL (inherit environ). */
+static int run_capture_input_mode(const char *const argv[], char **envp, const void *input,
+                                  size_t input_len, char *out, size_t out_cap, int *exit_code,
+                                  int append)
+{
+   size_t len = 0;
+   if (out && out_cap && append)
+   {
+      len = strnlen(out, out_cap);
+      if (len >= out_cap)
+         len = out_cap - 1;
+      out[len] = '\0';
+   }
+   else if (out && out_cap)
       out[0] = '\0';
    if (exit_code)
       *exit_code = -1;
@@ -651,19 +710,12 @@ static int run_capture_input(const char *const argv[], char **envp, const void *
          return -1;
       }
    }
-   size_t len = 0;
    char buf[1024];
    ssize_t r;
    while ((r = read(pipefd[0], buf, sizeof(buf))) > 0)
    {
-      if (out && out_cap && len < out_cap - 1)
-      {
-         size_t room = (out_cap - 1) - len;
-         size_t take = (size_t)r < room ? (size_t)r : room;
-         memcpy(out + len, buf, take);
-         len += take;
-      }
-      /* keep draining even once the buffer is full so the child never blocks */
+      capture_tail_append(out, out_cap, &len, buf, (size_t)r);
+      /* keep draining while shifting old bytes so the child never blocks */
    }
    close(pipefd[0]);
    if (out && out_cap)
@@ -677,10 +729,28 @@ static int run_capture_input(const char *const argv[], char **envp, const void *
    return 0;
 }
 
+static int run_capture_input(const char *const argv[], char **envp, const void *input,
+                             size_t input_len, char *out, size_t out_cap, int *exit_code)
+{
+   return run_capture_input_mode(argv, envp, input, input_len, out, out_cap, exit_code, 0);
+}
+
+static int run_capture_append_input(const char *const argv[], char **envp, const void *input,
+                                    size_t input_len, char *out, size_t out_cap, int *exit_code)
+{
+   return run_capture_input_mode(argv, envp, input, input_len, out, out_cap, exit_code, 1);
+}
+
 static int run_capture(const char *const argv[], char **envp, char *out, size_t out_cap,
                        int *exit_code)
 {
    return run_capture_input(argv, envp, NULL, 0, out, out_cap, exit_code);
+}
+
+static int run_capture_append(const char *const argv[], char **envp, char *out, size_t out_cap,
+                              int *exit_code)
+{
+   return run_capture_append_input(argv, envp, NULL, 0, out, out_cap, exit_code);
 }
 
 /* Retire the pre-baked aimee-llm-cpu container left over from an older install.
@@ -730,10 +800,8 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
       return;
    char buf[512];
    int code = -1;
-   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 &&
-       out_cap > strlen(out) + 1)
-      snprintf(out + strlen(out), out_cap - strlen(out),
-               "retired obsolete aimee-llm-cpu container\n");
+   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0)
+      capture_tail_printf(out, out_cap, "retired obsolete aimee-llm-cpu container\n");
 }
 
 /* Background worker: ordered `docker compose -f <file> up -d --no-deps SERVICE`.
@@ -872,7 +940,6 @@ static void *deploy_worker(void *arg)
       out[0] = '\0';
       deploy_retire_stale_llm(envp, file, out, sizeof(out));
       code = 0;
-      size_t used = 0;
 
       /* Bootstrap the managed KB's own bearer before its long-lived container
        * exists. The token crosses only stdin to a disposable one-shot and is
@@ -896,19 +963,16 @@ static void *deploy_worker(void *arg)
          size_t record_len = second_len > 0 ? (size_t)first_len + 1 + (size_t)second_len + 1 : 0;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
-         used = strlen(out);
          if (!record_len || record_len > sizeof(record) ||
              deploy_kb_vault_bootstrap_argv(
                  file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_input(bootstrap_argv, envp, record, record_len, out + used,
-                               sizeof(out) - used, &bootstrap_code) != 0 ||
+             run_capture_append_input(bootstrap_argv, envp, record, record_len, out, sizeof(out),
+                                      &bootstrap_code) != 0 ||
              bootstrap_code != 0)
          {
             code = bootstrap_code == 0 ? -1 : bootstrap_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to seal the managed KB bearer into its Vault\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to seal the managed KB bearer into its Vault\n");
          }
          runtime_secret_wipe(token, sizeof(token));
          runtime_secret_wipe(service_token, sizeof(service_token));
@@ -926,55 +990,49 @@ static void *deploy_worker(void *arg)
              token ? snprintf(record, sizeof(record), "SYNTHESIS_API_KEY=%s", token) : -1;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
-         used = strlen(out);
          if (record_len <= 0 || (size_t)record_len >= sizeof(record) ||
              deploy_kb_vault_bootstrap_argv(
                  file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out + used,
-                               sizeof(out) - used, &bootstrap_code) != 0 ||
+             run_capture_append_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out,
+                                      sizeof(out), &bootstrap_code) != 0 ||
              bootstrap_code != 0)
          {
             code = bootstrap_code == 0 ? -1 : bootstrap_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to seal the managed LLM credential into the KB Vault\n");
+            capture_tail_printf(
+                out, sizeof(out),
+                "deploy: failed to seal the managed LLM credential into the KB Vault\n");
          }
          memset(record, 0, sizeof(record));
       }
       if (code == 0 && managed_kb)
       {
          const char *kb_argv[10];
-         used = strlen(out);
          /* Recreate even when Compose sees no configuration change: the
           * immediately preceding one-shot may have added or rotated Vault
           * credentials which the live process can only load at startup. */
          if (deploy_up_service_argv(file, "aimee-kb", 1, kb_argv,
                                     sizeof(kb_argv) / sizeof(kb_argv[0])) < 0 ||
-             run_capture(kb_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+             run_capture_append(kb_argv, envp, out, sizeof(out), &code) != 0)
          {
             code = -1;
-            snprintf(out, sizeof(out), "deploy: failed to start aimee-kb with `docker compose`\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to start aimee-kb with `docker compose`\n");
          }
       }
       if (code == 0 && managed_llm)
       {
          const char *llm_argv[10];
-         used = strlen(out);
          if (deploy_up_service_argv(file, "aimee-llm", 0, llm_argv,
                                     sizeof(llm_argv) / sizeof(llm_argv[0])) < 0 ||
-             run_capture(llm_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+             run_capture_append(llm_argv, envp, out, sizeof(out), &code) != 0)
          {
             code = -1;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to start aimee-llm with `docker compose`\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to start aimee-llm with `docker compose`\n");
          }
       }
       if (code == 0 && !managed_kb && !managed_llm)
-         snprintf(out + strlen(out), sizeof(out) - strlen(out),
-                  "deploy: no managed sibling services selected\n");
+         capture_tail_printf(out, sizeof(out), "deploy: no managed sibling services selected\n");
 
       if (code == 0 && managed_identity)
       {
@@ -988,19 +1046,13 @@ static void *deploy_worker(void *arg)
              authority_code != 0)
          {
             code = authority_code == 0 ? -1 : authority_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed authority/JWKS bootstrap failed%s%s\n",
-                        authority_out[0] ? ": " : "", authority_out);
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed authority/JWKS bootstrap failed%s%s\n",
+                                authority_out[0] ? ": " : "", authority_out);
          }
          else
-         {
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed authority roots and signed JWKS verified\n");
-         }
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed authority roots and signed JWKS verified\n");
       }
       if (code == 0 && managed_identity)
       {
@@ -1014,19 +1066,15 @@ static void *deploy_worker(void *arg)
              identity_code != 0)
          {
             code = identity_code == 0 ? -1 : identity_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed server identity enrollment failed%s%s\n",
-                        identity_out[0] ? ": " : "", identity_out);
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed server identity enrollment failed%s%s\n",
+                                identity_out[0] ? ": " : "", identity_out);
          }
          else
          {
             deploy_managed_identity_activated();
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed server identity enrolled and verified\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed server identity enrolled and verified\n");
          }
       }
    }

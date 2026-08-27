@@ -119,6 +119,28 @@ static int envp_key_count(char **envp, const char *key)
    return count;
 }
 
+static void test_capture_keeps_terminal_output(void)
+{
+   char out[12] = "";
+   size_t len = 0;
+   capture_tail_append(out, sizeof(out), &len, "first", 5);
+   capture_tail_append(out, sizeof(out), &len, "-middle-", 8);
+   capture_tail_append(out, sizeof(out), &len, "LAST", 4);
+   assert(strcmp(out, "middle-LAST") == 0);
+   assert(len == strlen(out));
+
+   /* A later deploy-stage result must displace old progress even after the
+    * shared UI buffer is already full. */
+   capture_tail_printf(out, sizeof(out), "-END");
+   assert(strcmp(out, "le-LAST-END") == 0);
+
+   char one_chunk[8] = "";
+   len = 0;
+   capture_tail_append(one_chunk, sizeof(one_chunk), &len, "0123456789", 10);
+   assert(strcmp(one_chunk, "3456789") == 0);
+   printf("  deploy diagnostics retain the terminal output across stages ok\n");
+}
+
 static void test_managed_kb_bearer_is_vault_persistent(void)
 {
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
@@ -579,6 +601,7 @@ static void test_ps_passes_through_unparseable_output(void)
 int main(void)
 {
    printf("test_deploy_apply\n");
+   test_capture_keeps_terminal_output();
    test_managed_kb_bearer_is_vault_persistent();
    test_managed_kb_application_identity_is_independent();
    test_managed_identity_activation_resets_live_client();

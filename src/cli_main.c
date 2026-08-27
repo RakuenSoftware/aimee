@@ -157,7 +157,7 @@ static const client_help_t client_bootstrap_help[] = {
      "  set <url> [token]  Persist a remote server target\n"
      "  enroll            Rotate the bearer and enroll this client certificate\n"
      "  trust             Pin the configured server certificate again\n"
-     "  show              Show the configured target\n"
+     "  status            Show the configured target and reachability\n"
      "  clear             Forget the configured target\n"},
     {"version", "Print the client version", CLIENT_TIER_CORE, 0, NULL},
     {"help", "Show commands, or details for one command", CLIENT_TIER_CORE, 0, NULL},
