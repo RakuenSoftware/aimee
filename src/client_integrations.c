@@ -2433,7 +2433,7 @@ static int client_command_installed(const char *name)
    size_t name_len = strlen(name);
    while (part)
    {
-      const char *end = strchr(part, platform_path_separator() == '\\' ? ';' : ':');
+      const char *end = strchr(part, platform_path_sep() == '\\' ? ';' : ':');
       size_t n = end ? (size_t)(end - part) : strlen(part);
       char candidate[MAX_PATH_LEN];
       if (n > 0 && n + 1 + name_len < sizeof(candidate))
