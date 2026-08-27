@@ -189,8 +189,67 @@ is marked regression-sensitive only when the candidate's visible grader is
 green and the test-only diff turns red when reapplied to the original buggy
 parent.
 
-No large-repository result is reported here until the paired artifact has been
-run and validated. A public capacity statement requires an observed pair where
-the plain agent is rejected by the provider for exceeding context and the Aimee
-condition passes the hidden grader. A plain failure for any other reason is a
-completion crossover, not a context-capacity crossover.
+A public capacity statement requires an observed pair where the plain agent is
+rejected by the provider for exceeding context and the Aimee condition passes
+the hidden grader. A plain failure for any other reason is a completion
+crossover, not a context-capacity crossover.
+
+### Trust-bundle exploratory pair: more runway, no completion
+
+The first real-repository pair is a valid adverse calibration result, not a
+product ROI win.
+
+- Source pin: `79a2ee0df751b7f34b1acb5b17999f79925bb6e0`
+- Task: `trust_bundle_readiness`, buggy parent
+  `358bab1f7fa4da58b349e1847c0b685a4c5686f0`
+- Model/context: Qwen3.8-27B UD-Q4_K_XL, 65,536 tokens
+- Limits: 30 turns, 2,048 output tokens per turn, one exploratory repeat
+- Marginal provider spend: `$0.00` on the operator-owned local endpoint
+
+| condition | provider responses | terminal reason | input | cache read | output | total | patch | authored tests | hidden grade |
+|---|---:|---|---:|---:|---:|---:|---|---|---|
+| off | 14 | context limit on turn 15 | 575,923 | 512,806 | 1,291 | 577,214 | none | none | fail |
+| Aimee | 30 | maximum turns | 873,612 | 104,072 | 4,321 | 877,933 | none | none | fail |
+
+The plain request reached 64,438 provider-reported input tokens, then its next
+natural request was rejected at 68,217 tokens against the 65,536-token window.
+Aimee kept every request at or below 43,232 input tokens and completed all 30
+allowed provider turns. That establishes additional context runway on this
+trajectory, but it is **not** the desired context-capacity crossover: neither
+condition produced a patch, authored a test, or passed the hidden grader.
+
+The treatment also cost more total tokens and wall time because it ran more than
+twice as many turns. Its 45-minute wall time versus 6.3 minutes for control was
+amplified by low prefix-cache reuse: 104,072 cached input tokens for Aimee versus
+512,806 for control. More available turns are not ROI when the additional work
+does not converge.
+
+The artifact exposed a specific economizer defect. The treatment reported 25
+mutated turns, but every mutation was body compression; whole-history folding
+never activated, the frozen boundary was reused on 0 turns, and the Coordinate
+Closet overflowed on 24 turns. Autonomous OpenAI tool loops have no later plain
+user message, while the fold accepted only plain-user boundaries.
+
+Commit `840b8a4ab4` adds a structurally safe boundary immediately before a
+complete assistant tool-call cycle. An offline replay of the exact canonical
+30-turn transcript through that patched production handler—not a new provider
+run—changes the mechanism diagnostics as follows:
+
+| diagnostic | recorded treatment | patched offline replay |
+|---|---:|---:|
+| true history-fold turns | 0 | 25 |
+| byte-stable boundary reuses | 0 | 19 |
+| Coordinate Closet overflow turns | 24 | 0 |
+| final folded / retained messages | n/a | 62 / 19 |
+| internal reduced-token forecast | 633,195 | 562,257 |
+
+The forecast is not provider billing and is not reported as savings. A fresh
+paired provider rerun is required to learn whether the fix reduces billed input,
+improves cache behavior, stops the rereading loop, or enables completion.
+
+Raw artifacts:
+
+- `large-repo-qwen38-trust-pilot.preflight.json`
+- `large-repo-qwen38-trust-pilot.json`
+- Raw artifact SHA-256:
+  `c72c59ae5f93dc0d7842bdb7729c0ab7aae7095c94bada1985d05fc05412106d`
