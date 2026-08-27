@@ -38,6 +38,7 @@
 #include "cJSON.h"
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/select.h>
 #include <sys/wait.h>
@@ -186,6 +187,65 @@ static int agent_tool_result_usable(const char *result)
       }
    }
    return usable;
+}
+
+static int agent_progress_tool_is_mutation(const char *name)
+{
+   if (!name)
+      return 0;
+   return strcmp(name, "write_file") == 0 || strcmp(name, "edit_file") == 0 ||
+          strcmp(name, "edit_symbol") == 0 || strcmp(name, "apply_patch") == 0;
+}
+
+/* Convert a tool call into the stable identity consumed by the dependency-free
+ * liveness state machine. read_file receives range-aware treatment; other
+ * retrievals use their canonical argument JSON, which still catches a call
+ * revisited after unrelated work. */
+static void agent_progress_retrieval(const char *name, const char *arguments, char *target,
+                                     size_t target_sz, int *range_start, int *range_end,
+                                     int *has_range)
+{
+   if (target && target_sz)
+      target[0] = '\0';
+   if (range_start)
+      *range_start = 0;
+   if (range_end)
+      *range_end = 0;
+   if (has_range)
+      *has_range = 0;
+   if (!name || !arguments || !target || target_sz == 0)
+      return;
+
+   if (strcmp(name, "read_file") == 0)
+   {
+      cJSON *root = cJSON_Parse(arguments);
+      if (root)
+      {
+         cJSON *path = cJSON_GetObjectItemCaseSensitive(root, "path");
+         cJSON *offset = cJSON_GetObjectItemCaseSensitive(root, "offset");
+         cJSON *limit = cJSON_GetObjectItemCaseSensitive(root, "limit");
+         if (cJSON_IsString(path) && path->valuestring)
+            snprintf(target, target_sz, "%s", path->valuestring);
+         if (cJSON_IsNumber(offset) && cJSON_IsNumber(limit) && limit->valuedouble > 0)
+         {
+            long long start = offset->valuedouble < 0 ? 0 : (long long)offset->valuedouble;
+            long long end = start + (long long)limit->valuedouble - 1;
+            if (start > INT_MAX)
+               start = INT_MAX;
+            if (end > INT_MAX)
+               end = INT_MAX;
+            if (range_start)
+               *range_start = (int)start;
+            if (range_end)
+               *range_end = (int)end;
+            if (has_range)
+               *has_range = 1;
+         }
+         cJSON_Delete(root);
+      }
+   }
+   if (!target[0])
+      snprintf(target, target_sz, "%.255s", arguments);
 }
 
 static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
@@ -608,6 +668,9 @@ native_provider_http:
    int repeat_count = 0;
    int total_repeat_triggers =
        0;   /* circuit breaker: aborts after LIVENESS_REPEAT_ABORT_THRESHOLD */
+   liveness_progress_state_t progress;
+   liveness_progress_init(&progress);
+   int progress_enabled = delegate_role_is_write(budget_role);
    (void)0; /* transient retries handled by http_retry_post */
 
    /* Adaptive context refresh: more frequent for complex tasks (many tool calls),
@@ -1606,6 +1669,8 @@ native_provider_http:
       /* Notify auto-snapshot context of the current turn so file writes can be grouped */
       agent_tools_begin_turn(turn);
 
+      liveness_progress_action_t progress_action = LIVENESS_PROGRESS_NONE;
+
       /* Rounds-to-resume accounting: judge what the model ASKED for, before the
        * tools run — a re-derivation is a re-derivation whether or not it
        * succeeds. Observation only; nothing here steers the loop. */
@@ -1794,6 +1859,19 @@ native_provider_http:
          if (usable_tool_result)
             successful_tool_calls++;
 
+         if (progress_enabled)
+         {
+            char target[LIVENESS_PROGRESS_TARGET_MAX];
+            int range_start = 0, range_end = 0, has_range = 0;
+            agent_progress_retrieval(parsed.calls[i].name, parsed.calls[i].arguments, target,
+                                     sizeof(target), &range_start, &range_end, &has_range);
+            liveness_progress_action_t observed = liveness_progress_observe(
+                &progress, parsed.calls[i].name, target, range_start, range_end, has_range,
+                usable_tool_result, agent_progress_tool_is_mutation(parsed.calls[i].name));
+            if (observed > progress_action)
+               progress_action = observed;
+         }
+
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
             consecutive_errors++;
@@ -1859,6 +1937,32 @@ native_provider_http:
          {
             cJSON_Delete(anth_results);
          }
+      }
+
+      if (progress_action == LIVENESS_PROGRESS_ABORT)
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "no-progress circuit breaker tripped after %d successful calls without an "
+                  "edit (%d repeated or overlapping retrievals)",
+                  progress.calls_since_mutation, progress.duplicate_hits);
+         agent_free_parsed_response(&parsed);
+         break;
+      }
+      if (progress_action == LIVENESS_PROGRESS_CHECKPOINT ||
+          progress_action == LIVENESS_PROGRESS_ESCALATE)
+      {
+         char progress_hint[768];
+         liveness_format_progress_hint(&progress, progress_action, progress_hint,
+                                       sizeof(progress_hint));
+         cJSON *hint = cJSON_CreateObject();
+         cJSON_AddStringToObject(hint, "role", "user");
+         cJSON_AddStringToObject(hint, "content", progress_hint);
+         cJSON_AddItemToArray(messages, hint);
+         aimee_log(LOG_WARN, "agent.progress",
+                   "checkpoint=%d calls_without_edit=%d duplicate_retrievals=%d",
+                   progress.checkpoints, progress.calls_since_mutation, progress.duplicate_hits);
+         if (refresh_interval > 2)
+            refresh_interval = 2;
       }
 
       /* Stuck detection: if the agent calls the same tool with the same args

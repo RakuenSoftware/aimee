@@ -5,12 +5,14 @@ import unittest
 from pathlib import Path
 
 from benchmarks.roi.large_repo_crossover import (
+    ProgressController,
     bounded_output,
     command_allowed,
     diff_metrics,
     load_tasks,
     prepare_diff,
     summarize,
+    tool_result_usable,
 )
 
 
@@ -78,6 +80,42 @@ class LargeRepoCrossoverTests(unittest.TestCase):
         self.assertEqual(result["context_capacity_crossovers"][0]["task_id"], "large")
         self.assertEqual(result["by_condition"]["aimee"]["regression_sensitive_test_cells"], 1)
         self.assertEqual(result["by_condition"]["off"]["resolved"], 0)
+
+    def test_progress_controller_detects_nonconsecutive_overlap(self):
+        guard = ProgressController()
+        self.assertEqual(guard.observe(
+            "read_file", {"path": "src/a.c", "start": 1, "end": 100},
+            usable=True, mutation=False,
+        )["action"], "none")
+        guard.observe("read_file", {"path": "src/b.c", "start": 1, "end": 100},
+                      usable=True, mutation=False)
+        self.assertEqual(guard.observe(
+            "read_file", {"path": "src/a.c", "start": 90, "end": 150},
+            usable=True, mutation=False,
+        )["action"], "none")
+        event = guard.observe(
+            "read_file", {"path": "src/a.c", "start": 20, "end": 40},
+            usable=True, mutation=False,
+        )
+        self.assertEqual(event["action"], "checkpoint")
+        self.assertEqual(event["duplicate_hits"], 2)
+
+    def test_progress_controller_resets_only_on_successful_mutation(self):
+        guard = ProgressController()
+        for _ in range(4):
+            guard.observe("search", {"query": "same"}, usable=True, mutation=False)
+        before = guard.calls_since_mutation
+        guard.observe("apply_patch", {"patch": "bad"}, usable=False, mutation=True)
+        self.assertEqual(guard.calls_since_mutation, before)
+        event = guard.observe("apply_patch", {"patch": "good"}, usable=True, mutation=True)
+        self.assertEqual(event["action"], "mutation_reset")
+        self.assertEqual(event["calls_since_mutation"], 0)
+        self.assertEqual(event["successful_mutations"], 1)
+
+    def test_tool_result_usability_distinguishes_failed_patch(self):
+        self.assertTrue(tool_result_usable("apply_patch", "[exit_code=0]\n[tool_output_ref=x]"))
+        self.assertFalse(tool_result_usable("apply_patch", "patch failed\n[exit_code=1]\n[tool_output_ref=x]"))
+        self.assertFalse(tool_result_usable("read_file", "read_file: no such file: missing"))
 
 
 if __name__ == "__main__":

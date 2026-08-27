@@ -30,6 +30,10 @@ from benchmarks.roi.current_stack_pilot import EconomizerProbe, build_probe, usa
 
 
 SEED = 20260827
+PROGRESS_INITIAL_CALLS = 12
+PROGRESS_FOLLOWUP_CALLS = 8
+PROGRESS_DUPLICATE_HITS = 2
+PROGRESS_WINDOW = 12
 SYSTEM_PROMPT = """You are a coding agent working in a large repository at a known buggy revision.
 Diagnose and implement the user's complete request. Inspect the repository rather than guessing.
 Use the provided tools, preserve existing contracts, add regression tests when appropriate, and
@@ -73,6 +77,105 @@ class ProviderError(RuntimeError):
     def __init__(self, message: str, *, context_limit: bool = False):
         super().__init__(message)
         self.context_limit = context_limit
+
+
+class ProgressController:
+    """Experiment mirror of the production write-role progress guard."""
+
+    def __init__(self) -> None:
+        self.window: list[tuple[str, str, int | None, int | None]] = []
+        self.calls_since_mutation = 0
+        self.calls_since_checkpoint = 0
+        self.duplicate_hits = 0
+        self.checkpoints = 0
+        self.successful_mutations = 0
+
+    @staticmethod
+    def retrieval(name: str, args: dict[str, Any]) -> tuple[str, str, int | None, int | None]:
+        if name == "read_file":
+            start = max(1, int(args.get("start") or 1))
+            end = max(start, min(start + 799, int(args.get("end") or start + 399)))
+            return name, str(args.get("path") or ""), start, end
+        return name, json.dumps(args, sort_keys=True, separators=(",", ":")), None, None
+
+    @staticmethod
+    def overlaps(left: tuple[str, str, int | None, int | None],
+                 right: tuple[str, str, int | None, int | None]) -> bool:
+        if left[:2] != right[:2]:
+            return False
+        if left[2] is None or right[2] is None:
+            return True
+        return right[2] <= left[3] and left[2] <= right[3]
+
+    def observe(self, name: str, args: dict[str, Any], *, usable: bool,
+                mutation: bool) -> dict[str, Any]:
+        if not usable:
+            return self.event("none")
+        if mutation:
+            mutations = self.successful_mutations + 1
+            self.__init__()
+            self.successful_mutations = mutations
+            return self.event("mutation_reset")
+
+        self.calls_since_mutation += 1
+        if self.checkpoints:
+            self.calls_since_checkpoint += 1
+        current = self.retrieval(name, args)
+        if any(self.overlaps(prior, current) for prior in self.window):
+            self.duplicate_hits += 1
+        self.window.append(current)
+        self.window = self.window[-PROGRESS_WINDOW:]
+
+        action = "none"
+        if self.checkpoints == 0 and (
+            self.calls_since_mutation >= PROGRESS_INITIAL_CALLS
+            or self.duplicate_hits >= PROGRESS_DUPLICATE_HITS
+        ):
+            self.checkpoints = 1
+            self.calls_since_checkpoint = 0
+            action = "checkpoint"
+        elif self.checkpoints and self.calls_since_checkpoint >= PROGRESS_FOLLOWUP_CALLS:
+            self.checkpoints += 1
+            self.calls_since_checkpoint = 0
+            action = "abort" if self.checkpoints >= 3 else "escalate"
+        return self.event(action)
+
+    def event(self, action: str) -> dict[str, Any]:
+        return {
+            "action": action,
+            "calls_since_mutation": self.calls_since_mutation,
+            "calls_since_checkpoint": self.calls_since_checkpoint,
+            "duplicate_hits": self.duplicate_hits,
+            "checkpoints": self.checkpoints,
+            "successful_mutations": self.successful_mutations,
+        }
+
+    def hint(self, action: str) -> str:
+        if action == "escalate":
+            return (
+                f"No-progress escalation: this write-capable task has completed "
+                f"{self.calls_since_mutation} successful tool calls without an edit "
+                f"({self.duplicate_hits} repeated or overlapping retrievals). You must now make "
+                "the smallest justified edit and run focused verification, or return a specific "
+                "blocker. Do not spend more calls on broad repository exploration or reread "
+                "ranges already present in the transcript."
+            )
+        return (
+            f"Progress checkpoint: this write-capable task has completed "
+            f"{self.calls_since_mutation} successful tool calls without an edit "
+            f"({self.duplicate_hits} repeated or overlapping retrievals). Stop gathering broadly. "
+            "State a concrete defect hypothesis, then make the smallest justified edit or run "
+            "the decisive test. If blocked, return the blocker explicitly. Reuse earlier results "
+            "instead of rereading them."
+        )
+
+
+def tool_result_usable(name: str, content: str) -> bool:
+    if content.startswith(("tool error:", "unknown tool:", "read_file: no such", "run: command refused")):
+        return False
+    if "[exit_code=" in content and "[exit_code=0" not in content:
+        return False
+    return name != "submit"
 
 
 def sha256_text(value: str) -> str:
@@ -376,6 +479,8 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
     add_worktree(repo, workspace, parent)
     messages: list[dict[str, Any]] = [{"role": "user", "content": task.prompt}]
     outputs: dict[str, str] = {}
+    progress = ProgressController()
+    progress_enabled = condition == "aimee_progress"
     turns = []
     terminal_reason = "max_turns"
     submitted = False
@@ -384,7 +489,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
         for turn in range(max_turns):
             activation: dict[str, Any]
             view = messages
-            if condition == "aimee":
+            if condition in {"aimee", "aimee_progress"}:
                 activation = economize(probe, messages, run_id)
                 if activation.get("mutated"):
                     view = activation["messages"]
@@ -399,6 +504,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
                 "provider_bytes": len(json.dumps(provider_messages, separators=(",", ":")).encode()),
                 "request_sha256": sha256_json(provider_messages),
                 "economizer": activation,
+                "progress_controller_before": progress.event("none") if progress_enabled else None,
             }
             try:
                 response, wall = call_provider(
@@ -428,6 +534,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
             messages.append(assistant)
             tool_calls = assistant.get("tool_calls") or []
             tool_records = []
+            progress_events = []
             if not tool_calls:
                 turns.append(request_record)
                 terminal_reason = "assistant_final"
@@ -448,13 +555,30 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
                     "tool_call_id": call.get("id"), "name": name, "arguments": arguments,
                     "result_bytes": len(content.encode()), "visible_truncated": truncated,
                 })
+                if progress_enabled:
+                    event = progress.observe(
+                        name, arguments, usable=tool_result_usable(name, content),
+                        mutation=name == "apply_patch",
+                    )
+                    progress_events.append(event)
                 if name == "submit":
                     submitted = True
             request_record["tool_calls"] = tool_records
+            request_record["progress_events"] = progress_events
             turns.append(request_record)
             if submitted:
                 terminal_reason = "submitted"
                 break
+            if progress_enabled and any(row["action"] == "abort" for row in progress_events):
+                terminal_reason = "progress_abort"
+                break
+            if progress_enabled:
+                actions = [row["action"] for row in progress_events]
+                action = "escalate" if "escalate" in actions else (
+                    "checkpoint" if "checkpoint" in actions else "none"
+                )
+                if action != "none":
+                    messages.append({"role": "user", "content": progress.hint(action)})
 
         prepare_diff(workspace)
         patch = subprocess.check_output(["git", "diff", "HEAD", "--no-ext-diff"], cwd=workspace, text=True)
@@ -497,6 +621,18 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
             "tool_output_recoveries": sum(
                 call["name"] == "tool_output_get" for row in turns for call in row.get("tool_calls", [])
             ),
+            "progress_controller": {
+                "enabled": progress_enabled,
+                **progress.event("none"),
+                "checkpoint_turns": sum(
+                    any(event["action"] == "checkpoint" for event in row.get("progress_events", []))
+                    for row in turns
+                ),
+                "escalation_turns": sum(
+                    any(event["action"] == "escalate" for event in row.get("progress_events", []))
+                    for row in turns
+                ),
+            },
             "patch": patch,
             "patch_sha256": sha256_text(patch),
             "diff": metrics,
@@ -514,7 +650,7 @@ def run_cell(repo: Path, task: Task, condition: str, repeat: int, base_url: str,
 
 def summarize(cells: list[dict[str, Any]]) -> dict[str, Any]:
     by_condition = {}
-    for condition in ("off", "aimee"):
+    for condition in sorted({cell["condition"] for cell in cells}):
         rows = [cell for cell in cells if cell["condition"] == condition]
         resolved = sum(bool(cell["resolved"]) for cell in rows)
         by_condition[condition] = {
@@ -532,12 +668,18 @@ def summarize(cells: list[dict[str, Any]]) -> dict[str, Any]:
             ),
         }
     off = {(c["task_id"], c["repeat"]): c for c in cells if c["condition"] == "off"}
-    aimee = {(c["task_id"], c["repeat"]): c for c in cells if c["condition"] == "aimee"}
-    crossovers = [
-        {"task_id": key[0], "repeat": key[1], "off_reason": off[key]["terminal_reason"]}
-        for key in sorted(set(off) & set(aimee))
-        if not off[key]["resolved"] and aimee[key]["resolved"]
-    ]
+    treatments = {
+        condition: {(c["task_id"], c["repeat"]): c for c in cells if c["condition"] == condition}
+        for condition in by_condition if condition != "off"
+    }
+    crossovers = []
+    for condition, rows in treatments.items():
+        crossovers.extend([
+            {"task_id": key[0], "repeat": key[1], "condition": condition,
+             "off_reason": off[key]["terminal_reason"]}
+            for key in sorted(set(off) & set(rows))
+            if not off[key]["resolved"] and rows[key]["resolved"]
+        ])
     context_crossovers = [
         row for row in crossovers
         if off[(row["task_id"], row["repeat"])]["terminal_reason"] == "context_limit"
@@ -555,6 +697,8 @@ def parse_args() -> argparse.Namespace:
                         default=Path(__file__).with_name("large_repo_tasks.json"))
     parser.add_argument("--tasks", default="clone_fd_and_owner,trust_bundle_readiness,pool_lease_attribution,db1_outcome_codes")
     parser.add_argument("--conditions", default="off,aimee")
+    parser.add_argument("--progress-preregistration", type=Path,
+                        default=Path(__file__).with_name("large_repo_progress_preregistration.json"))
     parser.add_argument("--repeats", type=int, default=1)
     parser.add_argument("--max-turns", type=int, default=50)
     parser.add_argument("--max-output-tokens", type=int, default=2048)
@@ -571,10 +715,19 @@ def main() -> None:
     if args.repeats < 1 or args.max_turns < 1 or args.max_output_tokens < 1:
         raise SystemExit("repeats, max-turns, and max-output-tokens must be positive")
     conditions = [item.strip() for item in args.conditions.split(",") if item.strip()]
-    if set(conditions) - {"off", "aimee"} or not conditions:
-        raise SystemExit("conditions must be off and/or aimee")
+    if set(conditions) - {"off", "aimee", "aimee_progress"} or not conditions:
+        raise SystemExit("conditions must be off, aimee, and/or aimee_progress")
     selected = [item.strip() for item in args.tasks.split(",") if item.strip()]
     manifest, tasks = load_tasks(args.task_manifest, selected)
+    progress_preregistration = json.loads(args.progress_preregistration.read_text())
+    expected_progress = {
+        "initial_calls": PROGRESS_INITIAL_CALLS,
+        "followup_calls": PROGRESS_FOLLOWUP_CALLS,
+        "duplicate_hits": PROGRESS_DUPLICATE_HITS,
+        "window": PROGRESS_WINDOW,
+    }
+    if progress_preregistration.get("controller") != expected_progress:
+        raise SystemExit("progress preregistration does not match the implemented controller")
     repo = Path(__file__).resolve().parents[2]
     dirty = subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=all"], cwd=repo, text=True)
     if dirty:
@@ -617,6 +770,7 @@ def main() -> None:
         "schema_version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
         "source_commit": source_commit, "model": args.model,
         "task_manifest_sha256": sha256_json(manifest), "tasks": selected,
+        "progress_preregistration_sha256": sha256_json(progress_preregistration),
         "conditions": conditions, "repeats": args.repeats, "budget": budget,
         "dispatch_started": False,
     }, indent=2, sort_keys=True) + "\n")
@@ -652,6 +806,8 @@ def main() -> None:
         "model": args.model, "context_cap": args.context_cap,
         "execution_path": "full git worktree; OpenAI-compatible tool loop; production Go economizer handler with process-local StateStore",
         "task_manifest_sha256": sha256_json(manifest), "seed": SEED,
+        "progress_preregistration": progress_preregistration,
+        "progress_preregistration_sha256": sha256_json(progress_preregistration),
         "budget": budget, "cells": cells, "summary": summarize(cells),
     }
     args.output.write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n")
