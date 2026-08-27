@@ -2,6 +2,11 @@
 
 Run the services on one machine. Install only the thin client where you write code.
 
+Using a hosted knowledge base such as aimee cloud? The path is the same, with two differences: start
+from `compose.server-standalone.yaml` instead of the managed profile in Section 1, and at
+[Step 3](#step-3-choose-the-knowledge-base) paste your setup code instead of deploying a local
+knowledge base. Sections 2 and 3, installing and enrolling the client, are unchanged.
+
 ## 1. Start the managed server
 
 You need Docker with Compose v2. The managed server mounts the Docker socket so its browser wizard
@@ -101,8 +106,24 @@ You can change the primary later on the Agents tab.
 
 ![Step 3 of the setup wizard, knowledge base](images/wizard-3-knowledge-base.png)
 
-Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
-needs nothing else installed.
+Three choices:
+
+- **Deploy a local knowledge base.** The default, and it needs nothing else installed.
+- **Paste a setup code** from a hosted `aimee-kb`, such as aimee cloud. The code is exchanged for
+  that knowledge base's address and key, so this is the third option with the typing removed.
+- **Connect to an existing `aimee-kb` by hand**, with its URL and bearer token.
+
+The last two both save `kb_mode=remote` and deploy nothing here, so the deploy-topology and
+shared-store steps are skipped for either.
+
+A setup code is single-use and short-lived, so the wizard only redeems it when you press the button,
+never as you type. If it is refused the code stays in the box, because the usual cause is a typo
+rather than a dead code, and re-typing should not cost you a fresh one. Nothing is written until an
+exchange succeeds.
+
+If you are attaching to a hosted knowledge base, start from `compose.server-standalone.yaml` rather
+than the managed profile in [Section 1](#1-start-the-managed-server): it runs `aimee-server` with no
+`aimee-kb` and no PostgreSQL, which is what you want when the knowledge base is somewhere else.
 
 For a local KB, the remaining steps place its embedder and optional synthesizer, choose the bundled
 or external shared store, connect an optional Git host, and add workspaces. The embedder runs inside
