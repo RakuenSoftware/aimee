@@ -13,6 +13,7 @@
 #include "request_context.h"
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
+#include "integrity.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -1192,6 +1193,14 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
    if (!blk || !blk[0])
    {
+      free(blk);
+      return NULL;
+   }
+   integrity_result_t retrieval_gate;
+   if (integrity_ingress_decide(blk, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &retrieval_gate))
+   {
+      LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
+               integrity_verdict_name(retrieval_gate.verdict), retrieval_gate.match_category);
       free(blk);
       return NULL;
    }

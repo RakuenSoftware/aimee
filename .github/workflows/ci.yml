@@ -649,6 +649,11 @@ jobs:
       # needs CREATEDB and a connection to `postgres` -- both true for the image's
       # bootstrap superuser.
       AIMEE_TEST_DB2_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
+      # Make the content-scope proof exercise lazy DB2 pool connections as the
+      # production NOBYPASSRLS role, with a hermetic 768-dimensional embedder.
+      # Each test process receives its own disposable database clone.
+      AIMEE_TEST_PG_RUNTIME_POOL: "1"
+      AIMEE_TEST_EMBEDDING_COMMAND: ${{ github.workspace }}/scripts/test-embedding-fixture.py
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:

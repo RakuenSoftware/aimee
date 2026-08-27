@@ -96,6 +96,11 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       snprintf(err, errlen, "unauthenticated: no attested principal");
       return 401;
    }
+   if (wfe_autonomy_killed())
+   {
+      snprintf(err, errlen, "autonomy disabled by AIMEE_AUTONOMY_KILL_SWITCH");
+      return 503;
+   }
    /* The submitter is the cap/audit key stored in submitter[128]; a longer
     * principal would truncate and collide with another's quota bucket. */
    if (strlen(submitter) >= 128)

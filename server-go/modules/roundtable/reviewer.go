@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/JBailes/aimee/server-go/delegate"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -21,16 +22,22 @@ import (
 type PanelReviewer struct {
 	presets *panel.Store
 	seats   panel.Delegates
+	egress  egress.Executor
 }
 
 // NewPanelReviewer takes the seat contract rather than a transport, so what
 // convenes a panel is substitutable and this stays testable without a live
 // module bus.
-func NewPanelReviewer(presets *panel.Store, seats panel.Delegates) (*PanelReviewer, error) {
+func NewPanelReviewer(presets *panel.Store, seats panel.Delegates,
+	executors ...egress.Executor) (*PanelReviewer, error) {
 	if presets == nil || seats == nil {
 		return nil, errors.New("roundtable review needs a preset store and a way to seat delegates")
 	}
-	return &PanelReviewer{presets: presets, seats: seats}, nil
+	var executor egress.Executor
+	if len(executors) > 0 {
+		executor = executors[0]
+	}
+	return &PanelReviewer{presets: presets, seats: seats, egress: executor}, nil
 }
 
 // NewBusDelegates seats a panel through the delegates module's bus stage.
@@ -51,7 +58,7 @@ func (r *PanelReviewer) Review(ctx context.Context, request panel.ReviewRequest)
 	// Resolving it here rather than at some caller's edge is what keeps every
 	// review -- workflow gate, CLI, MCP tool -- accepting the same artifact
 	// forms, and keeps reviewers from spending their tool budget fetching it.
-	materialized, err := panel.MaterializeArtifact(ctx, request.Artifact, nil)
+	materialized, err := panel.MaterializeArtifact(ctx, request.Artifact, r.egress, 0)
 	if err != nil {
 		return panel.RunResult{}, err
 	}

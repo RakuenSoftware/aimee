@@ -548,6 +548,12 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
                             char out_id[80])
 {
    out_id[0] = '\0';
+   if (wfe_autonomy_killed() && (!rule->mode[0] || strcmp(rule->mode, "interactive") != 0))
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "%s: autonomy kill switch refused %s repo=%s",
+                rule->source, what, rule->workspace);
+      return -1;
+   }
    /* mode drives whether the autonomy scheduler advances the run hands-off
     * ("autonomous", only when explicitly requested) or the item parks for
     * a human to drive in the webchat ("interactive"). */

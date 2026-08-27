@@ -112,10 +112,20 @@ int main(void)
    char err[512];
    char sha[128];
 
+   /* The core asks the real egress process for this key before each request.
+    * Pin a valid X25519 public key here; the secret itself must only appear as
+    * authenticated ciphertext in the later forge-stage body. */
+   module_bus_stub_reply_for_event(
+       12295u, "{\"version\":1,\"key_id\":\"0123456789abcdef0123456789abcdef\","
+               "\"public_key\":\"hSDwCYkwp1R0i33ctD73Wg2/Og0mOBr066SpjqqbTmo=\"}");
+
    /* A merge reports the commit from the stage reply, so no second lookup. */
    assert(merge_with("{\"status\":200,\"merged\":true,\"merge_sha\":\"deadbeef\"}", sha,
                      sizeof(sha), err, sizeof(err)) == 0);
    assert(strcmp(sha, "deadbeef") == 0);
+   assert(strstr(module_bus_stub_last_request(), "\"credential\"") != NULL);
+   assert(strstr(module_bus_stub_last_request(), "\"token\"") == NULL);
+   assert(strstr(module_bus_stub_last_request(), "test-token") == NULL);
 
    /* Already merged is NOT an error: a caller that retried would open a second
     * merge of work already on the base. */

@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "aimee_home.h"
+#include "artifact_trust.h"
 #include "db1_client/wfe_store.h"
 
 struct wfe_ctx
@@ -58,7 +59,15 @@ wfe_def_t *wfe_load_workflow(const char *name, char *err, size_t errlen)
    }
    char path[1100];
    snprintf(path, sizeof path, "%s/workflows/%s.yaml", aimee_home(), name);
-   return wfe_def_load_file(path, err, errlen);
+   char *verified = NULL;
+   size_t verified_len = 0;
+   if (artifact_trust_read_file("workflow", name, path, 1024u * 1024u, &verified, &verified_len,
+                                NULL, err, errlen) != 0)
+      return NULL;
+   (void)verified_len;
+   wfe_def_t *def = wfe_def_parse(verified, err, errlen);
+   free(verified);
+   return def;
 }
 
 /* Server-minted, non-forgeable id: wi_ + 16 random bytes (hex). */

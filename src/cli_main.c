@@ -21,6 +21,7 @@
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
+#include "hook_session_token.h"
 #include <aimee/delegates/delegate_plan.h>
 #include "cli_chat_stream.h"
 #include "platform.h"
@@ -1159,7 +1160,15 @@ static int handle_hooks(int argc, char **argv, int json_output)
     * AIMEE_HOOK_CLIENT when many agents hook into one server. */
    const char *hook_client = getenv("AIMEE_HOOK_CLIENT");
    if (hook_client && hook_client[0])
+   {
       cJSON_AddStringToObject(req, "harness_client", hook_client);
+      char hook_token[HOOK_SESSION_TOKEN_CAP];
+      if (sid && sid[0] && hook_session_token_load(aimee_home(), sid, hook_client, hook_token) == 0)
+      {
+         cJSON_AddStringToObject(req, "hook_token", hook_token);
+         memset(hook_token, 0, sizeof(hook_token));
+      }
+   }
 
    /* Resolve the harness-memory project key HERE, on the client, against the real
     * cwd / git repo / AIMEE_PROJECT_ID, and forward it: a remote server's

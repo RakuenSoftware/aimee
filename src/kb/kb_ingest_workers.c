@@ -706,8 +706,9 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
     * creating a partial ingest. */
    for (int ci = 0; ci < n_chunks; ci++)
    {
-      integrity_result_t gate = integrity_gate_check(chunks[ci].content, INTEGRITY_SOURCE_DOCUMENT);
-      if (gate.verdict != INTEGRITY_VERDICT_ACCEPT)
+      integrity_result_t gate;
+      if (integrity_ingress_decide(chunks[ci].content, INTEGRITY_SOURCE_DOCUMENT, "document", 1,
+                                   &gate))
       {
          LOG_WARN("integrity", "document ingest parked (%s): %s",
                   integrity_verdict_name(gate.verdict), gate.match_category);

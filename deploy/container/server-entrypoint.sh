@@ -117,6 +117,7 @@ case "$AIMEE_WFE_ENGINE" in
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
+export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server
 # THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
 #
 # It used to. `export AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db"` lived here, naming a

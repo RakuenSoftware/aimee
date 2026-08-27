@@ -26,6 +26,7 @@ import (
 	controlweb "github.com/JBailes/aimee/server-go/modules/control-web"
 	"github.com/JBailes/aimee/server-go/modules/delegates"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 	executionpolicy "github.com/JBailes/aimee/server-go/modules/execution-policy"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
@@ -243,6 +244,33 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, err
 	return db, nil
 }
 
+// moduleEgress attaches a second, request-only identity for outbound transport.
+// Serving rights never imply calling rights, so the module's serving principal
+// is deliberately not reused here.
+func moduleEgress(ctx context.Context, moduleBusSocket string, principalRef uint32) egress.Client {
+	if ctx == nil || moduleBusSocket == "" || principalRef == 0 {
+		return nil
+	}
+	client, err := bus.ConnectClient(ctx, moduleBusSocket, 1, principalRef)
+	if err != nil {
+		log.Printf("egress: could not attach outbound principal %d: %v", principalRef, err)
+		return nil
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, client)
+	if err != nil {
+		client.Detach()
+		log.Printf("egress: could not create outbound caller %d: %v", principalRef, err)
+		return nil
+	}
+	transport, err := egress.NewBusAuthorizer(caller)
+	if err != nil {
+		caller.CloseAndWait()
+		client.Detach()
+		return nil
+	}
+	return transport
+}
+
 func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtable.PanelReviewer, error) {
 	home := os.Getenv("AIMEE_HOME")
 	if home == "" {
@@ -272,7 +300,8 @@ func roundtableReviewer(ctx context.Context, moduleBusSocket string) (*roundtabl
 		busClient.Detach()
 		return nil, err
 	}
-	return roundtable.NewPanelReviewer(presets, roundtable.NewBusDelegates(client))
+	return roundtable.NewPanelReviewer(presets, roundtable.NewBusDelegates(client),
+		moduleEgress(ctx, moduleBusSocket, egress.RoundtableClientRef))
 }
 
 // sandboxHome resolves the learned store's root the same way the WFE resolves
@@ -301,7 +330,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	// the set is a deployment decision, not a compile-time list -- a fleet may
 	// run ten of them, each its own process and its own failure domain.
 	if instance, isPlugin := strings.CutPrefix(name, "mcp-"); isPlugin {
-		return mcpModuleConfig(ctx, config, name, instance)
+		return mcpModuleConfig(ctx, config, moduleBusSocket, name, instance)
 	}
 
 	switch name {
@@ -316,7 +345,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
 			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
 		}
-		config.Handler = memory.Handle
+		config.Handler = memory.NewHandler(moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef))
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
@@ -387,7 +416,20 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: modulegit.EventCredResolve, StageID: modulegit.StageCredResolve},
 			{EventKind: modulegit.EventVerifyRun, StageID: modulegit.StageVerifyRun},
 		}
-		config.Handler = modulegit.Handle
+		config.Handler = modulegit.NewHandler(moduleEgress(ctx, moduleBusSocket, egress.GitClientRef))
+	case "egress":
+		config.ModuleName = name
+		config.PrincipalRef = egress.PrincipalRef
+		config.Stages = []bus.ModuleStage{
+			{EventKind: egress.EventAuthorize, StageID: egress.StageAuthorize},
+			{EventKind: egress.EventHTTP, StageID: egress.StageHTTP},
+			{EventKind: egress.EventSSEOpen, StageID: egress.StageSSEOpen},
+			{EventKind: egress.EventSSESend, StageID: egress.StageSSESend},
+			{EventKind: egress.EventSSERecv, StageID: egress.StageSSERecv},
+			{EventKind: egress.EventSSEClose, StageID: egress.StageSSEClose},
+			{EventKind: egress.EventCredentialKey, StageID: egress.StageCredentialKey},
+		}
+		config.Handler = egress.NewHandler()
 	case "skills":
 		config.ModuleName = name
 		config.PrincipalRef = 14
@@ -630,7 +672,8 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 // serves its stages with no plugin attached: it declares zero commands and
 // answers CapabilityAbsent. That is a working, inert module -- not a gap left
 // open.
-func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, name, instance string) (bus.ModuleProcessConfig, bool) {
+func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, moduleBusSocket,
+	name, instance string) (bus.ModuleProcessConfig, bool) {
 	if instance == "" {
 		log.Printf("mcp module: executable names no instance (want aimee-module-mcp-NAME)")
 		return bus.ModuleProcessConfig{}, false
@@ -669,6 +712,7 @@ func mcpModuleConfig(ctx context.Context, config bus.ModuleProcessConfig, name, 
 		{EventKind: declare, StageID: mcpmodule.StageDeclareCommands},
 	}
 	config.Handler = module.Handle
+	module.SetEgressClient(moduleEgress(ctx, moduleBusSocket, ref+egress.PluginClientOffset))
 
 	// The plugin is RECORDED, not started.
 	//
@@ -772,6 +816,18 @@ func run(ctx context.Context, args []string) error {
 	}
 	if config.ModuleName == "postgres" {
 		defer postgres.Close()
+	}
+	if config.ModuleName == "egress" {
+		if err := hardenEgressCredentialOwner(); err != nil {
+			return fmt.Errorf("egress cannot disable same-uid process inspection: %w", err)
+		}
+	}
+	if config.ModuleName != "egress" && config.ModuleName != "postgres" &&
+		config.ModuleName != "sandbox" {
+		if err := installModuleNetworkGuard(); err != nil {
+			return fmt.Errorf("module %q cannot remove ambient network privilege: %w",
+				config.ModuleName, err)
+		}
 	}
 	config.SocketPath = args[1]
 	return bus.RunModuleProcess(ctx, config)

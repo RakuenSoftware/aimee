@@ -7,6 +7,7 @@
  * onto the live legacy_config_record via config_save/config_reload; the roundtable runtime
  * (delegate_ensemble.c) is untouched and keeps reading legacy_config_record. */
 #include "roundtable_preset.h"
+#include "artifact_trust.h"
 #include "config.h" /* config_default_dir, legacy_config_record, config_load_file, config_save, config_reload */
 #include "log.h"
 #include "platform_path.h" /* platform_mkdir_p */
@@ -47,6 +48,23 @@ static char *rt_read_file(const char *path)
    size_t n = fread(buf, 1, (size_t)len, f);
    fclose(f);
    buf[n] = '\0';
+   const char *base = strrchr(path, '/');
+   base = base ? base + 1 : path;
+   char artifact_id[RT_PRESET_NAME_MAX];
+   snprintf(artifact_id, sizeof(artifact_id), "%s", base);
+   char *dot = strrchr(artifact_id, '.');
+   if (dot)
+      *dot = '\0';
+   char *canonical = realpath(path, NULL);
+   char trust_err[256];
+   if (!canonical || artifact_trust_verify_bytes("ensemble-template", artifact_id, canonical, buf,
+                                                 n, NULL, trust_err, sizeof(trust_err)) != 0)
+   {
+      free(canonical);
+      free(buf);
+      return NULL;
+   }
+   free(canonical);
    return buf;
 }
 

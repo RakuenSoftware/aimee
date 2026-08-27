@@ -183,6 +183,7 @@ case "${1:-}" in
 esac
 : "${AIMEE_HOME:=/var/lib/aimee}"
 export AIMEE_HOME
+export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-kb
 [ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
 aimee-kb --bootstrap-vault-env
 _secret_names=$(aimee-kb --list-credential-env-names)

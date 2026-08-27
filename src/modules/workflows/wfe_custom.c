@@ -8,6 +8,7 @@
  * a reload/reset can never dangle a previously-returned wfe_custom_block_t field.
  */
 #include "wfe_def.h"
+#include "artifact_trust.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -335,6 +336,17 @@ int wfe_custom_registry_load(const char *path, char *err, size_t errlen)
    fclose(f);
    buf[got] = '\0';
 #endif
+
+   char *canonical = realpath(path, NULL);
+   if (!canonical || artifact_trust_verify_bytes("workflow-blocks", "blocks", canonical, buf, got,
+                                                 NULL, err, errlen) != 0)
+   {
+      free(canonical);
+      free(buf);
+      g_loaded = 1;
+      return -1;
+   }
+   free(canonical);
 
    cJSON *root = yaml_parse(buf);
    free(buf);

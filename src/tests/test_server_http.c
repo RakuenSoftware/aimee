@@ -104,6 +104,11 @@ double wfe_autonomy_default_max_cost_usd(void)
    return 5.0;
 }
 
+int wfe_autonomy_killed(void)
+{
+   return 0;
+}
+
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
 {

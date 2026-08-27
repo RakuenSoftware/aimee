@@ -94,6 +94,7 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
     "${AIMEE_SRC_DIR}/modules/git/include"
+    "${AIMEE_SRC_DIR}/modules/egress/include"
     "${AIMEE_SRC_DIR}/modules/response-composition/include"
     "${AIMEE_SRC_DIR}/modules/skills/include"
     "${AIMEE_SRC_DIR}/modules/routing/include"
@@ -584,6 +585,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/shared/kb_paths.c
     ${AIMEE_SRC_DIR}/compact.c
     ${AIMEE_SRC_DIR}/platform_random.c
+    ${AIMEE_SRC_DIR}/artifact_trust.c
+    ${AIMEE_SRC_DIR}/hook_session_token.c
     ${AIMEE_SRC_DIR}/slop_detect.c
     ${AIMEE_SRC_DIR}/proxy_bootstrap.c
     ${AIMEE_SRC_DIR}/client_integrations.c
@@ -626,6 +629,7 @@ set(CORE_SRCS
 )
 
 set(DATA_SRCS
+    ${AIMEE_SRC_DIR}/integrity_ingress.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
@@ -870,6 +874,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    ${AIMEE_SRC_DIR}/hook_session_token.c
     # cli_session_start renders the degraded-dependency notice from here; the
     # CLI links it directly, so it must be listed in BOTH build systems.
     ${AIMEE_SRC_DIR}/session_degraded_notice.c
@@ -1171,6 +1176,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/fact_grounding.c
 )
 set(KB_DATA_SRCS
+    ${AIMEE_SRC_DIR}/integrity_ingress.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c

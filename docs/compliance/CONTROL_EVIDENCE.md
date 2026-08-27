@@ -1,5 +1,11 @@
 # Control and evidence register
 
+Live GitHub settings are exported with `scripts/collect-live-governance-evidence.sh`. The collector
+uses GET-only API calls, requires an offline signing key, content-addresses every response, and
+refuses an empty ruleset or branch protection without an approving-review requirement. Run it at
+least quarterly and after every ruleset, environment, or access change; retain the signed bundle
+for 18 months. A source-only assurance bundle is never evidence that these live controls operated.
+
 | Control | Accountable owner | Implementation/evidence | Cadence | Independent review | Evidence retention |
 | --- | --- | --- | --- | --- | --- |
 | secure change approval | Engineering Governance | CODEOWNERS, protected-branch export, PR review | each change | non-author | 2 years |

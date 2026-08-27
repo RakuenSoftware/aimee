@@ -165,6 +165,9 @@ psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c2b-jwks-publication-pg17-
 echo "== P5-C2c authenticated JWKS fetch authority assertions =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p5c2c-jwks-fetch-pg17-test.sql"
 
+echo "== Subject erasure, retention, and immutable audit-intent assertions =="
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/subject-erasure-pg-test.sql"
+
 echo "== P1 RLS gate: cleanup =="
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $TESTDB;"
 echo "== P1 RLS gate: PASSED =="

@@ -49,8 +49,9 @@ class DurabilityCheckTest(unittest.TestCase):
             "static const int LEDGER_EVENT_KINDS[] = {\n" +
             "".join(f'  {{{value}u, "test"}},\n' for value in sorted(rows)) +
             "};\n"
-            'obs_bus_emit_durable_event("bus.module.request", "", "", "");\n'
-            'obs_bus_emit_durable_event("bus.module.reply", "", "", "");\n',
+            "bus_host_set_tap(&g.host, governance_tap, NULL);\n"
+            'persist_or_queue_durable("bus.module.request", "", "", "");\n'
+            'persist_or_queue_durable("bus.module.reply", "", "", "");\n',
             encoding="utf-8")
         return root
 
@@ -92,6 +93,14 @@ class DurabilityCheckTest(unittest.TestCase):
     def test_zero_resolved_kinds_is_never_success(self) -> None:
         _, errors = CHECK.analyse(self.fixture(header="#define NOT_AN_EVENT 5889u\n"))
         self.assertTrue(any("zero module_api event kinds resolved" in error for error in errors))
+
+    def test_module_durability_requires_structural_host_tap(self) -> None:
+        root = self.fixture()
+        path = root / CHECK.OBS_BUS
+        path.write_text(path.read_text(encoding="utf-8").replace(
+            "bus_host_set_tap(&g.host, governance_tap, NULL);", ""), encoding="utf-8")
+        _, errors = CHECK.analyse(root)
+        self.assertTrue(any("structural module request/reply" in error for error in errors))
 
     def test_repository_contract(self) -> None:
         counts, errors = CHECK.analyse(ROOT)

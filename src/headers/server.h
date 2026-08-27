@@ -22,6 +22,11 @@ int provider_name_settable(const char *name, const agent_config_t *acfg);
 /* Forward declaration */
 typedef struct cJSON cJSON;
 
+/* Authenticated hook memory interception, implemented with the other hook
+ * helpers so the main method table does not own storage-policy details. */
+int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+                            const char *client, char *msg, size_t msg_len);
+
 #define SERVER_PROTOCOL_VERSION 1
 /* Per-server cap on concurrent connections held in the dispatch table.
  * Paired with SERVER_LISTEN_BACKLOG: the kernel queue holds connects
@@ -504,6 +509,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

@@ -10,7 +10,11 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
+
+var allowEgress egress.Client = testEgress{}
 
 // A minimal MCP-over-SSE server: GET announces the POST endpoint, POSTs are
 // answered as `message` events back on the stream.
@@ -113,7 +117,7 @@ func TestSSETransportCompletesAFullSession(t *testing.T) {
 	ts := httptest.NewServer(srv.handler(t))
 	defer ts.Close()
 
-	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second)
+	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second, allowEgress, 0)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -146,7 +150,7 @@ func TestSSETransportSendsTheBearerOnEveryRequest(t *testing.T) {
 	ts := httptest.NewServer(srv.handler(t))
 	defer ts.Close()
 
-	tr, err := NewSSETransport(ts.URL+"/sse", "s3cret", 5*time.Second)
+	tr, err := NewSSETransport(ts.URL+"/sse", "mcp:712", 5*time.Second, allowEgress, 0)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -169,7 +173,7 @@ func TestSSETransportResolvesARelativeEndpoint(t *testing.T) {
 	ts := httptest.NewServer(srv.handler(t))
 	defer ts.Close()
 
-	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second)
+	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second, allowEgress, 0)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -189,7 +193,7 @@ func TestSSETransportRefusesAServerThatNeverAnnouncesAnEndpoint(t *testing.T) {
 	ts := httptest.NewServer(srv.handler(t))
 	defer ts.Close()
 
-	if _, err := NewSSETransport(ts.URL+"/sse", "", 300*time.Millisecond); err == nil {
+	if _, err := NewSSETransport(ts.URL+"/sse", "", 300*time.Millisecond, allowEgress, 0); err == nil {
 		t.Fatal("a server that announced no endpoint was accepted")
 	}
 }
@@ -199,7 +203,7 @@ func TestSSETransportRefusesANonOKStream(t *testing.T) {
 		w.WriteHeader(http.StatusUnauthorized)
 	}))
 	defer ts.Close()
-	if _, err := NewSSETransport(ts.URL+"/sse", "", time.Second); err == nil {
+	if _, err := NewSSETransport(ts.URL+"/sse", "", time.Second, allowEgress, 0); err == nil {
 		t.Fatal("an HTTP 401 stream was accepted")
 	}
 }
@@ -223,7 +227,7 @@ func TestSSETransportRefusesCrossOriginEndpoint(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	if _, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits()); err == nil {
+	if _, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits(), allowEgress, 0); err == nil {
 		t.Fatal("a cross-origin POST endpoint was accepted")
 	}
 }
@@ -249,7 +253,7 @@ func TestSSETransportBoundsLinesAndEvents(t *testing.T) {
 			}))
 			defer ts.Close()
 
-			tr, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits())
+			tr, err := newSSETransportWithLimits(ts.URL, "", time.Second, testSSELimits(), allowEgress, 0)
 			if err != nil {
 				t.Fatalf("connect: %v", err)
 			}
@@ -282,7 +286,7 @@ func TestSSETransportBoundsPostResponseAndTime(t *testing.T) {
 			ts := httptest.NewServer(mux)
 			defer ts.Close()
 
-			tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, testSSELimits())
+			tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, testSSELimits(), allowEgress, 0)
 			if err != nil {
 				t.Fatalf("connect: %v", err)
 			}
@@ -307,7 +311,7 @@ func TestSSETransportClosesAnIdleStream(t *testing.T) {
 
 	limits := testSSELimits()
 	limits.idleTimeout = 50 * time.Millisecond
-	tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, limits)
+	tr, err := newSSETransportWithLimits(ts.URL+"/sse", "", time.Second, limits, allowEgress, 0)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}
@@ -324,7 +328,7 @@ func TestSSETransportIsUsableByTheModuleLikeAnyOther(t *testing.T) {
 	ts := httptest.NewServer(srv.handler(t))
 	defer ts.Close()
 
-	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second)
+	tr, err := NewSSETransport(ts.URL+"/sse", "", 5*time.Second, allowEgress, 0)
 	if err != nil {
 		t.Fatalf("connect: %v", err)
 	}

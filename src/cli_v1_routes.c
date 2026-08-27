@@ -1283,6 +1283,25 @@ cJSON *marshal_kb_reembed(int argc, char **argv)
    return req;
 }
 
+cJSON *marshal_kb_erase_subject(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   if (opts.pos_count != 1)
+   {
+      fprintf(stderr, "aimee: usage: aimee kb erase-subject <subject> [--request-id ID]\n");
+      return NULL;
+   }
+   cJSON *req = marshal_no_args("kb.erase-subject");
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "subject", opts.positional[0]);
+   const char *request_id = cli_args_get(&opts, "request-id");
+   if (request_id && request_id[0])
+      cJSON_AddStringToObject(req, "request_id", request_id);
+   return req;
+}
+
 /* memory embed --all | <id> — rebuild memory vectors, e.g. after a dim change
  * drops them. Defaults to nothing so a bare invocation is rejected server-side
  * rather than silently re-embedding an entire corpus. */

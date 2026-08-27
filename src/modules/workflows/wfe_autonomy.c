@@ -1,6 +1,7 @@
 /* wfe_autonomy.c: the autonomy driver + human-only gate-override. */
 #include "wfe_autonomy.h"
 
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <math.h> /* isfinite — validate the AIMEE_AUTONOMY_MAX_USD override */
@@ -17,6 +18,21 @@
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
+
+int wfe_autonomy_killed(void)
+{
+   const char *v = getenv("AIMEE_AUTONOMY_KILL_SWITCH");
+   if (!v)
+      return 0;
+   char normalized[8];
+   size_t n = strlen(v);
+   if (n >= sizeof(normalized))
+      return 0;
+   for (size_t i = 0; i <= n; i++)
+      normalized[i] = (char)tolower((unsigned char)v[i]);
+   return !strcmp(normalized, "1") || !strcmp(normalized, "true") || !strcmp(normalized, "yes") ||
+          !strcmp(normalized, "on");
+}
 
 /* On a terminal run, tear down the per-work-item worktree (F2) + clear its column,
  * so finished runs don't leak worktrees/branches. A non-autonomous terminal path
@@ -200,6 +216,12 @@ double wfe_autonomy_default_max_cost_usd(void)
 
 int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen)
 {
+   if (wfe_autonomy_killed())
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "autonomy disabled by AIMEE_AUTONOMY_KILL_SWITCH");
+      return -1;
+   }
    /* Per-run safety ceilings (WP-5). max_turns is a CUMULATIVE cap on the persisted
     * audit-event count: it bounds the WHOLE run across resumes (events persist), and
     * because one advance emits several events it is a deliberately CONSERVATIVE upper

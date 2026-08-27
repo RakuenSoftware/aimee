@@ -20,7 +20,8 @@
     "execution-policy",
     "audit",
     "sandbox",
-    "aimee"
+    "aimee",
+    "egress"
   ],
   "optional": [
     "governance",
@@ -66,7 +67,8 @@
     "postgres": 28,
     "db2": 29,
     "aimee": 30,
-    "observability": 31
+    "observability": 31,
+    "egress": 32
   },
   "retired_principal_refs": [],
   "plugin_principal_ref_band": { "first": 200, "limit": 456 },

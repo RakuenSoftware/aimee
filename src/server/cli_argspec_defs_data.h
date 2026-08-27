@@ -771,6 +771,13 @@
  "\"flag\":\"target-dim\",\"empty\":\"emit\",\"type\":\"number_lenient\""
  "}]}"},
 
+{"kb.erase-subject",
+ "{\"usage\":\"usage: aimee kb erase-subject <subject> [--request-id ID]\","
+ "\"max_positionals\":1,\"fields\":[{\"json\":\"subject\","
+ "\"from\":\"positional\",\"index\":0,\"required\":true,\"empty\":\"emit\"},"
+ "{\"json\":\"request_id\",\"from\":\"flag\",\"flag\":\"request-id\","
+ "\"empty\":\"drop\"}]}"},
+
 {"rules.delete",
  "{\"fields\":[{\"json\":\"id\",\"from\":\"positional_or_flag\","
  "\"index\":0,\"flag\":\"id\",\"type\":\"number_lenient\"}]}"},

@@ -18,6 +18,27 @@ static int g_temporal_enabled = 0;
 static int g_temporal_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
 
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+void obs_bus_emit_durable_event(const char *event_type, const char *subject, const char *verdict,
+                                const char *detail)
+{
+   (void)event_type;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+}
+
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
  * dragging in the kb client / config-load object graph. */

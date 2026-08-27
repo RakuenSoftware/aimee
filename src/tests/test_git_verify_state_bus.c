@@ -96,6 +96,19 @@ static void write_grant(const char *policy_dir, const char *executable)
            executable, AIMEE_GIT_EVENT_OPERATION, AIMEE_GIT_EVENT_REF_VALIDATE,
            AIMEE_GIT_EVENT_CI_GRADE, AIMEE_GIT_EVENT_VERIFY_RUN);
    must(fclose(file) == 0, "write the grant manifest");
+
+   /* The production Git process attaches a second, request-only identity for
+    * forge transport. This fixture never invokes forge, but admitting the
+    * identity keeps the real process contract intact instead of relying on a
+    * noisy failed attachment during a non-network test. */
+   snprintf(path, sizeof(path), "%s/git-egress.grant", policy_dir);
+   file = fopen(path, "w");
+   must(file != NULL, "open the Git egress grant manifest");
+   fprintf(file,
+           "version=1\nprincipal_class=1\nprincipal_ref=71\nuid=self\n"
+           "executable=%s\nrequest=12290\n",
+           executable);
+   must(fclose(file) == 0, "write the Git egress grant manifest");
 }
 
 static void start_module(const char *executable, const char *socket_path)

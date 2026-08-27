@@ -14,4 +14,7 @@ find . -name go.sum -o -name package-lock.json -o -name Cargo.lock \
 python3 scripts/check-security-claims.py > "$out/security-claims-check.txt"
 python3 scripts/check-workflow-pins.py > "$out/workflow-pin-check.txt"
 sha256sum "$out"/* > "$out/MANIFEST.sha256"
+if [ "${ASSURANCE_LIVE_GOVERNANCE:-0}" = 1 ]; then
+  scripts/collect-live-governance-evidence.sh "$out/live-governance" "${GITHUB_REPOSITORY:-}"
+fi
 echo "assurance evidence written to $out"

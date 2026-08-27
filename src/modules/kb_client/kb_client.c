@@ -635,6 +635,38 @@ char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int
    return resp;
 }
 
+char *kb_client_subject_erasure_begin(const char *request_id, const char *subject,
+                                      cJSON *session_ids, int *status_out)
+{
+   if (!request_id || !request_id[0] || !subject || !subject[0] || !cJSON_IsArray(session_ids))
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "request_id", request_id);
+   cJSON_AddStringToObject(req, "subject", subject);
+   cJSON_AddItemReferenceToObject(req, "session_ids", session_ids);
+   char *resp = kb_client_v1_post_json_keep_error("/v1/privacy/erase-subject/begin", req, 120000,
+                                                  status_out);
+   cJSON_Delete(req);
+   return resp;
+}
+
+char *kb_client_subject_erasure_complete(const char *request_id, int64_t db1_count, int *status_out)
+{
+   if (!request_id || !request_id[0] || db1_count < 0)
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "request_id", request_id);
+   cJSON_AddNumberToObject(req, "db1_count", (double)db1_count);
+   char *resp = kb_client_v1_post_json_keep_error("/v1/privacy/erase-subject/complete", req, 120000,
+                                                  status_out);
+   cJSON_Delete(req);
+   return resp;
+}
+
 /* The curator observability block from aimee-kb's /v1/health (§4), returned as a
  * standalone JSON object for the server's GET /v1/kb/curator surface. Never
  * returns NULL: an unavailable kb / missing block yields a status-error object. */

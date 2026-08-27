@@ -107,6 +107,10 @@ char *kb_client_agent_surfaces_json(void);
  * force-clears a stuck reembed_in_progress marker (ignores confirm/force/dim). */
 char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int clear_maintenance,
                         int *status_out);
+char *kb_client_subject_erasure_begin(const char *request_id, const char *subject,
+                                      cJSON *session_ids, int *status_out);
+char *kb_client_subject_erasure_complete(const char *request_id, int64_t db1_count,
+                                         int *status_out);
 
 /* Returns the curator observability block (§4) from aimee-kb's /v1/health as a
  * standalone heap JSON object (caller frees). Backs the server's GET

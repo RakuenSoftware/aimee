@@ -1,14 +1,52 @@
 package git
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
+
+type testEgress struct{}
+
+func (testEgress) Authorize(context.Context, uint64, egress.Request) (egress.Decision, error) {
+	return egress.Decision{Allowed: true, PolicyRevision: egress.PolicyRevision}, nil
+}
+
+func (testEgress) Do(ctx context.Context, _ uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, request.Method, request.TargetURL, bytes.NewReader(request.Body))
+	if err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	for name, value := range request.Headers {
+		req.Header.Set(name, value)
+	}
+	// This transport double stands in for the egress process's decryption and
+	// header injection. Production never treats Ciphertext as plaintext.
+	if request.Credential != nil {
+		req.Header.Set("Authorization", "Bearer "+request.Credential.Ciphertext)
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, request.MaxResponseBytes+1))
+	return egress.HTTPResponse{Status: response.StatusCode, Body: body}, err
+}
+
+var allowEgress egress.Executor = testEgress{}
+
+func forgeCredential(secret string) *egress.CredentialEnvelope {
+	return &egress.CredentialEnvelope{Ciphertext: secret}
+}
 
 // forgeStub stands in for the forge and records what it was asked, so the tests
 // assert the REQUEST as well as the parse. Getting the endpoint or the method
@@ -40,18 +78,18 @@ func (s *forgeStub) start(t *testing.T) {
 	t.Cleanup(func() { forgeBaseURL = previous; server.Close() })
 }
 
-func TestForgeSendsTheCredentialOnlyInTheHeader(t *testing.T) {
+func TestForgeRelaysOnlyAnOpaqueCredentialEnvelope(t *testing.T) {
 	stub := &forgeStub{reply: `{"default_branch":"testing"}`}
 	stub.start(t)
 
-	out := PerformForge(ForgeRequest{Op: OpDefaultBranch, Owner: "o", Repo: "r", Token: "s3cret"})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpDefaultBranch, Owner: "o", Repo: "r", Credential: forgeCredential("s3cret")})
 	if out.Error != "" {
 		t.Fatalf("unexpected error: %s", out.Error)
 	}
 	if stub.auth != "Bearer s3cret" {
 		t.Fatalf("Authorization = %q", stub.auth)
 	}
-	// The token must never reach the URL (proxies and logs keep those) nor the
+	// The bearer must never reach the URL (proxies and logs keep those) nor the
 	// response the caller gets back.
 	if got := stub.path; got != "/repos/o/r" || strings.Contains(got, "s3cret") {
 		t.Fatalf("path = %q, want the bare repo endpoint with no credential", got)
@@ -74,7 +112,7 @@ func TestForgeSendsTheCredentialOnlyInTheHeader(t *testing.T) {
 func TestDefaultBranchUsesTheBareRepoEndpoint(t *testing.T) {
 	stub := &forgeStub{reply: `{"default_branch":"main"}`}
 	stub.start(t)
-	PerformForge(ForgeRequest{Op: OpDefaultBranch, Owner: "o", Repo: "r", Token: "t"})
+	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpDefaultBranch, Owner: "o", Repo: "r", Credential: forgeCredential("t")})
 	if stub.path != "/repos/o/r" {
 		t.Fatalf("path = %q, want /repos/o/r with no trailing slash", stub.path)
 	}
@@ -85,8 +123,8 @@ func TestPRCreateSendsTheFieldsAndReadsTheNumber(t *testing.T) {
 		"head":{"ref":"feat"},"base":{"ref":"testing"},"draft":true,"html_url":"u"}`}
 	stub.start(t)
 
-	out := PerformForge(ForgeRequest{
-		Op: OpPRCreate, Owner: "o", Repo: "r", Token: "t",
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
+		Op: OpPRCreate, Owner: "o", Repo: "r", Credential: forgeCredential("t"),
 		Title: "t", Head: "feat", Base: "testing", Body: "b", Draft: true,
 	})
 	if out.Error != "" || out.Pull == nil {
@@ -110,7 +148,7 @@ func TestPRCreateSendsTheFieldsAndReadsTheNumber(t *testing.T) {
 func TestForgeRefusalCarriesTheForgeMessage(t *testing.T) {
 	stub := &forgeStub{status: 422, reply: `{"message":"A pull request already exists"}`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{Op: OpPRCreate, Owner: "o", Repo: "r", Token: "t"})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRCreate, Owner: "o", Repo: "r", Credential: forgeCredential("t")})
 	if out.Status != 422 {
 		t.Fatalf("status = %d, want 422", out.Status)
 	}
@@ -129,7 +167,7 @@ func TestTransportFailureIsNotAForgeRefusal(t *testing.T) {
 	forgeBaseURL = "http://127.0.0.1:1" // nothing listens
 	t.Cleanup(func() { forgeBaseURL = previous })
 
-	out := PerformForge(ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 1})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 1})
 	if out.Status != 0 || out.Error == "" {
 		t.Fatalf("want status 0 with an error, got %+v", out)
 	}
@@ -141,7 +179,7 @@ func TestTransportFailureIsNotAForgeRefusal(t *testing.T) {
 func TestPRMergeReportsWhatTheForgeSaid(t *testing.T) {
 	stub := &forgeStub{reply: `{"merged":true}`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 7})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 7})
 	if stub.method != http.MethodPut || stub.path != "/repos/o/r/pulls/7/merge" {
 		t.Fatalf("%s %s", stub.method, stub.path)
 	}
@@ -152,7 +190,7 @@ func TestPRMergeReportsWhatTheForgeSaid(t *testing.T) {
 	// 409 is the forge refusing on conflict; it must not read as merged.
 	stub2 := &forgeStub{status: 409, reply: `{"message":"Merge conflict"}`}
 	stub2.start(t)
-	out = PerformForge(ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 7})
+	out = PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 7})
 	if out.Merged || out.Status != 409 || !strings.Contains(out.Error, "Merge conflict") {
 		t.Fatalf("out = %+v", out)
 	}
@@ -161,8 +199,8 @@ func TestPRMergeReportsWhatTheForgeSaid(t *testing.T) {
 func TestPRFindOpenQualifiesTheHeadWithTheOwner(t *testing.T) {
 	stub := &forgeStub{reply: `[{"number":5,"state":"open","head":{"ref":"feat"}}]`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{
-		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat",
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
+		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Credential: forgeCredential("t"), Head: "feat",
 	})
 	// Unqualified, GitHub's head filter matches nothing and the caller concludes
 	// there is no open PR — then opens a duplicate.
@@ -182,8 +220,8 @@ func TestPRFindOpenFiltersByBaseAsWellAsHead(t *testing.T) {
 	stub := &forgeStub{reply: `[{"number":5,"state":"open","head":{"ref":"feat"},
 		"base":{"ref":"testing"}}]`}
 	stub.start(t)
-	PerformForge(ForgeRequest{
-		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat", Base: "testing",
+	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
+		Op: OpPRFindOpen, Owner: "acme", Repo: "r", Credential: forgeCredential("t"), Head: "feat", Base: "testing",
 	})
 	if !strings.Contains(stub.path, "head=acme%3Afeat") {
 		t.Fatalf("path = %q, want an owner-qualified head filter", stub.path)
@@ -196,7 +234,7 @@ func TestPRFindOpenFiltersByBaseAsWellAsHead(t *testing.T) {
 	// would match nothing rather than "any base".
 	stub2 := &forgeStub{reply: `[]`}
 	stub2.start(t)
-	PerformForge(ForgeRequest{Op: OpPRFindOpen, Owner: "acme", Repo: "r", Token: "t", Head: "feat"})
+	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRFindOpen, Owner: "acme", Repo: "r", Credential: forgeCredential("t"), Head: "feat"})
 	if strings.Contains(stub2.path, "base=") {
 		t.Fatalf("path = %q, want no base filter when none was asked for", stub2.path)
 	}
@@ -207,7 +245,7 @@ func TestPRFindOpenFiltersByBaseAsWellAsHead(t *testing.T) {
 func TestPRListOpenAsksForMostRecentlyUpdatedFirst(t *testing.T) {
 	stub := &forgeStub{reply: `[]`}
 	stub.start(t)
-	PerformForge(ForgeRequest{Op: OpPRListOpen, Owner: "o", Repo: "r", Token: "t", Limit: 20})
+	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRListOpen, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Limit: 20})
 	for _, want := range []string{"sort=updated", "direction=desc", "per_page=20", "state=open"} {
 		if !strings.Contains(stub.path, want) {
 			t.Fatalf("path = %q, missing %s", stub.path, want)
@@ -269,12 +307,12 @@ func TestGuardsRejectBadInputBeforeAnyCall(t *testing.T) {
 		req  ForgeRequest
 	}{
 		{"no token", ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Number: 1}},
-		{"bad owner", ForgeRequest{Op: OpPRInfo, Owner: "o/../x", Repo: "r", Token: "t", Number: 1}},
-		{"bad repo", ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "..", Token: "t", Number: 1}},
-		{"no number", ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t"}},
-		{"unknown op", ForgeRequest{Op: "delete_everything", Owner: "o", Repo: "r", Token: "t"}},
+		{"bad owner", ForgeRequest{Op: OpPRInfo, Owner: "o/../x", Repo: "r", Credential: forgeCredential("t"), Number: 1}},
+		{"bad repo", ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "..", Credential: forgeCredential("t"), Number: 1}},
+		{"no number", ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Credential: forgeCredential("t")}},
+		{"unknown op", ForgeRequest{Op: "delete_everything", Owner: "o", Repo: "r", Credential: forgeCredential("t")}},
 	} {
-		out := PerformForge(tc.req)
+		out := PerformForge(context.Background(), 0, allowEgress, tc.req)
 		if out.Error == "" {
 			t.Fatalf("%s: expected a refusal before any request", tc.name)
 		}
@@ -305,7 +343,7 @@ func TestPRInfoKeepsMergeableThreeValued(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &forgeStub{reply: tc.body}
 			stub.start(t)
-			out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+			out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 1})
 			if out.Error != "" || out.Pull == nil {
 				t.Fatalf("unexpected: %+v", out)
 			}
@@ -331,7 +369,7 @@ func TestPRInfoCarriesTheRefsAndStateACallerNeeds(t *testing.T) {
 		"merged_at":"2026-08-10T13:17:33Z","mergeable_state":"clean","html_url":"u",
 		"head":{"ref":"feat","sha":"deadbeef"},"base":{"ref":"testing"}}`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 7})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 7})
 	if out.Error != "" || out.Pull == nil {
 		t.Fatalf("unexpected: %+v", out)
 	}
@@ -357,7 +395,7 @@ func TestNeverMergedHasNoMergedAt(t *testing.T) {
 	stub := &forgeStub{reply: `{"number":1,"state":"open","merged":false,"merged_at":null,
 		"head":{"ref":"f","sha":"abc"},"base":{"ref":"testing"}}`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Token: "t", Number: 1})
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRInfo, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 1})
 	if out.Pull == nil || out.Pull.MergedAt != "" {
 		t.Fatalf("merged_at = %+v, want empty", out.Pull)
 	}
@@ -374,12 +412,16 @@ func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 	stub.start(t)
 
 	request, err := json.Marshal(ForgeRequest{
-		Op: OpDefaultBranch, Owner: "o", Repo: "r", Token: "t",
+		Op: OpDefaultBranch, Owner: "o", Repo: "r", Credential: forgeCredential("t"),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := Handle(bus.ModuleInvocation{StageID: StageForgeRequest}, request)
+	if bytes.Contains(request, []byte(`"token"`)) {
+		t.Fatalf("forge bus request exposed a legacy token field: %s", request)
+	}
+	handler := NewHandler(allowEgress)
+	body, status := handler(bus.ModuleInvocation{StageID: StageForgeRequest}, request)
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
@@ -390,7 +432,7 @@ func TestHandleForgeRequestRoutesThroughStageFour(t *testing.T) {
 	if decoded.DefaultBranch != "testing" {
 		t.Fatalf("decoded = %+v", decoded)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageForgeRequest}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := handler(bus.ModuleInvocation{StageID: StageForgeRequest}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }
@@ -420,8 +462,8 @@ func TestMergeSeparatesTerminalConflictFromLostRace(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := &forgeStub{status: tc.status, reply: tc.reply}
 			stub.start(t)
-			out := PerformForge(ForgeRequest{
-				Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3,
+			out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
+				Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3,
 			})
 			if out.Merged {
 				t.Fatal("a refused merge must never report merged")
@@ -439,8 +481,8 @@ func TestMergeSeparatesTerminalConflictFromLostRace(t *testing.T) {
 func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
 	stub := &forgeStub{reply: `{"merged":true,"sha":"abc123"}`}
 	stub.start(t)
-	out := PerformForge(ForgeRequest{
-		Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3,
+	out := PerformForge(context.Background(), 0, allowEgress, ForgeRequest{
+		Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3,
 		MergeMethod: "squash", ExpectedHeadSHA: "deadbeef",
 	})
 	if !out.Merged || out.MergeSHA != "abc123" {
@@ -460,7 +502,7 @@ func TestMergeCarriesMethodDriftGuardAndReturnsTheSHA(t *testing.T) {
 	// A plain merge has nothing to synthesise, so no commit_message is sent.
 	stub2 := &forgeStub{reply: `{"merged":true,"sha":"x"}`}
 	stub2.start(t)
-	PerformForge(ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Token: "t", Number: 3})
+	PerformForge(context.Background(), 0, allowEgress, ForgeRequest{Op: OpPRMerge, Owner: "o", Repo: "r", Credential: forgeCredential("t"), Number: 3})
 	if strings.Contains(stub2.body, "commit_message") {
 		t.Fatalf("a plain merge must not synthesise a message: %s", stub2.body)
 	}

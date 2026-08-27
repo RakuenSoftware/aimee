@@ -1566,6 +1566,15 @@ int main(int argc, char **argv)
    if (argc > 1 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   if (argc == 3 && strcmp(argv[1], "--egress-vault-secret") == 0)
+   {
+      if (vault_env_egress_parent_attest() != 0 || vault_env_bootstrap_init() < 0)
+         return 1;
+      int rc = vault_env_print_egress_credential(argv[2]);
+      runtime_secret_clear();
+      return rc == 0 ? 0 : 1;
+   }
+
    /* A native launch follows the same disposable first-boot boundary as the
     * container entrypoint. unsetenv() alone can leave inherited bytes visible
     * in /proc/<pid>/environ, so a credential-bearing process may seal into

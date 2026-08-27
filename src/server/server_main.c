@@ -514,6 +514,15 @@ int main(int argc, char **argv)
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   if (argc == 3 && strcmp(argv[1], "--egress-vault-secret") == 0)
+   {
+      if (vault_env_egress_parent_attest() != 0 || vault_env_bootstrap_init() < 0)
+         return 1;
+      int rc = vault_env_print_egress_credential(argv[2]);
+      runtime_secret_clear();
+      return rc == 0 ? 0 : 1;
+   }
+
    /* The co-located root-UDS-attested web service consumes these labelled base64
     * records through a pipe for authentication, signed sessions, and in-memory
     * TLS setup. The helper is intentionally webchat-specific: there is no

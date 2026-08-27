@@ -50,4 +50,10 @@ integrity_result_t integrity_gate_check(const char *text, integrity_source_t sou
 const char *integrity_source_name(integrity_source_t source);
 const char *integrity_verdict_name(integrity_verdict_t verdict);
 
+/* The one materialization boundary used by autonomous content ingress. It
+ * classifies, emits a durable content-free verdict, and returns nonzero when
+ * the caller must park/refuse the content before any write or prompt effect. */
+int integrity_ingress_decide(const char *text, integrity_source_t source, const char *boundary,
+                             int autonomous, integrity_result_t *result_out);
+
 #endif /* INTEGRITY_H */

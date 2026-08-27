@@ -30,6 +30,7 @@
 #include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
+#include "hook_session_token.h"
 
 /* server.c exposes capture completeness in server.health.  This dispatch test
  * does not start the observability bus, so give it a deterministic health
@@ -912,6 +913,10 @@ int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.embed");
+}
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "kb.erase-subject");
 }
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -2068,6 +2073,51 @@ static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
    free(ctx);
 }
 
+static void test_hook_identity_session_binding(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx && conn);
+   conn->peer_uid = 1000;
+   hook_session_token_registry_reset();
+
+   const char *start = "{\"method\":\"hooks.session_start\",\"session_id\":\"bound-session\","
+                       "\"harness_client\":\"claude\",\"hook_input\":\"{}\"}";
+   cJSON *json = dispatch_json(ctx, conn, start, strlen(start));
+   const char *token = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_token"));
+   assert(token && strlen(token) == HOOK_SESSION_TOKEN_HEX_LEN);
+   char saved[HOOK_SESSION_TOKEN_CAP];
+   snprintf(saved, sizeof(saved), "%s", token);
+   cJSON_Delete(json);
+
+   char pre[1024];
+   snprintf(pre, sizeof(pre),
+            "{\"method\":\"hooks.pre\",\"session_id\":\"bound-session\","
+            "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
+            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            saved);
+   json = dispatch_json(ctx, conn, pre, strlen(pre));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
+                 "trusted") == 0);
+   cJSON_Delete(json);
+
+   /* The same secret cannot claim a different harness or session. */
+   char mismatch[1024];
+   snprintf(mismatch, sizeof(mismatch),
+            "{\"method\":\"hooks.pre\",\"session_id\":\"other-session\","
+            "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
+            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            saved);
+   json = dispatch_json(ctx, conn, mismatch, strlen(mismatch));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
+                 "untrusted") == 0);
+   cJSON_Delete(json);
+
+   hook_session_token_registry_reset();
+   free(conn);
+   free(ctx);
+}
+
 /* Regression: the /v1 HTTP workers (server_http.c) build a memset-zeroed
  * server_conn_t, so conn->evloop is NULL and its fd is never registered with
  * any epoll set. Flushing a buffered response must NOT route that NULL loop
@@ -2401,6 +2451,7 @@ int main(void)
    test_init_route_through_server_to_kb();
    test_launch_run_returns_provider_metadata();
    test_hooks_pre_recovers_worktree_mapping_from_cwd();
+   test_hook_identity_session_binding();
    printf("server_dispatch: all tests passed\n");
    return 0;
 }

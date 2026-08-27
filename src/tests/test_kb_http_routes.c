@@ -35,6 +35,7 @@
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+#include "kb_blob_reconcile.h"
 #include "runtime_secret.h"
 
 #include <aimee/control-web/module_api.h>
@@ -135,6 +136,50 @@ void db2_lease_end(void)
 }
 void db2_lease_release_idle(void)
 {
+}
+
+static int g_erasure_begin_calls;
+static int g_erasure_complete_calls;
+static int g_erasure_reconcile_calls;
+
+int db2_subject_erasure_begin(const char *request_id, const char *subject,
+                              const char *sessions_json, int64_t *memory_count,
+                              int64_t *document_count, int *already_done)
+{
+   assert(strcmp(request_id, "erase-route-0123456789") == 0);
+   assert(strcmp(subject, "subject@example.test") == 0);
+   assert(strcmp(sessions_json, "[\"session-a\"]") == 0);
+   g_erasure_begin_calls++;
+   *memory_count = 2;
+   *document_count = 3;
+   *already_done = 0;
+   return 0;
+}
+
+int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                 int *event_created)
+{
+   assert(strcmp(request_id, "erase-route-0123456789") == 0);
+   assert(actor && actor[0]);
+   assert(db1_count == 1);
+   g_erasure_complete_calls++;
+   *event_created = 1;
+   return 0;
+}
+
+int config_kb_pdf_blob_orphan_alarm_mb(void)
+{
+   return 64;
+}
+
+int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *out)
+{
+   assert(alarm_mb == 64);
+   assert(grace_secs == 0);
+   memset(out, 0, sizeof(*out));
+   out->orphans_unlinked = 4;
+   g_erasure_reconcile_calls++;
+   return 0;
 }
 /* /v1/health reports pool starvation, so the route layer now reads the pool.
  * A route test wants no real DB2: report an idle pool so health stays "ok" and
@@ -6189,6 +6234,42 @@ static void test_maintenance_routes_are_owner_gated(void)
    assert(s == 403);
 }
 
+static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
+{
+   char buf[1024];
+   const char *begin = "{\"request_id\":\"erase-route-0123456789\","
+                       "\"subject\":\"subject@example.test\","
+                       "\"session_ids\":[\"session-a\"]}";
+   int s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL,
+                            "Bearer scope:project:x:secret", "scope:project:x:secret", begin,
+                            (int)strlen(begin), buf, sizeof(buf));
+   assert(s == 403);
+   assert(g_erasure_begin_calls == 0);
+
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL, OWNER_AUTH, OWNER_TOK,
+                        begin, (int)strlen(begin), buf, sizeof(buf));
+   assert(s == 200);
+   assert(g_erasure_begin_calls == 1);
+   assert(strstr(buf, "\"memory_count\":2") != NULL);
+   assert(strstr(buf, "\"document_count\":3") != NULL);
+
+   const char *invalid_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1.5}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        invalid_complete, (int)strlen(invalid_complete), buf, sizeof(buf));
+   assert(s == 400);
+   assert(g_erasure_complete_calls == 0);
+   assert(g_erasure_reconcile_calls == 0);
+
+   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200);
+   assert(g_erasure_complete_calls == 1);
+   assert(g_erasure_reconcile_calls == 1);
+   assert(strstr(buf, "\"event_created\":true") != NULL);
+   assert(strstr(buf, "\"orphan_blobs_unlinked\":4") != NULL);
+}
+
 static void test_maintenance_repair_missing_project(void)
 {
    char buf[256];
@@ -7429,6 +7510,7 @@ int main(void)
    test_scoped_token_cannot_ingest_all_projects();
    test_service_scope_is_data_plane_not_admin();
    test_maintenance_routes_are_owner_gated();
+   test_subject_erasure_routes_are_owner_gated_and_idempotent();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();

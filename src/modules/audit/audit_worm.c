@@ -765,6 +765,26 @@ int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_
 
 int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq)
 {
+   /* A newly created store has no evidence to attest yet. Admit that one state
+    * explicitly while keeping the public verifier RED for an empty chain. */
+   long count = audit_worm_count();
+   if (count == 0)
+   {
+      if (err && errlen)
+         err[0] = '\0';
+      if (head_seq)
+         *head_seq = 0;
+      if (last_ckpt_seq)
+         *last_ckpt_seq = 0;
+      return 0;
+   }
+   if (count < 0)
+   {
+      if (err && errlen)
+         snprintf(err, errlen, "cannot read WORM store at startup");
+      return -1;
+   }
+
    long head = 0, ckpt = 0;
    int status = audit_worm_verify(err, errlen, &head, &ckpt);
    if (status == AUDIT_WORM_VERIFY_RED)
