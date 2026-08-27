@@ -649,3 +649,13 @@ CREATE TABLE IF NOT EXISTS org_egress_dispatch (
 );
 CREATE INDEX IF NOT EXISTS idx_org_egress_recover
   ON org_egress_dispatch(state,lease_expires_at,id);
+
+-- Mirrors memory_workspace_owner in schema.sql so check-schema-sync sees the same
+-- table set. The Postgres side additionally defines memory_workspace_readable();
+-- the shim cannot enforce RLS, so no resolver is defined here.
+CREATE TABLE IF NOT EXISTS memory_workspace_owner (
+  workspace  TEXT PRIMARY KEY,
+  owner_kind TEXT NOT NULL,
+  owner_id   TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT ''
+);

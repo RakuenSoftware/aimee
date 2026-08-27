@@ -14026,6 +14026,70 @@ REVOKE ALL ON FUNCTION kb_management_token_key_use_worm_guard(),
   kb_management_token_authority_finalize(TEXT,TEXT) FROM PUBLIC;
 
 -- ============================================================================
+-- Memory tenancy binding (step 2 of docs/proposals/pending/
+-- memory-table-row-level-security.md). ADDITIVE ONLY: no RLS is enabled on any
+-- memory table by this block, and nothing reads these objects yet. It exists so
+-- the ownership model has a home before any policy depends on it.
+--
+-- A workspace is a collection of projects and may be owned by ANY entity kind --
+-- a principal, a team, an org, or a kind not yet defined -- so the owner is
+-- polymorphic (owner_kind, owner_id) rather than a foreign key into one table.
+-- owner_kind is deliberately NOT constrained to a fixed list: the resolver below
+-- fails closed on a kind it cannot resolve, so an unknown kind is unreadable
+-- rather than wrongly readable.
+CREATE TABLE IF NOT EXISTS memory_workspace_owner (
+  workspace  TEXT PRIMARY KEY,
+  owner_kind TEXT NOT NULL,
+  owner_id   TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (pg_now_text()));
+
+-- memory_workspace_readable(workspace): the single predicate every future memory
+-- policy calls, so adding an owner kind is one branch here rather than an edit to
+-- ~29 policies.
+--
+-- STABLE and NOT security definer on purpose. It reads kb_team_membership, which
+-- is itself under FORCE RLS with p_member_self (identity_key = the principal GUC),
+-- so the membership probe sees ONLY the calling principal's own rows -- exactly the
+-- question being asked ("is MY principal in that team"), at least privilege. A
+-- SECURITY DEFINER here would widen that to every principal's memberships for no
+-- gain.
+--
+-- Fail-closed by construction: current_setting(..., true) yields NULL when the GUC
+-- is unset, so an unauthenticated session matches nothing.
+--
+-- owner_kind='org' is intentionally absent: there is no org membership table in
+-- this schema (the org_* tables are budget, model, telemetry and vault records,
+-- none of which record who belongs to an org). An org-owned workspace therefore
+-- resolves to unreadable until that membership source exists. This is a known
+-- gap, not an oversight.
+CREATE OR REPLACE FUNCTION memory_workspace_readable(p_workspace TEXT)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public
+AS $$
+  SELECT CASE
+    -- A workspace-less memory is global scope: readable by any authenticated
+    -- principal. An unset principal GUC still yields false.
+    WHEN p_workspace IS NULL OR p_workspace = '' THEN
+      current_setting('aimee.principal', true) IS NOT NULL
+        AND current_setting('aimee.principal', true) <> ''
+    ELSE EXISTS (
+      SELECT 1 FROM memory_workspace_owner o
+       WHERE o.workspace = p_workspace
+         AND (
+              (o.owner_kind = 'principal'
+                 AND o.owner_id = current_setting('aimee.principal', true))
+           OR (o.owner_kind = 'team'
+                 AND EXISTS (SELECT 1 FROM kb_team_membership m
+                              WHERE m.team::text = o.owner_id
+                                AND m.identity_key =
+                                    current_setting('aimee.principal', true)))
+             ))
+  END;
+$$;
+
+-- ============================================================================
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
 -- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
