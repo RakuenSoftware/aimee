@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "registered_at": "2026-08-27T12:45:00Z",
+  "purpose": "Expand the current-stack large-repository ROI test beyond the trust-bundle task before Article Zero publication, measuring whether current economization plus progress control reduces provider tokens, prevents context exhaustion, increases tested completion, or produces useful failure records on three preselected Aimee defects.",
+  "controller": {
+    "initial_calls": 12,
+    "followup_calls": 8,
+    "duplicate_hits": 2,
+    "window": 12
+  },
+  "tasks": [
+    "clone_fd_and_owner",
+    "pool_lease_attribution",
+    "db1_outcome_codes"
+  ],
+  "conditions": {
+    "off": "Unmodified canonical transcript and no progress controller.",
+    "aimee_progress": "Production Go economizer plus the production-equivalent write-progress controller."
+  },
+  "initial_repeats": 1,
+  "fixed_controls": [
+    "Qwen3.8 27B Q4_K_XL",
+    "temperature zero",
+    "same per-task buggy parent revision",
+    "same task prompt, tools, and tool-output limits",
+    "same 65536-token context cap",
+    "same visible and sealed hidden child-era graders",
+    "same 30-turn maximum",
+    "randomized cell order with seed 20260827"
+  ],
+  "primary_outcome": "hidden grader passes",
+  "secondary_outcomes": [
+    "provider-reported input, cached-input, and output tokens",
+    "cost or token volume per hidden-grade completion",
+    "context-limit and progress-abort terminal reasons",
+    "successful repository mutation",
+    "authored and regression-sensitive tests",
+    "economizer folds and boundary reuse",
+    "wall time and repeated or overlapping retrievals"
+  ],
+  "followup_rule": "After every initial task-condition cell is complete, repeat a task pair only if the initial pair contains a hidden-grade completion, a context-capacity crossover, a completion crossover, or at least a 10 percent total-token difference with equal hidden-grade outcome. Do not select repeats using ungraded self-reports.",
+  "stopping_rule": "Run every initial cell to submit, assistant final, provider/context failure, progress abort, or 30 turns. Do not change prompts, graders, thresholds, tool limits, or the task list after dispatch begins.",
+  "interpretation_guardrail": "The initial expansion is one exploratory pair per task. Aggregate and per-task outcomes must report every failure. A stopped failure is valuable only as observed cost containment or when its sealed lesson changes a later independently graded attempt."
+}
