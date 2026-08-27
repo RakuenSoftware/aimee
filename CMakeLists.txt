@@ -875,6 +875,9 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
     ${AIMEE_SRC_DIR}/hook_session_token.c
+    # hook_session_token_mint uses the portable hex wrapper; the platform
+    # backend in CLIENT_SUPPORT_SRCS supplies platform_random_bytes only.
+    ${AIMEE_SRC_DIR}/platform_random.c
     # cli_session_start renders the degraded-dependency notice from here; the
     # CLI links it directly, so it must be listed in BOTH build systems.
     ${AIMEE_SRC_DIR}/session_degraded_notice.c
@@ -1549,7 +1552,7 @@ if(NOT WIN32)
 endif()
 if(WIN32)
     target_compile_definitions(aimee PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
-    target_link_libraries(aimee PRIVATE ws2_32)
+    target_link_libraries(aimee PRIVATE ws2_32 bcrypt)
     # LTO + --gc-sections on MinGW fails to drop the dead is_noise_utterance
     # (util.c, pulled in for opt_parse etc.) which references tokenize_for_search
     # (text.c — not part of the thin client). Disabling IPO for this target lets
