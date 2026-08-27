@@ -1,0 +1,175 @@
+{
+  "budget": {
+    "actual_contract": "Codex CLI authenticated using ChatGPT; fixed-plan quota, no per-call cash charge",
+    "actual_marginal_budget_usd": 0.0,
+    "api_equivalent_budget_usd": 28.68,
+    "calls": 2,
+    "expected_actual_marginal_cash_usd": 0.0,
+    "expected_api_price_equivalent_usd": 0.08928,
+    "hard_actual_marginal_cash_usd": 0.0,
+    "hard_api_price_equivalent_usd": 28.68,
+    "pricing_generation": "official-gpt-5.6-sol-2026-08-26",
+    "retries": 0
+  },
+  "calls": [
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0350976,
+      "call_id": "roi-codex-pilot-848b4adac3f242d6:0:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17690,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "request_sha256": "cd33eafd69d4c25fc7db28cddcbbb26af2cffb72ccccabd4a5a5734762c1d8a1",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-848b4adac3f242d6",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff2-1525-7a93-b98d-b49299e0f73a",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17690,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.2655212881509215
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0356896,
+      "call_id": "roi-codex-pilot-848b4adac3f242d6:1:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  00-00-00 \u27e6check\u27e7\n  00-01-00 \u27e6check\u27e7\n  00-02-00 \u27e6check\u27e7\n  00-03-00 \u27e6check\u27e7\n  00-04-00 \u27e6check\u27e7\n  00-05-00 \u27e6check\u27e7\n  00-00-01 \u27e6check\u27e7\n  00-01-01 \u27e6check\u27e7\n  00-02-01 \u27e6check\u27e7\n  00-03-01 \u27e6check\u27e7\n  00-04-01 \u27e6check\u27e7\n  00-05-01 \u27e6check\u27e7\n  00-00-02 \u27e6check\u27e7\n  00-01-02 \u27e6check\u27e7\n  00-02-02 \u27e6check\u27e7\n  00-03-02 \u27e6check\u27e7\n  00-04-02 \u27e6check\u27e7\n  00-05-02 \u27e6check\u27e7\n  00-00-03 \u27e6check\u27e7\n  00-01-03 \u27e6check\u27e7\n  00-02-03 \u27e6check\u27e7\n  00-03-03 \u27e6check\u27e7\n  00-04-03 \u27e6check\u27e7\n  00-05-03 \u27e6check\u27e7\n  00-00-04 \u27e6check\u27e7\n  00-01-04 \u27e6check\u27e7\n  00-02-04 \u27e6check\u27e7\n  00-03-04 \u27e6check\u27e7\n  00-04-04 \u27e6check\u27e7\n  00-05-04 \u27e6check\u27e7\n  00-00-05 \u27e6check\u27e7\n  00-01-05 \u27e6check\u27e7\n  00-02-05 \u27e6check\u27e7\n  00-03-05 \u27e6check\u27e7\n  00-04-05 \u27e6check\u27e7\n  00-05-05 \u27e6check\u27e7\n  00-00-06 \u27e6check\u27e7\n  00-01-06 \u27e6check\u27e7\n  00-02-06 \u27e6check\u27e7\n  00-03-06 \u27e6check\u27e7\n  00-04-06 \u27e6check\u27e7\n  00-05-06 \u27e6check\u27e7\n  00-00-07 \u27e6check\u27e7\n  00-01-07 \u27e6check\u27e7\n  00-02-07 \u27e6check\u27e7\n  00-03-07 \u27e6check\u27e7\n  00-04-07 \u27e6check\u27e7\n  00-05-07 \u27e6check\u27e7\n  00-00-08 \u27e6check\u27e7\n  00-01-08 \u27e6check\u27e7\n  00-02-08 \u27e6check\u27e7\n  00-03-08 \u27e6check\u27e7\n  00-04-08 \u27e6check\u27e7\n  00-05-08 \u27e6check\u27e7\n  00-00-09 \u27e6check\u27e7\n  00-01-09 \u27e6check\u27e7\n  00-02-09 \u27e6check\u27e7\n  00-03-09 \u27e6check\u27e7\n  00-04-09 \u27e6check\u27e7\n  00-05-09 \u27e6check\u27e7\n  00-00-10 \u27e6check\u27e7\n  00-01-10 \u27e6check\u27e7\n  00-02-10 \u27e6check\u27e7\n  00-03-10 \u27e6check\u27e7\n  00-04-10 \u27e6check\u27e7\n  00-05-10 \u27e6check\u27e7\n  00-00-11 \u27e6check\u27e7\n  00-01-11 \u27e6check\u27e7\n  00-02-11 \u27e6check\u27e7\n  00-03-11 \u27e6check\u27e7\n  00-04-11 \u27e6check\u27e7\n  00-05-11 \u27e6check\u27e7\n  00-00-12 \u27e6check\u27e7\n  00-01-12 \u27e6check\u27e7\n  00-02-12 \u27e6check\u27e7\n  00-03-12 \u27e6check\u27e7\n  00-04-12 \u27e6check\u27e7\n  00-05-12 \u27e6check\u27e7\n  00-00-13 \u27e6check\u27e7\n  00-01-13 \u27e6check\u27e7\n  00-02-13 \u27e6check\u27e7\n  00-03-13 \u27e6check\u27e7\n  00-04-13 \u27e6check\u27e7\n  00-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-00-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17838,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "request_sha256": "70955af879c8b72ab3395b3d69df7837e8ea9d22d80add77ec9f3e3c783c1d2d",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-848b4adac3f242d6",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff2-25c0-7c01-8e89-4281dc803340",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17838,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.076176814036444
+    }
+  ],
+  "claim_status": "calibration_only",
+  "commit": "3938b55fc9a410c1b548ea7e8b2a40d7e5f264a7",
+  "created_at": "2026-08-26T21:20:33.160769+00:00",
+  "execution_path": "production Go economizer handler in-process; ephemeral Codex CLI",
+  "model": "gpt-5.6-sol",
+  "run_id": "roi-codex-pilot-848b4adac3f242d6",
+  "schema_version": 1,
+  "seed": 20260826,
+  "summary": {
+    "api_price_equivalent_delta_usd": 0.0005920000000000022,
+    "by_condition": {
+      "full": {
+        "actual_marginal_cash_usd": 0.0,
+        "api_price_equivalent_usd": 0.0356896,
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17838,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0,
+        "resolved": true
+      },
+      "off": {
+        "actual_marginal_cash_usd": 0.0,
+        "api_price_equivalent_usd": 0.0350976,
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17690,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0,
+        "resolved": true
+      }
+    },
+    "input_token_delta": 148,
+    "output_token_delta": 0,
+    "quality_gate_equal_resolved": true,
+    "unique_threads": true
+  },
+  "task_corpus_sha256": "e077a2d47e81e8df52fb79d57daa07d502d2c0100bb2de9ec1e3ad5e667db6c7",
+  "wall_seconds": 8.342052893945947
+}
