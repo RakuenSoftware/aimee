@@ -33,6 +33,10 @@ DB2_TEST_BACKEND_LIB = $(PQ_LIB)
 # wanted sqlite", which are otherwise the same code path and abort identically.
 # Target-specific so only the shim sees it, rather than redefining every object.
 $(OBJDIR)/db2/db2_test_shim.o: C_FLAGS += -DAIMEE_TEST_PG_BACKEND=1
+# The round-trip counter the batching tests assert on. The sqlite shim carries it
+# unconditionally (it is test-only); the libpq layer is also production code, so
+# it compiles the counter only for this test-only object.
+$(OBJDIR)/db2/db_postgres.o: C_FLAGS += -DAIMEE_PG_STMT_COUNTER=1
 endif
 
 
