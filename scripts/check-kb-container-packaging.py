@@ -19,7 +19,15 @@ except ImportError:  # pragma: no cover - fail-closed packaging prerequisite
 REQUIRED_DOCKERFILE_PATTERNS = {
     "named-build-stage": r"(?im)^FROM\s+\S+\s+AS\s+build\b",
     "builds-aimee-kb": r"make\s+-C\s+src\s+\.\./aimee-kb",
+    "builds-aimee-kb-worm": r"make\s+-C\s+src[^\n]*\.\./aimee-kb-worm",
     "copies-aimee-kb": r"COPY\s+--from=build\s+/src/aimee-kb\s+/usr/local/bin/aimee-kb",
+    "copies-aimee-kb-worm": (
+        r"COPY\s+--from=build\s+/src/aimee-kb-worm\s+/usr/local/bin/aimee-kb-worm"
+    ),
+    # SQLite belongs only to the separately linked WORM worker. check-linking
+    # independently rejects SQLite linkage in the aimee-kb service binary.
+    "sqlite-worm-build-dependency": r"\blibsqlite3-dev\b",
+    "sqlite-worm-runtime-dependency": r"\blibsqlite3-0\b",
     "aimee-home-env": r"(?m)^ENV\s+AIMEE_HOME=/var/lib/aimee\b",
     # DB2 ships IN the image so an unconfigured deployment has a working vector
     # store without pulling a third-party database image at runtime.
@@ -37,7 +45,6 @@ REQUIRED_DOCKERFILE_PATTERNS = {
 
 FORBIDDEN_DOCKERFILE_PATTERNS = {
     "server-binary": r"aimee-server",
-    "sqlite-package": r"sqlite3|libsqlite3",
     "db1-reference": r"\bDB1\b|db1/",
     # A baked URL makes an unconfigured install silently depend on a sibling
     # container instead of starting the PostgreSQL shipped inside aimee-kb.
@@ -625,6 +632,10 @@ def plant_test() -> int:
         expected = {
             "Dockerfile missing named-build-stage",
             "Dockerfile missing copies-aimee-kb",
+            "Dockerfile missing builds-aimee-kb-worm",
+            "Dockerfile missing copies-aimee-kb-worm",
+            "Dockerfile missing sqlite-worm-build-dependency",
+            "Dockerfile missing sqlite-worm-runtime-dependency",
             "Dockerfile missing aimee-home-env",
             "Dockerfile missing db2-embedded-engine",
             "Dockerfile missing runtime-user",
@@ -651,13 +662,16 @@ def plant_test() -> int:
             "\n".join(
                 [
                     "FROM debian AS build",
-                    "RUN make -C src ../aimee-kb",
+                    "RUN apt-get install -y libsqlite3-dev",
+                    "RUN make -C src ../aimee-kb ../aimee-kb-worm",
                     "FROM debian",
                     "RUN apt-get install -y \\",
                     "        postgresql-${PG_MAJOR}-pgvector \\",
+                    "        libsqlite3-0 \\",
                     "        python3",
                     "ENV AIMEE_HOME=/var/lib/aimee",
                     "COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb",
+                    "COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm",
                     "COPY scripts/embed-remote.py /opt/aimee/scripts/",
                     "COPY deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml",
                     "USER aimee",

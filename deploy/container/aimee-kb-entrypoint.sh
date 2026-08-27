@@ -419,12 +419,12 @@ SQL
 
     start_embedded_worm() {
         (
-            # aimee-kb owns schema migration. Wait until the bounded drainer
-            # exists, then install exactly the worker grants and drop every
+            # aimee-kb owns schema migration. Wait until the bounded claim/ack
+            # API exists, then install exactly the worker grants and drop every
             # direct storage/function capability before authenticating as it.
             while process_alive "$kb"; do
                 if "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet --tuples-only \
-                    --command="SELECT to_regprocedure('aimee_kb_worm_api.drain(integer)') IS NOT NULL" \
+                    --command="SELECT to_regprocedure('aimee_kb_worm_api.claim(integer)') IS NOT NULL AND to_regprocedure('aimee_kb_worm_api.ack(bigint,bigint)') IS NOT NULL" \
                     2>/dev/null | grep -q t; then
                     break
                 fi
@@ -445,9 +445,13 @@ SQL
   REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_worm_worker;
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_worm_worker;
   REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_worm_api FROM aimee_kb_worm_worker;
-  GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.drain(INTEGER) TO aimee_kb_worm_worker;
+  GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.claim(INTEGER),
+    aimee_kb_worm_api.ack(BIGINT,BIGINT) TO aimee_kb_worm_worker;
 SQL
-            exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" aimee-kb-worm
+            mkdir -p "$AIMEE_HOME/audit"
+            exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" \
+                AIMEE_WORM_PATH="$AIMEE_HOME/audit/kb-worm-live.db" \
+                aimee-kb-worm
         ) &
         worm=$!
     }

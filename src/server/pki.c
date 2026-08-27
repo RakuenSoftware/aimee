@@ -10,8 +10,6 @@
 #include "aimee.h"           /* MAX_PATH_LEN */
 #include "log.h"
 
-#include <sqlite3.h>
-
 #include <openssl/bn.h>
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <openssl/err.h>
@@ -81,7 +79,7 @@ int pki_server_tls_key_load(char *out, size_t cap)
    return 0;
 }
 
-/* --- DB1 (caller holds no lock; sqlite is serialized) --- */
+/* --- DB1 (reached through the store module) --- */
 
 /* Add a serial to the in-memory snapshot (caller holds g_mu). */
 static void snapshot_add(const char *serial)

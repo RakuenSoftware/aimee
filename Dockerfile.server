@@ -1,4 +1,5 @@
-# aimee-server: the agent/memory broker. Owns DB1 (user-scoped SQLite store) and
+# aimee-server: the agent/memory broker. Owns DB1 through the PostgreSQL-backed
+# aimee/postgres module pair and
 # fronts the /v1 HTTP API; it reaches aimee-kb (DB2 + pgvector) over HTTP via
 # AIMEE_KB_API_URL. Without that URL the kb-backed (shared/vector) features are
 # simply unavailable, so this image also runs standalone (DB1-backed endpoints
@@ -172,8 +173,10 @@ RUN apt-get update \
         > /etc/apt/sources.list.d/pgdg.list \
     && rm -rf /var/lib/apt/lists/*
 
-# Runtime shared libs the server links: libsqlite3 (DB1), libssl/libcrypto
-# (crypto), libzstd + zlib (compression). The server reaches Postgres-backed DB2
+# Runtime shared libs the server links: libsqlite3 (the separate append-only
+# audit WORM), libssl/libcrypto (crypto), libzstd + zlib (compression). DB1 is
+# reached through the postgres module rather than linked into the server. The
+# server reaches Postgres-backed DB2
 # only through aimee-kb, so it does not link libpq itself. curl is for the
 # container HEALTHCHECK. libcrypt is retained only to verify a one-time migrated
 # PAM hash; libpam0g remains in the Go binary's existing cgo link closure but no

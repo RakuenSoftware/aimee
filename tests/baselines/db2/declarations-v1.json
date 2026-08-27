@@ -1239,12 +1239,7 @@
   ],
   "declarations": [
     {
-      "consumers": [
-        "src/kb/kb_module_stage_adapters.c",
-        "src/tests/test_code_project_lifecycle.c",
-        "src/tests/test_kb_audit_worm.c",
-        "src/tests/test_kb_audit_worm_pg.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
@@ -1253,7 +1248,7 @@
       ],
       "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
       "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
-      "status": "audit-pending",
+      "status": "internal-unconsumed",
       "symbol": "aimee_db2_register_audit_hash_provider"
     },
     {
@@ -1638,7 +1633,6 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
-        "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_p2b_egress_live.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
@@ -1856,6 +1850,7 @@
         "src/tests/test_db2.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -1968,7 +1963,6 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_index.c",
-        "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
@@ -2179,6 +2173,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -2382,6 +2377,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -2562,6 +2558,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -9641,7 +9638,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_code_project_lifecycle.c"
+        "src/tests/test_code_project_lifecycle.c",
+        "src/tests/test_kb_audit_worm.c"
       ],
       "locations": [
         {
@@ -9656,28 +9654,14 @@
     },
     {
       "consumers": [
+        "src/kb/kb_service_kb.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 40
-        }
-      ],
-      "signature": "long db2_kb_audit_count ( void )",
-      "signature_sha256": "5bee08fcd0d1ed74c486e8f1badce0a0945b4a9aba75da7cbde8e1951d4313aa",
-      "status": "private-test-only",
-      "symbol": "db2_kb_audit_count"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service_kb.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 45
+          "line": 38
         }
       ],
       "signature": "int db2_kb_audit_pending ( long long * count , long long * oldest_age_seconds )",
@@ -9686,27 +9670,11 @@
       "symbol": "db2_kb_audit_pending"
     },
     {
-      "consumers": [
-        "src/tests/test_kb_audit_worm.c",
-        "src/tests/test_kb_audit_worm_pg.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 37
-        }
-      ],
-      "signature": "int db2_kb_audit_verify_chain ( char * err , size_t errlen )",
-      "signature_sha256": "2a63fd0afff412034c71cfbda2216cb396884da61831f881441bb51e1fb181d6",
-      "status": "private-test-only",
-      "symbol": "db2_kb_audit_verify_chain"
-    },
-    {
       "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 51
+          "line": 44
         }
       ],
       "signature": "int db2_kb_audit_worm_enabled ( void )",
@@ -9721,7 +9689,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 50
+          "line": 43
         }
       ],
       "signature": "void db2_kb_audit_worm_set_enabled ( int enabled )",
@@ -27009,15 +26977,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "634a8dcb7e83830a6aa0438606d542534f04ee23940aeed0379c71373a046e4e",
+  "fingerprint": "e98dead41d00ccefb2abf9f926e62d8aee02651f942d5509c7b3cded7138cb9d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 738,
-    "declarations": 1489,
+    "audit_pending": 737,
+    "declarations": 1487,
     "headers": 143,
-    "internal_unconsumed": 171,
-    "private_test_only": 286,
+    "internal_unconsumed": 172,
+    "private_test_only": 284,
     "reviewed": 294
   }
 }

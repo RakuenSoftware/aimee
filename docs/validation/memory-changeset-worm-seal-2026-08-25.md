@@ -32,7 +32,7 @@ granted to runtime, so a direct call was not open to them. The omission was
 therefore structural rather than accidental: there was no seam they could use.
 
 No unit test could observe it. The sqlite shim (`schema_sqlite.sql`) mirrors
-`fact_graph_commits`, `fact_graph_changes`, `kb_audit_event` and the semantic
+`fact_graph_commits`, `fact_graph_changes`, `kb_audit_outbox` and the semantic
 mutation guards, but carries none of these five functions and no evidence
 trigger. The unsealed close does not exist under the shim, so there is nothing
 there to fail.
@@ -51,17 +51,17 @@ The follow-up removes chain construction from every PostgreSQL producer:
   transactional notification.
 - `db2_kb_audit_append_in_txn` submits to that function in production; the C
   process no longer reads the chain head, takes its lock, computes its hash, or
-  inserts `kb_audit_event`.
+  inserts an immutable `kb_audit_outbox` intent.
 - `aimee-kb-worm` is a separate libpq-only process requiring
   `AIMEE_WORM_DB2_URL`; it refuses to reuse the ordinary runtime credential.
 - `aimee_kb_worm_worker` has no access to the application `public` schema and
   no table or sequence privileges. Its only capability is the bounded
-  `aimee_kb_worm_api.drain(limit)` definer in an isolated schema.
+  isolated `aimee_kb_worm_api.claim(limit)` / `ack(outbox_id,seq)` definers.
 - Drain, chain append, witness append, and immutable delivery acknowledgement
   commit together. A crash leaves either all of them or none of them.
 
-The worker preserves the established canonical row bytes, same action and
-same `commit_id=<id>` detail, so `db2_kb_audit_verify_chain()` continues to
+The worker preserves the established canonical row bytes — same action and
+same `commit_id=<id>` detail — so the shared SQLite worker continues to
 verify the resulting trail.
 
 ## Verified

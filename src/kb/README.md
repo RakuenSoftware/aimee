@@ -7,7 +7,8 @@ It does not own DB1, workflow state, thin-client paths, or another KB's corpus.
 
 ## Boundaries
 
-- links libpq, never SQLite;
+- the main service links libpq, never SQLite; the separate `aimee-kb-worm`
+  process links the shared SQLite WORM implementation;
 - accepts typed `/v1` operations from server and authorized KB clients;
 - owns every DB2 transaction and background queue claim;
 - owns embedding and synthesis role placement for this KB;
@@ -26,6 +27,8 @@ configured and available. Changing index type rebuilds the index; it does not re
 
 Workers claim DB2 queue rows with database locking so several KB workers do not process the same
 item. Horizontal replicas still need sane database connection limits and one shared schema version.
+The WORM worker is the exception: run exactly one instance against its persistent
+SQLite file; a session lock rejects concurrent WORM consumers.
 
 ## Main areas
 

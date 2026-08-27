@@ -570,7 +570,7 @@ int main(void)
    assert(scalar_int("SELECT COUNT(*) FROM entity_edges WHERE id="
                      " (SELECT MAX(id) FROM entity_edges WHERE source='jane' AND target='acme')") ==
           0);
-   assert(scalar_int("SELECT COUNT(*) FROM kb_audit_event WHERE action LIKE 'fact.%'") > 0);
+   assert(scalar_int("SELECT COUNT(*) FROM kb_audit_outbox WHERE action LIKE 'fact.%'") > 0);
    (void)jane_acme;
 
    /* bad args / no-op. */

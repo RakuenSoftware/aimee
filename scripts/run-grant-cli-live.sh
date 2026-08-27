@@ -222,9 +222,9 @@ out=$(G set --subject alice --server livesrv --team 990001 --tier data) || fail 
 # refused every call, so increment 5 was wired end to end and could not create a grant.
 [ "$(rows "SELECT granted_by FROM kb_write_tier_grant WHERE subject='alice'")" = "owner" ] \
   || fail "granted_by is not the authenticated operator"
-[ "$(rows "SELECT count(*) FROM kb_audit_event WHERE action='authz.write_tier.set'")" = "1" ] \
+[ "$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action='authz.write_tier.set'")" = "1" ] \
   || fail "no WORM audit row for the set"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
   || fail "the audit row does not name the operator as actor"
 echo "  row=data granted_by=owner, audited with actor=owner"
 
@@ -276,7 +276,7 @@ G revoke --subject alice --server livesrv --team 990001 >/dev/null || fail "revo
   || fail "revoked_at was not set"
 [ "$(rows "SELECT count(*) FROM kb_write_tier_grant WHERE subject='alice'")" = "1" ] \
   || fail "revocation did not retain exactly one row"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
   || fail "the revoke audit row does not name the operator"
 echo "  retained, revoked_at set, audited as owner"
 
@@ -303,9 +303,9 @@ G set --subject alice --server nosuchsrv --team 990001 --tier data >/dev/null 2>
 echo "  nothing written"
 
 step "the audit trail reconstructs the sequence"
-psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_event
-            WHERE action LIKE 'authz.write_tier%' ORDER BY seq" | sed 's/^/  /'
-n=$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")
+psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_outbox
+            WHERE action LIKE 'authz.write_tier%' ORDER BY outbox_id" | sed 's/^/  /'
+n=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")
 [ "$n" -ge 7 ] || fail "expected at least 7 audit rows, found $n"
 
 step "PASSED"

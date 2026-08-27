@@ -23,6 +23,8 @@ def sources() -> dict[str, str]:
         "c_appender": "src/modules/db2/c/kb_audit_worm.c",
         "fact_mutation": "src/modules/db2/c/fact_mutation.c",
         "worker": "src/kb/kb_worm_worker_main.c",
+        "server": "src/server/server_main.c",
+        "worm_store": "src/modules/audit/audit_worm.c",
         "makefile": "src/Makefile",
         "dockerfile": "Dockerfile",
         "entrypoint": "deploy/container/aimee-kb-entrypoint.sh",
@@ -35,19 +37,32 @@ class WormWorkerBoundaryTest(unittest.TestCase):
     def test_repository_contract_passes(self) -> None:
         self.assertEqual([], CHECK.audit(**sources()))
 
-    def test_runtime_chain_insert_is_rejected(self) -> None:
+    def test_postgres_chain_table_is_rejected(self) -> None:
         data = sources()
-        data["grants"] += "\nGRANT INSERT ON kb_audit_event TO aimee_kb_runtime;\n"
+        data["schema"] += "\nCREATE TABLE IF NOT EXISTS kb_audit_event(seq BIGINT);\n"
         self.assertIn(
-            "grants: runtime has direct INSERT on kb_audit_event", CHECK.audit(**data)
+            "schema: PostgreSQL still owns a WORM chain table", CHECK.audit(**data)
+        )
+
+    def test_retired_chain_guard_dependency_is_rejected(self) -> None:
+        data = sources()
+        data["schema"] = data["schema"].replace(
+            "EXECUTE FUNCTION kb_management_jwks_publication_root_guard()",
+            "EXECUTE FUNCTION kb_worm_block()",
+            1,
+        )
+        self.assertIn(
+            "schema: an immutable table still depends on the retired PG chain guard",
+            CHECK.audit(**data),
         )
 
     def test_foreground_chain_builder_is_rejected(self) -> None:
         data = sources()
         data["c_appender"] = data["c_appender"].replace(
-            "/* Production producers never read, lock, hash, or insert the chain.",
-            'const char *bad = "INSERT INTO kb_audit_event";\n'
-            "   /* Production producers never read, lock, hash, or insert the chain.",
+            "#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM",
+            '#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM\n'
+            '   const char *bad = "INSERT INTO kb_audit_event";\n'
+            "   (void)bad;",
             1,
         )
         self.assertIn(
@@ -61,15 +76,25 @@ class WormWorkerBoundaryTest(unittest.TestCase):
             "worker binary: forbidden dependency marker fact_mutation.h", CHECK.audit(**data)
         )
 
+    def test_shared_startup_admission_is_required(self) -> None:
+        data = sources()
+        data["server"] = data["server"].replace(
+            "audit_worm_startup_verify", "audit_worm_verify", 1
+        )
+        self.assertIn(
+            "server binary: shared WORM startup admission is not enforced",
+            CHECK.audit(**data),
+        )
+
     def test_worker_link_growth_is_rejected(self) -> None:
         data = sources()
         data["makefile"] = data["makefile"].replace(
-            "$(KB_WORM): $(OBJDIR)/kb/kb_worm_worker_main.o",
-            "$(KB_WORM): $(OBJDIR)/kb/kb_worm_worker_main.o $(KB_DB2_OBJS)",
+            "$(KB_WORM): $(KB_WORM_OBJS)",
+            "$(KB_WORM): $(KB_WORM_OBJS) $(KB_DB2_OBJS)",
             1,
         )
         self.assertIn(
-            "Makefile: WORM binary link surface is not the single worker object",
+            "Makefile: WORM binary does not use its narrow object closure",
             CHECK.audit(**data),
         )
 

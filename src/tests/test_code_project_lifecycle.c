@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#include <aimee/audit/audit_worm_chain.h>
 #include <aimee/db2/host_contracts.h>
 
 #include "../modules/db2/c/code_index.h"
@@ -104,19 +103,19 @@ static void test_move_detach_readd(void)
                  " (SELECT id FROM projects WHERE name='stable-project')") == 1);
 
    int64_t detached_generation = 0;
-   exec_ok("ALTER TABLE kb_audit_event RENAME TO kb_audit_event_unavailable");
+   exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
    assert(db2_code_project_detach("stable-project", "tester", &detached_generation) ==
           CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'"
                  " AND lifecycle_state='current'") == 1);
-   exec_ok("ALTER TABLE kb_audit_event_unavailable RENAME TO kb_audit_event");
+   exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
    assert(db2_code_project_detach("stable-project", "tester", &detached_generation) == 0);
    assert(detached_generation == 1);
    assert(scalar("SELECT COUNT(*) FROM code_projection_generations"
                  " WHERE project='stable-project' AND state='visible'") == 0);
    assert(scalar("SELECT COUNT(*) FROM entity_edges WHERE edge_origin='code_projection'"
                  " AND source='project:stable-project'") == 0);
-   assert(scalar("SELECT COUNT(*) FROM kb_audit_event WHERE action='code.index.detach'"
+   assert(scalar("SELECT COUNT(*) FROM kb_audit_outbox WHERE action='code.index.detach'"
                  " AND actor_principal='tester' AND subject='stable-project'") == 1);
    project_info_t projects[8];
    int listed = db2_code_index_project_list(projects, 8);
@@ -227,11 +226,11 @@ static void test_manifest_confirmation_and_audit(void)
    snprintf(hash, sizeof(hash), "%s", dry.manifest_hash);
 
    /* If the standard WORM audit store cannot accept a row, no deletion lands. */
-   exec_ok("ALTER TABLE kb_audit_event RENAME TO kb_audit_event_unavailable");
+   exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
    assert(db2_code_project_purge_confirm("stable-project", hash, "tester", "cleanup", &confirmed) ==
           CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM projects WHERE name='stable-project'") == 1);
-   exec_ok("ALTER TABLE kb_audit_event_unavailable RENAME TO kb_audit_event");
+   exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
 
    char escaped_reason[513];
    memset(escaped_reason, '\n', sizeof(escaped_reason) - 1);
@@ -254,7 +253,7 @@ static void test_manifest_confirmation_and_audit(void)
    assert(scalar("SELECT COUNT(*) FROM curator_code_unit_vectors WHERE point_id=902") == 1);
    /* Purge clears index derivatives, not durable curator artifacts/memory. */
    assert(scalar("SELECT COUNT(*) FROM artifacts WHERE id='artifact-stable'") == 1);
-   assert(scalar("SELECT COUNT(*) FROM kb_audit_event WHERE action='code.index.purge'"
+   assert(scalar("SELECT COUNT(*) FROM kb_audit_outbox WHERE action='code.index.purge'"
                  " AND actor_principal='tester' AND subject='stable-project'"
                  " AND detail LIKE '%manifest_hash%' AND detail LIKE '%generation%'"
                  /* ESCAPE '~': backslash is LIKE's default escape character in
@@ -332,14 +331,14 @@ static void test_gc_audit(void)
    assert(db2_code_project_gc_confirm("gc-project", 60, hash, "tester", "retention", &done) ==
           CODE_PROJECT_LIFECYCLE_HASH_MISMATCH);
 
-   exec_ok("ALTER TABLE kb_audit_event RENAME TO kb_audit_event_unavailable");
+   exec_ok("ALTER TABLE kb_audit_outbox RENAME TO kb_audit_outbox_unavailable");
    assert(db2_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) ==
           CODE_PROJECT_LIFECYCLE_AUDIT_FAILED);
    assert(scalar("SELECT COUNT(*) FROM code_project_aliases WHERE project_id="
                  " (SELECT id FROM projects WHERE name='gc-project')") == 2);
    assert(scalar("SELECT COUNT(*) FROM files WHERE project_id="
                  " (SELECT id FROM projects WHERE name='gc-project')") == 2);
-   exec_ok("ALTER TABLE kb_audit_event_unavailable RENAME TO kb_audit_event");
+   exec_ok("ALTER TABLE kb_audit_outbox_unavailable RENAME TO kb_audit_outbox");
 
    assert(db2_code_project_gc_confirm("gc-project", 30, hash, "tester", "retention", &done) == 0);
    assert(strcmp(done.mode, "confirmed") == 0);
@@ -368,7 +367,7 @@ static void test_gc_audit(void)
                  " AND generation=2") == 1);
    assert(scalar("SELECT COUNT(*) FROM css_render_snapshots WHERE project='gc-project'"
                  " AND generation=2") == 1);
-   assert(scalar("SELECT COUNT(*) FROM kb_audit_event WHERE action='code.index.gc'"
+   assert(scalar("SELECT COUNT(*) FROM kb_audit_outbox WHERE action='code.index.gc'"
                  " AND actor_principal='tester' AND subject='gc-project'") == 1);
    puts("  PASS: retention GC is manifest-fenced, audited, and fail-closed");
 }
@@ -404,7 +403,6 @@ static void test_reindex_under_new_name_takes_the_alias(void)
 int main(void)
 {
    db2_test_shim_open();
-   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    test_move_detach_readd();
    test_manifest_confirmation_and_audit();
    test_gc_audit();

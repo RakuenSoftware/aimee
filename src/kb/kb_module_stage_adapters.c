@@ -23,7 +23,6 @@
 #include "vault_witness_signer.h"
 #include "vault_witness_verify.h"
 
-#include <aimee/audit/audit_worm_chain.h>
 #include <aimee/audit/obs_bus.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/core/event_bus/module_protocol.h>
@@ -599,7 +598,6 @@ static int learning_classify(const char *signal, uint32_t *sink_mask)
 
 void kb_module_stage_adapters_configure(void)
 {
-   aimee_db2_register_audit_hash_provider(audit_worm_row_hash);
    aimee_db2_register_mdl_score_provider(score_mdl);
    aimee_db2_register_fact_gate_provider(check_fact_gate);
    aimee_db2_register_fact_extract_provider(extract_facts);

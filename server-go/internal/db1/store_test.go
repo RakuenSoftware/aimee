@@ -2,7 +2,6 @@ package db1_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"math"
@@ -33,75 +32,6 @@ func newTestStore(t *testing.T) (*db1.Store, string) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	return store, storePath
-}
-
-func TestOpenMigratesPreGoWorkflowSchema(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec(`CREATE TABLE lifecycle_work_item (id INTEGER PRIMARY KEY, work_item_id TEXT UNIQUE, repo TEXT DEFAULT '', proposal_path TEXT DEFAULT '', workflow_name TEXT DEFAULT 'build', workflow_version TEXT DEFAULT '', current_stage TEXT DEFAULT '', state TEXT DEFAULT 'active', mode TEXT DEFAULT 'autonomous', pause_reason TEXT DEFAULT '', paused_state TEXT DEFAULT '', content_hash TEXT DEFAULT '', pr_ref TEXT DEFAULT '', submitter TEXT DEFAULT '', cum_cost_usd REAL DEFAULT 0, override_count INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP, UNIQUE(repo, proposal_path))`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close()
-	store, err := db1test.Open(t, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_migrated", Repo: "r", ProposalPath: "p", WorkflowName: "build", WorkflowVersion: strings.Repeat("a", 64), StartStage: "start", SourcePath: "docs/proposals/pending/p.md"}); err != nil {
-		t.Fatal(err)
-	}
-	item, err := store.WorkItem(context.Background(), "wi_migrated")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if item.SourcePath == "" {
-		t.Fatal("source_path migration missing")
-	}
-}
-
-func TestOpenBackfillsLegacyDelegateMappingOwnership(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "legacy-mapping.db")
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = db.Exec(`
-CREATE TABLE lifecycle_work_item (
- id INTEGER PRIMARY KEY, work_item_id TEXT UNIQUE, repo TEXT DEFAULT '', proposal_path TEXT DEFAULT '',
- workflow_name TEXT DEFAULT 'build', workflow_version TEXT DEFAULT '', current_stage TEXT DEFAULT '',
- state TEXT DEFAULT 'active', mode TEXT DEFAULT 'autonomous', pause_reason TEXT DEFAULT '', paused_state TEXT DEFAULT '',
- content_hash TEXT DEFAULT '', pr_ref TEXT DEFAULT '', submitter TEXT DEFAULT '', cum_cost_usd REAL DEFAULT 0,
- override_count INTEGER DEFAULT 0, created_at TEXT DEFAULT CURRENT_TIMESTAMP, updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
- UNIQUE(repo, proposal_path));
-INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_legacy_owner','repo','legacy','impl','stopped');
-INSERT INTO lifecycle_work_item(work_item_id,repo,proposal_path,current_stage,state) VALUES('wi_%_wildcard','repo','wildcard','impl','stopped');
-CREATE TABLE lifecycle_delegate_job (
- execution_key TEXT PRIMARY KEY, job_id INTEGER NOT NULL, participant_token TEXT NOT NULL DEFAULT '',
- updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_legacy_owner:impl:v1:hash',91);
-INSERT INTO lifecycle_delegate_job(execution_key,job_id) VALUES('wi_X_wildcard:impl:v1:hash',92);
-CREATE TABLE agent_jobs (id INTEGER PRIMARY KEY,status TEXT NOT NULL,participant_token TEXT NOT NULL DEFAULT '');
-INSERT INTO agent_jobs(id,status) VALUES(91,'running'),(92,'running');`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = db.Close()
-	store, err := db1test.Open(t, path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer store.Close()
-	mappings, err := store.TerminalDelegateJobs(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(mappings) != 1 || mappings[0].ExecutionKey != "wi_legacy_owner:impl:v1:hash" || mappings[0].JobID != 91 {
-		t.Fatalf("legacy mappings=%+v", mappings)
-	}
 }
 
 func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
@@ -710,7 +640,7 @@ func TestExpiredPostDispatchLeaseBecomesReplayOnlyAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID)
+	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +778,7 @@ func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
 	if busy, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second"); err != nil || !busy.Busy || busy.Allowed || busy.ReplayOnly {
 		t.Fatalf("busy=%+v err=%v", busy, err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID)
+	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	replay, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second")
 	if err != nil || !replay.ReplayOnly || replay.Amount != 0 {
 		t.Fatalf("replay=%+v err=%v", replay, err)
@@ -897,7 +827,7 @@ func TestDeniedReconciliationStaysDeniedAcrossRestart(t *testing.T) {
 		t.Fatalf("a allowed=%v err=%v", allowed, err)
 	}
 	// Crash before ParkBudgetTree: the denied decision was never acted on.
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_deny_a")
+	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_deny_a")
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +869,7 @@ func TestConcurrentReplayAdmissionAdmitsExactlyOneOwner(t *testing.T) {
 	if allowed, err := first.ReconcileWorkflowBudget(ctx, item.ID, "dead-owner", .4); err != nil || !allowed {
 		t.Fatalf("allowed=%v err=%v", allowed, err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID)
+	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	winner, err := first.ReserveWorkflowBudget(ctx, item.ID, "replay-one")
 	if err != nil || !winner.ReplayOnly {
 		t.Fatalf("winner=%+v err=%v", winner, err)
@@ -1005,7 +935,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A restart resumes: a new owner takes replay ownership.
-		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID)
+		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
 		if err != nil || !res.ReplayOnly {
 			t.Fatalf("res=%+v err=%v", res, err)
@@ -1032,7 +962,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 		if allowed, err := store.ReconcileWorkflowBudget(ctx, item.ID, "owner1", 0.4); err != nil || !allowed {
 			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
 		}
-		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, item.ID)
+		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
 		if err != nil || !res.ReplayOnly {
 			t.Fatalf("res=%+v err=%v", res, err)

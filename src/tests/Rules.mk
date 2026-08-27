@@ -5402,10 +5402,8 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
-# P2a atomic-audit proof. REAL-PG test (SKIPs without AIMEE_TEST_PG_URL): builds a mixed
-# [C, SQL, C] kb_audit_event chain and asserts the C verifier accepts it + the SQL row
-# hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
-# via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
+# P2a atomic-audit proof. REAL-PG test (SKIPs without AIMEE_TEST_PG_URL): mixed C and
+# SQL producers submit immutable intents, then the claim/ack API records delivery.
 # Content-scope referent + predicate (slice 1). REAL-PG test: SKIPs cleanly
 # without AIMEE_TEST_PG_URL, because RLS and current_setting mean nothing on the
 # SQLite shim.

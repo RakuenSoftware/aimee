@@ -35,8 +35,7 @@ for pass in 1 2; do
 done
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/fact-mutation-pg-test.sql" >/dev/null
 
-# Parallel producers write only immutable outbox intents; the WORM consumer
-# serializes those committed intents into one gap-free chain.
+# Parallel producers write immutable outbox intents in their own transactions.
 workers=8
 for i in $(seq 1 "$workers"); do
   psql -v ON_ERROR_STOP=1 "$DB_URL" \
@@ -49,18 +48,9 @@ pending="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
   "SELECT pending_count FROM kb_audit_worm_pending()")"
 [ "$pending" -ge "$workers" ] || {
   echo "expected at least $workers pending audit intents, got $pending" >&2; exit 1; }
-pre_drain="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
-  "SELECT count(*) FROM kb_audit_event WHERE action='fact.concurrent'")"
-[ "$pre_drain" = "0" ] || {
-  echo "producer path wrote $pre_drain chain rows before the worker drained" >&2; exit 1; }
-psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c "SELECT kb_audit_worm_drain(1000)" >/dev/null
-
 count="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
-  "SELECT count(*) FROM kb_audit_event WHERE action='fact.concurrent'")"
-[ "$count" = "$workers" ] || { echo "expected $workers concurrent audit rows, got $count" >&2; exit 1; }
-broken="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
-  "SELECT count(*) FROM (SELECT seq,lag(row_hash) OVER (ORDER BY seq) p,prev_hash FROM kb_audit_event) q WHERE seq>1 AND p<>prev_hash")"
-[ "$broken" = "0" ] || { echo "concurrent WORM chain has $broken broken predecessor links" >&2; exit 1; }
+  "SELECT count(*) FROM kb_audit_outbox WHERE action='fact.concurrent'")"
+[ "$count" = "$workers" ] || { echo "expected $workers concurrent audit intents, got $count" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # A memory mutation submits its changeset seal into the immutable WORM outbox in
@@ -91,14 +81,12 @@ sealed_count() {
   psql -Atq -v ON_ERROR_STOP=1 "$1" -c \
     "SELECT count(*) FROM fact_graph_commits c
       WHERE c.operation LIKE 'memory.%'
-        AND EXISTS (SELECT 1 FROM kb_audit_event a
+        AND EXISTS (SELECT 1 FROM kb_audit_outbox a
                      WHERE a.detail = 'commit_id=' || c.commit_id
                        AND a.action = c.operation)"
 }
 
 seal_probe "$DB_URL" "worm-seal-probe"
-psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c "SELECT kb_audit_worm_drain(1000)" >/dev/null
-
 closed="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
   "SELECT count(*) FROM fact_graph_commits WHERE operation LIKE 'memory.%' AND status='applied'")"
 [ "$closed" -ge 1 ] || { echo "seal probe closed no memory changeset (got $closed)" >&2; exit 1; }
@@ -110,16 +98,11 @@ sealed="$(sealed_count "$DB_URL")"
 # The seal must record the authenticated actor and authority off the changeset
 # row, not whatever the caller felt like passing.
 actor="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
-  "SELECT a.actor_principal || '/' || a.actor_role FROM kb_audit_event a
+  "SELECT a.actor_principal || '/' || a.actor_role FROM kb_audit_outbox a
      JOIN fact_graph_commits c ON a.detail = 'commit_id=' || c.commit_id
-    WHERE c.operation LIKE 'memory.%' ORDER BY a.seq DESC LIMIT 1")"
+    WHERE c.operation LIKE 'memory.%' ORDER BY a.outbox_id DESC LIMIT 1")"
 [ "$actor" = "worm-seal-tester/user" ] || {
   echo "seal recorded actor '$actor', expected 'worm-seal-tester/user'" >&2; exit 1; }
-
-# Sealing a memory write must not break the chain it appends to.
-broken="$(psql -Atq -v ON_ERROR_STOP=1 "$DB_URL" -c \
-  "SELECT count(*) FROM (SELECT seq,lag(row_hash) OVER (ORDER BY seq) p,prev_hash FROM kb_audit_event) q WHERE seq>1 AND p<>prev_hash")"
-[ "$broken" = "0" ] || { echo "WORM chain broken after seal: $broken links" >&2; exit 1; }
 
 # ---------------------------------------------------------------------------
 # Negative control. Apply the same schema with the five seal CALLS stripped --
@@ -134,7 +117,6 @@ sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" |
   psql -v ON_ERROR_STOP=1 "$UNSEALED_URL" -f - >/dev/null
 
 seal_probe "$UNSEALED_URL" "worm-seal-probe-unsealed"
-psql -Atq -v ON_ERROR_STOP=1 "$UNSEALED_URL" -c "SELECT kb_audit_worm_drain(1000)" >/dev/null
 unsealed_closed="$(psql -Atq -v ON_ERROR_STOP=1 "$UNSEALED_URL" -c \
   "SELECT count(*) FROM fact_graph_commits WHERE operation LIKE 'memory.%' AND status='applied'")"
 [ "$unsealed_closed" -ge 1 ] || {
