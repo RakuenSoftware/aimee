@@ -10,17 +10,15 @@ extern "C"
 {
 #endif
 
-   /* Produce the canonical lowercase SHA-256 row hash for the shared audit WORM
-    * record. out_hex has room for 64 hex bytes plus NUL. */
+   /* Deprecated audit hash-provider ABI. New callers must not use it: the
+    * shared SQLite WORM owns canonical hashing directly. */
    typedef void (*aimee_db2_audit_hash_fn)(long long seq, const char *actor_role,
                                            const char *actor_principal, const char *action,
                                            const char *subject, const char *verdict,
                                            const char *key_id, const char *detail,
                                            const char *prev_hash, char out_hex[65]);
 
-   /* Install the audit module's canonical hash provider during process startup.
-    * NULL removes it. Audit appends and verification fail closed while absent or
-    * when the provider returns anything other than 64 lowercase hex bytes. */
+   /* Deprecated no-op retained for binary compatibility. */
    void aimee_db2_register_audit_hash_provider(aimee_db2_audit_hash_fn provider);
 
    /* Score one synthesis candidate against its evidence bundle. The provider

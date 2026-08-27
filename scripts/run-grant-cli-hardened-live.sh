@@ -417,7 +417,7 @@ out=$(G set --subject alice --server livesrv --team 990001 --tier data) || fail 
 # The granter is the actor kb AUTHENTICATED, never a value from the request body.
 [ "$(rows "SELECT granted_by FROM kb_write_tier_grant WHERE subject='alice'")" = "owner" ] \
   || fail "granted_by is not the authenticated operator"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox
              WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
   || fail "the audit row does not name the operator as actor"
 # THIS is what the hardened tier adds: the SECURITY DEFINER write succeeded while connected as
@@ -482,7 +482,7 @@ out=$(G revoke --subject alice --server livesrv --team 990001) || fail "revoke: 
   || fail "revoked_at was not set"
 [ "$(rows "SELECT count(*) FROM kb_write_tier_grant WHERE subject='alice'")" = "1" ] \
   || fail "revocation did not retain exactly one row"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox
              WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
   || fail "the revoke audit row does not name the operator"
 # The second warning an operator could not previously see: access is gone SHORTLY, not now.
@@ -562,9 +562,9 @@ done
 echo "  health=200 with the same bearer, so the refusal is the TRANSPORT gate, not auth"
 
 step "the audit trail reconstructs the sequence"
-psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_event
-            WHERE action LIKE 'authz.write_tier%' ORDER BY seq" | sed 's/^/  /'
-n=$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")
+psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_outbox
+            WHERE action LIKE 'authz.write_tier%' ORDER BY outbox_id" | sed 's/^/  /'
+n=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")
 [ "$n" -ge 7 ] || fail "expected at least 7 audit rows, found $n"
 
 step "kb logged no schema or permission failure"

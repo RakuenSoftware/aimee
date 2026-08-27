@@ -7,6 +7,10 @@ Wants=network-online.target
 Type=simple
 DynamicUser=yes
 EnvironmentFile=/etc/aimee/worm-worker.env
+Environment=AIMEE_HOME=/var/lib/aimee-worm
+Environment=AIMEE_WORM_PATH=/var/lib/aimee-worm/audit/kb-worm-live.db
+StateDirectory=aimee-worm
+StateDirectoryMode=0700
 ExecStart=/usr/local/bin/aimee-kb-worm
 Restart=on-failure
 RestartSec=2s

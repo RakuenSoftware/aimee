@@ -1,6 +1,6 @@
-/* kb_audit_worm.h: aimee-kb Postgres WORM audit producer seam (S5). Producers
- * commit immutable outbox intents; the separately credentialed aimee-kb-worm
- * process constructs the shared hash-chain record. */
+/* kb_audit_worm.h: aimee-kb WORM audit producer seam. Producers commit
+ * immutable PostgreSQL outbox intents; the separately credentialed worker
+ * constructs the chain with the shared SQLite audit_worm implementation. */
 #ifndef AIMEE_DB2_KB_AUDIT_WORM_H
 #define AIMEE_DB2_KB_AUDIT_WORM_H 1
 
@@ -16,8 +16,8 @@ extern "C"
                                      const char *subject, const char *verdict, const char *key_id,
                                      const char *detail, const char *prev_hash, char out_hex[65]);
 
-   /* Internal declaration of the host contract exported publicly through
-    * <aimee/db2/host_contracts.h>. NULL removes the provider. */
+   /* Deprecated no-op retained for ABI compatibility. Hashing is owned by the
+    * shared SQLite worker and is no longer injected into DB2. */
    void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider);
 
    /* Submit one governed action to the durable WORM outbox. detail is bounded
@@ -31,13 +31,6 @@ extern "C"
    int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
                                   const char *action, const char *subject, const char *verdict,
                                   const char *detail);
-
-   /* Recompute the whole chain (row_hash + prev linkage + gap-free seq). 0 if intact,
-    * -1 on the first break (reason in err). */
-   int db2_kb_audit_verify_chain(char *err, size_t errlen);
-
-   /* Row count (test/introspection). -1 on error. */
-   long db2_kb_audit_count(void);
 
    /* Durable producer backlog. Returns 0 and fills the available outputs, or
     * -1 when the database/function is unavailable. Age is zero for an empty

@@ -133,8 +133,8 @@ approval. It never auto-writes a durable, every-user-visible rule.
 
 Consolidate recurring, high-confidence db2 `episode` rows into durable org facts/rules:
 - Runs only when `intelligence.autopopulate.promote.enabled` (default 0) AND each promotion is
-  approved **per row** (never per batch; R2), because it mutates shared multi-user state.
-- Each promotion writes a **WORM audit** row (reuse `audit_worm_*` / `kb_audit_event`) recording
+  approved **per row** (never per batch — R2), because it mutates shared multi-user state.
+- Each promotion submits a **WORM audit** intent (reuse `audit_worm_*` / `kb_audit_outbox`) recording
   source episodes, resulting row, and approver.
 - **KB-ontology reconciliation (R2)**: before promoting, check the candidate against the KB's own
   typed-fact ontology reconciliation so the two systems don't diverge (a promoted rule that

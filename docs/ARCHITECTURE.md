@@ -17,8 +17,9 @@ flowchart LR
     S -->|typed /v1| K[aimee-kb, one-KB profile]
     S -->|provider API| P[model providers]
     K -->|remote model role, when configured| X[model endpoint]
-    S -->|module bus| D1[(DB1 PostgreSQL)]
-    F --> WF[(workflow SQLite)]
+    S -->|module bus| M[aimee store module]
+    F -->|module bus| M
+    M -->|postgres module| D1[(DB1 PostgreSQL)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
 ```
 
@@ -123,8 +124,9 @@ The current load-bearing consumer is observability:
 - MCP and tool-call activity;
 - tool completion outcomes.
 
-The host tap sees accepted events before routing. It writes an ordered capture stream while the
-consumer drains typed records to the WORM ledger or DB1. Storage stays off the request path.
+The host tap writes its own ordered observability stream. WORM evidence uses a
+separate producer/outbox path and does not run on, call, or depend on the tap;
+this makes compromise of either side independently detectable.
 
 Small events are inline. Large events use generation-checked arena leases. Backpressure is bounded;
 a producer blocks or receives `would_block`, and shed delivery is represented by an overflow event.
@@ -134,13 +136,15 @@ See [Event bus](EVENT_BUS.md).
 
 ## Storage
 
-There are two product data tiers and one workflow store.
+There are two product data tiers, one workflow store, and separate WORM evidence stores.
 
 | Store | Owner | Contents |
 | --- | --- | --- |
 | DB1, PostgreSQL | `aimee-store` module | sessions, working memory, local state, agent jobs, policy and audit state, caches |
 | Workflow SQLite | `aimee-wfe` | definitions, immutable snapshots, work items, lifecycle events, artifacts, retries and parks |
 | DB2, PostgreSQL + pgvector | `aimee-kb` | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
+| Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
+| KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
 
 The DB1/DB2 boundary is compile-enforced:
 
@@ -150,8 +154,10 @@ The DB1/DB2 boundary is compile-enforced:
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 
-The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only, with no
-database handles or queries, so both stores produce the same chain format.
+The server and KB worker share the complete SQLite WORM implementation, not two
+engine-specific approximations. Their files, keys, and process compartments are
+separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
+ledger needed for atomic KB mutation intent and idempotent delivery.
 
 New KB containers run a private PostgreSQL 18 cluster when no external `AIMEE_DB2_URL` is set. It is
 still DB2, still owned by the KB, and still independently exportable.

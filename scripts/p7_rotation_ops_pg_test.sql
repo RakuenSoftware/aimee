@@ -50,13 +50,11 @@ BEGIN
   SELECT count(*) INTO got FROM org_vault_rotation_probe_admit(
     'owner',rid,'worker-b',tok2,'p7:probe:one');
   IF got<>1 THEN RAISE EXCEPTION 'P7 OPS FAIL: probe admission returned no envelope'; END IF;
-  PERFORM kb_audit_worm_drain(1000);
-  SELECT count(*) INTO uses FROM kb_audit_event
+  SELECT count(*) INTO uses FROM kb_audit_outbox
     WHERE action='vault.rotation.probe_use' AND subject='p7:probe:one';
   PERFORM * FROM org_vault_rotation_probe_admit(
     'owner',rid,'worker-b',tok2,'p7:probe:one');
-  PERFORM kb_audit_worm_drain(1000);
-  IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.rotation.probe_use' AND
+  IF (SELECT count(*) FROM kb_audit_outbox WHERE action='vault.rotation.probe_use' AND
       subject='p7:probe:one')<>uses THEN
     RAISE EXCEPTION 'P7 OPS FAIL: probe admission duplicated WORM use';
   END IF;
@@ -132,7 +130,7 @@ RESET ROLE;
 
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM kb_audit_event WHERE action LIKE 'vault.rotation.%' AND
+  IF EXISTS (SELECT 1 FROM kb_audit_outbox WHERE action LIKE 'vault.rotation.%' AND
       (detail ILIKE '%secret-marker%' OR detail ILIKE '%7365637265742d6d61726b6572%')) THEN
     RAISE EXCEPTION 'P7 OPS FAIL: secret material appeared in WORM metadata';
   END IF;

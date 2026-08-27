@@ -27,6 +27,7 @@ RUN apt-get update \
         git \
         libp11-kit-dev \
         libpq-dev \
+        libsqlite3-dev \
         libssl-dev \
         libzstd-dev \
         pkg-config \
@@ -126,6 +127,7 @@ RUN apt-get update \
         curl \
         libgomp1 \
         libpq5 \
+        libsqlite3-0 \
         libssl3 \
         libzstd1 \
         python3 \

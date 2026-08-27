@@ -1,10 +1,11 @@
-/* kb_audit_worm.c: the aimee-kb WORM audit producer/verifier seam (S5).
- * PostgreSQL production builds submit immutable outbox intents; the dedicated
- * aimee-kb-worm process is the sole chain constructor. The SQLite unit-test shim
- * retains a local canonical builder to keep hash verification deterministic. */
+/* kb_audit_worm.c: aimee-kb's durable WORM producer seam.
+ *
+ * The KB transaction owns only an immutable PostgreSQL outbox intent. The
+ * separately credentialed aimee-kb-worm process claims committed intents and
+ * appends them through modules/audit/audit_worm.c, the same SQLite chain/store
+ * implementation used by aimee-server. No PostgreSQL chain builder lives here. */
 #include <stdio.h>
 #include <string.h>
-#include <time.h>
 
 #include <aimee/audit/audit_worm_chain.h>
 #include "../support/db2_runtime_config.h"
@@ -12,38 +13,15 @@
 #include "db_postgres.h"
 #include "kb_audit_worm.h"
 
-static db2_audit_hash_fn g_audit_hash_provider;
-
+/* Retained as a no-op ABI during the module transition. Canonical hashing is
+ * now owned directly by the shared SQLite WORM worker, not injected into DB2. */
 void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider)
 {
-   g_audit_hash_provider = provider;
-}
-
-static int kb_worm_row_hash(long long seq, const char *actor_role, const char *actor_principal,
-                            const char *action, const char *subject, const char *verdict,
-                            const char *key_id, const char *detail, const char *prev_hash,
-                            char out_hex[65])
-{
-   if (!out_hex)
-      return -1;
-   memset(out_hex, 0, 65);
-   if (!g_audit_hash_provider)
-      return -1;
-   g_audit_hash_provider(seq, actor_role, actor_principal, action, subject, verdict, key_id, detail,
-                         prev_hash, out_hex);
-   out_hex[64] = '\0';
-   for (size_t i = 0; i < 64; i++)
-      if (!((out_hex[i] >= '0' && out_hex[i] <= '9') || (out_hex[i] >= 'a' && out_hex[i] <= 'f')))
-      {
-         out_hex[0] = '\0';
-         return -1;
-      }
-   return 0;
+   (void)provider;
 }
 
 /* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
- * and cached, so the hot kb-audit seam costs one branch after the first call;
- * db2_kb_audit_worm_set_enabled() lets the app or a test override. */
+ * and cached, so the hot kb-audit seam costs one branch after the first call. */
 static int g_kb_worm_enabled = -1;
 void db2_kb_audit_worm_set_enabled(int enabled)
 {
@@ -52,21 +30,9 @@ void db2_kb_audit_worm_set_enabled(int enabled)
 int db2_kb_audit_worm_enabled(void)
 {
    if (g_kb_worm_enabled < 0)
-   {
       g_kb_worm_enabled = config_audit_worm_enabled() ? 1 : 0;
-   }
    return g_kb_worm_enabled;
 }
-
-#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
-static void kb_worm_ts(char out[32])
-{
-   time_t now = time(NULL);
-   struct tm tmv;
-   gmtime_r(&now, &tmv);
-   strftime(out, 32, "%Y-%m-%dT%H:%M:%SZ", &tmv);
-}
-#endif
 
 int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *actor_principal,
                                const char *action, const char *subject, const char *verdict,
@@ -80,7 +46,6 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    verdict = verdict ? verdict : "";
    detail = detail ? detail : "";
 
-   /* Bound detail (R2-8), identical marker to the server store. */
    char detail_capped[AUDIT_WORM_DETAIL_MAX + 96];
    size_t dlen = strlen(detail);
    if (dlen > AUDIT_WORM_DETAIL_MAX)
@@ -90,13 +55,19 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
       detail = detail_capped;
    }
 
+   char err[256] = "";
 #ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
-   /* Production producers never read, lock, hash, or insert the chain. This
-    * SECURITY DEFINER entry point can only create an immutable outbox intent in
-    * the caller's existing transaction; the WORM process owns chain assembly. */
-   char submit_err[256] = "";
+   aimee_pg_stmt_t *submit =
+       aimee_pg_prepare(conn, "SELECT kb_audit_worm_submit(?1,?2,?3,?4,?5,?6)", err, sizeof(err));
+#else
+   /* The DB2 SQLite shim cannot execute PL/pgSQL SECURITY DEFINER functions;
+    * mirror the producer contract by inserting the intent directly. */
    aimee_pg_stmt_t *submit = aimee_pg_prepare(
-       conn, "SELECT kb_audit_worm_submit(?1,?2,?3,?4,?5,?6)", submit_err, sizeof(submit_err));
+       conn,
+       "INSERT INTO kb_audit_outbox(enqueued_at,actor_role,actor_principal,action,subject,"
+       "verdict,detail) VALUES(datetime('now'),?1,?2,?3,?4,?5,?6) RETURNING outbox_id",
+       err, sizeof(err));
+#endif
    if (!submit)
       return -1;
    aimee_pg_bind_text(submit, "?1", actor_role);
@@ -105,65 +76,9 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    aimee_pg_bind_text(submit, "?4", subject);
    aimee_pg_bind_text(submit, "?5", verdict);
    aimee_pg_bind_text(submit, "?6", detail);
-   aimee_pg_step_t submitted = aimee_pg_step(submit, submit_err, sizeof(submit_err));
+   aimee_pg_step_t submitted = aimee_pg_step(submit, err, sizeof(err));
    aimee_pg_finalize(submit);
    return submitted == AIMEE_PG_ROW ? 0 : -1;
-#else
-   /* The SQLite unit-test shim has no stored procedures or sidecar. It retains
-    * the old local chain builder so the canonical hash verifier stays covered;
-    * this branch is absent from every production build. */
-
-   char err[256];
-   long long seq = 1;
-   char prev[65];
-   snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
-   aimee_pg_stmt_t *q = aimee_pg_prepare(
-       conn, "SELECT seq, row_hash FROM kb_audit_event ORDER BY seq DESC LIMIT 1", err, sizeof err);
-   if (!q)
-      return -1;
-   aimee_pg_step_t qst = aimee_pg_step(q, err, sizeof err);
-   if (qst == AIMEE_PG_ROW)
-   {
-      seq = aimee_pg_column_int64(q, 0) + 1;
-      const char *ph = aimee_pg_column_text(q, 1);
-      if (ph)
-         snprintf(prev, sizeof prev, "%s", ph);
-   }
-   aimee_pg_finalize(q);
-   if (qst != AIMEE_PG_ROW && qst != AIMEE_PG_DONE)
-      return -1;
-
-   char ts[32];
-   kb_worm_ts(ts);
-   char row_hash[65];
-   if (kb_worm_row_hash(seq, actor_role, actor_principal, action, subject, verdict, "", detail,
-                        prev, row_hash) != 0)
-      return -1;
-
-   aimee_pg_stmt_t *ins = aimee_pg_prepare(
-       conn,
-       "INSERT INTO kb_audit_event(seq, ts, actor_role, actor_principal, action, subject,"
-       " verdict, detail, key_id, prev_hash, row_hash)"
-       " VALUES(?1,?2,?3,?4,?5,?6,?7,?8,'',?9,?10)",
-       err, sizeof err);
-   if (!ins)
-      return -1;
-   aimee_pg_bind_int64(ins, "?1", seq);
-   aimee_pg_bind_text(ins, "?2", ts);
-   aimee_pg_bind_text(ins, "?3", actor_role);
-   aimee_pg_bind_text(ins, "?4", actor_principal);
-   aimee_pg_bind_text(ins, "?5", action);
-   aimee_pg_bind_text(ins, "?6", subject);
-   aimee_pg_bind_text(ins, "?7", verdict);
-   aimee_pg_bind_text(ins, "?8", detail);
-   aimee_pg_bind_text(ins, "?9", prev);
-   aimee_pg_bind_text(ins, "?10", row_hash);
-   aimee_pg_step_t st = aimee_pg_step(ins, err, sizeof err);
-   aimee_pg_finalize(ins);
-   if (st == AIMEE_PG_ERR)
-      return -1;
-   return 0;
-#endif
 }
 
 int db2_kb_audit_append(const char *actor_role, const char *actor_principal, const char *action,
@@ -185,100 +100,6 @@ int db2_kb_audit_append(const char *actor_role, const char *actor_principal, con
    return 0;
 }
 
-int db2_kb_audit_verify_chain(char *err, size_t errlen)
-{
-   if (err && errlen)
-      err[0] = '\0';
-   void *conn = db2_conn();
-   if (!conn)
-   {
-      if (err)
-         snprintf(err, errlen, "no db2 connection");
-      return -1;
-   }
-   char perr[256];
-   aimee_pg_stmt_t *q = aimee_pg_prepare(
-       conn,
-       "SELECT seq, actor_role, actor_principal, action, subject, verdict, key_id, detail,"
-       " prev_hash, row_hash FROM kb_audit_event ORDER BY seq ASC",
-       perr, sizeof perr);
-   if (!q)
-   {
-      if (err)
-         snprintf(err, errlen, "query prepare failed: %s", perr);
-      return -1;
-   }
-   int rc = 0;
-   char prev[65];
-   snprintf(prev, sizeof prev, "%s", AUDIT_WORM_GENESIS_PREV);
-   long long expect = 1;
-   while (aimee_pg_step(q, perr, sizeof perr) == AIMEE_PG_ROW)
-   {
-      long long seq = aimee_pg_column_int64(q, 0);
-      const char *role = aimee_pg_column_text(q, 1);
-      const char *principal = aimee_pg_column_text(q, 2);
-      const char *action = aimee_pg_column_text(q, 3);
-      const char *subject = aimee_pg_column_text(q, 4);
-      const char *verdict = aimee_pg_column_text(q, 5);
-      const char *key_id = aimee_pg_column_text(q, 6);
-      const char *detail = aimee_pg_column_text(q, 7);
-      const char *stored_prev = aimee_pg_column_text(q, 8);
-      const char *stored_row = aimee_pg_column_text(q, 9);
-      if (seq != expect)
-      {
-         if (err)
-            snprintf(err, errlen, "seq gap: expected %lld, got %lld", expect, seq);
-         rc = -1;
-         break;
-      }
-      if (!stored_prev || strcmp(stored_prev, prev) != 0)
-      {
-         if (err)
-            snprintf(err, errlen, "prev_hash break at seq %lld", seq);
-         rc = -1;
-         break;
-      }
-      char rh[65];
-      if (kb_worm_row_hash(seq, role ? role : "", principal ? principal : "", action ? action : "",
-                           subject ? subject : "", verdict ? verdict : "", key_id ? key_id : "",
-                           detail ? detail : "", prev, rh) != 0)
-      {
-         if (err)
-            snprintf(err, errlen, "row hash provider unavailable or invalid at seq %lld", seq);
-         rc = -1;
-         break;
-      }
-      if (!stored_row || strcmp(rh, stored_row) != 0)
-      {
-         if (err)
-            snprintf(err, errlen, "row_hash mismatch at seq %lld (tampered)", seq);
-         rc = -1;
-         break;
-      }
-      snprintf(prev, sizeof prev, "%s", stored_row);
-      expect = seq + 1;
-   }
-   aimee_pg_finalize(q);
-   return rc;
-}
-
-long db2_kb_audit_count(void)
-{
-   void *conn = db2_conn();
-   if (!conn)
-      return -1;
-   char err[128];
-   aimee_pg_stmt_t *q =
-       aimee_pg_prepare(conn, "SELECT COUNT(*) FROM kb_audit_event", err, sizeof err);
-   if (!q)
-      return -1;
-   long n = -1;
-   if (aimee_pg_step(q, err, sizeof err) == AIMEE_PG_ROW)
-      n = (long)aimee_pg_column_int64(q, 0);
-   aimee_pg_finalize(q);
-   return n;
-}
-
 int db2_kb_audit_pending(long long *count, long long *oldest_age_seconds)
 {
    if (count)
@@ -289,13 +110,17 @@ int db2_kb_audit_pending(long long *count, long long *oldest_age_seconds)
    if (!conn)
       return -1;
    char err[128];
-   aimee_pg_stmt_t *q = aimee_pg_prepare(
-       conn, "SELECT pending_count,oldest_age_seconds FROM kb_audit_worm_pending()", err,
-       sizeof err);
+#ifdef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   const char *sql = "SELECT pending_count,oldest_age_seconds FROM kb_audit_worm_pending()";
+#else
+   const char *sql = "SELECT COUNT(*),0 FROM kb_audit_outbox o LEFT JOIN kb_audit_delivery d"
+                     " ON d.outbox_id=o.outbox_id WHERE d.outbox_id IS NULL";
+#endif
+   aimee_pg_stmt_t *q = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!q)
       return -1;
    int rc = -1;
-   if (aimee_pg_step(q, err, sizeof err) == AIMEE_PG_ROW)
+   if (aimee_pg_step(q, err, sizeof(err)) == AIMEE_PG_ROW)
    {
       if (count)
          *count = aimee_pg_column_int64(q, 0);

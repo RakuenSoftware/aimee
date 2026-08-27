@@ -760,12 +760,10 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                      $(OBJDIR)/modules/translation/aimee_ir_stream.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o
-# modules/audit/audit_worm.c is the aimee-server SQLite WORM store (#include <sqlite3.h>); the
-# kb is DB2/Postgres-only and MUST stay sqlite-free (see the boundary integrity
-# check below), using its own modules/db2/c/kb_audit_worm.c. Its SQLite API has no kb-side
-# callers (guardrails_action_audit.c / cmd_audit.c / server_state.c are server/
-# CLI only), while the shared modules/audit/audit_worm_chain.c is pure hashing (no sqlite) and
-# stays. Excluding it keeps the kb-only/split image build from needing sqlite3.h.
+# The main aimee-kb service stays SQLite-free. Its producer adapter only writes
+# DB2 outbox intents. The separately linked KB_WORM target below owns the same
+# modules/audit/audit_worm.c SQLite implementation as aimee-server.
+# Excluding it here keeps the KB request process from needing sqlite3.h.
 # modules/db1/% is no longer filtered: the directory is gone, so nothing in
 # CORE_SRCS can match it.
 KB_CORE_SRCS = $(filter-out modules/audit/audit_worm.c,$(CORE_SRCS))
@@ -1468,12 +1466,18 @@ $(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
-# Dedicated WORM consumer. Keep this link surface intentionally tiny: libpq is
-# its only service dependency, so request handlers, mutation code, providers,
-# vault code, and the ordinary runtime credential cannot enter the process.
-$(KB_WORM): $(OBJDIR)/kb/kb_worm_worker_main.o
+# Dedicated WORM consumer. It links the exact SQLite WORM implementation used
+# by aimee-server plus only its leaf crypto/JSON helpers and libpq for the
+# transactionally durable KB outbox. Request handlers, mutation code, providers,
+# vault code, and the ordinary runtime credential cannot enter this process.
+KB_WORM_OBJS = $(OBJDIR)/kb/kb_worm_worker_main.o \
+               $(OBJDIR)/modules/audit/audit_worm.o \
+               $(OBJDIR)/modules/audit/audit_worm_chain.o \
+               $(OBJDIR)/aimee_home.o $(OBJDIR)/aimee_sha256.o \
+               $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+$(KB_WORM): $(KB_WORM_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(PQ_LIB)
+	$(CC) -o $@ $^ $(PQ_LIB) -lsqlite3 -lcrypto -lpthread
 
 $(KB_RESOLVER): kb/http/kb_http_resolver.c kb/http/kb_http_resolver_protocol.h
 	$(AIMEE_RUNTIME_MUTATION_GUARD)

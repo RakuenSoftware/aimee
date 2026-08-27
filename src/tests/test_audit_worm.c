@@ -149,6 +149,41 @@ static void test_checkpoint_and_verify_status(void)
    printf("  test_checkpoint_and_verify_status: ok\n");
 }
 
+/* Process admission is shared by the server and KB worker: a fresh store is
+ * accepted, an intact tail is checkpointed to GREEN, and offline tampering
+ * prevents startup before either process accepts work. */
+static void test_startup_verify_fails_closed(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/startup.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   char err[160] = "";
+   long head = -1, ckpt = -1;
+   assert(audit_worm_startup_verify(err, sizeof err, &head, &ckpt) == 0);
+   assert(head == 0 && ckpt == 0);
+
+   assert(audit_worm_append("server", "startup", "server.ready", "", "ok", "{}") == 0);
+   assert(audit_worm_startup_verify(err, sizeof err, &head, &ckpt) == 0);
+   assert(head == 2 && ckpt == 2);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_GREEN);
+   audit_worm_close();
+
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET subject='offline-tamper' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_startup_verify(err, sizeof err, NULL, NULL) == -1);
+   assert(strstr(err, "seq 1") != NULL);
+   audit_worm_close();
+   printf("  test_startup_verify_fails_closed: ok (%s)\n", err);
+}
+
 /* A checkpoint is bound to the chain key: verifying against a different key (an
  * attacker who can rewrite the file but lacks the key) is detected as RED. */
 static void test_checkpoint_bound_to_chain_key(void)
@@ -307,9 +342,44 @@ static void test_detail_capped(void)
    printf("  test_detail_capped: ok\n");
 }
 
-/* Cross-engine vector: the server (SQLite) store and the kb (Postgres) store hash
- * a row identically (both call audit_worm_row_hash). This literal is asserted in
- * test_kb_audit_worm.c too — the two must never drift. */
+/* A durable producer may retry after SQLite committed but before its delivery
+ * acknowledgement committed. The stable event id converges on the original
+ * row, while reusing an id for different evidence fails closed. */
+static void test_idempotent_outbox_delivery(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/idempotent.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   long long first = 0, retry = 0;
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "q1", "ok", "{}", &first) == 0);
+   assert(first == 1);
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "q1", "ok", "{}", &retry) == 0);
+   assert(retry == first);
+   assert(audit_worm_count() == 1);
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "DIFFERENT", "ok", "{}", NULL) == -1);
+   assert(audit_worm_count() == 1);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+
+   /* event_id is retry metadata, but it is still evidence-bound: bypassing the
+    * triggers to rewrite it must break verification. */
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET event_id='kb:forged' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verify_chain(NULL, 0) == -1);
+   audit_worm_close();
+   printf("  test_idempotent_outbox_delivery: ok\n");
+}
+
+/* Golden vector for ordinary rows in the shared server/KB SQLite implementation. */
 static void test_cross_engine_vector(void)
 {
    char h[65];
@@ -325,12 +395,14 @@ int main(void)
    test_cross_engine_vector();
    test_metric_snapshot();
    test_detail_capped();
+   test_idempotent_outbox_delivery();
    test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();
    test_tamper_detected_past_triggers();
    test_checkpoint_and_verify_status();
+   test_startup_verify_fails_closed();
    test_checkpoint_bound_to_chain_key();
    test_seal_snapshot_verifies();
    test_sealed_snapshot_tamper_detected();

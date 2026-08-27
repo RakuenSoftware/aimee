@@ -69,38 +69,9 @@ BEGIN
   RAISE NOTICE 'WITNESS OK: reseal event witnessed once, replay is idempotent';
 END $$;
 
--- ---------------------------------------------------------------------------
--- 8. E2 audit wiring: kb_audit_worm_append witnesses each audit-chain row into the
---    reserved ('!kb','!audit') shard with a source predecessor (the audit chain is
---    itself hash-chained). Earlier sections' open events already produced audit
---    rows here, so identify the row from this operation and verify its exact
---    witness linkage without assuming the worker's drain batch contains only it.
--- ---------------------------------------------------------------------------
-DO $$
-DECLARE v_n BIGINT; v_seq BIGINT; v_kind SMALLINT; v_hsp BOOLEAN;
-BEGIN
-  PERFORM public.kb_audit_worm_append('kb','uid:5','vault.key_use','anthropic:default','allow','');
-  PERFORM public.kb_audit_worm_drain(1000);
-
-  SELECT seq INTO v_seq FROM public.kb_audit_event
-    WHERE actor_role='kb' AND actor_principal='uid:5'
-      AND action='vault.key_use' AND subject='anthropic:default'
-      AND verdict='allow' AND detail=''
-    ORDER BY seq DESC LIMIT 1;
-  SELECT count(*) INTO v_n FROM public.kb_vault_witness_log
-    WHERE tenant='!kb' AND provider='!audit' AND source_id=v_seq::TEXT;
-  IF v_seq IS NULL OR v_n <> 1 THEN
-    RAISE EXCEPTION 'WITNESS FAIL: audit row % has % witness rows', v_seq, v_n;
-  END IF;
-
-  -- This audit witness row is source_kind 0 and carries a source predecessor.
-  SELECT source_kind, has_source_pred INTO v_kind, v_hsp FROM public.kb_vault_witness_log
-    WHERE tenant='!kb' AND provider='!audit' AND source_id=v_seq::TEXT;
-  IF v_kind <> 0 OR NOT v_hsp THEN
-    RAISE EXCEPTION 'WITNESS FAIL: audit witness kind/has_source_pred wrong: % / %', v_kind, v_hsp;
-  END IF;
-  RAISE NOTICE 'WITNESS OK: audit (vault.key_use) witnessed once with source predecessor';
-END $$;
+-- The SQLite WORM and observability witnesses are deliberately independent.
+-- This PostgreSQL fixture tests the vault witness ledgers only; the SQLite
+-- evidence bridge has its own cross-database recovery gate.
 
 -- ---------------------------------------------------------------------------
 -- Destructive head-vs-log cross-check: build a dedicated shard, verify it intact,
@@ -191,17 +162,17 @@ DO $$
 DECLARE v_head BIGINT;
 BEGIN
   SELECT seq INTO v_head FROM public.kb_vault_witness_shard
-    WHERE tenant='!kb' AND provider='!audit';
+    WHERE tenant='!kb' AND provider='!open';
   IF v_head IS NULL OR v_head < 1 THEN
-    RAISE EXCEPTION 'WITNESS FAIL: expected a non-empty !kb/!audit shard for the suppression test';
+    RAISE EXCEPTION 'WITNESS FAIL: expected a non-empty !kb/!open shard for the suppression test';
   END IF;
   BEGIN
-    PERFORM public.org_vault_witness_emit_advance(0::smallint,'!kb','!audit', v_head + 1000000);
+    PERFORM public.org_vault_witness_emit_advance(0::smallint,'!kb','!open', v_head + 1000000);
     RAISE EXCEPTION 'WITNESS FAIL: cursor advanced past the stream head (emission suppressible)';
   EXCEPTION WHEN sqlstate 'P7W06' THEN NULL;
   END;
   -- An advance exactly to the head is legitimate and must still be accepted.
-  IF public.org_vault_witness_emit_advance(0::smallint,'!kb','!audit', v_head) <> v_head THEN
+  IF public.org_vault_witness_emit_advance(0::smallint,'!kb','!open', v_head) <> v_head THEN
     RAISE EXCEPTION 'WITNESS FAIL: advance to the exact head was rejected';
   END IF;
   RAISE NOTICE 'WITNESS OK: emission cursor cannot be advanced past the stream head';
@@ -213,14 +184,14 @@ DO $$
 DECLARE v_n BIGINT; v_min BIGINT;
 BEGIN
   SELECT count(*), COALESCE(min(shard_seq),0) INTO v_n, v_min
-    FROM public.org_vault_witness_emit_batch('!kb','!audit',0,2);
+    FROM public.org_vault_witness_emit_batch('!kb','!open',0,2);
   IF v_n > 2 THEN RAISE EXCEPTION 'WITNESS FAIL: batch returned % rows for limit 2', v_n; END IF;
   IF v_n > 0 AND v_min <> 1 THEN
     RAISE EXCEPTION 'WITNESS FAIL: batch from cursor 0 started at %', v_min;
   END IF;
   IF v_n > 0 THEN
     SELECT COALESCE(min(shard_seq),0) INTO v_min
-      FROM public.org_vault_witness_emit_batch('!kb','!audit',1,10);
+      FROM public.org_vault_witness_emit_batch('!kb','!open',1,10);
     IF v_min <> 0 AND v_min <= 1 THEN
       RAISE EXCEPTION 'WITNESS FAIL: batch after cursor 1 returned seq %', v_min;
     END IF;

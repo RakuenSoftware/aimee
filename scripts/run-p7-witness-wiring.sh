@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # P7-witness-e2 wiring gate: provisions a CLEAN isolated database and proves the
-# atomic witness append is invoked from all three source ledgers (audit, reseal,
-# open) inside their own transactions, with content-binding source hashes and
+# atomic witness append is invoked from the reseal and open source ledgers
+# inside their own transactions, with content-binding source hashes and
 # idempotent replay. Kept OUT of run-p1-rls-gate.sh because it drives real vault
 # functions and mutates kb_vault_control, which the shared RLS-gate DB's other P7
 # tests also touch. The connecting role must be a superuser.
@@ -23,7 +23,7 @@ DB_URL="${BASE_URL%/*}/$DB"
 psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;" >/dev/null
 sed 's/__EMBED_DIM__/1024/g' "$ROOT/src/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
 
-echo "== P7-witness-e2 wiring: audit + reseal + open ledgers =="
+echo "== P7-witness-e2 wiring: independent reseal + open witness ledgers =="
 psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$ROOT/scripts/p7_witness_wiring_pg_test.sql"
 
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE $DB;"

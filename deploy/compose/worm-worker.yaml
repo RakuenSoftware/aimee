@@ -9,9 +9,16 @@ services:
     restart: unless-stopped
     environment:
       AIMEE_WORM_DB2_URL: ${AIMEE_WORM_DB2_URL:?dedicated WORM worker DSN required}
+      AIMEE_HOME: /var/lib/aimee-worm
+      AIMEE_WORM_PATH: /var/lib/aimee-worm/audit/kb-worm-live.db
+    volumes:
+      - aimee-worm-data:/var/lib/aimee-worm
     read_only: true
     cap_drop: ["ALL"]
     security_opt:
       - no-new-privileges:true
     tmpfs:
       - /tmp:size=8m,mode=1777
+
+volumes:
+  aimee-worm-data:

@@ -28,13 +28,13 @@ extern "C"
  * tell them apart; an unknown value is rejected, never ignored. */
 typedef enum
 {
-   VAULT_WITNESS_SRC_AUDIT = 0, /* kb_audit_event: hash-chained, has a predecessor */
+   VAULT_WITNESS_SRC_AUDIT = 0, /* legacy/external audit source with predecessor */
    VAULT_WITNESS_SRC_REWRAP = 1, /* kb_vault_rewrap_worm: no source predecessor link */
    VAULT_WITNESS_SRC_OPEN = 2    /* kb_vault_open_event: row hash, no predecessor link */
 } vault_witness_source_t;
 
 /* Field caps. Tenant/provider are bounded shard-key components; actor matches the
- * existing kb_audit_event actor bound (575). These are validated by the decoder. */
+ * legacy audit actor bound (575). These are validated by the decoder. */
 #define VAULT_WITNESS_TENANT_MAX 128
 #define VAULT_WITNESS_PROVIDER_MAX 128
 #define VAULT_WITNESS_SOURCE_ID_MAX 256

@@ -1,9 +1,9 @@
 # Proposal: one PostgreSQL store module, and the C store deleted
 
-- **State:** IN PROGRESS. The module's shared serving layer is built and
-  mutation-verified. **12 families are native (137 of 463 operations)**, each
-  with unit tests against a scripted database and a suite against a real
-  PostgreSQL 17. 7 families remain.
+- **State:** DONE. All **19 families and 463 operations** are native Go over
+  PostgreSQL, the C/SQLite store is deleted, and the workflow-engine fixture
+  exercises the real `aimee` and `postgres` modules against isolated PostgreSQL
+  schemas.
 
 ## What this is
 
@@ -100,6 +100,13 @@ pool is what is broken.
 | `sessions` | 11782 | 24 | race-free persona claim; five tables from five sources |
 | `roundtable` | 11788 | 25 | four entities, 106 columns, driven from one spec |
 | `delegation` | 11781 | 44 | spawn tree, job leases, reservations, learnings |
+| `ensemble` | 11779 | 6 | phase/turn state machine |
+| `conversation` | 11780 | 45 | context, clarification, windows and working memory |
+| `telemetry` | 11783 | 45 | events, insights and token audit |
+| `workflow` | 11784 | 49 | plans, roadmap and runtime state |
+| `agent_work` | 11786 | 53 | jobs, coordination, cron and logs |
+| `runtime` | 11787 | 60 | caches, snapshots and durable runtime state |
+| `lifecycle` | 11792 | 68 | work-item tree, transitions, budgets and recovery |
 
 ### Changed on purpose
 
@@ -233,30 +240,20 @@ column-spec test earns its place: transposing two adjacent columns in the
 roundtable pass spec is caught at column 29, where nothing behavioural would
 have noticed.
 
-## Remaining
+## Completion
 
-7 families, 326 operations:
+All nineteen families are served natively. The wide families use the same
+column-spec approach introduced by roundtable; ensemble carries the phase/turn
+state machine rather than reducing it to a mechanical statement port.
 
-| | | | |
-|---|---|---|---|
-| `ensemble` (6) | `conversation` (45) | `telemetry` (45) | `workflow` (49) |
-| `agent_work` (53) | `runtime` (60) | `lifecycle` (68) | |
+The old `src/modules/db1` implementation and its C store tests are deleted. The
+Go workflow-engine fixture no longer opens or mutates a SQLite file: it starts
+the real `postgres` and `aimee` module processes, gives each test an isolated
+PostgreSQL schema, and uses a direct pgx connection only for clock manipulation
+that no public operation exposes. `modernc.org/sqlite` and its transitive
+dependency tree are gone from `server-go`.
 
-The remaining families are large in operation count rather than in novelty, and
-the column-spec approach the roundtable family introduced is what makes them
-tractable: the wide ones are the same shape, only wider.
-
-`ensemble` is the one that is not merely SQL: its 987 lines are a phase/turn
-state machine, so it is a port of logic rather than of statements.
-
-Downstream of finishing:
-
-- **Test fixtures.** `server-go/internal/db1/db1test` reaches into the store
-  *file* to move the clock. Under PostgreSQL there is no path, only a DSN. They
-  are the last SQLite in Go, production Go is already clean.
-- **Deleting the C.** `src/modules/db1` goes once every kind is served natively,
-  along with the 54 files in `src/tests` that test it.
-- **The `db1` names in the contract itself**: `server-go/db1`, the
-  `AIMEE_DB1_*` wire constants, the catalog's own vocabulary, are the caller-side
-  contract and its generator. Renaming them is a separate change with a much
-  wider blast radius than the store.
+The `db1` names in the contract itself — `server-go/db1`, the `AIMEE_DB1_*`
+wire constants, and the catalog vocabulary — remain deliberately. They name the
+caller-side contract, not a database engine; renaming them is a separate change
+with a much wider blast radius than the completed store migration.

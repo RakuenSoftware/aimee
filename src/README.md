@@ -27,9 +27,11 @@ src/
   cli_*                 thin-client commands and transport
   server/               server listeners, handlers, agent/resource plane
   kb/                   KB daemon and HTTP surface
-  db1/                  server SQLite owner
-  db2/                  KB PostgreSQL/pgvector owner
+  db1_client/           typed client for the server store module
   modules/              product modules and public include trees
+    aimee/              PostgreSQL-backed server store contract
+    postgres/           shared PostgreSQL transport module
+    db2/                KB PostgreSQL/pgvector owner
     audit/              WORM audit, replay, observability bridge
     sandbox/            delegate isolation
   tests/                C unit and integration tests
@@ -38,7 +40,7 @@ server-go/
   bus/                   pure-Go event-bus client and conformance
   internal/wfe/          definitions, catalog, canonical snapshots
   internal/engine/       scheduler, runners, worktrees, forge, roundtables
-  internal/db1/          Go-owned workflow store
+  internal/db1/          workflow view of the store-module contract
   internal/api/          workflow/control-plane routes
 
 runtime-web/             Go browser service
@@ -87,15 +89,18 @@ See [Event bus](../docs/EVENT_BUS.md).
 DB1 and DB2 cannot call through each other's storage layer.
 
 - Server builds define the DB2-disabled boundary and never link `libpq`.
-- KB builds define the DB1-disabled boundary and never link SQLite.
+- The `aimee-kb` service never links SQLite; its separately credentialed WORM
+  worker links the same SQLite implementation as `aimee-server`.
 - The thin client links neither database.
 - Cross-tier operations use typed `/v1` clients.
 - `scripts/check_tier_deps.sh`, link checks, and symbol checks enforce the boundary.
 
-The shared WORM chain primitive is pure hashing. It may be used by both stores only while it remains
-free of SQLite, libpq, handles, and storage policy.
+The server and KB worker share the complete `modules/audit/audit_worm.c` SQLite
+implementation. They use separate files and keys. The KB worker's narrow link
+closure adds libpq only for its immutable producer outbox.
 
-The Go workflow SQLite store is separately owned and never dual-written by C.
+The Go workflow engine reaches DB1 through the same store module as the server;
+it owns workflow behavior but does not open a database.
 
 ## Modules
 
