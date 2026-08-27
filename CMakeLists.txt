@@ -436,6 +436,7 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/agent_hints.c
     ${AIMEE_SRC_DIR}/modules/db2/c/agent_outcomes.c
     ${AIMEE_SRC_DIR}/modules/db2/c/canonical_index.c
+    ${AIMEE_SRC_DIR}/modules/db2/c/canonical_index_query.c
     ${AIMEE_SRC_DIR}/modules/db2/c/anti_patterns.c
     ${AIMEE_SRC_DIR}/modules/db2/c/collab_rules.c
     ${AIMEE_SRC_DIR}/modules/db2/c/curiosity.c
@@ -1148,6 +1149,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_accounts.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_governance.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_code.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_code_scan_phase.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ingest.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_jobs.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ws.c

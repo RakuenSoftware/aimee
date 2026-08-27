@@ -463,6 +463,7 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

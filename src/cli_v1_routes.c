@@ -614,6 +614,21 @@ static void marshal_add_index_context(cJSON *req, const cli_args_t *opts)
       cJSON_AddStringToObject(req, "cwd", cwd);
 }
 
+cJSON *marshal_index_verify(int argc, char **argv)
+{
+   static const char *bool_flags[] = {"deep", NULL};
+   cli_args_t opts;
+   cli_args_parse(argc, argv, bool_flags, &opts);
+   cJSON *req = marshal_no_args("index.verify");
+   if (opts.pos_count >= 1)
+      cJSON_AddStringToObject(req, "project", opts.positional[0]);
+   if (opts.pos_count >= 2)
+      cJSON_AddStringToObject(req, "root", opts.positional[1]);
+   if (cli_args_get(&opts, "deep"))
+      cJSON_AddTrueToObject(req, "deep");
+   return req;
+}
+
 cJSON *marshal_index_find(int argc, char **argv)
 {
    static const char *bools[] = {"json", NULL};
