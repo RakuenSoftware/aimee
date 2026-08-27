@@ -227,22 +227,25 @@ extern "C"
                                           db2_entity_edge_weighted_neighbor_t *out, int max,
                                           int limit_sql, int utility_scoring_enabled);
 
-   /* Set-based two-hop expansion CTE.  Given a seed entity, return all
-    * neighbours reachable within exactly two hops in one SQL round trip.
-    * hop=1 rows get factor 1.0; hop=2 rows get factor 0.5.
-    * Returns count of (node, weight, hop) triples written into out. */
-   typedef struct
-   {
-      char node[GRAPH_ENDPOINT_MAX];
-      int weight;
-      int hop; /* 1 or 2 */
-      char relation[64];
-      char confidence_class[4]; /* "A"/"B"/"C"; empty for co-occurrence */
-      int is_semantic;
-   } db2_entity_edge_hop_t;
+/* Largest frontier a single batched neighbour read will accept. Bounds the
+ * generated SQL, so the caller expands a wider frontier in chunks rather than
+ * building an unbounded statement. */
+#define EE_FRONTIER_BATCH_MAX 64
 
-   int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per_hop,
-                                         db2_entity_edge_hop_t *out);
+   /* Neighbours of a WHOLE FRONTIER in one round trip -- the batched form of
+    * db2_entity_edge_neighbors_weighted, returning identical fields so a
+    * traversal can swap one for the other without changing how it scores.
+    *
+    * Replaces the earlier two-hop CTE. That reader expanded a single seed to
+    * depth two and left every other level a query per node, so a walk still
+    * paid round trips proportional to its own frontier; batching by level
+    * covers depth two and every other depth with one statement each. Rows are
+    * capped per frontier node, not globally -- see the implementation.
+    *
+    * `nodes` is read but not retained. Returns count written into out. */
+   int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
+                                                db2_entity_edge_weighted_neighbor_t *out, int max,
+                                                int limit_per_node, int utility_scoring_enabled);
 
    /* Backfill utility_touched_at for rows with non-zero utility_score and
     * empty utility_touched_at.  Returns rows updated.  Safe to call
