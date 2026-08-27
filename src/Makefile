@@ -2770,13 +2770,8 @@ STATIC_ANALYSIS_STRICT ?= 0
 
 cppcheck:
 	@if command -v cppcheck >/dev/null 2>&1; then \
-		cppcheck -j $$(nproc 2>/dev/null || echo 2) \
-			--enable=warning,performance,portability \
-			--suppress=missingIncludeSystem \
-			--suppress=nullPointerOutOfMemory \
-			--suppress=normalCheckLevelMaxBranches \
-			--error-exitcode=1 -Iheaders -Ivendor/headers \
-			$(ALL_SRCS) && echo "cppcheck: ok"; \
+		python3 -I -S ../scripts/run-cppcheck-ratchet.py --self-test && \
+		python3 -I -S ../scripts/run-cppcheck-ratchet.py $(ALL_SRCS); \
 	elif [ "$(STATIC_ANALYSIS_STRICT)" = "1" ]; then \
 		echo "ERROR: cppcheck not found. Install with: apt install cppcheck  (Fedora/RHEL: dnf install cppcheck)"; exit 1; \
 	else \

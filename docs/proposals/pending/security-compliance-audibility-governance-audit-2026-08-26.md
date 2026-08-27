@@ -1580,6 +1580,7 @@ Incremental ACG-018 transport/isolation and final branch verification on 2026-08
 | `.252` P1 PostgreSQL 18/pgvector gate plus `subject-erasure-pg-test.sql` in separate disposable databases | Pass | Reconfirms role separation, RLS, WORM/Vault/JWKS and concurrency gates; erasure proves retry idempotency, retention, minimized exactly-once outbox evidence and unchanged prior audit intents; the worker gate proves idempotent SQLite WORM delivery |
 | Egress credential-custody tests | Pass locally and on `.252` | Forge uses a 30-second caller/host/operation/repository-bound X25519/AES-GCM envelope; MCP uses only its deterministic caller-scoped handle and the parent-attested non-dumpable Vault bridge |
 | Live GitHub GET-only governance probe | Incomplete control: one active `main` deployment ruleset; both environments use the same sole admin reviewer; `testing` protection unreadable with the available token; signing key absent | Confirms that ACG-019/020 operating evidence and separation of duties remain open rather than inferring them from source |
+| Required cppcheck CI ratchet | 1,073 existing diagnostics recorded in 61 diagnostic/file ceilings; planted new diagnostic is rejected | SAST is now mandatory and cannot regress, but this is not represented as a clean analysis result; the checked baseline remains explicit remediation debt |
 
 The source checks do not convert the explicitly documented organizational and architectural
 residuals into operating evidence. The ACG-011 and ACG-031 source controls now have representative

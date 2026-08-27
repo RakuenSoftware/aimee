@@ -31,6 +31,7 @@ typedef SSIZE_T ssize_t;
 #define fstat    _fstat
 #define lstat    _stat
 #define strtok_r strtok_s
+typedef struct _stat artifact_stat_t;
 #ifndef S_ISREG
 #define S_ISREG(mode) (((mode) & _S_IFMT) == _S_IFREG)
 #endif
@@ -48,6 +49,7 @@ static char *artifact_realpath(const char *path, char *unused)
 #define realpath artifact_realpath
 #else
 #include <unistd.h>
+typedef struct stat artifact_stat_t;
 #endif
 
 #if !defined(_WIN32) && !defined(AIMEE_ARTIFACT_TRUST_NO_AUDIT)
@@ -103,7 +105,7 @@ static char *read_private_file(const char *path, size_t max_len)
    int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
    if (fd < 0)
       return NULL;
-   struct stat st;
+   artifact_stat_t st;
    if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 || st.st_size <= 0 ||
        (uintmax_t)st.st_size > max_len || (st.st_mode & 0022))
    {
@@ -283,7 +285,7 @@ int artifact_trust_read_file(const char *artifact_class, const char *artifact_id
       return -1;
    char *canonical = realpath(path, NULL);
    int fd = canonical ? open(canonical, O_RDONLY | O_CLOEXEC | O_NOFOLLOW) : -1;
-   struct stat st;
+   artifact_stat_t st;
    if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_nlink != 1 ||
        st.st_size < 0 || (uintmax_t)st.st_size > max_len)
    {
