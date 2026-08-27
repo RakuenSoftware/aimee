@@ -30,8 +30,9 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -102,12 +103,32 @@ static int memory_collect_graph_candidates(const char *raw_query, const char *no
    return count;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void cand_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search.candidates",
+            "candidate generation is unavailable: the relational store is "
+            "unreachable, so retrieval produces no candidates at all, not "
+            "merely poor ones");
+}
+
 int memory_generate_candidates(const char *query, const char *norm_query,
                                memory_query_intent_t intent, const memory_query_plan_t *plan,
                                int fetch_limit, memory_t *out, int max, int64_t *semantic_ids,
                                double *semantic_scores, int *semantic_hit_count,
                                memory_candidate_source_t *source_stats, int *source_stats_count)
 {
+   if (!db2_conn())
+   {
+      cand_warn_store_unreachable();
+      return 0;
+   }
    if (!query || !query[0] || !norm_query || !norm_query[0] || !out || max <= 0)
       return 0;
    int count = 0;

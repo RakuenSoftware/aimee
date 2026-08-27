@@ -12,6 +12,7 @@
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include "kb.h"
 #include <ctype.h>
@@ -312,9 +313,28 @@ static int days_between(const char *earlier, const char *later)
  *     report min/max/avg gap and, if there is a "reference" date in the query
  *     (today = now_local_iso8601), the time since the most recent event.
  */
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void derive_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.context", "fact derivation is unavailable: the relational store is "
+                              "unreachable, so no facts are derived, which reads the same as "
+                              "a query that supports none");
+}
+
 int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
                         memory_derived_facts_t *out)
 {
+   if (!db2_conn())
+   {
+      derive_warn_store_unreachable();
+      return 0;
+   }
    if (!out)
       return 0;
    memset(out, 0, sizeof(*out));

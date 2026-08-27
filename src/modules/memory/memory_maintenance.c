@@ -20,6 +20,7 @@
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include <pthread.h>
 #include <string.h>
@@ -149,9 +150,28 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    return j;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void maint_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.maintenance", "maintenance cannot run: the relational store is unreachable, "
+                                  "so no sweep, promotion or expiry happens and the run must not "
+                                  "be reported as a clean pass");
+}
+
 int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary)
 {
+   if (!db2_conn())
+   {
+      maint_warn_store_unreachable();
+      return -1;
+   }
    if (modes == 0)
       modes = MEMORY_MAINTENANCE_MODES_DEFAULT;
 

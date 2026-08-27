@@ -16,6 +16,7 @@
 #include "modules/db2/c/prospective_memories.h"
 #include "dogfood.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -118,8 +119,27 @@ int memory_prospective_get(int64_t id, memory_prospective_t *out)
    return db2_prospective_get(id, out);
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void prosp_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.prospective", "prospective listing is unavailable: the relational store is "
+                                  "unreachable, so no reminders are returned and due reminders "
+                                  "will not fire");
+}
+
 int memory_prospective_list(const char *state, memory_prospective_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      prosp_warn_store_unreachable();
+      return 0;
+   }
    return db2_prospective_list(state, out, max);
 }
 

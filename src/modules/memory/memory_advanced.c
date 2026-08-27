@@ -22,6 +22,7 @@
 #include "dogfood.h"
 #include "kb_reasoning.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
@@ -248,8 +249,27 @@ int memory_retire(int64_t id, const char *session_id)
    return 0;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void adv_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.advanced", "fact history is unavailable: the relational store is "
+                               "unreachable, so history queries return nothing, which is "
+                               "indistinguishable from a key that has none");
+}
+
 int memory_fact_history(const char *key, memory_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      adv_warn_store_unreachable();
+      return 0;
+   }
    if (!key)
       return 0;
    char norm[512];

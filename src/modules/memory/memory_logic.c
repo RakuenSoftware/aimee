@@ -19,6 +19,7 @@
 #include "config.h"
 #include "kb.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include <ctype.h>
 #include <limits.h>
@@ -378,8 +379,27 @@ int memory_synthesize_failure_episodes(void)
 }
 
 /* Embed any L2 memories that lack embeddings (called after promotion). */
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void embed_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.logic", "L2 embedding backfill is unavailable: the relational store is "
+                            "unreachable, so unembedded rows stay unembedded rather than "
+                            "there being none to embed");
+}
+
 void embed_unembedded_l2(void)
 {
+   if (!db2_conn())
+   {
+      embed_warn_store_unreachable();
+      return;
+   }
    const char *embed_command = config_embedder_command_current(NULL);
    const char *embed_ver = config_embedder_model()[0] ? config_embedder_model() : embed_command;
 

@@ -30,8 +30,9 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -1099,10 +1100,29 @@ int memory_find_facts_lexical_fallback(const char *query, const char *scope_type
    return count;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void lexfb_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search.lexical", "the lexical fallback is unavailable: the relational store is "
+                                     "unreachable, so the fallback contributes nothing and cannot "
+                                     "rescue a thin vector result");
+}
+
 int memory_find_facts_visible_lexical_fallback(const char *query, const char *workspace,
                                                const char *project, int limit, memory_t *out,
                                                int max)
 {
+   if (!db2_conn())
+   {
+      lexfb_warn_store_unreachable();
+      return 0;
+   }
    if (!query || !query[0] || !out || max <= 0)
       return 0;
    if (limit <= 0)

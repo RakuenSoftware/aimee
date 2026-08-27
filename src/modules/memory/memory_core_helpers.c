@@ -29,8 +29,9 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -220,9 +221,28 @@ static int memory_find_index_by_id(const memory_t *matches, int count, int64_t m
    return -1;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void neighbors_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.helpers", "neighbour linking is unavailable: the relational store is "
+                              "unreachable, so matches gain no linked neighbours rather than "
+                              "having none to gain");
+}
+
 int memory_append_linked_neighbors(memory_t *matches, int count, int max_count,
                                    const char *allowed_relations)
 {
+   if (!db2_conn())
+   {
+      neighbors_warn_store_unreachable();
+      return 0;
+   }
    if (!matches || count <= 0 || count >= max_count)
       return count;
 

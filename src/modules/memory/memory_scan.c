@@ -16,6 +16,7 @@
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -650,9 +651,28 @@ int memory_is_profile_query(const char *query)
  * observation count from memory_entities.
  * Writes a JSON string into out_json. Returns 0 on success, -1 on failure.
  */
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void card_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.scan", "profile card build is unavailable: the relational store is "
+                           "unreachable, so a card cannot be built rather than the entity "
+                           "lacking observations");
+}
+
 int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json,
                               size_t out_json_len)
 {
+   if (!db2_conn())
+   {
+      card_warn_store_unreachable();
+      return -1;
+   }
    if (!entity_id || !entity_id[0] || !out_json || out_json_len == 0)
       return -1;
 

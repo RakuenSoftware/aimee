@@ -8,6 +8,7 @@
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include <aimee/workspace/workspace.h>
 #include "kb.h"
@@ -1449,8 +1450,27 @@ static void check_artifact_staleness(void)
    }
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void assemble_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.assemble", "context assembly is unavailable: the relational store is "
+                               "unreachable, so the assembled context is empty rather than "
+                               "merely sparse");
+}
+
 char *memory_assemble_context(const char *task_hint)
 {
+   if (!db2_conn())
+   {
+      assemble_warn_store_unreachable();
+      return NULL;
+   }
    int cap = MAX_CONTEXT_TOTAL + 256;
    db2_memory_scope_context_t request_scope;
    db2_memory_scope_context_get(&request_scope);

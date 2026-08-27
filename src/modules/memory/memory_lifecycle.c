@@ -10,6 +10,7 @@
 #include "modules/db2/c/memory_lifecycle.h"
 #include "dogfood.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include "memory_context_internal.h"
 #include <ctype.h>
@@ -209,8 +210,27 @@ int memory_lifecycle_sweep_expired(void)
    return archived;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void lifecycle_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.lifecycle", "lifecycle counts are unavailable: the relational store is "
+                                "unreachable, so the counts cannot be reported rather than "
+                                "being genuinely zero");
+}
+
 int memory_lifecycle_counts(memory_lifecycle_counts_t *out)
 {
+   if (!db2_conn())
+   {
+      lifecycle_warn_store_unreachable();
+      return -1;
+   }
    if (!out)
       return -1;
    db2_memory_lifecycle_counts_t db_counts;

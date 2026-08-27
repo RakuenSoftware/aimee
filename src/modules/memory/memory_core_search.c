@@ -30,8 +30,9 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -330,8 +331,27 @@ void memory_expand_synonyms(const char *query, char *out, size_t out_len)
    }
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void search_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search", "lexical fact search is unavailable: the relational store is "
+                             "unreachable, so the query returns no matches rather than "
+                             "finding none");
+}
+
 int memory_find_facts_like(const char *query, int limit, memory_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      search_warn_store_unreachable();
+      return 0;
+   }
    return db2_memory_find_facts_like(query, limit, out, max);
 }
 

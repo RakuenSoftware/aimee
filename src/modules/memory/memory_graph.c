@@ -8,6 +8,7 @@
 #include "modules/db2/c/memory_query.h"
 #include "entity_edges.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
@@ -69,8 +70,27 @@ int memory_extract_edges(int64_t window_id, char **file_refs, int file_count, ch
 
 /* --- Query edges --- */
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void graph_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.graph", "edge queries are unavailable: the relational store is "
+                            "unreachable, so an entity reports no edges, which is "
+                            "indistinguishable from an isolated entity");
+}
+
 int memory_query_edges(const char *entity, edge_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      graph_warn_store_unreachable();
+      return 0;
+   }
    return db2_entity_edge_list_by_entity(entity, out, max);
 }
 

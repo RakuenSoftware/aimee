@@ -13,6 +13,7 @@
 #include "modules/db2/c/epistemic_directives.h"
 #include "modules/db2/c/failed_queries.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include <ctype.h>
 #include <pthread.h>
@@ -127,8 +128,27 @@ int memory_directive_create(const char *question, const char *topic, const char 
    return 0;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void directive_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.directives", "directive listing is unavailable: the relational store is "
+                                 "unreachable, so no directives are returned and active "
+                                 "directives will not be applied");
+}
+
 int memory_directive_list(const char *state, const char *cause, memory_directive_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      directive_warn_store_unreachable();
+      return 0;
+   }
    return db2_directive_list(state, cause, out, max);
 }
 
