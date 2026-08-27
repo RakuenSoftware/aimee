@@ -42,7 +42,7 @@ RUN set -eux; \
     "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
         --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"; \
     "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-        "sentence-transformers==6.0.0" "transformers==5.16.1" "einops==0.8.2"; \
+        "sentence-transformers==5.2.3" "transformers==4.57.6" "einops==0.8.2"; \
     find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
     rm -rf /root/.cache/pip
 
@@ -114,10 +114,12 @@ if sel not in table:
 # Load offline from the baked cache. This is the assertion: it fails the build if the
 # weights are absent, incomplete, or need the network.
 os.environ["HF_HUB_OFFLINE"] = "1"
+from huggingface_hub import snapshot_download
 from sentence_transformers import SentenceTransformer
 spec = table[sel]
-m = SentenceTransformer(spec["repo"], revision=spec["revision"],
-                        trust_remote_code=True)
+local_dir = snapshot_download(spec["repo"], revision=spec["revision"],
+                              local_files_only=True)
+m = SentenceTransformer(local_dir, trust_remote_code=True)
 dim = m.get_sentence_embedding_dimension()
 if dim != spec["dim"]:
     sys.exit(f"{sel}: registry says dim={spec['dim']}, model serves {dim}")

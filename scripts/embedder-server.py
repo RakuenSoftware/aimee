@@ -36,7 +36,7 @@ Config (env):
   EMBEDDER_THREADS  torch intra-op threads (default min(8, ncpu))
   EMBEDDER_QUANTIZE fp32 (default) | int8 (torch dynamic; ~3.3x faster, drifts)
 
-Dependencies: torch, "sentence-transformers>=3.3", "transformers>=5.2", einops
+Dependencies: torch, sentence-transformers, transformers, einops
 """
 
 import json
@@ -258,6 +258,23 @@ def load_model():
     import torch
 
     torch.set_num_threads(EMBEDDER_THREADS)
+    # Resolve the immutable baked snapshot once and give every backend its local
+    # directory. Some trust_remote_code models open their own weight files and do
+    # not honour Hugging Face's repo-id cache lookup while offline; a local path is
+    # unambiguous and prevents a healthy image build from becoming a first-request
+    # outage. Outside an offline image, retain the repo-id path so development can
+    # still populate an empty cache normally.
+    from huggingface_hub import snapshot_download
+
+    try:
+        model_source = snapshot_download(
+            MODEL_NAME, revision=MODEL_REVISION, local_files_only=True)
+        model_revision = None
+    except Exception:
+        if os.environ.get("HF_HUB_OFFLINE", "").lower() in ("1", "true", "yes", "on"):
+            raise
+        model_source = MODEL_NAME
+        model_revision = MODEL_REVISION
     # trust_remote_code: some registered third-party embedders ship custom
     # modelling code on the Hub.
     # revision pinned from the registry: the weights are baked at build time, and a
@@ -290,12 +307,8 @@ def load_model():
             # nothing to enumerate. Loading through ST rather than driving
             # onnxruntime directly keeps its pooling and normalisation exactly as
             # the torch path had them, so the vector space does not move.
-            from huggingface_hub import snapshot_download
-
-            local_dir = snapshot_download(MODEL_NAME, revision=MODEL_REVISION,
-                                          local_files_only=True)
             _model = SentenceTransformer(
-                local_dir, trust_remote_code=True, backend="onnx",
+                model_source, revision=model_revision, trust_remote_code=True, backend="onnx",
                 model_kwargs={"file_name": "onnx/model.onnx"})
             _runtime = "onnx"
         except Exception as exc:  # missing optimum/onnxruntime, or no baked graph
@@ -304,7 +317,8 @@ def load_model():
             sys.stderr.write(f"embedder-server: onnx unavailable ({exc}); using torch\n")
             _model = None
     if _model is None:
-        _model = SentenceTransformer(MODEL_NAME, revision=MODEL_REVISION, trust_remote_code=True)
+        _model = SentenceTransformer(
+            model_source, revision=model_revision, trust_remote_code=True)
         _runtime = "torch"
     _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
     if EMBEDDER_QUANTIZE == "int8":

@@ -1481,17 +1481,21 @@ static int attn_git_shares_foreign_session_history(const char *dir, const char *
                /* Registry branch names are launcher-generated, but treat them as data
                 * regardless: a name carrying a quote must never become shell syntax. */
                int other = sess[0] && (!own || !own[0] || strcmp(sess, own) != 0);
-               int quotable = !strchr(sess, '\'') && !strchr(sess, '\n');
+               int quotable = strlen(sess) <= 511 && strlen(defref) <= 511 && !strchr(sess, '\'') &&
+                              !strchr(sess, '\n') && !strchr(defref, '\'') &&
+                              !strchr(defref, '\n') && !strchr(dir, '\'') && !strchr(dir, '\n');
                if (other && quotable)
                {
-                  char cmd[3200];
-                  snprintf(cmd, sizeof(cmd),
-                           "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1 "
-                           "&& mb=$(git -C '%s' merge-base HEAD '%s' 2>/dev/null) "
-                           "&& [ -n \"$mb\" ] "
-                           "&& ! git -C '%s' merge-base --is-ancestor \"$mb\" '%s' 2>/dev/null",
-                           dir, sess, dir, sess, dir, defref);
-                  if (system(cmd) == 0)
+                  char cmd[4096];
+                  int n =
+                      snprintf(cmd, sizeof(cmd),
+                               "cd '%.*s' "
+                               "&& git rev-parse --verify --quiet '%.*s^{commit}' >/dev/null 2>&1 "
+                               "&& mb=$(git merge-base HEAD '%.*s' 2>/dev/null) "
+                               "&& [ -n \"$mb\" ] "
+                               "&& ! git merge-base --is-ancestor \"$mb\" '%.*s' 2>/dev/null",
+                               2047, dir, 511, sess, 511, sess, 511, defref);
+                  if (n > 0 && (size_t)n < sizeof(cmd) && system(cmd) == 0)
                      shared = 1;
                }
             }

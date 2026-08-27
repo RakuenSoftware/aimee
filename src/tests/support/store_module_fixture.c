@@ -13,10 +13,11 @@
 #include <time.h>
 #include <unistd.h>
 
+#include <libpq-fe.h>
+
 #include "../platform_test_util.h"
 
 #include <aimee/audit/obs_bus.h>
-#include "module_json_call.h" /* aimee_module_call_deadline_ns */
 
 /* The store's principal reference, and the kinds derived from it:
  * kind = 4096 + ref*256 + stage. Stages 1..19 are the served families, so the
@@ -104,53 +105,84 @@ void store_module_fixture_stop(void)
    }
 }
 
-/* The SQL stage's request frame: op, a statement id, a transaction handle (0
- * for "on the pool"), the statement, and an argument count. Little-endian, the
- * same encoding server-go/modules/postgres/sql.go reads. */
-#define PG_STAGE_SQL 2u
-#define PG_OP_EXEC   1u
-
-static void put_u32(unsigned char *p, uint32_t v)
-{
-   for (unsigned i = 0; i < 4; ++i)
-      p[i] = (unsigned char)((v >> (i * 8u)) & 0xffu);
-}
-
 static void store_module_fixture_reset_schema(void)
 {
-   static const char *const id = "fixture-reset";
-   /* CASCADE because the store's tables reference each other; recreating the
-    * schema immediately afterwards leaves the database as initdb left it. */
-   static const char *const sql = "DROP SCHEMA public CASCADE; CREATE SCHEMA public";
+   /* A caller that has just created a uniquely named disposable database has
+    * nothing to reset. More importantly, dropping public there would also drop
+    * pgvector/pg_trgm, which belong to the DB2 half of that shared database.
+    * This test-only opt-out is safe only for such a fresh database; ordinary
+    * reusable fixtures keep the deterministic reset below. */
+   const char *reset = getenv("AIMEE_TEST_STORE_RESET_SCHEMA");
+   if (reset && strcmp(reset, "0") == 0)
+      return;
 
-   unsigned char frame[256];
-   uint32_t at = 0;
-   put_u32(frame + at, PG_OP_EXEC);
-   at += 4u;
-   put_u32(frame + at, (uint32_t)strlen(id));
-   at += 4u;
-   memcpy(frame + at, id, strlen(id));
-   at += (uint32_t)strlen(id);
-   memset(frame + at, 0, 8); /* handle 0: not inside a transaction */
-   at += 8u;
-   put_u32(frame + at, (uint32_t)strlen(sql));
-   at += 4u;
-   memcpy(frame + at, sql, strlen(sql));
-   at += (uint32_t)strlen(sql);
-   put_u32(frame + at, 0u); /* no bound arguments */
-   at += 4u;
+   const char *migration_dsn = getenv("AIMEE_STORE_MIGRATION_URL");
+   const char *runtime_dsn = getenv("AIMEE_STORE_URL");
+   if (!migration_dsn || !migration_dsn[0] || !runtime_dsn || !runtime_dsn[0])
+      die("schema reset needs distinct migration and runtime DSNs");
 
-   unsigned char reply[512];
-   uint32_t reply_len = 0;
-   aimee_module_call_result_t rc =
-       obs_bus_module_call(PG_KIND_SQL, PG_STAGE_SQL, 0, aimee_module_call_deadline_ns(30000),
-                           frame, at, reply, (uint32_t)sizeof reply, &reply_len, NULL, NULL);
-   if (rc != AIMEE_MODULE_CALL_OK)
+   /* Reset is DDL and must never travel through the runtime SQL operation. The
+    * fixture used to do exactly that, which both handed the runtime identity
+    * schema authority and destroyed the migrator's schema grant. Connect with
+    * the test's explicit migration capability, then restore only USAGE for the
+    * runtime role. Default privileges owned by the migrator grant the tables,
+    * sequences and functions created by the real migrations below. */
+   char *parse_err = NULL;
+   PQconninfoOption *runtime_opts = PQconninfoParse(runtime_dsn, &parse_err);
+   if (!runtime_opts)
    {
-      char why[128];
-      snprintf(why, sizeof why, "the SQL stage refused the schema reset (result %d)", (int)rc);
-      die(why);
+      if (parse_err)
+         PQfreemem(parse_err);
+      die("AIMEE_STORE_URL could not be parsed for the schema reset");
    }
+   const char *runtime_user = NULL;
+   for (PQconninfoOption *o = runtime_opts; o->keyword; ++o)
+      if (strcmp(o->keyword, "user") == 0)
+      {
+         runtime_user = o->val;
+         break;
+      }
+   char runtime_role[64] = "";
+   if (runtime_user)
+      snprintf(runtime_role, sizeof runtime_role, "%s", runtime_user);
+   PQconninfoFree(runtime_opts);
+   if (!runtime_role[0])
+      die("AIMEE_STORE_URL names no runtime role for the schema reset");
+
+   PGconn *conn = PQconnectdb(migration_dsn);
+   if (!conn || PQstatus(conn) != CONNECTION_OK)
+   {
+      if (conn)
+         PQfinish(conn);
+      die("the migration identity could not connect for the schema reset");
+   }
+   char *quoted_role = PQescapeIdentifier(conn, runtime_role, strlen(runtime_role));
+   if (!quoted_role)
+   {
+      PQfinish(conn);
+      die("the runtime role could not be quoted for the schema reset");
+   }
+   char sql[512];
+   int n = snprintf(sql, sizeof sql,
+                    "DROP SCHEMA public CASCADE; CREATE SCHEMA public; "
+                    "GRANT USAGE ON SCHEMA public TO %s",
+                    quoted_role);
+   PQfreemem(quoted_role);
+   if (n < 0 || (size_t)n >= sizeof sql)
+   {
+      PQfinish(conn);
+      die("the schema reset statement exceeded its bound");
+   }
+   PGresult *result = PQexec(conn, sql);
+   if (!result || PQresultStatus(result) != PGRES_COMMAND_OK)
+   {
+      if (result)
+         PQclear(result);
+      PQfinish(conn);
+      die("the migration identity refused the schema reset");
+   }
+   PQclear(result);
+   PQfinish(conn);
 }
 
 void store_module_fixture_start(void)

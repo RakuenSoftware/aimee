@@ -178,14 +178,14 @@ RUN set -eux; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
           --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          "sentence-transformers==6.0.0" "transformers==5.16.1" "einops==0.8.2"; \
+          "sentence-transformers==5.2.3" "transformers==4.57.6" "einops==0.8.2"; \
       # onnxruntime is the CPU serving path this embedder was characterised on.
       # Without it sentence-transformers falls back to fp32 torch, which costs
       # ~2000 ms for one ~512-token text on 4 cores (25M-parameter model) and
       # made corpus ingest run at ~20 s/file. optimum provides the ORT backend
       # sentence-transformers loads via backend="onnx".
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          "optimum[onnxruntime]==2.3.0" "onnxruntime==1.29.0"; \
+          "optimum[onnxruntime]==2.1.0" "onnxruntime==1.29.0"; \
       find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
       rm -rf /root/.cache/pip; \
     fi

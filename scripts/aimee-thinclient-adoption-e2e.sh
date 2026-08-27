@@ -138,12 +138,22 @@ sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
 # pki family; a module attaching afterwards is already too late.
 start_module() {
   stop_module
+  # Migrations and ordinary operations are separate capabilities. Refuse an
+  # incomplete fixture here, before the module can turn it into an opaque
+  # "store unavailable" startup failure.
+  if [[ -z "${AIMEE_STORE_URL:-}" || -z "${AIMEE_STORE_MIGRATION_URL:-}" ]]; then
+    red "AIMEE_STORE_URL and AIMEE_STORE_MIGRATION_URL are both required"
+    exit 1
+  fi
+  local migration_url="$AIMEE_STORE_MIGRATION_URL"
   (
     deadline=$((SECONDS + WAIT_SECONDS))
     while (( SECONDS < deadline )); do
       if [[ -S "$MODULE_BUS_SOCK" ]]; then
-        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" "$PG_MODULE" "$MODULE_BUS_SOCK" &
-        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" \
+          AIMEE_STORE_MIGRATION_URL="$migration_url" "$PG_MODULE" "$MODULE_BUS_SOCK" &
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" \
+          AIMEE_STORE_MIGRATION_URL="$migration_url" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
       fi
       sleep 0.1
     done

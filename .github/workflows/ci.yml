@@ -361,7 +361,18 @@ jobs:
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
           timeout 240 sudo apt-get install -y -q libpam0g-dev
       - name: Go unit tests
-        run: make -C src go-unit-tests
+        run: |
+          # Populate all module caches with bounded retries before tests fan out.
+          # A proxy HTTP/2 reset otherwise fails whichever package first needs the
+          # missing zip, even though the source and dependency graph are valid.
+          for module in control-web runtime-web server-go; do
+            for attempt in 1 2 3 4 5; do
+              (cd "$module" && GOPROXY='https://proxy.golang.org|direct' go mod download) && break
+              test "$attempt" -lt 5 || exit 1
+              sleep $((attempt * 5))
+            done
+          done
+          GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: Reject reachable Go vulnerabilities
@@ -436,6 +447,11 @@ jobs:
             sleep 0.1
           done
           test "$http_ready" -eq 1
+          # Skill routes are workspace-scoped. Register this checkout explicitly
+          # without indexing it; the lint itself is the operation under test.
+          AIMEE_HOME="$app_home" AIMEE_SOCK="$sock" \
+            AIMEE_API_ENDPOINT="unix:$app_home/aimee-http.sock" \
+            ./aimee workspace add "$PWD" --no-scan >/dev/null
           # The client only ever talks to an EXPLICITLY configured endpoint; it
           # no longer discovers a co-located server. aimee-server publishes its
           # /v1 socket under its config dir (config_default_dir()/aimee-http.sock),
@@ -1690,6 +1706,12 @@ jobs:
     timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      # Test-only credentials required while Compose is parsed by Bake, before
+      # the topology smoke scripts have a chance to establish their environment.
+      AIMEE_STORE_ADMIN_PASSWORD: ci-e2e-admin-password-2878
+      AIMEE_STORE_MIGRATOR_PASSWORD: ci-e2e-migrator-password-2878
+      AIMEE_STORE_RUNTIME_PASSWORD: ci-e2e-runtime-password-2878
     strategy:
       fail-fast: false
       matrix:
@@ -1794,7 +1816,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      AIMEE_STORE_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_adoption_ci
+      AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_adoption_ci
+      AIMEE_STORE_MIGRATION_URL: postgres://aimee_store_migrator:migrator-ci@127.0.0.1:5432/aimee_adoption_ci
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       # The store is a PostgreSQL module now, so a rig that stands a server up
@@ -1829,6 +1852,12 @@ jobs:
           echo "Postgres did not become ready in time"
           docker logs aimee-adoption-pg || true
           exit 1
+      - name: Provision separate store authorities
+        run: |
+          docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
+            "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
+          docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
+            "ALTER DATABASE aimee_adoption_ci OWNER TO aimee_store_migrator; ALTER SCHEMA public OWNER TO aimee_store_migrator; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE aimee_adoption_ci TO aimee_store_runtime; GRANT USAGE ON SCHEMA public TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;"
       - name: Install dependencies
         run: |
           # Same apt hygiene as the build jobs: drop flaky third-party repos,

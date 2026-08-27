@@ -9,8 +9,8 @@
 #   1. GET /v1/health             — server up (server-native, SQLite DB1)
 #   2. GET /v1/version            — build identifies itself
 #   3. GET /v1/health (no bearer) — rejected (401): auth enforced on TCP
-#   4. GET /v1/kb/status          — kb absent -> well-formed "unavailable"
-#                                   (proves graceful degradation, not a crash)
+#   4. GET /v1/rules              — read-scoped kb proxy returns a well-formed
+#                                   upstream error (not a crash)
 #
 # Usage:
 #   scripts/aimee-server-standalone-docker-smoke.sh             # stack already up
@@ -83,6 +83,22 @@ check() {
   fi
 }
 
+check_error_body() {
+  local name="$1" expect="$2"; shift 2
+  local body
+  # Degraded dependency responses are deliberately non-2xx.  Preserve their
+  # JSON body so this assertion distinguishes a clean upstream error from a transport
+  # failure or crash.
+  if body="$(curl -sS -k --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)" &&
+     [[ "$body" == *"$expect"* ]]; then
+    green "  PASS  $name"; PASS=$((PASS + 1))
+  else
+    red   "  FAIL  $name"
+    printf '        expected substring: %s\n        got: %s\n' "$expect" "${body:-<no response / curl error>}"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
 check_status() {
   local name="$1" want="$2"; shift 2
   local code
@@ -141,9 +157,11 @@ bold "==> Auth is enforced"
 check_status "GET /v1/health (no bearer) rejected" 401 "${SERVER_URL}/v1/health"
 
 bold "==> Lazy kb degrades gracefully (no kb wired in)"
-# With no kb, the server must answer /v1/kb/status with a well-formed
-# "unavailable" object (available:false) — NOT hang or crash.
-check "GET /v1/kb/status -> unavailable" '"available":false' "${SERVER_URL}/v1/kb/status"
+# /v1/kb/status is intentionally owner/dashboard-gated, so use the ordinary
+# read-scoped rules proxy to exercise the missing-kb path. It must return a
+# well-formed upstream error instead of hanging or crashing.
+check_error_body "GET /v1/rules -> upstream unavailable" '"error":"rules backend unavailable"' \
+  "${SERVER_URL}/v1/rules"
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

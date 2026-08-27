@@ -74,6 +74,33 @@ services:
       # workspace volume at the same path so those paths are actually readable.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
+  # One-shot trust bootstrap for the split topology.  The KB's ordinary HTTP
+  # listener is intentionally plaintext-only, so a bearer may not cross the
+  # Compose network to it.  This job writes the KB-issued mTLS identity into the
+  # server volume while keeping the KB CA and database socket in the KB volume.
+  # It is profile-gated and invoked explicitly by the deploy smoke/bootstrap
+  # flow; ordinary `compose up` never treats it as a long-running service.
+  aimee-server-identity:
+    profiles: ["identity-bootstrap"]
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
+
   # The server's store: PostgreSQL, holding every table the daemon keeps.
   #
   # A STOCK upstream image, deliberately. The kb builds its own PostgreSQL

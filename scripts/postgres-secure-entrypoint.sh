@@ -3,7 +3,11 @@ set -euo pipefail
 
 : "${AIMEE_STORE_DB_HOSTNAME:=aimee-store-db}"
 secure_dir=/var/lib/postgresql/secure
-install -d -o postgres -g postgres -m 0700 "$secure_dir"
+# The server mounts this volume read-only and must traverse the directory to
+# read server.crt as its TLS trust root.  The certificate is public (0644);
+# the private key and pg_hba.conf remain postgres-only (0600), so traversal
+# does not expose either sensitive file.
+install -d -o postgres -g postgres -m 0755 "$secure_dir"
 
 if [[ ! -s "$secure_dir/server.key" || ! -s "$secure_dir/server.crt" ]]; then
   tmp_dir=$(mktemp -d "$secure_dir/.tls.XXXXXX")

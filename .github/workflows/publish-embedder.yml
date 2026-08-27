@@ -160,8 +160,12 @@ jobs:
           file: Dockerfile.embedder
           platforms: linux/amd64
           load: true
-          provenance: mode=max
-          sbom: true
+          # Docker's local image store cannot load the manifest list BuildKit
+          # creates for attestations. The preceding publish/cache build proves
+          # provenance and SBOM generation; this second output exists only for
+          # the local mTLS hop test.
+          provenance: false
+          sbom: false
           cache-from: type=gha,scope=${{ matrix.name }}-amd64
           build-args: |
             AIMEE_EMBEDDER=${{ matrix.model }}
