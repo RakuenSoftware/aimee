@@ -96,8 +96,19 @@ class EconomizerProbe:
             stderr=subprocess.PIPE, text=True, bufsize=1,
         )
 
+    def reduce_request(self, request: dict[str, Any]) -> dict[str, Any]:
+        """Send one exact ReduceRequest wire object to the production handler."""
+        assert self.process.stdin and self.process.stdout
+        self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
+        self.process.stdin.flush()
+        line = self.process.stdout.readline()
+        if not line:
+            stderr = self.process.stderr.read() if self.process.stderr else ""
+            raise RuntimeError(f"economizer probe exited without output: {stderr}")
+        return json.loads(line)
+
     def reduce(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
-        request = {
+        return self.reduce_request({
             "messages": messages,
             "system_prompt": SYSTEM_PROMPT,
             "seam": "delegate",
@@ -112,15 +123,7 @@ class EconomizerProbe:
             "closet_enabled": True,
             "closet_budget_bytes": 4096,
             "closet_max_ratio_pct": 35,
-        }
-        assert self.process.stdin and self.process.stdout
-        self.process.stdin.write(json.dumps(request, separators=(",", ":")) + "\n")
-        self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            stderr = self.process.stderr.read() if self.process.stderr else ""
-            raise RuntimeError(f"economizer probe exited without output: {stderr}")
-        return json.loads(line)
+        })
 
     def close(self) -> None:
         if self.process.stdin:

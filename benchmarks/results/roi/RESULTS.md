@@ -60,9 +60,12 @@ product-quality result; it identifies the recovery-aware workload required for
 the next pilot. Both uncommitted calibration artifacts were excluded because
 they could not meet the source-lineage gate.
 
-### Codex high-coordinate calibration
+### Excluded tokenizer micro-test
 
-A clean-lineage, one-task Codex calibration is retained as a negative result:
+A clean-lineage, one-task Codex tokenizer micro-test is retained for runner
+diagnostics only. It is **excluded from product ROI evidence**: the prompt was
+synthetic, the answer was a planted identifier, the task was single-shot, and
+the agent did not inspect, edit, or test a large repository.
 
 - Run ID: `roi-codex-pilot-848b4adac3f242d6`
 - Source pin: `3938b55fc9a410c1b548ea7e8b2a40d7e5f264a7`
@@ -77,17 +80,19 @@ rates](https://developers.openai.com/api/docs/models/gpt-5.6-sol) accessed on
 2026-08-26: `$4.00/M` uncached input, `$0.40/M` cached input, and `$20.00/M`
 output below the long-context threshold.
 
-The economized prompt was 2,880 UTF-8 bytes shorter and the economizer forecast
+The transformed prompt was 2,880 UTF-8 bytes shorter and the economizer forecast
 875 fewer tokens, yet GPT-5.6 Sol reported **148 more input tokens**. The
 high-coordinate folded summary contains many conserved unique identifiers and
 Unicode placeholders; those were cheaper than the original repetitive log text
-under Qwen's tokenizer but not under GPT-5.6's. This is evidence that the local
-chars-per-token forecast is not a provider bill and that savings are not
-provider-neutral.
+under Qwen's tokenizer but not under GPT-5.6's. The only supported inference is
+that the local chars-per-token forecast is not a provider bill. This tiny test
+cannot estimate Aimee's effect on a real agent trajectory, because it has no
+repository exploration, compiler output, test output, retries, cross-language
+coordination, or accumulated tool history.
 
-The result is a calibration, not a regression estimate: it has one task and one
-repeat. It motivates a preregistered coordinate-density stratum and repeated
-Codex pairs.
+The result is not a negative product finding or a regression estimate. It is a
+tokenizer-specific mechanism check with one task and one repeat. Large-repository
+agentic experiments supersede it for ROI evaluation.
 
 - Raw artifact: `current-stack-codex-sol-tail-calibration.json`
 - Preflight: `current-stack-codex-sol-tail-calibration.preflight.json`
@@ -165,3 +170,27 @@ changing exact-answer quality when the required information remains in the
 retained tail. Repeats, natural coding tasks, tool condensation and recovery,
 module-process activation, delegation, and a billable provider remain required
 before publication.
+
+## Large-repository crossover stage
+
+The tiny synthetic checks above are not the headline product test. A separate
+paired runner now targets four real defects in Aimee itself, including prior
+high-context trajectories and a C/Go/JSON boundary change. Each cell starts
+from the buggy parent revision in a disposable full-repository worktree. The
+plain and Aimee conditions use the same Qwen3.8 model, prompt, tools, maximum
+turns, and hidden child-era grader; only current production economization of the
+accumulated conversation differs.
+
+The runner records provider-reported billable token buckets on every turn,
+exact context-limit errors, economizer activation and warm-boundary reuse, full
+recoverable tool output, patch contents, and hidden-test results. It also
+measures test authorship rather than merely asking for tests: an authored test
+is marked regression-sensitive only when the candidate's visible grader is
+green and the test-only diff turns red when reapplied to the original buggy
+parent.
+
+No large-repository result is reported here until the paired artifact has been
+run and validated. A public capacity statement requires an observed pair where
+the plain agent is rejected by the provider for exceeding context and the Aimee
+condition passes the hidden grader. A plain failure for any other reason is a
+completion crossover, not a context-capacity crossover.

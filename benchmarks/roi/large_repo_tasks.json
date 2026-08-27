@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "selection_policy": "Real Aimee fixes selected before the fresh run for prior context pressure, prior separation, or a modern cross-language boundary. Historical outcomes select tasks but are not observations in the new experiment.",
+  "tasks": [
+    {
+      "task_id": "clone_fd_and_owner",
+      "fix_commit": "312e9019046fa8d27a28382bb4074ac142ce2304",
+      "selection_stratum": "historical-high-context",
+      "languages": ["C"],
+      "prompt": "Bulk-cloning an organization intermittently reports `git clone failed (rc=127)`, and some successfully cloned repositories appear under the organization being browsed rather than the repository's actual owner. Diagnose and fix both defects without weakening the credential or path-safety boundaries. Preserve existing public behavior, add regression tests when appropriate, and run relevant verification before finishing.",
+      "hidden_test_files": ["src/tests/test_git_cred_inject.c"],
+      "grader_commands": [
+        "make -C src -j8 build/obj/tests/unit-test-git-cred-inject",
+        "src/build/obj/tests/unit-test-git-cred-inject"
+      ]
+    },
+    {
+      "task_id": "trust_bundle_readiness",
+      "fix_commit": "270b3483d5da39a68206c47378c6bb9614728550",
+      "selection_stratum": "historical-completion-crossover",
+      "languages": ["C"],
+      "prompt": "A standalone deployment can report its management authorization state as ready even though the configured JWKS trust bundle does not exist and every KB-issued write token is denied. Correct readiness and diagnostics so the operator is told what input is actually missing, while preserving fail-closed request validation. Add regression tests when appropriate and run relevant verification before finishing.",
+      "hidden_test_files": ["src/tests/test_server_write_tier_db1.c"],
+      "grader_commands": [
+        "make -C src -j8 build/obj/tests/unit-test-server-write-tier-db1",
+        "src/build/obj/tests/unit-test-server-write-tier-db1"
+      ]
+    },
+    {
+      "task_id": "pool_lease_attribution",
+      "fix_commit": "b84c9294aae8c639d76e8ffba326e49c7e334d57",
+      "selection_stratum": "historical-all-fail-high-context",
+      "languages": ["C"],
+      "prompt": "Production can end up with all DB2 pool members held for many hours. The starvation report counts held members but cannot identify the long-lived worker that lazily acquired and retained one outside an explicit lease scope. Make the next starvation verdict identify the actual lazy-acquire call site without overwriting attribution for explicit begin/end scopes. Preserve the existing pool lifecycle, add regression tests when appropriate, and run relevant verification before finishing.",
+      "hidden_test_files": ["src/tests/test_db2_pool.c"],
+      "grader_commands": [
+        "make -C src -j8 build/obj/tests/unit-test-db2-pool",
+        "src/build/obj/tests/unit-test-db2-pool"
+      ]
+    },
+    {
+      "task_id": "db1_outcome_codes",
+      "fix_commit": "acb4ac0060dbe74d20b2a1b209bd16126be4edf4",
+      "selection_stratum": "modern-cross-language",
+      "languages": ["C", "Go", "JSON"],
+      "prompt": "Two DB1 work-item operations lose their return values across the module bus. A concurrency or rate-cap refusal reaches the workflow intake as a generic database failure instead of its distinct refusal, while a successful override increment is interpreted as failure rather than returning the new count. Audit the wire contract and both language boundaries, preserve true errors, add regression tests when appropriate, and run the relevant cross-language verification before finishing.",
+      "hidden_test_files": ["src/tests/test_db1_module_bus.c"],
+      "grader_commands": [
+        "make -C src -j8 unit-test-db1-module-bus"
+      ]
+    }
+  ]
+}

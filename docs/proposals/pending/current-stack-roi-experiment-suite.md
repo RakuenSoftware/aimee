@@ -1,7 +1,8 @@
 # Proposal: Current-stack ROI experiment suite
 
-- **State:** PENDING. The staged design and a bounded local-Qwen calibration
-  pilot are implemented; this PR makes no confirmatory ROI claim.
+- **State:** PENDING. The staged design, bounded local-Qwen calibration, and a
+  real-repository context-capacity runner are implemented; no confirmatory ROI
+  claim is made until the latter has valid paired results.
 - **Date:** 2026-08-26
 - **Owner:** benchmark and product-evidence maintainers
 - **Baseline reviewed:** `origin/testing` at
@@ -50,6 +51,14 @@ budget preflight, activation trigger, byte-identical off path, provider-usage
 reconciliation, and exact-answer grading. It is intentionally labelled
 `pilot_only`: the module bus, recovery loop, delegation, natural coding tasks,
 and a billable provider are not yet in its execution boundary.
+
+The next exploratory stage uses historical Aimee defects as sealed tasks in
+full detached worktrees. It compares a plain agent with the same agent whose
+accumulated history passes through the current production Go economizer. The
+model, prompt, repository revision, tools, turn limits, and hidden grader are
+otherwise identical. The selected tasks include high-context failures and one
+C/Go/JSON wire-contract change; historical outcomes select the tasks but do
+not count as new evidence.
 
 ## Why the existing results are insufficient
 
@@ -129,6 +138,9 @@ dollar claim; it never silently becomes zero.
 
 - provider tokens per resolved task, reported as a vector of the buckets above;
 - task resolution and paired regressions/recoveries;
+- exact provider-context failures and paired capacity crossovers;
+- agent-authored test files, plus whether those tests pass with the candidate
+  patch and fail when reapplied alone to the original buggy revision;
 - median and p95 wall time per resolved task;
 - frontier-model tokens displaced, always labelled separately from total cost;
 - economizer baseline/reduced/removed tokens, activation reason, cache decision,
@@ -138,6 +150,28 @@ dollar claim; it never silently becomes zero.
 
 `usage_kind=avoided`, reducer deltas, byte estimates, and hypothetical prices are
 counterfactual diagnostics. They never enter `total_realized_cost`.
+
+### Large-repository capacity and test-quality estimands
+
+The exploratory large-repository runner reports two additional paired outcomes:
+
+```text
+completion crossover = control unresolved AND treatment hidden-grader pass
+
+context-capacity crossover = completion crossover
+                           AND control provider rejected accumulated context
+
+regression-sensitive authored test = agent changed a test
+                                   AND candidate grader passed
+                                   AND test-only patch failed on buggy parent
+```
+
+Repository size alone is not the intervention, and padding is forbidden. A
+capacity claim requires natural tool and reasoning history from the task itself.
+Likewise, a test-file count is descriptive rather than proof of value: the
+red-on-defect/green-on-fix check is the stronger outcome. Hidden child-era tests
+remain unavailable during the agent run and are restored only for independent
+grading.
 
 ## Experimental controls
 
