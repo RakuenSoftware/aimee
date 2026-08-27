@@ -13,6 +13,10 @@
 
 #define MSQ_ERRBUF 256
 
+/* Ids per IN(...) statement. Bounds the placeholder buffer; a longer candidate
+ * list is split across statements rather than truncated. */
+#define MSQ_RANK_BATCH_CHUNK 128
+
 static __thread db2_memory_scope_context_t s_memory_scope_context;
 
 /* Keep PostgreSQL RLS in lockstep with the in-process filter.  These values are
@@ -86,6 +90,29 @@ void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
       *out = s_memory_scope_context;
 }
 
+/* The visibility rank, expressed once. The single-id and batch readers below
+ * both call this: two copies of a four-level visibility ladder is how a store
+ * starts disagreeing with itself about who can see what. */
+static int msq_rank_for(const char *type, const char *value)
+{
+   if (!type || !value)
+      return 0;
+   if (s_memory_scope_context.scope_type[0] && s_memory_scope_context.scope_value[0] &&
+       strcmp(type, s_memory_scope_context.scope_type) == 0 &&
+       strcmp(value, s_memory_scope_context.scope_value) == 0)
+      return 4;
+   if (strcmp(type, "project") == 0 && s_memory_scope_context.project[0] &&
+       strcmp(value, s_memory_scope_context.project) == 0)
+      return 3;
+   if (strcmp(type, "workspace") == 0 && s_memory_scope_context.workspace[0] &&
+       strcmp(value, s_memory_scope_context.workspace) == 0)
+      return 2;
+   if ((strcmp(type, "global") == 0 && strcmp(value, "_global") == 0) ||
+       (strcmp(type, "workspace") == 0 && strcmp(value, "_shared") == 0))
+      return 1;
+   return 0;
+}
+
 int db2_memory_scope_context_rank(int64_t memory_id)
 {
    if (memory_id <= 0)
@@ -101,28 +128,67 @@ int db2_memory_scope_context_rank(int64_t memory_id)
    aimee_pg_bind_int64(st, "?1", memory_id);
    int rank = 0;
    if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *type = aimee_pg_column_text(st, 0);
-      const char *value = aimee_pg_column_text(st, 1);
-      if (type && value && s_memory_scope_context.scope_type[0] &&
-          s_memory_scope_context.scope_value[0] &&
-          strcmp(type, s_memory_scope_context.scope_type) == 0 &&
-          strcmp(value, s_memory_scope_context.scope_value) == 0)
-         rank = 4;
-      else if (type && value && strcmp(type, "project") == 0 && s_memory_scope_context.project[0] &&
-               strcmp(value, s_memory_scope_context.project) == 0)
-         rank = 3;
-      else if (type && value && strcmp(type, "workspace") == 0 &&
-               s_memory_scope_context.workspace[0] &&
-               strcmp(value, s_memory_scope_context.workspace) == 0)
-         rank = 2;
-      else if (type && value &&
-               ((strcmp(type, "global") == 0 && strcmp(value, "_global") == 0) ||
-                (strcmp(type, "workspace") == 0 && strcmp(value, "_shared") == 0)))
-         rank = 1;
-   }
+      rank = msq_rank_for(aimee_pg_column_text(st, 0), aimee_pg_column_text(st, 1));
    aimee_pg_finalize(st);
    return rank;
+}
+
+/* Batch form of the above: ONE statement for the whole candidate set instead of
+ * one per candidate. The ranking is thread-local scope context plus two strings
+ * per row, so the per-id work was never the cost -- the round trip was, and a
+ * recall ranks every candidate it is about to sort.
+ *
+ * Chunked so an arbitrarily long candidate list cannot overflow the placeholder
+ * buffer. Ids absent from `memories` keep rank 0, matching the single-id reader
+ * when its query returns no row. */
+int db2_memory_scope_context_rank_batch(const int64_t *ids, int n, int *out_ranks)
+{
+   if (!ids || n <= 0 || !out_ranks)
+      return 0;
+   for (int i = 0; i < n; i++)
+      out_ranks[i] = 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   int ranked = 0;
+   for (int base = 0; base < n; base += MSQ_RANK_BATCH_CHUNK)
+   {
+      int chunk = n - base < MSQ_RANK_BATCH_CHUNK ? n - base : MSQ_RANK_BATCH_CHUNK;
+      char placeholders[MSQ_RANK_BATCH_CHUNK * 8];
+      int pos = 0;
+      for (int i = 0; i < chunk; i++)
+         pos += snprintf(placeholders + pos, sizeof(placeholders) - (size_t)pos,
+                         i == 0 ? "?%d" : ",?%d", i + 1);
+      char sql[sizeof(placeholders) + 128];
+      snprintf(sql, sizeof(sql), "SELECT id,scope_type,scope_value FROM memories WHERE id IN (%s)",
+               placeholders);
+
+      char err[MSQ_ERRBUF] = "";
+      aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+      if (!st)
+         return ranked;
+      for (int i = 0; i < chunk; i++)
+      {
+         char name[16];
+         snprintf(name, sizeof(name), "?%d", i + 1);
+         aimee_pg_bind_int64(st, name, ids[base + i]);
+      }
+      while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         int64_t row_id = aimee_pg_column_int64(st, 0);
+         int rank = msq_rank_for(aimee_pg_column_text(st, 1), aimee_pg_column_text(st, 2));
+         /* A candidate list may repeat an id; rank every position holding it. */
+         for (int i = 0; i < chunk; i++)
+            if (ids[base + i] == row_id)
+            {
+               out_ranks[base + i] = rank;
+               ranked++;
+            }
+      }
+      aimee_pg_finalize(st);
+   }
+   return ranked;
 }
 
 int db2_memory_scope_context_allows(int64_t memory_id)
