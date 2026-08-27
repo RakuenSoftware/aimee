@@ -5,10 +5,8 @@
 
 #include "kb_client.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "lifecycle.h"
 #include "tool_registry.h"
-#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -32,7 +30,6 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
    if (!name)
       return -1;
 
-#if !defined(AIMEE_DB2_DISABLED)
    if (db2_is_initialized())
    {
       tool_registry_entry_t entry;
@@ -53,7 +50,6 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
       }
       return 0;
    }
-#endif
 
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "name", name);
@@ -89,7 +85,6 @@ int kb_client_tool_registry_lookup(const char *name, char *out_input_schema, siz
    return 0;
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 struct kbctr_prompts_ctx
 {
    cJSON *arr;
@@ -106,11 +101,9 @@ static int kbctr_collect_prompt(const char *name, const char *prompt, void *user
    cJSON_AddItemToArray(ctx->arr, o);
    return 0;
 }
-#endif
 
 char *kb_client_tool_registry_snapshot_json(void)
 {
-#if !defined(AIMEE_DB2_DISABLED)
    if (db2_is_initialized())
    {
       cJSON *resp = cJSON_CreateObject();
@@ -124,7 +117,6 @@ char *kb_client_tool_registry_snapshot_json(void)
       cJSON_Delete(resp);
       return out;
    }
-#endif
 
    cJSON *req = cJSON_CreateObject();
    return kb_v1_action_request("tool_registry.snapshot", req);

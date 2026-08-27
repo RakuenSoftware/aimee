@@ -2,13 +2,11 @@
  * Extracted from memory_advanced.c. */
 #include "aimee.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_relations.h"
 #include "modules/db2/c/memory_scenes.h"
-#endif
 #include "log.h"
 #include "memory.h"
 #include "memory_ontology.h"
@@ -114,10 +112,6 @@ int memory_episode_card_parse(const char *json, memory_episode_card_t *out)
  */
 int64_t memory_episode_card_generate(const char *source_session)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)source_session;
-   return 0;
-#else
    if (!source_session || !source_session[0])
       return 0;
    if (!config_memory_episode_summaries_enabled())
@@ -254,7 +248,6 @@ int64_t memory_episode_card_generate(const char *source_session)
    aimee_log(LOG_INFO, "memory_episode", "episode card created for session %s (unit_id=%lld)",
              source_session, (long long)unit_id);
    return unit_id;
-#endif
 }
 
 /*
@@ -263,14 +256,7 @@ int64_t memory_episode_card_generate(const char *source_session)
  */
 int memory_episode_cards_query(const char *source_session, char **out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)source_session;
-   (void)out;
-   (void)max;
-   return 0;
-#else
    return db2_memory_episode_cards_query(source_session, out, max);
-#endif
 }
 
 /* --- Scene Clustering --- */
@@ -449,14 +435,6 @@ int memory_ontology_validate(memory_node_kind_t sk, memory_relation_kind_t rel,
 int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int max_hops,
                       graph_walk_entry_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)seed_entity;
-   (void)relation_mask;
-   (void)max_hops;
-   (void)out;
-   (void)max;
-   return 0;
-#else
    if (!seed_entity || !out || max <= 0)
       return 0;
 
@@ -537,5 +515,4 @@ int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int m
 
    return count;
 #undef WALK_MAX_FRONTIER
-#endif
 }

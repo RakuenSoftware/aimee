@@ -143,13 +143,6 @@ static void eval_synthesis_scan_jobs(int window_days, const char *suite,
 static void eval_synthesis_scan_signals(int window_days, const char *suite,
                                         eval_synthesis_scan_stats_t *stats)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   /* Correction signals live in DB2. A build without it still scans the job
-    * ledger; it simply has one fewer source. */
-   (void)window_days;
-   (void)suite;
-   (void)stats;
-#else
    db2_learning_negative_signal_t rows[EVAL_SYNTHESIS_SCAN_SIGNALS];
    int n = db2_learning_negative_signals_recent(window_days, rows, EVAL_SYNTHESIS_SCAN_SIGNALS);
    if (n <= 0)
@@ -196,7 +189,6 @@ static void eval_synthesis_scan_signals(int window_days, const char *suite,
       else
          stats->skipped++;
    }
-#endif
 }
 
 int eval_synthesis_scan_failures(int window_days, const char *suite,

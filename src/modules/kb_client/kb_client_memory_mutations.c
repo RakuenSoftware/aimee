@@ -5,9 +5,71 @@
 
 #include "kb_client.h" /* kb_client_memory_audit_note (defined in kb_client_memory_audit.c) */
 
+/* gate_check_sensitive is the platform secret/PII classifier, implemented in
+ * posix/memory.c and windows/memory.c -- platform files, not inside the memory
+ * module. Its only header lives at modules/memory/memory_platform.h, which is
+ * module-internal and deliberately not on this translation unit's include path:
+ * the memory module publishes a bus wire contract, not a C surface. Declaring
+ * the prototype here keeps the boundary intact while still calling the one
+ * canonical classifier rather than growing a second, divergent one. */
+int gate_check_sensitive(const char *content, char *redacted, size_t redacted_cap);
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* PII must never cross the aimee-server -> aimee-kb boundary.
+ *
+ * The screen runs HERE, client-side, before any request is issued -- not on the
+ * kb side. A gate that runs after the POST has already moved the data it exists
+ * to contain: "aimee-kb rejected it" still means aimee-kb received it. Placing it
+ * in these wrappers rather than at their call sites means a caller cannot forget
+ * it, the same reason the evidence ledger lives in a trigger.
+ *
+ * gate_check_sensitive is the platform classifier: 2 = a secret/PII span it
+ * cannot cleanly redact, 1 = redacted into the caller's buffer, 0 = clean.
+ *
+ * Returns 0 with *out NULL when `text` may be sent as-is; 0 with *out set to a
+ * heap copy the caller must free when a redacted form must be sent instead; and
+ * -1 when the text must not leave this process at all. An allocation failure
+ * returns -1: unable to classify means unable to send.
+ */
+static int kbc_pii_screen(const char *text, char **out)
+{
+   *out = NULL;
+   if (!text || !text[0])
+      return 0;
+   /* Sized so the prefix plus the [REDACTED] marker always fits; the classifier
+    * only reports 2 for a span it could not locate, never for a small buffer. */
+   size_t cap = strlen(text) + 32;
+   char *buf = malloc(cap);
+   if (!buf)
+      return -1;
+   int verdict = gate_check_sensitive(text, buf, cap);
+   if (verdict == 1)
+   {
+      *out = buf;
+      return 0;
+   }
+   free(buf);
+   return verdict == 0 ? 0 : -1;
+}
+
+/* The key is the record's lookup handle, so redacting it in place would silently
+ * change which record the caller is addressing -- worse than refusing. ANY
+ * sensitivity in a key therefore withholds the whole write, redactable or not. */
+static int kbc_pii_key_sensitive(const char *key)
+{
+   if (!key || !key[0])
+      return 0;
+   size_t cap = strlen(key) + 32;
+   char *buf = malloc(cap);
+   if (!buf)
+      return 1;
+   int verdict = gate_check_sensitive(key, buf, cap);
+   free(buf);
+   return verdict != 0;
+}
 
 int kb_client_memory_supersede(int64_t old_id, const char *new_content, double confidence,
                                const char *session_id, memory_t *out)
@@ -15,10 +77,19 @@ int kb_client_memory_supersede(int64_t old_id, const char *new_content, double c
    if (old_id <= 0 || !new_content)
       return -1;
 
+   char *sup_red = NULL;
+   if (kbc_pii_screen(new_content, &sup_red) != 0)
+   {
+      kb_client_memory_audit_note("memory.supersede.withheld_pii", old_id, "", "", "", confidence,
+                                  session_id, 0);
+      return KB_CLIENT_MEMORY_WITHHELD_PII;
+   }
+
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "old_id", (double)old_id);
-   cJSON_AddStringToObject(req, "new_content", new_content);
+   cJSON_AddStringToObject(req, "new_content", sup_red ? sup_red : new_content);
+   free(sup_red);
    cJSON_AddNumberToObject(req, "confidence", confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);
@@ -415,6 +486,16 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
    if (!key || !content)
       return -1;
 
+   char *content_red = NULL;
+   if (kbc_pii_key_sensitive(key) || kbc_pii_screen(content, &content_red) != 0)
+   {
+      free(content_red);
+      /* Deliberately no key in this note: the key may be what was sensitive. */
+      kb_client_memory_audit_note("memory.insert.withheld_pii", 0, tier, kind, "", confidence,
+                                  session_id, 0);
+      return KB_CLIENT_MEMORY_WITHHELD_PII;
+   }
+
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
    if (tier && tier[0])
@@ -422,7 +503,8 @@ int kb_client_memory_insert_as(const char *tier, const char *kind, const char *k
    if (kind && kind[0])
       cJSON_AddStringToObject(req, "kind", kind);
    cJSON_AddStringToObject(req, "key", key);
-   cJSON_AddStringToObject(req, "content", content);
+   cJSON_AddStringToObject(req, "content", content_red ? content_red : content);
+   free(content_red);
    if (use_cases && use_cases[0])
       cJSON_AddStringToObject(req, "use_cases", use_cases);
    cJSON_AddNumberToObject(req, "confidence", confidence);
@@ -683,10 +765,17 @@ int kb_client_memory_update_as(int64_t id, const char *content, memory_authority
       *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+   char *upd_red = NULL;
+   if (kbc_pii_screen(content, &upd_red) != 0)
+   {
+      kb_client_memory_audit_note("memory.update.withheld_pii", id, NULL, NULL, NULL, 0.0, NULL, 0);
+      return KB_CLIENT_MEMORY_WITHHELD_PII;
+   }
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
-   cJSON_AddStringToObject(req, "content", content);
+   cJSON_AddStringToObject(req, "content", upd_red ? upd_red : content);
+   free(upd_red);
    if (authority == MEMORY_AUTHORITY_USER)
       cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.update", req);

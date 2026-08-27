@@ -1,16 +1,5 @@
 #include "kb_neardup.h"
 
-#if defined(AIMEE_DB2_DISABLED)
-int kb_neardup_propose(const char *project, const char *file_path, const char *match_path,
-                       double jaccard)
-{
-   (void)project;
-   (void)file_path;
-   (void)match_path;
-   (void)jaccard;
-   return 0;
-}
-#else
 #include "modules/db2/c/artifacts.h"
 #include "log.h"
 #include "cJSON.h"
@@ -82,4 +71,3 @@ int kb_neardup_propose(const char *project, const char *file_path, const char *m
             file_path, match_path, jaccard);
    return 0;
 }
-#endif

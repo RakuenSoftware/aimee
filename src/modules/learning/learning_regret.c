@@ -64,15 +64,9 @@ int learning_fate_record(int proposal_id, const char *fate, const char *reason)
 {
    if (proposal_id <= 0 || !learning_fate_is_valid(fate))
       return -1;
-#if defined(AIMEE_DB2_DISABLED)
-   (void)reason;
-   return -1;
-#else
    return db2_learning_fate_record(proposal_id, fate, reason);
-#endif
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 /* The regret vocabulary as the one comma-separated list the SQL layer matches
  * against, so it cannot drift from LEARNING_REGRET_FATES above. */
 static void regret_fate_list(char *buf, size_t cap)
@@ -82,7 +76,6 @@ static void regret_fate_list(char *buf, size_t cap)
    for (int i = 0; LEARNING_REGRET_FATES[i] && o + 1 < cap; i++)
       o += (size_t)snprintf(buf + o, cap - o, "%s%s", o ? "," : "", LEARNING_REGRET_FATES[i]);
 }
-#endif
 
 int learning_metrics_regret(int window_days, learning_detector_regret_t *out, int max)
 {
@@ -91,9 +84,6 @@ int learning_metrics_regret(int window_days, learning_detector_regret_t *out, in
    if (window_days <= 0)
       window_days = LEARNING_METRICS_DEFAULT_WINDOW_DAYS;
 
-#if defined(AIMEE_DB2_DISABLED)
-   return -1;
-#else
    char fates[128];
    regret_fate_list(fates, sizeof(fates));
 
@@ -115,7 +105,6 @@ int learning_metrics_regret(int window_days, learning_detector_regret_t *out, in
          out[i].regret_rate = (double)rows[i].regret / (double)rows[i].settled;
    }
    return n;
-#endif
 }
 
 /* One detector's settled regret over the default window. Returns 0 and leaves
