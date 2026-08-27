@@ -12,6 +12,8 @@
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
+#include <stdatomic.h>
+#include <time.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -83,6 +85,7 @@ static const struct
     {"memory.read", pt_print_memory_read},
     {"memory.stats", pt_print_memory_stats},
     {"index.scan", pt_print_index_scan},
+    {"index.verify", pt_print_index_verify},
     {"index.list", pt_print_index_list},
     {"index.find", pt_print_index_find},
     {"index.blast_radius", pt_print_index_blast_radius},
@@ -1253,10 +1256,9 @@ static const char *cli_ws_err_message(cJSON *resp)
    return NULL;
 }
 
-/* Collect <abs_root>'s source files locally and push them to the server's
- * /v1/index/ingest in size-bounded batches, blocking on each op-run. The kb
- * code-scan upserts per project+path, so batches accumulate. Returns 0 on
- * success, nonzero if any batch failed. */
+/* Collect <abs_root>'s source files locally and publish one complete manifest
+ * through /v1/index/ingest, blocking on each op-run. Size-bounded stage
+ * requests remain private until seal atomically replaces the prior manifest. */
 
 /* Per-batch content budget. Batching bounds client memory and keeps each
  * relayed request under the 1 MB body cap of pre-KB_HTTP_BODY_MAX aimee-kb
@@ -1264,10 +1266,11 @@ static const char *cli_ws_err_message(cJSON *resp)
  * wire body above the raw content total, so budget well under 1 MB. */
 #define CLI_INGEST_BATCH_BYTES (600 * 1024)
 
-/* POST one batch of files (adopted/freed) as project `name`/`root`, polling the
- * async op-run to completion. Returns 0 on success. */
-static int cli_ws_ingest_batch(const char *remote, const char *bearer, const char *name,
-                               const char *root, cJSON *batch)
+/* POST one complete-scan phase for project `name`/`root`, polling the async
+ * op-run to completion. A non-NULL batch is adopted/freed. */
+static int cli_ws_ingest_phase(const char *remote, const char *bearer, const char *name,
+                               const char *root, const char *phase, const char *scan_id,
+                               int expected_files, cJSON *batch)
 {
    cJSON *body = cJSON_CreateObject();
    if (!body)
@@ -1277,7 +1280,12 @@ static int cli_ws_ingest_batch(const char *remote, const char *bearer, const cha
    }
    cJSON_AddStringToObject(body, "name", name);
    cJSON_AddStringToObject(body, "root", root);
-   cJSON_AddItemToObject(body, "files", batch); /* adopt */
+   cJSON_AddStringToObject(body, "phase", phase);
+   cJSON_AddStringToObject(body, "scan_id", scan_id);
+   if (strcmp(phase, "seal") == 0)
+      cJSON_AddNumberToObject(body, "expected_files", expected_files);
+   if (batch)
+      cJSON_AddItemToObject(body, "files", batch); /* adopt */
    char *body_json = cJSON_PrintUnformatted(body);
    cJSON_Delete(body);
    if (!body_json)
@@ -1290,7 +1298,7 @@ static int cli_ws_ingest_batch(const char *remote, const char *bearer, const cha
    const char *err = cli_ws_err_message(resp);
    int rc = err ? 1 : 0;
    if (err)
-      fprintf(stderr, "aimee: index ingest batch failed: %s\n", err);
+      fprintf(stderr, "aimee: index ingest %s failed: %s\n", phase, err);
    cJSON_Delete(resp);
    return rc;
 }
@@ -1305,6 +1313,7 @@ typedef struct
    const char *bearer;
    const char *base;
    const char *abs_root;
+   char scan_id[97];
    cJSON *batch; /* current open batch, or NULL */
    size_t batch_bytes;
    int pushed;
@@ -1313,7 +1322,7 @@ typedef struct
    int oom; /* could not allocate a batch array */
 } ws_ingest_ctx_t;
 
-/* Push the current batch (cli_ws_ingest_batch adopts/frees it) and reset. */
+/* Stage the current batch (cli_ws_ingest_phase adopts/frees it) and reset. */
 static void ws_ingest_flush(ws_ingest_ctx_t *s)
 {
    if (!s->batch)
@@ -1326,7 +1335,8 @@ static void ws_ingest_flush(ws_ingest_ctx_t *s)
    else
    {
       int batch_no = s->batches + 1;
-      int batch_ok = cli_ws_ingest_batch(s->remote, s->bearer, s->base, s->abs_root, s->batch) == 0;
+      int batch_ok = cli_ws_ingest_phase(s->remote, s->bearer, s->base, s->abs_root, "stage",
+                                         s->scan_id, 0, s->batch) == 0;
       if (batch_ok)
          s->pushed += have;
       else
@@ -1361,7 +1371,10 @@ static int ws_ingest_collect_cb(const char *rel_path, const char *content, void 
 
    cJSON *entry = cJSON_CreateObject();
    if (!entry)
-      return 0; /* skip this file, keep walking */
+   {
+      s->oom = 1;
+      return 1; /* never seal an incomplete manifest */
+   }
    cJSON_AddStringToObject(entry, "rel_path", rel_path);
    cJSON_AddStringToObject(entry, "content", content);
    cJSON_AddItemToArray(s->batch, entry);
@@ -1379,26 +1392,40 @@ static int cli_ws_ingest_root(const char *remote, const char *bearer, const char
    s.bearer = bearer;
    s.base = project_name;
    s.abs_root = abs_root;
+   static atomic_ullong sequence = 0;
+   snprintf(s.scan_id, sizeof(s.scan_id), "thin-%llu-%llu", (unsigned long long)time(NULL),
+            (unsigned long long)atomic_fetch_add(&sequence, 1) + 1);
+
+   if (cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "begin", s.scan_id, 0, NULL) != 0)
+      return 1;
 
    code_collect_files_cb(abs_root, ws_ingest_collect_cb, &s);
    ws_ingest_flush(&s); /* flush the trailing partial batch */
 
-   if (s.batches == 0 && !s.oom)
+   if (s.failed || s.oom)
    {
+      (void)cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "abort", s.scan_id, 0, NULL);
+      if (s.oom)
+         fprintf(stderr,
+                 "aimee: ran out of memory building an ingest batch; the scan for '%s' was "
+                 "aborted\n",
+                 abs_root);
       if (!g_cli_ws_json_output)
-         printf("no indexable files found in %s\n", abs_root);
-      return 0;
+         printf("ingested %d file(s) from %s (%d batch%s) — scan aborted\n", s.pushed, abs_root,
+                s.batches, s.batches == 1 ? "" : "es");
+      return 1;
    }
 
-   if (s.oom)
-      fprintf(stderr,
-              "aimee: warning: ran out of memory building an ingest batch; some files in "
-              "'%s' were not pushed\n",
-              abs_root);
+   if (cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "seal", s.scan_id, s.pushed, NULL) != 0)
+   {
+      (void)cli_ws_ingest_phase(remote, bearer, s.base, abs_root, "abort", s.scan_id, 0, NULL);
+      return 1;
+   }
+
    if (!g_cli_ws_json_output)
-      printf("ingested %d file(s) from %s (%d batch%s)%s\n", s.pushed, abs_root, s.batches,
-             s.batches == 1 ? "" : "es", (s.failed || s.oom) ? " — some batches failed" : "");
-   return (s.failed || s.oom) ? 1 : 0;
+      printf("ingested %d file(s) from %s (%d batch%s)\n", s.pushed, abs_root, s.batches,
+             s.batches == 1 ? "" : "es");
+   return 0;
 }
 
 /* Ingest a workspace tree as ONE PROJECT PER GIT REPO: code_collect_discover_repos

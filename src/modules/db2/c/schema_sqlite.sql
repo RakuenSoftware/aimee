@@ -10,6 +10,29 @@ CREATE VIRTUAL TABLE IF NOT EXISTS code_fts USING fts5(content, content='file_co
 CREATE TABLE IF NOT EXISTS rules (  id INTEGER PRIMARY KEY AUTOINCREMENT,  polarity TEXT NOT NULL,  title TEXT NOT NULL,  description TEXT NOT NULL DEFAULT '',  weight INTEGER NOT NULL DEFAULT 5,  domain TEXT NOT NULL DEFAULT '',  directive_type TEXT NOT NULL DEFAULT 'soft',  expires_at TEXT DEFAULT NULL,  last_reinforced_at TEXT DEFAULT NULL,  created_at TEXT NOT NULL,  updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS projects (  id INTEGER PRIMARY KEY AUTOINCREMENT,  name TEXT NOT NULL UNIQUE,  root TEXT NOT NULL,  workspace TEXT NOT NULL DEFAULT '',  scanned_at TEXT NOT NULL,  trust TEXT NOT NULL DEFAULT 'trusted' CHECK (trust IN ('trusted', 'untrusted')), lifecycle_state TEXT NOT NULL DEFAULT 'current' CHECK (lifecycle_state IN ('current','detached')), current_generation INTEGER NOT NULL DEFAULT 1 CHECK (current_generation > 0));
 CREATE INDEX IF NOT EXISTS idx_projects_lifecycle ON projects(lifecycle_state, name);
+CREATE TABLE IF NOT EXISTS code_index_project_state (
+  project_id INTEGER PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
+  revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+  sealed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS code_scan_sessions (
+  scan_id TEXT PRIMARY KEY,
+  project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+  generation INTEGER NOT NULL CHECK (generation > 0),
+  baseline_revision INTEGER NOT NULL CHECK (baseline_revision >= 0),
+  state TEXT NOT NULL DEFAULT 'open' CHECK (state IN ('open','sealed','aborted')),
+  created_at TEXT NOT NULL,
+  sealed_at TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_code_scan_sessions_project
+  ON code_scan_sessions(project_id, state, created_at);
+CREATE TABLE IF NOT EXISTS code_scan_manifest_files (
+  scan_id TEXT NOT NULL REFERENCES code_scan_sessions(scan_id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  PRIMARY KEY(scan_id, path)
+);
 CREATE TABLE IF NOT EXISTS code_project_aliases (  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, alias TEXT NOT NULL UNIQUE, alias_kind TEXT NOT NULL DEFAULT 'checkout', is_current INTEGER NOT NULL DEFAULT 1 CHECK (is_current IN (0,1)), first_seen_at TEXT NOT NULL, last_seen_at TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS idx_code_project_alias_project ON code_project_aliases(project_id, is_current);
 CREATE TABLE IF NOT EXISTS code_project_generations (  id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, generation INTEGER NOT NULL CHECK (generation > 0), root TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'current' CHECK (state IN ('current','superseded','detached')), created_at TEXT NOT NULL, detached_at TEXT NOT NULL DEFAULT '', UNIQUE(project_id, generation));

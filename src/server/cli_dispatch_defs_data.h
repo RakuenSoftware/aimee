@@ -32,6 +32,7 @@
     {"economizer", "stats", "economizer.stats", NULL, NULL, 60000},
     {"memory", "benchmark", "memory.benchmark", NULL, NULL, 600000},
     {"index", "scan", "index.scan", NULL, NULL, 300000},
+    {"index", "verify", "index.verify", NULL, NULL, 300000},
     {"index", "overview", "index.list", NULL, "projects", 0},
     {"index", "list", "index.list", NULL, "projects", 0},
     {"index", "find", "index.find", NULL, NULL, 0},

@@ -741,8 +741,9 @@ int handle_runner_respond(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 
 /* index.ingest: a thin client pushes the {"rel_path","content"} contents of a
- * `detached` workspace this server cannot see; relay them to aimee-kb's code
- * scan. SYNCHRONOUS (inline kb push + send_and_free) — unlike index.scan it must
+ * `detached` workspace this server cannot see. New clients relay a private
+ * begin/stage/seal session; the legacy files-only shape remains incremental.
+ * SYNCHRONOUS (inline kb push + send_and_free) — unlike index.scan it must
  * not use the kb_proxy_spawn detached-thread path, because /v1/index/ingest is
  * served by the async op-run worker via loopback_rpc (server_http.c), which runs
  * server_dispatch on a socketpair and reads the response synchronously: a reply
@@ -755,17 +756,33 @@ int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    const char *root = jo_str(req, "root", NULL);
    if (!name || !name[0] || !root || !root[0])
       return server_send_error(conn, "index.ingest requires both name and root", NULL);
-   if (!cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(req, "files")))
-      return server_send_error(conn, "index.ingest requires a files array", NULL);
+
+   const char *phase = jo_str(req, "phase", NULL);
+   const char *scan_id = jo_str(req, "scan_id", NULL);
+   cJSON *files_item = cJSON_GetObjectItemCaseSensitive(req, "files");
+   if ((!phase || !phase[0] || strcmp(phase, "stage") == 0) && !cJSON_IsArray(files_item))
+      return server_send_error(conn, "index.ingest requires a files array for legacy/stage", NULL);
+   if (phase && phase[0] && (!scan_id || !scan_id[0]))
+      return server_send_error(conn, "index.ingest phased request requires scan_id", NULL);
+   cJSON *expected_item = cJSON_GetObjectItemCaseSensitive(req, "expected_files");
+   if (phase && strcmp(phase, "seal") == 0 &&
+       (!cJSON_IsNumber(expected_item) || expected_item->valuedouble < 0))
+      return server_send_error(conn, "index.ingest seal requires expected_files", NULL);
 
    int force = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "force")) ? 1 : 0;
-   /* Detach the client-pushed array so kb_client_code_scan_push adopts (frees)
-    * it without a double-free when req is released. */
-   cJSON *files = cJSON_DetachItemFromObjectCaseSensitive(req, "files");
+   /* Detach the client-pushed array so the kb-client relay adopts (frees) it
+    * without a double-free when req is released. */
+   cJSON *files =
+       cJSON_IsArray(files_item) ? cJSON_DetachItemFromObjectCaseSensitive(req, "files") : NULL;
 
    kb_client_index_scan_result_t res;
    memset(&res, 0, sizeof(res));
-   int kb_rc = kb_client_code_scan_push(name, root, force, files, &res);
+   int kb_rc =
+       phase && phase[0]
+           ? kb_client_code_scan_phase(
+                 name, root, force, phase, scan_id,
+                 cJSON_IsNumber(expected_item) ? (int)expected_item->valuedouble : 0, files, &res)
+           : kb_client_code_scan_push(name, root, force, files, &res);
    cJSON *resp = (cJSON *)kb_client_index_scan_format_response(kb_rc, &res);
    return send_and_free(conn, resp);
 }

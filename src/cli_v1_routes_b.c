@@ -1423,6 +1423,7 @@ static const struct
     {"index.find_callers", marshal_index_find_callers},
     {"index.list", marshal_index_list},
     {"index.scan", marshal_index_scan},
+    {"index.verify", marshal_index_verify},
     {"index.structure", marshal_index_structure},
     {"index.span", marshal_index_span},
     {"index.investigate", marshal_index_investigate},

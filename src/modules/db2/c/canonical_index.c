@@ -28,6 +28,7 @@
 #include "../support/db2_log.h"
 
 #include <ctype.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -256,67 +257,15 @@ static int64_t ci_upsert_file(void *conn, int64_t project_id, const char *rel_pa
    return id;
 }
 
-/* Returns 1 if the file's mtime is newer than its stored scanned_at,
- * 0 if up-to-date, 1 if no row exists (treat as modified). */
-static int ci_file_modified_since(void *conn, int64_t project_id, const char *rel_path,
-                                  time_t mtime)
-{
-   char err[CI_ERRBUF] = "";
-   aimee_pg_stmt_t *st =
-       aimee_pg_prepare(conn,
-                        "SELECT f.scanned_at FROM files f JOIN projects p ON p.id=f.project_id"
-                        " WHERE f.project_id = ?1 AND f.path = ?2"
-                        " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
-                        err, sizeof(err));
-   if (!st)
-      return 1;
-   aimee_pg_bind_int64(st, "?1", project_id);
-   aimee_pg_bind_text(st, "?2", rel_path);
-   int modified = 1;
-   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
-   {
-      const char *ts = aimee_pg_column_text(st, 0);
-      if (ts && ts[0])
-      {
-         struct tm tm;
-         memset(&tm, 0, sizeof(tm));
-         /* Accept either ISO ("2024-01-01T12:00:00") or space-separated form. */
-         char sep = '\0';
-         int matched = sscanf(ts, "%d-%d-%d%c%d:%d:%d", &tm.tm_year, &tm.tm_mon, &tm.tm_mday, &sep,
-                              &tm.tm_hour, &tm.tm_min, &tm.tm_sec);
-         if (matched == 7)
-         {
-            tm.tm_year -= 1900;
-            tm.tm_mon -= 1;
-            /* now_utc() writes UTC; parse as UTC (timegm), not local (mktime),
-             * otherwise files modified within the local timezone offset of
-             * the previous scan are wrongly skipped. */
-            time_t scanned = timegm(&tm);
-            if (mtime <= scanned)
-               modified = 0;
-         }
-      }
-   }
-   aimee_pg_finalize(st);
-   return modified;
-}
-
 /* ---- File body replacement (transactional) --------------------- */
 
-/* Returns 0 on success, -1 when the transactional replacement fails or is
- * aborted at its commit point by a purge fence. Callers must stop the scan for
- * that project: continuing on the same Postgres connection after an aborted
- * transaction would only turn the original error into misleading follow-ons. */
-static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
-                                const char *content)
+/* Replace one file inside the caller's transaction. Keeping this primitive
+ * transaction-free lets a sealed complete manifest publish every changed file,
+ * every retraction, and its revision bump as one database commit. */
+static int ci_replace_file_data_txn(void *conn, int64_t file_id, const char *ext,
+                                    const char *content)
 {
    char err[CI_ERRBUF] = "";
-
-   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
-   {
-      LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
-      return -1;
-   }
 
    db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
    db2_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id);
@@ -347,7 +296,6 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
       if (!st)
       {
          LOG_WARN(CI_LOG_TAG, "file content prepare failed: %s", err);
-         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }
       aimee_pg_bind_int64(st, "?1", file_id);
@@ -356,7 +304,6 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
       {
          LOG_WARN(CI_LOG_TAG, "file content write failed: %s", err);
          aimee_pg_finalize(st);
-         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }
       aimee_pg_finalize(st);
@@ -484,6 +431,26 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
       }
       if (st)
          aimee_pg_finalize(st);
+   }
+
+   return 0;
+}
+
+/* Legacy single-file publication. Complete scans use
+ * ci_replace_file_data_txn from the session seal below. */
+static int ci_replace_file_data(void *conn, const char *project, int64_t file_id, const char *ext,
+                                const char *content)
+{
+   char err[CI_ERRBUF] = "";
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+   {
+      LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
+      return -1;
+   }
+   if (ci_replace_file_data_txn(conn, file_id, ext, content) != 0)
+   {
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return -1;
    }
 
    /* Generation-fence check INSIDE the transaction, immediately before
@@ -665,34 +632,6 @@ static int ci_file_list_append(ci_file_list_t *list, const char *path)
       return -1;
    list->count++;
    return 0;
-}
-
-static void ci_purge_hidden_paths(int64_t project_id)
-{
-   /* Purge hidden-path files but SPARE a wanted dotfile build manifest
-    * (.gitmodules with all non-hidden ancestors) — recall §2.2. The purge mirrors
-    * the ingest allowlist (ci_path_ingest_excluded), so a re-scan does not delete a
-    * legitimately-ingested submodule declaration back out. */
-   (void)db2_code_index_purge_hidden_except_manifests(project_id);
-}
-
-static void ci_purge_build_exclusions(int64_t project_id, const ci_exclusion_list_t *exclusions)
-{
-   char pattern[MAX_PATH_LEN];
-   for (int i = 0; i < exclusions->count; i++)
-   {
-      const char *exclude = exclusions->paths[i];
-      size_t len = strlen(exclude);
-      if (len > 0 && exclude[len - 1] == '/')
-      {
-         snprintf(pattern, sizeof(pattern), "%s%%", exclude);
-         (void)db2_code_index_purge_files_matching(project_id, pattern);
-      }
-      else
-      {
-         (void)db2_code_index_purge_files_matching(project_id, exclude);
-      }
-   }
 }
 
 static int ci_ascii_contains(const char *haystack, const char *needle)
@@ -1310,8 +1249,560 @@ static void ci_backfill_cochange(const char *project, const char *abs_root)
    free(head);
 }
 
+/* ---- Complete-manifest scan sessions --------------------------- */
+
+static int ci_scan_id_valid(const char *scan_id)
+{
+   if (!scan_id || !scan_id[0] || strlen(scan_id) > 96)
+      return 0;
+   for (const unsigned char *p = (const unsigned char *)scan_id; *p; p++)
+      if (!isalnum(*p) && *p != '-' && *p != '_' && *p != '.')
+         return 0;
+   return 1;
+}
+
+static void ci_local_scan_id(char out[97])
+{
+   static atomic_ullong sequence = 0;
+   unsigned long long n = atomic_fetch_add(&sequence, 1) + 1;
+   snprintf(out, 97, "local-%llu-%llu", (unsigned long long)time(NULL), n);
+}
+
+int canonical_index_scan_begin(const char *name, const char *root_label, const char *scan_id,
+                               long long *baseline_revision_out)
+{
+   if (baseline_revision_out)
+      *baseline_revision_out = -1;
+   if (!name || !name[0] || !ci_scan_id_valid(scan_id))
+      return -1;
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   int64_t project_id =
+       ci_upsert_project(conn, name, root_label && root_label[0] ? root_label : "remote");
+   if (project_id < 0)
+      return -1;
+
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *state = aimee_pg_prepare(
+       conn,
+       "INSERT INTO code_index_project_state(project_id,revision,sealed_at) VALUES(?1,0,'') "
+       "ON CONFLICT(project_id) DO NOTHING",
+       err, sizeof(err));
+   if (!state)
+      return -1;
+   aimee_pg_bind_int64(state, "?1", project_id);
+   int ok = aimee_pg_step(state, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(state);
+   if (!ok)
+      return -1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+   aimee_pg_stmt_t *ins = aimee_pg_prepare(
+       conn,
+       "INSERT INTO code_scan_sessions(scan_id,project_id,generation,baseline_revision,state,"
+       "created_at,sealed_at) SELECT ?1,p.id,p.current_generation,s.revision,'open',?2,'' "
+       "FROM projects p JOIN code_index_project_state s ON s.project_id=p.id "
+       "WHERE p.id=?3 AND p.lifecycle_state='current' ON CONFLICT(scan_id) DO NOTHING",
+       err, sizeof(err));
+   if (!ins)
+      return -1;
+   aimee_pg_bind_text(ins, "?1", scan_id);
+   aimee_pg_bind_text(ins, "?2", ts);
+   aimee_pg_bind_int64(ins, "?3", project_id);
+   ok = aimee_pg_step(ins, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(ins);
+   if (!ok)
+      return -1;
+
+   aimee_pg_stmt_t *read = aimee_pg_prepare(
+       conn,
+       "SELECT s.baseline_revision FROM code_scan_sessions s JOIN projects p ON p.id=s.project_id "
+       "WHERE s.scan_id=?1 AND p.id=?2 AND s.generation=p.current_generation AND s.state='open'",
+       err, sizeof(err));
+   if (!read)
+      return -1;
+   aimee_pg_bind_text(read, "?1", scan_id);
+   aimee_pg_bind_int64(read, "?2", project_id);
+   long long baseline = -1;
+   if (aimee_pg_step(read, err, sizeof(err)) == AIMEE_PG_ROW)
+      baseline = (long long)aimee_pg_column_int64(read, 0);
+   aimee_pg_finalize(read);
+   if (baseline < 0)
+      return -1;
+   if (baseline_revision_out)
+      *baseline_revision_out = baseline;
+   return 0;
+}
+
+int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_input_t *files,
+                               int file_count, int *accepted_out)
+{
+   if (accepted_out)
+      *accepted_out = 0;
+   if (!ci_scan_id_valid(scan_id) || !files || file_count < 0)
+      return -1;
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *open =
+       aimee_pg_prepare(conn, "SELECT 1 FROM code_scan_sessions WHERE scan_id=?1 AND state='open'",
+                        err, sizeof(err));
+   if (!open)
+      return -1;
+   aimee_pg_bind_text(open, "?1", scan_id);
+   int exists = aimee_pg_step(open, err, sizeof(err)) == AIMEE_PG_ROW;
+   aimee_pg_finalize(open);
+   if (!exists)
+      return -1;
+
+   aimee_pg_stmt_t *put =
+       aimee_pg_prepare(conn,
+                        "INSERT INTO code_scan_manifest_files(scan_id,path,content,content_hash) "
+                        "VALUES(?1,?2,?3,?4) ON CONFLICT(scan_id,path) DO UPDATE SET "
+                        "content=EXCLUDED.content,content_hash=EXCLUDED.content_hash",
+                        err, sizeof(err));
+   if (!put)
+      return -1;
+   int accepted = 0;
+   for (int i = 0; i < file_count; i++)
+   {
+      const char *path = files[i].rel_path;
+      if (!path || !path[0] || path[0] == '/' || ci_path_ingest_excluded(path) || !files[i].content)
+         continue;
+      char *content = strdup(files[i].content);
+      if (!content)
+      {
+         aimee_pg_finalize(put);
+         return -1;
+      }
+      (void)text_sanitize_utf8(content);
+      char hash[32];
+      ci_content_hash(content, hash, sizeof(hash));
+      aimee_pg_bind_text(put, "?1", scan_id);
+      aimee_pg_bind_text(put, "?2", path);
+      aimee_pg_bind_text(put, "?3", content);
+      aimee_pg_bind_text(put, "?4", hash);
+      int rc = aimee_pg_step(put, err, sizeof(err));
+      free(content);
+      if (rc != AIMEE_PG_DONE)
+      {
+         aimee_pg_finalize(put);
+         return -1;
+      }
+      aimee_pg_reset(put);
+      accepted++;
+   }
+   aimee_pg_finalize(put);
+   if (accepted_out)
+      *accepted_out = accepted;
+   return 0;
+}
+
+static int ci_scan_session_count(void *conn, const char *scan_id)
+{
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT COUNT(*) FROM code_scan_manifest_files WHERE scan_id=?1", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", scan_id);
+   int count = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      count = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return count;
+}
+
+int canonical_index_scan_seal(const char *scan_id, int expected_files,
+                              canonical_index_seal_result_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!ci_scan_id_valid(scan_id) || expected_files < 0)
+      return -1;
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   char err[CI_ERRBUF] = "";
+   char project[256] = "";
+   aimee_pg_stmt_t *project_q = aimee_pg_prepare(
+       conn,
+       "SELECT p.name FROM code_scan_sessions s JOIN projects p ON p.id=s.project_id "
+       "WHERE s.scan_id=?1",
+       err, sizeof(err));
+   if (!project_q)
+      return -1;
+   aimee_pg_bind_text(project_q, "?1", scan_id);
+   if (aimee_pg_step(project_q, err, sizeof(err)) == AIMEE_PG_ROW)
+      snprintf(project, sizeof(project), "%s", aimee_pg_column_text(project_q, 0));
+   aimee_pg_finalize(project_q);
+   if (!project[0])
+      return -2;
+   if (aimee_pg_exec(conn, aimee_pg_is_shim() ? "BEGIN" : "BEGIN ISOLATION LEVEL SERIALIZABLE", err,
+                     sizeof(err)) != 0)
+      return -1;
+   /* Purge and scan publication share the project advisory lock. Take it
+    * before row locks on both paths to avoid lock-order inversions. */
+   if (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project))
+      goto storage_fail;
+
+   const char *session_sql =
+       aimee_pg_is_shim() ? "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
+                            "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
+                            "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
+                            "ON ps.project_id=p.id WHERE s.scan_id=?1"
+                          : "SELECT s.project_id,s.generation,s.baseline_revision,s.state,"
+                            "p.name,p.current_generation,ps.revision FROM code_scan_sessions s "
+                            "JOIN projects p ON p.id=s.project_id JOIN code_index_project_state ps "
+                            "ON ps.project_id=p.id WHERE s.scan_id=?1 FOR UPDATE OF s,ps";
+   aimee_pg_stmt_t *session = aimee_pg_prepare(conn, session_sql, err, sizeof(err));
+   if (!session)
+      goto storage_fail;
+   aimee_pg_bind_text(session, "?1", scan_id);
+   if (aimee_pg_step(session, err, sizeof(err)) != AIMEE_PG_ROW)
+   {
+      aimee_pg_finalize(session);
+      goto stale;
+   }
+   int64_t project_id = aimee_pg_column_int64(session, 0);
+   int64_t generation = aimee_pg_column_int64(session, 1);
+   int64_t baseline = aimee_pg_column_int64(session, 2);
+   char state[16];
+   snprintf(state, sizeof(state), "%s", aimee_pg_column_text(session, 3));
+   int64_t current_generation = aimee_pg_column_int64(session, 5);
+   int64_t current_revision = aimee_pg_column_int64(session, 6);
+   aimee_pg_finalize(session);
+   if (strcmp(state, "open") != 0 || generation != current_generation ||
+       baseline != current_revision || ci_scan_session_count(conn, scan_id) != expected_files)
+      goto stale;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+   aimee_pg_stmt_t *rows = aimee_pg_prepare(
+       conn,
+       "SELECT path,content,content_hash FROM code_scan_manifest_files WHERE scan_id=?1 "
+       "ORDER BY path",
+       err, sizeof(err));
+   if (!rows)
+      goto storage_fail;
+   aimee_pg_bind_text(rows, "?1", scan_id);
+   int indexed = 0;
+   int row_rc = AIMEE_PG_DONE;
+   while ((row_rc = aimee_pg_step(rows, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      char *path = strdup(aimee_pg_column_text(rows, 0));
+      char *content = strdup(aimee_pg_column_text(rows, 1));
+      char hash[32];
+      snprintf(hash, sizeof(hash), "%s", aimee_pg_column_text(rows, 2));
+      if (!path || !content)
+      {
+         free(path);
+         free(content);
+         aimee_pg_finalize(rows);
+         goto storage_fail;
+      }
+      int changed = 1;
+      aimee_pg_stmt_t *old = aimee_pg_prepare(
+          conn,
+          "SELECT f.hash FROM files f JOIN projects p ON p.id=f.project_id WHERE f.project_id=?1 "
+          "AND f.generation=p.current_generation AND f.path=?2",
+          err, sizeof(err));
+      if (!old)
+      {
+         free(path);
+         free(content);
+         aimee_pg_finalize(rows);
+         goto storage_fail;
+      }
+      aimee_pg_bind_int64(old, "?1", project_id);
+      aimee_pg_bind_text(old, "?2", path);
+      if (aimee_pg_step(old, err, sizeof(err)) == AIMEE_PG_ROW)
+      {
+         const char *old_hash = aimee_pg_column_text(old, 0);
+         changed = !old_hash || strcmp(old_hash, hash) != 0;
+      }
+      aimee_pg_finalize(old);
+      int64_t file_id = ci_upsert_file(conn, project_id, path, ts);
+      if (file_id < 0 || (changed && ci_replace_file_data_txn(conn, file_id, ci_get_extension(path),
+                                                              content) != 0))
+      {
+         free(path);
+         free(content);
+         aimee_pg_finalize(rows);
+         goto storage_fail;
+      }
+      indexed += changed;
+      free(path);
+      free(content);
+   }
+   aimee_pg_finalize(rows);
+   if (row_rc != AIMEE_PG_DONE)
+      goto storage_fail;
+
+   aimee_pg_stmt_t *del = aimee_pg_prepare(
+       conn,
+       "DELETE FROM files WHERE project_id=?1 AND generation=?2 AND NOT EXISTS "
+       "(SELECT 1 FROM code_scan_manifest_files m WHERE m.scan_id=?3 AND m.path=files.path)",
+       err, sizeof(err));
+   if (!del)
+      goto storage_fail;
+   aimee_pg_bind_int64(del, "?1", project_id);
+   aimee_pg_bind_int64(del, "?2", generation);
+   aimee_pg_bind_text(del, "?3", scan_id);
+   if (aimee_pg_step(del, err, sizeof(err)) != AIMEE_PG_DONE)
+   {
+      aimee_pg_finalize(del);
+      goto storage_fail;
+   }
+   int retracted = aimee_pg_stmt_changes(del);
+   aimee_pg_finalize(del);
+
+   aimee_pg_stmt_t *bump = aimee_pg_prepare(
+       conn,
+       "UPDATE code_index_project_state SET revision=revision+1,sealed_at=?1 WHERE project_id=?2 "
+       "RETURNING revision",
+       err, sizeof(err));
+   if (!bump)
+      goto storage_fail;
+   aimee_pg_bind_text(bump, "?1", ts);
+   aimee_pg_bind_int64(bump, "?2", project_id);
+   long long revision = -1;
+   if (aimee_pg_step(bump, err, sizeof(err)) == AIMEE_PG_ROW)
+      revision = (long long)aimee_pg_column_int64(bump, 0);
+   aimee_pg_finalize(bump);
+   if (revision < 0)
+      goto storage_fail;
+
+   aimee_pg_stmt_t *done = aimee_pg_prepare(
+       conn, "UPDATE code_scan_sessions SET state='sealed',sealed_at=?1 WHERE scan_id=?2", err,
+       sizeof(err));
+   if (!done)
+      goto storage_fail;
+   aimee_pg_bind_text(done, "?1", ts);
+   aimee_pg_bind_text(done, "?2", scan_id);
+   int done_ok = aimee_pg_step(done, err, sizeof(err)) == AIMEE_PG_DONE;
+   aimee_pg_finalize(done);
+   if (!done_ok)
+      goto storage_fail;
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+   {
+      aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      LOG_WARN(CI_LOG_TAG, "scan seal commit failed for '%s': %s", scan_id, err);
+      return -1;
+   }
+   if (out)
+   {
+      out->revision = revision;
+      out->files_indexed = indexed;
+      out->files_retracted = retracted;
+   }
+   /* Optional CSS projections own their own transactions, so converge them
+    * only after the source snapshot is visible. */
+   if (config_present() && config_css_style_graph_enabled())
+   {
+      for (int offset = 0;; offset++)
+      {
+         aimee_pg_stmt_t *css = aimee_pg_prepare(
+             conn,
+             "SELECT path,content FROM code_scan_manifest_files WHERE scan_id=?1 ORDER BY path "
+             "LIMIT 1 OFFSET ?2",
+             err, sizeof(err));
+         if (!css)
+            break;
+         aimee_pg_bind_text(css, "?1", scan_id);
+         aimee_pg_bind_int(css, "?2", offset);
+         if (aimee_pg_step(css, err, sizeof(err)) != AIMEE_PG_ROW)
+         {
+            aimee_pg_finalize(css);
+            break;
+         }
+         char *path = strdup(aimee_pg_column_text(css, 0));
+         char *content = strdup(aimee_pg_column_text(css, 1));
+         aimee_pg_finalize(css);
+         if (!path || !content)
+         {
+            free(path);
+            free(content);
+            break;
+         }
+         int64_t file_id = ci_resolve_file_id(conn, project_id, path);
+         if (file_id >= 0)
+            ci_css_index_file(file_id, ci_get_extension(path), content, 1);
+         free(path);
+         free(content);
+      }
+   }
+   return 0;
+
+stale:
+   aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   return -2;
+storage_fail:
+   aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+   LOG_WARN(CI_LOG_TAG, "scan seal failed for '%s': %s", scan_id, err);
+   return -1;
+}
+
+int canonical_index_scan_abort(const char *scan_id)
+{
+   if (!ci_scan_id_valid(scan_id))
+      return -1;
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "UPDATE code_scan_sessions SET state='aborted' WHERE scan_id=?1 AND state='open'", err,
+       sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", scan_id);
+   int rc = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE ? 0 : -1;
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+static int ci_path_ptr_cmp(const void *a, const void *b)
+{
+   return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+static void ci_verify_example(canonical_index_verify_result_t *out, const char *kind,
+                              const char *path)
+{
+   if (out->example_count >= CANONICAL_INDEX_VERIFY_EXAMPLES)
+      return;
+   snprintf(out->examples[out->example_count], sizeof(out->examples[0]), "%s:%s", kind, path);
+   out->example_count++;
+}
+
+int canonical_index_verify_project(const char *name, const char *root, int deep,
+                                   canonical_index_verify_result_t *out)
+{
+   if (!out || !name || !name[0] || !root || !root[0])
+      return -1;
+   memset(out, 0, sizeof(*out));
+   char abs_root[MAX_PATH_LEN];
+   if (!realpath(root, abs_root))
+   {
+      out->unavailable = 1;
+      return 0;
+   }
+   void *conn = ci_conn();
+   if (!conn)
+      return -1;
+   int64_t project_id = ci_resolve_project_id(conn, name);
+   if (project_id < 0)
+      return -1;
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *meta = aimee_pg_prepare(
+       conn,
+       "SELECT COUNT(f.id),COALESCE(s.revision,0) FROM projects p "
+       "LEFT JOIN files f ON f.project_id=p.id AND f.generation=p.current_generation "
+       "LEFT JOIN code_index_project_state s ON s.project_id=p.id WHERE p.id=?1 "
+       "GROUP BY s.revision",
+       err, sizeof(err));
+   if (!meta)
+      return -1;
+   aimee_pg_bind_int64(meta, "?1", project_id);
+   if (aimee_pg_step(meta, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      out->indexed_files = aimee_pg_column_int(meta, 0);
+      out->index_revision = (long long)aimee_pg_column_int64(meta, 1);
+   }
+   aimee_pg_finalize(meta);
+
+   ci_file_list_t list = {0};
+   ci_collect_text_files(abs_root, &list);
+   if (list.count > 1)
+      qsort(list.paths, (size_t)list.count, sizeof(list.paths[0]), ci_path_ptr_cmp);
+   out->workspace_files = list.count;
+   for (int i = 0; i < list.count; i++)
+   {
+      const char *rel = list.paths[i] + strlen(abs_root);
+      if (*rel == '/')
+         rel++;
+      aimee_pg_stmt_t *hash_q = aimee_pg_prepare(
+          conn,
+          "SELECT f.hash FROM files f JOIN projects p ON p.id=f.project_id WHERE f.project_id=?1 "
+          "AND f.generation=p.current_generation AND f.path=?2",
+          err, sizeof(err));
+      if (!hash_q)
+      {
+         for (; i < list.count; i++)
+            free(list.paths[i]);
+         free(list.paths);
+         return -1;
+      }
+      aimee_pg_bind_int64(hash_q, "?1", project_id);
+      aimee_pg_bind_text(hash_q, "?2", rel);
+      int row = aimee_pg_step(hash_q, err, sizeof(err));
+      char stored_hash[32] = "";
+      if (row == AIMEE_PG_ROW)
+         snprintf(stored_hash, sizeof(stored_hash), "%s", aimee_pg_column_text(hash_q, 0));
+      aimee_pg_finalize(hash_q);
+      if (row != AIMEE_PG_ROW)
+      {
+         out->unindexed_files++;
+         ci_verify_example(out, "unindexed", rel);
+      }
+      else if (deep)
+      {
+         size_t content_len = 0;
+         char *content = ci_read_file_content(list.paths[i], &content_len);
+         if (!content)
+         {
+            for (; i < list.count; i++)
+               free(list.paths[i]);
+            free(list.paths);
+            out->unavailable = 1;
+            return 0;
+         }
+         (void)text_sanitize_utf8(content);
+         char actual_hash[32];
+         ci_content_hash(content, actual_hash, sizeof(actual_hash));
+         free(content);
+         if (strcmp(stored_hash, actual_hash) != 0)
+         {
+            out->modified_files++;
+            ci_verify_example(out, "modified", rel);
+         }
+      }
+      free(list.paths[i]);
+   }
+   free(list.paths);
+
+   aimee_pg_stmt_t *paths = aimee_pg_prepare(
+       conn,
+       "SELECT f.path FROM files f JOIN projects p ON p.id=f.project_id WHERE f.project_id=?1 "
+       "AND f.generation=p.current_generation ORDER BY f.path",
+       err, sizeof(err));
+   if (!paths)
+      return -1;
+   aimee_pg_bind_int64(paths, "?1", project_id);
+   int row_rc;
+   while ((row_rc = aimee_pg_step(paths, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      const char *rel = aimee_pg_column_text(paths, 0);
+      char full[MAX_PATH_LEN];
+      snprintf(full, sizeof(full), "%s/%s", abs_root, rel ? rel : "");
+      struct stat st;
+      if (stat(full, &st) != 0)
+      {
+         out->missing_files++;
+         ci_verify_example(out, "missing", rel ? rel : "");
+      }
+   }
+   aimee_pg_finalize(paths);
+   return row_rc == AIMEE_PG_DONE ? 0 : -1;
+}
+
 int canonical_index_scan_project(const char *name, const char *root, int force, int *inspected_out)
 {
+   (void)force; /* content hashes, not mtimes, decide whether publication work is needed */
    if (inspected_out)
       *inspected_out = 0;
    if (!ci_exec_capture)
@@ -1324,9 +1815,8 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    if (!conn)
       return -1;
 
-   /* CSS style-graph and git co-change write paths are opt-in; read once per scan. */
+   /* Git co-change remains a convergent projection after the source seal. */
    int cfg_ok = (config_present());
-   int css_on = cfg_ok && config_css_style_graph_enabled();
    int cochange_on = cfg_ok && config_code_cochange_git_enabled();
 
    char abs_root[MAX_PATH_LEN];
@@ -1339,17 +1829,10 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
       return -1;
    }
 
-   int64_t project_id = ci_upsert_project(conn, name, abs_root);
-   if (project_id < 0)
+   char scan_id[97];
+   ci_local_scan_id(scan_id);
+   if (canonical_index_scan_begin(name, abs_root, scan_id, NULL) != 0)
       return -1;
-
-   ci_exclusion_list_t build_exclusions = {0};
-   ci_collect_build_exclusions(abs_root, &build_exclusions);
-   ci_purge_hidden_paths(project_id);
-   ci_purge_build_exclusions(project_id, &build_exclusions);
-
-   char ts[32];
-   now_utc(ts, sizeof(ts));
 
    ci_file_list_t list = {0};
    ci_collect_text_files(abs_root, &list);
@@ -1357,7 +1840,7 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
    if (inspected_out)
       *inspected_out = list.count;
 
-   int scanned = 0;
+   int accepted_total = 0;
    for (int i = 0; i < list.count; i++)
    {
       const char *full = list.paths[i];
@@ -1365,62 +1848,46 @@ int canonical_index_scan_project(const char *name, const char *root, int force, 
       if (*rel == '/')
          rel++;
 
-      struct stat st;
-      if (stat(full, &st) != 0)
-      {
-         free(list.paths[i]);
-         continue;
-      }
-      if (!force && !ci_file_modified_since(conn, project_id, rel, st.st_mtime))
-      {
-         free(list.paths[i]);
-         continue;
-      }
-
       size_t content_len;
       char *content = ci_read_file_content(full, &content_len);
       if (!content)
       {
-         free(list.paths[i]);
-         continue;
+         for (int j = i; j < list.count; j++)
+            free(list.paths[j]);
+         free(list.paths);
+         canonical_index_scan_abort(scan_id);
+         return -1;
       }
-      /* Source files are arbitrary bytes even when their extension is textual.
-       * Canonical indexing stores the complete body in a Postgres TEXT column
-       * and derives more rows from it, so normalize once before either path. */
-      (void)text_sanitize_utf8(content);
-
-      int64_t file_id = ci_upsert_file(conn, project_id, rel, ts);
-      if (file_id < 0)
+      canonical_index_file_input_t input = {.rel_path = rel, .content = content};
+      int accepted = 0;
+      if (canonical_index_scan_stage(scan_id, &input, 1, &accepted) != 0 || accepted != 1)
       {
-         free(content);
-         free(list.paths[i]);
-         continue;
-      }
-
-      const char *ext = ci_get_extension(full);
-      if (ci_replace_file_data(conn, name, file_id, ext, content) != 0)
-      {
-         /* Purge fence: abort the whole scan for this project. */
          free(content);
          for (int j = i; j < list.count; j++)
             free(list.paths[j]);
          free(list.paths);
+         canonical_index_scan_abort(scan_id);
          return -1;
       }
-      ci_css_index_file(file_id, ext, content, css_on);
-
+      accepted_total += accepted;
       free(content);
       free(list.paths[i]);
-      scanned++;
    }
 
    free(list.paths);
+
+   canonical_index_seal_result_t sealed;
+   if (canonical_index_scan_seal(scan_id, accepted_total, &sealed) != 0)
+   {
+      canonical_index_scan_abort(scan_id);
+      return -1;
+   }
 
    /* Seed co_edited edges from git history (incremental after the first scan). */
    if (cochange_on)
       ci_backfill_cochange(name, abs_root);
 
-   return scanned;
+   return sealed.files_indexed;
 }
 
 int canonical_index_scan_files(const char *name, const char *root_label,

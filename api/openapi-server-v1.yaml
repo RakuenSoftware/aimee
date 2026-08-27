@@ -3415,6 +3415,28 @@ paths:
       summary: Sync the code graph (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /index/verify:
+    post:
+      summary: Compare a workspace with its published canonical index without mutating either
+      description: >-
+        Performs a read-only manifest comparison. Set deep=true to hash file contents;
+        otherwise verification uses the stored manifest metadata. The response distinguishes
+        current index state from matched, modified, missing, and unavailable workspace state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, root]
+              properties:
+                project: { type: string }
+                root: { type: string }
+                deep: { type: boolean, default: false }
+      responses:
+        "200": { description: Verification result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or invalid project/root }
+        "503": { description: Canonical index unavailable }
   /index/scan:
     post:
       summary: Scan/re-index the codebase (async; poll GET /runs/{id})
@@ -3428,20 +3450,37 @@ paths:
         thin client to ingest a workspace whose root lives on the client and is
         not visible to the server (a `detached` workspace). The server relays the
         supplied {rel_path, content} entries to aimee-kb without reading any
-        local filesystem.
+        local filesystem. Complete snapshots use begin, one or more stage
+        requests, and seal; staged files remain private until seal atomically
+        publishes the manifest. The legacy files-only request remains supported
+        as an incremental update.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name, root, files]
+              required: [name, root]
+              anyOf:
+                - required: [files]
+                - required: [phase, scan_id]
               properties:
                 name: { type: string }
                 root: { type: string }
                 force: { type: boolean }
+                phase:
+                  type: string
+                  enum: [begin, stage, seal, abort]
+                scan_id:
+                  type: string
+                  description: Client-generated identifier shared by every phase of one scan.
+                expected_files:
+                  type: integer
+                  minimum: 0
+                  description: Required for seal; must equal the distinct files staged.
                 files:
                   type: array
+                  description: Required for legacy and stage requests.
                   items:
                     type: object
                     required: [rel_path, content]

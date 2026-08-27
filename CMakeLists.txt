@@ -1148,6 +1148,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_accounts.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_governance.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_code.c
+    ${AIMEE_SRC_DIR}/kb/http/kb_http_code_scan_phase.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ingest.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_jobs.c
     ${AIMEE_SRC_DIR}/kb/http/kb_http_ws.c

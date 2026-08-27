@@ -1470,6 +1470,7 @@ static const server_method_dispatch_t server_dispatch_table[] = {
     {"memory.read", handle_memory_read},
     {"memory.benchmark", handle_memory_benchmark},
     {"index.scan", handle_index_scan},
+    {"index.verify", handle_index_verify},
     {"index.ingest", handle_index_ingest},
     {"index.find", handle_index_find},
     {"index.list", handle_index_list},
