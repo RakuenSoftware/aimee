@@ -429,6 +429,98 @@ static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
    printf("  PASS: test_as_of_reaches_the_kb_and_its_verdict_comes_back\n");
 }
 
+/* ---------------------------------------------------------------------------
+ * PII must never cross to aimee-kb.
+ *
+ * The assertion that matters is NOT "the call returned an error" -- it is that
+ * NO REQUEST WAS ISSUED. A gate that lets the POST happen and then reports a
+ * rejection has already moved the data it exists to contain. g_pii_posts counts
+ * transmissions; for withheld content it must stay at zero.
+ */
+static int g_pii_posts;
+static char g_pii_last_body[4096];
+
+static int recording_post_handler(const char *url, const char *auth_header, const char *body,
+                                  char **response_buf, int timeout_ms, const char *extra_headers)
+{
+   (void)url;
+   (void)auth_header;
+   (void)timeout_ms;
+   (void)extra_headers;
+   g_pii_posts++;
+   snprintf(g_pii_last_body, sizeof(g_pii_last_body), "%s", body ? body : "");
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"ok\",\"memory\":{\"id\":7}}");
+   return 200;
+}
+
+static void test_pii_never_reaches_kb(void)
+{
+   const char *secret = "my password: hunter2trustno1";
+
+   /* 1. Clean content is transmitted unchanged. */
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   g_pii_last_body[0] = '\0';
+   assert(kb_client_memory_insert(TIER_L1, KIND_FACT, "k-clean", "the sky is blue", 1.0, "s",
+                                  NULL) == 0);
+   assert(g_pii_posts == 1);
+   assert(strstr(g_pii_last_body, "the sky is blue") != NULL);
+
+   /* 2. The secret never appears on the wire: either redacted, or withheld with
+    *    nothing sent at all. */
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   g_pii_last_body[0] = '\0';
+   int rc = kb_client_memory_insert(TIER_L1, KIND_FACT, "k-secret", secret, 1.0, "s", NULL);
+   if (rc == 0)
+   {
+      assert(g_pii_posts == 1);
+      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
+      assert(strstr(g_pii_last_body, "REDACTED") != NULL);
+   }
+   else
+   {
+      assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
+      assert(g_pii_posts == 0);
+   }
+
+   /* 3. A sensitive KEY withholds the whole write: the key is the lookup handle
+    *    and cannot be redacted in place. Nothing is transmitted. */
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   rc = kb_client_memory_insert(TIER_L1, KIND_FACT, secret, "benign body", 1.0, "s", NULL);
+   assert(rc == KB_CLIENT_MEMORY_WITHHELD_PII);
+   assert(g_pii_posts == 0);
+
+   /* 4. The same screen guards update and supersede, not just insert. */
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   g_pii_last_body[0] = '\0';
+   rc = kb_client_memory_update(42, secret);
+   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
+      assert(g_pii_posts == 0);
+   else
+      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
+
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   g_pii_last_body[0] = '\0';
+   rc = kb_client_memory_supersede(42, secret, 1.0, "s", NULL);
+   if (rc == KB_CLIENT_MEMORY_WITHHELD_PII)
+      assert(g_pii_posts == 0);
+   else
+      assert(strstr(g_pii_last_body, "hunter2trustno1") == NULL);
+
+   mock_agent_http_reset();
+   printf("  PASS: test_pii_never_reaches_kb\n");
+}
+
 int main(void)
 {
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
@@ -443,6 +535,7 @@ int main(void)
    test_typed_context_uses_server_defaults();
    test_recall_carries_and_records_production_activation();
    test_as_of_reaches_the_kb_and_its_verdict_comes_back();
+   test_pii_never_reaches_kb();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");

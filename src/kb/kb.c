@@ -2,7 +2,6 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/code_index.h"
 #include "modules/db2/c/db_postgres.h"
@@ -20,7 +19,6 @@
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
 #include "modules/db2/c/bandit.h"
-#endif
 #include "headers/sketch.h"
 #include <strings.h>
 #include "kb.h"
@@ -44,85 +42,6 @@
 #include <unistd.h>
 
 #define KB_ERRBUF 256
-
-#if defined(AIMEE_DB2_DISABLED)
-int kb_build(const char *root_path, const char *project, const char *embedding_cmd,
-             int force_rebuild, kb_stats_t *stats_out)
-{
-   (void)root_path;
-   (void)project;
-   (void)embedding_cmd;
-   (void)force_rebuild;
-   if (stats_out)
-      memset(stats_out, 0, sizeof(*stats_out));
-   return -1;
-}
-
-int kb_update(const char *root_path, const char *project, const char *embedding_cmd,
-              kb_stats_t *stats_out)
-{
-   (void)root_path;
-   (void)project;
-   (void)embedding_cmd;
-   if (stats_out)
-      memset(stats_out, 0, sizeof(*stats_out));
-   return -1;
-}
-
-char *kb_search(const char *project, const char *query, const char *embedding_cmd, int max_results)
-{
-   (void)project;
-   (void)query;
-   (void)embedding_cmd;
-   (void)max_results;
-   return safe_strdup("error: knowledge base storage is owned by aimee-kb");
-}
-
-char *kb_search_json(const char *project, const char *query, const char *embedding_cmd,
-                     int max_results)
-{
-   (void)project;
-   (void)query;
-   (void)embedding_cmd;
-   (void)max_results;
-   return safe_strdup("{\"error\":\"knowledge base storage is owned by aimee-kb\"}");
-}
-
-/* Storage-disabled alternative to the full implementation below. The outer
- * AIMEE_DB2_DISABLED #if/#else makes the definitions mutually exclusive. */
-char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, const char *query,
-                               const char *embedding_cmd, int max_results,
-                               const char *fusion_mode_override)
-{
-   (void)all_projects;
-   (void)fusion_mode_override;
-   return kb_search_json(preferred_project, query, embedding_cmd, max_results);
-}
-
-void kb_resolve_project(const char *project, const char *root_path, char *out, size_t out_len)
-{
-   (void)root_path;
-   if (!out || out_len == 0)
-      return;
-   out[0] = '\0';
-   if (project && project[0])
-   {
-      snprintf(out, out_len, "%s", project);
-      return;
-   }
-}
-
-int kb_async_enabled(void)
-{
-   return 0;
-}
-
-int kb_extract_convention_candidates(void)
-{
-   return 0;
-}
-
-#else
 
 static int estimate_tokens(const char *text, size_t len)
 {
@@ -294,7 +213,7 @@ static int should_index_file(const char *rel_path, char includes[][KB_GLOB_MAX],
 /* File walking                                                         */
 /* ------------------------------------------------------------------ */
 
-#define MAX_FILES        4096
+#define MAX_FILES 4096
 
 typedef struct
 {
@@ -2020,7 +1939,6 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    free(lex_res);
    free(vec_res);
 
-#if !defined(AIMEE_DB2_DISABLED)
    if (n_results > 0)
    {
       int cfg_ok = (config_present());
@@ -2105,7 +2023,6 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          kb_detect_observe(sum / n_results, n_results);
       }
    }
-#endif
 
    *n_out = n_results;
 
@@ -2471,5 +2388,3 @@ void kb_resolve_project(const char *project, const char *root_path, char *out, s
       return;
    }
 }
-
-#endif /* !AIMEE_DB2_DISABLED */

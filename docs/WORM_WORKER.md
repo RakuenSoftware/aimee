@@ -1,71 +1,91 @@
-# WORM Audit Worker
+# SQLite WORM Audit Worker
 
-WORM chain construction is an independent security compartment. Application
-processes submit immutable audit intents; they do not hold chain-writer
-authority or the worker credential.
+Both `aimee-server` and `aimee-kb` use
+`src/modules/audit/audit_worm.c` as their SQLite WORM implementation. They use
+separate files, keys, and processes: the server keeps its existing audit store,
+while the KB worker defaults to `$AIMEE_HOME/audit/kb-worm-live.db`. Neither
+store runs on, calls, or depends on the tap.
 
 ## Transaction contract
 
-The producer's transaction inserts its application mutation and one
+The producer transaction inserts its application mutation and one immutable
 `kb_audit_outbox` row. PostgreSQL commits both or neither. `pg_notify` wakes the
-worker only after commit, while polling recovers notifications lost during
-downtime.
+worker after commit, while polling recovers notifications lost during downtime.
 
 `aimee-kb-worm` claims committed, undelivered intents with `FOR UPDATE SKIP
-LOCKED`. One drain transaction appends the hash-chain row, appends its vault
-witness, and inserts `kb_audit_delivery`. A crash before commit rolls back all
-three. Restart sees the still-pending intent and retries it; a delivered intent
-cannot be appended twice.
+LOCKED`. It appends each event to SQLite with the stable ID `kb:<outbox_id>`,
+records the returned SQLite sequence in `kb_audit_delivery`, then commits the
+PostgreSQL claim transaction.
 
-The outbox, delivery ledger, and chain all reject update, delete, and truncate.
-Only schema-owner intervention that deliberately disables those triggers can
-rewrite history.
+SQLite and PostgreSQL cannot share one atomic transaction. The bridge therefore
+uses idempotent retry: a crash after the SQLite commit but before PostgreSQL
+acknowledgement leaves the intent pending; retry finds the byte-identical SQLite
+event and returns its original sequence. Reusing an event ID with different
+evidence fails closed. The delivery sequence is unique, so starting against an
+empty or stale SQLite file after prior deliveries also fails closed instead of
+silently forking the chain.
+
+The PostgreSQL outbox and delivery ledger reject update, delete, and truncate.
+SQLite rejects row updates and deletes, verifies every predecessor/hash link,
+and adds keyed checkpoints. Filesystem immutable flags are best-effort; the
+cryptographic chain and independently operated tap evidence are the portable
+controls.
+
+Both processes call the same startup-admission function before accepting work.
+It opens and verifies the complete existing SQLite chain and every checkpoint
+MAC, checkpoints an intact non-empty head, and requires the result to be GREEN.
+`aimee-server` fails before creating its module bus or API sockets when this
+admission fails; `aimee-kb-worm` fails before claiming PostgreSQL outbox work.
 
 ## Privilege boundary
 
 Provision `schema_roles.sql`, `schema.sql`, and `schema_grants.sql` in that
-order. They create the `aimee_kb_worm_worker` login role and reduce it to:
+order. They create the `aimee_kb_worm_worker` login and reduce it to:
 
 - `USAGE` on the isolated `aimee_kb_worm_api` schema;
-- `EXECUTE` on `aimee_kb_worm_api.drain(integer)`.
+- `EXECUTE` on `aimee_kb_worm_api.claim(integer)` and
+  `aimee_kb_worm_api.ack(bigint,bigint)`.
 
-It has no `USAGE` on the application `public` schema and receives no table,
-sequence, application-function, status-function, or internal-appender
-privileges. This matters because PostgreSQL grants new functions to `PUBLIC` by
-default: removing schema usage prevents a later application function from
-silently becoming worker-reachable. Conversely, `aimee_kb_runtime` can execute
-`kb_audit_worm_submit(...)` but cannot insert the chain, manipulate either
-ledger, or invoke the drainer.
+It has no `USAGE` on `public` and no table, sequence, application-function, or
+status-function privileges. Conversely, `aimee_kb_runtime` may execute
+`kb_audit_worm_submit(...)` but cannot manipulate either ledger or invoke the
+worker API. PostgreSQL no longer creates or owns a KB WORM chain table.
 
-Give the worker a credential distinct from `AIMEE_DB2_URL`. Start it with:
+Give the worker a credential distinct from `AIMEE_DB2_URL`:
 
 ```sh
 AIMEE_WORM_DB2_URL='postgresql://aimee_kb_worm_worker:...@db/aimee' \
+  AIMEE_HOME=/var/lib/aimee-worm \
+  AIMEE_WORM_PATH=/var/lib/aimee-worm/audit/kb-worm-live.db \
   aimee-kb-worm
 ```
 
-The worker intentionally has no fallback to the runtime DSN and exits unless
-the authenticated PostgreSQL role is exactly `aimee_kb_worm_worker`, has no
-membership edges or administrative attributes, cannot resolve `public`, and
-can resolve the isolated worker API.
+The worker has no runtime-DSN fallback. It exits unless the authenticated role
+is exactly `aimee_kb_worm_worker`, has no membership edges or administrative
+attributes, cannot resolve `public`, and can resolve only the isolated worker
+API. It also holds a PostgreSQL session advisory lock, preventing two workers
+from splitting one logical chain across different SQLite files.
 
-Run it as a separate OS service or container. A thread inside `aimee-kb` is not
-a security boundary: it would share address space, process credentials, control
-flow, and crash fate with the operations being audited. The container image
-ships both executables so a hardened deployment can run the same image with an
-overridden entrypoint of `/usr/local/bin/aimee-kb-worm` and only the worker DSN.
-`deploy/compose/worm-worker.yaml` provides that hardened overlay for an
-externally reachable DB2. The self-contained KB image's embedded PostgreSQL is
-a development/single-owner tier, not a process-isolated hardened deployment.
+Run exactly one worker as a separate OS service or container, with its SQLite
+directory on persistent storage and mode `0700`. A thread inside `aimee-kb` is
+not a security boundary because it shares address space, credentials, control
+flow, and crash fate with the code being audited. The supplied systemd unit and
+`deploy/compose/worm-worker.yaml` allocate dedicated persistent worker state.
+
+## Upgrade from the retired PostgreSQL chain
+
+Schema upgrades stop creating or writing `kb_audit_event`, but deliberately do
+not drop an existing table: silently deleting prior evidence would violate the
+purpose of WORM. Preserve/export and verify the legacy chain, start the SQLite
+worker, confirm the outbox reaches zero and the SQLite chain verifies, then
+retire the inert PostgreSQL table under an explicit evidence-retention policy.
+Do not treat the outbox or delivery ledger as the evidence chain.
 
 ## Operations
 
 Monitor `kb_audit_worm_pending()` from the runtime health path. Alert on both
-pending count and oldest age; a small count with an old intent still means the
-audit observer is stalled. The worker uses transactional `LISTEN/NOTIFY` for
+pending count and oldest age. The worker uses transactional `LISTEN/NOTIFY` for
 normal wakeups and a one-second poll for recovery.
-
-Useful controls:
 
 ```sh
 # Drain all currently available work, then exit.

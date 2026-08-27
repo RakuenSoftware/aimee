@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -12,8 +11,6 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
@@ -21,28 +18,16 @@ import (
 
 func execOnDB(t *testing.T, path, query string, args ...any) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(query, args...); err != nil {
-		t.Fatal(err)
-	}
+	db1test.Exec(t, path, query, args...)
 }
 
 // expireBudgetLease simulates a crashed owner whose reservation lease has run
 // out. Replay ownership is only transferable once the lease lapses.
 func expireBudgetLease(t *testing.T, path, workItemID string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, workItemID); err != nil {
-		t.Fatal(err)
-	}
+	db1test.Exec(t, path,
+		`UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`,
+		workItemID)
 }
 
 type scriptedRunner struct {
@@ -1199,7 +1184,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err := store.ParkRunnerFailure(t.Context(), "wi_replay_lost_unresolved", "work", "o1", "runner_unavailable", "d", true, false, 0); err != nil {
 			t.Fatal(err)
 		}
-		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_unresolved")
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_replay_lost_unresolved")
 		out, err := eng.Advance(t.Context(), "wi_replay_lost_unresolved")
 		if err != nil || out.Parked || out.Ran {
 			t.Fatalf("expected a silent redispatch: out=%+v err=%v", out, err)
@@ -1218,7 +1203,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if allowed, err := store.ReconcileWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1", 0.3); err != nil || !allowed {
 			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
 		}
-		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_actual")
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_replay_lost_actual")
 		out, err := eng.Advance(t.Context(), "wi_replay_lost_actual")
 		if err != nil || !out.Parked || out.PauseReason != "replay_unrecoverable" {
 			t.Fatalf("expected park replay_unrecoverable: out=%+v err=%v", out, err)

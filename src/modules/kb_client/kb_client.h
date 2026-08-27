@@ -835,6 +835,13 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
  * write-side gate pipeline runs inside aimee-kb.  Returns 0 on
  * success (|out| filled if non-NULL) or -1 if kb is unreachable or
  * the gate rejected the write.  Mirrors memory_insert(). */
+/* Returned when memory content carries a secret/PII span that cannot be cleanly
+ * redacted. The write is REFUSED CLIENT-SIDE: no request is issued, so the text
+ * never reaches aimee-kb. Distinct from -1 (kb unreachable or kb-side rejection)
+ * so a caller can tell "we would not send this" from "we could not send this".
+ * Every content-carrying memory.* wrapper below returns it. */
+#define KB_CLIENT_MEMORY_WITHHELD_PII (-2)
+
 int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
                             const char *content, double confidence, const char *session_id,
                             memory_t *out);
@@ -1192,8 +1199,13 @@ typedef struct
    int projects;      /* number of projects scanned (0 when skipped) */
    int files;         /* number of files (re)indexed (0 when skipped) */
    int inspected;     /* number of files visited (>= files); 0 if older kb */
+   int retracted;     /* files removed by a sealed complete manifest */
+   long long index_revision;
    long retry_after;  /* seconds until cooldown ends (0 when not in cooldown) */
    char reason[32];   /* "busy" | "cooldown" | "no_kb" | "error" | "" */
+   char index_state[16];
+   char workspace_state[16];
+   char verification[16];
    char message[256]; /* human-readable detail; populated when reason == "error" */
 } kb_client_index_scan_result_t;
 
@@ -1221,6 +1233,19 @@ char *kb_client_index_project_lifecycle_json(const char *operation, const char *
  * kb_client_index_scan. */
 int kb_client_code_scan_push(const char *name, const char *root, int force, void *files_arr_v,
                              kb_client_index_scan_result_t *out);
+
+/* Relay one phase of a complete client-owned scan. phase is begin|stage|seal|abort;
+ * scan_id identifies the private session and expected_files is used only by
+ * seal. A stage adopts files_arr_v using the same array shape as the legacy
+ * push helper. This is the server-side half of remote thin-client ingestion. */
+int kb_client_code_scan_phase(const char *name, const char *root, int force, const char *phase,
+                              const char *scan_id, int expected_files, void *files_arr_v,
+                              kb_client_index_scan_result_t *out);
+
+/* Read-only canonical-index/workspace comparison. Returns response JSON owned
+ * by the caller, or NULL on transport failure. */
+char *kb_client_index_verify_json(const char *project, const char *root, int deep,
+                                  int *http_status);
 
 /* Internal: map a parsed aimee-kb response into the result struct.
  * Exposed so unit tests can pin the wire contract directly without

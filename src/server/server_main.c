@@ -28,6 +28,7 @@
 #include "agent_exec.h"
 #include "log.h"
 #include <aimee/audit/audit_action.h>
+#include <aimee/audit/audit_worm.h>
 #include "platform_path.h"
 #include "platform_process.h"
 #include "platform_random.h"
@@ -185,6 +186,24 @@ static int run_server(const char *socket_path, log_level_t log_level)
    /* Initialize logging */
    log_init(log_level);
    audit_log_open();
+
+   /* The SQLite WORM ledger is an admission boundary, not a health warning.
+    * Verify it before the durable bus sink, configuration module, sockets, or
+    * listeners can accept work. A fresh home creates an empty GREEN ledger; an
+    * intact non-empty ledger receives a startup checkpoint; any chain, MAC, or
+    * storage failure rejects startup. */
+   {
+      char worm_err[256] = "";
+      if (audit_worm_startup_verify(worm_err, sizeof(worm_err), NULL, NULL) != 0)
+      {
+         startup_notify(notify_fd, "error: SQLite WORM startup verification failed\n");
+         aimee_log(LOG_ERROR, "audit.worm", "server startup rejected: %s",
+                   worm_err[0] ? worm_err : "verification failure");
+         audit_worm_close();
+         audit_log_close();
+         return 1;
+      }
+   }
    if (server_obs_bus_configure() != 0)
       LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
    if (obs_bus_configure_daemon_module_runtime("server", config_default_dir()) != 0)

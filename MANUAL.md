@@ -354,6 +354,7 @@ Before an upgrade, back up:
 
 - `~/.config/aimee/` including DB1, config, vault material, TLS state, and workflow files;
 - the KB PostgreSQL database with `pg_dump` or the container export helper;
+- the server and KB WORM SQLite stores using a consistent SQLite backup or seal;
 - any external witness or audit seal destination.
 
 Do not copy a live SQLite file without its WAL/SHM files or a consistent backup operation. Do not
@@ -405,7 +406,6 @@ deployments. Preserve the first error and the operation ID; later failures are o
 ~/.config/aimee/
   aimee.yaml           main configuration
   agents.json          agents and network inventory
-  aimee.db             DB1 SQLite
   remote.conf          thin-client target and trust state
   workflows/           workflow definitions
   captures/ or audit-* event capture and audit material
@@ -416,8 +416,9 @@ deployments. Preserve the first error and the operation ID; later failures are o
 <workspace>/aimee.workspace.yaml
 ```
 
-DB2 is PostgreSQL, not a file under the config directory. Workflow lifecycle rows belong to the Go
-control plane even when it shares the server container.
+DB1 and DB2 are PostgreSQL stores, not files under the config directory. DB1 is served through the
+`aimee` and `postgres` modules; workflow lifecycle rows use that same store contract even though the
+Go control plane owns their behavior.
 
 ## Terms
 
@@ -426,7 +427,7 @@ control plane even when it shares the server container.
 | primary | the AI tool or model the user is working with |
 | delegate | a policy-controlled agent doing a bounded task |
 | persona | a named perspective and instruction set |
-| DB1 | local server SQLite state |
+| DB1 | local server PostgreSQL state served by the store modules |
 | DB2 | KB PostgreSQL and pgvector state |
 | event bus | intra-daemon typed shared-memory transport |
 | capture | ordered observational bus record; never automatic execution replay |

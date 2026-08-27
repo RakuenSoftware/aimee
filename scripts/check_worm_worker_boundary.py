@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: str,
-          worker: str, makefile: str, dockerfile: str, entrypoint: str,
+          worker: str, server: str, worm_store: str, makefile: str, dockerfile: str, entrypoint: str,
           compose: str) -> list[str]:
     failures: list[str] = []
 
@@ -21,30 +21,35 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
         "immutable audit outbox": "CREATE TABLE IF NOT EXISTS kb_audit_outbox",
         "immutable delivery ledger": "CREATE TABLE IF NOT EXISTS kb_audit_delivery",
         "producer submit function": "CREATE OR REPLACE FUNCTION kb_audit_worm_submit",
-        "worker drain function": "CREATE OR REPLACE FUNCTION kb_audit_worm_drain",
-        "isolated worker API": "CREATE OR REPLACE FUNCTION aimee_kb_worm_api.drain",
-        "worker-only appender": "CREATE OR REPLACE FUNCTION kb_audit_worm_append_internal",
+        "worker claim function": "CREATE OR REPLACE FUNCTION kb_audit_worm_claim",
+        "worker ack function": "CREATE OR REPLACE FUNCTION kb_audit_worm_ack",
+        "isolated worker claim API": "CREATE OR REPLACE FUNCTION aimee_kb_worm_api.claim",
+        "isolated worker ack API": "CREATE OR REPLACE FUNCTION aimee_kb_worm_api.ack",
         "transactional wakeup": "pg_notify('kb_audit_worm'",
         "concurrent claim": "FOR UPDATE OF o SKIP LOCKED",
         "atomic delivery acknowledgement": "INSERT INTO kb_audit_delivery(outbox_id,audit_seq)",
+        "stale SQLite store rejection": "p_audit_seq <= latest",
         "outbox update block": "kb_audit_outbox_no_update",
         "outbox delete block": "kb_audit_outbox_no_delete",
         "delivery update block": "kb_audit_delivery_no_update",
         "delivery delete block": "kb_audit_delivery_no_delete",
+        "independent JWKS publication-root guard":
+            "CREATE OR REPLACE FUNCTION kb_management_jwks_publication_root_guard",
     }
     for label, needle in required_schema.items():
         if needle not in schema:
             failures.append(f"schema: missing {label}")
 
-    if re.search(
-        r"GRANT\s+[A-Z, ]*INSERT[A-Z, ]*\s+ON(?:\s+TABLE)?\s+"
-        r"(?:public\.)?kb_audit_event\s+TO\s+aimee_kb_runtime",
-        grants,
-        re.I,
-    ):
-        failures.append("grants: runtime has direct INSERT on kb_audit_event")
+    if "CREATE TABLE IF NOT EXISTS kb_audit_event" in schema:
+        failures.append("schema: PostgreSQL still owns a WORM chain table")
+    if "EXECUTE FUNCTION kb_worm_block()" in schema:
+        failures.append("schema: an immutable table still depends on the retired PG chain guard")
+    for obsolete in ("kb_audit_worm_append_internal", "kb_audit_worm_drain",
+                     "aimee_kb_worm_api.drain"):
+        if f"CREATE OR REPLACE FUNCTION {obsolete}" in schema:
+            failures.append(f"schema: obsolete PostgreSQL chain function {obsolete}")
     for needle, label in (
-        ("REVOKE ALL ON TABLE kb_audit_event,kb_audit_outbox,kb_audit_delivery",
+        ("REVOKE ALL ON TABLE kb_audit_outbox,kb_audit_delivery",
          "runtime storage revoke"),
         ("GRANT EXECUTE ON FUNCTION kb_audit_worm_submit", "runtime submit grant"),
         ("REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_worm_worker",
@@ -52,7 +57,8 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
         ("REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker",
          "worker public schema revoke"),
         ("GRANT USAGE ON SCHEMA aimee_kb_worm_api", "worker API schema grant"),
-        ("GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.drain", "worker API drain grant"),
+        ("GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.claim", "worker API claim grant"),
+        ("aimee_kb_worm_api.ack(BIGINT,BIGINT)", "worker API ack grant"),
     ):
         if needle not in grants:
             failures.append(f"grants: missing {label}")
@@ -89,20 +95,37 @@ def audit(schema: str, grants: str, roles: str, c_appender: str, fact_mutation: 
     if ("AIMEE_WORM_DB2_URL is required" not in worker or
             "refusing runtime credential " not in worker):
         failures.append("worker binary: separate credential is not mandatory")
-    if ("aimee_kb_worm_api.drain" not in worker or
+    if ("aimee_kb_worm_api.claim" not in worker or
+            "aimee_kb_worm_api.ack" not in worker or
+            "audit_worm_append_idempotent" not in worker or
+            "audit_worm_startup_verify" not in worker or
+            "pg_try_advisory_lock(5752444001::bigint)" not in worker or
             "NOT has_schema_privilege(current_user,'public','USAGE')" not in worker):
         failures.append("worker binary: isolated database capability is not enforced")
+    if "audit_worm_startup_verify" not in server:
+        failures.append("server binary: shared WORM startup admission is not enforced")
+    if ("int audit_worm_startup_verify" not in worm_store or
+            "audit_worm_verify(" not in worm_store or
+            "audit_worm_checkpoint()" not in worm_store):
+        failures.append("WORM store: shared startup admission implementation is missing")
     target = re.search(r"^\$\(KB_WORM\):([^\n]+)", makefile, re.M)
-    if not target or target.group(1).strip() != "$(OBJDIR)/kb/kb_worm_worker_main.o":
-        failures.append("Makefile: WORM binary link surface is not the single worker object")
+    if not target or target.group(1).strip() != "$(KB_WORM_OBJS)":
+        failures.append("Makefile: WORM binary does not use its narrow object closure")
+    for required_obj in ("kb/kb_worm_worker_main.o", "modules/audit/audit_worm.o",
+                         "modules/audit/audit_worm_chain.o"):
+        if required_obj not in makefile:
+            failures.append(f"Makefile: WORM binary missing shared object {required_obj}")
     if "COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm" not in dockerfile:
         failures.append("Dockerfile: WORM worker is not packaged")
-    if 'exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" aimee-kb-worm' not in entrypoint:
+    if ('AIMEE_WORM_DB2_URL="$embedded_worm_dsn"' not in entrypoint or
+            'AIMEE_WORM_PATH="$AIMEE_HOME/audit/kb-worm-live.db"' not in entrypoint):
         failures.append("entrypoint: self-contained tier does not supervise a separate worker")
     if "REVOKE USAGE ON SCHEMA public FROM PUBLIC;" not in entrypoint:
         failures.append("entrypoint: embedded worker inherits public schema access")
     if 'entrypoint: ["/usr/local/bin/aimee-kb-worm"]' not in compose:
         failures.append("compose: hardened worker does not replace the KB entrypoint")
+    if "aimee-worm-data:/var/lib/aimee-worm" not in compose:
+        failures.append("compose: SQLite WORM store is not persistent")
 
     return failures
 
@@ -119,6 +142,8 @@ def main(argv: list[str] | None = None) -> int:
         "c_appender": root / "src/modules/db2/c/kb_audit_worm.c",
         "fact_mutation": root / "src/modules/db2/c/fact_mutation.c",
         "worker": root / "src/kb/kb_worm_worker_main.c",
+        "server": root / "src/server/server_main.c",
+        "worm_store": root / "src/modules/audit/audit_worm.c",
         "makefile": root / "src/Makefile",
         "dockerfile": root / "Dockerfile",
         "entrypoint": root / "deploy/container/aimee-kb-entrypoint.sh",

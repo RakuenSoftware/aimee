@@ -26,12 +26,9 @@ import tempfile
 
 CHARTER_TABLES = ("artifacts", "artifact_citations", "artifact_links", "audit_events")
 
-# Sanctioned per-service WORM audit stores (the auditable-worm-audit-store
-# initiative, docs/proposals/pending/auditable-worm-audit-store.md): append-only,
-# hash-chained, tamper-evident stores that are DELIBERATELY separate from the
-# charter audit_events — they are the audit-of-record, not a parallel artifact
-# store. Exempt from the rogue-store check.
-SANCTIONED_AUDIT_TABLES = ("kb_audit_event",)
+# WORM chains live in their separately owned SQLite stores, outside these
+# product schemas. No PostgreSQL audit-event table is sanctioned here.
+SANCTIONED_AUDIT_TABLES: tuple[str, ...] = ()
 
 CREATE_RE = re.compile(r"CREATE TABLE IF NOT EXISTS\s+([a-z_][a-z0-9_]*)", re.IGNORECASE)
 

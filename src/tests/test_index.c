@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <utime.h>
 #include <unistd.h>
 #include "aimee.h"
 #include "modules/db2/c/db2.h"
@@ -907,6 +908,87 @@ int main(void)
       snprintf(rmcmd, sizeof(rmcmd), "rm -rf '%s'", repo);
       (void)system(rmcmd);
       free(repo);
+   }
+
+   /* --- complete-manifest invariants: stage privacy, exact retraction,
+    * content-hash verification, retry idempotency, and revision ABA guard. --- */
+   {
+      char *dir = malloc(PATH_MAX);
+      assert(dir != NULL);
+      snprintf(dir, PATH_MAX, "%s/aimee-test-reconcile-XXXXXX", platform_tmpdir());
+      assert(platform_mkdtemp(dir) != NULL);
+      char a_path[PATH_MAX], b_path[PATH_MAX];
+      snprintf(a_path, sizeof(a_path), "%s/a.c", dir);
+      snprintf(b_path, sizeof(b_path), "%s/b.c", dir);
+      FILE *f = fopen(a_path, "w");
+      assert(f != NULL);
+      fputs("int aa=1;\n", f);
+      fclose(f);
+      f = fopen(b_path, "w");
+      assert(f != NULL);
+      fputs("int bb=1;\n", f);
+      fclose(f);
+      int inspected = 0;
+      assert(canonical_index_scan_project("reconcile", dir, 0, &inspected) == 2);
+
+      struct stat before;
+      assert(stat(a_path, &before) == 0);
+      assert(remove(b_path) == 0);
+      f = fopen(a_path, "w");
+      assert(f != NULL);
+      fputs("int aa=2;\n", f); /* same byte length */
+      fclose(f);
+      struct utimbuf same_time = {.actime = before.st_atime, .modtime = before.st_mtime};
+      assert(utime(a_path, &same_time) == 0);
+
+      canonical_index_verify_result_t verify;
+      assert(canonical_index_verify_project("reconcile", dir, 1, &verify) == 0);
+      assert(verify.modified_files == 1); /* hashes catch same-size/same-mtime edits */
+      assert(verify.missing_files == 1);
+
+      canonical_index_file_input_t staged = {"a.c", "int aa=2;\n"};
+      assert(canonical_index_scan_begin("reconcile", dir, "interrupted", NULL) == 0);
+      assert(canonical_index_scan_stage("interrupted", &staged, 1, NULL) == 0);
+      char stored[64];
+      file_content("reconcile", "a.c", stored, sizeof(stored));
+      assert(strcmp(stored, "int aa=1;\n") == 0); /* no seal: staged data stays private */
+      assert(canonical_index_scan_abort("interrupted") == 0);
+
+      assert(canonical_index_scan_project("reconcile", dir, 0, &inspected) == 1);
+      assert(file_row_count("reconcile", "b.c") == 0);
+      assert(canonical_index_verify_project("reconcile", dir, 1, &verify) == 0);
+      assert(!verify.unavailable && verify.modified_files == 0 && verify.missing_files == 0 &&
+             verify.unindexed_files == 0);
+
+      /* Two sessions may share a baseline, but only the first successful seal
+       * advances it; the late seal is rejected instead of overwriting newer facts. */
+      assert(canonical_index_scan_begin("reconcile", dir, "older", NULL) == 0);
+      assert(canonical_index_scan_begin("reconcile", dir, "newer", NULL) == 0);
+      canonical_index_file_input_t old_input = {"a.c", "int aa=3;\n"};
+      canonical_index_file_input_t new_input = {"a.c", "int aa=4;\n"};
+      assert(canonical_index_scan_stage("older", &old_input, 1, NULL) == 0);
+      assert(canonical_index_scan_stage("newer", &new_input, 1, NULL) == 0);
+      canonical_index_seal_result_t seal;
+      assert(canonical_index_scan_seal("newer", 1, &seal) == 0);
+      assert(canonical_index_scan_seal("older", 1, &seal) == -2);
+      file_content("reconcile", "a.c", stored, sizeof(stored));
+      assert(strcmp(stored, "int aa=4;\n") == 0);
+
+      /* Duplicate and out-of-order batches converge on distinct manifest paths. */
+      assert(canonical_index_scan_begin("reconcile", dir, "retry-order-scan", NULL) == 0);
+      canonical_index_file_input_t retry_inputs[] = {
+          {"z.c", "int z;\n"}, {"y.c", "int y;\n"}, {"z.c", "int z;\n"}};
+      int accepted = 0;
+      assert(canonical_index_scan_stage("retry-order-scan", retry_inputs, 3, &accepted) == 0);
+      assert(accepted == 3);
+      assert(canonical_index_scan_seal("retry-order-scan", 2, &seal) == 0);
+      assert(file_row_count("reconcile", "y.c") == 1);
+      assert(file_row_count("reconcile", "z.c") == 1);
+
+      char rmcmd[PATH_MAX + 16];
+      snprintf(rmcmd, sizeof(rmcmd), "rm -rf %s", dir);
+      (void)system(rmcmd);
+      free(dir);
    }
 
    /* Cleanup */

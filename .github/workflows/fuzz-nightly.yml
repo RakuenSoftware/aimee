@@ -26,9 +26,7 @@ jobs:
       - name: Build all fuzz targets
         run: |
           cd src
-          make -j$(nproc) tests/fuzz_extractors tests/fuzz_json_parse \
-               tests/fuzz_memory_search \
-               tests/fuzz_message_frame tests/fuzz_acl_parse
+          make -j$(nproc) fuzz-build
 
       - name: Seed corpus smoke test
         run: cd src && make fuzz
@@ -36,7 +34,15 @@ jobs:
       - name: Extended fuzz run (30 minutes)
         run: |
           cd src
-          PER_TARGET=300  # 5 minutes per target, 6 targets = 30 min
+          mapfile -t targets < <(make -s fuzz-list)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "No fuzz targets registered"
+            exit 1
+          fi
+
+          TOTAL_SECONDS=1800
+          PER_TARGET=$((TOTAL_SECONDS / ${#targets[@]}))
+          echo "Running ${#targets[@]} targets for ${PER_TARGET}s each"
 
           fuzz_extended() {
             local target="$1"
@@ -62,8 +68,6 @@ jobs:
             echo "--- $name: $iterations iterations completed ---"
           }
 
-          for target in tests/fuzz_extractors tests/fuzz_json_parse \
-                        tests/fuzz_memory_search \
-                        tests/fuzz_message_frame tests/fuzz_acl_parse; do
+          for target in "${targets[@]}"; do
             fuzz_extended "$target"
           done

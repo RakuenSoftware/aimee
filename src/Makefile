@@ -229,10 +229,10 @@ L_AGENT   = $(L_CORE) -lssl -lcrypto $(HTTP_LIB)
 L_FULL    = $(L_AGENT) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_CLIENT  = $(L_MINIMAL) $(CORE_CONNECTION_LIB) $(TLS_LIBS) -lm -lz
 L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
-# Server (DB1 daemon) link flags — same as L_FULL minus libpq. The daemon
-# no longer carries DB2 code; the only postgres-bound work routes
-# through the kb client socket to aimee-kb, which carries libpq itself.
-L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s -lsqlite3 -lm -lpthread -lz $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+# Server link flags. The daemon owns the store directly: it links libpq and the
+# same postgres + memory modules as aimee-kb, so it no longer routes every
+# store-bound call through the kb client socket.
+L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections -s $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
@@ -357,7 +357,7 @@ DB1_CLIENT_OBJS = $(DB1_CLIENT_SRCS:%.c=$(OBJDIR)/%.o)
 # --- Layer 0c: DB2 (shared knowledge tier) ---
 DB2_PG_SRCS = modules/db2/c/db_postgres.c
 DB2_PG_OBJS = $(DB2_PG_SRCS:modules/db2/c/%.c=$(OBJDIR)/db2/%.o)
-DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db2_pool.c modules/db2/c/agent_hints.c modules/db2/c/agent_outcomes.c modules/db2/c/canonical_index.c modules/db2/c/anti_patterns.c modules/db2/c/workflow_patterns.c modules/db2/c/evidence_vectors.c modules/db2/c/learning_synth_ops.c modules/db2/c/collab_rules.c modules/db2/c/curiosity.c modules/db2/c/decision_log.c modules/db2/c/kb_audit_worm.c modules/db2/c/enrollments.c modules/db2/c/db2_tenant.c modules/db2/c/db2_hardening.c modules/db2/c/team.c modules/db2/c/project.c modules/db2/c/membership.c modules/db2/c/admin_grant.c modules/db2/c/write_tier_grant.c modules/db2/c/oidc_jwks.c modules/db2/c/entity_edges.c modules/db2/c/rel_types_store.c modules/db2/c/entity_registry.c modules/db2/c/fact_lifecycle.c modules/db2/c/fact_identity.c modules/db2/c/fact_identity_unicode.c modules/db2/c/fact_mutation.c modules/db2/c/evidence_lifecycle.c modules/db2/c/ontology_evolution.c modules/db2/c/fact_ingest.c modules/db2/c/fact_recall.c modules/db2/c/entity_nodes.c modules/db2/c/code_projection.c modules/db2/c/lessons.c modules/db2/c/shadow_delta.c modules/db2/c/entity_profiles.c modules/db2/c/epistemic_directives.c modules/db2/c/failed_queries.c modules/db2/c/feedback.c modules/db2/c/notes.c modules/db2/c/prospective_memories.c modules/db2/c/rules.c modules/db2/c/stopwords.c modules/db2/c/tasks.c modules/db2/c/tool_registry.c modules/db2/c/trace_mining.c modules/db2/c/kind_lifecycle.c modules/db2/c/kb_payload.c modules/db2/c/kb_runtime_state.c modules/db2/c/kb_service_backend.c modules/db2/c/kb_service_backend_ingest.c modules/db2/c/memory_briefing.c modules/db2/c/memory_conflicts.c modules/db2/c/memory_export.c modules/db2/c/memory_health.c modules/db2/c/memory_lifecycle.c modules/db2/c/memory_payload.c modules/db2/c/memory_promotion.c modules/db2/c/memory_query.c modules/db2/c/memory_query_bookkeeping.c modules/db2/c/memory_entity_graph.c modules/db2/c/memory_row_mapper_pg.c modules/db2/c/memory_score_fields.c modules/db2/c/memory_scope_query.c modules/db2/c/memory_relations.c modules/db2/c/memory_scenes.c modules/db2/c/vector_index_ops.c modules/db2/c/code_index_ops.c modules/db2/c/learning.c modules/db2/c/code_index.c modules/db2/c/code_project_lifecycle.c modules/db2/c/css_graph.c modules/db2/c/css_migration.c modules/db2/c/css_render.c modules/db2/c/css_insights.c modules/db2/c/typed_facts.c modules/db2/c/db_schema.c modules/db2/c/memory_lint.c modules/db2/c/sketch.c modules/db2/c/artifacts.c modules/db2/c/corpus_structural.c modules/db2/c/corpus_jobs.c modules/db2/c/mining.c modules/db2/c/calibration.c modules/db2/c/demotion.c modules/db2/c/fidelity.c modules/db2/c/feature_rows.c modules/db2/c/report_enrichments.c modules/db2/c/bandit.c modules/db2/c/kb_maintenance.c modules/db2/c/kb_docs.c modules/db2/c/kb_releases.c modules/db2/c/code_audit.c \
+DB2_SRCS = modules/db2/c/db2_init.c modules/db2/c/db2_reembed.c modules/db2/c/db2_pool.c modules/db2/c/agent_hints.c modules/db2/c/agent_outcomes.c modules/db2/c/canonical_index.c modules/db2/c/canonical_index_query.c modules/db2/c/anti_patterns.c modules/db2/c/workflow_patterns.c modules/db2/c/evidence_vectors.c modules/db2/c/learning_synth_ops.c modules/db2/c/collab_rules.c modules/db2/c/curiosity.c modules/db2/c/decision_log.c modules/db2/c/kb_audit_worm.c modules/db2/c/enrollments.c modules/db2/c/db2_tenant.c modules/db2/c/db2_hardening.c modules/db2/c/team.c modules/db2/c/project.c modules/db2/c/membership.c modules/db2/c/admin_grant.c modules/db2/c/write_tier_grant.c modules/db2/c/oidc_jwks.c modules/db2/c/entity_edges.c modules/db2/c/rel_types_store.c modules/db2/c/entity_registry.c modules/db2/c/fact_lifecycle.c modules/db2/c/fact_identity.c modules/db2/c/fact_identity_unicode.c modules/db2/c/fact_mutation.c modules/db2/c/evidence_lifecycle.c modules/db2/c/ontology_evolution.c modules/db2/c/fact_ingest.c modules/db2/c/fact_recall.c modules/db2/c/entity_nodes.c modules/db2/c/code_projection.c modules/db2/c/lessons.c modules/db2/c/shadow_delta.c modules/db2/c/entity_profiles.c modules/db2/c/epistemic_directives.c modules/db2/c/failed_queries.c modules/db2/c/feedback.c modules/db2/c/notes.c modules/db2/c/prospective_memories.c modules/db2/c/rules.c modules/db2/c/stopwords.c modules/db2/c/tasks.c modules/db2/c/tool_registry.c modules/db2/c/trace_mining.c modules/db2/c/kind_lifecycle.c modules/db2/c/kb_payload.c modules/db2/c/kb_runtime_state.c modules/db2/c/kb_service_backend.c modules/db2/c/kb_service_backend_ingest.c modules/db2/c/memory_briefing.c modules/db2/c/memory_conflicts.c modules/db2/c/memory_export.c modules/db2/c/memory_health.c modules/db2/c/memory_lifecycle.c modules/db2/c/memory_payload.c modules/db2/c/memory_promotion.c modules/db2/c/memory_query.c modules/db2/c/memory_query_bookkeeping.c modules/db2/c/memory_entity_graph.c modules/db2/c/memory_row_mapper_pg.c modules/db2/c/memory_score_fields.c modules/db2/c/memory_scope_query.c modules/db2/c/memory_relations.c modules/db2/c/memory_scenes.c modules/db2/c/vector_index_ops.c modules/db2/c/code_index_ops.c modules/db2/c/learning.c modules/db2/c/code_index.c modules/db2/c/code_project_lifecycle.c modules/db2/c/css_graph.c modules/db2/c/css_migration.c modules/db2/c/css_render.c modules/db2/c/css_insights.c modules/db2/c/typed_facts.c modules/db2/c/db_schema.c modules/db2/c/memory_lint.c modules/db2/c/sketch.c modules/db2/c/artifacts.c modules/db2/c/corpus_structural.c modules/db2/c/corpus_jobs.c modules/db2/c/mining.c modules/db2/c/calibration.c modules/db2/c/demotion.c modules/db2/c/fidelity.c modules/db2/c/feature_rows.c modules/db2/c/report_enrichments.c modules/db2/c/bandit.c modules/db2/c/kb_maintenance.c modules/db2/c/kb_docs.c modules/db2/c/kb_releases.c modules/db2/c/code_audit.c \
            modules/db2/c/pgvec_transport.c modules/db2/c/memory_vectors.c modules/db2/c/kb_vectors.c modules/db2/c/vector_status.c modules/db2/c/pgvec_verify.c modules/db2/c/pgvec_kb_service.c \
            modules/db2/c/curator_terms.c modules/db2/c/curator_gaps.c \
            modules/db2/c/cross_repo_resolver.c modules/db2/c/cross_repo_classify.c modules/db2/c/cross_repo_stats.c \
@@ -602,9 +602,7 @@ SERVER_DATA_SRCS = $(filter-out $(SERVER_SRCS) modules/guardrails/guardrails_orc
 SERVER_DATA_OBJS = $(SERVER_DATA_SRCS:%.c=$(OBJDIR)/server/%.o) \
                    $(OBJDIR)/server/modules/guardrails/guardrails_orchestrator.o
 # Cmd-layer objects the daemon links because hooks.session_start runs
-# session_start_emit (and its prune_stale_sessions
-# helpers) in-process. Compiled with -DAIMEE_DB2_DISABLED via the server/
-# pattern rule.
+# session_start_emit (and its prune_stale_sessions helpers) in-process.
 SERVER_CMD_OBJS = $(OBJDIR)/server/cmd_session_lifecycle.o \
                   $(OBJDIR)/server/cmd_hooks_scope.o \
                   $(OBJDIR)/modules/memory/memory_redirect.o \
@@ -627,6 +625,7 @@ KB_SRCS = kb/kb_main.c kb/kb_module_stage_adapters.c kb/kb_vault_policy.c kb/kb_
 KB_SRCS += kb/kb_obs_bus_adapter.c
 KB_SRCS += kb/http/kb_metrics_listener.c
 KB_SRCS += modules/db2/client/generated.c
+KB_SRCS += kb/http/kb_http_code_scan_phase.c
 $(OBJDIR)/kb/kb_module_stage_adapters.o $(OBJDIR)/modules/db2/client/generated.o: C_FLAGS += \
     -Imodules/db2/include
 KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
@@ -762,12 +761,10 @@ KB_BEDROCK_IR_OBJS = $(OBJDIR)/modules/translation/aimee_backend_bedrock.o \
                      $(OBJDIR)/modules/translation/aimee_frontend_openai.o \
                      $(OBJDIR)/modules/translation/aimee_ir_stream.o \
                      $(OBJDIR)/modules/ir/aimee_ir.o
-# modules/audit/audit_worm.c is the aimee-server SQLite WORM store (#include <sqlite3.h>); the
-# kb is DB2/Postgres-only and MUST stay sqlite-free (see the boundary integrity
-# check below), using its own modules/db2/c/kb_audit_worm.c. Its SQLite API has no kb-side
-# callers (guardrails_action_audit.c / cmd_audit.c / server_state.c are server/
-# CLI only), while the shared modules/audit/audit_worm_chain.c is pure hashing (no sqlite) and
-# stays. Excluding it keeps the kb-only/split image build from needing sqlite3.h.
+# The main aimee-kb service stays SQLite-free. Its producer adapter only writes
+# DB2 outbox intents. The separately linked KB_WORM target below owns the same
+# modules/audit/audit_worm.c SQLite implementation as aimee-server.
+# Excluding it here keeps the KB request process from needing sqlite3.h.
 # modules/db1/% is no longer filtered: the directory is gone, so nothing in
 # CORE_SRCS can match it.
 KB_CORE_SRCS = $(filter-out modules/audit/audit_worm.c,$(CORE_SRCS))
@@ -775,6 +772,15 @@ KB_CORE_OBJS = $(KB_CORE_SRCS:%.c=$(OBJDIR)/kb/%.o) $(OBJDIR)/cJSON.o
 KB_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/kb/%.o)
 KB_DB2_HOST_ADAPTER_OBJS = $(DB2_HOST_ADAPTER_SRCS:%.c=$(OBJDIR)/kb/%.o)
+# aimee-server links the SAME postgres + memory modules as aimee-kb. Both daemons
+# own the store directly; the server no longer compiles a DB2-disabled stub and
+# delegates every memory op to the sidecar. Separate $(OBJDIR)/server/ objects
+# because server and kb still differ in other compile flags, not in whether the
+# store exists.
+SERVER_DB2_OBJS = $(DB2_SRCS:%.c=$(OBJDIR)/server/%.o)
+SERVER_DB2_PG_OBJS = $(DB2_PG_SRCS:%.c=$(OBJDIR)/server/%.o)
+SERVER_MEMORY_OBJS = $(KB_MEMORY_SPLIT_SRCS:%.c=$(OBJDIR)/server/%.o)
+
 KB_MEMORY_SPLIT_SRCS = modules/memory/memory_core_search_c.c modules/memory/memory_core_search_b.c modules/memory/memory_core_helpers_b.c modules/memory/memory_core_helpers.c modules/memory/memory_core_crud.c modules/memory/memory_core_search.c modules/memory/memory_core_scope_embed.c modules/memory/memory_core_tiers.c
 # ^ KB-real only (#error-guarded); NEVER add to DATA_SRCS/server build.
 KB_DATA_SRCS = $(KB_MEMORY_SPLIT_SRCS) code_match.c rel_types.c modules/memory/memory_fact_gate.c modules/memory/memory_extract_patterns.c modules/memory/memory_pii_gate.c modules/memory/memory_core.c modules/memory/memory_logic.c modules/memory/memory_effective.c modules/memory/memory_health.c modules/memory/memory_conflict.c modules/memory/memory_context.c modules/memory/memory_activation.c modules/memory/memory_assemble.c modules/memory/memory_advanced.c modules/memory/memory_prospective.c modules/memory/memory_lifecycle.c modules/memory/memory_directives.c modules/memory/memory_maintenance.c modules/memory/memory_graph.c modules/memory/memory_graph_fusion.c modules/memory/memory_scan.c modules/memory/memory_improve.c modules/memory/memory_episodes.c \
@@ -939,7 +945,7 @@ ALL_OBJS = $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(DB2_PG_OBJS) $(DB2_OBJS
 # nothing is stale when nothing exists.
 DEPS = $(ALL_OBJS:.o=.d) $(shell find $(OBJDIR) -name '*.d' 2>/dev/null)
 
-.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
+.PHONY: optional-tool-ownership-check refactor-baseline-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check cleanup-ledger-check repository-lock-check db2-contract-check db2-declaration-ledger-check db2-activation-check all clean install inc-check forge-app-token-validation lint code-vector-graph-corpus-check line-check schema-sync-check memory-store-degradation-check config-schema-drift-check config-uninitialized-check cmd-srcs-compile-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check background-skill-curator-absence-check guidance-tool-parity-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check curator-sidecar-parse-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check p1-rls-gate-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check deployed-image-check gen-sdks sdk-parity-check v1-ws-test format unit-tests configure-hooks-matrix-test go-unit-tests verify-local integration-tests wizard-bootstrap-e2e v1-third-party-test v1-sdk-smoke init-migrate-service-test server lean fuzz coverage static-analysis cppcheck clang-tidy bench bench-check bench-baseline memory-retrieval-eval-check learning-loop-evidence self-learning-efficacy virtual-context-eval-check virtual-context-inspect curator-eval curator-eval-check build-integrity build-variants check-linking retire-obsolete-binaries kb provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check module-placement-check
 
 all: retire-obsolete-binaries $(BINARY) $(ALL_RUNTIME_WEB) $(DELEGATE_EGRESS) $(SERVER) $(KB) $(KB_WORM) $(KB_RESOLVER) $(GATEWAY) $(FORWARDER)
 
@@ -959,6 +965,11 @@ retire-obsolete-binaries:
 
 # Test targets (included after 'all' so unit-tests is not the default target)
 include tests/Rules.mk
+
+configure-hooks-matrix-test:
+	python3 ../scripts/tests/test_configure_hooks_matrix.py
+
+unit-tests: configure-hooks-matrix-test
 
 # Fast local verification target used by modules/git/git_verify auto-generation when
 # available. This keeps lint in the enforced path while still running the
@@ -1101,7 +1112,9 @@ lean:
 	fi
 
 # Dynamic linking policy check: enforce DB ownership boundaries and verify
-# daemon system libraries are dynamically linked. Only runs on Linux (ldd) and
+# daemon system libraries are dynamically linked. Daemons link with -s, so the
+# only symbol table left is .dynsym: assert on IMPORTED (UND) library symbols
+# such as PQ*, never on internal definitions, which a stripped binary drops. Only runs on Linux (ldd) and
 # macOS (otool). Skipped on Windows where MinGW runtime is intentionally static.
 check-linking: $(BINARY) $(ALL_RUNTIME_WEB) $(SERVER) $(KB) $(GATEWAY)
 ifeq ($(OS),Windows_NT)
@@ -1134,17 +1147,20 @@ else ifeq ($(UNAME_S),Darwin)
 		case "$$bin" in \
 			*aimee-server*) \
 				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: libpq linked into DB1-only server"; \
-					fail=1; \
+					echo "  libpq: dynamic (server owns DB2)"; \
 				else \
-					echo "  libpq: not found (server boundary ok)"; \
+					echo "  ERROR: libpq not linked into DB2-owning server"; \
+					fail=1; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && \
-				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: DB2 symbols present in DB1-only server"; \
-					fail=1; \
+				if command -v readelf >/dev/null 2>&1; then \
+					if readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
+						echo "  libpq imports: present (server calls DB2)"; \
+					else \
+						echo "  ERROR: server links libpq but imports no PQ symbol"; \
+						fail=1; \
+					fi; \
 				else \
-					echo "  DB2 symbols: not found (server boundary ok)"; \
+					echo "  libpq imports: not checked (no readelf)"; \
 				fi ;; \
 			*aimee-kb*) \
 				if echo "$$deps" | grep -q libsqlite3; then \
@@ -1213,17 +1229,20 @@ else
 		case "$$bin" in \
 			*aimee-server*) \
 				if echo "$$deps" | grep -q libpq; then \
-					echo "  ERROR: libpq linked into DB1-only server"; \
-					fail=1; \
+					echo "  libpq: dynamic (server owns DB2)"; \
 				else \
-					echo "  libpq: not found (server boundary ok)"; \
+					echo "  ERROR: libpq not linked into DB2-owning server"; \
+					fail=1; \
 				fi; \
-				if command -v readelf >/dev/null 2>&1 && \
-				   readelf -Ws "$$bin" | awk '$$7 != "UND" && $$8 ~ /^(db2_|PQ[A-Z])/ { found=1 } END { exit !found }'; then \
-					echo "  ERROR: DB2 symbols present in DB1-only server"; \
-					fail=1; \
+				if command -v readelf >/dev/null 2>&1; then \
+					if readelf -Ws "$$bin" | awk '$$7 == "UND" && $$8 ~ /^PQ/ { found=1 } END { exit !found }'; then \
+						echo "  libpq imports: present (server calls DB2)"; \
+					else \
+						echo "  ERROR: server links libpq but imports no PQ symbol"; \
+						fail=1; \
+					fi; \
 				else \
-					echo "  DB2 symbols: not found (server boundary ok)"; \
+					echo "  libpq imports: not checked (no readelf)"; \
 				fi ;; \
 			*aimee-kb*) \
 				if echo "$$deps" | grep -q libsqlite3; then \
@@ -1435,7 +1454,7 @@ $(DELEGATE_EGRESS): $(DELEGATE_EGRESS_GO_SRCS)
 # synthesize a tcp: endpoint from a --server / AIMEE_SERVER_URL / remote.conf
 # target. --gc-sections drops the rest of aimee_client (the actual TCP/TLS
 # transport), so no extra net/tls/uds objects are needed here.
-$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
+$(SERVER): $(SERVER_OBJS) $(SERVER_KB_CLIENT_OBJS) $(AGENT_OBJS) $(SERVER_DATA_OBJS) $(SERVER_DB2_OBJS) $(SERVER_DB2_PG_OBJS) $(SERVER_MEMORY_OBJS) $(SERVER_CMD_OBJS) $(CORE_OBJS) $(DB1_OBJS) $(DB1_CLIENT_OBJS) $(PLATFORM_OBJS) $(MCP_GIT_OBJS) $(OBS_BUS_RUNTIME_OBJ) $(AUDIT_REPLAY_OBJ) $(OBJDIR)/aimee_client.o $(CORE_EVENT_BUS_LIB) $(CORE_CONNECTION_LIB)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_SERVER)
 
@@ -1453,12 +1472,18 @@ $(KB): $(KB_OBJS) $(KB_SYNTHESIS_OBJS) $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
 	$(CC) -o $@ $^ $(L_KB) $(KB_TPM2_LDLIBS) $(KB_PKCS11_LDLIBS)
 
-# Dedicated WORM consumer. Keep this link surface intentionally tiny: libpq is
-# its only service dependency, so request handlers, mutation code, providers,
-# vault code, and the ordinary runtime credential cannot enter the process.
-$(KB_WORM): $(OBJDIR)/kb/kb_worm_worker_main.o
+# Dedicated WORM consumer. It links the exact SQLite WORM implementation used
+# by aimee-server plus only its leaf crypto/JSON helpers and libpq for the
+# transactionally durable KB outbox. Request handlers, mutation code, providers,
+# vault code, and the ordinary runtime credential cannot enter this process.
+KB_WORM_OBJS = $(OBJDIR)/kb/kb_worm_worker_main.o \
+               $(OBJDIR)/modules/audit/audit_worm.o \
+               $(OBJDIR)/modules/audit/audit_worm_chain.o \
+               $(OBJDIR)/aimee_home.o $(OBJDIR)/aimee_sha256.o \
+               $(OBJDIR)/dstr.o $(OBJDIR)/cJSON.o
+$(KB_WORM): $(KB_WORM_OBJS)
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
-	$(CC) -o $@ $^ $(PQ_LIB)
+	$(CC) -o $@ $^ $(PQ_LIB) -lsqlite3 -lcrypto -lpthread
 
 $(KB_RESOLVER): kb/http/kb_http_resolver.c kb/http/kb_http_resolver_protocol.h
 	$(AIMEE_RUNTIME_MUTATION_GUARD)
@@ -1658,11 +1683,11 @@ $(OBJDIR)/server/server_cron.o: server/server_cron.c
 
 $(OBJDIR)/modules/kb_client/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/server/server_session_start_stubs.o: server/server_session_start_stubs.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/kb_client_tool_registry.o: modules/kb_client/kb_client_tool_registry.c
 	@mkdir -p $(dir $@)
@@ -1686,7 +1711,7 @@ $(OBJDIR)/kb/kb_vault_tpm_runtime_lock.o: C_FLAGS += $(KB_TPM2_CFLAGS)
 
 $(OBJDIR)/server/%.o: %.c
 	@mkdir -p $(dir $@)
-	$(CC) -c $(C_FLAGS) -DAIMEE_DB2_DISABLED -o $@ $<
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 $(OBJDIR)/%.o: %.c
 	@mkdir -p $(dir $@)
@@ -2005,6 +2030,12 @@ $(OBJDIR)/db2/db_schema.o: modules/db2/c/db_schema.c schema_data.h
 $(OBJDIR)/kb/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
 	@mkdir -p $(dir $@)
 	$(CC) -c $(C_FLAGS) -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM -o $@ $<
+
+# The server object tree now carries db2 too, so it needs the same generated
+# schema dependency the kb and default trees already declare.
+$(OBJDIR)/server/modules/db2/c/db_schema.o: modules/db2/c/db_schema.c schema_data.h
+	@mkdir -p $(dir $@)
+	$(CC) -c $(C_FLAGS) -o $@ $<
 
 # --- React webchat frontend (requires npm; optional) ---
 # Builds the React SPA into frontend/dist/ for use by aimee-runtime-web (Go).
@@ -2359,11 +2390,12 @@ schema-sync-check:
 # needs redoing against the new schema files. See the note in
 # server-go/modules/aimee/families/schema_*.sql.
 
-# A memory path that reaches the relational store must either branch on
-# AIMEE_DB2_DISABLED or report when the store is unreachable. Returning empty
-# with no indication is indistinguishable from a genuine absence, and on
-# aimee-server -- which links no libpq -- that is the normal case. Retires with
-# the fork itself at the S5 cutover.
+# A memory path that reaches the relational store must report when the store is
+# unreachable. Returning empty with no indication is indistinguishable from a
+# genuine absence. aimee-server now links the same postgres + memory modules as
+# aimee-kb, so an unreachable store is a real outage rather than the normal case
+# it used to be on a server built without them -- which makes saying so matter
+# more, not less.
 memory-store-degradation-check:
 	@python3 ../scripts/check-memory-store-degradation.py
 
@@ -2496,6 +2528,8 @@ format:
 	$(CLANG_FORMAT) -i $(LINT_SRCS)
 
 # --- Fuzz testing (standalone mode, no libFuzzer required) ---
+
+.PHONY: fuzz-build fuzz-list
 
 FUZZ_EXTRACTOR_OBJS = $(OBJDIR)/tests/fuzz_extractors.o $(TEST_DATA_OBJS_MOCK)
 
@@ -2637,6 +2671,11 @@ tests/fuzz_server_mgmt_action: $(FUZZ_SERVER_MGMT_ACTION_OBJS)
 
 tests/fuzz_server_mgmt_read_config: $(FUZZ_SERVER_MGMT_READ_CONFIG_OBJS)
 	$(CC) -o $@ $^ $(L_AGENT)
+
+fuzz-build: $(FUZZ_TARGETS)
+
+fuzz-list:
+	@printf '%s\n' $(FUZZ_TARGETS)
 
 fuzz: $(FUZZ_TARGETS)
 	./tests/fuzz_extractors tests/fuzz_corpus/seed.*

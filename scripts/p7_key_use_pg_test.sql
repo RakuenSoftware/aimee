@@ -99,13 +99,12 @@ BEGIN
 END $$;
 
 RESET ROLE;
-SELECT kb_audit_worm_drain(1000);
 DO $$
 BEGIN
   IF (SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970711)<>1 THEN
     RAISE EXCEPTION 'P7 key-use FAIL: intent cardinality mismatch';
   END IF;
-  IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND
+  IF (SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND
       subject='team:970711|bedrock|primary')<>1 THEN
     RAISE EXCEPTION 'P7 key-use FAIL: WORM audit cardinality mismatch';
   END IF;

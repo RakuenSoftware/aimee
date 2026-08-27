@@ -80,7 +80,7 @@ datatracker.ietf.org draft-sharif-agent-audit-trail.
 | Sealing to kernel-immutable segments (crypto-only degrade) | `src/modules/audit/audit_worm.c` (`VACUUM INTO` + `FS_IMMUTABLE_FL`) | shipped; sealer runs in-process, sidecar deferred |
 | Decision records (status / supersedes / revisit / linked policy, one-active-per-scope) | `decision_log`, `db2_decision_log_record()` | shipped |
 | Vault write audit (append-only, key fingerprints) | `src/server/server_vault.c:185-214` | shipped, separate unchained log |
-| kb-side WORM twin (`kb_audit_event`, byte-identical chain code) | db2, plpgsql WORM triggers | shipped, default-off |
+| KB WORM (shared SQLite implementation, separate file/key/process) | `aimee-kb-worm`, immutable DB2 outbox | shipped, default-off |
 | Structured WORM actor `{role, principal_id}` | WORM record model | shipped |
 
 ## Deltas

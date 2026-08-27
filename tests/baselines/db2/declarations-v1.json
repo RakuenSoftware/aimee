@@ -1239,12 +1239,7 @@
   ],
   "declarations": [
     {
-      "consumers": [
-        "src/kb/kb_module_stage_adapters.c",
-        "src/tests/test_code_project_lifecycle.c",
-        "src/tests/test_kb_audit_worm.c",
-        "src/tests/test_kb_audit_worm_pg.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
@@ -1253,7 +1248,7 @@
       ],
       "signature": "void aimee_db2_register_audit_hash_provider ( db2_audit_hash_fn provider )",
       "signature_sha256": "8b6a2fb7e64f7f358d82c66cc77537019be51faacfe5a92901fb97c977b73459",
-      "status": "audit-pending",
+      "status": "internal-unconsumed",
       "symbol": "aimee_db2_register_audit_hash_provider"
     },
     {
@@ -1638,7 +1633,6 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
-        "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_p2b_egress_live.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
@@ -1856,6 +1850,7 @@
         "src/tests/test_db2.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -1968,7 +1963,6 @@
         "src/tests/test_fact_lifecycle.c",
         "src/tests/test_features.c",
         "src/tests/test_index.c",
-        "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_kb_maintenance.c",
         "src/tests/test_kb_tenancy_shim_guard.c",
@@ -2179,6 +2173,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -2382,6 +2377,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -2562,6 +2558,7 @@
         "src/tests/test_graph_scoring.c",
         "src/tests/test_index.c",
         "src/tests/test_kb.c",
+        "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c",
         "src/tests/test_kb_doc_pdf.c",
         "src/tests/test_kb_http_routes.c",
@@ -2646,7 +2643,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 101
+          "line": 141
         }
       ],
       "signature": "int canonical_index_blast_radius ( const char * project , const char * file_path , blast_radius_t * out )",
@@ -2662,7 +2659,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 119
+          "line": 159
         }
       ],
       "signature": "int canonical_index_code_search ( const char * query , const char * project , code_search_hit_t * out , int max , int enrich )",
@@ -2679,7 +2676,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 121
+          "line": 161
         }
       ],
       "signature": "int canonical_index_code_search_excluding_project ( const char * query , const char * excluded_project , code_search_hit_t * out , int max , int enrich )",
@@ -2775,7 +2772,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 89
+          "line": 129
         }
       ],
       "signature": "int canonical_index_find ( const char * identifier , term_hit_t * out , int max )",
@@ -2791,7 +2788,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 109
+          "line": 149
         }
       ],
       "signature": "int canonical_index_find_callers ( const char * project , const char * symbol , caller_hit_t * out , int max )",
@@ -2807,7 +2804,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 111
+          "line": 151
         }
       ],
       "signature": "int canonical_index_find_callers_excluding_project ( const char * excluded_project , const char * symbol , caller_hit_t * out , int max )",
@@ -2824,7 +2821,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 97
+          "line": 137
         }
       ],
       "signature": "int canonical_index_find_excluding_project ( const char * excluded_project , const char * identifier , term_hit_t * out , int max )",
@@ -2841,7 +2838,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 93
+          "line": 133
         }
       ],
       "signature": "int canonical_index_find_project ( const char * project , const char * identifier , term_hit_t * out , int max )",
@@ -2858,7 +2855,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 86
+          "line": 126
         }
       ],
       "signature": "int canonical_index_list_projects ( project_info_t * out , int max )",
@@ -2874,7 +2871,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 134
+          "line": 174
         }
       ],
       "signature": "int canonical_index_project_lang_breakdown ( const char * project , char * buf , size_t bufsz )",
@@ -2890,13 +2887,45 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 129
+          "line": 169
         }
       ],
       "signature": "int canonical_index_project_stats ( const char * project , int * files_out , int * defs_out )",
       "signature_sha256": "8b8ea12a6b434bf666db36304c2d74d608f4f37e0b225482f15e5d274834ea3d",
       "status": "audit-pending",
       "symbol": "canonical_index_project_stats"
+    },
+    {
+      "consumers": [
+        "src/tests/test_index.c",
+        "src/tests/test_kb_http_routes.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 96
+        }
+      ],
+      "signature": "int canonical_index_scan_abort ( const char * scan_id )",
+      "signature_sha256": "b963c5e476cbd4d5a4c54f9049b914a72fdc5202e5efd85a2b6b5b1db75fb6d7",
+      "status": "private-test-only",
+      "symbol": "canonical_index_scan_abort"
+    },
+    {
+      "consumers": [
+        "src/tests/test_index.c",
+        "src/tests/test_kb_http_routes.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 89
+        }
+      ],
+      "signature": "int canonical_index_scan_begin ( const char * name , const char * root_label , const char * scan_id , long long * baseline_revision_out )",
+      "signature_sha256": "feef4e2256b0b5808fcf3743fb229522b2df5d4f6fc00102410ea41c80f1f28c",
+      "status": "private-test-only",
+      "symbol": "canonical_index_scan_begin"
     },
     {
       "consumers": [
@@ -2907,7 +2936,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 81
+          "line": 121
         }
       ],
       "signature": "int canonical_index_scan_files ( const char * name , const char * root_label , const canonical_index_file_input_t * files , int file_count , int force , int * inspected_out )",
@@ -2925,13 +2954,45 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 68
+          "line": 69
         }
       ],
       "signature": "int canonical_index_scan_project ( const char * name , const char * root , int force , int * inspected_out )",
       "signature_sha256": "232f44534846c471254c0ac494352659384a124701cffd5eff60d8415214c4be",
       "status": "audit-pending",
       "symbol": "canonical_index_scan_project"
+    },
+    {
+      "consumers": [
+        "src/tests/test_index.c",
+        "src/tests/test_kb_http_routes.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 94
+        }
+      ],
+      "signature": "int canonical_index_scan_seal ( const char * scan_id , int expected_files , canonical_index_seal_result_t * out )",
+      "signature_sha256": "60f4aa386d4dddf686d5b2a6437fa7cc6f1bfe1212121b59276ab51299fef855",
+      "status": "private-test-only",
+      "symbol": "canonical_index_scan_seal"
+    },
+    {
+      "consumers": [
+        "src/tests/test_index.c",
+        "src/tests/test_kb_http_routes.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 91
+        }
+      ],
+      "signature": "int canonical_index_scan_stage ( const char * scan_id , const canonical_index_file_input_t * files , int file_count , int * accepted_out )",
+      "signature_sha256": "d1c47456ebbcd7f9062bb22e9f479a4c008f458c582fe7bfec6301fcef8350b1",
+      "status": "private-test-only",
+      "symbol": "canonical_index_scan_stage"
     },
     {
       "consumers": [
@@ -2964,13 +3025,68 @@
       "locations": [
         {
           "header": "src/modules/db2/c/canonical_index.h",
-          "line": 105
+          "line": 145
         }
       ],
       "signature": "int canonical_index_structure ( const char * project , const char * file_path , definition_t * out , int max )",
       "signature_sha256": "e9339286dea7fa79c9bc9186df5664eebf66bb3501c5eed45e2638633b5dd48d",
       "status": "audit-pending",
       "symbol": "canonical_index_structure"
+    },
+    {
+      "consumers": [
+        "src/tests/test_index.c",
+        "src/tests/test_kb_http_routes.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index.h",
+          "line": 114
+        }
+      ],
+      "signature": "int canonical_index_verify_project ( const char * name , const char * root , int deep , canonical_index_verify_result_t * out )",
+      "signature_sha256": "8c22c995ed06b23080b276ca5de63ca8fe453b53e7b5e843795b09369c2be8be",
+      "status": "private-test-only",
+      "symbol": "canonical_index_verify_project"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index_internal.h",
+          "line": 18
+        }
+      ],
+      "signature": "void * ci_conn ( void )",
+      "signature_sha256": "769c82e5c983ac2727c78347944e33c7ecb0804c069047a6580b4fdf8213cbff",
+      "status": "internal-unconsumed",
+      "symbol": "ci_conn"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index_internal.h",
+          "line": 20
+        }
+      ],
+      "signature": "int64_t ci_resolve_file_id ( void * conn , int64_t project_id , const char * rel_path )",
+      "signature_sha256": "8301f1b9a67ba688a2c2857dd1377a5acbd455b9cafa45738d478aab94f9fd61",
+      "status": "internal-unconsumed",
+      "symbol": "ci_resolve_file_id"
+    },
+    {
+      "consumers": [],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/canonical_index_internal.h",
+          "line": 19
+        }
+      ],
+      "signature": "int64_t ci_resolve_project_id ( void * conn , const char * name )",
+      "signature_sha256": "d688f79e359fe4116afcaab03815031dae15afbdd8dbdece90cb2b6b1e53fdd0",
+      "status": "internal-unconsumed",
+      "symbol": "ci_resolve_project_id"
     },
     {
       "consumers": [
@@ -5035,7 +5151,23 @@
         "src/modules/kb-synthesis/kb_curator_resolve_entities.c",
         "src/modules/kb-synthesis/kb_curator_serve.c",
         "src/modules/kb-synthesis/kb_curator_synthesize.c",
+        "src/modules/memory/memory_advanced.c",
+        "src/modules/memory/memory_assemble.c",
+        "src/modules/memory/memory_context.c",
+        "src/modules/memory/memory_core_helpers.c",
+        "src/modules/memory/memory_core_helpers_b.c",
+        "src/modules/memory/memory_core_scope_embed.c",
+        "src/modules/memory/memory_core_search.c",
+        "src/modules/memory/memory_core_search_b.c",
+        "src/modules/memory/memory_core_search_c.c",
+        "src/modules/memory/memory_directives.c",
+        "src/modules/memory/memory_graph.c",
         "src/modules/memory/memory_graph_fusion.c",
+        "src/modules/memory/memory_lifecycle.c",
+        "src/modules/memory/memory_logic.c",
+        "src/modules/memory/memory_maintenance.c",
+        "src/modules/memory/memory_prospective.c",
+        "src/modules/memory/memory_scan.c",
         "src/modules/roadmap/roadmap_auto.c",
         "src/modules/roadmap/roadmap_milestone.c",
         "src/modules/roadmap/roadmap_reassess.c",
@@ -9506,7 +9638,8 @@
     },
     {
       "consumers": [
-        "src/tests/test_code_project_lifecycle.c"
+        "src/tests/test_code_project_lifecycle.c",
+        "src/tests/test_kb_audit_worm.c"
       ],
       "locations": [
         {
@@ -9521,28 +9654,14 @@
     },
     {
       "consumers": [
+        "src/kb/kb_service_kb.c",
         "src/tests/test_kb_audit_worm.c",
         "src/tests/test_kb_audit_worm_pg.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 40
-        }
-      ],
-      "signature": "long db2_kb_audit_count ( void )",
-      "signature_sha256": "5bee08fcd0d1ed74c486e8f1badce0a0945b4a9aba75da7cbde8e1951d4313aa",
-      "status": "private-test-only",
-      "symbol": "db2_kb_audit_count"
-    },
-    {
-      "consumers": [
-        "src/kb/kb_service_kb.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 45
+          "line": 38
         }
       ],
       "signature": "int db2_kb_audit_pending ( long long * count , long long * oldest_age_seconds )",
@@ -9551,27 +9670,11 @@
       "symbol": "db2_kb_audit_pending"
     },
     {
-      "consumers": [
-        "src/tests/test_kb_audit_worm.c",
-        "src/tests/test_kb_audit_worm_pg.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 37
-        }
-      ],
-      "signature": "int db2_kb_audit_verify_chain ( char * err , size_t errlen )",
-      "signature_sha256": "2a63fd0afff412034c71cfbda2216cb396884da61831f881441bb51e1fb181d6",
-      "status": "private-test-only",
-      "symbol": "db2_kb_audit_verify_chain"
-    },
-    {
       "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 51
+          "line": 44
         }
       ],
       "signature": "int db2_kb_audit_worm_enabled ( void )",
@@ -9586,7 +9689,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/kb_audit_worm.h",
-          "line": 50
+          "line": 43
         }
       ],
       "signature": "void db2_kb_audit_worm_set_enabled ( int enabled )",
@@ -26874,15 +26977,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "9bd8ac80ca79c95245f647ea140d6a1019de6718055550fbe98f048264b99beb",
+  "fingerprint": "e98dead41d00ccefb2abf9f926e62d8aee02651f942d5509c7b3cded7138cb9d",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 738,
-    "declarations": 1481,
-    "headers": 142,
-    "internal_unconsumed": 168,
-    "private_test_only": 281,
+    "audit_pending": 737,
+    "declarations": 1487,
+    "headers": 143,
+    "internal_unconsumed": 172,
+    "private_test_only": 284,
     "reviewed": 294
   }
 }

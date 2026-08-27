@@ -104,11 +104,11 @@ service identity before crossing a trusted container network.
 Back up:
 
 - server config and DB1;
-- workflow SQLite and artifacts;
+- PostgreSQL-backed workflow state and filesystem artifacts;
 - KB PostgreSQL;
 - vault root-key or external custody metadata;
 - TLS enrollment and revocation state;
-- WORM ledger, seals, and off-host anchor state;
+- both persistent SQLite WORM ledgers, seals, and off-host anchor state;
 - workspace mirrors when rebuilding them is expensive.
 
 Use the KB export helper for the embedded database. Test a restore. `docker compose down -v` deletes
@@ -126,6 +126,7 @@ named volumes.
 - stream first-boot provider, git, database, and witness secrets into their owning Vault, then
   recreate/start long-lived services without credential environment mappings;
 - ship WORM evidence to an off-host witness when host compromise is in scope;
+- run exactly one KB WORM worker with its own persistent volume and credential;
 - alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
   reaping.
 

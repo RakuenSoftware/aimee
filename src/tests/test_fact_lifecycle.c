@@ -493,6 +493,24 @@ int main(void)
    assert(db2_fact_current_count("rollback-subject") == 0);
    assert(scalar_int("SELECT COUNT(*) FROM fact_graph_commits") == commits_before_replay);
 
+   /* A later drain that re-extracts the same triple from NEW text is not a
+    * replay, so the evidence guard above does not apply -- and unlike
+    * db2_fact_mutation_invalidate, rollback writes no rejection tombstone. The
+    * only thing left standing between a rolled-back insertion and its return is
+    * the reactivate gate, which compares the incoming actor against the row's
+    * authority_rank. Unless the rollback recorded the operator's authority there,
+    * that rank is still the original asserter's and SYSTEM re-extraction wins. */
+   fact_evidence_input_t rb_reextract_ev = ev1;
+   rb_reextract_ev.source_id = "message:rollback-reextract";
+   rb_reextract_ev.evidence_hash = "hash-rollback-reextract";
+   ai.source = "rollback-subject";
+   ai.target = "acme";
+   ai.evidence = &rb_reextract_ev;
+   assert(db2_fact_mutation_assert(&system_actor, &ai, &mr) == 0);
+   assert(strcmp(mr.lifecycle, FACT_LIFECYCLE_INVALIDATED) == 0);
+   assert(db2_fact_current_count("rollback-subject") == 0);
+   ai.evidence = &ev1;
+
    /* One ingest-run id groups independently committed assertions into one
     * previewable, all-or-nothing rollback. */
    fact_evidence_input_t batch_ev = ev1;
@@ -552,7 +570,7 @@ int main(void)
    assert(scalar_int("SELECT COUNT(*) FROM entity_edges WHERE id="
                      " (SELECT MAX(id) FROM entity_edges WHERE source='jane' AND target='acme')") ==
           0);
-   assert(scalar_int("SELECT COUNT(*) FROM kb_audit_event WHERE action LIKE 'fact.%'") > 0);
+   assert(scalar_int("SELECT COUNT(*) FROM kb_audit_outbox WHERE action LIKE 'fact.%'") > 0);
    (void)jane_acme;
 
    /* bad args / no-op. */

@@ -12,7 +12,7 @@
  * independent checks apply, established by different machinery:
  *
  *   the DB layer  kb_write_tier_grant_set / _revoke are SECURITY DEFINER and require
- *                 admin or team-lead authority, audited to kb_audit_event. Reads are
+ *                 admin or team-lead authority, submitted to the KB WORM outbox. Reads are
  *                 RLS-scoped to the caller's teams. That rule is shipped and tested and
  *                 is NOT tightened here — a stricter copy of an authorization check is
  *                 how a regression enters.

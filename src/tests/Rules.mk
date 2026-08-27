@@ -1849,6 +1849,7 @@ $(TESTPREFIX)/unit-test-markdown: $(OBJDIR)/tests/test_markdown.o $(OBJDIR)/mark
 
 $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOCK) \
                                $(OBJDIR)/db2/canonical_index.o \
+                               $(OBJDIR)/db2/canonical_index_query.o \
                                $(OBJDIR)/db2/cross_repo_resolver.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
@@ -2105,6 +2106,7 @@ $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.
 	                                  $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
 	                                  $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
 	                                  $(OBJDIR)/tests/support/mock_agent_http.o \
+	                                  $(OBJDIR)/posix/memory.o \
 	                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cJSON.o \
 	                                  $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -5406,10 +5408,8 @@ $(TESTPREFIX)/p7-vault-rewrap-live: $(OBJDIR)/tests/test_kb_vault_rewrap_live.o 
                               $(KB_VAULT_OBJS) $(KB_PLATFORM_OBJS) $(TS_VENDOR_OBJS)
 	$(TESTLINK) -o $@ $^ $(L_KB)
 
-# P2a atomic-audit proof. REAL-PG test (SKIPs without AIMEE_TEST_PG_URL): builds a mixed
-# [C, SQL, C] kb_audit_event chain and asserts the C verifier accepts it + the SQL row
-# hashes byte-identically in C. Same KB object closure as unit-test-vault-pg (real libpq
-# via db_postgres.o + the kb db2 layer that carries kb_audit_worm.o/schema.sql).
+# P2a atomic-audit proof. REAL-PG test (SKIPs without AIMEE_TEST_PG_URL): mixed C and
+# SQL producers submit immutable intents, then the claim/ack API records delivery.
 # Content-scope referent + predicate (slice 1). REAL-PG test: SKIPs cleanly
 # without AIMEE_TEST_PG_URL, because RLS and current_setting mean nothing on the
 # SQLite shim.
@@ -6604,6 +6604,7 @@ $(TESTPREFIX)/unit-test-kb-http-routes: $(OBJDIR)/tests/test_kb_http_routes.o $(
                      $(OBJDIR)/kb/kb_bandit_registry.o \
                      $(OBJDIR)/kb/http/kb_http_code.o \
                      $(OBJDIR)/kb/http/kb_http_code_lifecycle.o \
+                     $(OBJDIR)/kb/http/kb_http_code_scan_phase.o \
                      $(OBJDIR)/kb/http/kb_http_code_context.o \
                      $(OBJDIR)/kb/http/kb_http_code_graphfb.o $(OBJDIR)/kb/lessons_reflect.o \
                                     $(OBJDIR)/kb/lessons_session_capture.o $(OBJDIR)/kb/lessons_cite_tracker.o \
