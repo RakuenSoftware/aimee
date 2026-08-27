@@ -16,6 +16,7 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
+#include "kb_client_pii.h"
 #include "db1_client/caches.h"
 #include "db1_client/user_memory.h"
 #include "db1_optional.h"
@@ -1193,7 +1194,13 @@ int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *sign
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "workspace", workspace ? workspace : "");
    cJSON_AddStringToObject(req, "signal_type", signal_type ? signal_type : "");
-   cJSON_AddStringToObject(req, "rule", rule ? rule : "");
+   /* The learned rule is prose; workspace and signal_type are enumerated
+    * handles the kb groups on. */
+   if (kb_client_pii_add_string_required(req, "rule", rule ? rule : "") != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    cJSON_AddNumberToObject(req, "observed_confidence", observed_confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);

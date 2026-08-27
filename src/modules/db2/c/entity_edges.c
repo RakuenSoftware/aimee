@@ -1189,54 +1189,74 @@ int db2_entity_edge_neighbors_weighted(const char *entity, db2_entity_edge_weigh
    return n;
 }
 
-int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per_hop,
-                                      db2_entity_edge_hop_t *out)
+int db2_entity_edge_neighbors_weighted_batch(const char *const *nodes, int node_count,
+                                             db2_entity_edge_weighted_neighbor_t *out, int max,
+                                             int limit_per_node, int utility_scoring_enabled)
 {
-   if (!entity || !out || max <= 0)
+   if (!nodes || node_count <= 0 || !out || max <= 0)
       return 0;
-   if (limit_per_hop <= 0)
-      limit_per_hop = 32;
+   if (node_count > EE_FRONTIER_BATCH_MAX)
+      node_count = EE_FRONTIER_BATCH_MAX;
+   if (limit_per_node <= 0)
+      limit_per_node = 50;
    void *conn = db2_conn();
    if (!conn)
       return 0;
 
-   /* CTE: hop1 = 1-hop neighbours; final = hop2 neighbours not in hop1.
-    *
-    * Each UNION branch is PARENTHESISED because it carries its own LIMIT.
-    * Postgres rejects `SELECT ... LIMIT n UNION ALL SELECT ...` as a syntax
-    * error: an unparenthesised LIMIT binds to the whole union, so the grammar
-    * will not accept another branch after it. SQLite accepts the same text.
-    * This function's only tests run against the sqlite shim, and it had no
-    * production caller, so it was accepted by the suite and had in fact never
-    * executed against the real database. Verified against PostgreSQL 17. */
-   char sql[4096];
+   /* Two placeholder lists over the same node set: ?1..?n match an edge whose
+    * SOURCE is on the frontier, ?n+1..?2n one whose TARGET is. Same shape as
+    * db2_memory_filter_archived_ids -- positional binds rather than a
+    * stringified IN clause, so a node key may contain anything. */
+   char src_ph[EE_FRONTIER_BATCH_MAX * 8];
+   char tgt_ph[EE_FRONTIER_BATCH_MAX * 8];
+   int sp = 0, tp = 0;
+   for (int i = 0; i < node_count; i++)
+   {
+      sp += snprintf(src_ph + sp, sizeof(src_ph) - (size_t)sp, i == 0 ? "?%d" : ",?%d", i + 1);
+      tp += snprintf(tgt_ph + tp, sizeof(tgt_ph) - (size_t)tp, i == 0 ? "?%d" : ",?%d",
+                     node_count + i + 1);
+   }
+
+   /* ROW_NUMBER partitions by the frontier node the edge was reached from, so
+    * each node still contributes at most limit_per_node neighbours. A single
+    * global LIMIT would let one high-degree node consume the whole budget and
+    * starve the rest of the frontier: a batch that quietly changes which
+    * neighbours get visited is worse than the round trips it saves. */
+   char sql[8192];
    snprintf(sql, sizeof(sql),
-            "WITH hop1 AS ("
-            "  (SELECT target AS node, weight, relation, edge_class, confidence_class"
-            "   FROM entity_edges"
-            "   WHERE source = ?1" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d)"
+            "WITH inc AS ("
+            "  SELECT e.source AS src, e.target AS node, e.weight, e.utility_score,"
+            "         e.utility_touched_at, e.relation, e.edge_class, e.confidence_class"
+            "  FROM entity_edges e"
+            "  WHERE e.source IN (%s)" EE_ADMIT_CURRENT_SEMANTIC_E EE_VISIBLE_PROJECTION_E
             "  UNION ALL"
-            "  (SELECT source AS node, weight, relation, edge_class, confidence_class"
-            "   FROM entity_edges"
-            "   WHERE target = ?2" EE_ADMIT_CURRENT_SEMANTIC EE_VISIBLE_PROJECTION " LIMIT %d)"
+            "  SELECT e.target AS src, e.source AS node, e.weight, e.utility_score,"
+            "         e.utility_touched_at, e.relation, e.edge_class, e.confidence_class"
+            "  FROM entity_edges e"
+            "  WHERE e.target IN (%s)" EE_ADMIT_CURRENT_SEMANTIC_E EE_VISIBLE_PROJECTION_E
+            "), ranked AS ("
+            "  SELECT node, weight, utility_score, utility_touched_at, relation, edge_class,"
+            "         confidence_class,"
+            "         ROW_NUMBER() OVER (PARTITION BY src ORDER BY weight DESC) AS rn"
+            "  FROM inc"
             ")"
-            " SELECT node, weight, 1 AS hop, relation, edge_class, confidence_class FROM hop1"
-            " UNION ALL"
-            " SELECT DISTINCT e.target, e.weight, 2 AS hop, e.relation, e.edge_class,"
-            "        e.confidence_class"
-            " FROM entity_edges e"
-            " JOIN hop1 h ON (e.source = h.node)"
-            " WHERE e.target != ?3" EE_ADMIT_CURRENT_SEMANTIC_E EE_VISIBLE_PROJECTION_E
-            "   AND e.target NOT IN (SELECT node FROM hop1)"
-            " LIMIT %d",
-            limit_per_hop, limit_per_hop, max);
+            " SELECT node, weight, utility_score, utility_touched_at, relation, edge_class,"
+            "        confidence_class FROM ranked WHERE rn <= %d",
+            src_ph, tgt_ph, limit_per_node);
+
    char err[EE_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
-   aimee_pg_bind_text(st, "?1", entity);
-   aimee_pg_bind_text(st, "?2", entity);
-   aimee_pg_bind_text(st, "?3", entity);
+   for (int i = 0; i < node_count; i++)
+   {
+      char name[16];
+      snprintf(name, sizeof(name), "?%d", i + 1);
+      aimee_pg_bind_text(st, name, nodes[i]);
+      snprintf(name, sizeof(name), "?%d", node_count + i + 1);
+      aimee_pg_bind_text(st, name, nodes[i]);
+   }
+
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
    {
@@ -1245,11 +1265,20 @@ int db2_entity_edge_two_hop_neighbors(const char *entity, int max, int limit_per
          continue;
       snprintf(out[n].node, sizeof(out[n].node), "%s", node);
       out[n].weight = aimee_pg_column_int(st, 1);
-      out[n].hop = aimee_pg_column_int(st, 2);
-      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 3));
-      edge_class_fields(aimee_pg_column_text(st, 4), aimee_pg_column_text(st, 5),
+      out[n].utility_score = aimee_pg_column_double(st, 2);
+      db2_copy_text(out[n].relation, sizeof(out[n].relation), aimee_pg_column_text(st, 4));
+      edge_class_fields(aimee_pg_column_text(st, 5), aimee_pg_column_text(st, 6),
                         &out[n].is_semantic, out[n].confidence_class,
                         sizeof(out[n].confidence_class));
+      if (utility_scoring_enabled)
+      {
+         const char *ts = aimee_pg_column_text(st, 3);
+         out[n].effective_utility = db2_entity_edge_utility_decay(out[n].utility_score, ts, 90);
+      }
+      else
+      {
+         out[n].effective_utility = 0.0;
+      }
       n++;
    }
    aimee_pg_finalize(st);

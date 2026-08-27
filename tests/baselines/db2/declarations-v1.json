@@ -7593,7 +7593,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 250
+          "line": 253
         }
       ],
       "signature": "int db2_entity_edge_backfill_utility_touched_at ( void )",
@@ -7606,7 +7606,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 280
+          "line": 283
         }
       ],
       "signature": "int db2_entity_edge_build_unique_index ( int * out_already_exists )",
@@ -7649,7 +7649,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 265
+          "line": 268
         }
       ],
       "signature": "int db2_entity_edge_dedup_audit ( db2_entity_edge_dedup_report_t * out )",
@@ -7662,7 +7662,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 271
+          "line": 274
         }
       ],
       "signature": "int db2_entity_edge_dedup_migrate ( const char * rollback_path , int dry_run , db2_entity_edge_dedup_report_t * out )",
@@ -7739,7 +7739,6 @@
     },
     {
       "consumers": [
-        "src/modules/memory/memory_graph_fusion.c",
         "src/tests/test_graph_scoring.c"
       ],
       "locations": [
@@ -7750,8 +7749,24 @@
       ],
       "signature": "int db2_entity_edge_neighbors_weighted ( const char * entity , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_sql , int utility_scoring_enabled )",
       "signature_sha256": "ba927bb80f578444a0f8e7afbb845835eb86bb7fd5f373ea6eed28136ef7c4b4",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_entity_edge_neighbors_weighted"
+    },
+    {
+      "consumers": [
+        "src/modules/memory/memory_graph_fusion.c",
+        "src/tests/test_graph_scoring.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/entity_edges.h",
+          "line": 246
+        }
+      ],
+      "signature": "int db2_entity_edge_neighbors_weighted_batch ( const char * const * nodes , int node_count , db2_entity_edge_weighted_neighbor_t * out , int max , int limit_per_node , int utility_scoring_enabled )",
+      "signature_sha256": "d16541be0744fed9a5122932be5d5b870efbe0d5750c43abdc72751d74fc07db",
+      "status": "audit-pending",
+      "symbol": "db2_entity_edge_neighbors_weighted_batch"
     },
     {
       "consumers": [
@@ -7875,26 +7890,11 @@
       "symbol": "db2_entity_edge_top_targets_by_relation"
     },
     {
-      "consumers": [
-        "src/tests/test_graph_scoring.c"
-      ],
-      "locations": [
-        {
-          "header": "src/modules/db2/c/entity_edges.h",
-          "line": 244
-        }
-      ],
-      "signature": "int db2_entity_edge_two_hop_neighbors ( const char * entity , int max , int limit_per_hop , db2_entity_edge_hop_t * out )",
-      "signature_sha256": "6043753d9531f015554819f066a13d89c09e5e5d0c80802c4ebca3ba59aca5da",
-      "status": "private-test-only",
-      "symbol": "db2_entity_edge_two_hop_neighbors"
-    },
-    {
       "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/entity_edges.h",
-          "line": 275
+          "line": 278
         }
       ],
       "signature": "int db2_entity_edge_unique_index_exists ( void )",
@@ -27069,7 +27069,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "1dc5161debb92f323f20285061b724c23bf1daad4f39b29a4f8391b9f4a64574",
+  "fingerprint": "8c9cc91927e85e39d4d1f4366c649355135a22d1089018669b580e8a9a247932",
   "module": "db2",
   "schema_version": 1,
   "summary": {

@@ -4,6 +4,7 @@
  * line cap. */
 
 #include "kb_client.h"
+#include "kb_client_pii.h"
 #include "cJSON.h"
 #include "tasks.h"
 
@@ -49,7 +50,13 @@ int kb_client_task_create(const char *title, const char *session_id, int64_t par
    if (!title || !out)
       return -1;
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "title", title);
+   /* A task title is written from whatever the session was doing, and the kb
+    * keeps it. */
+   if (kb_client_pii_add_string_required(req, "title", title) != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);
    cJSON_AddNumberToObject(req, "parent_id", (double)parent_id);

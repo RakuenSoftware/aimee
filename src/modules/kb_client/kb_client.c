@@ -6,6 +6,7 @@
 #include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
+#include "kb_client_pii.h"
 #include "kb_client_mtls.h"
 #include "agent_exec.h"
 #include "cli_client.h"
@@ -1200,15 +1201,21 @@ char *kb_client_memory_directive_create_json(const char *question, const char *t
    if (!question || !question[0])
       return kb_error_json("memory.directive_create requires question");
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "question", question);
-   if (topic && topic[0])
-      cJSON_AddStringToObject(req, "topic", topic);
+   /* question, topic and cause are prose the kb persists; entity and file are
+    * handles the caller resolves against later, so a redacted form would point
+    * at nothing -- those withhold outright. */
+   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
+       kb_client_pii_add_string_required(req, "question", question) != 0 ||
+       kb_client_pii_add_string(req, "topic", topic) != 0 ||
+       kb_client_pii_add_string(req, "cause", cause) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (entity && entity[0])
       cJSON_AddStringToObject(req, "entity", entity);
    if (file && file[0])
       cJSON_AddStringToObject(req, "file", file);
-   if (cause && cause[0])
-      cJSON_AddStringToObject(req, "cause", cause);
    cJSON_AddNumberToObject(req, "priority", priority);
    if (session && session[0])
       cJSON_AddStringToObject(req, "session", session);
@@ -1223,8 +1230,11 @@ char *kb_client_memory_directive_resolve_json(int64_t id, int64_t with_memory, c
    cJSON_AddNumberToObject(req, "id", (double)id);
    if (with_memory > 0)
       cJSON_AddNumberToObject(req, "with_memory", (double)with_memory);
-   if (note && note[0])
-      cJSON_AddStringToObject(req, "note", note);
+   if (kb_client_pii_add_string(req, "note", note) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    return kb_v1_action_request("memory.directive_resolve", req);
 }
 
@@ -1269,12 +1279,17 @@ char *kb_client_curiosity_create_json(const char *gap_type, const char *target_e
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "gap_type", gap_type ? gap_type : "");
+   /* evidence quotes the material that raised the gap -- the field most likely
+    * to carry a verbatim span of whatever the session was handling. */
+   if (kb_client_pii_identifier_sensitive(target_entity) ||
+       kb_client_pii_add_string(req, "target_topic", target_topic) != 0 ||
+       kb_client_pii_add_string(req, "evidence", evidence) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (target_entity && target_entity[0])
       cJSON_AddStringToObject(req, "target_entity", target_entity);
-   if (target_topic && target_topic[0])
-      cJSON_AddStringToObject(req, "target_topic", target_topic);
-   if (evidence && evidence[0])
-      cJSON_AddStringToObject(req, "evidence", evidence);
    cJSON_AddNumberToObject(req, "importance", importance);
    cJSON_AddNumberToObject(req, "novelty", novelty);
    if (source_session && source_session[0])
@@ -1323,8 +1338,14 @@ char *kb_client_note_create_json(const char *title, const char *content, const c
                                  const char *author)
 {
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "title", title ? title : "");
-   cJSON_AddStringToObject(req, "content", content ? content : "");
+   /* A note is nothing but persisted prose. Tags are lookup handles. */
+   if (kb_client_pii_identifier_sensitive(tags) ||
+       kb_client_pii_add_string_required(req, "title", title ? title : "") != 0 ||
+       kb_client_pii_add_string_required(req, "content", content ? content : "") != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (tags && tags[0])
       cJSON_AddStringToObject(req, "tags", tags);
    if (author && author[0])

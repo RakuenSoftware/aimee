@@ -125,21 +125,6 @@ static void test_score_parts_new_fields(void)
    assert(fabs(parts.source_fusion - 0.4) < 1e-9);
 }
 
-/* --- hop-decay factor --- */
-
-static void test_hop_decay_factor(void)
-{
-   /* Proposal: 1-hop → factor 1.0, 2-hop → factor 0.5.
-    * db2_entity_edge_two_hop_neighbors returns hop=1 or hop=2 in .hop.
-    * Verify the expected multipliers are applied by convention. */
-   db2_entity_edge_hop_t h1 = {.hop = 1};
-   db2_entity_edge_hop_t h2 = {.hop = 2};
-   double factor1 = (h1.hop == 1) ? 1.0 : 0.5;
-   double factor2 = (h2.hop == 1) ? 1.0 : 0.5;
-   assert(fabs(factor1 - 1.0) < 1e-9);
-   assert(fabs(factor2 - 0.5) < 1e-9);
-}
-
 /* --- backfill null-safety --- */
 
 static void test_backfill_no_db(void)
@@ -156,11 +141,13 @@ static void test_weighted_neighbors_null(void)
    assert(n == 0);
 }
 
-static void test_two_hop_null(void)
+static void test_batch_neighbors_null(void)
 {
-   db2_entity_edge_hop_t buf[8];
-   int n = db2_entity_edge_two_hop_neighbors(NULL, 8, 16, buf);
-   assert(n == 0);
+   db2_entity_edge_weighted_neighbor_t buf[8];
+   assert(db2_entity_edge_neighbors_weighted_batch(NULL, 2, buf, 8, 4, 0) == 0);
+   const char *nodes[1] = {"a"};
+   assert(db2_entity_edge_neighbors_weighted_batch(nodes, 0, buf, 8, 4, 0) == 0);
+   assert(db2_entity_edge_neighbors_weighted_batch(nodes, 1, NULL, 8, 4, 0) == 0);
 }
 
 /* --- SQLite shim integration: backfill is idempotent --- */
@@ -236,6 +223,103 @@ static int weighted_contains(const db2_entity_edge_weighted_neighbor_t *rows, in
    return 0;
 }
 
+/* --- batched frontier reads ---
+ *
+ * The batch exists to remove a round trip per frontier node, so the round-trip
+ * count is asserted directly. But the assertion that matters more is
+ * EQUIVALENCE: a batch that returns a different neighbour set than the per-node
+ * reads it replaces would silently change what recall can reach, which is worse
+ * than the latency it set out to fix. Both are checked here, against the shim,
+ * with no clock and no load sensitivity.
+ */
+void aimee_pg_test_stmt_count_reset(void);
+long aimee_pg_test_stmt_count(void);
+
+static void test_batch_matches_per_node_reads_and_costs_one_statement(void)
+{
+   setup();
+   insert_test_edge("froot-a", "froot-a-n1", "cooccurrence", "candidate", "");
+   insert_test_edge("froot-a", "froot-a-n2", "cooccurrence", "candidate", "");
+   insert_test_edge("froot-b", "froot-b-n1", "cooccurrence", "candidate", "");
+   insert_test_edge("froot-c-src", "froot-c", "cooccurrence", "candidate", "");
+
+   const char *frontier[3] = {"froot-a", "froot-b", "froot-c"};
+
+   /* What the per-node reader returns, node by node -- the behaviour the batch
+    * has to reproduce. */
+   db2_entity_edge_weighted_neighbor_t single[32];
+   int ns = 0;
+   long single_stmts = 0;
+   aimee_pg_test_stmt_count_reset();
+   for (int i = 0; i < 3; i++)
+      ns += db2_entity_edge_neighbors_weighted(frontier[i], single + ns, 32 - ns, 16, 0);
+   single_stmts = aimee_pg_test_stmt_count();
+
+   db2_entity_edge_weighted_neighbor_t batch[32];
+   memset(batch, 0, sizeof(batch));
+   aimee_pg_test_stmt_count_reset();
+   int nb = db2_entity_edge_neighbors_weighted_batch(frontier, 3, batch, 32, 16, 0);
+   long batch_stmts = aimee_pg_test_stmt_count();
+
+   /* Same neighbours, both directions of the edge included. */
+   assert(nb == ns);
+   for (int i = 0; i < ns; i++)
+      assert(weighted_contains(batch, nb, single[i].node));
+   assert(weighted_contains(batch, nb, "froot-a-n1"));
+   assert(weighted_contains(batch, nb, "froot-a-n2"));
+   assert(weighted_contains(batch, nb, "froot-b-n1"));
+   assert(weighted_contains(batch, nb, "froot-c-src"));
+
+   /* One statement for the whole frontier, where there were three. */
+   assert(single_stmts == 3);
+   assert(batch_stmts == 1);
+
+   teardown();
+}
+
+static void test_batch_caps_per_node_not_globally(void)
+{
+   setup();
+   /* A high-degree node next to a low-degree one. Under a single global LIMIT
+    * the busy node would consume the budget and the quiet one would vanish from
+    * the frontier entirely -- a silent change to what the walk can reach. */
+   insert_test_edge("busy", "busy-n1", "cooccurrence", "candidate", "");
+   insert_test_edge("busy", "busy-n2", "cooccurrence", "candidate", "");
+   insert_test_edge("busy", "busy-n3", "cooccurrence", "candidate", "");
+   insert_test_edge("busy", "busy-n4", "cooccurrence", "candidate", "");
+   insert_test_edge("quiet", "quiet-n1", "cooccurrence", "candidate", "");
+
+   const char *frontier[2] = {"busy", "quiet"};
+   db2_entity_edge_weighted_neighbor_t rows[32];
+   memset(rows, 0, sizeof(rows));
+   int n = db2_entity_edge_neighbors_weighted_batch(frontier, 2, rows, 32, 1, 0);
+
+   assert(n == 2); /* one per frontier node, not two from "busy" */
+   assert(weighted_contains(rows, n, "quiet-n1"));
+   teardown();
+}
+
+static void test_batch_applies_the_same_lifecycle_gates(void)
+{
+   setup();
+   /* The quarantine is a property of the reader, not of the caller. A batched
+    * read that skipped it would be a way around the gate. */
+   const char *commit_id = "test-batch-lifecycle";
+   insert_test_edge("batch-root", "batch-candidate", "semantic", "candidate", commit_id);
+   insert_test_edge("batch-root", "batch-persistent", "semantic", "persistent", commit_id);
+   insert_test_edge("batch-root", "batch-cooccurrence", "cooccurrence", "candidate", "");
+
+   const char *frontier[1] = {"batch-root"};
+   db2_entity_edge_weighted_neighbor_t rows[16];
+   memset(rows, 0, sizeof(rows));
+   int n = db2_entity_edge_neighbors_weighted_batch(frontier, 1, rows, 16, 16, 0);
+
+   assert(!weighted_contains(rows, n, "batch-candidate"));
+   assert(weighted_contains(rows, n, "batch-persistent"));
+   assert(weighted_contains(rows, n, "batch-cooccurrence"));
+   teardown();
+}
+
 static void test_candidate_semantic_edges_are_quarantined_from_graph_recall(void)
 {
    setup();
@@ -299,17 +383,23 @@ int main(void)
    printf("test_score_parts_new_fields... ");
    test_score_parts_new_fields();
    printf("ok\n");
-   printf("test_hop_decay_factor... ");
-   test_hop_decay_factor();
-   printf("ok\n");
    printf("test_backfill_no_db... ");
    test_backfill_no_db();
    printf("ok\n");
    printf("test_weighted_neighbors_null... ");
    test_weighted_neighbors_null();
    printf("ok\n");
-   printf("test_two_hop_null... ");
-   test_two_hop_null();
+   printf("test_batch_neighbors_null... ");
+   test_batch_neighbors_null();
+   printf("ok\n");
+   printf("test_batch_matches_per_node_reads_and_costs_one_statement... ");
+   test_batch_matches_per_node_reads_and_costs_one_statement();
+   printf("ok\n");
+   printf("test_batch_caps_per_node_not_globally... ");
+   test_batch_caps_per_node_not_globally();
+   printf("ok\n");
+   printf("test_batch_applies_the_same_lifecycle_gates... ");
+   test_batch_applies_the_same_lifecycle_gates();
    printf("ok\n");
    printf("test_backfill_idempotent... ");
    test_backfill_idempotent();
