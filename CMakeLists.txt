@@ -1235,7 +1235,11 @@ list(REMOVE_ITEM KB_CORE_SRCS
 find_package(Threads REQUIRED)
 # The HTTP transport uses WinHTTP on Windows, but executable workflow artifacts
 # still require OpenSSL for SHA-256 and signed-manifest verification.
-find_package(OpenSSL REQUIRED)
+if(AIMEE_THIN_CLIENT)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+else()
+    find_package(OpenSSL REQUIRED)
+endif()
 
 # --- Full-build static libraries + their native dependencies ----------------
 # The thin `aimee` CLI target (defined below) links none of these; it needs

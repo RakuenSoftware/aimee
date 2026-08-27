@@ -1630,11 +1630,48 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # artifact_trust uses libcrypto. Homebrew on the arm64 runner provides
+      # only an arm64 bottle, so build the pinned source for both release
+      # architectures and combine the static archives before CMake configures.
+      - name: Build universal OpenSSL crypto
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/openssl-3.6.3.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/openssl/openssl/releases/download/openssl-3.6.3/openssl-3.6.3.tar.gz
+          echo "243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1  $archive" \
+            | shasum -a 256 --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          source_dir="$RUNNER_TEMP/openssl-3.6.3"
+          for arch in arm64 x86_64; do
+            build_dir="$RUNNER_TEMP/openssl-$arch"
+            prefix="$RUNNER_TEMP/openssl-$arch-install"
+            cp -R "$source_dir" "$build_dir"
+            cd "$build_dir"
+            if [ "$arch" = arm64 ]; then
+              target=darwin64-arm64-cc
+            else
+              target=darwin64-x86_64-cc
+            fi
+            ./Configure "$target" no-shared no-tests --prefix="$prefix"
+            make --jobs 3 build_libs
+            make install_dev
+          done
+          universal="$RUNNER_TEMP/openssl-universal"
+          mkdir -p "$universal/lib"
+          cp -R "$RUNNER_TEMP/openssl-arm64-install/include" "$universal/include"
+          lipo -create \
+            "$RUNNER_TEMP/openssl-arm64-install/lib/libcrypto.a" \
+            "$RUNNER_TEMP/openssl-x86_64-install/lib/libcrypto.a" \
+            -output "$universal/lib/libcrypto.a"
+          echo "OPENSSL_ROOT_DIR=$universal" >> "$GITHUB_ENV"
+
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
-      # release build. TLS uses Secure Transport (system frameworks, already
-      # universal), so the fat build needs no arch-specific brew libraries.
+      # release build. Secure Transport and the pinned libcrypto above both
+      # contain the two required slices.
       - name: Configure with CMake (universal arm64+x86_64)
-        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
       - name: Build the thin client
         run: |
           cmake --build build --parallel 3 --target aimee
