@@ -842,6 +842,14 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out,
  * Every content-carrying memory.* wrapper below returns it. */
 #define KB_CLIENT_MEMORY_WITHHELD_PII (-2)
 
+/* The same refusal from any other content-carrying wrapper: rules, notes,
+ * decisions, anti-patterns, feedback, tasks, directives, curiosity gaps and
+ * prospective memories all persist session-authored prose into aimee-kb and
+ * are screened by the same client-side gate. Wrappers that return a response
+ * document instead of a status code return kb_client_pii_withheld_json()'s
+ * error envelope rather than this code. */
+#define KB_CLIENT_WITHHELD_PII (-2)
+
 int kb_client_memory_insert(const char *tier, const char *kind, const char *key,
                             const char *content, double confidence, const char *session_id,
                             memory_t *out);
