@@ -11,6 +11,7 @@
 #include "../support/db2_runtime_config.h"
 #include "db2_internal.h"
 #include "db_postgres.h"
+#include "../support/db2_time.h" /* now_utc: portable enqueued_at for the shim path */
 #include "kb_audit_worm.h"
 
 /* Retained as a no-op ABI during the module transition. Canonical hashing is
@@ -61,11 +62,20 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
        aimee_pg_prepare(conn, "SELECT kb_audit_worm_submit(?1,?2,?3,?4,?5,?6)", err, sizeof(err));
 #else
    /* The DB2 SQLite shim cannot execute PL/pgSQL SECURITY DEFINER functions;
-    * mirror the producer contract by inserting the intent directly. */
+    * mirror the producer contract by inserting the intent directly.
+    *
+    * The timestamp is computed in C and bound rather than written as a SQL
+    * function call. This branch is compiled for every unit-test binary, and the
+    * real-Postgres shard runs those same binaries against a live server, so any
+    * SQLite-only spelling here (datetime('now') is not a Postgres function)
+    * fails every governed mutation on that shard. now_utc() emits the same
+    * YYYY-MM-DDTHH:MM:SSZ shape as the schema's pg_now_text() default. */
+   char enqueued_at[32];
+   now_utc(enqueued_at, sizeof(enqueued_at));
    aimee_pg_stmt_t *submit = aimee_pg_prepare(
        conn,
        "INSERT INTO kb_audit_outbox(enqueued_at,actor_role,actor_principal,action,subject,"
-       "verdict,detail) VALUES(datetime('now'),?1,?2,?3,?4,?5,?6) RETURNING outbox_id",
+       "verdict,detail) VALUES(?7,?1,?2,?3,?4,?5,?6) RETURNING outbox_id",
        err, sizeof(err));
 #endif
    if (!submit)
@@ -76,6 +86,9 @@ int db2_kb_audit_append_in_txn(void *conn, const char *actor_role, const char *a
    aimee_pg_bind_text(submit, "?4", subject);
    aimee_pg_bind_text(submit, "?5", verdict);
    aimee_pg_bind_text(submit, "?6", detail);
+#ifndef AIMEE_DISABLE_DB2_SQLITE_SHIM
+   aimee_pg_bind_text(submit, "?7", enqueued_at);
+#endif
    aimee_pg_step_t submitted = aimee_pg_step(submit, err, sizeof(err));
    aimee_pg_finalize(submit);
    return submitted == AIMEE_PG_ROW ? 0 : -1;
