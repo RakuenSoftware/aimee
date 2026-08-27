@@ -768,6 +768,19 @@ int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, siz
 
 /* --- Statements --- */
 
+/* Statement counter, test-only. Round-trip COUNT is what a batching regression
+ * changes, and unlike a timing assertion it is deterministic: no clock, no load
+ * sensitivity, and it fails the same way on every machine. */
+static long s_stmt_count = 0;
+void aimee_pg_test_stmt_count_reset(void)
+{
+   s_stmt_count = 0;
+}
+long aimee_pg_test_stmt_count(void)
+{
+   return s_stmt_count;
+}
+
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
@@ -776,6 +789,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
                                      char *errbuf, size_t errlen)
 {
+   s_stmt_count++;
    if (kind)
       *kind = AIMEE_PG_PREPARE_INVALID;
    sqlite3 *db = (sqlite3 *)pg_conn;
