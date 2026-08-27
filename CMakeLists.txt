@@ -1233,12 +1233,9 @@ list(REMOVE_ITEM KB_CORE_SRCS
 )
 
 find_package(Threads REQUIRED)
-# On Windows the HTTP layer uses WinHTTP; OpenSSL is only required on POSIX.
-if(WIN32)
-    find_package(OpenSSL)
-else()
-    find_package(OpenSSL REQUIRED)
-endif()
+# The HTTP transport uses WinHTTP on Windows, but executable workflow artifacts
+# still require OpenSSL for SHA-256 and signed-manifest verification.
+find_package(OpenSSL REQUIRED)
 
 # --- Full-build static libraries + their native dependencies ----------------
 # The thin `aimee` CLI target (defined below) links none of these; it needs
@@ -1500,6 +1497,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/codex_auth.c
+    ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/markdown.c
@@ -1527,7 +1525,7 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE aimee-core-connection)
+target_link_libraries(aimee PRIVATE aimee-core-connection OpenSSL::Crypto)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)

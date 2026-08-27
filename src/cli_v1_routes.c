@@ -10,6 +10,7 @@
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
+#include <ctype.h>
 #if !defined(_WIN32) && !defined(_WIN64)
 #include "aimee_home.h"
 #include <dirent.h>
@@ -1389,12 +1390,28 @@ cJSON *marshal_kb_docs_push(int argc, char **argv)
    {
       const char *path = opts.positional[i];
       char abs_path[4096];
-      if (path && path[0] != '/')
+      int is_absolute = path && path[0] == '/';
+#if defined(_WIN32) || defined(_WIN64)
+      if (path && isalpha((unsigned char)path[0]) && path[1] == ':' &&
+          (path[2] == '/' || path[2] == '\\'))
+         is_absolute = 1;
+#endif
+      if (path && !is_absolute)
       {
          char cwd_buf[4096];
          if (getcwd(cwd_buf, sizeof(cwd_buf)))
          {
-            snprintf(abs_path, sizeof(abs_path), "%s/%s", cwd_buf, path);
+            size_t cwd_len = strlen(cwd_buf);
+            size_t path_len = strlen(path);
+            if (cwd_len > sizeof(abs_path) - 2 || path_len > sizeof(abs_path) - cwd_len - 2)
+            {
+               fprintf(stderr, "aimee: docs path is too long: %s\n", path);
+               cJSON_Delete(req);
+               return NULL;
+            }
+            memcpy(abs_path, cwd_buf, cwd_len);
+            abs_path[cwd_len] = '/';
+            memcpy(abs_path + cwd_len + 1, path, path_len + 1);
             path = abs_path;
          }
       }

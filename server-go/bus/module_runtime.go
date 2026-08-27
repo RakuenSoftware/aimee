@@ -88,6 +88,9 @@ type ModuleProcessConfig struct {
 	PrincipalRef   uint32
 	Stages         []ModuleStage
 	Handler        ModuleHandler
+	// AfterAttach hardens process state that would otherwise prevent the host
+	// from authenticating this executable through its peer credentials.
+	AfterAttach func() error
 }
 
 type cancelFlag struct{ set atomic.Bool }
@@ -204,6 +207,12 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 		return fmt.Errorf("%w: %s attach: %v", ErrModuleRuntime, config.ModuleName, err)
 	}
 	defer client.Detach()
+	if config.AfterAttach != nil {
+		if err := config.AfterAttach(); err != nil {
+			return fmt.Errorf("%w: %s post-attach hardening: %v", ErrModuleRuntime,
+				config.ModuleName, err)
+		}
+	}
 	return runModuleClient(ctx, config, stages, client)
 }
 

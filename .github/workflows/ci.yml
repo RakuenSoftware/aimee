@@ -1462,7 +1462,8 @@ jobs:
           if (-not $bin -and (Test-Path $pacman)) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
+                mingw-w64-ucrt-x86_64-openssl
               if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
@@ -1475,9 +1476,23 @@ jobs:
             }
           }
           if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
+          $prefix = Split-Path $bin
+          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
+            $opensslPackage = if ($bin -like "*\ucrt64\*") {
+              "mingw-w64-ucrt-x86_64-openssl"
+            } else {
+              "mingw-w64-x86_64-openssl"
+            }
+            & $pacman -Sy --noconfirm --needed $opensslPackage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
+            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
+          }
           Write-Host "Using MinGW at $bin"
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download SQLite amalgamation
         shell: powershell
@@ -1494,7 +1509,8 @@ jobs:
 
       # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
       # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
-      # built here, so the MinGW runner needs no libpq/zstd/OpenSSL.
+      # built here, so the MinGW runner needs no libpq/zstd. The thin client
+      # still links OpenSSL crypto for executable-artifact trust verification.
       - name: Build the thin client
         run: cmake --build build --parallel 2 --target aimee
 
@@ -1544,7 +1560,8 @@ jobs:
           if (-not $bin -and (Test-Path $pacman)) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
+                mingw-w64-ucrt-x86_64-openssl
               if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
@@ -1557,9 +1574,23 @@ jobs:
             }
           }
           if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          $prefix = Split-Path $bin
+          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
+            $opensslPackage = if ($bin -like "*\ucrt64\*") {
+              "mingw-w64-ucrt-x86_64-openssl"
+            } else {
+              "mingw-w64-x86_64-openssl"
+            }
+            & $pacman -Sy --noconfirm --needed $opensslPackage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
+            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
+          }
           Write-Host "Using MinGW at $bin"
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Download SQLite amalgamation
         shell: powershell
         run: |

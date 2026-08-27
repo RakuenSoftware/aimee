@@ -43,7 +43,7 @@ def runtime_guard_failures() -> list[str]:
         'config.ModuleName != "postgres"',
         'config.ModuleName != "sandbox"',
         "installModuleNetworkGuard()",
-        "hardenEgressCredentialOwner()",
+        "config.AfterAttach = hardenEgressCredentialOwner",
     )
     missing_main = [item for item in required_main if item not in main]
     if missing_main:

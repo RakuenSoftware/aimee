@@ -818,9 +818,11 @@ func run(ctx context.Context, args []string) error {
 		defer postgres.Close()
 	}
 	if config.ModuleName == "egress" {
-		if err := hardenEgressCredentialOwner(); err != nil {
-			return fmt.Errorf("egress cannot disable same-uid process inspection: %w", err)
-		}
+		/* The bus host authenticates /proc/<pid>/exe during attach. Becoming
+		 * non-dumpable first makes that identity check fail even for the same
+		 * uid. The runtime invokes this hook immediately after authenticated
+		 * attach and before it accepts a request. */
+		config.AfterAttach = hardenEgressCredentialOwner
 	}
 	if config.ModuleName != "egress" && config.ModuleName != "postgres" &&
 		config.ModuleName != "sandbox" {

@@ -10,6 +10,7 @@
 #include <aimee/sandbox/module_api.h>
 #include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
+#include <aimee/egress/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
 #include <aimee/kb-synthesis/module_api.h>
@@ -249,6 +250,19 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[0] = AIMEE_POSTGRES_EVENT_HEALTH;
       served[1] = AIMEE_POSTGRES_EVENT_SQL;
       *serve_count = 2;
+      return 0;
+   }
+   else if (strcmp(name, "egress") == 0)
+   {
+      *kind = AIMEE_EGRESS_EVENT_AUTHORIZE, *principal_ref = 32;
+      served[0] = AIMEE_EGRESS_EVENT_AUTHORIZE;
+      served[1] = AIMEE_EGRESS_EVENT_HTTP;
+      served[2] = AIMEE_EGRESS_EVENT_SSE_OPEN;
+      served[3] = AIMEE_EGRESS_EVENT_SSE_SEND;
+      served[4] = AIMEE_EGRESS_EVENT_SSE_RECV;
+      served[5] = AIMEE_EGRESS_EVENT_SSE_CLOSE;
+      served[6] = AIMEE_EGRESS_EVENT_CREDENTIAL_KEY;
+      *serve_count = 7;
       return 0;
    }
    else if (strcmp(name, "aimee") == 0)
@@ -724,6 +738,34 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       assert(response_len > 0 && response_len < sizeof(response));
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"allowed\"") != NULL);
+   }
+   else if (strcmp(name, "egress") == 0)
+   {
+      /* Exercise the authorization stage without touching the network. An
+       * incomplete digest must be denied with the current policy revision. */
+      static const char body[] =
+          "{\"target_url\":\"https://api.github.com/repos/o/r\",\"purpose\":\"forge\","
+          "\"method\":\"GET\",\"request_sha256\":\"invalid\"}";
+      assert(sizeof(body) - 1 <= sizeof(request));
+      memcpy(request, body, sizeof(body) - 1);
+      assert(aimee_module_client_call(client, AIMEE_EGRESS_EVENT_AUTHORIZE,
+                                      AIMEE_EGRESS_STAGE_AUTHORIZE, 2103, 0, request,
+                                      (uint32_t)(sizeof(body) - 1), response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"allowed\":false") != NULL);
+      assert(strstr((const char *)response, "module-egress-v1") != NULL);
+
+      response_len = 0;
+      assert(aimee_module_client_call(client, AIMEE_EGRESS_EVENT_CREDENTIAL_KEY,
+                                      AIMEE_EGRESS_STAGE_CREDENTIAL_KEY, 2104, 0, NULL, 0, response,
+                                      sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"version\":1") != NULL);
+      assert(strstr((const char *)response, "\"public_key\":") != NULL);
    }
    else
    {

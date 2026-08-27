@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -132,43 +133,51 @@ func NewHandler() bus.ModuleHandler {
 }
 
 func newHandler(r resolver) bus.ModuleHandler {
-	broker, err := newCredentialBroker()
-	if err != nil {
-		return func(bus.ModuleInvocation, []byte) ([]byte, bus.ModuleStatus) {
-			return nil, bus.ModuleStatusInternal
-		}
-	}
-	p := policy{resolver: r, credentials: broker}
-	s := newStreamService(p, newVaultCredentialResolver())
+	var once sync.Once
+	var initialized bus.ModuleHandler
 	return func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
-		if invocation.PrincipalClass != 1 {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		if invocation.StageID == StageHTTP {
-			return p.handleHTTP(invocation, body)
-		}
-		if invocation.StageID >= StageSSEOpen && invocation.StageID <= StageSSEClose {
-			return s.handle(invocation, body)
-		}
-		if invocation.StageID == StageCredentialKey {
-			if len(body) != 0 || invocation.Cancelled() {
-				return nil, bus.ModuleStatusInvalidRequest
+		once.Do(func() {
+			broker, err := newCredentialBroker()
+			if err != nil {
+				return
 			}
-			return broker.publicReply()
-		}
-		if invocation.StageID != StageAuthorize {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		var request Request
-		if json.Unmarshal(body, &request) != nil {
-			return nil, bus.ModuleStatusInvalidRequest
-		}
-		decision := p.decide(invocation, request)
-		encoded, err := json.Marshal(decision)
-		if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
+			p := policy{resolver: r, credentials: broker}
+			s := newStreamService(p, newVaultCredentialResolver())
+			initialized = func(invocation bus.ModuleInvocation, body []byte) ([]byte, bus.ModuleStatus) {
+				if invocation.PrincipalClass != 1 {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+				if invocation.StageID == StageHTTP {
+					return p.handleHTTP(invocation, body)
+				}
+				if invocation.StageID >= StageSSEOpen && invocation.StageID <= StageSSEClose {
+					return s.handle(invocation, body)
+				}
+				if invocation.StageID == StageCredentialKey {
+					if len(body) != 0 || invocation.Cancelled() {
+						return nil, bus.ModuleStatusInvalidRequest
+					}
+					return broker.publicReply()
+				}
+				if invocation.StageID != StageAuthorize {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+				var request Request
+				if json.Unmarshal(body, &request) != nil {
+					return nil, bus.ModuleStatusInvalidRequest
+				}
+				decision := p.decide(invocation, request)
+				encoded, err := json.Marshal(decision)
+				if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
+					return nil, bus.ModuleStatusInternal
+				}
+				return encoded, bus.ModuleStatusOK
+			}
+		})
+		if initialized == nil {
 			return nil, bus.ModuleStatusInternal
 		}
-		return encoded, bus.ModuleStatusOK
+		return initialized(invocation, body)
 	}
 }
 
