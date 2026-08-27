@@ -47,7 +47,7 @@ static const char *cli_config_dir(void)
 
 const char *cli_default_socket_path(void)
 {
-   static char path[MAX_PATH];
+   static char path[MAX_PATH + sizeof("\\aimee.sock")];
    if (path[0])
       return path;
 
