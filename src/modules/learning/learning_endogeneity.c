@@ -75,10 +75,6 @@ int learning_metrics_endogeneity_for_sink(int window_days, const char *sink,
    memset(out, 0, sizeof(*out));
    out->window_days = window_days;
 
-#if defined(AIMEE_DB2_DISABLED)
-   (void)sink;
-   return -1;
-#else
    db2_learning_source_count_t groups[LEARNING_ENDOGENEITY_MAX_GROUPS];
    int n = db2_learning_committed_source_counts(window_days, sink, groups,
                                                 LEARNING_ENDOGENEITY_MAX_GROUPS);
@@ -99,7 +95,6 @@ int learning_metrics_endogeneity_for_sink(int window_days, const char *sink,
    if (out->committed_total > 0)
       out->exogenous_ratio = (double)out->committed_exogenous / (double)out->committed_total;
    return 0;
-#endif
 }
 
 int learning_metrics_endogeneity(int window_days, learning_endogeneity_t *out)
@@ -113,15 +108,6 @@ learning_gate_state_t learning_gate_check_with(int window_days, double min_exoge
    learning_endogeneity_t local;
    learning_endogeneity_t *m = out ? out : &local;
 
-#if defined(AIMEE_DB2_DISABLED)
-   /* No learning is persisted in this build, so there is no echo chamber to
-    * guard against. */
-   (void)window_days;
-   (void)min_exogenous_ratio;
-   (void)min_sample;
-   memset(m, 0, sizeof(*m));
-   return LEARNING_GATE_OPEN;
-#else
    if (learning_metrics_endogeneity(window_days, m) != 0)
       return LEARNING_GATE_UNAVAILABLE;
    if (min_sample < 0)
@@ -133,7 +119,6 @@ learning_gate_state_t learning_gate_check_with(int window_days, double min_exoge
    if (m->exogenous_ratio < min_exogenous_ratio)
       return LEARNING_GATE_CLOSED_ENDOGENOUS;
    return LEARNING_GATE_OPEN;
-#endif
 }
 
 learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)

@@ -4,13 +4,11 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/feedback.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_relations.h"
-#endif
 #include "log.h"
 #include "memory.h"
 #include "memory_graph_fusion.h"
@@ -25,7 +23,6 @@
 
 /* Return the canonical episodic/semantic/procedural string for a raw kind
  * emitted by the cognifier, or NULL if the value is not recognised. */
-#if !defined(AIMEE_DB2_DISABLED)
 static const char *memory_cognify_canonical_kind(const char *raw)
 {
    if (!raw || !raw[0])
@@ -38,7 +35,6 @@ static const char *memory_cognify_canonical_kind(const char *raw)
       return MEMORY_UNIT_KIND_PROCEDURAL_STR;
    return NULL;
 }
-#endif
 
 /* --- Memory Improve Loop --- */
 
@@ -49,12 +45,7 @@ static const char *memory_cognify_canonical_kind(const char *raw)
  */
 int memory_improve_dedupe(int dry_run)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)dry_run;
-   return 0;
-#else
    return db2_memory_dedupe_by_key(dry_run);
-#endif
 }
 
 /*
@@ -64,12 +55,6 @@ int memory_improve_dedupe(int dry_run)
  */
 int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confidence)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)dry_run;
-   (void)min_cluster_size;
-   (void)max_confidence;
-   return 0;
-#else
    if (min_cluster_size <= 0)
       min_cluster_size = 3;
    if (max_confidence <= 0.0)
@@ -147,7 +132,6 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
       summaries++;
    }
    return summaries;
-#endif
 }
 
 /*
@@ -158,12 +142,6 @@ int memory_improve_summarise(int dry_run, int min_cluster_size, double max_confi
  */
 int memory_apply_feedback(int success, int64_t *citation_ids, int citation_count)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)success;
-   (void)citation_ids;
-   (void)citation_count;
-   return 0;
-#else
    if (!citation_ids || citation_count <= 0)
       return -1;
 
@@ -187,7 +165,6 @@ int memory_apply_feedback(int success, int64_t *citation_ids, int citation_count
                                     "Feedback correction");
    }
    return 0;
-#endif
 }
 
 /*
@@ -201,14 +178,6 @@ int memory_apply_feedback(int success, int64_t *citation_ids, int citation_count
 int memory_apply_feedback_path(int success, const char **path_node_keys, const char **relations,
                                const int *hops, int path_len)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)success;
-   (void)path_node_keys;
-   (void)relations;
-   (void)hops;
-   (void)path_len;
-   return 0;
-#else
    if (!path_node_keys || path_len <= 0)
       return -1;
 
@@ -239,7 +208,6 @@ int memory_apply_feedback_path(int success, const char **path_node_keys, const c
       if (path_node_keys[i] && path_node_keys[i][0])
          (void)db2_entity_edge_bump_utility(path_node_keys[i], credits[i]);
    return 0;
-#endif
 }
 
 /* --- LLM-Driven Cognification --- */
@@ -387,14 +355,6 @@ int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_resu
    if (!text || !text[0])
       return -1;
 
-#if defined(AIMEE_DB2_DISABLED)
-   if (config_memory_cognify_async_enabled() && memory_id > 0 && db1_cognify_job_enqueue)
-   {
-      db1_cognify_job_enqueue(memory_id);
-      return 0;
-   }
-   return -1;
-#else
    /* When async is enabled, enqueue and return immediately; a drain worker
     * will process the job later via memory_cognify_drain(). */
    if (config_memory_cognify_async_enabled() && memory_id > 0 && db1_cognify_job_enqueue)
@@ -495,7 +455,6 @@ int memory_cognify_unit(int64_t memory_id, const char *text, memory_cognify_resu
    }
 
    return 0;
-#endif
 }
 
 /* --- Async Cognification Job Queue --- */
@@ -520,7 +479,6 @@ int memory_cognify_queue_status(memory_cognify_queue_stats_t *out)
 
 /* Claim the next pending cognify job.  Returns 1 if a job was claimed
  * (job_id and memory_id set), 0 if none available, -1 on error. */
-#if !defined(AIMEE_DB2_DISABLED)
 static int mcj_claim_next(int64_t *job_id, int64_t *memory_id, int *attempts, int *max_attempts)
 {
    if (!job_id || !memory_id || !attempts || !max_attempts)
@@ -537,16 +495,9 @@ static int mcj_claim_next(int64_t *job_id, int64_t *memory_id, int *attempts, in
    *max_attempts = job.max_attempts;
    return 1;
 }
-#endif
 
 int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)timeout_secs;
-   if (out)
-      return memory_cognify_queue_status(out);
-   return 0;
-#else
    time_t started = time(NULL);
    memory_cognify_queue_stats_t stats;
    memset(&stats, 0, sizeof(stats));
@@ -615,5 +566,4 @@ int memory_cognify_drain(int timeout_secs, memory_cognify_queue_stats_t *out)
    if (out)
       *out = stats;
    return 0;
-#endif
 }

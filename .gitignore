@@ -6,6 +6,7 @@ aimee-forwarder
 /aimee-mcp
 /aimee-webchat
 /aimee-kb
+/aimee-kb-worm
 /aimee-witness-verify
 /aimee-kb-resolver
 # `make all` builds this beside the six above and it was the one left out, so a
