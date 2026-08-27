@@ -8,16 +8,15 @@
  * from memory_advanced.c (was merged in as "Memory Scan"). */
 #include "aimee.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/entity_profiles.h"
 #include "entity_edges.h"
 #include "entity_profiles.h"
-#endif
 #include "memory.h"
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include <ctype.h>
 #include <dirent.h>
@@ -652,16 +651,28 @@ int memory_is_profile_query(const char *query)
  * observation count from memory_entities.
  * Writes a JSON string into out_json. Returns 0 on success, -1 on failure.
  */
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void card_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.scan", "profile card build is unavailable: the relational store is "
+                           "unreachable, so a card cannot be built rather than the entity "
+                           "lacking observations");
+}
+
 int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json,
                               size_t out_json_len)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)entity_id;
-   (void)min_obs;
-   (void)out_json;
-   (void)out_json_len;
-   return -1;
-#else
+   if (!db2_conn())
+   {
+      card_warn_store_unreachable();
+      return -1;
+   }
    if (!entity_id || !entity_id[0] || !out_json || out_json_len == 0)
       return -1;
 
@@ -711,7 +722,6 @@ int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json
    snprintf(out_json, out_json_len, "%s", json_str);
    free(json_str);
    return 0;
-#endif
 }
 
 /* Profile-card upsert moved to db2/entity_profiles.c
@@ -724,11 +734,6 @@ int memory_profile_card_build(const char *entity_id, int min_obs, char *out_json
  */
 int memory_profile_card_refresh(int min_obs, int stale_secs)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)min_obs;
-   (void)stale_secs;
-   return 0;
-#else
    if (min_obs <= 0)
       min_obs = 10;
    if (stale_secs <= 0)
@@ -756,7 +761,6 @@ int memory_profile_card_refresh(int min_obs, int stale_secs)
    }
 
    return refreshed;
-#endif
 }
 
 /* Retrieve a stored profile card JSON for an entity.
@@ -764,12 +768,5 @@ int memory_profile_card_refresh(int min_obs, int stale_secs)
  */
 int memory_profile_card_get(const char *entity, char *out_json, size_t out_json_len)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)entity;
-   (void)out_json;
-   (void)out_json_len;
-   return -1;
-#else
    return db2_entity_profile_get_card(entity, out_json, out_json_len);
-#endif
 }

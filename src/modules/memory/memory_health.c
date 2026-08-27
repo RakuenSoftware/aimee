@@ -4,7 +4,6 @@
 #include "aimee.h"
 #include "util.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "db1_optional.h"
 #include "modules/db2/c/fact_lifecycle.h" /* §5 fact-class lifecycle jobs */
 #include "modules/db2/c/memory_health.h"
@@ -13,13 +12,10 @@
 #include "modules/db2/c/vector_index_ops.h"
 #include "kb.h"
 #include "log.h"
-#endif
 #include "memory.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
-#endif
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -67,61 +63,6 @@ int memory_quiet_lane_alarm(int changes, int64_t pending, int consecutive_quiet)
 
 /* Fold this cycle's outcome into the quiet-run counter and alarm if the lane has
  * been silent while work was waiting. Called once per maintenance cycle. */
-
-#if defined(AIMEE_DB2_DISABLED)
-/* Memory health, effectiveness, and maintenance writes are DB2-owned. Server
- * code should route these operations through aimee-kb RPCs. */
-int memory_compute_effectiveness(void)
-{
-   return 0;
-}
-
-int memory_demote_low_effectiveness(void)
-{
-   return 0;
-}
-
-int memory_effectiveness_stats(effectiveness_stats_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_enforce_retention(void)
-{
-   return 0;
-}
-
-int memory_run_maintenance(int *promoted, int *demoted, int *expired)
-{
-   if (promoted)
-      *promoted = 0;
-   if (demoted)
-      *demoted = 0;
-   if (expired)
-      *expired = 0;
-   return 0;
-}
-
-void memory_record_health(int promotions, int demotions, int expirations)
-{
-   (void)promotions;
-   (void)demotions;
-   (void)expirations;
-}
-
-void memory_prune_health(void)
-{
-}
-
-int memory_query_health(memory_health_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-#else
 
 static int mh_is_within_days(const char *s, int days)
 {
@@ -574,5 +515,3 @@ int memory_query_health(memory_health_t *out)
 
    return 0;
 }
-
-#endif

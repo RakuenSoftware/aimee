@@ -3,11 +3,9 @@
  * memory_logic.c. */
 #include "aimee.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "modules/db2/c/memory_conflicts.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
-#endif
 #include "kb.h"
 #include "log.h"
 #include "memory.h"
@@ -38,9 +36,6 @@ int memory_fold_session(const char *session_id, char *summary_out, size_t summar
    if (!session_id)
       return -1;
 
-#if defined(AIMEE_DB2_DISABLED)
-   return -1;
-#else
    /* Read one sentinel past the bounded pass. Seeing it means the pass is
     * incomplete, so defer the whole fold: a prefix must never be presented as
     * a complete session summary or used as permission to purge its suffix. */
@@ -131,7 +126,6 @@ int memory_fold_session(const char *session_id, char *summary_out, size_t summar
    if (summary_out && summary_out_len > 0)
       snprintf(summary_out, summary_out_len, "%s", checkpoint);
    return n;
-#endif
 }
 
 /* --- Conflict Detection --- */
@@ -140,9 +134,6 @@ int64_t memory_detect_conflict(const char *key, const char *content)
 {
    if (!key || !content)
       return 0;
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    /* Drained in pages rather than read into one fixed buffer. The old form
     * stopped at the buffer size, so a heavily-revised key silently stopped
     * being checked past that point and the contradiction it held was never
@@ -164,16 +155,10 @@ int64_t memory_detect_conflict(const char *key, const char *content)
       after_id = rows[n - 1].id;
    }
    return 0;
-#endif
 }
 
 int memory_record_conflict(int64_t mem_a, int64_t mem_b)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)mem_a;
-   (void)mem_b;
-   return -1;
-#else
    /* A pair someone already adjudicated is not raised again. Re-extraction
     * re-derives the same contradiction on every pass, and without this the
     * resolution is invisible to the write path: the queue refills with settled
@@ -211,17 +196,12 @@ int memory_record_conflict(int64_t mem_a, int64_t mem_b)
    }
 
    return 0;
-#endif
 }
 
 void memory_log_contradiction(int64_t mem_a, int64_t mem_b, const char *resolution,
                               const char *details)
 {
-#if !defined(AIMEE_DB2_DISABLED)
    db2_memory_contradiction_log(mem_a, mem_b, resolution, details);
-#else
-   (void)details;
-#endif
    aimee_log(LOG_WARN, "memory_promote", "contradiction: memory %lld vs %lld (%s)",
              (long long)mem_a, (long long)mem_b, resolution ? resolution : "pending");
 }
@@ -229,7 +209,6 @@ void memory_log_contradiction(int64_t mem_a, int64_t mem_b, const char *resoluti
 /* --- Retroactive Conflict Detection --- */
 
 /* Check if enough time has passed since the last retroactive scan */
-#if !defined(AIMEE_DB2_DISABLED)
 static int retro_scan_due(void)
 {
    char last[64];
@@ -241,13 +220,9 @@ static int retro_scan_due(void)
       return 0;
    return 1;
 }
-#endif
 
 int memory_scan_retroactive_conflicts(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    /* Rate limit: at most once per day */
    if (!retro_scan_due())
       return 0;
@@ -310,27 +285,15 @@ int memory_scan_retroactive_conflicts(void)
                 conflicts_found);
 
    return conflicts_found;
-#endif
 }
 
 int memory_list_conflicts(conflict_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)out;
-   (void)max;
-   return -1;
-#else
    return db2_memory_conflict_list(out, max);
-#endif
 }
 
 int memory_resolve_conflict(int64_t conflict_id, const char *resolution)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)conflict_id;
-   (void)resolution;
-   return -1;
-#else
    /* Fetch the conflict's memory IDs before resolving */
    int64_t mem_a = 0, mem_b = 0;
    db2_memory_conflict_get_pair(conflict_id, &mem_a, &mem_b);
@@ -348,5 +311,4 @@ int memory_resolve_conflict(int64_t conflict_id, const char *resolution)
    }
 
    return changes > 0 ? 0 : -1;
-#endif
 }

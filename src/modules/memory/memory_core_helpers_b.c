@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -33,8 +30,9 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -43,8 +41,27 @@
 #include <unistd.h>
 #include <pthread.h>
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void coref_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.coref", "coreference refresh is unavailable: the relational store is "
+                            "unreachable, so entity coreference is left stale rather than "
+                            "confirmed current");
+}
+
 void memory_refresh_coref_entities(int64_t memory_id, const char *content)
 {
+   if (!db2_conn())
+   {
+      coref_warn_store_unreachable();
+      return;
+   }
    if (memory_id <= 0 || !content || !content[0] || !memory_coref_has_pronoun(content))
       return;
 

@@ -1851,6 +1851,13 @@ int db2_fact_commit_rollback(const fact_actor_t *actor, const char *target_commi
          after = current;
          fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
          fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
+         /* Rolling an insertion back is an operator decision about the triple,
+          * not just about this commit's rows.  Record that authority so a later
+          * drain that re-extracts the same triple from new text is refused by
+          * the reactivate gate; the evidence-replay guard only covers an exact
+          * redelivery of the same mention. */
+         if ((int)actor->rank > after.authority_rank)
+            after.authority_rank = (int)actor->rank;
          after.version++;
       }
       else
@@ -2054,6 +2061,10 @@ int db2_fact_ingest_run_rollback(const fact_actor_t *actor, const char *ingest_r
          after = current;
          fm_copy(after.lifecycle, sizeof(after.lifecycle), FACT_LIFECYCLE_INVALIDATED);
          fm_copy(after.invalidated_at, sizeof(after.invalidated_at), now);
+         /* See db2_fact_commit_rollback: the operator's authority must land on
+          * the row so re-extraction cannot re-establish the rolled-back triple. */
+         if ((int)actor->rank > after.authority_rank)
+            after.authority_rank = (int)actor->rank;
          after.version++;
       }
       after.found = 1;

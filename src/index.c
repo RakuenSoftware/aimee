@@ -1,6 +1,5 @@
 /* index.c: code indexing, project scanning, symbol lookup, blast radius analysis */
 #include "aimee.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "config.h"
 #include "css_analyze.h"
 #include "modules/db2/c/code_index.h"
@@ -12,9 +11,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
-#endif
 
-#if !defined(AIMEE_DB2_DISABLED)
 static const char *get_extension(const char *path)
 {
    const char *dot = strrchr(path, '.');
@@ -609,7 +606,6 @@ static char *read_file_content(const char *path, size_t *out_len)
       *out_len = nread;
    return buf;
 }
-#endif
 
 /* --- Git co-change backfill ---
  *
@@ -628,7 +624,6 @@ static char *read_file_content(const char *path, size_t *out_len)
 /* cochange_pairs_for_commit() (the pure pairing policy) lives in cochange.c and
  * is declared in index.h. */
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void cochange_flush(char names[][128], int ncount, cochange_pair_t *pairs, int max_pairs)
 {
    int np = cochange_pairs_for_commit(names, ncount, COCHANGE_MAX_FILES, pairs, max_pairs);
@@ -794,16 +789,9 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
    free(log);
    free(head);
 }
-#endif /* !AIMEE_DB2_DISABLED */
 
 int index_scan_project(const char *name, const char *root, int force)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)name;
-   (void)root;
-   (void)force;
-   return -1;
-#else
    /* Resolve to absolute path */
    char abs_root[MAX_PATH_LEN];
    if (realpath(root, abs_root) == NULL)
@@ -953,30 +941,16 @@ int index_scan_project(const char *name, const char *root, int force)
       index_backfill_cochange(name, abs_root);
 
    return scanned;
-#endif
 }
 
 int index_list_projects(project_info_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)out;
-   (void)max;
-   return -1;
-#else
    return db2_code_index_project_list(out, max);
-#endif
 }
 
 int index_find(const char *identifier, term_hit_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)identifier;
-   (void)out;
-   (void)max;
-   return -1;
-#else
    return db2_code_index_term_find(identifier, out, max);
-#endif
 }
 
 int index_blast_radius(const char *project, const char *file_path, blast_radius_t *out)
@@ -986,10 +960,6 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
    memset(out, 0, sizeof(*out));
    snprintf(out->file, sizeof(out->file), "%s", file_path);
 
-#if defined(AIMEE_DB2_DISABLED)
-   (void)project;
-   return -1;
-#else
    if (db2_code_index_blast_radius(project, file_path, out) != 0)
       return -1;
 
@@ -1047,47 +1017,22 @@ int index_blast_radius(const char *project, const char *file_path, blast_radius_
    db2_code_index_blast_radius_local_first(project, out);
 
    return 0;
-#endif
 }
 
 int index_structure(const char *project, const char *file_path, definition_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)project;
-   (void)file_path;
-   (void)out;
-   (void)max;
-   return -1;
-#else
    return db2_code_index_file_definitions(project, file_path, out, max);
-#endif
 }
 
 /* --- Blast radius preview for multiple files --- */
 
 int index_find_callers(const char *project, const char *symbol, caller_hit_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)project;
-   (void)symbol;
-   (void)out;
-   (void)max;
-   return -1;
-#else
    return db2_code_index_callers_find(project, symbol, out, max);
-#endif
 }
 
 int index_code_search(const char *query, const char *project, code_search_hit_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)query;
-   (void)project;
-   (void)out;
-   (void)max;
-   return -1;
-#else
    /* The direct (non-HTTP) code-search path does not enrich line spans. */
    return db2_code_index_code_search(query, project, out, max, 0);
-#endif
 }

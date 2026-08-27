@@ -265,12 +265,10 @@ static _Atomic unsigned long long g_recall_gate_wrongly_performed = 0;
  * process boundary. When the local writer is present, gate decisions use the
  * same retrieval_event artifact type as ordinary recall; absence or store
  * failure never changes the fail-open decision. */
-#if !defined(AIMEE_DB2_DISABLED)
 extern int learning_evidence_write_retrieval_event(const char *query_fingerprint, const char *role,
                                                    const int64_t *surfaced_ids, int n_surfaced,
                                                    char *id_out, int id_out_len)
     __attribute__((weak));
-#endif
 
 static int recall_gate_mode(void)
 {
@@ -413,7 +411,6 @@ static int recall_gate_skip_turn(const char *query)
    atomic_fetch_add_explicit(&g_recall_gate_predicted_skip, 1, memory_order_relaxed);
    LOG_INFO("memory", "recall gate: %s turn (reason=%s)", mode == 2 ? "skipping" : "would skip",
             reason ? reason : "unclassified");
-#if !defined(AIMEE_DB2_DISABLED)
    if (learning_evidence_write_retrieval_event)
    {
       char role[96];
@@ -421,7 +418,6 @@ static int recall_gate_skip_turn(const char *query)
                reason ? reason : "unclassified");
       (void)learning_evidence_write_retrieval_event(query, role, NULL, 0, NULL, 0);
    }
-#endif
    return mode == 2;
 }
 

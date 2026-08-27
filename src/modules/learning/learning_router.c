@@ -1,12 +1,10 @@
 /* learning_router.c: explicit-signal capture, proposal gate, and sink routing. */
 #include "aimee.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "db1_client/db1.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/collab_rules.h"
 #include "modules/db2/c/db2_learning.h"
 #include "dogfood.h"
-#endif
 #include "cJSON.h"
 #include "integrity.h"
 #include <aimee/learning/learning.h>
@@ -36,16 +34,13 @@ void learning_router_register_signal_classifier(learning_signal_classifier_fn cl
    g_signal_classifier = classifier;
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 static int learning_classify_signal(const char *signal, uint32_t *mask)
 {
    if (!g_signal_classifier || !signal || !mask)
       return -1;
    return g_signal_classifier(signal, mask);
 }
-#endif
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void learning_ingest_record_ms(double ms)
 {
    if (ms < 0.0)
@@ -55,9 +50,7 @@ static void learning_ingest_record_ms(double ms)
    if (ms > g_learning_ingest_ms_max)
       g_learning_ingest_ms_max = ms;
 }
-#endif
 
-#if !defined(AIMEE_DB2_DISABLED)
 static int learning_proposal_ttl_days(void)
 {
    if (!config_present())
@@ -73,7 +66,6 @@ static int learning_max_commits_per_week(void)
    return config_learning_max_commits_per_week() > 0 ? config_learning_max_commits_per_week()
                                                      : LEARNING_DEFAULT_MAX_COMMITS_PER_WEEK;
 }
-#endif
 
 int learning_router_enabled(void)
 {
@@ -82,7 +74,6 @@ int learning_router_enabled(void)
    return config_learning_router_enabled() ? 1 : 0;
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void learning_expiry_after_days(int days, char *buf, size_t len)
 {
    time_t now = time(NULL);
@@ -95,7 +86,6 @@ static void learning_expiry_after_days(int days, char *buf, size_t len)
 #endif
    strftime(buf, len, "%Y-%m-%d %H:%M:%S", &tmv);
 }
-#endif
 
 static void learning_dispatch_clear(learning_dispatch_result_t *out)
 {
@@ -103,7 +93,6 @@ static void learning_dispatch_clear(learning_dispatch_result_t *out)
       memset(out, 0, sizeof(*out));
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void learning_log_dogfood(const learning_signal_input_t *input)
 {
    dogfood_label_t label;
@@ -429,7 +418,6 @@ static void learning_fill_target_key(learning_signal_input_t *input)
    if (memory_get(input->target_memory_id, &memory) == 0)
       snprintf(input->target_key, sizeof(input->target_key), "%s", memory.key);
 }
-#endif
 
 int learning_router_record_signal(const learning_signal_input_t *raw_input,
                                   learning_dispatch_result_t *out)
@@ -437,10 +425,6 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
    if (!raw_input || !raw_input->signal_type[0])
       return -1;
 
-#if defined(AIMEE_DB2_DISABLED)
-   learning_dispatch_clear(out);
-   return -1;
-#else
    /* Integrity gate: shadow/dry_run mode — log what the gate would do without
     * changing routing.  Runs before signal insert so hostile delegate/tool
     * content can be surfaced in evidence even in Phase 0. */
@@ -580,57 +564,31 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
    learning_ingest_record_ms(ms);
 
    return signal_id;
-#endif
 }
 
 int learning_list_proposals(const char *state, const char *sink, int limit,
                             learning_proposal_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)state;
-   (void)sink;
-   (void)limit;
-   (void)out;
-   (void)max;
-   return -1;
-#else
    db2_learning_proposals_archive_expired();
    return db2_learning_proposal_list(state, sink, limit, out, max);
-#endif
 }
 
 int learning_get_proposal(int id, learning_proposal_t *out)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)id;
-   (void)out;
-   return -1;
-#else
    db2_learning_proposals_archive_expired();
    return db2_learning_proposal_get(id, out);
-#endif
 }
 
 int learning_accept_proposal(int id, learning_proposal_t *out)
 {
    if (id <= 0)
       return -1;
-#if defined(AIMEE_DB2_DISABLED)
-   (void)out;
-   return -1;
-#else
    db2_learning_proposals_archive_expired();
    return learning_commit_proposal(id, out);
-#endif
 }
 
 int learning_reject_proposal(int id, learning_proposal_t *out)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)id;
-   (void)out;
-   return -1;
-#else
    learning_proposal_t proposal;
    if (id <= 0 || learning_get_proposal(id, &proposal) != 0)
       return -1;
@@ -646,7 +604,6 @@ int learning_reject_proposal(int id, learning_proposal_t *out)
       (void)learning_fate_record(id, LEARNING_FATE_REVERTED, "rejected after committing");
    }
    return learning_get_proposal(id, out ? out : &proposal);
-#endif
 }
 
 struct cJSON *learning_proposal_to_json(const learning_proposal_t *proposal)
@@ -731,10 +688,8 @@ struct cJSON *learning_dispatch_result_to_json(const learning_dispatch_result_t 
 
 /* --- Phase-2 metrics --- */
 
-#if !defined(AIMEE_DB2_DISABLED)
 static const char *LEARNING_CANONICAL_SINKS[LEARNING_SINK_COUNT] = {"reranker", "supersede", "rule",
                                                                     "workflow"};
-#endif
 
 int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out)
 {
@@ -746,9 +701,6 @@ int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out)
    memset(out, 0, sizeof(*out));
    out->window_days = window_days;
 
-#if defined(AIMEE_DB2_DISABLED)
-   return -1;
-#else
    /* Settled-only denominator: committed + archived within the
     * window, excluding still-pending rows so the ratio reflects the
     * operator's actual accept/reject decisions rather than backlog
@@ -759,16 +711,12 @@ int learning_metrics_commit_ratio(int window_days, learning_commit_ratio_t *out)
    if (out->proposals_terminal > 0)
       out->commit_ratio = (double)out->proposals_committed / (double)out->proposals_terminal;
    return 0;
-#endif
 }
 
 int learning_metrics_per_sink_caps(learning_sink_cap_t *out, int max)
 {
    if (!out || max <= 0)
       return -1;
-#if defined(AIMEE_DB2_DISABLED)
-   return -1;
-#else
    int cap = learning_max_commits_per_week();
    int n = max < LEARNING_SINK_COUNT ? max : LEARNING_SINK_COUNT;
    for (int i = 0; i < n; i++)
@@ -781,7 +729,6 @@ int learning_metrics_per_sink_caps(learning_sink_cap_t *out, int max)
          out[i].utilization = (double)out[i].committed_this_week / (double)cap;
    }
    return n;
-#endif
 }
 
 void learning_router_metrics(int64_t *ingest_calls, double *ingest_ms_avg, double *ingest_ms_max)
