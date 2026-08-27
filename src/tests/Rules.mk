@@ -53,6 +53,14 @@ DB2_TEST_BACKEND_STAMP = \
 $(DB2_TEST_BACKEND_STAMP):
 	@mkdir -p $(dir $@) && rm -f $(OBJDIR)/tests/.db2-test-backend-* && touch $@
 $(OBJDIR)/db2/db2_test_shim.o: $(DB2_TEST_BACKEND_STAMP)
+# db_postgres.o carries a mode-dependent define too (AIMEE_PG_STMT_COUNTER above),
+# and seven recipes name it explicitly, so a sqlite run builds it WITHOUT the
+# counter. Flipping to pg then rebuilds nothing -- the source is untouched -- and
+# every batching test fails to link with an undefined reference to
+# aimee_pg_test_stmt_count. CI never sees this because it builds one backend in a
+# fresh tree; running both modes in one OBJDIR is what finds it. Same stamp, same
+# reason as the shim above.
+$(OBJDIR)/db2/db_postgres.o: $(DB2_TEST_BACKEND_STAMP)
 
 # Test output prefix: defaults to $(OBJDIR)/tests so any `make unit-tests`
 # invocation with a non-default OBJDIR (sanitizers, coverage, build-integrity,
