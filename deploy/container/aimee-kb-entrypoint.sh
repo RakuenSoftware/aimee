@@ -142,7 +142,8 @@ start_embedder() {
 # operations permanently disconnected from the database the KB just started.
 configure_embedded_store_module() {
     AIMEE_STORE_URL=$1
-    export AIMEE_STORE_URL
+    AIMEE_STORE_MIGRATION_URL=$2
+    export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
 }
 
 # Sourcing stops here: everything above is definitions, everything below starts a
@@ -183,6 +184,7 @@ case "${1:-}" in
 esac
 : "${AIMEE_HOME:=/var/lib/aimee}"
 export AIMEE_HOME
+export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-kb
 [ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
 aimee-kb --bootstrap-vault-env
 _secret_names=$(aimee-kb --list-credential-env-names)
@@ -384,7 +386,38 @@ if [ "$external_db" -eq 0 ]; then
     else
         embedded_dsn="postgresql:///$DB?host=$PGSOCK"
     fi
-    configure_embedded_store_module "$embedded_dsn"
+    # The Go store keeps DDL off its ordinary SQL pool even in the self-contained
+    # image. Local trust authentication needs no passwords, but it still uses two
+    # distinct PostgreSQL roles so a compromised runtime module cannot migrate.
+    "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_migrator') THEN
+    CREATE ROLE aimee_store_migrator LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+    CREATE ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+END $$;
+ALTER ROLE aimee_store_migrator LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+ALTER ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+GRANT CONNECT ON DATABASE aimee_shared TO aimee_store_migrator, aimee_store_runtime;
+GRANT USAGE, CREATE ON SCHEMA public TO aimee_store_migrator;
+GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+REVOKE CREATE ON SCHEMA public FROM aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;
+SQL
+    embedded_store_runtime_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_store_runtime"
+    embedded_store_migration_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_store_migrator"
+    configure_embedded_store_module "$embedded_store_runtime_dsn" \
+        "$embedded_store_migration_dsn"
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
     # The self-contained tier still runs audit construction in a separate OS

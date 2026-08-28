@@ -4,51 +4,22 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
-const MaxArtifactBytes = 16 << 20
-
-func checkArtifactRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= 5 || req.URL.Scheme != "https" {
-		return errors.New("unsafe artifact redirect")
-	}
-	host := strings.ToLower(req.URL.Hostname())
-	if host != "github.com" && host != "patch-diff.githubusercontent.com" {
-		return errors.New("artifact redirect left GitHub")
-	}
-	return nil
-}
-
-var artifactHTTPClient = &http.Client{
-	Timeout:       30 * time.Second,
-	CheckRedirect: checkArtifactRedirect,
-}
-
-// artifactClient imposes the redirect and timeout policy of this boundary on
-// every fetch. An injected client contributes its transport, never its ability
-// to follow a redirect off GitHub.
-func artifactClient(client *http.Client) *http.Client {
-	if client == nil {
-		return artifactHTTPClient
-	}
-	effective := *client
-	effective.CheckRedirect = checkArtifactRedirect
-	if effective.Timeout <= 0 {
-		effective.Timeout = 30 * time.Second
-	}
-	return &effective
-}
+const MaxArtifactBytes = int(bus.ModuleMessageMaxBody) - 13
 
 // MaterializeArtifact converts an exact GitHub pull-request URL into immutable
 // review bytes at the service boundary. Reviewers never need to spend their tool
 // budget discovering or downloading the artifact themselves.
-func MaterializeArtifact(ctx context.Context, raw string, client *http.Client) (string, error) {
+func MaterializeArtifact(ctx context.Context, raw string, executor egress.Executor,
+	traceID uint64) (string, error) {
 	trimmed := strings.TrimSpace(raw)
 	parsed, err := url.Parse(trimmed)
 	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
@@ -66,28 +37,44 @@ func MaterializeArtifact(ctx context.Context, raw string, client *http.Client) (
 		return "", ValidationError{Message: "GitHub artifact URL has an invalid pull-request number"}
 	}
 	diffURL := "https://github.com/" + parts[0] + "/" + parts[1] + "/pull/" + number + ".diff"
-	request, err := http.NewRequestWithContext(ctx, http.MethodGet, diffURL, nil)
-	if err != nil {
-		return "", err
+	if executor == nil {
+		return "", errors.New("fetch GitHub pull-request artifact: egress transport is not configured")
 	}
-	request.Header.Set("Accept", "text/plain")
-	response, err := artifactClient(client).Do(request)
-	if err != nil {
-		return "", fmt.Errorf("fetch GitHub pull-request artifact: %w", err)
+	target := diffURL
+	for redirects := 0; redirects < 5; redirects++ {
+		response, callErr := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
+			TargetURL: target, Purpose: "review_artifact", Method: "GET",
+			RequestSHA256: egress.RequestDigest("GET", target, nil, false)},
+			Headers:          map[string]string{"Accept": "text/plain"},
+			MaxResponseBytes: int64(MaxArtifactBytes + 1), TimeoutMS: (30 * time.Second).Milliseconds()})
+		if callErr != nil {
+			return "", fmt.Errorf("fetch GitHub pull-request artifact: %w", callErr)
+		}
+		if response.Status >= 300 && response.Status < 400 {
+			base, baseErr := url.Parse(target)
+			next, nextErr := url.Parse(response.Location)
+			if baseErr != nil || nextErr != nil || response.Location == "" {
+				return "", errors.New("fetch GitHub pull-request artifact: unsafe redirect")
+			}
+			resolved := base.ResolveReference(next)
+			host := strings.ToLower(resolved.Hostname())
+			if resolved.Scheme != "https" || resolved.User != nil ||
+				(host != "github.com" && host != "patch-diff.githubusercontent.com") {
+				return "", errors.New("fetch GitHub pull-request artifact: redirect left GitHub")
+			}
+			target = resolved.String()
+			continue
+		}
+		if response.Status < 200 || response.Status >= 300 {
+			return "", fmt.Errorf("fetch GitHub pull-request artifact: HTTP %d", response.Status)
+		}
+		if len(response.Body) == 0 {
+			return "", errors.New("GitHub pull-request artifact is empty")
+		}
+		if len(response.Body) > MaxArtifactBytes {
+			return "", ValidationError{Message: "roundtable artifact exceeds 16 MiB"}
+		}
+		return string(response.Body), nil
 	}
-	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return "", fmt.Errorf("fetch GitHub pull-request artifact: HTTP %d", response.StatusCode)
-	}
-	content, err := io.ReadAll(io.LimitReader(response.Body, MaxArtifactBytes+1))
-	if err != nil {
-		return "", fmt.Errorf("read GitHub pull-request artifact: %w", err)
-	}
-	if len(content) == 0 {
-		return "", errors.New("GitHub pull-request artifact is empty")
-	}
-	if len(content) > MaxArtifactBytes {
-		return "", ValidationError{Message: "roundtable artifact exceeds 16 MiB"}
-	}
-	return string(content), nil
+	return "", errors.New("fetch GitHub pull-request artifact: too many redirects")
 }

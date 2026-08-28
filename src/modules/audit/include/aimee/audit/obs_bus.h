@@ -82,6 +82,16 @@ extern "C"
     * running is refused. */
    int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx);
 
+   /* Commit one action-class record synchronously to the daemon's WORM sink.
+    * This is the durability edge for security-relevant bridges whose ordinary
+    * ACTION event is intentionally asynchronous.  Returns 0 only after the
+    * service-specific sink has accepted the row; a missing sink is failure.
+    * Fields are bounded and content-free under the same contract as
+    * obs_bus_emit(). */
+   int obs_bus_commit_action(const char *actor, const char *tool, const char *args_hash,
+                             const char *command, const char *mode, const char *reason_code,
+                             const char *verdict, long long task_id);
+
    /* Configure the daemon's authenticated local module endpoint before start.
     * `socket_path` and `policy_dir` must be absolute. The policy directory holds
     * one strict *.grant manifest per installed executable. Both server and KB

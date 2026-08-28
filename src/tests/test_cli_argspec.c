@@ -72,6 +72,15 @@ typedef struct
    "kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk"
 
 static const sample_t SAMPLES[] = {
+    {"kb.erase-subject", {NULL}},
+    {"kb.erase-subject", {"subject@example.test", NULL}},
+    {"kb.erase-subject", {"", NULL}},
+    {"kb.erase-subject",
+     {"subject@example.test", "--request-id", "erase-request-0123456789", NULL}},
+    {"kb.erase-subject", {"--request-id=erase-request-0123456789", "subject@example.test", NULL}},
+    {"kb.erase-subject", {"subject@example.test", "--request-id", "", NULL}},
+    {"kb.erase-subject", {"subject@example.test", "extra", NULL}},
+
     /* memory.delete / memory.get / memory.embed — the numeric width samples.
        memory.delete SHIPPED with a spec saying atoi() where the marshaller uses
        atoll(); every id in the suite was small, so nothing disagreed. These

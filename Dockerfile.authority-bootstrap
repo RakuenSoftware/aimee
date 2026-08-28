@@ -1,7 +1,7 @@
 # Dedicated one-shot managed trust bootstrap. The final image contains the two
 # offline authority binaries and no ordinary KB/server runtime. It is invoked
 # only by the browser wizard after the private embedded PostgreSQL is healthy.
-FROM debian:trixie-slim AS build
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -15,7 +15,7 @@ ARG AIMEE_VERSION=""
 RUN make -C src token-roots-provisioner-core jwks-publisher-core -j"$(nproc)" \
         ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
 
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

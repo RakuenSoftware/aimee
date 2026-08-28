@@ -1,6 +1,7 @@
 # Proposal: One egress module, so unlogged external communication becomes impossible
 
-- **State:** PENDING. Architecture proposal; no implementation has started.
+- **State:** IN PROGRESS. HTTP/SSE transport, scoped credential custody, and ordinary Go process
+  socket isolation are implemented; core-daemon protocols and production evidence remain open.
 - **Date:** 2026-08-10.
 - **Charter roles:** Enforce / Constrain-Verify.
 - **Thesis:** modules are forbidden from talking to the outside world. Communication
@@ -147,3 +148,37 @@ Each step is independently useful, and the guarantee only hardens at step 4.
   cannot be widened by the caller?
 - Does the audit record carry request/response bodies, or only metadata and a content hash?
   Bodies are the most useful for governance and the most dangerous to retain.
+
+## 8. Implementation status (2026-08-27)
+
+Stages 1 through 4 of the sequence are implemented for the inventoried ordinary Go-module HTTP
+and MCP SSE paths:
+
+- the `egress` process carries bounded unary and stream bytes, binds DNS authorization to dialed IPs,
+  does not follow redirects, and restricts caller principals by purpose, method and destination;
+- memory embedding, Git forge requests, roundtable artifact retrieval and MCP SSE use request-only
+  bus identities with least-privilege stage grants;
+- transport events write metadata-only WORM evidence; credential-bearing requests and external
+  content are deliberately excluded from raw bus capture;
+- a source gate detects direct module socket use and includes a planted bypass, and the Linux
+  multicall launcher uses a synchronized seccomp filter to deny IPv4/IPv6 socket creation in
+  ordinary process modules while preserving Unix-domain bus transport.
+
+Forge no longer sends a raw token into Git: the Vault-owning core wraps the current bearer to the
+egress process's ephemeral X25519 key, with authenticated caller, host, operation, repository and
+30-second expiry, and only egress injects Authorization. MCP no longer sends a caller-selected
+environment name. Provisioning derives `mcp:<egress-ref>`, egress derives the sole corresponding
+`AIMEE_MCP_<egress-ref>_TOKEN` Vault name, and a parent-executable-attested helper streams that
+secret only to the non-dumpable egress process. Tests pin scope/expiry/tamper rejection and a real
+C-to-Go envelope vector.
+
+This still does not satisfy the proposal's product-wide single-transport acceptance section. The
+enforced boundary is complete for ordinary Go process modules, including their HTTP and SSE paths.
+Git-over-SSH, provider streaming, peer/KB/database traffic, management clients and other protocols
+owned by trusted C server/KB planes or separately declared proxy/store processes have not all
+converged on this service. They are instead formally constrained by
+`src/modules/core-network-contracts.json`: lint matches every remaining HTTP, Internet socket, DNS,
+PostgreSQL, TLS-connect and credentialed-Git primitive by exact file and count to an owner, purpose,
+destination rule, credential rule, audit disposition and review boundary, with a planted bypass.
+Production namespace/seccomp activation and throughput evidence remain deployment work. The
+proposal therefore stays in flight rather than overstating a product-wide single-egress guarantee.

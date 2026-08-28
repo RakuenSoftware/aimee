@@ -279,7 +279,8 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argv++;
 
    audit_log_open();
-   audit_ensure_key(); /* provision the per-action audit key (best-effort) */
+   if (audit_ensure_key() != 0)
+      fatal("required governed-action audit key is unavailable");
 
    /* Read JSON from stdin -- hook input is small (tool name + args) */
    char input[65536];

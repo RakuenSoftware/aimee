@@ -241,11 +241,11 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
  * Returns count of files applied, 0 if nothing, -1 on argument error. */
 int worktree_apply_changes_to_parent(const char *src_wt, const char *dst_wt);
 
-/* Shared filesystem path validation for all tool paths.
- * Resolves symlinks, rejects traversal attempts, rejects sensitive paths.
- * Returns NULL on success (path is safe), or a static error string on failure.
- * On success, the resolved path is written to resolved_buf. */
-const char *guardrails_validate_file_path(const char *path, char *resolved_buf,
-                                          size_t resolved_len);
+/* Sensitive-path check used after workspace authorization. Resolves symlinks,
+ * rejects traversal and policy-sensitive paths, and bounds the canonical copy.
+ * It is deliberately not named as a workspace validator: callers must obtain
+ * workspace authority before invoking it. */
+const char *guardrails_check_sensitive_path(const char *path, char *resolved_buf,
+                                            size_t resolved_len);
 
 #endif /* DEC_GUARDRAILS_H */

@@ -3390,6 +3390,28 @@ paths:
         returns a dry-run plan naming each table and row count.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/erase-subject:
+    post:
+      summary: Erase one data subject from mutable DB1 and DB2 stores
+      description: >-
+        Owner-only, idempotent two-phase erasure. The server derives affected
+        sessions, commits mutable deletion in both stores, reconciles orphaned
+        blobs, and appends minimized completion evidence without the subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject: { type: string, minLength: 1 }
+                request_id: { type: string, minLength: 16, maxLength: 128 }
+      responses:
+        "200": { description: Erasure completed or replayed idempotently }
+        "400": { description: Invalid subject or request identifier }
+        "403": { description: Owner authorization required }
+        "500": { description: A store phase failed; retry with the same request identifier }
   /memory/embed:
     post:
       summary: (Re)generate memory embeddings (async; poll GET /runs/{id})
@@ -3957,6 +3979,27 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /hooks/session_end:
+    post:
+      summary: Revoke a session-scoped authenticated harness-hook token
+      description: >-
+        Ends the authenticated hook identity established by session_start.
+        The session id, harness client, and hook token must match the attested
+        transport principal that originally minted the token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, harness_client, hook_token]
+              properties:
+                session_id: { type: string }
+                harness_client: { type: string }
+                hook_token: { type: string }
+      responses:
+        "200": { description: Hook identity revoked }
+        "400": { description: Invalid session or token binding }
   /session/brief_assemble:
     post:
       summary: Workspace-independent session brief for the remote thin client

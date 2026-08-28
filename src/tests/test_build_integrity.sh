@@ -414,7 +414,7 @@ fi
 server_verify_deps="build-essential clang-format-19 libcurl4-openssl-dev libpam0g-dev libp11-kit-dev libpq-dev libsqlite3-dev libssl-dev libzstd-dev pkg-config postgresql-client python3 python3-yaml ripgrep zlib1g-dev"
 missing_server_verify_deps=""
 for dep in $server_verify_deps; do
-    if ! awk -v dep="$dep" '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && index($0, dep){found=1} END{exit !found}' \
+    if ! awk -v dep="$dep" '/^FROM /{runtime=($0 ~ /^FROM debian:bookworm-slim(@sha256:[[:xdigit:]]+)?$/); found=0} runtime && index($0, dep){found=1} END{exit !found}' \
         ../Dockerfile.server; then
         missing_server_verify_deps="$missing_server_verify_deps $dep"
     fi

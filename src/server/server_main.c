@@ -29,6 +29,7 @@
 #include "log.h"
 #include <aimee/audit/audit_action.h>
 #include <aimee/audit/audit_worm.h>
+#include <aimee/audit/audit_worm_chain.h>
 #include "platform_path.h"
 #include "platform_process.h"
 #include "platform_random.h"
@@ -221,7 +222,16 @@ static int run_server(const char *socket_path, log_level_t log_level)
       audit_log_close();
       return 1;
    }
-   audit_ensure_key();             /* provision the per-action audit key (best-effort) */
+   unsigned char worm_key[32];
+   char worm_key_id[17];
+   if (audit_ensure_key() != 0 || audit_worm_chain_key_load(worm_key, worm_key_id) != 0 ||
+       (config_audit_worm_enabled() &&
+        audit_worm_append("system", "server", "server.startup", "aimee-server", "ok", "{}") != 0))
+   {
+      startup_notify(notify_fd, "error: required audit key/WORM store unavailable\n");
+      audit_log_close();
+      return 1;
+   }
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
@@ -503,6 +513,15 @@ int main(int argc, char **argv)
     * safely unset. */
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
+
+   if (argc == 3 && strcmp(argv[1], "--egress-vault-secret") == 0)
+   {
+      if (vault_env_egress_parent_attest() != 0 || vault_env_bootstrap_init() < 0)
+         return 1;
+      int rc = vault_env_print_egress_credential(argv[2]);
+      runtime_secret_clear();
+      return rc == 0 ? 0 : 1;
+   }
 
    /* The co-located root-UDS-attested web service consumes these labelled base64
     * records through a pipe for authentication, signed sessions, and in-memory

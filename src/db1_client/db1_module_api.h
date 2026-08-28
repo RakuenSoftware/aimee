@@ -258,6 +258,8 @@
 #define AIMEE_DB1_OP_WEBCHAT_LIVE_GET                       22u
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_CLAIM  23u
 #define AIMEE_DB1_OP_SERVER_SESSION_PERSONA_DELIVERY_FINISH 24u
+#define AIMEE_DB1_OP_SERVER_SESSION_LIST_BY_SUBJECT         25u
+#define AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT           26u
 
 /* Family 7: machine-local runtime state: caches, this box's operator and
  * clones, the model catalogue it fetched, and the snapshots it took. */

@@ -278,7 +278,7 @@ static void parse_build_manifest(const char *root, const char *path,
 
 static void collect_build_exclusions(const char *root, build_exclusion_list_t *exclusions)
 {
-   char *esc = shell_escape(root);
+   char *esc = shell_quote(root);
    char cmd[MAX_PATH_LEN * 2 + 512];
    int rc;
    snprintf(cmd, sizeof(cmd), "git -C %s rev-parse --is-inside-work-tree 2>/dev/null", esc);
@@ -477,7 +477,7 @@ static void collect_code_files(const char *dir, const char *root, file_list_t *l
    if (subproject_prefixes)
       collect_subproject_prefixes(root, root, 0, subproject_prefixes, &subproject_count);
 
-   char *esc = shell_escape(dir);
+   char *esc = shell_quote(dir);
    char cmd[MAX_PATH_LEN * 2 + 256];
    int rc;
 
@@ -644,7 +644,7 @@ static void cochange_flush(char names[][128], int ncount, cochange_pair_t *pairs
  * would double the accumulated weights). Silent no-op outside a git work tree. */
 static void index_backfill_cochange(const char *project, const char *abs_root)
 {
-   char *esc = shell_escape(abs_root);
+   char *esc = shell_quote(abs_root);
    if (!esc)
       return;
    char cmd[MAX_PATH_LEN * 2 + 512];
@@ -691,9 +691,9 @@ static void index_backfill_cochange(const char *project, const char *abs_root)
          return;
       }
       /* marker is already validated to lowercase-hex above, so it is shell-inert;
-       * shell_escape it anyway so every value interpolated into a git command is
+       * shell_quote it anyway so every value interpolated into a git command is
        * escaped uniformly (matching abs_root), leaving no unescaped interpolation. */
-      char *emarker = shell_escape(marker);
+      char *emarker = shell_quote(marker);
       const char *m = emarker ? emarker : marker;
       snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s HEAD 2>/dev/null", esc, m);
       char *anc = run_cmd(cmd, &rc);

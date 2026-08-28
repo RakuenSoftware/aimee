@@ -11,8 +11,12 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include "kb_client.h"
+#include "db1_client/server_sessions.h"
+#include "platform_random.h"
 
+#include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* As kb_relay_send, but a kb-reported failure is returned AS an error.
@@ -102,4 +106,99 @@ int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    return kb_relay_send_checked(conn, kb_client_memory_embed_json(all, memory_id, version, NULL),
                                 "knowledge service memory embed failed");
+}
+
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "subject");
+   const cJSON *jr = cJSON_GetObjectItemCaseSensitive(req, "request_id");
+   if (!cJSON_IsString(js) || !js->valuestring[0] || strlen(js->valuestring) > 600)
+      return server_send_error(conn, "kb.erase-subject requires subject", NULL);
+   char request_id[129] = "";
+   if (cJSON_IsString(jr) && jr->valuestring[0])
+   {
+      size_t request_len = strlen(jr->valuestring);
+      if (request_len < 16 || request_len > 128)
+         return server_send_error(conn, "invalid erasure request_id", NULL);
+      for (size_t i = 0; i < request_len; i++)
+      {
+         unsigned char c = (unsigned char)jr->valuestring[i];
+         if (!isalnum(c) && c != '.' && c != '_' && c != '-')
+            return server_send_error(conn, "invalid erasure request_id", NULL);
+      }
+      snprintf(request_id, sizeof(request_id), "%s", jr->valuestring);
+   }
+   else
+   {
+      unsigned char random[16];
+      if (platform_random_bytes(random, sizeof(random)) != 0)
+         return server_send_error(conn, "cannot mint erasure request id", NULL);
+      snprintf(request_id, sizeof(request_id), "erase-");
+      for (size_t i = 0; i < sizeof(random); i++)
+         snprintf(request_id + 6 + i * 2, sizeof(request_id) - 6 - i * 2, "%02x", random[i]);
+   }
+   char(*sessions)[DB1_SS_ID_LEN] = calloc(4096, sizeof(*sessions));
+   if (!sessions)
+      return server_send_error(conn, "out of memory", NULL);
+   int session_count = db1_server_session_list_by_subject(js->valuestring, sessions, 4096);
+   if (session_count < 0 || session_count == 4096)
+   {
+      free(sessions);
+      return server_send_error(conn, "cannot enumerate complete subject session set", NULL);
+   }
+   cJSON *session_ids = cJSON_CreateArray();
+   for (int i = 0; session_ids && i < session_count; i++)
+      cJSON_AddItemToArray(session_ids, cJSON_CreateString(sessions[i]));
+   free(sessions);
+   if (!session_ids)
+      return server_send_error(conn, "out of memory", NULL);
+
+   int status = 0;
+   char *begin_json =
+       kb_client_subject_erasure_begin(request_id, js->valuestring, session_ids, &status);
+   cJSON_Delete(session_ids);
+   cJSON *begin = begin_json ? cJSON_Parse(begin_json) : NULL;
+   free(begin_json);
+   if (status != 200 || !begin)
+   {
+      cJSON_Delete(begin);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "DB2 erasure failed; retry request_id=%s", request_id);
+      return server_send_error(conn, msg, NULL);
+   }
+
+   int db1_count = db1_server_session_erase_subject(request_id, js->valuestring);
+   if (db1_count < 0)
+   {
+      cJSON_Delete(begin);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "DB1 erasure failed; retry request_id=%s", request_id);
+      return server_send_error(conn, msg, NULL);
+   }
+   char *complete_json = kb_client_subject_erasure_complete(request_id, db1_count, &status);
+   cJSON *complete = complete_json ? cJSON_Parse(complete_json) : NULL;
+   free(complete_json);
+   if (status != 200 || !complete)
+   {
+      cJSON_Delete(begin);
+      cJSON_Delete(complete);
+      char msg[192];
+      snprintf(msg, sizeof(msg), "completion evidence failed; retry request_id=%s", request_id);
+      return server_send_error(conn, msg, NULL);
+   }
+
+   cJSON *resp = jo_ok();
+   cJSON_AddStringToObject(resp, "request_id", request_id);
+   cJSON_AddStringToObject(resp, "subject", js->valuestring);
+   cJSON_AddNumberToObject(resp, "session_count", db1_count);
+   const cJSON *mc = cJSON_GetObjectItemCaseSensitive(begin, "memory_count");
+   const cJSON *dc = cJSON_GetObjectItemCaseSensitive(begin, "document_count");
+   const cJSON *ec = cJSON_GetObjectItemCaseSensitive(complete, "event_created");
+   cJSON_AddNumberToObject(resp, "memory_count", cJSON_IsNumber(mc) ? mc->valuedouble : 0);
+   cJSON_AddNumberToObject(resp, "document_count", cJSON_IsNumber(dc) ? dc->valuedouble : 0);
+   cJSON_AddBoolToObject(resp, "event_created", cJSON_IsTrue(ec));
+   cJSON_Delete(begin);
+   cJSON_Delete(complete);
+   return server_send_ok(conn, resp);
 }

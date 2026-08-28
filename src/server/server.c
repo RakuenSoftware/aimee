@@ -4,12 +4,9 @@
 #endif
 #include "server_internal.h"
 #include "aimee.h"
-#include "harness_memory_audit.h"  /* hmem_audit */
-#include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
-#include "harness_memory_scope.h"  /* hmem_scope_for_client */
-#include "harness_memory_spill.h"  /* hmem_spill_write (retirement db1-outage fail-open) */
-#include "json_fluent.h"           /* jo_ok */
-#include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
+#include "harness_memory_scope.h" /* hmem_scope_for_client */
+#include "hook_session_token.h"
+#include "json_fluent.h" /* jo_ok */
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
@@ -639,9 +636,9 @@ static cJSON *server_run_kb_bootstrap(void)
    if (server_sibling_kb_path(kb_path, sizeof(kb_path)) != 0)
       return NULL;
 
-   char *quoted = shell_escape(kb_path);
+   char *quoted = shell_quote(kb_path);
    char cmd[MAX_PATH_LEN + 128];
-   snprintf(cmd, sizeof(cmd), "'%s' --bootstrap-db2 --json", quoted);
+   snprintf(cmd, sizeof(cmd), "%s --bootstrap-db2 --json", quoted);
    free(quoted);
 
    char *out = NULL;
@@ -677,17 +674,13 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd_in->valuestring;
 
    /* Fresh session ID per launch; never inherit a stale session-ppid file. */
-   char sid[16];
+   char sid[33];
    {
-      unsigned char rnd[4];
+      unsigned char rnd[16];
       if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
-      {
-         rnd[0] = (unsigned char)(getpid() & 0xff);
-         rnd[1] = (unsigned char)((getpid() >> 8) & 0xff);
-         rnd[2] = (unsigned char)(time(NULL) & 0xff);
-         rnd[3] = (unsigned char)((time(NULL) >> 8) & 0xff);
-      }
-      snprintf(sid, sizeof(sid), "%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2], rnd[3]);
+         return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
+      for (size_t i = 0; i < sizeof(rnd); i++)
+         snprintf(sid + i * 2, sizeof(sid) - i * 2, "%02x", rnd[i]);
    }
 
    /* Copied out: held across the worktree/session work below. */
@@ -824,141 +817,39 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, parsed);
 }
 
-/* Server-side central agent-memory interception. The split server owns DB1, so
- * (unlike the CLI path's HTTP POST) it writes the archive row directly via
- * db1_user_memory_upsert; the .md is retired and never materialized. Returns 2
- * (deny — msg set) when a memory op was intercepted/rejected, else 0 (allow).
- * Fail-open: any inability to identify or store returns 0 so a normal tool call
- * is never blocked by this stage. */
-static int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd,
-                                   cJSON *req, char *msg, size_t msg_len)
+static void server_hook_principal(const server_conn_t *conn, char *out, size_t cap)
 {
-   /* The client identity is per-REQUEST: a single shared server fields hooks from
-    * many agents (claude/gemini/codex/...), so it must use the harness_client the
-    * thin client forwarded — NOT the server's own AIMEE_HOOK_CLIENT env (which
-    * would scope every request to one fixed client). Fall back to the env only for
-    * the local/combined-binary path where no field is sent; on a shared split
-    * server AIMEE_HOOK_CLIENT must be UNSET so an older/3rd-party client that omits
-    * the field is treated as unknown (no interception) rather than mis-scoped.
-    * TRUST: harness_client is client-supplied and untrusted, but it is used SOLELY
-    * as a scope-registry lookup key — never an authorization, filesystem, or DB
-    * path input. An unknown key → no interception; a spoofed registered name only
-    * re-scopes the spoofer's OWN writes (no cross-client exposure, no escalation).
-    * Do not derive anything but the scope from it. */
-   const char *client = NULL;
-   cJSON *hc = cJSON_GetObjectItemCaseSensitive(req, "harness_client");
-   if (cJSON_IsString(hc) && hc->valuestring && hc->valuestring[0])
-      client = hc->valuestring;
-   if (!client)
-      client = getenv("AIMEE_HOOK_CLIENT");
-   const char *home = getenv("HOME");
-   if (!client || !client[0] || !home || !home[0])
+   if (conn->vault_principal[0])
+      snprintf(out, cap, "%s", conn->vault_principal);
+   else
+      snprintf(out, cap, "transport:%d:uid:%u", (int)conn->attested_transport,
+               (unsigned)conn->peer_uid);
+}
+
+/* 1 = trusted, 0 = continue without identity-derived privileges, -1 = hardened
+ * refusal. AIMEE_HOOK_IDENTITY_MODE is intentionally server-only operational
+ * policy: observe and enforce both refuse attribution, while hardened refuses
+ * the entire hook before any stateful policy consumer runs. */
+static int server_hook_identity(server_conn_t *conn, cJSON *req, const char *sid,
+                                const char **trusted_client)
+{
+   *trusted_client = NULL;
+   const char *client =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
+   const char *token = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "hook_token"));
+   if (!client || !client[0])
       return 0;
-   const hmem_scope_t *scope = hmem_scope_for_client(client);
-   if (!scope)
-      return 0;
-   cJSON *ti = tool_input ? cJSON_Parse(tool_input) : NULL;
-   if (!ti)
-      return 0;
-
-   int verdict = 0;
-
-   /* Bash bypass: a shell command that writes a memory file is reject-denied (we
-    * can't capture its output) — steer the agent to the Write tool. */
-   if (strcmp(tool, "Bash") == 0)
+   char principal[128];
+   server_hook_principal(conn, principal, sizeof(principal));
+   if (hook_session_token_verify(sid, client, principal, token))
    {
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(ti, "command");
-      const char *cmd = (jc && cJSON_IsString(jc)) ? jc->valuestring : NULL;
-      if (cmd && memory_redirect_bash_targets_memory(client, cmd, home))
-      {
-         snprintf(msg, msg_len,
-                  "Memory files are managed by aimee — use the Write tool to set "
-                  "memory/<name>.md, not shell redirection.");
-         hmem_audit("reject", NULL, NULL, "bash-write-memory");
-         verdict = 2;
-      }
-      cJSON_Delete(ti);
-      return verdict;
+      *trusted_client = client;
+      return 1;
    }
-
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(ti, "file_path");
-   if (!jp || !cJSON_IsString(jp))
-      jp = cJSON_GetObjectItemCaseSensitive(ti, "path");
-   const char *path = (jp && cJSON_IsString(jp)) ? jp->valuestring : NULL;
-   if (!path)
-   {
-      cJSON_Delete(ti);
-      return 0;
-   }
-
-   char name[HMEM_NAME_LEN];
-   const char *reason = NULL;
-   mr_verdict_t v = memory_redirect_classify(client, tool, path, home, name, sizeof(name), &reason);
-   if (v == MR_ALLOW)
-   {
-      cJSON_Delete(ti);
-      return 0;
-   }
-   if (v == MR_REJECT)
-   {
-      snprintf(msg, msg_len, "%s", reason ? reason : "memory write rejected");
-      hmem_audit("reject", NULL, NULL, reason);
-      cJSON_Delete(ti);
-      return 2;
-   }
-
-   /* MR_REDIRECT: a Write with no string content is invalid — never store an
-    * empty body over an existing entry. */
-   cJSON *jcont = cJSON_GetObjectItemCaseSensitive(ti, "content");
-   const char *content = (jcont && cJSON_IsString(jcont)) ? jcont->valuestring : NULL;
-   if (!content)
-   {
-      snprintf(msg, msg_len, "Memory Write needs a string 'content' field.");
-      cJSON_Delete(ti);
-      return 2;
-   }
-
-   /* Project key: prefer the client-resolved hint (correct for a remote server),
-    * else resolve from cwd (local server). */
-   char project[HMEM_PROJECT_KEY_MAX], rootdir[1024];
-   const char *hp = NULL;
-   cJSON *hpj = cJSON_GetObjectItemCaseSensitive(req, "harness_project");
-   if (cJSON_IsString(hpj) && hpj->valuestring && hpj->valuestring[0])
-      hp = hpj->valuestring;
-   if (hp && hmem_project_key_ok(hp))
-      snprintf(project, sizeof(project), "%s", hp);
-   else if (hmem_resolve_project(cwd, project, sizeof(project), rootdir, sizeof(rootdir)) != 0)
-   {
-      cJSON_Delete(ti); /* can't identify the project — fail open */
-      return 0;
-   }
-
-   /* .md retirement (unconditional): store the intercepted write into db1 as a
-    * private, non-recallable archive row (kind='archive', tier L1 — outside the
-    * recall selectors) and never materialize the .md — the file never exists;
-    * content lives only in aimee. The agent is steered to `aimee memory` by the
-    * session brief. Server owns db1, so write directly. */
-   {
-      /* Project-qualified so identically-named memories from different projects
-       * don't collide under this user's UNIQUE(kind,key). */
-      char akey[HMEM_PROJECT_KEY_MAX + 600];
-      snprintf(akey, sizeof(akey), "archive:%s/%s", project, name);
-      if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
-      {
-         /* db1 outage: spill for the next reconcile, then fail-open so the agent
-          * isn't blocked on our store. */
-         int sp = hmem_spill_write(project, name, "archive", content);
-         hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
-         cJSON_Delete(ti);
-         return 0;
-      }
-      hmem_audit("redirect-db1", project, name, NULL);
-      snprintf(msg, msg_len,
-               "Saved to aimee memory. Memory files are retired — retrieve with "
-               "`aimee memory search` and use `aimee memory store` going forward.");
-      cJSON_Delete(ti);
-      return 2;
-   }
+   const char *mode = getenv("AIMEE_HOOK_IDENTITY_MODE");
+   LOG_WARN("hook_identity", "untrusted hook session=%s client=%s mode=%s", sid, client,
+            mode && mode[0] ? mode : "enforce");
+   return mode && !strcmp(mode, "hardened") ? -1 : 0;
 }
 
 /* S2 pre-delivery native-tool externalization gate (server side; tracks 2+3). This
@@ -997,6 +888,12 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   const char *trusted_client = NULL;
+   int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
+   if (hook_identity < 0)
+      return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
+                               request_id);
+
    session_state_t state;
    session_state_load(&state, sid);
    hooks_ensure_cwd_worktree(&state, sid, cwd);
@@ -1005,7 +902,8 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
    {
       char mr_msg[1024] = "";
-      if (server_memory_intercept(tool_name, tool_input, cwd, req, mr_msg, sizeof(mr_msg)) == 2)
+      if (trusted_client && server_memory_intercept(tool_name, tool_input, cwd, req, trusted_client,
+                                                    mr_msg, sizeof(mr_msg)) == 2)
       {
          free(ti_heap);
          return hook_send_blocked(conn, mr_msg, request_id);
@@ -1086,6 +984,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", rc == 2 ? "blocked" : "ok");
    cJSON_AddNumberToObject(resp, "exit_code", rc);
+   cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
    if (msg[0])
       cJSON_AddStringToObject(resp, "message", msg);
    if (request_id)
@@ -1107,6 +1006,16 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
    const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
 
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   if (!sid || !is_safe_id(sid))
+      return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
+                               request_id);
+   const char *trusted_client = NULL;
+   int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
+   if (hook_identity < 0)
+      return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
+                               request_id);
+
    const char *tool_name = cJSON_IsString(jtn) ? jtn->valuestring : "";
    char *ti_heap = NULL;
    const char *tool_input = "{}";
@@ -1123,6 +1032,7 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
+   cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);
@@ -1235,6 +1145,21 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   const char *hook_client =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
+   if (hook_client && !hmem_scope_for_client(hook_client))
+      return server_send_error(conn, "unknown harness_client", request_id);
+   char hook_token[HOOK_SESSION_TOKEN_CAP] = "";
+   time_t hook_token_expires = 0;
+   if (sid && sid[0] && hook_client && hook_client[0])
+   {
+      char principal[128];
+      server_hook_principal(conn, principal, sizeof(principal));
+      if (hook_session_token_mint(sid, hook_client, principal, hook_token, &hook_token_expires) !=
+          0)
+         return server_send_error(conn, "could not establish hook identity", request_id);
+   }
+
    /* Register the session in the server_sessions registry under its real host id
     * (session_start_emit persists session_state, but NOT this listings row). This
     * makes every session locatable after a crash — the gap that meant a Claude
@@ -1247,7 +1172,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
-         (void)db1_server_session_create(sid, "claude-code", principal);
+         (void)db1_server_session_create(sid, hook_client && hook_client[0] ? hook_client : "hook",
+                                         principal);
       }
    }
 
@@ -1282,6 +1208,11 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       cJSON *resp = jo_ok();
       cJSON_AddNumberToObject(resp, "exit_code", 0);
       cJSON_AddStringToObject(resp, "output", "");
+      if (hook_token[0])
+      {
+         cJSON_AddStringToObject(resp, "hook_token", hook_token);
+         cJSON_AddNumberToObject(resp, "hook_token_expires_at", (double)hook_token_expires);
+      }
       if (request_id)
          cJSON_AddStringToObject(resp, "request_id", request_id);
       return server_send_ok(conn, resp);
@@ -1309,6 +1240,11 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
    cJSON_AddStringToObject(resp, "output", captured ? captured : "");
+   if (hook_token[0])
+   {
+      cJSON_AddStringToObject(resp, "hook_token", hook_token);
+      cJSON_AddNumberToObject(resp, "hook_token_expires_at", (double)hook_token_expires);
+   }
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
 
@@ -1316,6 +1252,26 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
    cJSON_Delete(resp);
    free(captured);
    return rc;
+}
+
+static int handle_hooks_session_end(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   if (!sid || !is_safe_id(sid))
+      return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
+                               request_id);
+   const char *trusted_client = NULL;
+   if (server_hook_identity(conn, req, sid, &trusted_client) != 1)
+      return server_send_error(conn, "unauthenticated session hook identity", request_id);
+   char principal[128];
+   server_hook_principal(conn, principal, sizeof(principal));
+   hook_session_token_revoke(sid, trusted_client, principal);
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "exit_code", 0);
+   return server_send_ok(conn, resp);
 }
 
 /* session.brief_assemble: workspace-independent SessionStart brief for the

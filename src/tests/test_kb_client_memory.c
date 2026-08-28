@@ -27,6 +27,19 @@ static int activation_writes;
 static int64_t activation_write_id;
 static int64_t activation_write_turn;
 
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+
 const char *session_id(void)
 {
    return "activation-client-session";

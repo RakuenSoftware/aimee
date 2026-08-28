@@ -1,16 +1,14 @@
 package git
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
-	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 // Forge operations. Named rather than numbered on the wire for the same reason
@@ -27,8 +25,12 @@ const (
 )
 
 const (
-	forgeAccept  = "application/vnd.github+json"
-	forgeTimeout = 20 * time.Second
+	forgeAccept    = "application/vnd.github+json"
+	forgeTimeoutMS = int64(20_000)
+	methodGet      = "GET"
+	methodPost     = "POST"
+	methodPatch    = "PATCH"
+	methodPut      = "PUT"
 )
 
 // forgeBaseURL is overridden in tests. Production talks to api.github.com; the
@@ -36,27 +38,23 @@ const (
 // elsewhere is a place to send a credential.
 var forgeBaseURL = "https://api.github.com"
 
-var forgeHTTPClient = &http.Client{Timeout: forgeTimeout}
-
 // ForgeRequest is one operation against the forge.
 //
-// Token travels on the bus. That is a deliberate decision, not an oversight:
-// this module performs the call, so it needs the credential, and the doctrine
-// permits an internally-initiated outbound call from a module until the egress
-// module exists. It is never logged, never echoed into a response, and never
-// placed in a URL — only in the Authorization header of the outbound request.
+// Credential is an egress-keyed, short-lived envelope. This process can relay
+// it but cannot recover the bearer; egress binds it to this caller, operation,
+// repository and api.github.com before adding an Authorization header.
 type ForgeRequest struct {
-	Op     string `json:"op"`
-	Owner  string `json:"owner"`
-	Repo   string `json:"repo"`
-	Token  string `json:"token"`
-	Number int    `json:"number,omitempty"`
-	Head   string `json:"head,omitempty"`
-	Base   string `json:"base,omitempty"`
-	Title  string `json:"title,omitempty"`
-	Body   string `json:"body,omitempty"`
-	Draft  bool   `json:"draft,omitempty"`
-	Limit  int    `json:"limit,omitempty"`
+	Op         string                     `json:"op"`
+	Owner      string                     `json:"owner"`
+	Repo       string                     `json:"repo"`
+	Credential *egress.CredentialEnvelope `json:"credential"`
+	Number     int                        `json:"number,omitempty"`
+	Head       string                     `json:"head,omitempty"`
+	Base       string                     `json:"base,omitempty"`
+	Title      string                     `json:"title,omitempty"`
+	Body       string                     `json:"body,omitempty"`
+	Draft      bool                       `json:"draft,omitempty"`
+	Limit      int                        `json:"limit,omitempty"`
 	// MergeMethod is "merge", "squash" or "rebase"; empty means merge.
 	MergeMethod string `json:"merge_method,omitempty"`
 	// ExpectedHeadSHA refuses the merge if the head has moved since it was read.
@@ -139,35 +137,37 @@ func nameOK(s string) bool {
 	return true
 }
 
-// call performs one request. The token is set on the header and nowhere else.
-func forgeCall(method, path, token string, body any) (int, []byte, error) {
-	var reader io.Reader
+// call submits one request to the network-owning egress process. The token is
+// set on the governed header and nowhere else.
+func forgeCall(ctx context.Context, traceID uint64, executor egress.Executor,
+	method, path, operation, resource string, credential *egress.CredentialEnvelope, body any) (int, []byte, error) {
+	var encoded []byte
 	if body != nil {
-		encoded, err := json.Marshal(body)
+		var err error
+		encoded, err = json.Marshal(body)
 		if err != nil {
 			return 0, nil, err
 		}
-		reader = bytes.NewReader(encoded)
 	}
-	request, err := http.NewRequest(method, forgeBaseURL+path, reader)
-	if err != nil {
-		return 0, nil, err
+	target := forgeBaseURL + path
+	if executor == nil {
+		return 0, nil, fmt.Errorf("egress transport is not configured")
 	}
-	request.Header.Set("Authorization", "Bearer "+token)
-	request.Header.Set("Accept", forgeAccept)
+	headers := map[string]string{"Accept": forgeAccept}
 	if body != nil {
-		request.Header.Set("Content-Type", "application/json")
+		headers["Content-Type"] = "application/json"
 	}
-	response, err := forgeHTTPClient.Do(request)
+	response, err := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
+		TargetURL: target, Purpose: "forge", Method: method,
+		RequestSHA256:     egress.RequestDigest(method, target, encoded, credential != nil),
+		CredentialPresent: credential != nil}, Headers: headers, Body: encoded,
+		CredentialHandle: "forge", CredentialScope: operation, CredentialResource: resource,
+		Credential:       credential,
+		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: forgeTimeoutMS})
 	if err != nil {
 		return 0, nil, err
 	}
-	defer response.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(response.Body, int64(bus.ModuleMessageMaxBody)))
-	if err != nil {
-		return response.StatusCode, nil, err
-	}
-	return response.StatusCode, payload, nil
+	return response.Status, response.Body, nil
 }
 
 // forgeError extracts the forge's own message. GitHub answers a rejected
@@ -218,21 +218,26 @@ func summarize(raw []byte) *PullSummary {
 // PerformForge runs one forge operation. Exported for the handler and the tests;
 // the decisions — which endpoint, which method, what the answer means — all live
 // here rather than in the caller.
-func PerformForge(request ForgeRequest) ForgeResponse {
+func PerformForge(ctx context.Context, traceID uint64, executor egress.Executor,
+	request ForgeRequest) ForgeResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if !nameOK(request.Owner) || !nameOK(request.Repo) {
 		return ForgeResponse{Error: "forge: owner/repo is not a valid name"}
 	}
-	if request.Token == "" {
+	if request.Credential == nil {
 		return ForgeResponse{Error: "forge: no credential"}
 	}
 	repo := "/repos/" + request.Owner + "/" + request.Repo
+	resource := request.Owner + "/" + request.Repo
 
 	switch request.Op {
 	case OpDefaultBranch:
 		// The bare form: GitHub 404s a trailing slash on this endpoint, and a
 		// caller must never fall back to guessing "main" — a repo whose default
 		// is "testing" would get its PR opened against the wrong branch.
-		status, payload, err := forgeCall(http.MethodGet, repo, request.Token, nil)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodGet, repo, request.Op, resource, request.Credential, nil)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -255,7 +260,7 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if request.Draft {
 			body["draft"] = true
 		}
-		status, payload, err := forgeCall(http.MethodPost, repo+"/pulls", request.Token, body)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodPost, repo+"/pulls", request.Op, resource, request.Credential, body)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -289,8 +294,8 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if request.Limit > 0 {
 			query.Set("per_page", fmt.Sprint(request.Limit))
 		}
-		status, payload, err := forgeCall(http.MethodGet, repo+"/pulls?"+query.Encode(),
-			request.Token, nil)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodGet, repo+"/pulls?"+query.Encode(),
+			request.Op, resource, request.Credential, nil)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -317,8 +322,8 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if request.Number <= 0 {
 			return ForgeResponse{Error: "pr info: a positive number is required"}
 		}
-		status, payload, err := forgeCall(http.MethodGet,
-			fmt.Sprintf("%s/pulls/%d", repo, request.Number), request.Token, nil)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodGet,
+			fmt.Sprintf("%s/pulls/%d", repo, request.Number), request.Op, resource, request.Credential, nil)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -344,8 +349,8 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if len(body) == 0 {
 			return ForgeResponse{Error: "pr edit: nothing to change"}
 		}
-		status, payload, err := forgeCall(http.MethodPatch,
-			fmt.Sprintf("%s/pulls/%d", repo, request.Number), request.Token, body)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodPatch,
+			fmt.Sprintf("%s/pulls/%d", repo, request.Number), request.Op, resource, request.Credential, body)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -372,8 +377,8 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 		if request.ExpectedHeadSHA != "" {
 			body["sha"] = request.ExpectedHeadSHA
 		}
-		status, payload, err := forgeCall(http.MethodPut,
-			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Token, body)
+		status, payload, err := forgeCall(ctx, traceID, executor, methodPut,
+			fmt.Sprintf("%s/pulls/%d/merge", repo, request.Number), request.Op, resource, request.Credential, body)
 		if err != nil {
 			return ForgeResponse{Error: "forge: " + err.Error()}
 		}
@@ -406,7 +411,7 @@ func PerformForge(request ForgeRequest) ForgeResponse {
 }
 
 // handleForgeRequest serves git-forge-request (stage 4).
-func handleForgeRequest(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleForgeRequest(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var decoded ForgeRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -414,7 +419,7 @@ func handleForgeRequest(invocation bus.ModuleInvocation, request []byte) ([]byte
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(PerformForge(decoded))
+	encoded, err := json.Marshal(PerformForge(context.Background(), invocation.TraceID, executor, decoded))
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}

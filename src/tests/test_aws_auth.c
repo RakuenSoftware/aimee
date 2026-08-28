@@ -834,7 +834,7 @@ static void test_cache_isolation(void)
 
    /* region-set is sorted, so order-of-input does not matter (a HIT). */
    {
-      sts_cache_t c;
+      static sts_cache_t c;
       sts_cache_init(&c);
       sts_cache_key_t k = base_key();
       aws_sts_credentials_t creds = make_creds("HIT");
@@ -850,7 +850,7 @@ static void test_cache_isolation(void)
 #define PERTURB(mut)                                                                               \
    do                                                                                              \
    {                                                                                               \
-      sts_cache_t c;                                                                               \
+      static sts_cache_t c;                                                                        \
       sts_cache_init(&c);                                                                          \
       sts_cache_key_t k = base_key();                                                              \
       aws_sts_credentials_t creds = make_creds("X");                                               \
@@ -879,7 +879,7 @@ static void test_cache_isolation(void)
 
    /* credential-generation bump -> miss (rotation / entitlement revocation). */
    {
-      sts_cache_t c;
+      static sts_cache_t c;
       sts_cache_init(&c);
       sts_cache_key_t k = base_key();
       aws_sts_credentials_t creds = make_creds("X");
@@ -890,7 +890,7 @@ static void test_cache_isolation(void)
 
    /* TTL expiry -> miss. */
    {
-      sts_cache_t c;
+      static sts_cache_t c;
       sts_cache_init(&c);
       sts_cache_key_t k = base_key();
       aws_sts_credentials_t creds = make_creds("X");
@@ -902,7 +902,7 @@ static void test_cache_isolation(void)
 
    /* TTL ceiling: an over-long expiry is clamped to now + 900. */
    {
-      sts_cache_t c;
+      static sts_cache_t c;
       sts_cache_init(&c);
       sts_cache_key_t k = base_key();
       aws_sts_credentials_t creds = make_creds("X");

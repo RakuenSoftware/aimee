@@ -1,8 +1,35 @@
-# Release controls always require the project owner's review.
+# Security-sensitive boundaries require owner review. Branch rules must also
+# require a non-author approval; CODEOWNERS alone cannot enforce separation.
 /.github/CODEOWNERS @JBailes
-/.github/workflows/auto-release.yml @JBailes
-/.github/workflows/main-merge-approval.yml @JBailes
-/.github/workflows/publish-images.yml @JBailes
-/.github/workflows/release-thin-client.yml @JBailes
-/.github/workflows/release-policy.yml @JBailes
+/OWNERS.md @JBailes
+/.github/SECURITY.md @JBailes
+/.github/workflows/ @JBailes
 /scripts/check-release-policy.sh @JBailes
+/scripts/check-workflow-pins.py @JBailes
+
+# Authentication, authorization, audit, credentials, data scope, and egress.
+/src/server/server_auth.c @JBailes
+/src/server/server_bearer_auth.c @JBailes
+/src/server/server_http_authz.c @JBailes
+/src/server/server_http_identity.c @JBailes
+/src/modules/audit/ @JBailes
+/src/modules/guardrails/ @JBailes
+/src/modules/vault/ @JBailes
+/src/modules/workspace/ @JBailes
+/src/modules/tools/ @JBailes
+/src/modules/db2/c/schema.sql @JBailes
+/src/modules/db2/c/schema_grants.sql @JBailes
+/src/kb/http/ @JBailes
+/src/kb/kb_egress_admission.c @JBailes
+/control-web/ @JBailes
+/server-go/modules/ @JBailes
+
+# Deployment and release trust boundaries.
+/Dockerfile* @JBailes
+/compose*.yaml @JBailes
+/deploy/ @JBailes
+/CMakeLists.txt @JBailes
+/src/Makefile @JBailes
+/docs/SECURITY.md @JBailes
+/docs/security-claims.json @JBailes
+/docs/compliance/ @JBailes

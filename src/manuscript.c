@@ -98,12 +98,15 @@ int manuscript_scan(const char *dir, manuscript_entry_t *out, int max, long *tot
       {
          if (!manuscript_is_prose_file(e->d_name))
             continue;
+         size_t name_len = strlen(e->d_name);
+         if (name_len >= sizeof(out[count].name))
+            continue;
          char path[MS_PATH_MAX];
          snprintf(path, sizeof(path), "%s/%s", scan_dir, e->d_name);
          char *text = manuscript_read_file(path);
          long w = manuscript_count_words(text);
          free(text);
-         snprintf(out[count].name, sizeof(out[count].name), "%s", e->d_name);
+         memcpy(out[count].name, e->d_name, name_len + 1);
          out[count].words = w;
          total += w;
          count++;

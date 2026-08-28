@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 // EVENT KINDS ARE PER-INSTANCE, NOT PER-PACKAGE.
@@ -134,11 +135,12 @@ type Module struct {
 	// plugin is what executes third-party code, so it happens after the gate,
 	// not before it. `decided` latches so a verdict is applied exactly once --
 	// re-admitting on every declaration would respawn the plugin each refresh.
-	pendingArgv []string
-	pendingCwd  string
-	ceiling     Permission
-	decided     bool
-	refused     bool
+	pendingArgv  []string
+	pendingCwd   string
+	ceiling      Permission
+	decided      bool
+	refused      bool
+	egressClient egress.Client
 }
 
 // New builds a module for the named instance with an explicit permission
@@ -158,6 +160,12 @@ func New(group string, ceiling Permission) *Module {
 
 // Group returns the normalized registry group for this instance.
 func (m *Module) Group() string { return m.group }
+
+func (m *Module) SetEgressClient(client egress.Client) {
+	m.mu.Lock()
+	m.egressClient = client
+	m.mu.Unlock()
+}
 
 // Attach binds a connected plugin session. Replacing an existing session closes
 // the old one: one plugin per module means the new session supersedes rather
@@ -222,7 +230,7 @@ func (m *Module) handleDeclareCommands(invocation bus.ModuleInvocation, request 
 
 	// Apply an admission verdict, if one rode along with this request.
 	if verdict, digest, ok := parseAdmission(request); ok {
-		if status := m.applyAdmission(verdict, digest); status != bus.ModuleStatusOK {
+		if status := m.applyAdmission(invocation.TraceID, verdict, digest); status != bus.ModuleStatusOK {
 			return nil, status
 		}
 	}
@@ -308,7 +316,7 @@ func (m *Module) Refused() bool {
 }
 
 // applyAdmission acts on a verdict from the daemon, exactly once.
-func (m *Module) applyAdmission(verdict uint32, digest [32]byte) bus.ModuleStatus {
+func (m *Module) applyAdmission(traceID uint64, verdict uint32, digest [32]byte) bus.ModuleStatus {
 	m.mu.Lock()
 	if m.decided || len(m.pendingArgv) == 0 {
 		// Nothing outstanding. A repeat verdict is not an error -- the daemon
@@ -330,13 +338,14 @@ func (m *Module) applyAdmission(verdict uint32, digest [32]byte) bus.ModuleStatu
 	}
 	argv := append([]string(nil), m.pendingArgv...)
 	cwd := m.pendingCwd
+	egressClient := m.egressClient
 	m.decided = true
 	m.mu.Unlock()
 
 	// Spawn outside the lock: starting a process and completing an MCP
 	// handshake is slow, and holding the lock would stall every concurrent
 	// invocation on this module.
-	client, err := startPlugin(argv, cwd)
+	client, err := startPlugin(argv, cwd, egressClient, traceID)
 	if err != nil {
 		// Admitted but unable to start. Not a refusal -- the gate said yes --
 		// so leave it decided and command-less rather than pretending it was
@@ -361,17 +370,17 @@ const SSEPrefix = "sse:"
 // so nothing above here knows whether the plugin is a local process or a remote
 // endpoint. That parity is what makes the C client's SSE support replaceable
 // rather than merely reimplemented for stdio.
-func startPlugin(argv []string, cwd string) (*Client, error) {
+func startPlugin(argv []string, cwd string, egressClient egress.Client, traceID uint64) (*Client, error) {
 	if len(argv) > 0 && strings.HasPrefix(argv[0], SSEPrefix) {
 		endpoint := strings.TrimPrefix(argv[0], SSEPrefix)
-		bearer := ""
+		credentialEnv := ""
 		if len(argv) > 1 {
 			// The token is read from the environment the provisioning owns, not
 			// baked into the declared argv: the argv is reported over the bus and
 			// logged, and a secret does not belong in either.
-			bearer = os.Getenv(argv[1])
+			credentialEnv = argv[1]
 		}
-		transport, err := NewSSETransport(endpoint, bearer, 30*time.Second)
+		transport, err := NewSSETransport(endpoint, credentialEnv, 30*time.Second, egressClient, traceID)
 		if err != nil {
 			return nil, err
 		}

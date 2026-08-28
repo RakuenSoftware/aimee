@@ -74,6 +74,33 @@ services:
       # workspace volume at the same path so those paths are actually readable.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
 
+  # One-shot trust bootstrap for the split topology.  The KB's ordinary HTTP
+  # listener is intentionally plaintext-only, so a bearer may not cross the
+  # Compose network to it.  This job writes the KB-issued mTLS identity into the
+  # server volume while keeping the KB CA and database socket in the KB volume.
+  # It is profile-gated and invoked explicitly by the deploy smoke/bootstrap
+  # flow; ordinary `compose up` never treats it as a long-running service.
+  aimee-server-identity:
+    profiles: ["identity-bootstrap"]
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
+
   # The server's store: PostgreSQL, holding every table the daemon keeps.
   #
   # A STOCK upstream image, deliberately. The kb builds its own PostgreSQL
@@ -93,14 +120,17 @@ services:
   aimee-store-db:
     restart: unless-stopped
     image: ${AIMEE_STORE_DB_IMAGE:-postgres:18}
+    entrypoint: ["/opt/aimee/postgres-secure-entrypoint.sh"]
     environment:
       # Literal, not per-field knobs. AIMEE_STORE_URL below is the ONE override
       # that matters: an operator with their own PostgreSQL points it there and
       # this service goes unused. Per-field variables would have to be kept in
       # agreement with that DSN by hand, and a password that disagrees with the
       # URL fails as "the store is unreachable".
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AIMEE_STORE_ADMIN_PASSWORD:?AIMEE_STORE_ADMIN_PASSWORD is required}
+      AIMEE_STORE_MIGRATOR_PASSWORD: ${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}
+      AIMEE_STORE_RUNTIME_PASSWORD: ${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}
       POSTGRES_DB: aimee_store
       # The LOCALE travels with the encoding. initdb refuses a UTF8 encoding
       # against a locale whose own encoding differs, and aborts before the
@@ -117,10 +147,14 @@ services:
     # No published port: the store is reached only across this compose network,
     # by aimee-server. Publishing it would put the daemon's whole state on the
     # host interface for no deployment that needs it there.
+    networks: [store]
     volumes:
       - aimee-store-db:/var/lib/postgresql/data
+      - ./scripts/postgres-secure-entrypoint.sh:/opt/aimee/postgres-secure-entrypoint.sh:ro
+      - ./scripts/postgres-store-init.sh:/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro
+      - aimee-store-tls:/var/lib/postgresql/secure
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "aimee", "-d", "aimee_store"]
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "aimee_store"]
       interval: 2s
       timeout: 2s
       retries: 30
@@ -150,7 +184,8 @@ services:
       # AIMEE_DB1_URL, which named a SQLite file for a C module that no longer
       # exists -- nothing had read it since the store became a Go module, so it
       # was telling operators the server kept a database it does not keep.
-      AIMEE_STORE_URL: ${AIMEE_STORE_URL:-postgres://aimee:aimee@aimee-store-db:5432/aimee_store}
+      AIMEE_STORE_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_runtime password=${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
+      AIMEE_STORE_MIGRATION_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_migrator password=${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
       # Reach the kb over its /v1 HTTP API. The base URL must NOT include /v1 —
       # kb_client paths already carry the /v1 prefix (kb_client_v1_url).
       AIMEE_KB_API_URL: http://aimee-kb:8741
@@ -207,8 +242,10 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [default, store]
     volumes:
       - aimee-server-home:/var/lib/aimee
+      - aimee-store-tls:/run/aimee-store-tls:ro
       # Durable mirror-tier state (AIMEE_WORKSPACES_DIR): bare mirrors +
       # reconstructed worktrees, persisted across recreations on their own volume.
       - aimee-server-workspaces:/var/lib/aimee-workspaces
@@ -216,6 +253,12 @@ services:
 
 volumes:
   aimee-store-db:
+  aimee-store-tls:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
+
+networks:
+  default:
+  store:
+    internal: true

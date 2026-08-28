@@ -142,6 +142,15 @@ extern "C"
     * accompanying pgvector point deletes — those run on the materialized
     * id list returned by db2_kb_documents_list_chunk_ids_for_file. */
    void db2_kb_documents_delete_for_file(const char *project, const char *file_path);
+   int db2_kb_documents_delete_older_than(int days);
+
+   /* Idempotent DB2 half and immutable-evidence completion of the cross-store
+    * subject-erasure saga. sessions_json is a JSON array of DB1 session ids. */
+   int db2_subject_erasure_begin(const char *request_id, const char *subject,
+                                 const char *sessions_json, int64_t *memory_count,
+                                 int64_t *document_count, int *already_done);
+   int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                    int *event_created);
 
    /* INSERT a fresh kb_documents row with DELETE-then-INSERT semantics
     * (callers invoke db2_kb_documents_delete_for_file for the file

@@ -44,11 +44,10 @@ extern "C"
 
    /* Compute the args hash for (tool_name, args_json) into `out` (capacity
     * >= AUDIT_ARGS_HASH_LEN). `args_json` may be NULL/empty (hashes the tool name
-    * only). Returns 0 on success.
-    *
-    * Best-effort: on any failure (key unavailable, allocation) it writes the stable
-    * sentinel "v1-" followed by 64 '0' and returns -1. Callers audit best-effort
-    * and MUST NOT block a tool on a non-zero return. */
+    * only). If the dedicated key is absent it is provisioned atomically using the
+    * platform CSPRNG. Returns 0 on success. On any failure it clears `out` and
+    * returns -1; governed callers MUST fail closed and MUST NOT emit an unsigned
+    * or sentinel digest. */
    int audit_args_hash(const char *tool_name, const char *args_json, char *out, size_t out_sz);
 
    /* Build an ARG-FREE command preview for the audit row's human-readable

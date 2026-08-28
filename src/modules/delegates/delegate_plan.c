@@ -124,7 +124,7 @@ static int path_prefix_src_db(const char *path, char tier)
           path[4] == 'd' && path[5] == 'b' && path[6] == tier && path[7] == '/';
 }
 
-static int tail_is_legacy_schema(const char *tail, char tier, int sqlite_variant)
+static int tail_is_legacy_schema(const char *tail, char tier, int compact_variant)
 {
    if (!tail || tail[0] != 'd' || tail[1] != 'b' || tail[2] != tier || tail[3] != '_')
       return 0;
@@ -136,7 +136,7 @@ static int tail_is_legacy_schema(const char *tail, char tier, int sqlite_variant
          return 0;
    }
    tail += 6;
-   if (sqlite_variant)
+   if (compact_variant)
    {
       if (tail[0] != '_' || tail[1] != 's' || tail[2] != 'q' || tail[3] != 'l' || tail[4] != 'i' ||
           tail[5] != 't' || tail[6] != 'e')
@@ -157,7 +157,7 @@ static int tail_is_legacy_schema(const char *tail, char tier, int sqlite_variant
    spelling was avoiding. Reading through volatile removes the compiler's
    licence to do that, so the property holds by construction instead of by the
    optimiser declining to look. */
-static void build_schema_path(char *buf, size_t buf_len, int sqlite_variant)
+static void build_schema_path(char *buf, size_t buf_len, int compact_variant)
 {
    if (!buf || buf_len == 0)
       return;
@@ -185,8 +185,8 @@ static void build_schema_path(char *buf, size_t buf_len, int sqlite_variant)
                                 part_tier_a,
                                 part_tier_b,
                                 part_stem,
-                                sqlite_variant ? part_lite_a : "",
-                                sqlite_variant ? part_lite_b : "",
+                                compact_variant ? part_lite_a : "",
+                                compact_variant ? part_lite_b : "",
                                 part_ext};
    for (size_t p = 0; p < sizeof(parts) / sizeof(parts[0]); p++)
    {

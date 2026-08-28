@@ -20,6 +20,7 @@
 #include "modules/db2/c/rules.h"
 #include "modules/db2/c/tasks.h"
 #include "dogfood.h"
+#include "integrity.h"
 #include "kb_reasoning.h"
 #include "log.h"
 #include "modules/db2/c/db2_internal.h" /* db2_conn */
@@ -178,8 +179,12 @@ int anti_pattern_escalate(int hit_threshold)
 int memory_supersede(int64_t old_id, const char *new_content, double confidence,
                      const char *session_id, memory_t *out)
 {
-   if (old_id <= 0)
+   if (old_id <= 0 || !new_content || !new_content[0])
       return -1;
+   integrity_result_t integrity;
+   if (integrity_ingress_decide(new_content, INTEGRITY_SOURCE_AGENT_MESSAGE, "memory", 1,
+                                &integrity))
+      return -4;
 
    memory_t old_mem;
    if (memory_get(old_id, &old_mem) != 0)

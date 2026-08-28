@@ -37,8 +37,12 @@ static void on_memory_mutation(const char *op, int64_t id, const char *tier, con
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(op, NULL, args_hash, sizeof args_hash);
 
-   obs_bus_emit(session_id && session_id[0] ? session_id : "memory", op, args_hash, command,
-                tier ? tier : "", reason, ok ? "ok" : "fail", (long long)id);
+   const char *actor = session_id && session_id[0] ? session_id : "memory";
+   if (obs_bus_commit_action(actor, op, args_hash, command, tier ? tier : "", reason,
+                             ok ? "ok" : "fail", (long long)id) != 0)
+      fprintf(stderr, "audit: memory mutation WORM commit failed for %s\n", op ? op : "");
+   obs_bus_emit(actor, op, args_hash, command, tier ? tier : "", reason, ok ? "ok" : "fail",
+                (long long)id);
 }
 
 void memory_audit_bridge_install(void)

@@ -937,7 +937,15 @@ static double config_number_or_zero(const char *key)
    {                                                                                               \
       return (int)config_number_or_zero(key);                                                      \
    }
-CONFIG_FLAG(config_audit_worm_enabled, "audit_worm_enabled")
+/* Governed-action WORM capture is a required control. The historical module
+ * default is 0, so treat that legacy value as enabled too; disabling requires
+ * an explicit break-glass environment marker that is visible to deployment
+ * policy and cannot happen through an ordinary config edit. */
+int config_audit_worm_enabled(void)
+{
+   const char *emergency = getenv("AIMEE_AUDIT_WORM_EMERGENCY_DISABLE");
+   return !(emergency && strcmp(emergency, "I_ACKNOWLEDGE_AUDIT_LOSS") == 0);
+}
 CONFIG_FLAG(config_bandit_live_decision_enabled, "bandit_live_decision_enabled")
 CONFIG_FLAG(config_css_style_graph_enabled, "css_style_graph_enabled")
 CONFIG_FLAG(config_delegate_graph_context_enabled, "delegate_graph_context_enabled")

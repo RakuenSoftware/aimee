@@ -21,6 +21,7 @@
 #include "support/mock_agent_http.h"
 
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -83,7 +84,8 @@ static unsigned char *b64url_decode(const char *in, size_t *out_len)
       return NULL;
 
    size_t oi = 0;
-   int buf = 0, bits = 0;
+   uint32_t buf = 0;
+   int bits = 0;
    for (size_t i = 0; i < n; i++)
    {
       signed char v = tbl[(unsigned char)in[i]];

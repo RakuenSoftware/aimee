@@ -126,7 +126,13 @@ live_env_init() {
    # objects, so the damage is bounded and live_env_release_owner reports it -- but
    # do not rely on that as a design.
    LIVE_OWNER="aimee_kb_owner"
+   # The Go store refuses to run migrations through its runtime identity. This
+   # per-run role owns only the Go store objects it creates in the disposable
+   # database; default privileges give the runtime role ordinary data access
+   # without giving it the migrator credential.
+   LIVE_MIGRATOR="aimee_store_migrator_$$"
    LIVE_PW="lv$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+   LIVE_MIGRATOR_PW="lm$(head -c8 /dev/urandom | od -An -tx1 | tr -d ' \n')"
    LIVE_KB_PORT=${LIVE_KB_PORT:-18901}
    LIVE_SRV_PORT=${LIVE_SRV_PORT:-18903}
    LIVE_KB_BEARER="kb-$LIVE_NAME-token"
@@ -275,6 +281,11 @@ live_env_pg_create() {
          echo "$LIVE_NAME: could not prepare the owner role" >&2
          exit 2
       }
+   pg_admin "CREATE ROLE $LIVE_MIGRATOR LOGIN PASSWORD '$LIVE_MIGRATOR_PW' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION" >/dev/null 2>&1 ||
+      {
+         echo "$LIVE_NAME: could not create the disposable store migrator role" >&2
+         exit 2
+      }
    pg_admin "CREATE DATABASE $LIVE_DB OWNER $LIVE_OWNER" >/dev/null 2>&1 ||
       {
          echo "$LIVE_NAME: could not create the database" >&2
@@ -283,6 +294,14 @@ live_env_pg_create() {
    # PG15+: the database owner still needs CREATE on public explicitly.
    pg_db -c "GRANT CREATE ON SCHEMA public TO $LIVE_OWNER" >/dev/null 2>&1
    pg_db -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null 2>&1
+   if ! pg_db -c "GRANT CONNECT ON DATABASE $LIVE_DB TO $LIVE_MIGRATOR; GRANT USAGE, CREATE ON SCHEMA public TO $LIVE_MIGRATOR; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $LIVE_OWNER; ALTER DEFAULT PRIVILEGES FOR ROLE $LIVE_MIGRATOR IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO $LIVE_OWNER" >/dev/null; then
+      echo "$LIVE_NAME: could not separate the store migration and runtime authorities" >&2
+      exit 2
+   fi
+   if [ "$(pg_val "SELECT has_schema_privilege('$LIVE_MIGRATOR','public','CREATE')")" != "t" ]; then
+      echo "$LIVE_NAME: disposable store migrator has no CREATE authority on public" >&2
+      exit 2
+   fi
    # BOTH tiers, exported HERE rather than beside the process that reads each.
    # The store's DSN used to be set nowhere: AIMEE_DB2_URL was exported inside
    # live_env_start_kb, and live_env_start_module passed AIMEE_STORE_URL through
@@ -297,6 +316,7 @@ live_env_pg_create() {
    # present root.
    export AIMEE_DB2_URL="postgres://$LIVE_OWNER:$LIVE_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
    export AIMEE_STORE_URL="$AIMEE_DB2_URL"
+   export AIMEE_STORE_MIGRATION_URL="postgres://$LIVE_MIGRATOR:$LIVE_MIGRATOR_PW@$LIVE_PG_HOST:$LIVE_PG_PORT/$LIVE_DB"
    echo "database $LIVE_DB on $LIVE_PG_HOST:$LIVE_PG_PORT"
 }
 
@@ -648,10 +668,12 @@ live_env_start_module() {
    # Postgres first: the store checks for its backend as it comes up.
    live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
       LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
-      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}" \
+      "AIMEE_STORE_MIGRATION_URL=${AIMEE_STORE_MIGRATION_URL:-}"
    live_env_arm_module "$PWD/$module" "$bus" "$AIMEE_HOME/db1-module.log" \
       LIVE_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
-      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}"
+      "AIMEE_STORE_URL=${AIMEE_STORE_URL:-}" \
+      "AIMEE_STORE_MIGRATION_URL=${AIMEE_STORE_MIGRATION_URL:-}"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
@@ -809,6 +831,8 @@ live_env_cleanup() {
          # A BORROWED cluster-global role goes back even when the database stays.
          live_env_restore_owner
       fi
+      echo "kept role: $LIVE_MIGRATOR (disposable store migrator); after the drop:"
+      echo "  psql -c 'DROP ROLE $LIVE_MIGRATOR'"
       return 0
    fi
    # A crashed daemon or module must not turn cleanup itself into a credential
@@ -818,6 +842,16 @@ live_env_cleanup() {
    # After the database is gone: drop a role this rig created, restore one it
    # borrowed. A borrowed role is cluster-global and other databases may own
    # objects with it, so it is never dropped.
+   if [ -n "${LIVE_MIGRATOR:-}" ]; then
+      local migrator_drop_err migrator_still
+      migrator_drop_err=$(pg_admin "DROP ROLE IF EXISTS $LIVE_MIGRATOR" 2>&1)
+      migrator_still=$(pg_admin_val "SELECT count(*) FROM pg_authid WHERE rolname='$LIVE_MIGRATOR'")
+      if [ "$migrator_still" != "0" ]; then
+         echo "$LIVE_NAME: could not drop disposable store migrator $LIVE_MIGRATOR." >&2
+         [ -n "$migrator_drop_err" ] && echo "  psql said: $(printf '%s' "$migrator_drop_err" | head -1)" >&2
+         LIVE_OWNER_LEAKED=1
+      fi
+   fi
    live_env_release_owner
    rm -rf "$LIVE_WORK"
    # A leaked login role FAILS THE RUN, even when every assertion passed. This
@@ -826,7 +860,7 @@ live_env_cleanup() {
    # stick, or "cleanup leaves no credential behind" is an aspiration rather than
    # a property CI enforces.
    if [ "${LIVE_OWNER_LEAKED:-0}" = "1" ]; then
-      echo "== FAILED — the run left the cluster-global role $LIVE_OWNER behind"
+      echo "== FAILED — the run left a disposable cluster-global login role behind"
       echo "LIVE_EXIT=1"
       exit 1
    fi

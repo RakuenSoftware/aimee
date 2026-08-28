@@ -71,9 +71,7 @@
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
-
 /* ── response helpers ───────────────────────────────────────────────────── */
-
 void write_all(int fd, const char *buf, int len)
 {
    int sent = 0;
@@ -1022,7 +1020,10 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
       return kb_dispatch_action_json(action, body, body_len, out_buf, out_cap);
    }
 
-   /* POST /v1/search */
+   int erasure_status =
+       kb_http_subject_erasure_route(method, path, body, !vr.scope_kind[0], out_buf, out_cap);
+   if (erasure_status >= 0)
+      return erasure_status;
    /* POST /v1/implements {"topic": "..."} — deep-curator doc<->code bridge. */
    if (strcmp(path, "/v1/implements") == 0)
    {

@@ -12,6 +12,7 @@
 
 #include "cJSON.h"
 #include "config.h"
+#include "platform_test_util.h"
 /* Accessor stubs: module_workflows stays -1 (unspecified); a zero would
  * sets it — a 0 would read as user-DISABLED and wrongly gate trigger workflow
  * dispatch, which is the same trap the comment above guards against.
@@ -43,6 +44,8 @@ void aimee_log(log_level_t level, const char *module, const char *fmt, ...)
 
 #include "db1_client/wfe_store.h" /* db1_work_item_t for the list/cost-cap stubs */
 #include "db1_client/db1_trigger.h"
+static int g_random_failure;
+static int g_trigger_insert_count;
 int db1_trigger_insert(const char *id, const char *source, const char *event, const char *task,
                        const char *workspace, const char *metadata)
 {
@@ -52,6 +55,7 @@ int db1_trigger_insert(const char *id, const char *source, const char *event, co
    (void)task;
    (void)workspace;
    (void)metadata;
+   g_trigger_insert_count++;
    return 0;
 }
 
@@ -84,6 +88,8 @@ int db1_pipeline_cancel(int pipeline_id)
 
 int platform_random_bytes(void *buf, size_t len)
 {
+   if (g_random_failure)
+      return -1;
    unsigned char *p = (unsigned char *)buf;
    for (size_t i = 0; i < len; i++)
       p[i] = (unsigned char)(i + 1);
@@ -317,6 +323,12 @@ int db1_work_item_list(db1_work_item_t **out)
 void wfe_scheduler_notify(void)
 {
    g_notify_count++;
+}
+
+static int g_autonomy_killed;
+int wfe_autonomy_killed(void)
+{
+   return g_autonomy_killed;
 }
 
 /* Stub of the shared intake cap policy (the real env-driven policy lives in
@@ -843,11 +855,10 @@ static void test_scan_proposals_end_to_end(void)
    size_t pl = strlen(g_lstree_pathspec);
    assert(pl > 0 && g_lstree_pathspec[pl - 1] == '/');
    /* Correct launch args: workflow=pipeline_template, repo=workspace, and — with
-    * the rule's mode left empty — the default execution mode "autonomous" (so the
-    * autonomy scheduler drives the run hands-off). */
+    * the rule's mode left empty — the safe default execution mode "interactive". */
    assert(strcmp(g_created[0].wf, "build") == 0);
    assert(strcmp(g_created[0].repo, "/repo/aimee") == 0);
-   assert(strcmp(g_created[0].mode, "autonomous") == 0);
+   assert(strcmp(g_created[0].mode, "interactive") == 0);
    /* proposal_path is <home>/triggers/proposals/<blob-sha>.md and holds the blob. */
    char exp0[700], exp1[700];
    snprintf(exp0, sizeof exp0, "%s/triggers/proposals/%s.md", g_home, g_blobs[0].sha);
@@ -905,6 +916,40 @@ static void test_scan_proposals_honors_explicit_mode(void)
    assert(strcmp(g_created[0].mode, "interactive") == 0);
 
    printf("  PASS: test_scan_proposals_honors_explicit_mode\n");
+}
+
+static void test_scan_proposals_honors_autonomy_kill_switch(void)
+{
+   trig_stub_reset();
+   snprintf(g_home, sizeof g_home, "%s/aimee-trigtest-kill-%d", platform_tmpdir(), (int)getpid());
+   mkdir(g_home, 0700);
+   snprintf(g_symref_out, sizeof g_symref_out, "origin/testing");
+   snprintf(g_blobs[0].sha, sizeof g_blobs[0].sha, "0123456789abcdef0123456789abcdef01234567");
+   snprintf(g_blobs[0].content, sizeof g_blobs[0].content, "# Proposal A\n");
+   g_nblobs = 1;
+   snprintf(g_lstree_out, sizeof g_lstree_out,
+            "100644 blob 0123456789abcdef0123456789abcdef01234567\t"
+            "docs/proposals/pending/a.md\n");
+
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof rule);
+   snprintf(rule.source, sizeof rule.source, "proposals");
+   snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
+   snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.event, sizeof rule.event, "docs/proposals/pending");
+   snprintf(rule.mode, sizeof rule.mode, "autonomous");
+
+   g_autonomy_killed = 1;
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 0);
+
+   snprintf(rule.mode, sizeof rule.mode, "interactive");
+   scan_proposals(&rule, 0);
+   assert(g_ncreated == 1);
+   assert(strcmp(g_created[0].mode, "interactive") == 0);
+   g_autonomy_killed = 0;
+
+   printf("  PASS: test_scan_proposals_honors_autonomy_kill_switch\n");
 }
 
 static void test_scan_proposals_requires_workspace_and_workflow(void)
@@ -1134,6 +1179,7 @@ static void test_scan_proposals_enforces_max_concurrent(void)
    snprintf(rule.source, sizeof rule.source, "proposals");
    snprintf(rule.workspace, sizeof rule.workspace, "/repo/aimee");
    snprintf(rule.pipeline_template, sizeof rule.pipeline_template, "build");
+   snprintf(rule.mode, sizeof rule.mode, "autonomous");
 
    /* Three pending, cap 2 -> exactly two filed this pass. */
    scan_proposals(&rule, 2);
@@ -1183,8 +1229,8 @@ static void test_scan_proposals_supersedes_legacy_interactive_binding(void)
    scan_proposals(&rule, 1);
    assert(g_ncreated == 2);
    assert(strcmp(g_created[1].wf, "build") == 0);
-   assert(strcmp(g_created[1].mode, "autonomous") == 0);
-   assert(strstr(g_created[1].path, ".build.autonomous.md") != NULL);
+   assert(strcmp(g_created[1].mode, "interactive") == 0);
+   assert(strstr(g_created[1].path, ".build.interactive.md") != NULL);
 
    /* The deterministic lane-scoped replacement deduplicates subsequent scans. */
    scan_proposals(&rule, 1);
@@ -1240,6 +1286,22 @@ static void test_proposal_name_matches(void)
    printf("  proposal_name_matches: ok\n");
 }
 
+static void test_scheduled_trigger_refuses_entropy_failure(void)
+{
+   trigger_rule_t rule;
+   memset(&rule, 0, sizeof(rule));
+   snprintf(rule.schedule, sizeof(rule.schedule), "* * * * *");
+   snprintf(rule.pipeline_template, sizeof(rule.pipeline_template), "test-pipeline");
+   snprintf(rule.workspace, sizeof(rule.workspace), "/workspace/entropy-fixture");
+
+   g_trigger_insert_count = 0;
+   g_random_failure = 1;
+   trigger_scheduler_fire_rule(&rule);
+   g_random_failure = 0;
+   assert(g_trigger_insert_count == 0);
+   printf("  PASS: test_scheduled_trigger_refuses_entropy_failure\n");
+}
+
 int main(void)
 {
    printf("test_trigger\n");
@@ -1280,6 +1342,7 @@ int main(void)
    test_parse_ls_tree_buffer_cap();
    test_scan_proposals_end_to_end();
    test_scan_proposals_honors_explicit_mode();
+   test_scan_proposals_honors_autonomy_kill_switch();
    test_scan_proposals_requires_workspace_and_workflow();
    test_scan_proposals_custom_event_and_schedule();
    test_scheduled_ref_refreshes_origin();
@@ -1290,6 +1353,7 @@ int main(void)
    test_scan_proposals_supersedes_legacy_interactive_binding();
    test_trigger_source_registry();
    test_proposal_name_matches();
+   test_scheduled_trigger_refuses_entropy_failure();
    printf("All tests passed.\n");
    return 0;
 }

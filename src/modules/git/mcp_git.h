@@ -115,6 +115,13 @@ int check_branch_has_merged_pr_for(const char *branch);
  * If mismatch_err is not NULL and a context mismatch is detected, allocates an error string. */
 int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mismatch_err);
 
+/* Server-dispatch variant for a path that workspace_turn_resolve_mirror_cwd()
+ * has already derived from a registered client workspace. The flag is an
+ * in-process trust handoff only; external callers must use
+ * mcp_chdir_git_root(), which performs the normal registered-root check. */
+int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args,
+                                  char **mismatch_err, int path_pre_authorized);
+
 /* Refuse an operation that writes LOCAL git state while this workspace is served as a
  * MIRROR — the server rebuilds its own worktree from a bare mirror plus the client's
  * diff, and that rebuild is replaced on the client's next change, so the write is

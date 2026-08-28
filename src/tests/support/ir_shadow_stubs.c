@@ -6,6 +6,7 @@
  * in the shadow's own tests. With the stub, shadow is simply disabled (enabled ->
  * 0), so compare_response is never called by the runtime anyway. */
 #include "aimee_ir_shadow.h"
+#include "modules/governance/gw_stage_governance.h"
 
 __attribute__((weak)) int aimee_ir_shadow_enabled(void)
 {
@@ -19,6 +20,23 @@ __attribute__((weak)) void aimee_ir_shadow_compare_response(const struct parsed_
    (void)legacy;
    (void)resp_json;
    (void)wire;
+}
+
+/* The minimal agent-runtime link does not carry the separately supervised
+ * governance stage. Keep its test seam disabled and inert; production links
+ * the strong event-bus implementation. */
+__attribute__((weak)) int gw_response_governance_enabled(void)
+{
+   return 0;
+}
+
+__attribute__((weak)) int gw_response_run_governance(struct parsed_response *parsed, int enabled,
+                                                     int policy_active)
+{
+   (void)parsed;
+   (void)enabled;
+   (void)policy_active;
+   return 0;
 }
 
 /* --- IR response-path symbols wired into agent_runtime.c ------------------

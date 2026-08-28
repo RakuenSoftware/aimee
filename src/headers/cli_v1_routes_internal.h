@@ -72,6 +72,7 @@ cJSON *marshal_kb_build(int argc, char **argv);
 cJSON *marshal_kb_docs_push(int argc, char **argv);
 cJSON *marshal_kb_ingest(int argc, char **argv);
 cJSON *marshal_kb_reembed(int argc, char **argv);
+cJSON *marshal_kb_erase_subject(int argc, char **argv);
 cJSON *marshal_memory_embed(int argc, char **argv);
 cJSON *marshal_kb_search(int argc, char **argv);
 cJSON *marshal_kb_status(int argc, char **argv);

@@ -1453,29 +1453,25 @@ static void remove_legacy_claude_settings_mcp(const char *settings_path)
    cJSON_Delete(root);
 }
 
-/* Ensure `hooks.<event>` contains an entry running
- * `AIMEE_HOOK_CLIENT=claude <aimee> <subcommand>`, optionally scoped to
- * `matcher` (NULL = fire on every event of this type). Idempotent (keyed on the
- * subcommand substring); sets *dirty when it adds the array or the entry. Used
- * for the context-pre-injection hooks (UserPromptSubmit, PreCompact — no
- * matcher) and the attention guard (PreToolUse — matcher-scoped). */
+/* Ensure `hooks.<event>` runs the aimee subcommand, optionally matcher-scoped.
+ * Idempotent by subcommand; used for context injection and the attention guard. */
 static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char *subcommand,
                                     const char *matcher, int *dirty)
 {
    const char *aimee_bin = resolved_aimee_bin_path();
-   char cmd[512];
+   dstr_t cmd;
+   dstr_init(&cmd);
    if (strcmp(subcommand, "hooks pre") == 0 || strcmp(subcommand, "user-prompt-submit") == 0)
    {
       const char *transport =
           client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_MCP_FIRST ? "mcp" : "cli";
-      snprintf(cmd, sizeof(cmd),
-               "AIMEE_HOOK_CLIENT=claude AIMEE_HOOK_TRANSPORT=%s AIMEE_CLI_PATH=%s %s %s",
-               transport, aimee_bin ? aimee_bin : "aimee", aimee_bin ? aimee_bin : "aimee",
-               subcommand);
+      dstr_appendf(&cmd, "AIMEE_HOOK_CLIENT=claude AIMEE_HOOK_TRANSPORT=%s AIMEE_CLI_PATH=%s %s %s",
+                   transport, aimee_bin ? aimee_bin : "aimee", aimee_bin ? aimee_bin : "aimee",
+                   subcommand);
    }
    else
-      snprintf(cmd, sizeof(cmd), "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
-               subcommand);
+      dstr_appendf(&cmd, "AIMEE_HOOK_CLIENT=claude %s %s", aimee_bin ? aimee_bin : "aimee",
+                   subcommand);
 
    cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, event);
    if (!cJSON_IsArray(arr))
@@ -1499,9 +1495,9 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
             /* Found this aimee hook. Re-point it if its command references a
              * different (e.g. stale or transient) binary path, so a reinstall
              * to a new location heals the hook instead of leaving it dangling. */
-            if (strcmp(cmdj->valuestring, cmd) != 0)
+            if (strcmp(cmdj->valuestring, dstr_cstr(&cmd)) != 0)
             {
-               cJSON_SetValuestring(cmdj, cmd);
+               cJSON_SetValuestring(cmdj, dstr_cstr(&cmd));
                *dirty = 1;
             }
             if (matcher && matcher[0])
@@ -1517,6 +1513,7 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
                   *dirty = 1;
                }
             }
+            dstr_free(&cmd);
             return;
          }
       }
@@ -1529,7 +1526,7 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
       if (matcher && matcher[0])
          cJSON_AddStringToObject(entry, "matcher", matcher);
       cJSON_AddStringToObject(hook, "type", "command");
-      cJSON_AddStringToObject(hook, "command", cmd);
+      cJSON_AddStringToObject(hook, "command", dstr_cstr(&cmd));
       cJSON_AddItemToArray(hook_arr, hook);
       cJSON_AddItemToObject(entry, "hooks", hook_arr);
       cJSON_AddItemToArray(arr, entry);
@@ -1541,6 +1538,7 @@ static void ensure_aimee_event_hook(cJSON *hooks, const char *event, const char 
       cJSON_Delete(hook_arr);
       cJSON_Delete(hook);
    }
+   dstr_free(&cmd);
 }
 
 /* Remove any PreToolUse (or other event) hook entry whose command runs the given
@@ -2432,14 +2430,17 @@ static int client_command_installed(const char *name)
    if (!name || !name[0] || !path)
       return 0;
    const char *part = path;
+   size_t name_len = strlen(name);
    while (part)
    {
-      const char *end = strchr(part, ':');
+      const char *end = strchr(part, platform_path_sep() == '\\' ? ';' : ':');
       size_t n = end ? (size_t)(end - part) : strlen(part);
       char candidate[MAX_PATH_LEN];
-      if (n > 0 && n + 1 + strlen(name) < sizeof(candidate))
+      if (n > 0 && n + 1 + name_len < sizeof(candidate))
       {
-         snprintf(candidate, sizeof(candidate), "%.*s/%s", (int)n, part, name);
+         memcpy(candidate, part, n);
+         candidate[n] = '/';
+         memcpy(candidate + n + 1, name, name_len + 1);
          if (access(candidate, X_OK) == 0)
             return 1;
       }

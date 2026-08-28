@@ -221,7 +221,7 @@ int config_set_learning_implicit_citation_repair(int value)
 
 int config_roundtable_replay_verify_enabled(void)
 {
-   double value = 0;
+   double value = 1; /* replay verification is default-on-failure */
    (void)config_client_read_number("roundtable_replay_verify_enabled", &value);
    return (int)value;
 }

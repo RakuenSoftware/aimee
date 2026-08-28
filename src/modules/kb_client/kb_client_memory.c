@@ -24,6 +24,7 @@
 #include "config.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
+#include "integrity.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -1244,6 +1245,16 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
    char *j = kb_v1_action_request("memory.recall", req);
    if (!j)
       return NULL;
+
+   /* Every recall consumer shares this seam. Reclassify legacy/future rows at
+    * materialization before they can become prompt authority. */
+   integrity_result_t recall_gate;
+   if (integrity_ingress_decide(j, INTEGRITY_SOURCE_AGENT_MESSAGE, "recall", 1, &recall_gate))
+   {
+      free(j);
+      return strdup("{\"status\":\"quarantined\",\"recall\":{},"
+                    "\"integrity_verdict\":\"quarantine\"}");
+   }
 
    /* Fast path: when this user has no db1 memory (the case until capture is
     * wired), skip the parse/merge/reserialize entirely and pass the kb bundle

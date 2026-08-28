@@ -77,6 +77,7 @@ def main():
                 print(r.stderr)
                 continue
             f = grant_fields(cfg, name)
+            ef = grant_fields(cfg, name + "-egress")
             ref = int(f["principal_ref"])
             serve = [int(k) for k in f["serve"].split(",")]
 
@@ -95,6 +96,12 @@ def main():
             check(serve[0] > 4096 + 30 * 256 + 255,
                   f"{name} kinds clear every canonical module block")
             check(f["executable"] == module_bin, f"{name} grant names the real executable")
+            check(int(ef["principal_ref"]) == ref + 512,
+                  f"{name} egress identity is uniquely derived from its module identity")
+            check(ef["request"] == "12291-12294" and ef["serve"] == "",
+                  f"{name} egress identity may request only the governed transport stages")
+            check(ef["executable"] == module_bin,
+                  f"{name} egress grant is pinned to the same executable")
 
             env = env_of(r.stdout)
             check(env.get("AIMEE_MODULE_PRINCIPAL_REF") == str(ref),
@@ -154,12 +161,20 @@ def main():
              "https://mcp.example.com/sse", "--bearer-env", "MCP_TOKEN",
              "--module-bin", module_bin, "--config-dir", cfg],
             capture_output=True, text=True, timeout=60)
+        check(r.returncode != 0, "an unscoped MCP bearer name is refused")
+        r = subprocess.run(
+            [sys.executable, TOOL, "--instance", "remote", "--sse-url",
+             "https://mcp.example.com/sse", "--bearer-env", "AIMEE_MCP_717_TOKEN",
+             "--module-bin", module_bin, "--config-dir", cfg],
+            capture_output=True, text=True, timeout=60)
         check(r.returncode == 0, "an SSE instance provisions")
         argv = json.loads(env_of(r.stdout).get("AIMEE_MCP_PLUGIN_ARGV", "[]"))
         check(argv[:1] == ["sse:https://mcp.example.com/sse"], "the SSE endpoint is prefixed")
-        # The env var NAME travels, never the token: the argv is reported over
-        # the bus and logged.
-        check(argv[1:] == ["MCP_TOKEN"], "only the bearer env var NAME is carried")
+        egress_ref = int(grant_fields(cfg, "remote-egress")["principal_ref"])
+        handle = f"mcp:{egress_ref}"
+        check(argv[1:] == [handle], "only an opaque caller-scoped credential handle is carried")
+        check(handle == "mcp:717",
+              "the handle deterministically resolves only to AIMEE_MCP_717_TOKEN in Vault")
 
         for bad in (["--sse-url", "ftp://x/y"], ["--argv", '["x"]', "--sse-url", "https://x/y"], []):
             r = subprocess.run(
@@ -173,6 +188,8 @@ def main():
         check(r.returncode == 0, "dry run succeeds")
         check(not os.path.exists(os.path.join(cfg, "modules.d", "server", "mcp-nowrite.grant")),
               "dry run wrote no grant")
+        check(not os.path.exists(os.path.join(cfg, "modules.d", "server", "mcp-nowrite-egress.grant")),
+              "dry run wrote no egress grant")
     finally:
         shutil.rmtree(cfg, ignore_errors=True)
 

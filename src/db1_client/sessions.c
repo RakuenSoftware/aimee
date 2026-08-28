@@ -443,6 +443,50 @@ int db1_server_session_delete_expired(int threshold_seconds)
    return (int)strtoll(slot0, NULL, 10);
 }
 
+int db1_server_session_list_by_subject(const char *principal,
+                                       char (*out_ids)[DB1_SS_ID_LEN], int max)
+{
+   if (!principal || !principal[0] || !out_ids || max <= 0 || max > 4096)
+      return -1;
+   char arg1[32];
+   snprintf(arg1, sizeof arg1, "%d", max);
+   const char *fields[] = {principal, arg1};
+   char **values = calloc((size_t)max, sizeof(*values));
+   size_t *caps = calloc((size_t)max, sizeof(*caps));
+   if (!values || !caps)
+   {
+      free(values);
+      free(caps);
+      return -1;
+   }
+   for (int i = 0; i < max; i++)
+   {
+      values[i] = out_ids[i];
+      caps[i] = DB1_SS_ID_LEN;
+   }
+   uint32_t filled = 0;
+   int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_LIST_BY_SUBJECT, fields, 2, values,
+                                caps, (size_t)max, &filled);
+   free(values);
+   free(caps);
+   return wire_status == (int)AIMEE_DB1_STATUS_OK ? (int)filled : -1;
+}
+
+int db1_server_session_erase_subject(const char *request_id, const char *principal)
+{
+   if (!request_id || !request_id[0] || !principal || !principal[0])
+      return -1;
+   const char *fields[] = {request_id, principal};
+   char slot0[32];
+   char *const values[] = {slot0};
+   const size_t caps[] = {sizeof slot0};
+   int wire_status = call_stage(AIMEE_DB1_OP_SERVER_SESSION_ERASE_SUBJECT, fields, 2, values, caps,
+                                1, NULL);
+   if (wire_status != (int)AIMEE_DB1_STATUS_OK)
+      return -1;
+   return (int)strtoll(slot0, NULL, 10);
+}
+
 int db1_primary_session_save(const char *session_id, const char *agent_name, const char *provider, const char *messages_json)
 {
    if (!session_id || !session_id[0])

@@ -801,6 +801,19 @@ static char *read_file_content(const char *path)
    return buf;
 }
 
+static void append_prompt_cwd(dstr_t *out, const char *template_text, const char *cwd)
+{
+   const char *slot = template_text ? strstr(template_text, "%s") : NULL;
+   if (!slot || strstr(slot + 2, "%s"))
+   {
+      dstr_append_str(out, template_text ? template_text : "");
+      return;
+   }
+   dstr_append(out, template_text, (size_t)(slot - template_text));
+   dstr_append_str(out, cwd ? cwd : ".");
+   dstr_append_str(out, slot + 2);
+}
+
 /* --- Public API ---------------------------------------------------------- */
 
 char *prompt_build(prompt_tier_t tier, const char *cwd, const char *custom_file)
@@ -846,7 +859,7 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
       else
       {
          /* Fall back to STANDARD if custom file is unreadable */
-         dstr_appendf(&out, standard_text, cwd ? cwd : ".");
+         append_prompt_cwd(&out, standard_text, cwd);
       }
    }
    else
@@ -854,14 +867,14 @@ char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
       switch (tier)
       {
       case PROMPT_MINIMAL:
-         dstr_appendf(&out, PROMPT_MINIMAL_TEXT, cwd ? cwd : ".");
+         append_prompt_cwd(&out, PROMPT_MINIMAL_TEXT, cwd);
          break;
       case PROMPT_EXTENDED:
-         dstr_appendf(&out, extended_text, cwd ? cwd : ".");
+         append_prompt_cwd(&out, extended_text, cwd);
          break;
       case PROMPT_STANDARD:
       default:
-         dstr_appendf(&out, standard_text, cwd ? cwd : ".");
+         append_prompt_cwd(&out, standard_text, cwd);
          break;
       }
    }

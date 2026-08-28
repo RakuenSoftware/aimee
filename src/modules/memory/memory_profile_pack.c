@@ -139,8 +139,8 @@ int memory_profile_pack_validate_file(const char *path, char *errbuf, size_t err
          }
       if (!known)
       {
-         cJSON_Delete(root);
          snprintf(errbuf, errlen, "unknown key: %s", it->string);
+         cJSON_Delete(root);
          return -1;
       }
    }
@@ -169,9 +169,9 @@ int memory_profile_pack_validate_file(const char *path, char *errbuf, size_t err
          {
             if (!cJSON_IsString(tier_item) || !is_known_tier(tier_item->valuestring))
             {
-               cJSON_Delete(root);
                snprintf(errbuf, errlen, "unknown tier: %s",
                         cJSON_IsString(tier_item) ? tier_item->valuestring : "(non-string)");
+               cJSON_Delete(root);
                return -1;
             }
          }

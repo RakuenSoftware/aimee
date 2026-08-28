@@ -207,6 +207,49 @@ static int needs_describe(const char *project_name, const char *project_path, in
 
 /* --- describe prompt --- */
 
+/* Render the repository-owned prompt templates without treating their bytes as
+ * a printf program.  Only the exact "%s" placeholders are substituted; a
+ * future stray '%' remains ordinary text. */
+static char *render_prompt_template(const char *template, const char *const *values,
+                                    size_t value_count)
+{
+   size_t total = strlen(template) + 1;
+   const char *scan = template;
+   size_t placeholders = 0;
+   while ((scan = strstr(scan, "%s")) != NULL)
+   {
+      if (placeholders >= value_count)
+         return NULL;
+      size_t value_len = strlen(values[placeholders]);
+      if (total > SIZE_MAX - value_len + 2)
+         return NULL;
+      total += value_len - 2;
+      placeholders++;
+      scan += 2;
+   }
+   if (placeholders != value_count)
+      return NULL;
+
+   char *out = malloc(total);
+   if (!out)
+      return NULL;
+   char *dst = out;
+   scan = template;
+   for (size_t i = 0; i < value_count; i++)
+   {
+      const char *placeholder = strstr(scan, "%s");
+      size_t literal_len = (size_t)(placeholder - scan);
+      memcpy(dst, scan, literal_len);
+      dst += literal_len;
+      size_t value_len = strlen(values[i]);
+      memcpy(dst, values[i], value_len);
+      dst += value_len;
+      scan = placeholder + 2;
+   }
+   strcpy(dst, scan);
+   return out;
+}
+
 static const char *describe_system_prompt =
     "You are a code analyst. Your job is to produce a structured project description "
     "that gives other AI agents everything they need to navigate and work in a project "
@@ -261,12 +304,11 @@ int describe_one(const char *project_name, const char *project_path)
       snprintf(head, sizeof(head), "unknown");
 
    /* Build the prompt */
-   size_t prompt_len = strlen(describe_user_template) + MAX_PATH_LEN + 256;
-   char *prompt = malloc(prompt_len);
+   const char *values[] = {project_path, project_name, head, project_name};
+   char *prompt =
+       render_prompt_template(describe_user_template, values, sizeof values / sizeof values[0]);
    if (!prompt)
       return -1;
-   snprintf(prompt, prompt_len, describe_user_template, project_path, project_name, head,
-            project_name);
 
    fprintf(stderr, "describe: analyzing %s at %s...\n", project_name, head);
 
@@ -421,12 +463,11 @@ int style_one(const char *project_name, const char *project_path)
       snprintf(head, sizeof(head), "unknown");
 
    /* Build the prompt (5 format args: path, path, name, head, name) */
-   size_t prompt_len = strlen(style_user_template) + MAX_PATH_LEN * 2 + 512;
-   char *prompt = malloc(prompt_len);
+   const char *values[] = {project_path, project_path, project_name, head, project_name};
+   char *prompt =
+       render_prompt_template(style_user_template, values, sizeof values / sizeof values[0]);
    if (!prompt)
       return -1;
-   snprintf(prompt, prompt_len, style_user_template, project_path, project_path, project_name, head,
-            project_name);
 
    fprintf(stderr, "style: analyzing %s at %s...\n", project_name, head);
 

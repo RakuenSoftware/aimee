@@ -1,16 +1,18 @@
 # Proposal: Security, compliance, audibility, and governance assurance program
 
-- **State:** pending; source audit complete, remediation proposed
+- **State:** pending; source remediation implemented and tested, with the explicitly listed
+  process-isolation, deployment, and organizational residuals still open
 - **Audit passes:** two independent passes over the same commit, merged into this single
   record. ACG-001–ACG-025 are first-pass findings; ACG-026–ACG-031 are second-pass findings.
   See [Audit passes and attribution](#audit-passes-and-attribution)
 - **Audit baseline:** `origin/testing` at
-  `a01a71c495fdb10a28821b154242cb7d0eb1d271` (2026-08-26)
+  `6a1b61a99c9cac5273ccf6c26d2a6a185a6985bd` (2026-08-26)
+- **Remediation branch:** `agent/security-compliance-audit-fixes`
 - **Audit scope:** the tracked source tree, build and release automation, deployment artifacts,
   runtime trust boundaries, data stores, operator surfaces, and checked-in tests and evidence
 - **Output type:** point-in-time source audit plus an implementation proposal; this is not a legal
   opinion, penetration-test certification, or third-party compliance attestation
-- **Owner:** unassigned
+- **Owner:** Product Security, with the boundary owners named by each finding
 
 ## Decision requested
 
@@ -148,40 +150,88 @@ This table is updated as findings are verified. Candidate issues stay out of the
 
 | ID | Severity | Domain | Finding | Status |
 | --- | --- | --- | --- | --- |
-| ACG-001 | Critical | Authentication / deployment | Shipped KB topologies expose an authentication-off owner surface | verified; release-blocking |
-| ACG-002 | High | Audit / governance | Governed-action WORM capture is default-off, best-effort, and may be silently lost | verified |
-| ACG-003 | High | Audit integrity | WORM hashes do not bind timestamps or later identity/tenant attribution columns | verified |
-| ACG-004 | High | Supply chain | Release workflows trust mutable actions and publish unattested artifacts | verified |
-| ACG-005 | High | Dependency security | `server-go` reaches a known infinite-loop vulnerability in `golang.org/x/text` | verified |
-| ACG-006 | Medium | Audit integrity | Audit-key failure emits a valid-looking all-zero argument-hash sentinel | verified |
-| ACG-007 | Medium | Control-plane egress | Operator-editable JWKS URLs permit private-address and DNS-rebinding requests | verified |
-| ACG-008 | Medium | Database hardening | Shipped DB1 uses a static password, plaintext transport, and the bootstrap superuser at runtime | verified |
-| ACG-009 | Medium | Supply chain | Container builds fetch executable inputs without complete immutable verification | verified |
-| ACG-010 | Low | Dependency security | The frontend development lock contains vulnerable `nanoid` 3.3.16 | verified |
-| ACG-011 | High | Tenant isolation | Cross-project content and memory reads are fail-open until operator-gated scope controls are enabled | verified; release-blocking for multi-user deployment |
-| ACG-012 | High | Audit confidentiality | Every authenticated bearer receives global dashboard and audit views without actor or tenant isolation | verified |
-| ACG-013 | High | Filesystem authorization | `skill.show` trusts caller-selected roots and follows symlinks, permitting cross-workspace server-side file reads | verified |
-| ACG-014 | High | Agentic security | Autonomous document-triggered execution is default-on while the integrity gate protects only one learning ingress | verified |
-| ACG-015 | High | Audit completeness | Several live enforcement and privileged-action paths never reach the tamper-evident chain | verified |
-| ACG-016 | High | Artifact trust | Project skills and other executable agent artifacts are unsigned, unpinned, and loaded as authoritative instructions | verified |
-| ACG-017 | Medium | Accountability | Delegate and hook identity collapses to coarse or spoofable principals | verified |
-| ACG-018 | Medium | Egress governance | Modules can make direct outbound calls and can silently omit the required governance event | verified |
-| ACG-019 | Medium | Change governance | Sensitive-code ownership and independent approval are prose-only or incomplete in CODEOWNERS | verified |
-| ACG-020 | Medium | Compliance readiness | Required organizational, privacy-lifecycle, and audit-evidence artifacts are absent from the source evidence set | verified source-evidence gap |
-| ACG-021 | Medium | Build parity | Make and CMake products expose different audit/WORM capabilities | verified |
-| ACG-022 | Medium | Availability | A hostile MCP SSE peer can drive unbounded buffering or an indefinitely blocked response drain | verified |
-| ACG-023 | Medium | Gateway identity | Gateway pairing codes are predictable/non-unique and pairing state updates are not atomic across processes | verified |
-| ACG-024 | Medium | Security testing | The checked-in nightly fuzz workflow is broken by a referenced but absent target source | verified by execution |
-| ACG-025 | Medium | Assurance claims | The published security model states guarantees that shipped defaults and reachable paths contradict | verified |
-| ACG-026 | Critical | Tool containment / injection | `shell_escape()` does not quote; ~20 unquoted call sites let a model-controlled MCP git path argument reach a shell on aimee-server, with forge credentials in scope | verified; release-blocking |
-| ACG-027 | High | Secure development | Binary hardening depends on toolchain defaults (no stack canaries, no fortified libc, partial RELRO only), and sanitizer, SAST and secret-scanning gates are absent | verified by execution |
-| ACG-028 | Medium | Filesystem authorization | `guardrails_validate_file_path` is a sensitive-path deny-list, not workspace confinement, and ignores its own bounds parameter | verified |
-| ACG-029 | Medium | Governance / policy resolution | Generated config accessors cannot distinguish "off" from "config authority unreachable"; security flags fail open | verified |
-| ACG-030 | Medium | Credential custody / accountability | CSPRNG failure fails open to a constant, colliding identifier on session, artifact, trigger and ingress paths | verified |
-| ACG-031 | Medium | Data protection, retention, deletion | No data-subject erasure and no content retention control, despite the security model instructing operators to configure one | verified |
+| ACG-001 | Critical | Authentication / deployment | Shipped KB topologies expose an authentication-off owner surface | source-remediated; remote-tested |
+| ACG-002 | High | Audit / governance | Governed-action WORM capture is default-off, best-effort, and may be silently lost | source-remediated; fault-path tested |
+| ACG-003 | High | Audit integrity | WORM hashes do not bind timestamps or later identity/tenant attribution columns | source-remediated; v2 migration tested |
+| ACG-004 | High | Supply chain | Release workflows trust mutable actions and publish unattested artifacts | source-remediated; workflow checks pass |
+| ACG-005 | High | Dependency security | `server-go` reaches a known infinite-loop vulnerability in `golang.org/x/text` | remediated; dependency tests pass |
+| ACG-006 | Medium | Audit integrity | Audit-key failure emits a valid-looking all-zero argument-hash sentinel | source-remediated; failure injection passes |
+| ACG-007 | Medium | Control-plane egress | Operator-editable JWKS URLs permit private-address and DNS-rebinding requests | source-remediated; negative tests pass |
+| ACG-008 | Medium | Database hardening | Shipped DB1 uses a static password, plaintext transport, and the bootstrap superuser at runtime | source/deployment-remediated; rollout evidence pending |
+| ACG-009 | Medium | Supply chain | Container builds fetch executable inputs without complete immutable verification | source-remediated; integrity check passes |
+| ACG-010 | Low | Dependency security | The frontend development lock contains vulnerable `nanoid` 3.3.16 | remediated; lock audit passes |
+| ACG-011 | High | Tenant isolation | Cross-project content and memory reads are fail-open until operator-gated scope controls are enabled | source-remediated; non-superuser remote matrix passes |
+| ACG-012 | High | Audit confidentiality | Every authenticated bearer receives global dashboard and audit views without actor or tenant isolation | source-remediated; authorization tests pass |
+| ACG-013 | High | Filesystem authorization | `skill.show` trusts caller-selected roots and follows symlinks, permitting cross-workspace server-side file reads | source-remediated; no-follow tests pass |
+| ACG-014 | High | Agentic security | Autonomous document-triggered execution is default-on while the integrity gate protects only one learning ingress | source-remediated; ingress and kill-switch tests pass |
+| ACG-015 | High | Audit completeness | Several live enforcement and privileged-action paths never reach the tamper-evident chain | source-remediated for enumerated paths; completeness rollout pending |
+| ACG-016 | High | Artifact trust | Project skills and other executable agent artifacts are unsigned, unpinned, and loaded as authoritative instructions | source-remediated across enumerated executable artifacts; negative tests pass |
+| ACG-017 | Medium | Accountability | Delegate and hook identity collapses to coarse or spoofable principals | source-remediated; session-scoped hook-token tests pass |
+| ACG-018 | Medium | Egress governance | Modules can make direct outbound calls and can silently omit the required governance event | ordinary Go modules source-remediated; trusted core source-constrained; deployment evidence remains |
+| ACG-019 | Medium | Change governance | Sensitive-code ownership and independent approval are prose-only or incomplete in CODEOWNERS | source-remediated; live separation and signed evidence remain open |
+| ACG-020 | Medium | Compliance readiness | Required organizational, privacy-lifecycle, and audit-evidence artifacts are absent from the source evidence set | source evidence added; organizational operation pending |
+| ACG-021 | Medium | Build parity | Make and CMake products expose different audit/WORM capabilities | remediated; Make/CMake parity tested |
+| ACG-022 | Medium | Availability | A hostile MCP SSE peer can drive unbounded buffering or an indefinitely blocked response drain | remediated; adversarial tests pass |
+| ACG-023 | Medium | Gateway identity | Gateway pairing codes are predictable/non-unique and pairing state updates are not atomic across processes | remediated; concurrency tests pass |
+| ACG-024 | Medium | Security testing | The checked-in nightly fuzz workflow is broken by a referenced but absent target source | remediated; canonical fuzz matrix builds |
+| ACG-025 | Medium | Assurance claims | The published security model states guarantees that shipped defaults and reachable paths contradict | remediated with release-qualified claim registry |
+| ACG-026 | Critical | Tool containment / injection | `shell_escape()` does not quote; ~20 unquoted call sites let a model-controlled MCP git path argument reach a shell on aimee-server, with forge credentials in scope | remediated; argv/quote/path tests pass |
+| ACG-027 | High | Secure development | Binary hardening depends on toolchain defaults (no stack canaries, no fortified libc, partial RELRO only), and sanitizer, SAST and secret-scanning gates are absent | remediated; hardened binary checks pass |
+| ACG-028 | Medium | Filesystem authorization | `guardrails_validate_file_path` is a sensitive-path deny-list, not workspace confinement, and ignores its own bounds parameter | remediated; bounded workspace validator tested |
+| ACG-029 | Medium | Governance / policy resolution | Generated config accessors cannot distinguish "off" from "config authority unreachable"; security flags fail open | remediated; mechanical fail-open check passes |
+| ACG-030 | Medium | Credential custody / accountability | CSPRNG failure fails open to a constant, colliding identifier on session, artifact, trigger and ingress paths | remediated; failure injection passes |
+| ACG-031 | Medium | Data protection, retention, deletion | No data-subject erasure and no content retention control, despite the security model instructing operators to configure one | source-remediated; cross-store remote acceptance passes |
 
-Current verified total: **2 critical, 11 high, 17 medium, and 1 low — 31 findings**. Severity can
-move only when new exploitability or compensating-control evidence is recorded in this document.
+Original verified total: **2 critical, 11 high, 17 medium, and 1 low — 31 findings**. The
+remediation disposition above does not silently erase the original severity. A finding is fully
+closed only when its acceptance evidence and any required live/organizational evidence are present.
+
+## Remediation implementation record
+
+The remediation branch changes the product, build, deployment, tests, and evidence system rather
+than merely changing this proposal's status. The principal implemented controls are:
+
+- authenticated KB startup for network listeners, server/KB mTLS, operator-only global audit
+  views, bounded and same-origin MCP SSE, pinned JWKS resolution, and CSPRNG-backed durable gateway
+  pairing;
+- default-on synchronous WORM action capture, startup key provisioning with fail-closed random
+  failure, canonical v2 hashes binding time and full attribution, and schema parity across SQLite,
+  PostgreSQL, and DB2;
+- one bounded registered-workspace path validator, no-follow/hardlink-safe project-skill reads,
+  signed Ed25519 skill approval manifests, fail-closed security configuration reads, and argv-only
+  MCP Git path discovery with a mechanical shell-quoting check;
+- separate PostgreSQL migration/runtime authorities, TLS/SCRAM bootstrap, Compose secrets and
+  network separation, exact external-input verification, commit-pinned Actions, SBOM/provenance
+  generation, release signing, and a hardened Make/CMake profile with executable checks for PIE,
+  full RELRO, NX, canaries, fortified libc, and control-flow protection;
+- repaired canonical fuzz targets, sanitizer/static/secret/dependency gates, upgraded vulnerable Go
+  and npm dependencies, release-qualified machine-readable security claims, expanded CODEOWNERS and
+  ownership policy, incident/data-governance documents, and generated assurance evidence.
+- one fail-closed content-visibility boundary with legacy quarantine and runtime-role RLS evidence,
+  centralized integrity ingress plus an autonomy kill switch, digest/signature checks for saved
+  workflows, custom blocks, roundtable templates and MCP manifests, and authenticated session hook
+  tokens;
+- a two-phase, retryable subject-erasure transaction spanning DB1 and DB2, scheduled mutable-content
+  retention, derived-data cleanup and exactly-once minimized WORM completion evidence; and
+- a bus-attested egress transport module with caller/purpose/method/path policy, request-digest and
+  DNS/IP binding, explicit byte/time limits, non-followed redirects, unary HTTP and MCP SSE frame
+  transport, metadata-only durable evidence, and least-privilege request grants. A static planted-
+  bypass gate rejects direct Go-module sockets, while a synchronized Linux seccomp filter denies
+  IPv4/IPv6 socket creation in ordinary Go process modules and retains Unix-domain module-bus access.
+
+The implementation deliberately does **not** turn source presence into an operating-effectiveness
+claim. These residuals keep the proposal pending:
+
+| Residual | Required closure evidence |
+| --- | --- |
+| ACG-018 production activation evidence | Forge and MCP module credentials resolve only in egress under caller-scoped, short-lived handles. The remaining trusted C/server/KB/store/proxy boundaries are formally constrained by a planted-test-backed exact source inventory. Retain production proof that the Linux process guard and non-dumpable credential owner are active. |
+| ACG-019/020 operating controls | Export live branch/ruleset/environment evidence, assign accountable people, exercise incident/restore/access-review procedures, and retain signed cadence evidence. |
+
+None of these residuals reopens the two original Critical sink conditions: ACG-001 and ACG-026 are
+source-remediated and remotely exercised. The ACG-011 migration and negative matrix and the ACG-031
+cross-store privacy lifecycle have now been exercised in disposable PostgreSQL deployments. A
+production promotion still requires deployment-specific migration evidence; regulated assurance
+still requires the ACG-019/020 organizational records and operating cadence.
 
 ### ACG-001 — Shipped KB topologies expose an authentication-off owner surface
 
@@ -407,6 +457,13 @@ move only when new exploitability or compensating-control evidence is recorded i
 - **Acceptance evidence:** a two-user/two-team/two-project matrix must negatively test get, list,
   search, recall, index lookup, workspace open/list, pagination, cache, maintenance, and every
   `scope=all` spelling before and after pool reuse and restart.
+- **Remediation verification (2026-08-27):** the content decision now reaches ordinary document,
+  vector, structured-child and maintenance paths; unattributed legacy projects move into a reserved
+  no-member quarantine before FORCE RLS is enabled. `src/tests/test_content_scope_pg.c` runs pooled
+  connections as the real `aimee_kb_runtime` role and passed remotely against PostgreSQL/pgvector,
+  including two users on separate teams, caller-less denial, pool reuse, exact-project re-embedding,
+  sibling relabel rejection and every covered child relation. That run also found and fixed an
+  empty-team cast fault and missing exact-project maintenance visibility on the tenancy referents.
 
 ### ACG-012 — Read-only bearer access exposes global audit and dashboard data
 
@@ -484,6 +541,11 @@ move only when new exploitability or compensating-control evidence is recorded i
 - **Acceptance evidence:** hostile fixtures at every ingress must produce a durable verdict and
   park/refuse before any tool, delegate, provider, forge, memory, or document effect. Obfuscated and
   encoded variants, quoted security documentation, and benign controls need precision gates.
+- **Remediation verification (2026-08-27):** `integrity_ingress_decide` is the shared materialization
+  boundary used by learning, ingest, memory, recall and attachment/document paths, with durable
+  verdicts and hostile/benign fixtures. `wfe_autonomy_killed()` supplies the immediate fail-closed
+  autonomy stop before autonomous workflow effects. The focused ingress, integrity, workflow and
+  server route suites pass.
 
 ### ACG-015 — Enforcement evidence is incomplete by construction
 
@@ -534,6 +596,10 @@ move only when new exploitability or compensating-control evidence is recorded i
 - **Acceptance evidence:** modify, replace, symlink, race-swap, downgrade, or partially update each
   artifact class and prove it refuses before parse/injection/execution; verify approval identity,
   exact digest, dependency closure, revocation, and offline signature validation.
+- **Remediation verification (2026-08-27):** the approved-digest/signature boundary now covers project
+  skills, saved workflows, custom workflow blocks, roundtable/ensemble templates and MCP plugin
+  manifests. `src/tests/test_artifact_trust.c` and the class-specific workflow, roundtable and MCP
+  tests reject missing approval, altered bytes and identity substitution before execution.
 
 ### ACG-017 — Agent and hook accountability is not identity-grade
 
@@ -548,6 +614,10 @@ move only when new exploitability or compensating-control evidence is recorded i
 - **Required change / owner:** Identity must mint per-agent/per-run principals, propagate bounded
   on-behalf-of chains server-side, use them for vault decisions, and replace the environment label
   with a session-scoped authenticated hook token.
+- **Remediation verification (2026-08-27):** session start now mints a CSPRNG-backed token bound to
+  session id, verified principal and harness client; subsequent hook operations require that token,
+  and session end revokes it. `src/tests/test_hook_session_token.c` and server dispatch tests cover
+  cross-session, cross-client, cross-principal, replay-after-rotation and post-revocation denial.
 
 ### ACG-018 — Egress policy and audit can be silently bypassed
 
@@ -561,6 +631,26 @@ move only when new exploitability or compensating-control evidence is recorded i
   every target, then migrate bytes/streaming/protocols to a single egress service and run other
   module processes without network. Destination policy must bind resolved IP, scheme, port, purpose,
   principal, credential handle, request digest, redirects, byte budget, and policy revision.
+- **Remediation verification (2026-08-27):** the separately registered Go egress module now owns
+  the actual HTTP request/response and MCP SSE connect/send/receive bytes for memory embedding, Git
+  forge calls, roundtable artifacts and dynamic MCP clients. Policy binds bus principal, purpose,
+  method/path, request digest, credential-presence, resolved IPs, redirects, limits and revision;
+  every transport stage is ledger-class while raw credential/external-content capture is suppressed.
+  `scripts/check-module-egress.py` inventories the four clients, rejects direct socket primitives and
+  a planted bypass, and ratchets the runtime guard. The Linux launcher installs a synchronized
+  seccomp filter that returns `EPERM` for IPv4/IPv6 socket creation in ordinary Go process modules
+  while preserving Unix-domain bus sockets; focused subprocess and full Go/native suites pass.
+  Forge now relays only a 30-second X25519/AES-GCM envelope bound to the Git caller, egress key,
+  host, operation and repository; a C-to-Go fixture pins the wire grammar. MCP provisioning relays
+  only `mcp:<caller-ref>` and egress derives the one matching Vault name, while a helper rejects any
+  parent other than the installed egress executable. The egress process disables dumpability before
+  serving. This closes credential custody and outbound transport for ordinary Go process modules.
+  `src/modules/core-network-contracts.json` additionally binds all 58 remaining C-plane
+  file/primitive boundaries to an owner, direction, purpose, destination constraint, credential
+  constraint, audit disposition and required reviewer. The lint ratchets exact call counts for HTTP,
+  Internet sockets, DNS, PostgreSQL, TLS connect and credentialed Git and proves enforcement with a
+  planted unknown call. Trusted core traffic is formally constrained, not misrepresented as using
+  the Go transport. Closure is not claimed for production activation evidence.
 
 ### ACG-019 — Sensitive change approval is not mechanically separated
 
@@ -575,6 +665,11 @@ move only when new exploitability or compensating-control evidence is recorded i
 - **Required change / owner:** Engineering Governance must map every sensitive boundary to a team
   with primary/backup people, require independent non-author approval, protect CODEOWNERS/OWNERS and
   workflow files themselves, export ruleset evidence, and use expiring signed risk exceptions.
+- **Live read-only verification (2026-08-27):** GitHub exposed one active `main` ruleset, whose only
+  rule requires deployment through `main-merge-approval`. Both that environment and `release`
+  resolve to the same single admin reviewer, so the observed state does not establish independent
+  approval. The available token received `403` for `testing` branch protection, and no offline
+  evidence-signing key was present; a complete, signed export therefore could not be produced.
 
 ### ACG-020 — Compliance readiness lacks the required evidence system
 
@@ -1143,6 +1238,13 @@ move only when new exploitability or compensating-control evidence is recorded i
     appends the same bounded deletion evidence.
   - Before/after verification proves all prior WORM rows are byte-identical, the chain gained only
     the deletion event, and any attempted WORM UPDATE/DELETE is refused.
+- **Remediation verification (2026-08-27):** owner-gated begin/complete routes and CLI support now
+  drive a durable two-phase request across DB1 and DB2 with an idempotent retry journal. Mutable
+  memories, documents, conversations, vectors and registered derived data are deleted; the scheduled
+  reaper applies the same bounded policy. `scripts/subject-erasure-pg-test.sql` passed in a disposable
+  remote PostgreSQL database with separate roles, proving retry idempotency, retention, cross-store
+  counts, exactly one minimized completion intent and byte-identical prior outbox rows. The isolated
+  WORM worker gate separately proves exactly-once delivery into an unbroken SQLite hash chain.
 
 ## Cross-cutting observation
 
@@ -1425,6 +1527,8 @@ operation from source presence.
 
 ## Verification record
 
+### Historical pre-remediation baseline
+
 | Check on audited baseline | Result | Assurance implication |
 | --- | --- | --- |
 | Registered Aimee `index investigate`, then required `index hybrid` fallback | Unavailable: local index `/v1` service did not respond | Direct tracked-tree inspection used; no indexed repository-memory claims included |
@@ -1442,6 +1546,47 @@ operation from source presence.
 | Second-pass sweep of generated config accessors | ~380 discard the read status; one call site fixed by hand to compensate | ACG-029 |
 | Targeted credential-pattern scan of tracked content | No apparent live credential verified | This is not a historical/entropy or external secret-platform scan |
 | Semgrep, Trivy, Grype, osv-scanner, Gitleaks, ShellCheck, Bandit, cppcheck, clang-tidy, pip-audit, Syft and cargo-audit | Tools unavailable in audit environment | Their absence is an evidence limitation, not a clean result |
+
+### Remediation verification (2026-08-26 through 2026-08-27)
+
+The remediation branch was exercised on a separate Linux host (`root@192.168.1.252`) using GCC 14
+and real PostgreSQL 18/pgvector, in addition to local dependency and frontend checks. These results
+supersede the corresponding baseline rows above; expected service-unconfigured skips remain stated
+rather than being counted as coverage.
+
+| Check on remediation branch | Result | Assurance implication |
+| --- | --- | --- |
+| `make lint` | Pass: all 74 checks | Includes new workflow-pin, build-input, shell-quote, fail-open config and security-claim consistency gates |
+| `TEST_RUN_JOBS=1 make unit-tests` | Pass: all 657 binaries | Complete hermetic native suite, including exact 5,000-row bus durability verification |
+| `TEST_RUN_JOBS=1 make sanitizers` | Pass: all 657 binaries with ASan/UBSan and leak detection | Full clean-build closure; remediation also fixed sanitizer-discovered lifetime, leak, stack and `SIGPIPE` defects |
+| P1 RLS gate against PostgreSQL 18/pgvector | Pass with separate migrator, runtime and administrative roles | Exercises schemas, grants, RLS, memory governance, WORM, Vault/witness, JWKS and concurrency against a real store |
+| `make integration-tests` | Pass: 115/115 runnable checks; 20 explicitly service-unconfigured skips | Includes thin-client remote exclusive mode and served argspec end-to-end paths |
+| `make fuzz` and assurance fuzz targets | Pass, including 10,000 management inputs and the checked corpus matrix | Previously missing targets now build and execute; unit sanitizer run also covers 60,000 witness mutations and 5,454 AWS event-stream decodes |
+| `make -j2 all server kb gateway`, `make hardening-check`, `make build-integrity` | Pass | Shipping binaries are PIE with full RELRO, NX, canaries, fortified libc and CET where supported; strict source/target boundaries pass |
+| `go mod verify`, `go test ./...`, latest `govulncheck ./...` in all three Go modules | Pass; no vulnerabilities found | Includes Go 1.26.7 scanner execution and upgraded `golang.org/x/text` |
+| Both npm lockfile audits, TypeScript checks and frontend tests | Zero advisories; pass: 21 files / 186 tests | The vulnerable development dependency was removed/upgraded and the lockfiles are internally consistent |
+| Six changed Compose definitions via `docker compose config --quiet` | Pass with distinct role-secret fixtures | Syntax and required separated database-role inputs are deployable |
+
+Incremental ACG-018 transport/isolation and final branch verification on 2026-08-27 adds:
+
+| Check | Result | Assurance implication |
+| --- | --- | --- |
+| Local and `.252` Go 1.26.7 `go mod verify` and `go test ./...` in `server-go`, `control-web` and `runtime-web`; `.252` `govulncheck ./...` | Pass in every package; no vulnerabilities found | Includes egress HTTP/SSE transport, scoped credential handles, C-compatible envelope vectors, callers and Linux subprocess socket-denial/non-dumpability tests; the module minimum and digest-pinned Docker builder stages were raised from the vulnerable Go 1.25 line to 1.26.7 |
+| Local and `.252` `make -C src -j4 unit-tests` | Pass: all 659 binaries | Includes the real-bus Git fixture, ciphertext-only forge request assertions, Vault helper parent-attestation negatives and the complete native corpus |
+| `.252` `TEST_RUN_JOBS=1 make -C src sanitizers` | Pass: all 659 registered binaries with ASan/UBSan | A clean instrumented build exposed and remediation fixed the missing `module_json_call.o` dependency in the memory-advanced target; the resumed full harness then completed without a sanitizer finding |
+| Local and `.252` `make -C src lint` against the intended generated-output index | Pass: all 75 checks | Includes direct-socket inventory plus planted bypass, credential-custody/package ratchets, descriptor ownership, process contracts, event durability and dynamic plugin provisioning |
+| Local and `.252` shipping build plus `make -C src build-integrity` | Pass | The shared C egress-envelope client is linked into the server without a module-to-module header crossing; product, linkage, hardening and container credential-bootstrap boundaries remain green |
+| Local and `.252` `make -C src integration-tests` | Pass: 70/70 configured checks; 64 service-unconfigured checks stated as skips | Thin-client remote-exclusive and served-argspec end-to-end checks pass; these runs do not relabel absent DB1/KB services as coverage |
+| `.252` P1 PostgreSQL 18/pgvector gate plus `subject-erasure-pg-test.sql` in separate disposable databases | Pass | Reconfirms role separation, RLS, WORM/Vault/JWKS and concurrency gates; erasure proves retry idempotency, retention, minimized exactly-once outbox evidence and unchanged prior audit intents; the worker gate proves idempotent SQLite WORM delivery |
+| Egress credential-custody tests | Pass locally and on `.252` | Forge uses a 30-second caller/host/operation/repository-bound X25519/AES-GCM envelope; MCP uses only its deterministic caller-scoped handle and the parent-attested non-dumpable Vault bridge |
+| Live GitHub GET-only governance probe | Incomplete control: one active `main` deployment ruleset; both environments use the same sole admin reviewer; `testing` protection unreadable with the available token; signing key absent | Confirms that ACG-019/020 operating evidence and separation of duties remain open rather than inferring them from source |
+| Required cppcheck CI ratchet | cppcheck 2.13.0: 1,088 existing diagnostics recorded in 68 diagnostic/file ceilings; planted new diagnostic is rejected | SAST is now mandatory and cannot regress, analyzer upgrades require explicit review, but this is not represented as a clean analysis result; the checked baseline remains remediation debt |
+
+The source checks do not convert the explicitly documented organizational and architectural
+residuals into operating evidence. The ACG-011 and ACG-031 source controls now have representative
+remote PostgreSQL acceptance evidence, but a production deployment must still prove its own
+migration, role posture, schedules and store inventory. External assurance additionally remains
+blocked on ACG-018 production activation evidence and the ACG-019/020 live organizational evidence.
 
 Dynamic exploitation, authenticated penetration testing, production configuration/IAM, branch
 rules, environment reviewers, organization access, cloud/container runtime, external providers,

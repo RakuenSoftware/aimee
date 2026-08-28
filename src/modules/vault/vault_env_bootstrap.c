@@ -11,6 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #define ENV_AGENT             "environment"
 #define ENV_NAME_MAX          128
@@ -378,6 +383,66 @@ int vault_env_seal_forge_credential(const char *cred_name)
    }
    OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
    free(value);
+   return rc;
+}
+
+#define EGRESS_MODULE_EXECUTABLE "/usr/local/libexec/aimee-modules/aimee-module-egress"
+
+int vault_env_egress_parent_path_ok(const char *path)
+{
+   return path && strcmp(path, EGRESS_MODULE_EXECUTABLE) == 0;
+}
+
+int vault_env_egress_parent_attest(void)
+{
+#if defined(__linux__)
+   char proc_path[64], executable[4096];
+   int n = snprintf(proc_path, sizeof(proc_path), "/proc/%ld/exe", (long)getppid());
+   if (n <= 0 || (size_t)n >= sizeof(proc_path))
+      return -1;
+   ssize_t got = readlink(proc_path, executable, sizeof(executable) - 1);
+   if (got <= 0 || (size_t)got >= sizeof(executable))
+      return -1;
+   executable[got] = '\0';
+   if (!vault_env_egress_parent_path_ok(executable) || prctl(PR_SET_DUMPABLE, 0) != 0)
+      return -1;
+   return 0;
+#else
+   return -1;
+#endif
+}
+
+static int mcp_egress_credential_name_ok(const char *name)
+{
+   static const char prefix[] = "AIMEE_MCP_";
+   static const char suffix[] = "_TOKEN";
+   if (!name || strncmp(name, prefix, sizeof(prefix) - 1) != 0)
+      return 0;
+   const char *digits = name + sizeof(prefix) - 1;
+   unsigned long ref = 0;
+   const char *p = digits;
+   while (*p >= '0' && *p <= '9')
+   {
+      ref = ref * 10 + (unsigned long)(*p - '0');
+      p++;
+   }
+   return p != digits && strcmp(p, suffix) == 0 && ref >= 712 && ref < 968;
+}
+
+int vault_env_print_egress_credential(const char *env_name)
+{
+   if (vault_env_egress_parent_attest() != 0 || !mcp_egress_credential_name_ok(env_name))
+      return -1;
+   char value[ENV_SECRET_VALUE_MAX + 1];
+   memset(value, 0, sizeof(value));
+   int present = runtime_secret_get(env_name, value, sizeof(value));
+   size_t len = present ? strlen(value) : 0;
+   int rc = present && len > 0 && len <= ENV_SECRET_VALUE_MAX && !memchr(value, '\n', len) &&
+                    !memchr(value, '\r', len) && fwrite(value, 1, len, stdout) == len &&
+                    fflush(stdout) == 0
+                ? 0
+                : -1;
+   OPENSSL_cleanse(value, sizeof(value));
    return rc;
 }
 

@@ -40,7 +40,7 @@ static void launch_set_err(char *errbuf, size_t errbuf_len, const char *msg)
       snprintf(errbuf, errbuf_len, "%s", msg ? msg : "delegate launch failed");
 }
 
-static int shell_quote(char *out, size_t out_len, const char *raw)
+static int shell_quote_into(char *out, size_t out_len, const char *raw)
 {
    if (!out || out_len < 3 || !raw)
       return -1;
@@ -119,7 +119,7 @@ static int tracked_files_load(const char *cwd, tracked_files_t *out)
    if (cwd && cwd[0])
    {
       char quoted[MAX_PATH_LEN * 2];
-      if (shell_quote(quoted, sizeof(quoted), cwd) != 0)
+      if (shell_quote_into(quoted, sizeof(quoted), cwd) != 0)
          return -1;
       snprintf(ls_cmd, sizeof(ls_cmd), "git -C %s ls-files --full-name", quoted);
    }

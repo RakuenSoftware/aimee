@@ -190,7 +190,7 @@ int64_t memory_episode_card_generate(const char *source_session)
    }
 
    /* Build card text */
-   char card_text[2048];
+   char card_text[4096];
    snprintf(card_text, sizeof(card_text),
             "Episode: %s\n"
             "Participants: %s\n"
@@ -212,7 +212,6 @@ int64_t memory_episode_card_generate(const char *source_session)
    if (memory_insert(TIER_L2, KIND_EPISODE, key, card_text, 1.8, "episode_card", &m) != 0 ||
        m.id <= 0)
       return 0;
-
    /* Associate the synthetic memory with the session */
    db2_memory_set_source_session(m.id, source_session);
 

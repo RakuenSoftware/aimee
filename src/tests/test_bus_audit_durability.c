@@ -29,6 +29,25 @@
 
 #define N 5000
 
+static int worm_commits;
+
+static int test_worm_sink(const char *actor_role, const char *actor_principal, const char *action,
+                          const char *subject, const char *verdict, const char *detail, void *ctx)
+{
+   (void)ctx;
+   if (strcmp(action, "tool.vault.get") != 0)
+      return 0;
+   assert(strcmp(actor_role, "action") == 0);
+   assert(strcmp(actor_principal, "session:123") == 0);
+   assert(strcmp(subject, "v1-test") == 0);
+   assert(strcmp(verdict, "allow") == 0);
+   assert(strstr(detail, "mode=3:tls") != NULL);
+   assert(strstr(detail, "reason=2:ok") != NULL);
+   assert(strstr(detail, "task_id=17") != NULL);
+   worm_commits++;
+   return 0;
+}
+
 static uint64_t now_ns(void)
 {
    struct timespec ts;
@@ -60,6 +79,17 @@ int main(void)
    }
    setenv("AIMEE_HOME", home, 1);
    audit_log_open(); /* opens audit.log under AIMEE_HOME so the consumer can append */
+
+   /* Security-relevant action bridges must have a synchronous WORM edge; a
+    * missing sink is a visible failure, and an installed sink commits before
+    * the asynchronous observability row is published. */
+   assert(obs_bus_commit_action("session:123", "vault.get", "v1-test", "agent/key", "tls", "ok",
+                                "allow", 17) != 0);
+   assert(obs_bus_set_durable_sink(test_worm_sink, NULL) == 0);
+   assert(obs_bus_commit_action("session:123", "vault.get", "v1-test", "agent/key", "tls", "ok",
+                                "allow", 17) == 0);
+   assert(worm_commits == 1);
+   assert(obs_bus_set_durable_sink(NULL, NULL) == 0);
 
    if (obs_bus_start() != 0)
    {

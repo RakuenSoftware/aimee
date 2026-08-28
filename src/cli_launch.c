@@ -78,20 +78,17 @@ int parse_launch_meta(const char *output, launch_meta_t *meta)
    return 1;
 }
 
-static void launch_session_id(char out[33])
+static int launch_session_id(char out[33])
 {
    unsigned char rnd[16];
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
    {
-      uint64_t mix = (uint64_t)time(NULL) ^ ((uint64_t)platform_getppid() << 32);
-      for (size_t i = 0; i < sizeof(rnd); i++)
-      {
-         mix = mix * 6364136223846793005ULL + 1442695040888963407ULL;
-         rnd[i] = (unsigned char)(mix >> 56);
-      }
+      out[0] = '\0';
+      return -1;
    }
    for (size_t i = 0; i < sizeof(rnd); i++)
       snprintf(out + (i * 2), 3, "%02x", rnd[i]);
+   return 0;
 }
 
 /* Route launched provider clients through the same conversation gateway. This
@@ -169,7 +166,12 @@ int client_launch_exec(int argc, char **argv)
    }
 
    char sid[33];
-   launch_session_id(sid);
+   if (launch_session_id(sid) != 0)
+   {
+      fprintf(stderr,
+              "aimee: secure entropy is unavailable; refusing to launch a shared session\n");
+      return 1;
+   }
    if (platform_setenv("AIMEE_SESSION_ID", sid) != 0)
    {
       fprintf(stderr, "aimee: could not establish the launch session id\n");

@@ -37,6 +37,7 @@ func TestModuleRegistryMatchesProcessContracts(t *testing.T) {
 		// first use and answers with the reason when it cannot, so the stage is
 		// servable whether or not a database is reachable.
 		{"postgres", 28, []uint32{11265, 11266}},
+		{"egress", 32, []uint32{12289, 12290, 12291, 12292, 12293, 12294, 12295}},
 		// `aimee` is deliberately absent. It is the one module here whose
 		// config depends on the environment: it refuses to serve without a
 		// store backend, so in this test's process it has no stage table to

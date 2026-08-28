@@ -11,6 +11,7 @@
 #include "branch_ownership.h"
 #include "dstr.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -33,10 +34,14 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static cJSON *mcp_error(const char *fmt, const char *detail)
+static cJSON *mcp_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static cJSON *mcp_error(const char *fmt, ...)
 {
    char buf[1024];
-   snprintf(buf, sizeof(buf), fmt, detail);
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
    return mcp_text(buf);
 }
 
@@ -86,13 +91,13 @@ static int pr_repo_default_branch(char *out, size_t out_len)
  * run from a session sitting on its own branch. Already-exists is success. */
 static int pr_ensure_feature_branch(const char *feat, char *err, size_t err_len)
 {
-   char *esc = shell_escape(feat);
+   char *esc = shell_quote(feat);
    if (!esc)
       return -1;
    char cmd[768];
    int rc = 0;
 
-   snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin '%s' 2>/dev/null", esc);
+   snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin %s 2>/dev/null", esc);
    char *out = mcp_git_run(cmd, &rc);
    free(out);
    if (rc == 0)
@@ -109,7 +114,7 @@ static int pr_ensure_feature_branch(const char *feat, char *err, size_t err_len)
                "cannot resolve the repository default branch to cut the feature branch from");
       return -1;
    }
-   char *esc_def = shell_escape(def);
+   char *esc_def = shell_quote(def);
    if (!esc_def)
    {
       free(esc);
@@ -118,7 +123,7 @@ static int pr_ensure_feature_branch(const char *feat, char *err, size_t err_len)
 
    /* Fetch first: cutting the feature branch from a stale local copy of the trunk would
     * silently start the feature behind. */
-   snprintf(cmd, sizeof(cmd), "git fetch origin '%s' 2>&1", esc_def);
+   snprintf(cmd, sizeof(cmd), "git fetch origin %s 2>&1", esc_def);
    out = mcp_git_run(cmd, &rc);
    free(out);
    if (rc != 0)
@@ -135,15 +140,19 @@ static int pr_ensure_feature_branch(const char *feat, char *err, size_t err_len)
     * commits instead of having the branch yanked back to the trunk. Losing that race is
     * success, not failure -- the branch we needed exists either way -- so a rejection
     * here is re-checked rather than reported. */
-   snprintf(cmd, sizeof(cmd),
-            "git push --force-with-lease='refs/heads/%s:' origin "
-            "'refs/remotes/origin/%s:refs/heads/%s' 2>&1",
-            esc, esc_def, esc);
+   char lease_raw[512], spec_raw[768];
+   snprintf(lease_raw, sizeof(lease_raw), "--force-with-lease=refs/heads/%s:", feat);
+   snprintf(spec_raw, sizeof(spec_raw), "refs/remotes/origin/%s:refs/heads/%s", def, feat);
+   char *lease = shell_quote(lease_raw);
+   char *spec = shell_quote(spec_raw);
+   snprintf(cmd, sizeof(cmd), "git push %s origin %s 2>&1", lease, spec);
+   free(lease);
+   free(spec);
    out = mcp_git_run(cmd, &rc);
    if (rc != 0)
    {
       free(out);
-      snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin '%s' 2>/dev/null", esc);
+      snprintf(cmd, sizeof(cmd), "git ls-remote --exit-code --heads origin %s 2>/dev/null", esc);
       out = mcp_git_run(cmd, &rc);
       free(out);
       free(esc);
@@ -325,11 +334,14 @@ static int pr_derive_from_commits(const char *base, char *title, size_t title_le
 
    /* Prefer the remote's copy of the base: a stale local base would attribute
     * commits to this branch that are already merged. */
-   char *esc_base = shell_escape(base);
+   char remote_ref[600];
+   snprintf(remote_ref, sizeof(remote_ref), "origin/%s", base);
+   char *quoted_remote_ref = shell_quote(remote_ref);
    char range[512];
    int rc = 0;
-   snprintf(range, sizeof(range), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
-            esc_base);
+   snprintf(range, sizeof(range), "git rev-parse --verify --quiet %s >/dev/null 2>&1",
+            quoted_remote_ref);
+   free(quoted_remote_ref);
    int have_remote_base = 0;
    {
       char *probe = mcp_git_run(range, &rc);
@@ -338,17 +350,20 @@ static int pr_derive_from_commits(const char *base, char *title, size_t title_le
    }
    char base_ref[600];
    if (have_remote_base && strncmp(base, "origin/", 7) != 0)
-      snprintf(base_ref, sizeof(base_ref), "origin/%s", esc_base);
+      snprintf(base_ref, sizeof(base_ref), "origin/%s", base);
    else
-      snprintf(base_ref, sizeof(base_ref), "%s", esc_base);
-   free(esc_base);
+      snprintf(base_ref, sizeof(base_ref), "%s", base);
 
    char cmd[1024];
-   snprintf(cmd, sizeof(cmd), "git log --reverse --format='%%s' '%s'..HEAD 2>/dev/null", base_ref);
+   char revision_range[700];
+   snprintf(revision_range, sizeof(revision_range), "%s..HEAD", base_ref);
+   char *quoted_range = shell_quote(revision_range);
+   snprintf(cmd, sizeof(cmd), "git log --reverse --format='%%s' %s 2>/dev/null", quoted_range);
    char *subjects = mcp_git_run(cmd, &rc);
    if (rc != 0 || !subjects || !subjects[0])
    {
       free(subjects);
+      free(quoted_range);
       return -1;
    }
 
@@ -373,7 +388,10 @@ static int pr_derive_from_commits(const char *base, char *title, size_t title_le
    }
    free(subjects);
    if (n == 0)
+   {
+      free(quoted_range);
       return -1;
+   }
 
    if (n == 1)
    {
@@ -420,7 +438,11 @@ static int pr_derive_from_commits(const char *base, char *title, size_t title_le
    }
 
    /* The diffstat is the one thing the subjects do not say: how big this is. */
-   snprintf(cmd, sizeof(cmd), "git diff --stat '%s'...HEAD 2>/dev/null", base_ref);
+   free(quoted_range);
+   snprintf(revision_range, sizeof(revision_range), "%s...HEAD", base_ref);
+   quoted_range = shell_quote(revision_range);
+   snprintf(cmd, sizeof(cmd), "git diff --stat %s 2>/dev/null", quoted_range);
+   free(quoted_range);
    char *stat = mcp_git_run(cmd, &rc);
    if (rc == 0 && stat && stat[0])
       str_appendf(body, bpos, (int)body_len, "\n%s", stat);
@@ -448,21 +470,23 @@ int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap)
    if (!base || !base[0])
       return -1;
 
-   char *esc = shell_escape(base);
    char base_ref[600];
    int rc = 0;
    {
       char probe[700];
-      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet 'origin/%s' >/dev/null 2>&1",
-               esc);
+      char remote_ref[600];
+      snprintf(remote_ref, sizeof(remote_ref), "origin/%s", base);
+      char *quoted_remote_ref = shell_quote(remote_ref);
+      snprintf(probe, sizeof(probe), "git rev-parse --verify --quiet %s >/dev/null 2>&1",
+               quoted_remote_ref);
+      free(quoted_remote_ref);
       char *p = mcp_git_run(probe, &rc);
       free(p);
    }
    if (rc == 0 && strncmp(base, "origin/", 7) != 0)
-      snprintf(base_ref, sizeof(base_ref), "origin/%s", esc);
+      snprintf(base_ref, sizeof(base_ref), "origin/%s", base);
    else
-      snprintf(base_ref, sizeof(base_ref), "%s", esc);
-   free(esc);
+      snprintf(base_ref, sizeof(base_ref), "%s", base);
 
    /* Fetch first: a stale local copy of the base would clear a branch that in fact
     * conflicts with what the base has become, which is precisely the case that
@@ -470,7 +494,9 @@ int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap)
    if (strncmp(base_ref, "origin/", 7) == 0)
    {
       char fetch_cmd[700];
-      snprintf(fetch_cmd, sizeof(fetch_cmd), "git fetch origin '%s' 2>&1", base_ref + 7);
+      char *quoted_branch = shell_quote(base_ref + 7);
+      snprintf(fetch_cmd, sizeof(fetch_cmd), "git fetch origin %s 2>&1", quoted_branch);
+      free(quoted_branch);
       int frc = 0;
       free(mcp_git_run(fetch_cmd, &frc));
    }
@@ -483,8 +509,12 @@ int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap)
     * checkout is ordinary, so the wrong answer here would be common. */
    {
       char verify[700];
-      snprintf(verify, sizeof(verify),
-               "git rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1", base_ref);
+      char commit_ref[700];
+      snprintf(commit_ref, sizeof(commit_ref), "%s^{commit}", base_ref);
+      char *quoted_commit_ref = shell_quote(commit_ref);
+      snprintf(verify, sizeof(verify), "git rev-parse --verify --quiet %s >/dev/null 2>&1",
+               quoted_commit_ref);
+      free(quoted_commit_ref);
       int vrc = 0;
       free(mcp_git_run(verify, &vrc));
       if (vrc != 0)
@@ -492,9 +522,11 @@ int mcp_git_conflicts_with_base(const char *base, char *files, size_t files_cap)
    }
 
    char cmd[1024];
+   char *quoted_base_ref = shell_quote(base_ref);
    snprintf(cmd, sizeof(cmd),
-            "git merge-tree --write-tree --name-only --no-messages HEAD '%s' 2>/dev/null",
-            base_ref);
+            "git merge-tree --write-tree --name-only --no-messages HEAD %s 2>/dev/null",
+            quoted_base_ref);
+   free(quoted_base_ref);
    int mrc = 0;
    char *out = mcp_git_run(cmd, &mrc);
    /* --write-tree exits 1 with the conflicted paths on stdout, 0 when clean. */
@@ -1172,7 +1204,7 @@ cJSON *handle_git_pr(cJSON *args)
          return mcp_text("error: could not determine GitHub repository from origin remote");
 
       /* Build the PATCH command in a heap buffer sized to the escaped fields.
-       * A PR body is user-controlled and shell_escape can expand it up to ~4x,
+       * A PR body is user-controlled and shell_quote can expand it up to ~4x,
        * so it easily exceeds any fixed buffer; the `pos += snprintf` accumulation
        * would then run pos past the end and wrap (cap - pos) to a huge size_t on
        * the next write — an out-of-bounds (stack) write. Sizing the buffer to

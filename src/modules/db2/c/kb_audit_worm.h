@@ -15,10 +15,17 @@ extern "C"
                                      const char *actor_principal, const char *action,
                                      const char *subject, const char *verdict, const char *key_id,
                                      const char *detail, const char *prev_hash, char out_hex[65]);
+   typedef void (*db2_audit_hash_v2_fn)(
+       long long seq, const char *ts, const char *actor_role, const char *actor_principal,
+       const char *actor_issuer, const char *actor_subject, const char *transport_cn,
+       long long team_id, const char *selected_default_from, const char *action,
+       const char *subject, const char *verdict, const char *key_id, const char *detail,
+       const char *prev_hash, char out_hex[65]);
 
    /* Deprecated no-op retained for ABI compatibility. Hashing is owned by the
     * shared SQLite worker and is no longer injected into DB2. */
    void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider);
+   void aimee_db2_register_audit_hash_v2_provider(db2_audit_hash_v2_fn provider);
 
    /* Submit one governed action to the durable WORM outbox. detail is bounded
     * to AUDIT_WORM_DETAIL_MAX. Returns 0 when the intent commits, -1 on failure. */

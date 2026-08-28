@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -32,10 +33,14 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static cJSON *mcp_error(const char *fmt, const char *detail)
+static cJSON *mcp_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static cJSON *mcp_error(const char *fmt, ...)
 {
    char buf[1024];
-   snprintf(buf, sizeof(buf), fmt, detail);
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
    return mcp_text(buf);
 }
 
@@ -105,9 +110,9 @@ int mcp_git_identity_flags(char *out, size_t out_len)
                                         NULL, name, sizeof(name), email, sizeof(email));
    if (have <= 0)
       return have;
-   char *esc_name = shell_escape(name);
-   char *esc_email = shell_escape(email);
-   snprintf(out, out_len, "-c user.name='%s' -c user.email='%s'", esc_name, esc_email);
+   char *esc_name = shell_quote(name);
+   char *esc_email = shell_quote(email);
+   snprintf(out, out_len, "-c user.name=%s -c user.email=%s", esc_name, esc_email);
    free(esc_name);
    free(esc_email);
    return 1;
@@ -192,8 +197,8 @@ cJSON *handle_git_commit(cJSON *args)
             skipped++;
             continue;
          }
-         char *esc = shell_escape(f->valuestring);
-         int n = snprintf(add_cmd + cmd_len, sizeof(add_cmd) - cmd_len, " '%s'", esc);
+         char *esc = shell_quote(f->valuestring);
+         int n = snprintf(add_cmd + cmd_len, sizeof(add_cmd) - cmd_len, " %s", esc);
          free(esc);
          if (n < 0 || cmd_len + (size_t)n >= sizeof(add_cmd))
          {
@@ -246,9 +251,9 @@ cJSON *handle_git_commit(cJSON *args)
    if (have_identity <= 0)
       return mcp_text(mcp_git_identity_error(have_identity));
 
-   char *esc_msg = shell_escape(jmsg->valuestring);
+   char *esc_msg = shell_quote(jmsg->valuestring);
    char commit_cmd[8192];
-   snprintf(commit_cmd, sizeof(commit_cmd), "git %s commit -m '%s' 2>&1", ident, esc_msg);
+   snprintf(commit_cmd, sizeof(commit_cmd), "git %s commit -m %s 2>&1", ident, esc_msg);
    free(esc_msg);
 
    int rc;
@@ -555,7 +560,7 @@ cJSON *handle_git_clone(cJSON *args)
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(args, "branch");
    cJSON *jdepth = cJSON_GetObjectItemCaseSensitive(args, "depth");
 
-   char *esc_url = shell_escape(jurl->valuestring);
+   char *esc_url = shell_quote(jurl->valuestring);
 
    char cmd[2048];
    int pos = snprintf(cmd, sizeof(cmd), "git clone");
@@ -564,8 +569,8 @@ cJSON *handle_git_clone(cJSON *args)
 
    if (cJSON_IsString(jbranch) && jbranch->valuestring[0])
    {
-      char *esc = shell_escape(jbranch->valuestring);
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " -b '%s'", esc);
+      char *esc = shell_quote(jbranch->valuestring);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " -b %s", esc);
       free(esc);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
@@ -578,15 +583,15 @@ cJSON *handle_git_clone(cJSON *args)
    }
 
    {
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " '%s'", esc_url);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " %s", esc_url);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
    }
 
    if (cJSON_IsString(jpath) && jpath->valuestring[0])
    {
-      char *esc = shell_escape(jpath->valuestring);
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " '%s'", esc);
+      char *esc = shell_quote(jpath->valuestring);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " %s", esc);
       free(esc);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
@@ -642,9 +647,9 @@ cJSON *handle_git_reset(cJSON *args)
    if (strcmp(mode, "soft") != 0 && strcmp(mode, "mixed") != 0 && strcmp(mode, "hard") != 0)
       return mcp_text("error: mode must be soft, mixed, or hard");
 
-   char *esc_ref = shell_escape(ref);
+   char *esc_ref = shell_quote(ref);
    char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git reset --%s '%s' 2>&1", mode, esc_ref);
+   snprintf(cmd, sizeof(cmd), "git reset --%s %s 2>&1", mode, esc_ref);
    free(esc_ref);
 
    int rc;
@@ -730,8 +735,8 @@ cJSON *handle_git_add(cJSON *args)
             skipped++;
             continue;
          }
-         char *esc = shell_escape(f->valuestring);
-         pos = str_appendf(cmd, pos, (int)sizeof(cmd), " '%s'", esc);
+         char *esc = shell_quote(f->valuestring);
+         pos = str_appendf(cmd, pos, (int)sizeof(cmd), " %s", esc);
          free(esc);
       }
       if (pos <= (int)strlen("git add --"))
@@ -800,9 +805,9 @@ int mcp_git_unstage_sensitive(char *report, size_t report_len)
          *nl = '\0';
       if (*line && is_sensitive_file(line))
       {
-         char *esc = shell_escape(line);
+         char *esc = shell_quote(line);
          char cmd[MAX_PATH_LEN + 64];
-         snprintf(cmd, sizeof(cmd), "git restore --staged -- '%s' 2>&1", esc);
+         snprintf(cmd, sizeof(cmd), "git restore --staged -- %s 2>&1", esc);
          free(esc);
          int unstage_rc = 0;
          free(mcp_git_run(cmd, &unstage_rc));
@@ -887,8 +892,8 @@ cJSON *handle_git_restore(cJSON *args)
       cJSON *f = cJSON_GetArrayItem(jfiles, i);
       if (!cJSON_IsString(f))
          continue;
-      char *esc = shell_escape(f->valuestring);
-      fpos = str_appendf(file_args, fpos, (int)sizeof(file_args), " '%s'", esc);
+      char *esc = shell_quote(f->valuestring);
+      fpos = str_appendf(file_args, fpos, (int)sizeof(file_args), " %s", esc);
       free(esc);
    }
 
@@ -900,8 +905,8 @@ cJSON *handle_git_restore(cJSON *args)
 
    if (cJSON_IsString(jsource) && jsource->valuestring[0])
    {
-      char *esc = shell_escape(jsource->valuestring);
-      cpos = str_appendf(cmd, cpos, (int)sizeof(cmd), " --source='%s'", esc);
+      char *esc = shell_quote(jsource->valuestring);
+      cpos = str_appendf(cmd, cpos, (int)sizeof(cmd), " --source=%s", esc);
       free(esc);
    }
 

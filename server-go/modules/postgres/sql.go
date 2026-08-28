@@ -216,10 +216,41 @@ func (r *txRegistry) reapLocked() {
 // reporting on the pool it borrows reads healthy right up until it cannot
 // answer at all.
 var (
-	sqlPoolOnce sync.Once
-	sqlPool     *pgxpool.Pool
-	sqlPoolErr  error
+	sqlPoolOnce       sync.Once
+	sqlPool           *pgxpool.Pool
+	sqlPoolErr        error
+	migrationPoolOnce sync.Once
+	migrationPool     *pgxpool.Pool
+	migrationPoolErr  error
 )
+
+func parseStoreConfig(dsn string) (*pgxpool.Config, error) {
+	return parseStoreConfigFor("AIMEE_STORE_URL", dsn)
+}
+
+func parseStoreConfigFor(name, dsn string) (*pgxpool.Config, error) {
+	config, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("postgres: %s is not a valid DSN: %w", name, err)
+	}
+	return config, nil
+}
+
+func parseMigrationConfig(migrationDSN, runtimeDSN string) (*pgxpool.Config, error) {
+	config, err := parseStoreConfigFor("AIMEE_STORE_MIGRATION_URL", migrationDSN)
+	if err != nil {
+		return nil, err
+	}
+	runtime, err := parseStoreConfigFor("AIMEE_STORE_URL", runtimeDSN)
+	if err != nil {
+		return nil, err
+	}
+	if config.ConnConfig.User == runtime.ConnConfig.User {
+		return nil, fmt.Errorf("postgres: migration role %q must differ from the runtime role",
+			config.ConnConfig.User)
+	}
+	return config, nil
+}
 
 // SQLPool opens (once) the pool this stage serves from.
 func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
@@ -230,9 +261,9 @@ func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 				"stage has no database to serve")
 			return
 		}
-		config, err := pgxpool.ParseConfig(dsn)
+		config, err := parseStoreConfig(dsn)
 		if err != nil {
-			sqlPoolErr = fmt.Errorf("postgres: AIMEE_STORE_URL is not a valid DSN: %w", err)
+			sqlPoolErr = err
 			return
 		}
 		// Room for the transaction ceiling plus ordinary traffic. A pool smaller
@@ -248,14 +279,47 @@ func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 			sqlPoolErr = fmt.Errorf("postgres: the SQL stage could not open its pool: %w", err)
 			return
 		}
-		if err := ensureSearchPathSchema(ctx, pool, config); err != nil {
-			pool.Close()
-			sqlPoolErr = err
-			return
-		}
 		sqlPool, sqlPoolErr = pool, nil
 	})
 	return sqlPool, sqlPoolErr
+}
+
+// MigrationPool is deliberately separate from the runtime pool. Schema creation
+// and version-ledger writes never travel over AIMEE_STORE_URL, so a compromise of
+// the ordinary query path does not inherit DDL authority. Deployments must supply
+// a distinct owner DSN and may remove it after startup migration completes.
+func MigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
+	migrationPoolOnce.Do(func() {
+		dsn := os.Getenv("AIMEE_STORE_MIGRATION_URL")
+		if dsn == "" {
+			migrationPoolErr = errors.New("postgres: AIMEE_STORE_MIGRATION_URL is unset")
+			return
+		}
+		runtimeDSN := os.Getenv("AIMEE_STORE_URL")
+		if runtimeDSN == "" {
+			migrationPoolErr = errors.New("postgres: AIMEE_STORE_URL is unset")
+			return
+		}
+		config, err := parseMigrationConfig(dsn, runtimeDSN)
+		if err != nil {
+			migrationPoolErr = err
+			return
+		}
+		config.MaxConns = 2
+		config.MinConns = 0
+		pool, err := pgxpool.NewWithConfig(ctx, config)
+		if err != nil {
+			migrationPoolErr = fmt.Errorf("postgres: migration pool initialization failed: %w", err)
+			return
+		}
+		if err := ensureSearchPathSchema(ctx, pool, config); err != nil {
+			pool.Close()
+			migrationPoolErr = err
+			return
+		}
+		migrationPool = pool
+	})
+	return migrationPool, migrationPoolErr
 }
 
 // ensureSearchPathSchema creates the schema the DSN's search_path names.
@@ -320,20 +384,31 @@ func plainIdentifier(s string) bool {
 // That guard already carries one, for roundtable-review, and an exemption list
 // is where the wrong repair always sits one line from whoever meets the failure.
 type sqlHandler struct {
-	txs    *txRegistry
-	poolFn func(context.Context) (*pgxpool.Pool, error)
+	txs             *txRegistry
+	poolFn          func(context.Context) (*pgxpool.Pool, error)
+	migrationPoolFn func(context.Context) (*pgxpool.Pool, error)
 }
 
 // NewSQLHandler builds the stage's bus handler against the module's pool.
 func NewSQLHandler() bus.ModuleHandler {
-	return (&sqlHandler{txs: newTxRegistry(), poolFn: SQLPool}).handle
+	return (&sqlHandler{txs: newTxRegistry(), poolFn: SQLPool,
+		migrationPoolFn: MigrationPool}).handle
 }
 
 func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]byte, bus.ModuleStatus) {
 	if invocation.StageID != StageSQL {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	pool, err := h.poolFn(context.Background())
+	r := &reader{buf: frame}
+	op, err := r.u32()
+	if err != nil {
+		return nil, bus.ModuleStatusInvalidRequest
+	}
+	poolFn := h.poolFn
+	if op == opMigrate || op == opCurrentVersion {
+		poolFn = h.migrationPoolFn
+	}
+	pool, err := poolFn(context.Background())
 	if err != nil || pool == nil {
 		// No database. Refused IN BAND with the reason rather than at the
 		// transport, because a caller that can read "AIMEE_STORE_URL is unset"
@@ -341,12 +416,6 @@ func (h *sqlHandler) handle(invocation bus.ModuleInvocation, frame []byte) ([]by
 		// went wrong somewhere.
 		return refuse(statusFailed, "",
 			fmt.Sprintf("the SQL stage has no database: %v", err)), bus.ModuleStatusOK
-	}
-
-	r := &reader{buf: frame}
-	op, err := r.u32()
-	if err != nil {
-		return nil, bus.ModuleStatusInvalidRequest
 	}
 
 	// The caller's remaining time bounds the statement, so a query cannot

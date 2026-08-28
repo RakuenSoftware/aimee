@@ -11,6 +11,8 @@
  * audit for the server-hosted case. */
 #include "kb_mcp_audit_bridge.h"
 
+#include <stdio.h>
+
 #include <aimee/audit/audit_action.h> /* audit_args_hash, AUDIT_ARGS_HASH_LEN */
 #include <aimee/audit/obs_bus.h>      /* obs_bus_emit (lazy-starts the bus on first emit) */
 
@@ -26,7 +28,13 @@ void kb_mcp_audit_record(const char *actor, const char *tool, const char *mode,
    char args_hash[AUDIT_ARGS_HASH_LEN];
    audit_args_hash(tool, NULL, args_hash, sizeof args_hash);
 
-   obs_bus_emit(actor && actor[0] ? actor : "mcp", tool, args_hash, /*command=*/"",
-                mode && mode[0] ? mode : "outbound", reason_code ? reason_code : "",
-                verdict && verdict[0] ? verdict : "ok", /*task_id=*/0);
+   const char *safe_actor = actor && actor[0] ? actor : "mcp";
+   const char *safe_mode = mode && mode[0] ? mode : "outbound";
+   const char *safe_reason = reason_code ? reason_code : "";
+   const char *safe_verdict = verdict && verdict[0] ? verdict : "ok";
+   if (obs_bus_commit_action(safe_actor, tool, args_hash, /*command=*/"", safe_mode, safe_reason,
+                             safe_verdict, /*task_id=*/0) != 0)
+      fprintf(stderr, "audit: MCP action WORM commit failed for %s\n", tool);
+   obs_bus_emit(safe_actor, tool, args_hash, /*command=*/"", safe_mode, safe_reason, safe_verdict,
+                /*task_id=*/0);
 }

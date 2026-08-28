@@ -31,17 +31,18 @@
 /* ------------------------------------------------------------------ */
 
 /* Generate a trigger id of the form "trig_" + 16 random hex chars. */
-static void gen_trigger_id(char *buf, size_t cap)
+static int gen_trigger_id(char *buf, size_t cap)
 {
    unsigned char raw[8];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
    {
-      unsigned int r = (unsigned int)time(NULL) ^ (unsigned int)clock();
-      snprintf(buf, cap, "trig_%08x", r);
-      return;
+      if (buf && cap)
+         buf[0] = '\0';
+      return -1;
    }
    snprintf(buf, cap, "trig_%02x%02x%02x%02x%02x%02x%02x%02x", raw[0], raw[1], raw[2], raw[3],
             raw[4], raw[5], raw[6], raw[7]);
+   return 0;
 }
 
 static int create_trigger_pipeline(const char *task, char *out, size_t out_len)
@@ -151,7 +152,11 @@ int handle_trigger_fire(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * queue admission; accepting queued work preserves trigger events during
     * bursts and lets the dispatcher drain them later. */
    char id[32];
-   gen_trigger_id(id, sizeof(id));
+   if (gen_trigger_id(id, sizeof(id)) != 0)
+   {
+      free(metadata_alloc);
+      return server_send_error(conn, "secure entropy unavailable; trigger not created", NULL);
+   }
 
    /* 5. Insert */
    int rc = db1_trigger_insert(id, source, event, task, workspace, metadata_str);

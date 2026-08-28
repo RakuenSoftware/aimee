@@ -5,6 +5,7 @@
 #include "cJSON.h"
 #include "client_session_worktree.h" /* client_session_id_publish */
 #include "aimee_home.h"              /* aimee_home */
+#include "hook_session_token.h"
 #include "agent_code_capabilities.h"
 #include "aimee_session_guidance.h"
 #include <errno.h>
@@ -434,6 +435,28 @@ int handle_session_start(int json_output)
       return 2;
    }
 
+   /* Establish the authenticated identity used by every later pre/post hook.
+    * This remains fail-open for availability: worktree routing is local and a
+    * temporarily unavailable policy plane must not prevent the host starting.
+    * An old/stale token is removed whenever the authority cannot renew it. */
+   const char *hook_client = getenv("AIMEE_HOOK_CLIENT");
+   if (sid && sid[0] && hook_client && hook_client[0])
+   {
+      cJSON *req = cJSON_CreateObject();
+      cJSON_AddStringToObject(req, "method", "hooks.session_start");
+      cJSON_AddStringToObject(req, "session_id", sid);
+      cJSON_AddStringToObject(req, "harness_client", hook_client);
+      cJSON_AddStringToObject(req, "hook_input", stdin_data ? stdin_data : "");
+      cJSON_AddBoolToObject(req, "nonblocking", 1);
+      cJSON *resp = cli_v1_dispatch(req, 5000);
+      cJSON_Delete(req);
+      const char *token =
+          resp ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(resp, "hook_token")) : NULL;
+      if (!token || hook_session_token_store(aimee_home(), sid, hook_client, token) != 0)
+         (void)hook_session_token_delete(aimee_home(), sid, hook_client);
+      cJSON_Delete(resp);
+   }
+
    /* Success is deliberately empty. Emitting additionalContext would expose an
     * implementation detail and duplicate shared model-ingress context. */
    if (json_output)
@@ -450,6 +473,24 @@ int handle_session_end(int json_output)
    char hook_sid[64] = "";
    const char *sid =
        client_hook_payload_session_id(hook_json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
+   const char *hook_client = getenv("AIMEE_HOOK_CLIENT");
+   if (sid && sid[0] && hook_client && hook_client[0])
+   {
+      char token[HOOK_SESSION_TOKEN_CAP];
+      if (hook_session_token_load(aimee_home(), sid, hook_client, token) == 0)
+      {
+         cJSON *req = cJSON_CreateObject();
+         cJSON_AddStringToObject(req, "method", "hooks.session_end");
+         cJSON_AddStringToObject(req, "session_id", sid);
+         cJSON_AddStringToObject(req, "harness_client", hook_client);
+         cJSON_AddStringToObject(req, "hook_token", token);
+         memset(token, 0, sizeof(token));
+         cJSON *resp = cli_v1_dispatch(req, 3000);
+         cJSON_Delete(resp);
+         cJSON_Delete(req);
+      }
+      (void)hook_session_token_delete(aimee_home(), sid, hook_client);
+   }
    char cwd[4096];
    const char *payload_cwd = NULL;
    cJSON *jcwd = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "cwd") : NULL;

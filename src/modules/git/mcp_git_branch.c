@@ -6,6 +6,7 @@
 #include "util.h"
 #include "branch_ownership.h"
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,10 +22,14 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static cJSON *mcp_error(const char *fmt, const char *detail)
+static cJSON *mcp_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static cJSON *mcp_error(const char *fmt, ...)
 {
    char buf[1024];
-   snprintf(buf, sizeof(buf), fmt, detail);
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
    return mcp_text(buf);
 }
 
@@ -78,7 +83,7 @@ cJSON *handle_git_branch(cJSON *args)
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
       return mcp_text("error: 'name' parameter is required for create/switch/delete/claim/release");
 
-   char *esc_name = shell_escape(jname->valuestring);
+   char *esc_name = shell_quote(jname->valuestring);
 
    /* Main branch protection: block deleting main/master */
    if (strcmp(action, "delete") == 0 &&
@@ -104,26 +109,26 @@ cJSON *handle_git_branch(cJSON *args)
           * Switching would detach the worktree from its session branch. */
          if (cJSON_IsString(jbase) && jbase->valuestring[0])
          {
-            char *esc_base = shell_escape(jbase->valuestring);
-            snprintf(cmd, sizeof(cmd), "git branch '%s' '%s' 2>&1", esc_name, esc_base);
+            char *esc_base = shell_quote(jbase->valuestring);
+            snprintf(cmd, sizeof(cmd), "git branch %s %s 2>&1", esc_name, esc_base);
             free(esc_base);
          }
          else
          {
-            snprintf(cmd, sizeof(cmd), "git branch '%s' 2>&1", esc_name);
+            snprintf(cmd, sizeof(cmd), "git branch %s 2>&1", esc_name);
          }
       }
       else
       {
          if (cJSON_IsString(jbase) && jbase->valuestring[0])
          {
-            char *esc_base = shell_escape(jbase->valuestring);
-            snprintf(cmd, sizeof(cmd), "git checkout -b '%s' '%s' 2>&1", esc_name, esc_base);
+            char *esc_base = shell_quote(jbase->valuestring);
+            snprintf(cmd, sizeof(cmd), "git checkout -b %s %s 2>&1", esc_name, esc_base);
             free(esc_base);
          }
          else
          {
-            snprintf(cmd, sizeof(cmd), "git checkout -b '%s' 2>&1", esc_name);
+            snprintf(cmd, sizeof(cmd), "git checkout -b %s 2>&1", esc_name);
          }
       }
 
@@ -194,11 +199,11 @@ cJSON *handle_git_branch(cJSON *args)
          free(esc_name);
          return mcp_text("error: branch name is required after origin/");
       }
-      char *esc_local = shell_escape(local_name);
+      char *esc_local = shell_quote(local_name);
       free(esc_name);
       char probe[768];
       int rc = 0;
-      snprintf(probe, sizeof(probe), "git show-ref --verify --quiet 'refs/heads/%s' 2>/dev/null",
+      snprintf(probe, sizeof(probe), "git show-ref --verify --quiet refs/heads/%s 2>/dev/null",
                esc_local);
       char *probe_out = mcp_git_run(probe, &rc);
       free(probe_out);
@@ -208,7 +213,7 @@ cJSON *handle_git_branch(cJSON *args)
       if (!local_exists)
       {
          snprintf(probe, sizeof(probe),
-                  "git show-ref --verify --quiet 'refs/remotes/origin/%s' 2>/dev/null", esc_local);
+                  "git show-ref --verify --quiet refs/remotes/origin/%s 2>/dev/null", esc_local);
          probe_out = mcp_git_run(probe, &rc);
          free(probe_out);
          tracking_origin = rc == 0;
@@ -216,10 +221,10 @@ cJSON *handle_git_branch(cJSON *args)
 
       char cmd[1024];
       if (tracking_origin)
-         snprintf(cmd, sizeof(cmd), "git checkout -b '%s' --track 'origin/%s' 2>&1", esc_local,
+         snprintf(cmd, sizeof(cmd), "git checkout -b %s --track origin/%s 2>&1", esc_local,
                   esc_local);
       else
-         snprintf(cmd, sizeof(cmd), "git checkout '%s' 2>&1", esc_local);
+         snprintf(cmd, sizeof(cmd), "git checkout %s 2>&1", esc_local);
       char *out = mcp_git_run(cmd, &rc);
       if (rc != 0)
       {
@@ -246,7 +251,7 @@ cJSON *handle_git_branch(cJSON *args)
    if (strcmp(action, "orphan") == 0)
    {
       char cmd[512];
-      snprintf(cmd, sizeof(cmd), "git checkout --orphan '%s' 2>&1", esc_name);
+      snprintf(cmd, sizeof(cmd), "git checkout --orphan %s 2>&1", esc_name);
       int rc;
       char *out = mcp_git_run(cmd, &rc);
       if (rc != 0)
@@ -279,7 +284,7 @@ cJSON *handle_git_branch(cJSON *args)
       int remote = (jremote && cJSON_IsTrue(jremote)) ? 1 : 0;
 
       char cmd[512];
-      snprintf(cmd, sizeof(cmd), "git branch %s '%s' 2>&1", force_del ? "-D" : "-d", esc_name);
+      snprintf(cmd, sizeof(cmd), "git branch %s %s 2>&1", force_del ? "-D" : "-d", esc_name);
       int rc;
       char *out = mcp_git_run(cmd, &rc);
       if (rc != 0)
@@ -296,7 +301,7 @@ cJSON *handle_git_branch(cJSON *args)
       if (remote)
       {
          char rcmd[512];
-         snprintf(rcmd, sizeof(rcmd), "git push origin --delete '%s' 2>&1", esc_name);
+         snprintf(rcmd, sizeof(rcmd), "git push origin --delete %s 2>&1", esc_name);
          char *rout = mcp_git_run(rcmd, &rc);
          if (rc != 0)
             snprintf(remote_result, sizeof(remote_result), "\nremote delete failed: %s",
@@ -433,8 +438,8 @@ cJSON *handle_git_stash(cJSON *args)
       cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(args, "message");
       if (cJSON_IsString(jmsg) && jmsg->valuestring[0])
       {
-         char *esc = shell_escape(jmsg->valuestring);
-         snprintf(cmd, sizeof(cmd), "git stash push -m '%s' 2>&1", esc);
+         char *esc = shell_quote(jmsg->valuestring);
+         snprintf(cmd, sizeof(cmd), "git stash push -m %s 2>&1", esc);
          free(esc);
       }
       else
@@ -478,7 +483,7 @@ cJSON *handle_git_stash(cJSON *args)
    char *out = mcp_git_run(cmd, &rc);
    if (rc != 0)
    {
-      cJSON *r = mcp_error("error: git stash %s failed: %s", out ? out : "unknown");
+      cJSON *r = mcp_error("error: git stash %s failed: %s", action, out ? out : "unknown");
       free(out);
       return r;
    }
@@ -519,7 +524,7 @@ cJSON *handle_git_tag(cJSON *args)
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
       return mcp_text("error: 'name' parameter is required for create/delete");
 
-   char *esc_name = shell_escape(jname->valuestring);
+   char *esc_name = shell_quote(jname->valuestring);
 
    if (strcmp(action, "create") == 0)
    {
@@ -528,17 +533,16 @@ cJSON *handle_git_tag(cJSON *args)
 
       if (cJSON_IsString(jmsg) && jmsg->valuestring[0])
       {
-         char *esc_msg = shell_escape(jmsg->valuestring);
+         char *esc_msg = shell_quote(jmsg->valuestring);
          if (cJSON_IsString(jref) && jref->valuestring[0])
          {
-            char *esc_ref = shell_escape(jref->valuestring);
-            snprintf(cmd, sizeof(cmd), "git tag -a '%s' -m '%s' '%s' 2>&1", esc_name, esc_msg,
-                     esc_ref);
+            char *esc_ref = shell_quote(jref->valuestring);
+            snprintf(cmd, sizeof(cmd), "git tag -a %s -m %s %s 2>&1", esc_name, esc_msg, esc_ref);
             free(esc_ref);
          }
          else
          {
-            snprintf(cmd, sizeof(cmd), "git tag -a '%s' -m '%s' 2>&1", esc_name, esc_msg);
+            snprintf(cmd, sizeof(cmd), "git tag -a %s -m %s 2>&1", esc_name, esc_msg);
          }
          free(esc_msg);
       }
@@ -546,19 +550,19 @@ cJSON *handle_git_tag(cJSON *args)
       {
          if (cJSON_IsString(jref) && jref->valuestring[0])
          {
-            char *esc_ref = shell_escape(jref->valuestring);
-            snprintf(cmd, sizeof(cmd), "git tag '%s' '%s' 2>&1", esc_name, esc_ref);
+            char *esc_ref = shell_quote(jref->valuestring);
+            snprintf(cmd, sizeof(cmd), "git tag %s %s 2>&1", esc_name, esc_ref);
             free(esc_ref);
          }
          else
          {
-            snprintf(cmd, sizeof(cmd), "git tag '%s' 2>&1", esc_name);
+            snprintf(cmd, sizeof(cmd), "git tag %s 2>&1", esc_name);
          }
       }
    }
    else if (strcmp(action, "delete") == 0)
    {
-      snprintf(cmd, sizeof(cmd), "git tag -d '%s' 2>&1", esc_name);
+      snprintf(cmd, sizeof(cmd), "git tag -d %s 2>&1", esc_name);
    }
    else
    {
@@ -571,7 +575,7 @@ cJSON *handle_git_tag(cJSON *args)
    char *out = mcp_git_run(cmd, &rc);
    if (rc != 0)
    {
-      cJSON *r = mcp_error("error: git tag %s failed: %s", out ? out : "unknown");
+      cJSON *r = mcp_error("error: git tag %s failed: %s", action, out ? out : "unknown");
       free(out);
       return r;
    }
@@ -757,21 +761,20 @@ cJSON *handle_git_fetch(cJSON *args)
    if (before_rc != FETCH_STATE_OK)
       return mcp_error("error: %s", "fetch refused because checkout state cannot be captured");
 
-   char *esc_remote = shell_escape(remote);
+   char *esc_remote = shell_quote(remote);
    char refspec[512];
    snprintf(refspec, sizeof(refspec), "+refs/heads/*:refs/remotes/%s/*", remote);
-   char *esc_refspec = shell_escape(refspec);
+   char *esc_refspec = shell_quote(refspec);
    char cmd[1024];
    /* A positional refspec is not enough to contain --prune: Git still consults
     * remote.<name>.fetch for its prune map. An explicitly empty --refmap
     * suppresses that configured mapping; the one positional refspec below is
     * then the only fetch and prune destination. */
    if (prune)
-      snprintf(cmd, sizeof(cmd),
-               "git fetch --no-tags --no-prune-tags --prune --refmap= '%s' '%s' 2>&1", esc_remote,
-               esc_refspec);
+      snprintf(cmd, sizeof(cmd), "git fetch --no-tags --no-prune-tags --prune --refmap= %s %s 2>&1",
+               esc_remote, esc_refspec);
    else
-      snprintf(cmd, sizeof(cmd), "git fetch --no-tags --no-prune-tags --refmap= '%s' '%s' 2>&1",
+      snprintf(cmd, sizeof(cmd), "git fetch --no-tags --no-prune-tags --refmap= %s %s 2>&1",
                esc_remote, esc_refspec);
    free(esc_remote);
    free(esc_refspec);

@@ -31,6 +31,9 @@ static void on_sandbox_degraded(const char *program, sandbox_mode_t mode, int ne
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash("sandbox.exec", NULL, args_hash, sizeof args_hash);
 
+   if (obs_bus_commit_action("sandbox", "sandbox.exec", args_hash, program ? program : "", modestr,
+                             reason ? reason : "", verdict, /*task_id=*/0) != 0)
+      fprintf(stderr, "audit: sandbox WORM commit failed\n");
    obs_bus_emit("sandbox", "sandbox.exec", args_hash, program ? program : "", modestr,
                 reason ? reason : "", verdict, /*task_id=*/0);
 }

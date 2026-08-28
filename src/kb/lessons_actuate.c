@@ -12,12 +12,12 @@ int lessons_actor_may_confirm(const char *actor_source)
 }
 
 /* Append at most `cap`-bounded text; returns bytes now used (never exceeds cap-1). */
-static size_t append(char *out, size_t cap, size_t used, const char *fmt, const char *a,
-                     const char *b)
+static size_t append_parts(char *out, size_t cap, size_t used, const char *prefix, const char *a,
+                           const char *middle, const char *b, const char *suffix)
 {
    if (used >= cap - 1)
       return used;
-   int w = snprintf(out + used, cap - used, fmt, a, b);
+   int w = snprintf(out + used, cap - used, "%s%s%s%s%s", prefix, a, middle, b, suffix);
    if (w < 0)
       return used;
    used += (size_t)w;
@@ -32,8 +32,8 @@ int lessons_render_preamble(const lessons_reflect_entry_t *entries, int n, char 
    if (!entries || n <= 0)
       return 0;
 
-   size_t used =
-       append(out, cap, 0, "%s%s", "Earned-trust notes for this repo (prefer/avoid):\n", "");
+   size_t used = append_parts(out, cap, 0, "", "Earned-trust notes for this repo (prefer/avoid):\n",
+                              "", "", "");
    int rendered = 0;
    const char *cur_comm = NULL;
    for (int i = 0; i < n; i++)
@@ -68,11 +68,12 @@ int lessons_render_preamble(const lessons_reflect_entry_t *entries, int n, char 
          continue;
       if (!cur_comm || strcmp(cur_comm, entries[i].community) != 0)
       {
-         used = append(out, cap, used, "  [%s]\n",
-                       entries[i].community[0] ? entries[i].community : "(ungrouped)", "");
+         used = append_parts(out, cap, used, "  [",
+                             entries[i].community[0] ? entries[i].community : "(ungrouped)", "", "",
+                             "]\n");
          cur_comm = entries[i].community;
       }
-      used = append(out, cap, used, "    - %s: %s\n", entries[i].node, tag);
+      used = append_parts(out, cap, used, "    - ", entries[i].node, ": ", tag, "\n");
       rendered++;
    }
    return rendered;

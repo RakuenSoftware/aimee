@@ -93,7 +93,7 @@ static void test_generated_graphs(void)
    {
       NODES = 64
    };
-   char names[NODES][16];
+   char names[NODES][32];
    audit_edge_t edges[NODES + 8];
    for (int i = 0; i < NODES; i++)
    {

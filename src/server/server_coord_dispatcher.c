@@ -187,9 +187,8 @@ static int dispatcher_recover_previous_boot(void)
    unsigned char rnd[8];
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
    {
-      struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);
-      memcpy(rnd, &ts, sizeof(rnd));
+      LOG_ERROR("coord_dispatcher", "secure entropy unavailable; dispatcher not started");
+      return -1;
    }
    snprintf(g_claim_owner, sizeof(g_claim_owner), "coord-%ld-", (long)getpid());
    size_t used = strlen(g_claim_owner);

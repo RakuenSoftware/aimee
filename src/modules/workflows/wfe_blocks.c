@@ -136,10 +136,17 @@ static int is_dir(const char *p)
    return p && p[0] && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-/* snprintf that returns -1 on truncation (a corrupt path must never reach git). */
-static int sn(char *buf, size_t cap, const char *fmt, const char *a)
+/* Bounded join helpers keep the format literal while returning -1 on
+ * truncation (a corrupt path must never reach git). */
+static int sn_suffix(char *buf, size_t cap, const char *a, const char *suffix)
 {
-   int r = snprintf(buf, cap, fmt, a);
+   int r = snprintf(buf, cap, "%s%s", a, suffix);
+   return (r >= 0 && (size_t)r < cap) ? 0 : -1;
+}
+
+static int sn_prefix(char *buf, size_t cap, const char *prefix, const char *a)
+{
+   int r = snprintf(buf, cap, "%s%s", prefix, a);
    return (r >= 0 && (size_t)r < cap) ? 0 : -1;
 }
 
@@ -225,9 +232,9 @@ int wfe_worktree_ensure(const char *work_item_id, const char *existing, const ch
    if (!home || !home[0])
       return -1;
    char parent[768], path[1000], branch[200], lockf[1024];
-   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0 ||
+   if (sn_suffix(parent, sizeof parent, home, "/wfe-worktrees") != 0 ||
        snprintf(path, sizeof path, "%s/%s", parent, work_item_id) >= (int)sizeof path ||
-       sn(branch, sizeof branch, "aimee/wi/%s", work_item_id) != 0 ||
+       sn_prefix(branch, sizeof branch, "aimee/wi/", work_item_id) != 0 ||
        snprintf(lockf, sizeof lockf, "%s/%s.lock", parent, work_item_id) >= (int)sizeof lockf)
       return -1;
    const char *b = (base && base[0]) ? base : "HEAD";
@@ -327,7 +334,7 @@ int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs)
    if (!home || !home[0])
       return 0;
    char parent[768];
-   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0)
+   if (sn_suffix(parent, sizeof parent, home, "/wfe-worktrees") != 0)
       return 0;
    DIR *dp = opendir(parent);
    if (!dp)
@@ -365,7 +372,7 @@ int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs)
          continue;
 
       char branch[220];
-      if (sn(branch, sizeof branch, "aimee/wi/%s", e->d_name) != 0)
+      if (sn_prefix(branch, sizeof branch, "aimee/wi/", e->d_name) != 0)
          continue;
       wt_scrub(rl, path, branch); /* force-remove worktree + rm -rf + delete branch */
       char lockf[1100];

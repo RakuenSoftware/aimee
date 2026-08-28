@@ -53,7 +53,7 @@ int config_set_ingress_cache_placement_enabled(int value)
 
 int config_delegate_sandbox_require_isolation(void)
 {
-   double value = 0;
+   double value = 1; /* isolation is default-on-failure */
    (void)config_client_read_number("delegate_sandbox_require_isolation", &value);
    return (int)value;
 }
@@ -318,7 +318,7 @@ int config_set_lsp_server_count(int value)
 
 int config_computer_use_redact_sensitive_screenshots(void)
 {
-   double value = 0;
+   double value = 1; /* redaction is default-on-failure */
    (void)config_client_read_number("computer_use_redact_sensitive_screenshots", &value);
    return (int)value;
 }
@@ -522,7 +522,7 @@ int config_set_skills_review_enabled(int value)
 
 int config_skills_eval_gate_enabled(void)
 {
-   double value = 0;
+   double value = 1; /* executable skill evaluation is default-on-failure */
    (void)config_client_read_number("skills_eval_gate_enabled", &value);
    return (int)value;
 }

@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "claims": [
+    {
+      "id": "SC-001", "artifacts": ["aimee thin client"], "default": "all supported builds",
+      "boundary": "client to database", "owner": "Build Engineering",
+      "tests": ["src/tests/test_build_integrity.sh"],
+      "evidence": "build-integrity", "limitations": "Does not constrain a separately installed native extension."
+    },
+    {
+      "id": "SC-002", "artifacts": ["aimee-server", "aimee-kb"], "default": "shipped Make images",
+      "boundary": "service data-store ownership", "owner": "Runtime Core",
+      "tests": ["src/tests/test_build_integrity.sh"],
+      "evidence": "build-integrity and module ownership gates", "limitations": "Operator-supplied replacement binaries are out of scope."
+    },
+    {
+      "id": "SC-003", "artifacts": ["aimee-server", "aimee-kb"], "default": "network listeners",
+      "boundary": "remote request authentication", "owner": "Identity Platform",
+      "tests": ["src/tests/test_server_http.c", "src/tests/test_kb_http_routes.c"],
+      "evidence": "remote anonymous negative-route matrix", "limitations": "Credential-free KB HTTP is permitted only on process-local loopback; it carries no owner actor."
+    },
+    {
+      "id": "SC-004", "artifacts": ["aimee-server", "aimee-kb"], "default": "remote mutation routes",
+      "boundary": "user write authorization", "owner": "Identity and Data Authorization",
+      "tests": ["src/tests/test_kb_http_routes.c", "src/tests/test_server_http.c"],
+      "evidence": "signed identity, replay, and grant negative tests", "limitations": "Local operator maintenance is a separate privileged boundary."
+    },
+    {
+      "id": "SC-005", "artifacts": ["aimee-server"], "default": "registered tools",
+      "boundary": "tool to host/workspace", "owner": "Tooling and Guardrails",
+      "tests": ["src/tests/test_guardrails.c", "src/tests/test_mcp_git.c", "src/tests/test_skill.c"],
+      "evidence": "path escape, injection, and authorization negative tests", "limitations": "Arbitrary native modules admitted by the operator remain trusted code."
+    },
+    {
+      "id": "SC-006", "artifacts": ["delegate containers"], "default": "credentials and network denied",
+      "boundary": "delegate to server credentials", "owner": "Sandbox Runtime",
+      "tests": ["src/tests/test_build_integrity.sh"],
+      "evidence": "sandbox blast-radius inspection", "limitations": "Explicitly granted package or network access expands the boundary."
+    },
+    {
+      "id": "SC-007", "artifacts": ["SQLite WORM", "PostgreSQL WORM"], "default": "v2-full for new rows",
+      "boundary": "audit evidence integrity", "owner": "Audit and Governance",
+      "tests": ["src/tests/test_audit_worm.c", "src/tests/test_audit_worm_chain.c", "src/tests/test_kb_audit_worm_pg.c"],
+      "evidence": "field mutation and mixed-version verification", "limitations": "v1-partial rows do not bind timestamps or later attribution fields; host-root compromise needs an external witness."
+    },
+    {
+      "id": "SC-008", "artifacts": ["write-capable delegates"], "default": "container required",
+      "boundary": "delegate to host", "owner": "Sandbox Runtime",
+      "tests": ["src/tests/test_build_integrity.sh"],
+      "evidence": "no-host-fallback build and runtime checks", "limitations": "The managed server's Docker socket remains host-equivalent authority."
+    }
+  ]
+}

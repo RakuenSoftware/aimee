@@ -116,6 +116,23 @@ static void test_skill_load_not_found(void)
    assert(content == NULL);
 }
 
+static void test_project_skill_requires_operator_approval(void)
+{
+   char *root = make_tmpdir();
+   char skills_dir[512], path[512];
+   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
+   mkdir_p(skills_dir);
+   snprintf(path, sizeof(path), "%s/unapproved.md", skills_dir);
+   write_file(path, "unapproved authority\n");
+   unsetenv("AIMEE_UNVERIFIED_PROJECT_SKILLS");
+   unsetenv("AIMEE_SKILL_APPROVAL_MANIFEST");
+   unsetenv("AIMEE_SKILL_APPROVAL_PUBLIC_KEY");
+   assert(skill_load(root, "unapproved") == NULL);
+   setenv("AIMEE_UNVERIFIED_PROJECT_SKILLS", "I_ACKNOWLEDGE_UNVERIFIED_AGENT_AUTHORITY", 1);
+   rm_rf(root);
+   free(root);
+}
+
 static void test_skill_load_found(void)
 {
    char *root = make_tmpdir();
@@ -133,6 +150,47 @@ static void test_skill_load_found(void)
    assert(strstr(content, "Performance Skill") != NULL);
    assert(strstr(content, "Profile before optimizing") != NULL);
    free(content);
+
+   rm_rf(root);
+   free(root);
+}
+
+static void test_skill_load_rejects_links_and_traversal_names(void)
+{
+   char *root = make_tmpdir();
+   char skills_dir[512], outside[512], link_path[512], hard_path[512];
+   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
+   mkdir_p(skills_dir);
+   snprintf(outside, sizeof(outside), "%s/secret.md", root);
+   write_file(outside, "secret\n");
+   snprintf(link_path, sizeof(link_path), "%s/linked.md", skills_dir);
+   assert(symlink(outside, link_path) == 0);
+   assert(skill_load(root, "linked") == NULL);
+   snprintf(hard_path, sizeof(hard_path), "%s/hard.md", skills_dir);
+   assert(link(outside, hard_path) == 0);
+   assert(skill_load(root, "hard") == NULL);
+   assert(skill_load(root, "../secret") == NULL);
+
+   rm_rf(root);
+   free(root);
+}
+
+static void test_skill_support_rejects_symlink_components(void)
+{
+   char *root = make_tmpdir();
+   char skill_dir[512], manifest[512], outside_dir[512], outside_file[512], link_dir[512];
+   snprintf(skill_dir, sizeof(skill_dir), "%s/.aimee/skills/safe", root);
+   mkdir_p(skill_dir);
+   snprintf(manifest, sizeof(manifest), "%s/SKILL.md", skill_dir);
+   write_file(manifest, "---\nname: safe\ndescription: Safe fixture.\n---\nBody.\n");
+   snprintf(outside_dir, sizeof(outside_dir), "%s/outside", root);
+   mkdir_p(outside_dir);
+   snprintf(outside_file, sizeof(outside_file), "%s/secret.md", outside_dir);
+   write_file(outside_file, "secret\n");
+   snprintf(link_dir, sizeof(link_dir), "%s/references", skill_dir);
+   assert(symlink(outside_dir, link_dir) == 0);
+   char err[256] = "";
+   assert(skill_support_file_load(root, "safe", "references/secret.md", err, sizeof(err)) == NULL);
 
    rm_rf(root);
    free(root);
@@ -486,7 +544,7 @@ static void test_skill_manage_write_file_guards_paths(void)
    assert(skill_manage_write_file(root, "support", "references/example.md", "ok", "user", err,
                                   sizeof(err)) == 0);
    char path[512];
-   snprintf(path, sizeof(path), "%s/.aimee/skills/references/example.md", root);
+   snprintf(path, sizeof(path), "%s/.aimee/skills/support/references/example.md", root);
    char *content = read_file(path);
    assert(strcmp(content, "ok") == 0);
    free(content);
@@ -1046,11 +1104,15 @@ int main(void)
    g_test_bundled = make_tmpdir();
    setenv("AIMEE_HOME", g_test_home, 1);
    setenv("AIMEE_BUNDLED_SKILLS_DIR", g_test_bundled, 1);
+   setenv("AIMEE_UNVERIFIED_PROJECT_SKILLS", "I_ACKNOWLEDGE_UNVERIFIED_AGENT_AUTHORITY", 1);
 
+   test_project_skill_requires_operator_approval();
    test_skill_path_not_found();
    test_skill_path_found_project();
    test_skill_load_not_found();
    test_skill_load_found();
+   test_skill_load_rejects_links_and_traversal_names();
+   test_skill_support_rejects_symlink_components();
    test_skill_directory_format_found();
    test_skill_list_empty();
    test_skill_list_finds_project_skills();

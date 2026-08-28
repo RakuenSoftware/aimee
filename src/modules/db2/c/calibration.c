@@ -242,11 +242,18 @@ int db2_calibration_audit_stats(const char *target_surface, const char *kind,
       buckets[i].sample_n = 0;
    }
 
-   const char *bucket_expr = aimee_pg_is_shim() ? "CAST(%sapplied_confidence * ?5 AS INT)"
-                                                : "CAST(FLOOR(%sapplied_confidence * ?5) AS INT)";
    char bucket_recent[96], bucket_direct[96];
-   snprintf(bucket_recent, sizeof(bucket_recent), bucket_expr, "");
-   snprintf(bucket_direct, sizeof(bucket_direct), bucket_expr, "ae.");
+   if (aimee_pg_is_shim())
+   {
+      snprintf(bucket_recent, sizeof(bucket_recent), "CAST(applied_confidence * ?5 AS INT)");
+      snprintf(bucket_direct, sizeof(bucket_direct), "CAST(ae.applied_confidence * ?5 AS INT)");
+   }
+   else
+   {
+      snprintf(bucket_recent, sizeof(bucket_recent), "CAST(FLOOR(applied_confidence * ?5) AS INT)");
+      snprintf(bucket_direct, sizeof(bucket_direct),
+               "CAST(FLOOR(ae.applied_confidence * ?5) AS INT)");
+   }
 
    char sql[1400] = "";
    /* We build the SQL with scope conditions inline — safe because all values

@@ -19,7 +19,7 @@ ARG WITH_VSCODE=1
 # The module runtime is a static multicall binary. The canonical process
 # contracts decide which executable names are populated from it in the C build
 # stage below, so Docker never carries a second language-selection list.
-FROM golang:1.25-bookworm AS module-go-build
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS module-go-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -28,7 +28,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module \
     && CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-config \
          github.com/RakuenSoftware/aimee-module-config/runtime
 
-FROM debian:bookworm-slim AS build
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -75,7 +75,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
 
 # --- webchat frontend: build the React SPA into a single index.html ---
 # vite-plugin-singlefile inlines all JS/CSS, so the runtime image ships one file.
-FROM node:20-bookworm AS frontend-build
+FROM node:20-bookworm@sha256:8f693eaa7e0a8e71560c9a82b55fd54c2ae920a2ba5d2cde28bac7d1c01c9ba5 AS frontend-build
 WORKDIR /frontend
 # @rakuensoftware/smoothgui is vendored under frontend/vendor/ as a tarball and
 # referenced via a file: dependency, so `npm ci` resolves it from the build
@@ -88,7 +88,7 @@ COPY frontend/ ./
 RUN npm run build
 
 # --- webchat service: standalone Go browser server (cgo: legacy crypt migration + sqlite) ---
-FROM golang:1.25-bookworm AS runtime-web-build
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS runtime-web-build
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
@@ -109,7 +109,7 @@ RUN CGO_ENABLED=1 go build -o /out/aimee-runtime-web .
 # without putting C back in charge of workflow transitions. This is crash
 # containment, not an OS security boundary: both processes currently share the
 # appliance service identity for repository credentials and Unix-socket access.
-FROM golang:1.25-bookworm AS wfe-build
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS wfe-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -121,10 +121,10 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-wfe ./cmd/aimee-server \
 # from the frontend + Go builds above (only in the build graph when
 # WITH_RUNTIME_WEB=1 selects this stage). The "0" variant is empty → no webchat in the
 # image (WITH_RUNTIME_WEB=0 opts the UI out of the build entirely).
-FROM debian:bookworm-slim AS runtime-web-stage-1
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime-web-stage-1
 COPY --from=runtime-web-build /out/aimee-runtime-web /runtime-web/aimee-runtime-web
 COPY --from=frontend-build /frontend/dist/index.html /runtime-web/index.html
-FROM debian:bookworm-slim AS runtime-web-stage-0
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime-web-stage-0
 RUN mkdir -p /runtime-web
 FROM runtime-web-stage-${WITH_RUNTIME_WEB} AS runtime-web-stage
 
@@ -133,25 +133,30 @@ FROM runtime-web-stage-${WITH_RUNTIME_WEB} AS runtime-web-stage
 # build graph when WITH_VSCODE=1). The "0" variant is an empty /opt/codeserver/usr
 # so the final COPY is a no-op — no download, no size, in the default/CI build.
 # code-server bundles its own Node and defaults to the Open VSX registry.
-FROM debian:bookworm-slim AS code-server-stage-1
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS code-server-stage-1
 ARG TARGETARCH
 ARG CODE_SERVER_VERSION=4.96.4
+ARG CODE_SERVER_SHA256_amd64=9062963bfa22664a2fb443343fbaa3ae39b4d12817c2002e0f550bcf4f3ffb2c
+ARG CODE_SERVER_SHA256_arm64=39f33b7ede6521cfdd769607ffa0db5984933a174eed8cd42a87a18cd82e1483
 # Release downloads go through GitHub/CDN edges that intermittently return 5xx
 # (a 504 here failed the whole T3 e2e-docker topology). `curl -fsSL` alone turns
 # that into a hard build failure, so retry with backoff. --retry-all-errors is
 # required: -f makes an HTTP 504 exit 22, which plain --retry would NOT retry.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl \
+    && eval "want=\${CODE_SERVER_SHA256_${TARGETARCH}}" \
+    && test -n "$want" \
     && curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/coder/code-server/releases/download/v${CODE_SERVER_VERSION}/code-server_${CODE_SERVER_VERSION}_${TARGETARCH}.deb" -o /tmp/cs.deb \
+    && echo "$want  /tmp/cs.deb" | sha256sum -c - \
     && mkdir -p /opt/codeserver \
     && dpkg-deb -x /tmp/cs.deb /opt/codeserver \
     && rm /tmp/cs.deb \
     && rm -rf /var/lib/apt/lists/*
-FROM debian:bookworm-slim AS code-server-stage-0
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS code-server-stage-0
 RUN mkdir -p /opt/codeserver/usr
 FROM code-server-stage-${WITH_VSCODE} AS code-server-stage
 
-FROM debian:bookworm-slim
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171
 
 # Verification builds the KB sources too. They use PostgreSQL 17's asynchronous
 # cancellation API, while Debian bookworm ships libpq 15 headers. Add the
@@ -240,19 +245,27 @@ COPY --from=wfe-build /usr/local/go/ /usr/local/go/
 ARG TARGETARCH
 ARG DOCKER_CLI_VERSION=27.5.1
 ARG DOCKER_COMPOSE_VERSION=2.32.4
+ARG DOCKER_CLI_SHA256_amd64=4f798b3ee1e0140eab5bf30b0edc4e84f4cdb53255a429dc3bbae9524845d640
+ARG DOCKER_CLI_SHA256_arm64=e6b53725a73763ab3f988c73f8772eaed429754c1a579db5ff11f21990fd1817
+ARG DOCKER_COMPOSE_SHA256_amd64=ed1917fb54db184192ea9d0717bcd59e3662ea79db48bff36d3475516c480a6b
+ARG DOCKER_COMPOSE_SHA256_arm64=0c4591cf3b1ed039adcd803dbbeddf757375fc08c11245b0154135f838495a2f
 RUN set -eux; \
     case "${TARGETARCH:-amd64}" in \
       amd64) darch=x86_64; carch=x86_64 ;; \
       arm64) darch=aarch64; carch=aarch64 ;; \
       *) echo "unsupported TARGETARCH=${TARGETARCH}" >&2; exit 1 ;; \
     esac; \
-    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" \
-      | tar -xz -C /tmp docker/docker; \
+    eval "docker_want=\${DOCKER_CLI_SHA256_${TARGETARCH:-amd64}}"; \
+    eval "compose_want=\${DOCKER_COMPOSE_SHA256_${TARGETARCH:-amd64}}"; \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://download.docker.com/linux/static/stable/${darch}/docker-${DOCKER_CLI_VERSION}.tgz" -o /tmp/docker.tgz; \
+    echo "${docker_want}  /tmp/docker.tgz" | sha256sum -c -; \
+    tar -xzf /tmp/docker.tgz -C /tmp docker/docker; \
     install -m0755 /tmp/docker/docker /usr/local/bin/docker; \
     rm -rf /tmp/docker; \
     mkdir -p /usr/local/lib/docker/cli-plugins; \
     curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/docker/compose/releases/download/v${DOCKER_COMPOSE_VERSION}/docker-compose-linux-${carch}" \
       -o /usr/local/lib/docker/cli-plugins/docker-compose; \
+    echo "${compose_want}  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum -c -; \
     chmod 0755 /usr/local/lib/docker/cli-plugins/docker-compose; \
     docker --version; docker compose version
 
@@ -261,11 +274,15 @@ RUN set -eux; \
 # through `gh auth login` (gh's own public app identity), so sign-in works out
 # of the box with no app registration (git_oauth_gh.c).
 ARG GH_CLI_VERSION=2.96.0
+ARG GH_CLI_SHA256_amd64=83d5c2ccad5498f58bf6368acb1ab32588cf43ab3a4b1c301bf36328b1c8bd60
+ARG GH_CLI_SHA256_arm64=06f86ec7103d41993b76cd78072f43595c34aaa56506d971d9860e67140bf909
 RUN set -eux; \
     gharch="${TARGETARCH:-amd64}"; \
     case "$gharch" in amd64|arm64) ;; *) echo "unsupported TARGETARCH=${gharch}" >&2; exit 1 ;; esac; \
-    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" \
-      | tar -xz -C /tmp "gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh"; \
+    eval "want=\${GH_CLI_SHA256_${gharch}}"; \
+    curl -fsSL --retry 5 --retry-delay 3 --retry-all-errors --retry-max-time 180 --connect-timeout 30 "https://github.com/cli/cli/releases/download/v${GH_CLI_VERSION}/gh_${GH_CLI_VERSION}_linux_${gharch}.tar.gz" -o /tmp/gh.tar.gz; \
+    echo "${want}  /tmp/gh.tar.gz" | sha256sum -c -; \
+    tar -xzf /tmp/gh.tar.gz -C /tmp "gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh"; \
     install -m0755 "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}/bin/gh" /usr/local/bin/gh; \
     rm -rf "/tmp/gh_${GH_CLI_VERSION}_linux_${gharch}"; \
     gh --version
@@ -292,6 +309,8 @@ RUN set -eux; \
 # --retry-all-errors is required because -f turns a 503 into exit 22, which plain
 # --retry does NOT retry.
 ARG AST_GREP_VERSION=0.45.1
+ARG AST_GREP_SHA256_amd64=76fb6555be6734fb5057dba8d2fb756430f374bb9e1af694cf1ce00e13238d63
+ARG AST_GREP_SHA256_arm64=9ee7ec49aada3dc05135d21977af089a33fc3154ada25bab102daca90b5098f2
 RUN set -eux; \
     agarch="${TARGETARCH:-amd64}"; \
     case "$agarch" in \
@@ -299,12 +318,14 @@ RUN set -eux; \
       arm64) agtriple="aarch64-unknown-linux-gnu" ;; \
       *) echo "unsupported TARGETARCH=${agarch}" >&2; exit 1 ;; \
     esac; \
+    eval "want=\${AST_GREP_SHA256_${agarch}}"; \
     apt-get update; \
     apt-get install -y --no-install-recommends unzip; \
     curl -fsSL --retry 8 --retry-delay 15 --retry-all-errors --retry-max-time 600 \
       --connect-timeout 30 \
       "https://github.com/ast-grep/ast-grep/releases/download/${AST_GREP_VERSION}/app-${agtriple}.zip" \
       -o /tmp/ast-grep.zip; \
+    echo "${want}  /tmp/ast-grep.zip" | sha256sum -c -; \
     unzip -o /tmp/ast-grep.zip -d /tmp/ast-grep; \
     install -m0755 /tmp/ast-grep/ast-grep /usr/local/bin/ast-grep; \
     rm -rf /tmp/ast-grep /tmp/ast-grep.zip; \

@@ -14,7 +14,7 @@ int delegate_git_head(const char *path, char *buf, size_t len)
    if (!path || !path[0])
       return -1;
 
-   char *esc_path = shell_escape(path);
+   char *esc_path = shell_quote(path);
    if (!esc_path)
       return -1;
 
@@ -25,7 +25,7 @@ int delegate_git_head(const char *path, char *buf, size_t len)
       free(esc_path);
       return -1;
    }
-   snprintf(cmd, cmd_len, "git -C '%s' rev-parse HEAD 2>/dev/null", esc_path);
+   snprintf(cmd, cmd_len, "git -C %s rev-parse HEAD 2>/dev/null", esc_path);
    free(esc_path);
 
    int rc;
@@ -66,7 +66,7 @@ int delegate_git_worktree_fingerprint(const char *path, char *buf, size_t len)
    if (!path || !path[0])
       return -1;
 
-   char *esc_path = shell_escape(path);
+   char *esc_path = shell_quote(path);
    if (!esc_path)
       return -1;
 
@@ -77,7 +77,7 @@ int delegate_git_worktree_fingerprint(const char *path, char *buf, size_t len)
       free(esc_path);
       return -1;
    }
-   snprintf(cmd, cmd_len, "git -C '%s' status --porcelain=v1 --untracked-files=all 2>/dev/null",
+   snprintf(cmd, cmd_len, "git -C %s status --porcelain=v1 --untracked-files=all 2>/dev/null",
             esc_path);
    free(esc_path);
 

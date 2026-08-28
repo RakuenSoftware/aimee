@@ -114,6 +114,10 @@ pg_indb_val() { pg_val "$1"; }
 # here depends on the daemon, so this goes back where it reads correctly.
 step "Provisioning the JWKS trust chain (real envelope, real signature)"
 export AIMEE_TEST_MODULE_BIN="$PWD/src/build/obj/aimee-module"
+# live_env_pg_create just created a uniquely named empty database. Do not let
+# the generic reusable-store fixture drop its public schema: this rig shares
+# that schema with DB2's pgvector/pg_trgm extensions.
+export AIMEE_TEST_STORE_RESET_SCHEMA=0
 # `make all` does not build the module -- its rule lives in tests/Rules.mk --
 # and both this step and live_env_start_module need it, so build it here rather
 # than making the CI job remember.
@@ -125,6 +129,13 @@ export AIMEE_TEST_MODULE_BIN="$PWD/src/build/obj/aimee-module"
 kid=$(./write-tier-enforce-live provision \
         --bundle "$BUNDLE" --key "$TOKEN_KEY") \
   || { echo "enforce-live: trust chain provisioning failed" >&2; exit 2; }
+# The provisioning driver's isolated store fixture recreates public through the
+# Go store migrator. DB2's separate legacy owner still has to apply its own C
+# schema when kb starts, so restore only that schema-creation grant afterwards.
+pg_db -c "GRANT CREATE ON SCHEMA public TO $LIVE_OWNER" >/dev/null 2>&1 || {
+  echo "enforce-live: could not restore DB2 owner schema authority" >&2
+  exit 2
+}
 echo "${kid}   trust bundle $BUNDLE (root-owned 0644)"
 
 # --- kb --------------------------------------------------------------------

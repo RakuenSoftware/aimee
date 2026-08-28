@@ -1118,6 +1118,74 @@
       ]
     },
     {
+      "id": "egress",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 32,
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "module-egress-authorization",
+          "event_kind": 12289,
+          "durability": "ledger",
+          "durability_reason": "every module network attempt requires a caller-bound destination decision",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "module-egress-http",
+          "event_kind": 12290,
+          "durability": "ledger",
+          "durability_reason": "authorized HTTP request and response bytes cross this stage",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 3,
+          "name": "module-egress-sse-open",
+          "event_kind": 12291,
+          "durability": "ledger",
+          "durability_reason": "opening a governed external stream is a privileged network action",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 4,
+          "name": "module-egress-sse-send",
+          "event_kind": 12292,
+          "durability": "ledger",
+          "durability_reason": "every outbound stream frame crosses the governed transport",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 5,
+          "name": "module-egress-sse-receive",
+          "event_kind": 12293,
+          "durability": "ledger",
+          "durability_reason": "stream response completion is recorded without persisting response content",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 6,
+          "name": "module-egress-sse-close",
+          "event_kind": 12294,
+          "durability": "ledger",
+          "durability_reason": "stream closure completes the governed external session",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 7,
+          "name": "module-egress-credential-key",
+          "event_kind": 12295,
+          "durability": "ledger",
+          "durability_reason": "credential-envelope key acquisition is part of the privileged egress decision chain",
+          "emitter": "obs_bus_emit_durable_event"
+        }
+      ]
+    },
+    {
       "id": "observability",
       "execution": "core",
       "placements": [
@@ -1197,6 +1265,40 @@
       ],
       "request": [
         11266
+      ]
+    },
+    {
+      "id": "memory-egress",
+      "principal_ref": 70,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-memory",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "request": [
+        12290
+      ]
+    },
+    {
+      "id": "git-egress",
+      "principal_ref": 71,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-git",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        12290
+      ]
+    },
+    {
+      "id": "roundtable-egress",
+      "principal_ref": 72,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-roundtable",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        12290
       ]
     }
   ]

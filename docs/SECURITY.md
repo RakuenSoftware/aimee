@@ -4,16 +4,22 @@ aimee assumes models, prompts, retrieved text, tool arguments, repositories, MCP
 remote networks can all be hostile. Enforcement lives in the services and execution backends, not
 in a prompt asking a model to behave.
 
-## Guarantees
+## Release-qualified claims
 
-- A thin client cannot open DB1 or DB2.
-- A server process cannot query DB2 directly; a KB process cannot query DB1.
-- Remote routes require an authenticated principal and declared capabilities.
-- Remote writes need a KB-signed user identity and a per-user grant.
-- Tool calls pass schema, path, policy, worktree, and backend checks before execution.
-- Agent credentials are resolved inside the server and are not returned to workflows or delegates.
-- Migrated action paths enter one ordered event-bus audit seam.
-- The audit store detects deletion, reordering, modification, and checkpoint mismatch.
+The claim IDs below are defined with exact artifacts, defaults, enforcement owners, negative tests,
+and limitations in [`security-claims.json`](security-claims.json). CI rejects an unqualified claim.
+
+- **SC-001:** the shipped thin client has no DB1 or DB2 linkage.
+- **SC-002:** the server has no DB2 query authority and the KB has no DB1 query authority.
+- **SC-003:** network-reachable server and KB routes require an authenticated principal and declared
+  capability; the KB's credential-free mode is restricted to process-local loopback and disables
+  authenticated-owner mutations.
+- **SC-004:** remote writes require a KB-signed identity and a live per-user grant.
+- **SC-005:** registered tool paths pass schema, policy, assigned-workspace, and backend checks.
+- **SC-006:** delegate containers receive neither provider nor forge credentials by default.
+- **SC-007:** v2 WORM rows detect changes to chronology, attribution, ordering, and content; migrated
+  v1 rows are exported as `v1-partial` and do not claim full-field coverage.
+- **SC-008:** write-capable delegates use mandatory container isolation with no host fallback.
 
 These guarantees do not make arbitrary native code safe and do not protect a host after full root
 compromise without an external witness.
@@ -30,9 +36,10 @@ Every remote or browser operation resolves to a principal:
 - a service identity;
 - an agent acting for one of the above.
 
-Audit records keep the originating principal when work crosses a delegate, workflow, KB, or tool
-boundary. Falling back to a generic server identity is reserved for autonomous internal work that
-has no user principal.
+Governed tool records bind the unique session/run identifier and delegate role. Services also bind
+verified issuer, subject, transport identity, and team where those identities are available. Legacy
+and autonomous paths that have not yet received a verified user identity are explicitly recorded as
+service actors; they must not be presented as user attribution.
 
 ## Trust boundaries
 
@@ -45,7 +52,7 @@ has no user principal.
 | server → KB | service authentication, TLS where configured, typed `/v1` routes |
 | workflow → resource plane | direct supervised peer, kernel identity, narrow internal operations |
 | agent → workspace | assigned root, worktree, path normalization, write authority |
-| delegate → host | process or container isolation, resource limits, explicit mounts and egress |
+| delegate → host | mandatory container isolation, resource limits, explicit mounts and mediated egress |
 | service → provider | vault lookup, catalog, budget, rate, and egress policy |
 | module → event bus | admission, private rings, subscription authorization, bounded credits |
 
@@ -219,12 +226,14 @@ lag, anchor failure, WORM verification failure, bus drops, or an uncovered enfor
 
 ## Data and privacy
 
-Nothing phones home by default. Network calls happen for configured providers, git hosts, package
-sources, vulnerability checks, telemetry exporters, or other explicit integrations.
+Core services do not enable telemetry by default. Configured providers, git hosts, package sources,
+vulnerability checks, MCP servers, model fetches, and other integrations can make outbound calls;
+consult the deployment egress policy before enabling them.
 
-Memory and document ingestion can retain sensitive source text. Scope the KB, configure retention,
-and avoid sending restricted evidence to an external synthesis provider. Memory audit
-uses fingerprints for keys that can contain personal data.
+Memory and document ingestion can retain sensitive source text. Scope the KB, apply the retention
+and erasure rules in [Data governance](DATA_GOVERNANCE.md), and avoid sending restricted evidence to
+an external synthesis provider. Memory audit uses fingerprints for keys that can contain personal
+data.
 
 ## Non-goals
 

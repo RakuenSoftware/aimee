@@ -29,6 +29,7 @@
 #include <aimee/core/event_bus/bus_region.h> /* bus_control_epoch */
 #include <aimee/core/event_bus/bus_runtime.h>
 #include <aimee/core/event_bus/module_client.h>
+#include <aimee/core/event_bus/module_protocol.h>
 #include <errno.h>
 #include "config.h" /* config_default_dir */
 #include "log.h"
@@ -71,6 +72,27 @@ typedef struct durable_pending
    char detail[AB_DUR_DETAIL];
    struct durable_pending *next;
 } durable_pending_t;
+
+/* The host admits 64 module endpoints and each runtime permits 16 concurrent
+ * calls.  Keep one tracker for every theoretically in-flight fragmented
+ * request/reply so exhaustion cannot turn continuation fragments into duplicate
+ * audit intents. */
+#define AB_MODULE_FRAGMENT_TRACKERS (64u * 16u)
+typedef struct
+{
+   uint32_t principal_ref;
+   uint32_t event_kind;
+   uint32_t stage_id;
+   uint16_t pattern;
+   uint16_t status;
+   uint64_t correlation_id;
+   uint64_t trace_id;
+   uint64_t body_len;
+   int active;
+} module_fragment_tracker_t;
+
+static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                           uint32_t payload_len);
 
 /* PostgreSQL can be unavailable during KB startup. Retain audit rows for retry,
  * but never let a broken durable sink turn into unbounded daemon memory. */
@@ -153,6 +175,7 @@ static struct
    durable_pending_t *durable_tail;
    uint32_t durable_pending_count;
    uint64_t durable_retry_after_ns;
+   module_fragment_tracker_t module_fragments[AB_MODULE_FRAGMENT_TRACKERS];
    int started;
    int terminated; /* set by stop; blocks lazy resurrection after shutdown */
 
@@ -807,7 +830,6 @@ static void capture_open(void)
    }
    g.cap_fd = fd;
    atomic_store_explicit(&g.capture_state, CAPTURE_OK, memory_order_release);
-   bus_host_set_tap(&g.host, bus_capture_tap, &g.capture);
    if (strcmp(sinks.capture_fault, "sink_broken") == 0)
       g.capture.broken = 1;
    capture_prune(dir, AB_CAP_KEEP); /* retain the newest sessions, prune older */
@@ -1086,6 +1108,7 @@ static int start_locked(void)
    /* Register the capture tap BEFORE the consumer thread starts pumping, so the
     * first routed event onward is recorded. */
    capture_open();
+   bus_host_set_tap(&g.host, governance_tap, NULL);
 
    if (sinks.module_socket[0])
    {
@@ -1331,6 +1354,13 @@ static const struct
     {11797u, "aimee.aimee-peer-inbox"},
     {11798u, "aimee.aimee-peer-grant"},
     {11799u, "aimee.aimee-peer-channel"},
+    {12289u, "egress.module-egress-authorization"},
+    {12290u, "egress.module-egress-http"},
+    {12291u, "egress.module-egress-sse-open"},
+    {12292u, "egress.module-egress-sse-send"},
+    {12293u, "egress.module-egress-sse-receive"},
+    {12294u, "egress.module-egress-sse-close"},
+    {12295u, "egress.module-egress-credential-key"},
 };
 
 /* Sampled declarations use integer parts-per-million so the checked contract
@@ -1368,6 +1398,112 @@ static const char *durable_event_name(uint32_t kind)
    return NULL;
 }
 
+/* Structural module audit seam. It sees C and Go callers alike, so a
+ * module-to-module authorization request cannot bypass the ledger merely by
+ * avoiding the C convenience wrapper. Request bodies stay in the bounded
+ * capture stream; the WORM row records only identity, shape and outcome. */
+static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                           uint32_t payload_len)
+{
+   (void)ctx;
+   /* Credential-bearing egress requests and external response bytes must not
+    * become a second durable content/secret store. Their request/reply shape,
+    * caller, stage, trace, lengths and status are recorded below in WORM; raw
+    * payload capture is deliberately suppressed. The forge request still
+    * carries its legacy token until credential-handle migration completes. */
+   int sensitive_transport = frame->event_kind == 7428u ||
+                             (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
+   if (!sensitive_transport &&
+       atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
+       !g.capture.broken)
+      bus_capture_tap(&g.capture, frame, payload, payload_len);
+
+   uint16_t pattern = frame->hdr_flags & (BUS_F_REQUEST | BUS_F_REPLY);
+   const char *name = sinks.durable ? durable_event_name(frame->event_kind) : NULL;
+   if (!name || (pattern != BUS_F_REQUEST && pattern != BUS_F_REPLY))
+      return;
+
+   aimee_module_message_t message;
+   if (aimee_module_message_decode(payload, payload_len, &message) != AIMEE_MODULE_MESSAGE_OK)
+      return;
+   if ((pattern == BUS_F_REQUEST && message.operation != AIMEE_MODULE_OP_INVOKE) ||
+       (pattern == BUS_F_REPLY && message.operation != AIMEE_MODULE_OP_RESULT))
+      return;
+
+   module_fragment_tracker_t *tracker = NULL;
+   module_fragment_tracker_t *free_slot = NULL;
+   for (size_t i = 0; i < AB_MODULE_FRAGMENT_TRACKERS; ++i)
+   {
+      module_fragment_tracker_t *candidate = &g.module_fragments[i];
+      if (!candidate->active && !free_slot)
+         free_slot = candidate;
+      if (candidate->active && candidate->principal_ref == frame->principal_ref &&
+          candidate->event_kind == frame->event_kind &&
+          candidate->correlation_id == frame->correlation_id && candidate->pattern == pattern)
+      {
+         tracker = candidate;
+         break;
+      }
+   }
+
+   int first = tracker == NULL;
+   if (first && (frame->hdr_flags & BUS_F_MORE) != 0 && free_slot)
+   {
+      tracker = free_slot;
+      *tracker = (module_fragment_tracker_t){.principal_ref = frame->principal_ref,
+                                             .event_kind = frame->event_kind,
+                                             .stage_id = message.stage_id,
+                                             .pattern = pattern,
+                                             .status = message.status,
+                                             .correlation_id = frame->correlation_id,
+                                             .trace_id = message.trace_id,
+                                             .body_len = message.body_len,
+                                             .active = 1};
+   }
+   else if (!first)
+   {
+      tracker->body_len += message.body_len;
+      tracker->status = message.status;
+   }
+
+   if (first && pattern == BUS_F_REQUEST)
+   {
+      char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
+      snprintf(subject, sizeof subject, "%s:%u", name, message.stage_id);
+      snprintf(detail, sizeof detail,
+               "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
+               "\"principal_ref\":%u,\"request_len\":%u}",
+               frame->event_kind, message.stage_id, (unsigned long long)message.trace_id,
+               frame->principal_ref, message.body_len);
+      if (persist_or_queue_durable("bus.module.request", subject, "intent", detail) > 0)
+         atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+   }
+
+   if ((frame->hdr_flags & BUS_F_MORE) == 0)
+   {
+      if (pattern == BUS_F_REPLY)
+      {
+         uint64_t total = tracker ? tracker->body_len : message.body_len;
+         uint16_t status = tracker ? tracker->status : message.status;
+         uint32_t stage = tracker ? tracker->stage_id : message.stage_id;
+         uint64_t trace = tracker ? tracker->trace_id : message.trace_id;
+         char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
+         snprintf(subject, sizeof subject, "%s:%u", name, stage);
+         snprintf(detail, sizeof detail,
+                  "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
+                  "\"principal_ref\":%u,\"status\":%u,\"response_len\":%llu}",
+                  frame->event_kind, stage, (unsigned long long)trace, frame->principal_ref, status,
+                  (unsigned long long)total);
+         if (persist_or_queue_durable("bus.module.reply", subject,
+                                      status == AIMEE_MODULE_STATUS_OK ? "ok" : "failed",
+                                      detail) > 0)
+            atomic_fetch_add_explicit(&g.written, 1, memory_order_relaxed);
+      }
+      if (tracker)
+         memset(tracker, 0, sizeof *tracker);
+   }
+}
+
 aimee_module_call_result_t
 obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
                     const void *request_body, uint32_t request_len, void *response_body,
@@ -1394,36 +1530,9 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
       return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    }
    module_cancel_context_t state = {.external = cancelled, .context = cancel_context};
-   const char *durable_name = sinks.durable ? durable_event_name(event_kind) : NULL;
-   if (durable_name)
-   {
-      char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
-      snprintf(subject, sizeof subject, "%s:%u", durable_name, stage_id);
-      snprintf(detail, sizeof detail,
-               "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
-               "\"request_len\":%u}",
-               event_kind, stage_id, (unsigned long long)trace_id, request_len);
-      obs_bus_emit_durable_event("bus.module.request", subject, "intent", detail);
-   }
    aimee_module_call_result_t result = aimee_module_client_call(
        &g.module_clients[slot].client, event_kind, stage_id, trace_id, deadline_ns, request_body,
        request_len, response_body, response_capacity, response_len, module_call_cancelled, &state);
-   if (durable_name)
-   {
-      char subject[AB_DUR_SUBJECT], detail[AB_DUR_DETAIL];
-      char response_digest[65] = "";
-      uint32_t actual_response_len = response_len ? *response_len : 0;
-      if (result == AIMEE_MODULE_CALL_OK && response_body && actual_response_len > 0)
-         (void)aimee_sha256_hex(response_body, actual_response_len, response_digest);
-      snprintf(subject, sizeof subject, "%s:%u", durable_name, stage_id);
-      snprintf(detail, sizeof detail,
-               "{\"event_kind\":%u,\"stage_id\":%u,\"trace_id\":%llu,"
-               "\"response_len\":%u,\"response_sha256\":\"%s\"}",
-               event_kind, stage_id, (unsigned long long)trace_id, actual_response_len,
-               response_digest);
-      obs_bus_emit_durable_event("bus.module.reply", subject, aimee_module_call_result_name(result),
-                                 detail);
-   }
    module_client_release(slot);
    atomic_fetch_sub(&g.module_callers, 1);
    if (result != AIMEE_MODULE_CALL_OK)
@@ -1500,6 +1609,52 @@ int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
    sinks.durable_ctx = sink ? ctx : NULL;
    pthread_mutex_unlock(&start_lock);
    return 0;
+}
+
+static size_t action_field_len(const char *value, size_t limit)
+{
+   size_t length = 0;
+   while (length < limit && value[length])
+      length++;
+   return length;
+}
+
+int obs_bus_commit_action(const char *actor, const char *tool, const char *args_hash,
+                          const char *command, const char *mode, const char *reason_code,
+                          const char *verdict, long long task_id)
+{
+   if (!sinks.durable)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "action has no configured WORM sink: %s", tool ? tool : "");
+      return -1;
+   }
+
+   /* Length prefixes make the bounded detail unambiguous even when a value
+    * contains spaces or '='.  command is already a non-content preview or
+    * fingerprint at every caller; raw tool arguments never enter this row. */
+   const char *safe_command = command ? command : "";
+   const char *safe_mode = mode ? mode : "";
+   const char *safe_reason = reason_code ? reason_code : "";
+   size_t command_len = action_field_len(safe_command, 319);
+   size_t mode_len = action_field_len(safe_mode, AB_MODE - 1);
+   size_t reason_len = action_field_len(safe_reason, 95);
+   char action[AB_DUR_ACTION];
+   char detail[AB_DUR_DETAIL];
+   int action_len =
+       snprintf(action, sizeof action, "tool.%.*s", AB_DUR_ACTION - 6, tool ? tool : "");
+   int detail_len = snprintf(detail, sizeof detail,
+                             "command=%zu:%.*s mode=%zu:%.*s reason=%zu:%.*s task_id=%lld",
+                             command_len, (int)command_len, safe_command, mode_len, (int)mode_len,
+                             safe_mode, reason_len, (int)reason_len, safe_reason, task_id);
+   if (action_len < 0 || (size_t)action_len >= sizeof action || detail_len < 0 ||
+       (size_t)detail_len >= sizeof detail)
+   {
+      aimee_log(LOG_ERROR, "obs_bus", "action WORM row exceeds bounded schema: %s",
+                tool ? tool : "");
+      return -1;
+   }
+   return sinks.durable("action", actor ? actor : "", action, args_hash ? args_hash : "",
+                        verdict ? verdict : "", detail, sinks.durable_ctx);
 }
 
 int obs_bus_test_capture_fault(const char *reason)

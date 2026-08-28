@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "log.h"
+#include "artifact_trust.h"
 #include "mcp_osv_cache.h"
 #include "aimee/protocols/mcp/mcp_osv_gate.h"
 #include "osv_check.h"
@@ -170,6 +171,27 @@ static int registry_start_client(const config_mcp_client_t *client)
 
    if (registry_osv_blocks_client(client))
       return -1;
+
+   /* The normalized config entry is the executable plugin manifest: it binds
+    * argv/cwd or URL, hosting daemon, and credential handle before launch. */
+   char manifest[8192];
+   int pos = snprintf(manifest, sizeof(manifest),
+                      "transport=%d\ninstall=%d\ncwd=%s\nurl=%s\n"
+                      "bearer=%s\n",
+                      (int)client->transport, (int)client->install, client->cwd, client->url,
+                      client->bearer_token_env);
+   for (int i = 0; pos > 0 && i < client->command_count && pos < (int)sizeof(manifest); i++)
+      pos += snprintf(manifest + pos, sizeof(manifest) - (size_t)pos, "argv[%d]=%s\n", i,
+                      client->command[i]);
+   char identity[160], trust_err[256];
+   snprintf(identity, sizeof(identity), "config:mcp/%s", client->name);
+   if (pos <= 0 || pos >= (int)sizeof(manifest) ||
+       artifact_trust_verify_bytes("plugin", client->name, identity, manifest, (size_t)pos, NULL,
+                                   trust_err, sizeof(trust_err)) != 0)
+   {
+      registry_warn(client->name, "%s", trust_err[0] ? trust_err : "artifact trust refusal");
+      return -1;
+   }
 
    mcp_transport_t *transport = NULL;
    if (client->transport == CONFIG_MCP_TRANSPORT_STDIO)

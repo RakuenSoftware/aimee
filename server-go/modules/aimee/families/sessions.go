@@ -2,6 +2,8 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -36,6 +38,8 @@ const (
 	opWebchatLiveGet             uint32 = 22
 	opPersonaDeliveryClaim       uint32 = 23
 	opPersonaDeliveryFinish      uint32 = 24
+	opServerSessionListBySubject uint32 = 25
+	opServerSessionEraseSubject  uint32 = 26
 )
 
 // Persona delivery states. The claim is an UPDATE guarded on unclaimed, so of
@@ -152,8 +156,147 @@ const (
 	                                ORDER BY created_at, id
 	                                LIMIT $2`
 
-	serverSessionDeleteExpiredSQL = `DELETE FROM server_sessions
-	                                  WHERE created_at <= now() - make_interval(secs => $1)`
+	serverSessionListBySubjectSQL = `SELECT id FROM server_sessions
+	                                  WHERE principal = $1
+	                                  ORDER BY created_at, id
+	                                  LIMIT $2`
+
+	// One transaction-owned statement reaps the content graph before its session
+	// authority row. WORM/audit tables are deliberately absent: retention never
+	// rewrites evidence. Data-modifying CTEs make a crash all-or-nothing.
+	serverSessionDeleteExpiredSQL = `WITH expired AS MATERIALIZED (
+	                                    SELECT id FROM server_sessions
+	                                     WHERE created_at <= now() - make_interval(secs => $1)
+	                                  ), expired_delegations AS MATERIALIZED (
+	                                    SELECT delegation_id FROM delegation_spawns
+	                                     WHERE session_id IN (SELECT id FROM expired)
+	                                  ),
+	                                  d_delegation_messages AS (DELETE FROM delegation_messages
+	                                    WHERE delegation_id IN (SELECT delegation_id FROM expired_delegations)),
+	                                  d_delegation_checkpoint AS (DELETE FROM delegation_checkpoint
+	                                    WHERE delegation_id IN (SELECT delegation_id FROM expired_delegations)),
+	                                  d_delegation_spawns AS (DELETE FROM delegation_spawns
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_delegate_learning AS (DELETE FROM delegate_learnings
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_working_profile AS (DELETE FROM working_profile_observations_local
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_context_cache AS (DELETE FROM context_cache
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_context_snapshots AS (DELETE FROM context_snapshots
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_context_events AS (DELETE FROM context_activation_events
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_context_turns AS (DELETE FROM context_activation_turns
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_file_snapshots AS (DELETE FROM file_snapshots
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_execution_trace AS (DELETE FROM execution_trace
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_workflow_bind AS (DELETE FROM workflow_binding
+	                                    WHERE aimee_session_id IN (SELECT id FROM expired)),
+	                                  d_branch_owner AS (DELETE FROM branch_ownership
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_feature_branch AS (DELETE FROM session_feature_branch
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_economizer AS (DELETE FROM economizer_state
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_checkpoints AS (DELETE FROM checkpoints
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_agent_log AS (DELETE FROM agent_log
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_guardrail AS (DELETE FROM session_state
+	                                    WHERE session_id IN (SELECT id FROM expired)
+	                                  ),
+	                                  d_working AS (DELETE FROM working_memory
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_rewrite AS (DELETE FROM payload_rewrite_state
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_events AS (DELETE FROM conv_tool_events
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_chains AS (DELETE FROM conv_tool_chains
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_context AS (DELETE FROM conv_context_state
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_windows AS (DELETE FROM windows
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_primary AS (DELETE FROM primary_sessions
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_webchat_bind AS (DELETE FROM webchat_claude_sessions
+	                                    WHERE aimee_session_id IN (SELECT id FROM expired)),
+	                                  d_webchat_live AS (DELETE FROM webchat_live
+	                                    WHERE session_id IN (SELECT id FROM expired)),
+	                                  d_write_paths AS (DELETE FROM session_state_write_paths
+	                                    WHERE session_id IN (SELECT id FROM expired))
+	                                  DELETE FROM server_sessions s USING expired e WHERE s.id=e.id`
+
+	// The subject eraser uses the same content graph as retention, but selects
+	// every session owned by one authenticated principal. It intentionally has
+	// no reference to the immutable audit/WORM families.
+	serverSessionEraseSubjectSQL = `WITH subject_sessions AS MATERIALIZED (
+	                                    SELECT id FROM server_sessions WHERE principal=$1
+	                                  ), subject_delegations AS MATERIALIZED (
+	                                    SELECT delegation_id FROM delegation_spawns
+	                                     WHERE session_id IN (SELECT id FROM subject_sessions)
+	                                  ),
+	                                  d_delegation_messages AS (DELETE FROM delegation_messages
+	                                    WHERE delegation_id IN (SELECT delegation_id FROM subject_delegations)),
+	                                  d_delegation_checkpoint AS (DELETE FROM delegation_checkpoint
+	                                    WHERE delegation_id IN (SELECT delegation_id FROM subject_delegations)),
+	                                  d_delegation_spawns AS (DELETE FROM delegation_spawns
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_delegate_learning AS (DELETE FROM delegate_learnings
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_working_profile AS (DELETE FROM working_profile_observations_local
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_context_cache AS (DELETE FROM context_cache
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_context_snapshots AS (DELETE FROM context_snapshots
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_context_events AS (DELETE FROM context_activation_events
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_context_turns AS (DELETE FROM context_activation_turns
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_file_snapshots AS (DELETE FROM file_snapshots
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_execution_trace AS (DELETE FROM execution_trace
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_workflow_bind AS (DELETE FROM workflow_binding
+	                                    WHERE aimee_session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_branch_owner AS (DELETE FROM branch_ownership
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_feature_branch AS (DELETE FROM session_feature_branch
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_economizer AS (DELETE FROM economizer_state
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_checkpoints AS (DELETE FROM checkpoints
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_agent_log AS (DELETE FROM agent_log
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_working AS (DELETE FROM working_memory
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_rewrite AS (DELETE FROM payload_rewrite_state
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_events AS (DELETE FROM conv_tool_events
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_chains AS (DELETE FROM conv_tool_chains
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_context AS (DELETE FROM conv_context_state
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_windows AS (DELETE FROM windows
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_primary AS (DELETE FROM primary_sessions
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_webchat_bind AS (DELETE FROM webchat_claude_sessions
+	                                    WHERE principal=$1 OR aimee_session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_webchat_live AS (DELETE FROM webchat_live
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_write_paths AS (DELETE FROM session_state_write_paths
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions)),
+	                                  d_guardrail AS (DELETE FROM session_state
+	                                    WHERE session_id IN (SELECT id FROM subject_sessions))
+	                                  DELETE FROM server_sessions s USING subject_sessions x
+	                                   WHERE s.id=x.id`
 
 	personaClaimSQL = `UPDATE server_sessions
 	                      SET persona_delivery_state = 2, last_activity_at = now()
@@ -420,6 +563,74 @@ func serverSessionDeleteExpired(ctx context.Context, q store.Queryer, f []string
 		return 0, nil, err
 	}
 	return store.StatusOK, []string{store.I64toa(tag.RowsAffected())}, nil
+}
+
+func serverSessionListBySubject(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	max, ok := store.Atoi(f[1])
+	if f[0] == "" || !ok || max <= 0 || max > 4096 {
+		return store.StatusInvalid, nil, nil
+	}
+	return collect(ctx, q, serverSessionListBySubjectSQL, 1, func(scan func(...any) error) ([]string, error) {
+		var id string
+		if err := scan(&id); err != nil {
+			return nil, err
+		}
+		return []string{id}, nil
+	}, f[0], max)
+}
+
+func serverSessionEraseSubject(ctx context.Context, q store.Queryer, f []string) (uint32, []string, error) {
+	requestID, principal := f[0], f[1]
+	if !validErasureRequestID(requestID) || principal == "" || len(principal) > 600 {
+		return store.StatusInvalid, nil, nil
+	}
+	digestBytes := sha256.Sum256([]byte(principal))
+	digest := hex.EncodeToString(digestBytes[:])
+
+	// The descriptor runs this handler in one transaction.  Serialize equal
+	// request ids so two coordinators cannot both miss the journal and erase.
+	if _, err := q.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, requestID); err != nil {
+		return 0, nil, err
+	}
+	var storedDigest string
+	var storedCount int64
+	err := q.QueryRow(ctx, `SELECT subject_digest, deleted_sessions
+	                         FROM db1_subject_erasure_request WHERE request_id=$1`, requestID).
+		Scan(&storedDigest, &storedCount)
+	switch {
+	case err == nil:
+		if storedDigest != digest {
+			return store.StatusInvalid, nil, nil
+		}
+		return store.StatusOK, []string{store.I64toa(storedCount)}, nil
+	case !store.IsNoRows(err):
+		return 0, nil, err
+	}
+
+	tag, err := q.Exec(ctx, serverSessionEraseSubjectSQL, principal)
+	if err != nil {
+		return 0, nil, err
+	}
+	deleted := tag.RowsAffected()
+	if _, err := q.Exec(ctx, `INSERT INTO db1_subject_erasure_request
+	                         (request_id,subject_digest,deleted_sessions) VALUES($1,$2,$3)`,
+		requestID, digest, deleted); err != nil {
+		return 0, nil, err
+	}
+	return store.StatusOK, []string{store.I64toa(deleted)}, nil
+}
+
+func validErasureRequestID(value string) bool {
+	if len(value) < 16 || len(value) > 128 {
+		return false
+	}
+	for _, c := range []byte(value) {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-') {
+			return false
+		}
+	}
+	return true
 }
 
 // --- persona delivery ----------------------------------------------------------
@@ -710,5 +921,7 @@ var Sessions = store.Family{
 		opWebchatLiveGet:             {Name: "webchat_live_get", Cells: 4, Args: 2, Run: webchatLiveGet},
 		opPersonaDeliveryClaim:       {Name: "server_session_persona_delivery_claim", Args: 1, Tx: true, Run: personaDeliveryClaim},
 		opPersonaDeliveryFinish:      {Name: "server_session_persona_delivery_finish", Args: 2, Tx: true, Run: personaDeliveryFinish},
+		opServerSessionListBySubject: {Name: "server_session_list_by_subject", Cells: 1, Args: 2, Run: serverSessionListBySubject},
+		opServerSessionEraseSubject:  {Name: "server_session_erase_subject", Args: 2, Tx: true, Run: serverSessionEraseSubject},
 	},
 }
