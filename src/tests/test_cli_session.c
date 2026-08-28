@@ -104,7 +104,11 @@ static void install_fake_tmux(void)
            "'\"$c\"' end';\n"
            "    elif [ \"$FAKE_TMUX_MODE\" = prompt_then_answer ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
-           "      if [ \"$c\" -le 6 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
+           /* Four unchanged captures reach CLI_SESSION_STABLE_N, proving the
+            * prompt survives the ordinary completion threshold before the
+            * answer appears.  Keeping it at six made this timing test needlessly
+            * sensitive to process-launch latency under the parallel PG lane. */
+           "      if [ \"$c\" -le 4 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
            "else printf '%%s\\n' '\xe2\x9d\xaf pasted repair prompt' "
            "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
@@ -299,7 +303,9 @@ static void test_recv_does_not_return_static_prompt_as_answer(void)
    cli_session_t s = fake_session();
    cli_session_set_kind(&s, "claude");
    char buf[8192];
-   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   /* The fake tmux forks twice per poll. Leave headroom for a fully saturated
+    * release runner; the fixture still answers after the fifth capture. */
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 30000);
    assert(rc == 0);
    assert(strcmp(buf, "{\"ok\":true}") == 0);
 }
