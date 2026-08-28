@@ -86,6 +86,9 @@ KB_MTLS_ENV = {
     "AIMEE_KB_MTLS_HOST": "aimee-kb",
     "AIMEE_KB_MTLS_PORT": "8745",
 }
+CONTROL_WEB_CRED_MOUNT = (
+    "${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro"
+)
 
 REQUIRED_DOCKERIGNORE_ENTRIES = {
     ".git",
@@ -316,6 +319,52 @@ def kb_publication_failures(text: str) -> list[str]:
             failures.append("unsupported non-scalar Compose ports entry")
     if not saw_loopback_8741:
         failures.append("aimee-kb has no effective loopback publication for target port 8741")
+    return failures
+
+
+def control_web_idle_health_failures(text: str) -> list[str]:
+    """Keep optional control-web first boot consistent with Compose health.
+
+    With no console credential, the process intentionally stays alive without a
+    listener. Once a credential file exists, health must probe the real TLS SPA.
+    """
+    if yaml is None:
+        return ["PyYAML is required to validate control-web Compose health"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-control-web") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return ["missing aimee-control-web service"]
+
+    failures: list[str] = []
+    environment = service.get("environment")
+    if not isinstance(environment, dict):
+        return ["aimee-control-web environment must use parsed mapping form"]
+    if environment.get("AIMEE_CONTROL_WEB_ENABLED") != "${AIMEE_CONTROL_WEB_ENABLED:-1}":
+        failures.append("aimee-control-web enable flag must be operator-overridable")
+    if environment.get("CONTROL_WEB_CRED_FILE") != "/run/control-web/console.cred":
+        failures.append("aimee-control-web credential path changed unexpectedly")
+    volumes = service.get("volumes")
+    if not isinstance(volumes, list) or CONTROL_WEB_CRED_MOUNT not in volumes:
+        failures.append("aimee-control-web must mount the credential parent directory read-only")
+
+    healthcheck = service.get("healthcheck")
+    test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
+    if not isinstance(test, list) or len(test) != 2 or test[0] != "CMD-SHELL":
+        failures.append("aimee-control-web healthcheck must use one bounded shell decision")
+        return failures
+    command = str(test[1])
+    required = {
+        "disabled-state handling": "AIMEE_CONTROL_WEB_ENABLED",
+        "credential-file handling": 'if [ ! -f "$${CONTROL_WEB_CRED_FILE}" ]',
+        "live TLS probe": "curl -fsSk https://127.0.0.1:8744/",
+    }
+    for name, marker in required.items():
+        if marker not in command:
+            failures.append(f"aimee-control-web healthcheck missing {name}")
     return failures
 
 
@@ -639,6 +688,8 @@ def check(root: Path) -> list[str]:
             failures.append(f"compose.yaml contains forbidden {name}")
         for failure in kb_publication_failures(text):
             failures.append(f"compose.yaml {failure}")
+        for failure in control_web_idle_health_failures(text):
+            failures.append(f"compose.yaml {failure}")
 
     if not server_compose.exists():
         failures.append("missing compose.server.yaml")
@@ -761,6 +812,20 @@ def plant_test() -> int:
                     '      - "127.0.0.1:8741:8741"',
                     "    healthcheck:",
                     '      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]',
+                    "  aimee-control-web:",
+                    "    environment:",
+                    "      AIMEE_CONTROL_WEB_ENABLED: ${AIMEE_CONTROL_WEB_ENABLED:-1}",
+                    "      CONTROL_WEB_CRED_FILE: /run/control-web/console.cred",
+                    "    volumes:",
+                    "      - ${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro",
+                    "    healthcheck:",
+                    "      test:",
+                    "        - CMD-SHELL",
+                    "        - >-",
+                    "          enabled=$$(printf '%s' \"$${AIMEE_CONTROL_WEB_ENABLED:-1}\" | tr '[:upper:]' '[:lower:]');",
+                    "          case \"$$enabled\" in 0|false|no|off) exit 0;; esac;",
+                    "          if [ ! -f \"$${CONTROL_WEB_CRED_FILE}\" ]; then exit 0; fi;",
+                    "          curl -fsSk https://127.0.0.1:8744/",
                     "",
                 ]
             ),
@@ -858,6 +923,21 @@ def plant_test() -> int:
             for item in found:
                 print(f"  found: {item}", file=sys.stderr)
             return 1
+
+        control_compose = read(root / "compose.yaml")
+        for marker in (
+            "      AIMEE_CONTROL_WEB_ENABLED: ${AIMEE_CONTROL_WEB_ENABLED:-1}\n",
+            "      - ${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro\n",
+            '          if [ ! -f \"$${CONTROL_WEB_CRED_FILE}\" ]; then exit 0; fi;\n',
+            "          curl -fsSk https://127.0.0.1:8744/\n",
+        ):
+            planted = control_compose.replace(marker, "", 1)
+            if planted == control_compose or not control_web_idle_health_failures(planted):
+                print(
+                    f"kb-container-packaging plant: missed control-web health marker {marker!r}",
+                    file=sys.stderr,
+                )
+                return 1
 
         identity_compose = read(root / "compose.server-managed.yaml")
         for marker in (
