@@ -3911,7 +3911,7 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer }
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
       responses:
         "200":
           description: Memory envelope

@@ -1336,6 +1336,15 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+RESP=$(http_call POST /v1/memory/get '{"id":0}') || true
+check_output "memory.get rejects non-positive ids" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":1.5}') || true
+check_output "memory.get rejects fractional ids" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":1e30}') || true
+check_output "memory.get rejects unrepresentable ids" '"kind":"invalid_argument"' echo "$RESP"
+
 RESP=$(http_call POST /v1/memory/user_capture '{}') || true
 check_output "memory.user_capture missing fields stays typed" '"kind":"invalid_argument"' echo "$RESP"
 if echo "$RESP" | grep -q '"http_status":400'; then

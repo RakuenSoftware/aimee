@@ -419,10 +419,10 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 cJSON *memory_get_command(cJSON *req)
 {
-
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(jid))
-      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "memory.get requires an id", NULL);
+   int64_t id = 0;
+   if (memory_request_positive_id(req, "id", &id) != 0)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.get requires a positive integer id", NULL);
 
    /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
     * the only thing between the flag and aimee-kb, which owns the interval. It
@@ -434,7 +434,7 @@ cJSON *memory_get_command(cJSON *req)
    memory_t m;
    kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
    server_memory_scope_begin(req);
-   int rc = kb_client_memory_get_as_of((int64_t)jid->valuedouble, as_of, &m, &verdict);
+   int rc = kb_client_memory_get_as_of(id, as_of, &m, &verdict);
    kb_client_memory_scope_context_clear();
 
    cJSON *resp;
