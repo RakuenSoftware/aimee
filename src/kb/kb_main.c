@@ -2341,9 +2341,9 @@ int main(int argc, char **argv)
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
+      obs_bus_stop();
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
-      obs_bus_stop();
       audit_log_close();
       agent_http_cleanup();
       return 1;
@@ -2352,13 +2352,13 @@ int main(int argc, char **argv)
    (void)runtime_secret_get("AIMEE_KB_API_BEARER_TOKEN", kb_http_bearer, sizeof(kb_http_bearer));
    int kb_http_start_rc = kb_http_start(http_port, kb_http_bearer);
    runtime_secret_wipe(kb_http_bearer, sizeof(kb_http_bearer));
-   if (kb_http_start_rc != 0)
+   if (kb_http_start_rc != KB_HTTP_START_OK)
    {
-      /* Another instance owns the port; yield gracefully with success so
-       * systemd (Restart=on-failure) doesn't restart-loop. */
-      LOG_WARN("kb_http",
-               "failed to start HTTP listener on port %d; another instance likely owns it",
-               http_port);
+      if (kb_http_start_rc == KB_HTTP_START_ADDRESS_IN_USE)
+         LOG_WARN("kb_http", "HTTP listener port %d is already in use", http_port);
+      else
+         LOG_ERROR("kb_http", "HTTP listener failed on %d (result=%d)", http_port,
+                   kb_http_start_rc);
       kb_metrics_listener_stop();
       kb_management_runtime_stop();
       kb_service_shutdown(&g_ctx);
@@ -2367,12 +2367,14 @@ int main(int argc, char **argv)
       kb_vault_operator_components_destroy(&vault_operator_components);
       if (vault_operator_runtime_opened)
          db2_vault_operator_runtime_close(&vault_operator_runtime);
+      obs_bus_stop();
       db2_shutdown();
       kb_vault_tpm_runtime_lock_release(&vault_tpm_runtime_lock);
-      obs_bus_stop();
       audit_log_close();
       agent_http_cleanup();
-      return 0;
+      /* A second instance may yield without making an on-failure supervisor restart-loop.
+       * Security/configuration and system failures must remain visible to operators. */
+      return kb_http_start_rc == KB_HTTP_START_ADDRESS_IN_USE ? 0 : 1;
    }
 
    /* Now that this instance owns the port, boot the MCP plugins this kb HOSTS
