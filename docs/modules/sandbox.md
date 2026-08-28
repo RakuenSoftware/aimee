@@ -78,7 +78,7 @@ for module consumers. Live proxy traffic enters only through the server's UDS de
 is handed to the Go helper; C retains only the learned-package bus adapter.
 
 The operator-visible surface is indirect: the packages that appear in a generated
-sandbox Dockerfile, and the resulting content-hash image tag.
+`sandbox` Dockerfile, and the resulting content-hash image tag.
 
 ## Data and migrations
 

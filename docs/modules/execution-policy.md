@@ -2,68 +2,82 @@
 
 ## Purpose and non-goals
 
-`execution-policy` is a required Go module process. It makes fail-closed authorization decisions for
-tool, filesystem, process, network, credential, and repository actions. It owns the decision and denial
-reason; it does not execute the action, keep secrets, resolve workspaces, author optional governance
-policy, or implement the append-only audit ledger.
+`execution-policy` makes fail-closed authorization decisions for tool, filesystem, process, network,
+credential, and repository actions. It owns verdicts and denial reasons. It does not execute actions,
+hold credentials, resolve workspaces, or replace the append-only audit and optional governance layers.
 
-The module is deliberately outside the C communication core. C owns the event-bus transport and the
-small enforcement caller that applies the verdict. Go owns all policy logic.
+## Public contracts
 
-## Public contract
-
-The wire identity is declared in
-`src/modules/execution-policy/include/aimee/execution-policy/module_api.h`: event kind `8449`, stage
-`1`. `server-go/modules/execution-policy/execution_policy.go` implements the required handler. The C
-caller in `src/server/execution_policy_bus.c` serializes the already-classified tool request, calls the
-Go process synchronously over the bus, validates the response, and denies on absence, timeout, or a
-malformed response.
-
-The existing `policy_check_tool` compatibility contract remains declared in
-`src/headers/agent_exec.h`; callers do not gain a local authorization fallback. Schema and argument
-validation (`tool_validate`) and side-effect classification (`tool_side_effect`) remain with the
-server/tools surface.
-
-Every request and reply for event kind `8449` is classified `ledger` in
-`src/modules/process-contracts.json`. The observability bridge therefore leaves a durable record that
-the decision seam fired without persisting raw arguments or response bodies.
+Principal `17` serves event `8449`, stage `1`, through the public header
+`aimee/execution-policy/module_api.h`. The caller submits an already classified, bounded action and
+authenticated context; the Go handler returns a typed allow, deny, or approval verdict and reason.
 
 ## Dependencies and consumers
 
-- `config` supplies effective computer-use settings; operator policy uses the module-owned fixed
-  locations described below.
-- `ir` supplies typed actions evaluated by policy.
-- `module-runtime` supervises readiness and the request/reply lifecycle.
+- `config`: supplies effective computer-use settings and the fixed operator-policy locations.
+- `ir`: supplies the canonical typed action evaluated by the policy engine.
+- `module-runtime`: supervises the process and authenticates principal `17` request/reply traffic.
 
-Consumers include delegates, gateway, tools, Git, workspace, workflows, and governance. Governance may
-author or distribute organizational policy, but the required local execution-policy process remains the
-final action boundary.
+Delegates, gateway, tools, Git, workspace, workflows, and governance consume the verdict. The enforcing
+caller applies it synchronously and has no local authorization fallback.
+
+## Providers and readiness
+
+The Go implementation at `server-go/modules/execution-policy` provides the required handler. Readiness
+requires valid built-in rules and any configured policy documents. A parser error, missing required
+contract, or failed bus registration leaves the seam unavailable, causing consumers to deny actions.
 
 ## Configuration and activation
 
-The required module cannot be hot-disabled. It reads `.aimee-policy.json`, followed by
-`$AIMEE_HOME/policy.json`, and understands `forbidden_commands`, `tool_rules`, and `approval_levels`.
-Missing optional policy means no operator restriction matched; an unreadable or invalid policy denies.
-Computer-use policy is supplied explicitly with each request so the decision uses the daemon's effective
-configuration rather than independently re-reading it.
+- `runtime_toggle.supported`: `false`; a live action path cannot lose its required authorization decision point.
 
-## Security and failure behavior
+The module reads `.aimee-policy.json` and `$AIMEE_HOME/policy.json` for forbidden commands, tool rules,
+and approval levels, plus typed settings from `config`. Policy files may narrow authority but cannot bypass hard rails.
 
-Authorization precedes mutation. Invalid requests, unavailable module transport, timeout, cancellation,
-invalid policy, and invalid responses all fail closed. The module receives bounded JSON and returns only
-`allowed` plus a redacted reason. The durable bus record stores event identity, status, sizes, and a
-response digest, not raw command arguments, repository content, credentials, or tool output.
+## Surfaces
 
-Optional semantic classifiers may advise policy but cannot independently allow an action or override a
-denial. Source-discovery interception and computer-use restrictions are part of the Go decision engine,
-so moving the module out of core does not create a C policy fallback.
+Action callers use the single `execution-policy` bus contract; operators edit the documented policy files and observe
+denials through UI, CLI, logs, and audit evidence. There is no public endpoint that accepts an invented
+principal or raw allow verdict, and no command that disables the required module during execution.
 
-## Tests and compatibility
+## Data and migrations
 
-Go unit tests cover ordinary allows, forbidden commands, path restrictions, source-discovery denial,
-computer-use allowlists, invalid input, cancellation, and policy-load failure. Existing C enforcement
-tests exercise the compatibility caller. Decision codes, action names, denial semantics, and pre-tool
-ordering remain compatibility contracts.
+The module keeps no mutable database. `Policy` documents are version-controlled or operator-managed JSON,
+while request decisions are ephemeral and their bounded outcomes are classified for the ledger. Changes
+need validation but no schema migration; historic audit records retain the policy outcome seen at execution.
 
-New policy sources must join this single fail-closed Go decision contract. A compatibility shim may
-transport or apply the verdict, but may not authorize independently or translate a denial into an allow.
+## Security and privacy
+
+Caller identity comes from the bus, not request data. The module evaluates normalized actions, returns `deny` for unknown classes, and rejects
+unknown classes, and treats absence, timeout, and malformed responses as denial. Ledger records prove
+the seam fired without persisting raw tool arguments, credentials, file content, or response bodies.
+
+## Supported journeys
+
+Before a delegate runs a command, the server classifies it into IR, attaches session and workspace
+identity, and calls `execution-policy`. An allow proceeds under the original bounds, an approval verdict
+parks for an authorized human, and a denial returns the stable reason without performing the action.
+
+## Tests and failure behavior
+
+Tests under `server-go/modules/execution-policy` and C caller tests cover rule precedence, malformed
+frames, timeouts, approval, and denial. Unknown actions, absent policy service, invalid JSON, ambiguous
+matches, and response validation failures deny. No transport or parser error becomes an implicit allow.
+
+## Operational diagnostics
+
+Use principal `17` readiness, action class, rule identifier, verdict, denial reason, and request ID.
+Correlate with the content-free ledger event and the enforcing caller log. Do not log raw arguments,
+environment variables, credentials, source content, or sensitive filesystem paths while diagnosing.
+
+## Compatibility
+
+Event `8449`, stage `1`, verdict meanings, normalized action classes, and denial reason identifiers are
+stable contracts. The legacy `policy_check_tool` caller symbol remains a compatibility seam but cannot
+authorize locally. Additive rules must preserve fail-closed handling of unknown values.
+
+## Extension and removal
+
+Add an action class in `IR`, wire fixtures, normalization, policy evaluation, enforcement, audit mapping,
+and denial tests together. Removing a rule requires proving no caller depends on its reason semantics.
+Removing the module requires a reviewed replacement at every action seam; bypass is not a migration.

@@ -26,8 +26,10 @@ Current contracts:
   and [protocols](protocols.md);
 - [gateway](gateway.md), [runtime web](runtime-web.md), [control web](control-web.md), and
   [vault](vault.md);
-- [aimee](aimee.md), [economizer](economizer.md), and [sandbox](sandbox.md);
-- [db1](db1.md), [db2](db2.md), and [postgres](postgres.md).
+- [aimee](aimee.md), [economizer](economizer.md), [egress](egress.md),
+  [observability](observability.md), and [sandbox](sandbox.md);
+- [db2](db2.md) and [postgres](postgres.md). The server PostgreSQL tier is documented separately
+  as the [DB1 storage boundary](../DB1.md).
 
 See the [technical reference](../../src/README.md) for the process and source map.
 

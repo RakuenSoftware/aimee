@@ -280,16 +280,17 @@ because the current reset command deliberately no-ops when the dimensions match.
 
 ### Local synthesis
 
-Synthesis writes curation and summaries. Unlike the embedder it is not inside the KB container: it is
-its own image, `aimee-llm-e2b` or `aimee-llm-e4b`, deployed beside the KB when the wizard selects a
-local model. Which model it carries is a property of the tag, because the weights are baked in.
+Synthesis writes curation and summaries from its own image, `aimee-llm-e2b` or
+`aimee-llm-e4b`. The wizard deploys it beside the KB when the user selects a local model. Which
+model it carries is a property of the tag because the weights are baked in.
 
 | image | model | weights |
 | --- | --- | --- |
 | `aimee-llm-e2b` | gemma-4-E2B-it | 2.62 GB (qat-UD-Q4_K_XL) |
 | `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB (UD-Q6_K_XL) |
 
-E4B is the better model; E2B is roughly half the resident memory and about twice the CPU speed. See
+E4B has the higher measured extraction score; E2B uses roughly half the resident memory and runs
+about twice as fast on the measured CPU lane. See
 [Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.
 
 Three states are all supported, and `off` is not an error: embedding, search, recall and indexing
@@ -545,8 +546,9 @@ at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is
 identity is revalidated against its CA pin after every process restart.
 
 Grant administration happens **on aimee-kb**, using the exact subject returned by the user's PAM or
-OIDC login. aimee-server does not proxy it: doing so would mean the server holding an administrative
-identity on the KB, so the `aimee kb grant …` commands were removed and no longer dispatch.
+OIDC login. The server holds no administrative KB identity and does not proxy this operation.
+Server-side dispatch for `aimee kb grant …` is removed. Its legacy grammar may still appear in
+client help, but those subcommands do not dispatch.
 
 ```bash
 # on aimee-kb, as a principal with admin or team-lead authority IN the target team

@@ -10,6 +10,7 @@
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 extern aimee_module_status_t aimee_runtime_web_module_handler(const aimee_module_invocation_t *,
                                                               const uint8_t *, uint32_t, uint8_t *,
@@ -78,6 +79,17 @@ int main(void)
    expect_status(SERVER_ERR_UNAVAILABLE, 503);
    expect_status("unknown", 502);
    expect_status(NULL, 502);
+
+   cJSON *rich = cJSON_Parse("{\"status\":\"unavailable\",\"retryable\":true,"
+                             "\"dependency\":\"kb\",\"retry_after_ms\":1000}");
+   assert(rich != NULL);
+   server_error_kind_apply(rich, SERVER_ERR_UNAVAILABLE);
+   assert(strcmp(cJSON_GetObjectItem(rich, "kind")->valuestring, SERVER_ERR_UNAVAILABLE) == 0);
+   assert(cJSON_GetObjectItem(rich, "http_status")->valueint == 503);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(rich, "retryable")));
+   assert(strcmp(cJSON_GetObjectItem(rich, "dependency")->valuestring, "kb") == 0);
+   assert(cJSON_GetObjectItem(rich, "retry_after_ms")->valueint == 1000);
+   cJSON_Delete(rich);
 
    server_conn_t conn = {0};
    server_error_kind_register_http_status_provider(NULL);
