@@ -157,8 +157,8 @@ That is not a storage fault. The selected KB has no ready synthesis role, so cur
 to run and each attempt is recorded as a failure rather than skipped. The count grows quietly and
 `kb status` does not name the cause.
 
-Configure synthesis inside that KB container or point it at a remote endpoint supported by the
-profile. Otherwise expect the count. `aimee kb status` shows the curator tiers as
+Deploy the model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar for that KB, or point the KB at
+a supported remote endpoint. Otherwise expect the count. `aimee kb status` shows the curator tiers as
 `configured: false` until a role is ready. See [KB model tiers](AIMEE_KB_SYNTH_TIERS.md).
 
 ## Workflow parks

@@ -265,7 +265,10 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
-   const char *r = "{\"status\":\"ok\",\"result\":42}\n";
+   const char *r = strstr(g_disp_body, "\"test_http_status\":true")
+                       ? "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                         "\"http_status\":400}\n"
+                       : "{\"status\":\"ok\",\"result\":42}\n";
    ssize_t w = write(conn->fd, r, strlen(r));
    (void)w;
    return 0;
@@ -481,8 +484,27 @@ static void test_sse_keepalive_slow_generation(void)
    assert(strstr(buf, "keep-alive") != NULL);
 }
 
+static void test_json_number_serialization_is_exact(void)
+{
+   const char *cases[] = {"9007199254740991", "9007199254740992", "9007199254740993"};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      cJSON *before = cJSON_Parse(cases[i]);
+      assert(cJSON_IsNumber(before));
+      char *encoded = cJSON_PrintUnformatted(before);
+      assert(encoded != NULL);
+      cJSON *after = cJSON_Parse(encoded);
+      assert(cJSON_IsNumber(after));
+      assert(after->valuedouble == before->valuedouble);
+      cJSON_Delete(after);
+      free(encoded);
+      cJSON_Delete(before);
+   }
+}
+
 int main(void)
 {
+   test_json_number_serialization_is_exact();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
@@ -2478,6 +2500,16 @@ int main(void)
           server_http_route("POST", "/v1/cron/add", spoof, (int)strlen(spoof), resp, sizeof(resp));
       assert(st == 200);
       assert(strcmp(g_disp_method, "cron.add") == 0);
+
+      /* Typed NDJSON errors carry their transport-independent HTTP mapping in
+       * the envelope. The first-class HTTP adapter must honor it rather than
+       * reporting a failed operation as a successful 200 response. */
+      const char *typed_error = "{\"test_http_status\":true}";
+      st = server_http_route("POST", "/v1/cron/add", typed_error, (int)strlen(typed_error), resp,
+                             sizeof(resp));
+      assert(st == 400);
+      assert(strcmp(resp, "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                          "\"http_status\":400}") == 0);
    }
 
    /* (The /v1/rpc method-allowlist tests were removed with the bridge: each method

@@ -1,8 +1,8 @@
 # KB fleet and model placement
 
 The target deployment has one or more `aimee-kb` containers. Each KB owns its storage boundary and
-declares which model roles it can serve. There is no `aimee-llm` service and no replacement
-inference service beside the KB fleet.
+declares which model roles it can serve. An optional model-specific `aimee-llm` sidecar can execute
+local synthesis for one KB. It is part of that KB's placement and is never a server routing target.
 
 ## Model roles belong to a KB
 
@@ -10,12 +10,12 @@ Each KB can configure the embedding and synthesis roles independently:
 
 | Role placement | Meaning |
 | --- | --- |
-| internal | The selected model runs inside that `aimee-kb` container. |
+| local | Embedding runs in the KB image or selected embedder sidecar; synthesis runs in the selected `aimee-llm-*` sidecar. |
 | remote | The KB calls an explicitly configured remote model endpoint. |
 | off | The role is unavailable and dependent stages report degradation. |
 
-A KB may serve embedding, synthesis, both roles, or neither. Internal placement does not create a
-separate network service for the server to route to. Remote placement does not move role ownership
+A KB may serve embedding, synthesis, or both roles. Local placement does not create a
+model service for the server to route to. Remote placement does not move role ownership
 to the server; the KB still owns admission, credentials, health, and the request contract.
 
 ## Fleet routing

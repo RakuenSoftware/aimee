@@ -169,9 +169,9 @@ fingerprinted before audit so a key cannot inject personal data or forged log li
 record itself remains subject to its KB scope and retention policy.
 
 Model roles receive only the evidence allowed by the selected KB's provider and egress policy.
-Embedding and synthesis can run inside that KB container or at its configured remote endpoint. Use
-internal placement when the corpus must not cross the container boundary. There is no standalone
-inference service beside the KB.
+Embedding runs in the KB image or its selected embedder sidecar. Local synthesis runs in the KB's
+model-specific `aimee-llm` sidecar over mTLS; remote synthesis uses the configured endpoint. Use a
+local placement when the corpus must stay within the deployment boundary.
 
 ## What exists now
 

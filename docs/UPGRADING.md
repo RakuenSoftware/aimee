@@ -16,13 +16,13 @@ Several of those are cases where a fresh install came up healthy and silently di
 
 1. Stop starting new workflows and wait for active writes to finish.
 2. Run `aimee audit checkpoint` and `aimee audit verify`.
-3. Back up the server config directory, DB1, workflow store, vault custody, TLS state, and audit
-   witness material.
+3. Dump DB1 with `pg_dump`; it includes workflow rows. Also back up the server config directory,
+   vault custody, TLS state, and audit witness material.
 4. Dump DB2 with `pg_dump` or the KB export helper.
 5. Export old `work_queue` rows if you need them; the upgrade removes those tables.
 6. Record current compose files, image digests, environment, external endpoints, and volume names.
 
-Do not rely on a raw copy of a live SQLite main file. Take a consistent backup with its WAL state.
+Use database-native consistent dumps. Copying a live database data file is not a backup.
 
 ## The combined image is gone, and the new stack will not adopt your old database
 
@@ -286,8 +286,9 @@ Grants are keyed by server, team, and exact authenticated subject:
 Grants are administered **against aimee-kb**, not through aimee-server. The
 server used to proxy this over its local Unix socket; that proxy was removed,
 because proxying it meant aimee-server holding an administrative identity on
-aimee-kb, which a single-tenant data-plane service should not have. The
-`aimee kb grant …` commands went with it and no longer dispatch.
+aimee-kb, which a single-tenant data-plane service should not have. Server-side dispatch went with
+it and no longer works. Legacy `aimee kb grant …` grammar may still appear in generated help, but
+it is not an administrative transport.
 
 ```bash
 # on aimee-kb, as a principal with admin or team-lead authority IN the target team
@@ -339,8 +340,8 @@ the `embedding_*` spelling while the code had already moved on, so the file and 
 setting could disagree. They are one name now, which means the old file keys are
 dead: re-set them.
 
-Deleted outright, because the container they configured is retired and the
-`aimee-kb` image variant now encodes that choice: `llm_embed_backend`,
+Deleted outright, because role placement and model-specific synthesis sidecars replace the generic
+container controls: `llm_embed_backend`,
 `llm_synth_backend`, `llm_synth_host`, `llm_synth_gpu`, `llm_synth_tier`,
 `AIMEE_LLM_SYNTH_MODE`, `AIMEE_LLM_SYNTH_URL`, `AIMEE_LLM_SYNTH_TIER`. A config
 still carrying `kb.curator.tier_b.*` is not an error: the key is ignored and

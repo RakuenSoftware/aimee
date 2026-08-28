@@ -39,7 +39,6 @@
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 /* Send a response object and delete it. Returns send rc. */
 int send_and_free(server_conn_t *conn, cJSON *resp)
@@ -84,22 +83,30 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    cJSON *jkw = cJSON_GetObjectItemCaseSensitive(req, "keywords");
-   int limit = jo_int(req, "limit", 10);
-
+   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   if (jlimit &&
+       (!cJSON_IsNumber(jlimit) || !isfinite(jlimit->valuedouble) || jlimit->valuedouble < 1 ||
+        jlimit->valuedouble > 32 || jlimit->valuedouble != (double)(int)jlimit->valuedouble))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search limit must be an integer between 1 and 32",
+                                    NULL);
+   int limit = jlimit ? (int)jlimit->valuedouble : 10;
    if (!cJSON_IsArray(jkw) || cJSON_GetArraySize(jkw) == 0)
-      return server_send_error(conn, "missing or empty keywords array", NULL);
-
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "missing or empty keywords array", NULL);
    int count = cJSON_GetArraySize(jkw);
    if (count > 16)
-      count = 16;
-
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search accepts at most 16 keywords", NULL);
    char *clusters[16];
    for (int i = 0; i < count; i++)
    {
       cJSON *item = cJSON_GetArrayItem(jkw, i);
-      clusters[i] = cJSON_IsString(item) ? item->valuestring : "";
+      if (!cJSON_IsString(item) || !item->valuestring[0])
+         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                       "memory.search keywords must be non-empty strings", NULL);
+      clusters[i] = item->valuestring;
    }
-
    /* Build query string for fact search */
    char query_buf[2048];
    int qpos = 0;
@@ -143,6 +150,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       free(json);
       if (!err)
          return server_send_error(conn, detail, NULL);
+      server_error_kind_apply(err, active_context_missing ? SERVER_ERR_INVALID_ARGUMENT
+                                                          : SERVER_ERR_UNAVAILABLE);
       cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
       return send_and_free(conn, err);
    }
@@ -189,7 +198,8 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    const char *key, *content;
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
-      return jo_err("missing key or content");
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a key and content", NULL);
    /* An empty key or content is a malformed REQUEST, not a storage failure. The
     * store already refuses it, but the refusal surfaced as "failed to store
     * memory" -- which reads as the database declining a valid write and sends
@@ -282,10 +292,10 @@ int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
-       item->valuedouble > 9007199254740991.0 || floor(item->valuedouble) != item->valuedouble)
+       item->valuedouble >= 9223372036854775808.0 || floor(item->valuedouble) != item->valuedouble)
       return -1;
    *out = (int64_t)item->valuedouble;
-   return 0;
+   return *out <= INT64_C(9007199254740991) ? 0 : -1;
 }
 
 /* Replace a memory with a corrected one, linking the two.
@@ -409,10 +419,10 @@ int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 cJSON *memory_get_command(cJSON *req)
 {
-
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(jid))
-      return jo_err("missing id");
+   int64_t id = 0;
+   if (memory_request_positive_id(req, "id", &id) != 0)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.get requires a positive integer id", NULL);
 
    /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
     * the only thing between the flag and aimee-kb, which owns the interval. It
@@ -424,7 +434,7 @@ cJSON *memory_get_command(cJSON *req)
    memory_t m;
    kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
    server_memory_scope_begin(req);
-   int rc = kb_client_memory_get_as_of((int64_t)jid->valuedouble, as_of, &m, &verdict);
+   int rc = kb_client_memory_get_as_of(id, as_of, &m, &verdict);
    kb_client_memory_scope_context_clear();
 
    cJSON *resp;
@@ -460,15 +470,18 @@ cJSON *memory_get_command(cJSON *req)
    }
    else if (rc > 0)
    {
-      resp = jo_err("memory not found");
+      resp = server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
    }
    else
    {
       char *typed = kb_client_last_result_json("memory lookup failed");
       resp = typed ? cJSON_Parse(typed) : NULL;
       free(typed);
-      if (!resp)
-         resp = jo_err("knowledge service unavailable");
+      if (resp)
+         server_error_kind_apply(resp, SERVER_ERR_UNAVAILABLE);
+      else
+         resp =
+             server_error_kind_json(SERVER_ERR_UNAVAILABLE, "knowledge service unavailable", NULL);
    }
    return resp;
 }

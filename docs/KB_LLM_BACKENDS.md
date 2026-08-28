@@ -1,7 +1,8 @@
 # KB model backends
 
-Embedding and synthesis are `aimee-kb` capabilities. There is no `aimee-llm` service and no
-standalone inference tier for the server to call.
+Embedding and synthesis are `aimee-kb` capabilities. Local synthesis executes in an optional,
+model-specific `aimee-llm` sidecar that the KB reaches over mTLS. The server never calls that
+sidecar directly.
 
 ## Place each role
 
@@ -9,19 +10,18 @@ Each KB configures the roles independently:
 
 | Role | Internal | Remote | Off |
 | --- | --- | --- | --- |
-| embedding | Run the selected embedder inside the KB container. | Call the configured embedding endpoint. | Not a supported state: a KB with no embedder refuses to start. |
-| synthesis | Run the selected synthesizer inside the KB container. | Call the configured synthesis endpoint. | Curator and answer-synthesis stages report degradation. |
+| embedding | Run the bundled embedder in the KB image or its selected embedder sidecar. | Call the configured embedding endpoint. | A KB with no embedder refuses dense work. |
+| synthesis | Run the selected model in an `aimee-llm-*` sidecar. | Call the configured synthesis endpoint. | Curator and answer-synthesis stages report degradation. |
 
-A KB hosts the embedding role internally or remotely, never neither, and may host synthesis or not.
-Available internal models depend on the KB image and deployment profile. A remote role uses an
+A KB hosts the embedding role locally or remotely and may disable synthesis. Available local models
+depend on the deployment profile. A remote role uses an
 explicit endpoint and credential owned by that KB.
 
-The current configuration descriptors call internal placement `local`:
+The current configuration uses:
 
-- `llm_embed_backend`: `local` or `external`;
-- `llm_synth_backend`: `local`, `external`, or `off`;
-- `embedder_model` and `embedder_dims`: embedding identity and width;
-- `embedder_url` and `llm_synth_endpoint`: remote role endpoints.
+- `embedder_command`, `embedder_url`, `embedder_model`, and `embedder_dims` for embedding;
+- `synthesis_endpoint`, `synthesis_model`, `synthesis_api_key`, and `synthesis_thinking` for
+  synthesis.
 
 Use the [generated configuration reference](gen/configuration.md) for the exact fields exposed by
 this checkout. Container environment values override file values only where that reference says
@@ -30,7 +30,7 @@ they do.
 ## Multiple KBs
 
 Model placement is per KB, not global to the server. A fleet can include, for example, a KB with an
-internal embedder, another with an internal synthesizer, and a KB that calls remote endpoints for
+bundled embedder, another with a local synthesis sidecar, and a KB that calls remote endpoints for
 both roles. Routing must first select a KB with the correct corpus and authority, then verify that it
 has the required role. It must not route to a model independently of the KB.
 
@@ -68,7 +68,8 @@ change still changes the vector space and currently needs a fresh DB2 plus sourc
 
 ## Credentials and egress
 
-An internal role stays inside its KB container. A remote role crosses the KB's egress boundary, so
+The local synthesis role crosses a dedicated KB-to-sidecar mTLS boundary. A remote role crosses the
+KB's egress boundary, so
 its endpoint, credential, budget, and allowlist belong to that KB's deployment and vault. Do not put
 them in documents, workflow artifacts, or server-side model shortcuts.
 

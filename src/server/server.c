@@ -1326,11 +1326,14 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
    const char *tier = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tier"));
    const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
    if (!kind || !kind[0] || !key || !key[0])
-      return server_send_error(conn, "kind and key are required", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "kind and key are required",
+                                    request_id);
    if (!content || !content[0])
-      return server_send_error(conn, "content is required", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "content is required",
+                                    request_id);
    if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
-      return server_send_error(conn, "failed to store user memory", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to store user memory",
+                                    request_id);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "kind", kind);

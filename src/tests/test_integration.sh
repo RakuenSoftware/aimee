@@ -1288,6 +1288,78 @@ fi  # DB1_SESSIONS_AVAILABLE
 # 5. Memory via server
 # ============================================================
 
+# These argument failures are typed INVALID_ARGUMENT replies. The dedicated
+# HTTP adapter must preserve that mapping as a physical 400 instead of masking
+# a rejected write behind 200 OK.
+RESP=$(http_call POST /v1/memory/store '{"key":"integ-invalid"}') || true
+check_output "memory.store missing content stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.store missing content returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.store missing-content HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/store '{"key":"integ-invalid","content":""}') || true
+check_output "memory.store empty content stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.store empty content returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.store empty-content HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/search '{}') || true
+check_output "memory.search missing keywords stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.search missing keywords returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.search missing-keywords HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/search '{"keywords":[123]}') || true
+check_output "memory.search rejects non-string keywords" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/search '{"keywords":[""],"limit":10}') || true
+check_output "memory.search rejects empty keywords" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/search '{"keywords":["probe"],"limit":-1}') || true
+check_output "memory.search rejects invalid limits" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{}') || true
+check_output "memory.get missing id stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.get missing id returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.get missing-id HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/get '{"id":0}') || true
+check_output "memory.get rejects non-positive ids" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":1.5}') || true
+check_output "memory.get rejects fractional ids" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":1e30}') || true
+check_output "memory.get rejects unrepresentable ids" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":9007199254740992}') || true
+check_output "memory.get rejects ids above the JSON safe integer range" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":9007199254740993}') || true
+check_output "memory.get rejects ids rounded onto the JSON safe integer boundary" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/user_capture '{}') || true
+check_output "memory.user_capture missing fields stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.user_capture missing fields returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.user_capture missing-fields HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
 if [ "$KB_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"

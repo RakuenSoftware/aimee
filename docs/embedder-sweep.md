@@ -42,10 +42,10 @@ validates each result with `benchmarks/verify_scores.py`.
 No answer-generation model runs. The result covers retrieval quality and latency: Recall@K, MRR,
 ingest time, and query time.
 
-The embedder is the `embedding_command` config key:
+The embedder is the `embedder_command` config key:
 
 ```bash
-aimee config set embedding_command "python3 scripts/embed.py --model all-mpnet-base-v2"
+aimee config set embedder_command "python3 scripts/embed.py --model all-mpnet-base-v2"
 ```
 
 The shipped script exports `AIMEE_EMBEDDING_COMMAND` per candidate instead, and nothing in the tree
