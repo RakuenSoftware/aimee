@@ -36,7 +36,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Typed context assembly | Done | Per-channel budgets, packing traces, watermarks, and trust boundaries. Master and per-channel opt-outs remain. |
 | Index detach, purge, and GC | Proposed | `workspace remove` unregisters only. No shipped command deletes indexed data; the audited lifecycle is designed. |
 | Multi-KB fleet routing | Next | The design selects a KB by corpus, authority, and capabilities; current managed and split profiles configure one KB URL. |
-| Per-KB internal or remote model roles | In progress | Configuration records embedding and synthesis placement; profile support is still converging. There is no standalone inference service. |
+| Per-KB local or remote model roles | In progress | Embedding placement and model-specific local synthesis sidecars work; profile support is still converging. There is no generic inference gateway. |
 
 ## Agents and workflows
 
@@ -88,7 +88,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
-| `aimee-llm` inference container | Embedding and synthesis are per-KB roles, internal to that KB container or remote. No replacement inference service exists. |
+| Generic `aimee-llm` inference gateway | Embedding stays with the KB; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

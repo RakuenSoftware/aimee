@@ -27,12 +27,12 @@ docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
 
 Server and one KB are declared together, and no browser action needs to create them. The KB owns its
-embedding and synthesis role placements. Each role can run inside the KB container or use a remote
-endpoint supported by the selected profile. There is no separate inference service. This is intended
+embedding and synthesis role placements. Embedding runs in the KB image or its selected sidecar.
+Local synthesis uses a model-specific `aimee-llm` sidecar; remote synthesis uses an endpoint. This is intended
 as the safer default when the server must not control Docker.
 
-`all`, not `kb`: the connection bearer and application-identity token must be sealed into both
-Vaults. The one-shot `aimee-server-identity` service then issues the server's separate client
+Use `all` so the connection bearer and application-identity token are sealed into both Vaults. The
+one-shot `aimee-server-identity` service then issues the server's separate client
 certificate before the long-lived server starts. Server-to-KB requests use all three checks over
 mTLS on the private Compose network. The KB's plain HTTP listener remains loopback-only for its
 container healthcheck and is not published on the host.
@@ -102,10 +102,9 @@ them synchronously, and exits before the service is created.
 
 ## Inference
 
-Embedding and synthesis belong to the KB that serves the request. A role can run inside its KB
-container or use a remote endpoint. Internal availability depends on the KB image and profile;
-remote placement needs an explicit endpoint and credential. No standalone inference container is
-part of either topology.
+Embedding and synthesis belong to the KB that serves the request. Embedding runs in the KB image or
+selected embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar over mTLS;
+remote synthesis needs an explicit endpoint and credential.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.

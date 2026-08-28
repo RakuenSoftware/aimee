@@ -4,9 +4,9 @@ An embedder change for one KB corpus is a data migration, not a role toggle. Mod
 dimension, pooling, and query/document prefixes define the vector space. If any of them changes
 while old vectors remain, retrieval can return plausible but incorrect rankings.
 
-There is no standalone inference service in this procedure. The selected KB runs its embedder inside
-its own container or calls the remote endpoint configured for that role. Synthesis is another role
-of the same KB and does not participate in the vector migration.
+The selected KB runs its embedder in the KB image, in its selected embedder sidecar, or at the remote
+endpoint configured for that role. The synthesis sidecar is a separate role and does not participate
+in the vector migration.
 
 ## Prove the candidate before changing production
 

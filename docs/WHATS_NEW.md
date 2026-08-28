@@ -1,6 +1,6 @@
 # What's new in 0.4.0
 
-0.4.0 is a one-way upgrade. It removes the combined image, the work queue, the inference container,
+0.4.0 is a one-way upgrade. It removes the combined image, the work queue, the generic inference gateway,
 the interactive TUI, and the generic RPC transport, and it will not read a 0.2 deployment back.
 Read [Upgrading](UPGRADING.md) before you start, not after.
 
@@ -130,8 +130,9 @@ See [Event bus](EVENT_BUS.md).
 
 - The KB container can own a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An
   export helper moves that data to an external PostgreSQL server.
-- The KB owns embedding, synthesis, retrieval, curation, and code-index storage. Each model role can
-  run inside that KB container or use a remote endpoint. There is no standalone inference service.
+- The KB owns embedding, retrieval, curation, and code-index storage. Embedding runs in the KB or at
+  its configured endpoint; local synthesis uses a model-specific `aimee-llm-e2b` or
+  `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint.
 - Cross-repository symbol and dependency edges now feed caller lookup, search, and blast radius.
 - CSS migration analysis adds a style graph, dead/conflicting-rule checks, and an optional isolated
   Chromium sidecar for computed-style verification.
@@ -209,8 +210,8 @@ The master assembler and each channel keep a request-level opt-out. See
   if you need them.
 - `aimee migrate v2`, whose server operation had already been removed.
 - The combined appliance image and its compose file.
-- The `aimee-llm` container and the reranker. Embedding and synthesis are per-KB roles; neither uses
-  a replacement inference service.
+- The generic `aimee-llm` gateway and the separate reranker. Embedding is a KB role. Local synthesis
+  uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar instead of a generic gateway.
 - The legacy KB Unix-socket autostart path.
 - Client-held plaintext agent credentials and the session credential-push endpoint.
 - The generic `/v1/rpc` transport. Named `/v1` routes are authoritative.
@@ -218,12 +219,13 @@ The master assembler and each channel keep a request-level opt-out. See
 ## If you installed from a mid-cycle tag
 
 The `v0.2.196` and `v0.3.0` tags were promoted in error part-way through this cycle and are not
-releases. The cycle continued for another 3,338 commits after the earlier one, so an installation
+releases. The cycle continued for more than 3,500 commits after the earlier one, so an installation
 taken from either is missing the following. Each is a case where the deployment came up healthy and
 did nothing useful, which is why they are listed here rather than folded into the sections above.
 
-- **The `aimee-llm` container is retired.** Embedding and synthesis are owned by the selected KB and
-  can run inside its container or at its configured remote endpoint. After the wizard selects the
+- **The generic `aimee-llm` gateway is retired.** Embedding is owned by the selected KB and can run
+  inside it or at its configured endpoint. Local synthesis uses a model-specific sidecar; remote
+  synthesis uses the KB's configured endpoint. After the wizard selects the
   bundled embedder, a fresh install embeds with no download and no second service. Set the embedder
   before you ingest. A later change is a data migration: the guarded reset handles a dimension
   change, while a same-dimension vector-space change needs a fresh DB2 and source re-ingestion.

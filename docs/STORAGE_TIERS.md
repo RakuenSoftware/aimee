@@ -4,14 +4,13 @@ aimee has two product data tiers. They are ownership boundaries, not interchange
 
 | Tier | Owner | Engine | Contents |
 | --- | --- | --- | --- |
-| DB1 | `aimee-store` module | PostgreSQL | sessions, working memory, agent jobs, local policy/audit state, caches, same-user runtime data |
+| DB1 | `aimee` domain module through `postgres` | PostgreSQL | sessions, working memory, agent jobs, workflows, local policy/audit state, caches, same-user runtime data |
 | DB2 | `aimee-kb` | PostgreSQL + pgvector | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
 | Server WORM | `aimee-server` | SQLite | append-only server evidence chain and checkpoints |
 | KB WORM | `aimee-kb-worm` | SQLite | append-only KB evidence chain and checkpoints |
 
-The Go workflow control plane uses the PostgreSQL-backed DB1 store module for definitions, immutable snapshots, work
-items, artifacts, parks, and lifecycle events. That store is not DB1 or DB2 and has one writer:
-`aimee-wfe`.
+The Go workflow control plane uses DB1 for definitions, immutable snapshots, work items, artifacts,
+parks, and lifecycle events. `aimee-wfe` owns workflow behavior and is the only workflow writer.
 
 ## Rules
 
@@ -30,7 +29,7 @@ Build and dependency checks enforce these rules.
 
 DB1 belongs to one server profile, and its module is told where to find it with
 `AIMEE_STORE_URL`. Being PostgreSQL does not make it shareable: one profile, one database.
- DB2 can serve one user, a team, or a company, but its contents
+DB2 can serve one user, a team, or a company, but its contents
 must match that scope.
 
 The default KB container runs a private PostgreSQL 18 cluster with pgvector and pgvectorscale. An

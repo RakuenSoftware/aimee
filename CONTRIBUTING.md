@@ -17,8 +17,8 @@ wrong place. The server's store is PostgreSQL, served by the `aimee` module, whi
 itself: it reaches the `postgres` module over the event bus, and that module owns the connection and
 the DSN (`AIMEE_STORE_URL`). `aimee-kb` owns DB2 and pgvector, also PostgreSQL.
 
-`aimee-server` does still link libsqlite3, for the audit WORM ledger, PKI and kb-synthesis. Those are
-the remaining SQLite users and they are unrelated to the store. `aimee` and `aimee-kb` link none:
+`aimee-server` still links libsqlite3 for the audit WORM ledger. That store is separate from DB1.
+The `aimee` and `aimee-kb` binaries link no SQLite:
 `make -C src check-linking` asserts each binary's boundary and prints what it found.
 
 ## Build and test

@@ -1,48 +1,82 @@
-# Egress module
+# egress module
 
-`egress` is the sole HTTP/SSE transport for network calls initiated by Go
-process modules. Callers attach a request-only bus identity distinct from their
-serving identity and submit the exact method, destination, purpose,
-credential-presence bit, request digest, limits, and bounded bytes over the bus.
-Only this process opens the external connection.
+## Purpose and non-goals
 
-The policy binds each decision to the bus-attested caller. Forge and review
-artifact identities are restricted to fixed GitHub origins; remote MCP
-destinations must resolve entirely to public addresses; and the memory identity
-may reach a configured local embedder. DNS decisions are bound to the actual
-dial address, redirects require a new governed request, response bodies are
-bounded, and response content never enters WORM.
+`egress` is the sole governed HTTP and SSE transport for network calls initiated by Go process modules.
+It binds method, destination, purpose, caller identity, DNS result, limits, and credential presence before
+dialing. It does not proxy arbitrary user traffic or replace PostgreSQL and sandbox transports.
 
-All authorize, unary HTTP, and stream lifecycle/frame stages are ledger-class.
-The bus governance tap records caller, stage, trace, byte counts, status, intent,
-and outcome while deliberately excluding credential-bearing requests and
-external response content from the raw capture stream and immutable evidence.
+## Public contracts
 
-Memory embedding, forge API, review-artifact retrieval, and MCP SSE carry their
-request/response or streaming frames through this process. The static egress
-check rejects direct network primitives outside declared network owners, and
-the runtime launcher denies Internet sockets to ordinary process modules.
+Principal `32` serves seven ledger stages at event kinds `12289` through `12295`: authorization,
+bounded unary HTTP, and stream open, lifecycle, and frame operations. Requests and responses use the
+versioned bounded wire in `aimee/egress/module_api.h`; redirects require a fresh authorization decision.
 
-Forge credentials cross the Git process only as 30-second X25519/AES-GCM
-envelopes. The authenticated scope fixes the egress key generation, Git caller
-identity, `api.github.com`, operation, and owner/repository; the egress process
-adds the bearer only after all of those checks pass. An egress restart revokes
-outstanding envelopes. MCP instances carry `mcp:<egress-principal-ref>` rather
-than an environment name. Egress deterministically maps that identity to
-`AIMEE_MCP_<egress-principal-ref>_TOKEN` and asks the server/KB Vault helper over
-a pipe. The helper accepts only the installed egress executable as its parent,
-and both helper and egress disable dumpability before plaintext is present.
+## Dependencies and consumers
 
-The runtime network-owner inventory is intentionally explicit:
+- `audit`: receives content-free authorization and transfer outcomes for the WORM evidence path.
+- `module-runtime`: attests principal `32`, caller identities, executable ownership, lifecycle, and stage grants.
 
-| Process owner | Network capability | Constraint |
-| --- | --- | --- |
-| `egress` | outbound HTTP/SSE for Go process modules | caller/purpose/destination policy, pinned DNS, bounded bytes, seven ledger stages |
-| `postgres` | PostgreSQL client transport | store-only process contract and DSN hardening |
-| `sandbox` / `aimee-delegate-egress` | isolated tool/delegate proxy transport | separate destination policy and sandbox boundary |
-| observability/browser/control listeners | inbound service sockets | declared core/listener ownership; not an ordinary outbound caller |
-| C server and KB planes | provider, peer/KB/database, forge/git and management protocols | every remaining primitive is pinned by `core-network-contracts.json` to an owner, purpose, destination/credential constraint, audit disposition and review boundary; exact call counts are lint-ratcheted, while convergence into this egress service remains proposal work |
+Memory embedding, forge operations, review artifacts, and remote MCP SSE consume the service. Each uses
+a distinct request-only bus identity so one consumer cannot borrow another consumer's destination policy.
 
-This distinction matters: the enforced claim is complete for ordinary Go
-process modules. Trusted core protocols are formally constrained and cannot grow
-silently, but are not represented as having traversed the Go egress transport.
+## Providers and readiness
+
+The Go process under `server-go/modules/egress` provides credential resolution, pinned HTTP dialing, and
+SSE framing. Readiness requires its policy catalog, resolver, and Vault helper contract. External endpoint
+failure affects the call, while a missing policy or unsafe helper keeps the relevant stage unavailable.
+
+## Configuration and activation
+
+- `runtime_toggle.supported`: `false`; all declared Go-module Internet access must pass through the required governed transport.
+
+Destination and credential policy comes from reviewed process contracts and narrowly scoped environment
+secrets such as `AIMEE_MCP_<principal>_TOKEN`. Ordinary callers cannot add a host or widen an allowlist at runtime.
+
+## Surfaces
+
+There is no public proxy URL or CLI tunnel. Callers use authenticated `egress` bus stages; operators see health,
+metrics, and audit outcomes. Forge credentials arrive as short-lived encrypted envelopes, while MCP
+credentials are resolved by exact principal. External response content returns only to the requesting caller.
+
+## Data and migrations
+
+`egress` owns no durable content database and requires no schema migration. Policy lives in versioned
+source contracts; short-lived credential envelopes and SSE state remain in memory and vanish on restart.
+The audit sink stores bounded metadata such as destination class, byte counts, status, and outcome.
+
+## Security and privacy
+
+Every DNS answer must be allowed and the `egress` dial uses the validated numeric address. Redirects, private
+addresses, credential scope, response size, and stream lifetime are checked independently. Raw headers,
+bearers, request bodies, external responses, and secret-bearing errors never enter capture or WORM.
+
+## Supported journeys
+
+A forge caller submits a scoped request, `egress` validates its attested identity and GitHub origin,
+decrypts a 30-second envelope, adds the bearer, pins DNS, and returns bounded bytes. An MCP stream uses
+the same authorization seam, then receives lifecycle and frame events until closure or limit expiry.
+
+## Tests and failure behavior
+
+Tests under `server-go/modules/egress` cover policy, DNS pinning, redirects, credentials, HTTP bounds,
+and SSE lifecycle. Unknown callers, disallowed destinations, mixed public/private answers, expired
+envelopes, oversized bodies, and helper failures fail closed without opening or retaining a connection.
+
+## Operational diagnostics
+
+Inspect principal `32` readiness, caller principal, purpose, destination class, DNS refusal, HTTP status,
+byte counters, and stream termination reason. Correlate the ledger event with its request ID. Diagnostics
+must never print authorization headers, Vault output, encrypted-envelope plaintext, or response content.
+
+## Compatibility
+
+Principal `32`, events `12289` through `12295`, stage meanings, caller identities, and policy purpose
+strings are stable compatibility boundaries. Adding a destination does not relax existing callers.
+Direct network primitives outside declared owners remain a lint and runtime contract violation.
+
+## Extension and removal
+
+Add a consumer by assigning an attested caller identity, exact `purpose` values, destinations, credential rules,
+bounds, audit disposition, and denial tests. Extend the wire additively with fixtures. Removal requires
+migrating every caller to another governed owner and retaining historical purpose semantics for audit.
