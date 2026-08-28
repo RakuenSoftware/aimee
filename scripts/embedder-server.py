@@ -138,6 +138,27 @@ MODEL_NAME = str(SPEC["repo"]) if SPEC else ""
 MODEL_REVISION = str(SPEC.get("revision") or "main") if SPEC else "main"
 
 
+def model_code_revision(spec):
+    """Return the immutable revision used for external ``auto_map`` code.
+
+    Transformers accepts one ``code_revision`` for a model load.  Refuse an
+    ambiguous registry entry instead of silently loading one of several custom-code
+    repositories at a floating ref.
+    """
+    revisions = set((spec.get("code_revisions") or {}).values()) if spec else set()
+    if len(revisions) > 1:
+        raise RegistryError("an embedder cannot declare multiple external code revisions")
+    revision = next(iter(revisions), None)
+    if revision is not None and (
+            not isinstance(revision, str) or len(revision) != 40
+            or any(char not in "0123456789abcdef" for char in revision)):
+        raise RegistryError("external embedder code must use an immutable commit revision")
+    return revision
+
+
+MODEL_CODE_REVISION = model_code_revision(SPEC)
+
+
 def prefix_for(input_type):
     """The prefix for `input_type` under the configured embedder."""
     return SPEC["prefixes"][input_type] if SPEC else ""
@@ -291,6 +312,8 @@ def load_model():
     # one?" is answerable without reading logs.
     global _runtime
     _model = None
+    config_kwargs = ({"code_revision": MODEL_CODE_REVISION}
+                     if MODEL_CODE_REVISION else None)
     if EMBEDDER_BACKEND in ("onnx", "auto"):
         try:
             # Load from the LOCAL SNAPSHOT DIRECTORY, not the repo id.
@@ -307,9 +330,12 @@ def load_model():
             # nothing to enumerate. Loading through ST rather than driving
             # onnxruntime directly keeps its pooling and normalisation exactly as
             # the torch path had them, so the vector space does not move.
+            model_kwargs = {"file_name": "onnx/model.onnx"}
+            if MODEL_CODE_REVISION:
+                model_kwargs["code_revision"] = MODEL_CODE_REVISION
             _model = SentenceTransformer(
                 model_source, revision=model_revision, trust_remote_code=True, backend="onnx",
-                model_kwargs={"file_name": "onnx/model.onnx"})
+                model_kwargs=model_kwargs, config_kwargs=config_kwargs)
             _runtime = "onnx"
         except Exception as exc:  # missing optimum/onnxruntime, or no baked graph
             if EMBEDDER_BACKEND == "onnx":
@@ -317,8 +343,11 @@ def load_model():
             sys.stderr.write(f"embedder-server: onnx unavailable ({exc}); using torch\n")
             _model = None
     if _model is None:
+        model_kwargs = ({"code_revision": MODEL_CODE_REVISION}
+                        if MODEL_CODE_REVISION else None)
         _model = SentenceTransformer(
-            model_source, revision=model_revision, trust_remote_code=True)
+            model_source, revision=model_revision, trust_remote_code=True,
+            model_kwargs=model_kwargs, config_kwargs=config_kwargs)
         _runtime = "torch"
     _dim = _model.get_sentence_embedding_dimension() or 0  # read before quantizing
     if EMBEDDER_QUANTIZE == "int8":
