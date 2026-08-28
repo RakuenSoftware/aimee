@@ -22,6 +22,22 @@ typedef int (*onboard_memory_get_fn)(int64_t id, memory_t *out);
 void onboard_set_memory_client_for_test(onboard_memory_insert_fn insert_fn,
                                         onboard_memory_get_fn get_fn);
 
+/* This suite exercises the pure onboarding report builder. Keep the unrelated
+ * setup path link-complete without starting a store or writing MCP config. */
+int db1_store_ready(void)
+{
+   return 0;
+}
+
+void db1_shutdown(void)
+{
+}
+
+void ensure_mcp_json(const char *dir)
+{
+   (void)dir;
+}
+
 static memory_t g_onboard_memory_smoke;
 static int64_t g_onboard_memory_next_id = 1000;
 

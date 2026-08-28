@@ -49,6 +49,20 @@ static int oauth_secret_store(const char *client_name, const char *vcred, const 
    return -1;
 }
 
+static int oauth_legacy_key(char *key, size_t key_len, const char *format, const char *client_name)
+{
+   int written = -1;
+   if (strcmp(format, OAUTH_KEY_ACCESS_TOKEN) == 0)
+      written = snprintf(key, key_len, "oauth.%s.access_token", client_name);
+   else if (strcmp(format, OAUTH_KEY_REFRESH_TOKEN) == 0)
+      written = snprintf(key, key_len, "oauth.%s.refresh_token", client_name);
+   else if (strcmp(format, OAUTH_KEY_EXPIRES_AT) == 0)
+      written = snprintf(key, key_len, "oauth.%s.expires_at", client_name);
+   else if (strcmp(format, OAUTH_DB1FMT_REAUTH) == 0)
+      written = snprintf(key, key_len, "oauth.%s.reauth_required", client_name);
+   return written >= 0 && (size_t)written < key_len ? 0 : -1;
+}
+
 /* Load from the vault; if absent, lazily migrate a legacy db1/secrets plaintext
  * value (db1_fmt is the old "oauth.%s.*" key format) into the vault and scrub it.
  * Returns 0 with `buf` filled, or -1 on a miss (buf emptied). */
@@ -60,7 +74,8 @@ static int oauth_secret_load(const char *client_name, const char *vcred, const c
    if (vault_service_get_server_principal(client_name, vcred, buf, len) == VAULT_OK && buf[0])
       return 0;
    char key[256];
-   snprintf(key, sizeof(key), db1_fmt, client_name);
+   if (oauth_legacy_key(key, sizeof key, db1_fmt, client_name) != 0)
+      return -1;
    if (db1_secret_load(key, buf, len) == 0 && buf[0])
    {
       if (vault_service_set_server(client_name, vcred, buf) != VAULT_OK ||
@@ -84,8 +99,8 @@ static void oauth_secret_remove(const char *client_name, const char *vcred, cons
 {
    (void)vault_service_delete(VAULT_SERVER_PRINCIPAL, client_name, vcred);
    char key[256];
-   snprintf(key, sizeof(key), db1_fmt, client_name);
-   (void)db1_secret_remove(key); /* also clear any legacy plaintext */
+   if (oauth_legacy_key(key, sizeof key, db1_fmt, client_name) == 0)
+      (void)db1_secret_remove(key); /* also clear any legacy plaintext */
 }
 
 /* ---- JSON parsing ---- */

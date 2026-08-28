@@ -98,7 +98,7 @@ char *tool_read_file(const char *path, int offset, int limit, int raw)
    (void)raw; /* Windows minimal path: un-anchored bytes only */
    /* Basic read implementation for Windows */
    char resolved[MAX_PATH_LEN];
-   const char *err = guardrails_validate_file_path(path, resolved, sizeof(resolved));
+   const char *err = guardrails_check_sensitive_path(path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
 
@@ -131,7 +131,7 @@ char *tool_read_file(const char *path, int offset, int limit, int raw)
 char *tool_write_file(const char *path, const char *content)
 {
    char resolved[MAX_PATH_LEN];
-   const char *err = guardrails_validate_file_path(path, resolved, sizeof(resolved));
+   const char *err = guardrails_check_sensitive_path(path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
 

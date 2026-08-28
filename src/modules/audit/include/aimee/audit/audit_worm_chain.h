@@ -16,6 +16,7 @@ extern "C"
 /* Domain-separation + algorithm tag folded into every row_hash. Bump to version
  * the canonicalization/hash. */
 #define AUDIT_WORM_DOMAIN "aimee.audit.worm.v1"
+#define AUDIT_WORM_DOMAIN_V2 "aimee.audit.worm.v2"
 /* Genesis prev_hash: 32 zero bytes as 64 lowercase hex chars. */
 #define AUDIT_WORM_GENESIS_PREV "0000000000000000000000000000000000000000000000000000000000000000"
 /* Hard cap on a row's detail payload (bytes); oversized detail is truncated with a
@@ -33,6 +34,16 @@ extern "C"
                             const char *action, const char *subject, const char *verdict,
                             const char *key_id, const char *detail, const char *prev_hash,
                             char out_hex[65]);
+
+   /* v2 binds chronology and every attribution column exposed as evidence.
+    * Existing v1 rows remain verifiable but must be labelled v1-partial. */
+   void audit_worm_row_hash_v2(long long seq, const char *ts, const char *actor_role,
+                               const char *actor_principal, const char *actor_issuer,
+                               const char *actor_subject, const char *transport_cn,
+                               long long team_id, const char *selected_default_from,
+                               const char *action, const char *subject, const char *verdict,
+                               const char *key_id, const char *detail, const char *prev_hash,
+                               char out_hex[65]);
 
    /* MAC a checkpoint commits over: the head (hash + seq) it attests, under key_id.
     * out_hex >= 65. */

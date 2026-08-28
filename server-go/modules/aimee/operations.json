@@ -9984,6 +9984,62 @@
       }
     },
     {
+      "family": "sessions",
+      "id": 25,
+      "name": "server_session_list_by_subject",
+      "c_name": "db1_server_session_list_by_subject",
+      "c_params": [
+        "principal",
+        "out_ids",
+        "max"
+      ],
+      "c_returns": "row_count",
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": ["ok", "invalid", "failed"],
+      "request": {
+        "fields": [
+          {"name": "principal", "type": "text", "required": true},
+          {"name": "max", "type": "int", "required": true}
+        ]
+      },
+      "reply": {
+        "list": {
+          "out": "out_ids",
+          "bound": "max",
+          "max_rows": 4096,
+          "column": {"kind": "text", "width": "DB1_SS_ID_LEN"}
+        },
+        "fields": [{"name": "session_id", "type": "text"}],
+        "max_bytes": 1048576
+      }
+    },
+    {
+      "family": "sessions",
+      "id": 26,
+      "name": "server_session_erase_subject",
+      "c_name": "db1_server_session_erase_subject",
+      "c_params": ["request_id", "principal"],
+      "c_returns": "int64",
+      "wire_format": "db1-fields-v2",
+      "scope": "global",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": ["ok", "invalid", "failed"],
+      "request": {
+        "fields": [
+          {"name": "request_id", "type": "text", "required": true},
+          {"name": "principal", "type": "text", "required": true}
+        ]
+      },
+      "reply": {
+        "fields": [{"name": "deleted", "type": "int"}],
+        "max_bytes": 32
+      }
+    },
+    {
       "family": "runtime",
       "id": 1,
       "name": "runtime_state_set",

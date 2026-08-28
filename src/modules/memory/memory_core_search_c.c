@@ -41,6 +41,11 @@
 #include <unistd.h>
 #include <pthread.h>
 
+/* Stack bound for id arrays handed to the batched rank reader. Sized to the
+ * rerank buffer; a wider set falls back to the single-id reader for the tail
+ * rather than growing the frame. */
+#define MEMORY_SCOPE_RANK_PROBE_MAX 96
+
 static int memory_collect_graph_candidates(const char *raw_query, const char *norm_query,
                                            int fetch_limit, memory_t *out, int count, int max,
                                            memory_candidate_source_t *source_stats,
@@ -980,8 +985,18 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
 
 static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_rank)
 {
-   for (int i = 0; i < count; i++)
-      scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   /* One statement for the whole set: this ranks every candidate about to be
+    * sorted, so a per-candidate reader made the round trips scale with recall
+    * width. */
+   {
+      int64_t rank_ids[MEMORY_SCOPE_RANK_PROBE_MAX];
+      int probe = count < MEMORY_SCOPE_RANK_PROBE_MAX ? count : MEMORY_SCOPE_RANK_PROBE_MAX;
+      for (int i = 0; i < probe; i++)
+         rank_ids[i] = matches[i].id;
+      db2_memory_scope_context_rank_batch(rank_ids, probe, scope_rank);
+      for (int i = probe; i < count; i++)
+         scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   }
    /* Stable insertion sort: relevance ordering from the reranker is retained
     * inside each hard visibility bucket. */
    for (int i = 1; i < count; i++)
@@ -1093,10 +1108,22 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
          db2_memory_scope_context_clear();
       return -1;
    }
+   /* Rank the pool in one statement before the filter loop: this runs on every
+    * scoped recall, over the full candidate pool, and a per-candidate reader
+    * made its round trips scale with pool width. */
+   int pool_ranks[MEMORY_RERANK_BUFFER];
+   {
+      int64_t rank_ids[MEMORY_RERANK_BUFFER];
+      int probe = count < MEMORY_RERANK_BUFFER ? count : MEMORY_RERANK_BUFFER;
+      for (int i = 0; i < probe; i++)
+         rank_ids[i] = candidates[i].id;
+      db2_memory_scope_context_rank_batch(rank_ids, probe, pool_ranks);
+   }
    int kept = 0;
    for (int i = 0; i < count; i++)
    {
-      int rank = db2_memory_scope_context_rank(candidates[i].id);
+      int rank = i < MEMORY_RERANK_BUFFER ? pool_ranks[i]
+                                          : db2_memory_scope_context_rank(candidates[i].id);
       if (rank <= 0 && !include_all)
       {
          memory_recall_trace_reject(candidates[i].id, "candidate", "scope_boundary");

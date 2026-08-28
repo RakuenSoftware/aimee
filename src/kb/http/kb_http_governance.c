@@ -4,16 +4,121 @@
 #include "kb_http_governance.h"
 
 #include "cJSON.h"
+#include "config.h"
+#include "kb_blob_reconcile.h"
+#include "kb_identity.h"
+#include "kb_reqctx.h"
 #include "modules/db2/c/artifacts.h"    /* db2_audit_event_* */
 #include "modules/db2/c/decision_log.h" /* db2_decision_log_* */
+#include "modules/db2/c/kb_payload.h"
 #include "log.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #define DECISION_LIST_MAX 50
 #define AUDIT_LIST_MAX    100
+
+int kb_http_subject_erasure_route(const char *method, const char *path, const char *body,
+                                  int owner_scope, char *out_buf, int out_cap)
+{
+   if (strcmp(path, "/v1/privacy/erase-subject/begin") != 0 &&
+       strcmp(path, "/v1/privacy/erase-subject/complete") != 0)
+      return -1;
+   if (strcmp(method, "POST") != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"method not allowed\"}");
+      return 405;
+   }
+   if (!owner_scope)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"owner authorization required\"}");
+      return 403;
+   }
+   const kb_principal_t *actor = kb_reqctx_actor();
+   char actor_key[600] = "";
+   if (!actor || kb_identity_key(actor, actor_key, sizeof(actor_key)) != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"authenticated owner identity required\"}");
+      return 403;
+   }
+   cJSON *req = body ? cJSON_Parse(body) : NULL;
+   const cJSON *jr = req ? cJSON_GetObjectItemCaseSensitive(req, "request_id") : NULL;
+   if (!cJSON_IsString(jr) || !jr->valuestring[0])
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"request_id required\"}");
+      return 400;
+   }
+   if (strcmp(path, "/v1/privacy/erase-subject/begin") == 0)
+   {
+      const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "subject");
+      const cJSON *jids = cJSON_GetObjectItemCaseSensitive(req, "session_ids");
+      if (!cJSON_IsString(js) || !js->valuestring[0] || !cJSON_IsArray(jids))
+      {
+         cJSON_Delete(req);
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":\"subject and session_ids array required\"}");
+         return 400;
+      }
+      char *sessions = cJSON_PrintUnformatted(jids);
+      int64_t memories = 0, documents = 0;
+      int already = 0;
+      int rc = sessions ? db2_subject_erasure_begin(jr->valuestring, js->valuestring, sessions,
+                                                    &memories, &documents, &already)
+                        : -1;
+      free(sessions);
+      if (rc != 0)
+      {
+         cJSON_Delete(req);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"DB2 erasure failed\"}");
+         return 500;
+      }
+      cJSON *resp = cJSON_CreateObject();
+      cJSON_AddStringToObject(resp, "status", "db2_done");
+      cJSON_AddStringToObject(resp, "request_id", jr->valuestring);
+      cJSON_AddNumberToObject(resp, "memory_count", (double)memories);
+      cJSON_AddNumberToObject(resp, "document_count", (double)documents);
+      cJSON_AddBoolToObject(resp, "already_done", already);
+      char *json = cJSON_PrintUnformatted(resp);
+      snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{}");
+      free(json);
+      cJSON_Delete(resp);
+      cJSON_Delete(req);
+      return 200;
+   }
+   const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "db1_count");
+   if (!cJSON_IsNumber(jc) || !isfinite(jc->valuedouble) || jc->valuedouble < 0 ||
+       jc->valuedouble > 9007199254740991.0 || trunc(jc->valuedouble) != jc->valuedouble)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"non-negative integer db1_count required\"}");
+      return 400;
+   }
+   kb_blob_recon_stats_t recon;
+   if (kb_blob_reconcile_run(config_kb_pdf_blob_orphan_alarm_mb(), 0, &recon) != 0)
+   {
+      cJSON_Delete(req);
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"orphan blob reconciliation failed\"}");
+      return 500;
+   }
+   int event_created = 0;
+   int rc = db2_subject_erasure_complete(jr->valuestring, actor_key, (int64_t)jc->valuedouble,
+                                         &event_created);
+   cJSON_Delete(req);
+   if (rc != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap, "{\"error\":\"erasure completion failed\"}");
+      return 500;
+   }
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"status\":\"completed\",\"event_created\":%s,"
+            "\"orphan_blobs_unlinked\":%lld}",
+            event_created ? "true" : "false", recon.orphans_unlinked);
+   return 200;
+}
 
 static const char *jstr(const cJSON *o, const char *k)
 {

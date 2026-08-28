@@ -8,16 +8,23 @@
 #include "gateway_pairing.h"
 #include "aimee_home.h"
 #include "log.h"
+#include "platform_random.h"
 #include <cJSON.h>
 
+#include <errno.h>
+#include <fcntl.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/file.h>
 #include <time.h>
+#include <unistd.h>
 
 #define PAIRING_TTL_SECONDS 3600
+#define PAIRING_FILE_MAX    (1024 * 1024)
 
 static pthread_mutex_t g_pairing_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -26,24 +33,40 @@ static void pairs_path(char *buf, size_t bufsz)
    snprintf(buf, bufsz, "%s/gateway-pairs.json", aimee_home());
 }
 
+static int pairs_lock(const char *path, int exclusive)
+{
+   char lock_path[640];
+   snprintf(lock_path, sizeof(lock_path), "%s.lock", path);
+   int fd = open(lock_path, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (fd < 0 || flock(fd, exclusive ? LOCK_EX : LOCK_SH) != 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   return fd;
+}
+
 static cJSON *pairs_load(const char *path)
 {
    FILE *f = fopen(path, "rb");
-   if (!f)
+   if (!f && errno == ENOENT)
       return cJSON_CreateArray();
+   if (!f)
+      return NULL;
    fseek(f, 0, SEEK_END);
    long sz = ftell(f);
    fseek(f, 0, SEEK_SET);
-   if (sz <= 0)
+   if (sz <= 0 || sz > PAIRING_FILE_MAX)
    {
       fclose(f);
-      return cJSON_CreateArray();
+      return NULL;
    }
    char *buf = malloc((size_t)sz + 1);
    if (!buf)
    {
       fclose(f);
-      return cJSON_CreateArray();
+      return NULL;
    }
    size_t n = fread(buf, 1, (size_t)sz, f);
    buf[n] = '\0';
@@ -53,7 +76,7 @@ static cJSON *pairs_load(const char *path)
    if (!root || !cJSON_IsArray(root))
    {
       cJSON_Delete(root);
-      return cJSON_CreateArray();
+      return NULL;
    }
    return root;
 }
@@ -63,17 +86,86 @@ static int pairs_save(const char *path, cJSON *arr)
    char *s = cJSON_PrintUnformatted(arr);
    if (!s)
       return -1;
-   FILE *f = fopen(path, "w");
-   if (!f)
+   char tmp[640];
+   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+   (void)unlink(tmp);
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
+   if (fd < 0)
    {
       free(s);
       return -1;
    }
-   fputs(s, f);
-   fclose(f);
+   size_t len = strlen(s), off = 0;
+   while (off < len)
+   {
+      ssize_t n = write(fd, s + off, len - off);
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n <= 0)
+         break;
+      off += (size_t)n;
+   }
+   int rc = (off == len && fsync(fd) == 0) ? 0 : -1;
+   if (close(fd) != 0)
+      rc = -1;
+   fd = -1;
+   if (rc == 0 && rename(tmp, path) != 0)
+      rc = -1;
+   if (rc == 0)
+   {
+      char parent[640];
+      snprintf(parent, sizeof(parent), "%s", path);
+      char *slash = strrchr(parent, '/');
+      if (!slash)
+         rc = -1;
+      else
+      {
+         *slash = '\0';
+         int dfd = open(parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         if (dfd < 0 || fsync(dfd) != 0)
+            rc = -1;
+         if (dfd >= 0)
+            close(dfd);
+      }
+   }
+   if (rc != 0)
+   {
+      if (fd >= 0)
+         (void)close(fd);
+      (void)unlink(tmp);
+   }
    free(s);
-   chmod(path, 0600);
+   return rc;
+}
+
+static int code_exists(cJSON *arr, const char *code)
+{
+   cJSON *e = NULL;
+   cJSON_ArrayForEach(e, arr)
+   {
+      const char *existing = cJSON_GetStringValue(cJSON_GetObjectItem(e, "code"));
+      if (existing && strcmp(existing, code) == 0)
+         return 1;
+   }
    return 0;
+}
+
+static int pairing_random_code(cJSON *arr, char code[8])
+{
+   /* 4,294,000,000 is the largest multiple of 1,000,000 below 2^32;
+    * rejection avoids modulo bias. Retry also enforces pending-code uniqueness. */
+   for (int attempt = 0; attempt < 128; attempt++)
+   {
+      uint32_t draw = 0;
+      if (platform_random_bytes(&draw, sizeof(draw)) != 0)
+         return -1;
+      if (draw >= UINT32_C(4294000000))
+         continue;
+      snprintf(code, 8, "%06u", draw % UINT32_C(1000000));
+      if (!code_exists(arr, code))
+         return 0;
+   }
+   return -1;
 }
 
 static cJSON *find_entry(cJSON *arr, const char *platform, const char *user_id)
@@ -98,7 +190,19 @@ int gateway_pairing_is_approved(const char *platform, const char *user_id)
    pairs_path(path, sizeof(path));
 
    pthread_mutex_lock(&g_pairing_mutex);
+   int lock_fd = pairs_lock(path, 0);
+   if (lock_fd < 0)
+   {
+      pthread_mutex_unlock(&g_pairing_mutex);
+      return 0;
+   }
    cJSON *arr = pairs_load(path);
+   if (!arr)
+   {
+      close(lock_fd);
+      pthread_mutex_unlock(&g_pairing_mutex);
+      return 0;
+   }
    cJSON *e = find_entry(arr, platform, user_id);
    int approved = 0;
    if (e)
@@ -113,6 +217,7 @@ int gateway_pairing_is_approved(const char *platform, const char *user_id)
          (void)exp;
    }
    cJSON_Delete(arr);
+   close(lock_fd);
    pthread_mutex_unlock(&g_pairing_mutex);
    return approved;
 }
@@ -126,7 +231,19 @@ int gateway_pairing_issue_if_absent(const char *platform, const char *user_id, c
    pairs_path(path, sizeof(path));
 
    pthread_mutex_lock(&g_pairing_mutex);
+   int lock_fd = pairs_lock(path, 1);
+   if (lock_fd < 0)
+   {
+      pthread_mutex_unlock(&g_pairing_mutex);
+      return -1;
+   }
    cJSON *arr = pairs_load(path);
+   if (!arr)
+   {
+      close(lock_fd);
+      pthread_mutex_unlock(&g_pairing_mutex);
+      return -1;
+   }
    cJSON *e = find_entry(arr, platform, user_id);
    if (e)
    {
@@ -138,6 +255,7 @@ int gateway_pairing_issue_if_absent(const char *platform, const char *user_id, c
       {
          snprintf(code_out, code_size, "%s", code);
          cJSON_Delete(arr);
+         close(lock_fd);
          pthread_mutex_unlock(&g_pairing_mutex);
          return 0;
       }
@@ -153,14 +271,14 @@ int gateway_pairing_issue_if_absent(const char *platform, const char *user_id, c
       }
    }
 
-   /* Generate a 6-digit code. arc4random is not available everywhere; use
-    * time+counter seeding which is adequate for a short-lived OOB code. */
-   static unsigned long counter = 0;
-   counter++;
-   unsigned long seed = (unsigned long)time(NULL) ^ (counter * 2654435761UL);
-   int code_int = (int)(seed % 1000000UL);
    char code[8];
-   snprintf(code, sizeof(code), "%06d", code_int);
+   if (pairing_random_code(arr, code) != 0)
+   {
+      cJSON_Delete(arr);
+      close(lock_fd);
+      pthread_mutex_unlock(&g_pairing_mutex);
+      return -1;
+   }
 
    cJSON *entry = cJSON_CreateObject();
    cJSON_AddStringToObject(entry, "platform", platform);
@@ -171,6 +289,7 @@ int gateway_pairing_issue_if_absent(const char *platform, const char *user_id, c
 
    int rc = pairs_save(path, arr);
    cJSON_Delete(arr);
+   close(lock_fd);
    pthread_mutex_unlock(&g_pairing_mutex);
    if (rc != 0)
    {

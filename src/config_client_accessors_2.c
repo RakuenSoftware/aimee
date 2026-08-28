@@ -5,7 +5,7 @@
 
 int config_subagent_ban_enabled(void)
 {
-   double value = 0;
+   double value = 1; /* provider-native delegation ban is default-on-failure */
    (void)config_client_read_number("subagent_ban_enabled", &value);
    return (int)value;
 }

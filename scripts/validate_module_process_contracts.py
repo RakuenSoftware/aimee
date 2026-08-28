@@ -28,7 +28,7 @@ PROCESS_REQUIRED = {
     # Being optional was also actively wrong -- an optional module with
     # enabled_by_default false is declared and never spawned, which is how peer
     # messaging came to be green in every test and absent from server.modules.
-    "aimee",
+    "aimee", "egress",
     "execution-policy",
 }
 GO_PROCESSES = {
@@ -46,7 +46,7 @@ GO_PROCESSES = {
     # AIMEE_DB1_EVENT_* constant its 461 C call sites compile against. Peer
     # messaging renumbered instead -- it had no C callers to break, which is why
     # its stages are 20..23 rather than 1..4.
-    "aimee",
+    "aimee", "egress",
     "execution-policy",
 }
 # Executables that host a process other than the module runtime's multicall binary.

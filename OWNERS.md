@@ -3,6 +3,12 @@
 Every durable store, wire contract, and policy boundary has one runtime owner. Shared helpers may
 serve several modules; they do not inherit authority over those modules.
 
+`@JBailes` is the current primary repository owner. Before a production promotion, Engineering
+Governance must assign and record a second qualified GitHub identity as backup/reviewer in the live
+ruleset. A boundary owner may author or advise a change, but the recorded approving reviewer must
+be a different identity. Quarterly ruleset/access exports are retained under
+`docs/compliance/CONTROL_EVIDENCE.md`; an absent backup or self-approval blocks promotion.
+
 | Area | Owner | Paths | Review focus |
 | --- | --- | --- | --- |
 | event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |

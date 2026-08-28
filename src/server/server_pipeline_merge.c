@@ -19,7 +19,7 @@
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
-#include "util.h"          /* shell_escape */
+#include "util.h"          /* shell_quote */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -294,8 +294,8 @@ void execute_gate_merge(int id, rtp_run_t *run, rtp_gate_t *gate, int gate_no, c
    char match[160] = {0};
    if (gate->expected_head_sha[0])
    {
-      char *e = shell_escape(gate->expected_head_sha);
-      snprintf(match, sizeof(match), " --match-head-commit '%s'", e ? e : gate->expected_head_sha);
+      char *e = shell_quote(gate->expected_head_sha);
+      snprintf(match, sizeof(match), " --match-head-commit %s", e);
       free(e);
    }
    char cmd[RTP_PATH_LEN + 256];

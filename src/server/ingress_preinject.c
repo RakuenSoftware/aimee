@@ -13,6 +13,7 @@
 #include "request_context.h"
 #include "platform_random.h"
 #include "agent_code_capabilities.h"
+#include "integrity.h"
 #include <ctype.h>
 #include <pthread.h>
 #include <stdbool.h>
@@ -48,16 +49,20 @@ void ingress_preinject_set_request_disabled(int disabled)
  * request thread. A UUID is 36 chars; 40 leaves room for the NUL. */
 static __thread char g_turn_id[40] = "";
 
-void ingress_preinject_mint_turn_id(char *buf, size_t len)
+int ingress_preinject_mint_turn_id(char *buf, size_t len)
 {
    if (!buf || len == 0)
-      return;
+      return -1;
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      buf[0] = '\0';
+      return -1;
+   }
    snprintf(buf, len, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 void ingress_preinject_set_turn_id(const char *turn_id)
@@ -1090,7 +1095,8 @@ char *ingress_preinject_build(const char *query, int request_disabled)
       char minted[40];
       if (!tid || !tid[0])
       {
-         ingress_preinject_mint_turn_id(minted, sizeof(minted));
+         if (ingress_preinject_mint_turn_id(minted, sizeof(minted)) != 0)
+            return NULL;
          tid = minted;
       }
       char fp[32];
@@ -1187,6 +1193,14 @@ char *ingress_preinject_build(const char *query, int request_disabled)
 
    if (!blk || !blk[0])
    {
+      free(blk);
+      return NULL;
+   }
+   integrity_result_t retrieval_gate;
+   if (integrity_ingress_decide(blk, INTEGRITY_SOURCE_DOCUMENT, "retrieval", 1, &retrieval_gate))
+   {
+      LOG_WARN("integrity", "automatic retrieval parked (%s): %s",
+               integrity_verdict_name(retrieval_gate.verdict), retrieval_gate.match_category);
       free(blk);
       return NULL;
    }

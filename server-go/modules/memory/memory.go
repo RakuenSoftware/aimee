@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 const (
@@ -68,22 +69,28 @@ const (
 
 // Handle dispatches a memory stage call.
 func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
-	switch invocation.StageID {
-	case StageWrite:
-		return handleWrite(invocation, request)
-	case StageExtractIndex:
-		if len(request) >= 4 && binary.LittleEndian.Uint32(request[0:4]) == scanRequestMagic {
-			return handleScanTurn(invocation, request)
+	return NewHandler(nil)(invocation, request)
+}
+
+func NewHandler(executor egress.Executor) bus.ModuleHandler {
+	return func(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+		switch invocation.StageID {
+		case StageWrite:
+			return handleWrite(invocation, request)
+		case StageExtractIndex:
+			if len(request) >= 4 && binary.LittleEndian.Uint32(request[0:4]) == scanRequestMagic {
+				return handleScanTurn(invocation, request)
+			}
+			return handleExtract(invocation, request)
+		case StageRetrieve:
+			return handleRetrieve(invocation, request)
+		case StageEmbed:
+			return handleEmbed(executor, invocation, request)
+		case StageDeclareCommands:
+			return handleDeclareCommands(invocation, request)
 		}
-		return handleExtract(invocation, request)
-	case StageRetrieve:
-		return handleRetrieve(invocation, request)
-	case StageEmbed:
-		return handleEmbed(invocation, request)
-	case StageDeclareCommands:
-		return handleDeclareCommands(invocation, request)
+		return handleRerank(invocation, request)
 	}
-	return handleRerank(invocation, request)
 }
 
 // handleScanTurn answers both halves of the §4 correction pre-scan: whether the

@@ -2,6 +2,9 @@
 
 #ifdef _WIN32
 #include <bcrypt.h>
+#elif defined(__linux__) && !defined(AIMEE_TEST_DB2_RANDOM_IO_SEAM_H)
+#include <errno.h>
+#include <sys/random.h>
 #endif
 #include <stdio.h>
 #include <string.h>
@@ -23,6 +26,25 @@ int platform_random_bytes(void *buf, size_t len)
        BCryptGenRandom(NULL, (PUCHAR)buf, (ULONG)len, BCRYPT_USE_SYSTEM_PREFERRED_RNG);
    return (status >= 0) ? 0 : -1;
 #else
+#if defined(__linux__) && !defined(AIMEE_TEST_DB2_RANDOM_IO_SEAM_H)
+   size_t offset = 0;
+   while (offset < len)
+   {
+      ssize_t n = getrandom((unsigned char *)buf + offset, len - offset, 0);
+      if (n > 0)
+      {
+         offset += (size_t)n;
+         continue;
+      }
+      if (n < 0 && errno == EINTR)
+         continue;
+      if (n < 0 && errno == ENOSYS)
+         break;
+      return -1;
+   }
+   if (offset == len)
+      return 0;
+#endif
    FILE *f = DB2_RANDOM_FOPEN("/dev/urandom", "r");
    if (!f)
       return -1;
@@ -34,7 +56,7 @@ int platform_random_bytes(void *buf, size_t len)
 
 int platform_random_hex(char *out, size_t hex_len)
 {
-   if (hex_len == 0 || (hex_len % 2) != 0)
+   if (!out || hex_len == 0 || (hex_len % 2) != 0)
       return -1;
 
    size_t raw_len = hex_len / 2;
@@ -44,8 +66,7 @@ int platform_random_hex(char *out, size_t hex_len)
 
    if (platform_random_bytes(raw, raw_len) != 0)
    {
-      memset(out, '0', hex_len);
-      out[hex_len] = '\0';
+      out[0] = '\0';
       return -1;
    }
 

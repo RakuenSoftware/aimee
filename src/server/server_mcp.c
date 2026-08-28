@@ -315,8 +315,17 @@ void mcp_memory_scope_begin(cJSON *args, int *active_context_missing)
    }
    cJSON *jscope = cJSON_GetObjectItemCaseSensitive(args, "scope");
    int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   int missing = !include_all && !workspace[0] && !project[0];
+   /* An absent scope must query an impossible tenant, never clear the DB scope
+    * and inherit the maintenance/all-rows behaviour. The request boundary
+    * separately authorizes include_all before any tool reaches this helper. */
+   if (missing)
+   {
+      snprintf(workspace, sizeof(workspace), "__aimee_scope_missing__");
+      snprintf(project, sizeof(project), "__aimee_scope_missing__");
+   }
    if (active_context_missing)
-      *active_context_missing = (!workspace[0] && !project[0]) ? 1 : 0;
+      *active_context_missing = missing;
    kb_client_memory_scope_context_set(workspace, project, include_all);
 }
 
@@ -1690,11 +1699,13 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
    int clone_has_destination = strcmp(tool, "git_clone") == 0 && path_arg && path_arg[0];
    const char *git_target_key = target_is_path ? "path" : "cwd";
    char mirror_target[MAX_PATH_LEN] = "";
+   int mirror_target_authorized = 0;
    if (git_target &&
        workspace_turn_resolve_mirror_cwd(git_target, mirror_target, sizeof(mirror_target)))
    {
       cJSON_ReplaceItemInObject(args, git_target_key, cJSON_CreateString(mirror_target));
       git_target = mirror_target;
+      mirror_target_authorized = target_is_path;
    }
 
    /* A `detached`-workspace target ALSO points at the CLIENT's path (the workspace
@@ -1715,7 +1726,8 @@ static cJSON *dispatch_git_tool(server_ctx_t *ctx, server_conn_t *conn, const ch
       else
          resolve_args = args;
    }
-   int resolved = mcp_chdir_git_root(NULL, 0, resolve_args, &mismatch_err);
+   int resolved = mcp_chdir_git_root_authorized(NULL, 0, resolve_args, &mismatch_err,
+                                                mirror_target_authorized);
    if (resolve_args != args)
       cJSON_Delete(resolve_args);
 
@@ -2059,6 +2071,16 @@ static int handle_mcp_call_inner(server_ctx_t *ctx, server_conn_t *conn, cJSON *
          mcp_inject_active_project(jargs);
          snprintf(g_served_tool, sizeof g_served_tool, "%s", tool);
       }
+   }
+
+   cJSON *requested_scope = cJSON_GetObjectItemCaseSensitive(jargs, "scope");
+   if (cJSON_IsString(requested_scope) && strcmp(requested_scope->valuestring, "all") == 0 &&
+       (!conn || (conn->capabilities & CAP_CROSS_SCOPE_READ) == 0))
+   {
+      served_outcome("refused", "cross_scope_forbidden");
+      if (owns_jargs)
+         cJSON_Delete(jargs);
+      return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
    }
 
    /* Family multiplex (P4): if `tool` is a collapsed family (pipeline/diagnose/

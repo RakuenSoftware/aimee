@@ -109,6 +109,36 @@ static void test_row_hash_field_sensitivity(void)
    printf("  test_row_hash_field_sensitivity: ok\n");
 }
 
+static void test_v2_binds_chronology_and_attribution(void)
+{
+   char base[65], changed[65];
+#define V2(ts, role, principal, issuer, actor_subject, transport, team, selected)                  \
+   audit_worm_row_hash_v2(1, ts, role, principal, issuer, actor_subject, transport, team,          \
+                          selected, "tool.read", "v1-1", "allow", "", "{}",                        \
+                          AUDIT_WORM_GENESIS_PREV, changed)
+   audit_worm_row_hash_v2(1, "2026-08-26T00:00:00Z", "primary", "u", "issuer", "subject", "cn", 7,
+                          "explicit", "tool.read", "v1-1", "allow", "", "{}",
+                          AUDIT_WORM_GENESIS_PREV, base);
+   V2("2026-08-26T00:00:01Z", "primary", "u", "issuer", "subject", "cn", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "backup", "u", "issuer", "subject", "cn", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "v", "issuer", "subject", "cn", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "u", "issuer2", "subject", "cn", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "u", "issuer", "subject2", "cn", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "u", "issuer", "subject", "cn2", 7, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "u", "issuer", "subject", "cn", 8, "explicit");
+   assert(strcmp(base, changed) != 0);
+   V2("2026-08-26T00:00:00Z", "primary", "u", "issuer", "subject", "cn", 7, "default");
+   assert(strcmp(base, changed) != 0);
+#undef V2
+   printf("  test_v2_binds_chronology_and_attribution: ok\n");
+}
+
 /* Checkpoint MAC must be deterministic and bound to the key, the attested head
  * (hash + seq), and the key_id. */
 static void test_ckpt_mac(void)
@@ -141,6 +171,7 @@ int main(void)
    test_hex32();
    test_genesis_row_hash();
    test_row_hash_field_sensitivity();
+   test_v2_binds_chronology_and_attribution();
    test_ckpt_mac();
    printf("all tests passed\n");
    return 0;

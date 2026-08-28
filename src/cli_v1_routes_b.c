@@ -1436,6 +1436,7 @@ static const struct
     {"kb.docs.push", marshal_kb_docs_push},
     {"kb.ingest", marshal_kb_ingest},
     {"kb.reembed", marshal_kb_reembed},
+    {"kb.erase-subject", marshal_kb_erase_subject},
     {"kb.health", marshal_kb_status},
     {"kb.search", marshal_kb_search},
     {"kb.status", marshal_kb_status},

@@ -156,9 +156,16 @@ def analyse(root: Path = ROOT) -> tuple[dict[str, int], list[str]]:
             errors.append(
                 f"sampled kind {kind} runtime rate {runtime_sampled[kind]} ppm "
                 f"differs from declared {sampled_rates[kind]} ppm")
-    if "obs_bus_emit_durable_event(\"bus.module.request\"" not in obs_text or \
-            "obs_bus_emit_durable_event(\"bus.module.reply\"" not in obs_text:
-        errors.append("module request/reply durable emitter path is absent")
+    # The host tap is the structural seam for C and process-module callers.
+    # Requiring both registration and the two synchronous durable writes keeps
+    # a refactor from reverting to audit calls in only one convenience client.
+    structural_markers = (
+        "bus_host_set_tap(&g.host, governance_tap",
+        'persist_or_queue_durable("bus.module.request"',
+        'persist_or_queue_durable("bus.module.reply"',
+    )
+    if any(marker not in obs_text for marker in structural_markers):
+        errors.append("structural module request/reply durable emitter path is absent")
 
     counts = {
         "header_symbols": header_symbols,

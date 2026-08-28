@@ -317,6 +317,9 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
       estimator = "unknown";
    if (!status)
       status = "unknown";
+   /* status points into parsed and must not be consulted after parsed is
+    * released below. */
+   double confidence = (strcmp(status, "ok") == 0) ? 1.0 : 0.5;
 
    cJSON *wrap = cJSON_CreateObject();
    cJSON_AddStringToObject(wrap, "source", "bandit_replay");
@@ -337,7 +340,6 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
    /* Replay evidence is durable, system-scoped: scope_kind="bandit_replay",
     * scope_id=<decision_point>. Confidence reflects estimator status:
     * ok → 1.0, insufficient_data → 0.5, else → 0.5. */
-   double confidence = (strcmp(status, "ok") == 0) ? 1.0 : 0.5;
    int rc = db2_artifact_write(id, "benchmark_trace", "committed", "bandit_replay", decision_point,
                                "", confidence, payload);
    free(payload);

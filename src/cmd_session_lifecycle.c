@@ -1384,15 +1384,9 @@ void cmd_launch(app_ctx_t *ctx, int argc, char **argv)
       unsigned char rnd[10];
       if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
       {
-         /* Fallback: seed an LCG from PID+time and emit one byte per step.
-          * Advancing the state each byte (rather than shifting a single value)
-          * keeps all bytes distinct without any out-of-range shift. */
-         uint64_t mix = (uint64_t)getpid() * 2654435761u + (uint64_t)time(NULL);
-         for (size_t i = 0; i < sizeof(rnd); i++)
-         {
-            mix = mix * 6364136223846793005ULL + 1442695040888963407ULL;
-            rnd[i] = (unsigned char)(mix >> 56);
-         }
+         fprintf(stderr,
+                 "aimee: secure entropy is unavailable; refusing to create a shared session\n");
+         return;
       }
       char fresh_id[32];
       int off = 0;

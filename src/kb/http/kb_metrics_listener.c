@@ -15,6 +15,7 @@
 #include <openssl/evp.h>
 #include <openssl/ssl.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -88,7 +89,7 @@ static ssize_t connection_read(metrics_connection_t *connection, void *data, siz
 static ssize_t connection_write(metrics_connection_t *connection, const void *data, size_t len)
 {
    if (!connection->ssl)
-      return write(connection->fd, data, len);
+      return send(connection->fd, data, len, MSG_NOSIGNAL);
    int wrote = SSL_write(connection->ssl, data, len > INT_MAX ? INT_MAX : (int)len);
    if (wrote > 0)
       return wrote;
@@ -258,6 +259,14 @@ static void worker_finished(void)
 static void *metrics_connection_worker(void *arg)
 {
    metrics_connection_t *connection = arg;
+   /* A scrape client may close after reading only the status line.  Keep that
+    * ordinary disconnect from terminating the entire KB process, including
+    * for TLS where SSL_write() does not expose MSG_NOSIGNAL.  The mask is
+    * intentionally worker-local and lasts until this short-lived thread exits. */
+   sigset_t blocked;
+   sigemptyset(&blocked);
+   sigaddset(&blocked, SIGPIPE);
+   (void)pthread_sigmask(SIG_BLOCK, &blocked, NULL);
    if (g_metrics_tls_ctx)
    {
       connection->ssl = SSL_new(g_metrics_tls_ctx);

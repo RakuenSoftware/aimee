@@ -2,6 +2,8 @@ package families
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"testing"
@@ -271,6 +273,91 @@ func TestDeleteExpiredReportsHowManyItRemoved(t *testing.T) {
 	status, cells := sessCall(t, db, opServerSessionDeleteExpired, []string{"60"})
 	if status != store.StatusOK || len(cells) != 1 || cells[0] != "7" {
 		t.Fatalf("status = %d, cells = %v", status, cells)
+	}
+}
+
+func TestExpiryReapsMutableContentGraphButNotEvidence(t *testing.T) {
+	db := newSessDB()
+	sessCall(t, db, opServerSessionDeleteExpired, []string{"60"})
+	sql := db.executed[0]
+	for _, table := range []string{
+		"delegation_messages", "delegate_learnings", "working_profile_observations_local",
+		"context_cache", "context_snapshots", "context_activation_events",
+		"file_snapshots", "execution_trace", "workflow_binding", "branch_ownership",
+		"economizer_state", "checkpoints", "agent_log", "session_state",
+		"working_memory", "payload_rewrite_state", "conv_tool_events",
+		"conv_tool_chains", "conv_context_state", "windows", "primary_sessions",
+		"webchat_claude_sessions", "webchat_live", "session_state_write_paths",
+		"server_sessions",
+	} {
+		if !strings.Contains(sql, "DELETE FROM "+table) {
+			t.Errorf("retention does not delete mutable family %s", table)
+		}
+	}
+	for _, immutable := range []string{"audit", "worm", "witness", "ledger"} {
+		if strings.Contains(strings.ToLower(sql), "delete from "+immutable) {
+			t.Errorf("retention attempts to rewrite immutable evidence family %s", immutable)
+		}
+	}
+}
+
+func TestSubjectErasureIsBoundAndContentComplete(t *testing.T) {
+	db := newSessDB()
+	db.rows = [][]any{{"session-a"}, {"session-b"}}
+	status, cells := sessCall(t, db, opServerSessionListBySubject, []string{"person@example.test", "10"})
+	if status != store.StatusOK || len(cells) != 2 {
+		t.Fatalf("list status = %d, cells = %v", status, cells)
+	}
+	if got := db.args[0][0].(string); got != "person@example.test" {
+		t.Fatalf("list subject = %q", got)
+	}
+
+	db = newSessDB()
+	db.execRows = 2
+	status, cells = sessCall(t, db, opServerSessionEraseSubject,
+		[]string{"erase-request-0123456789", "person@example.test"})
+	if status != store.StatusOK || len(cells) != 1 || cells[0] != "2" {
+		t.Fatalf("erase status = %d, cells = %v", status, cells)
+	}
+	deleteAt := -1
+	for i, sql := range db.executed {
+		if strings.Contains(sql, "WITH subject_sessions") {
+			deleteAt = i
+			break
+		}
+	}
+	if deleteAt < 0 {
+		t.Fatalf("subject deletion statement was not executed: %v", db.executed)
+	}
+	sql := db.executed[deleteAt]
+	if strings.Contains(sql, "person@example.test") || db.args[deleteAt][0] != "person@example.test" {
+		t.Fatalf("subject must be a bound parameter: sql=%q args=%v", sql, db.args[deleteAt])
+	}
+	for _, table := range []string{"working_memory", "conv_tool_events", "primary_sessions", "webchat_claude_sessions", "server_sessions"} {
+		if !strings.Contains(sql, "DELETE FROM "+table) {
+			t.Errorf("subject erasure does not delete %s", table)
+		}
+	}
+	for _, immutable := range []string{"audit", "worm", "witness", "ledger"} {
+		if strings.Contains(strings.ToLower(sql), "delete from "+immutable) {
+			t.Errorf("subject erasure attempts to rewrite immutable evidence family %s", immutable)
+		}
+	}
+}
+
+func TestSubjectErasureRetryReturnsJournaledCount(t *testing.T) {
+	db := newSessDB()
+	digestBytes := sha256.Sum256([]byte("person@example.test"))
+	db.row = []any{hex.EncodeToString(digestBytes[:]), int64(7)}
+	status, cells := sessCall(t, db, opServerSessionEraseSubject,
+		[]string{"erase-request-0123456789", "person@example.test"})
+	if status != store.StatusOK || len(cells) != 1 || cells[0] != "7" {
+		t.Fatalf("retry status = %d, cells = %v", status, cells)
+	}
+	for _, sql := range db.executed {
+		if strings.Contains(sql, "WITH subject_sessions") {
+			t.Fatal("journaled retry repeated mutable-data deletion")
+		}
 	}
 }
 

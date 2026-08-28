@@ -458,7 +458,7 @@ char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *
        * retry immediately against valid anchors */
       char fresh[ANCHOR_SNAPSHOT_ID_MAX];
       char resolved[MAX_PATH_LEN];
-      const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+      const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
       if (!verr && anchor_snapshot_create(resolved, content, rd, fresh) == 0)
          cJSON_AddStringToObject(res.reject, "snapshot_id", fresh);
       cJSON_AddStringToObject(res.reject, "path", actual_path);

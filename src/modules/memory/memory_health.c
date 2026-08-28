@@ -9,7 +9,9 @@
 #include "modules/db2/c/memory_health.h"
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/kb_payload.h"
 #include "modules/db2/c/vector_index_ops.h"
+#include <aimee/audit/obs_bus.h>
 #include "kb.h"
 #include "log.h"
 #include "memory.h"
@@ -216,9 +218,22 @@ int memory_effectiveness_stats(effectiveness_stats_t *out)
 
 int memory_enforce_retention(void)
 {
-   int total = 0;
-   total += db2_memory_health_delete_by_sensitivity("restricted", RETENTION_RESTRICTED_DAYS);
-   total += db2_memory_health_delete_by_sensitivity("sensitive", RETENTION_SENSITIVE_DAYS);
+   int sensitive = 0;
+   sensitive += db2_memory_health_delete_by_sensitivity("restricted", RETENTION_RESTRICTED_DAYS);
+   sensitive += db2_memory_health_delete_by_sensitivity("sensitive", RETENTION_SENSITIVE_DAYS);
+   int memories = db2_memory_health_delete_older_than(90);
+   int documents = db2_kb_documents_delete_older_than(90);
+   int total = sensitive + memories + documents;
+   if (total > 0)
+   {
+      char detail[192];
+      snprintf(detail, sizeof(detail),
+               "{\"policy_revision\":\"data-governance-v1\",\"memory\":%d,"
+               "\"documents\":%d,\"sensitivity_early\":%d}",
+               memories, documents, sensitive);
+      obs_bus_emit_durable_event("content.retention.completed", "scheduled-reaper", "allow",
+                                 detail);
+   }
    return total;
 }
 

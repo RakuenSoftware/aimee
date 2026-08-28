@@ -168,7 +168,7 @@ void ingress_preinject_set_request_disabled(int disabled);
  * ingress_preinject_build mints its own. Set per request; like the disable
  * override it does not auto-reset — the HTTP layer sets it (or "" to clear) on
  * every request. */
-void ingress_preinject_mint_turn_id(char *buf, size_t len);
+int ingress_preinject_mint_turn_id(char *buf, size_t len);
 void ingress_preinject_set_turn_id(const char *turn_id);
 const char *ingress_preinject_turn_id(void);
 

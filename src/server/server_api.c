@@ -8,7 +8,8 @@
  * First native resource: GET /v1/rules — the active collaboration rules,
  * proxied from aimee-kb via kb_client. */
 #include "server_http.h"
-#include "server.h" /* server_active_project_from_cwd */
+#include "server_http_internal.h" /* request capability context */
+#include "server.h"               /* server_active_project_from_cwd */
 #include "kb_client.h"
 #include "config.h"
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
@@ -149,6 +150,14 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    }
    if (all_projects)
    {
+      if ((g_rpc_conn_caps & CAP_CROSS_SCOPE_READ) == 0)
+      {
+         cJSON_Delete(req);
+         snprintf(resp, (size_t)cap,
+                  "{\"error\":{\"message\":\"scope=all requires operator authority\","
+                  "\"type\":\"forbidden\"}}");
+         return 403;
+      }
       if (!project && cJSON_IsString(jc) && jc->valuestring[0] &&
           server_active_project_from_cwd(jc->valuestring, resolved_project,
                                          sizeof(resolved_project)) == 0)
@@ -247,6 +256,14 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cwd");
    const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
    int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   if (include_all && (g_rpc_conn_caps & CAP_CROSS_SCOPE_READ) == 0)
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"scope=all requires operator authority\","
+               "\"type\":\"forbidden\"}}");
+      return 403;
+   }
    if (cJSON_IsString(jp))
       snprintf(project, sizeof(project), "%s", jp->valuestring);
    if (cJSON_IsString(jw))
@@ -263,6 +280,14 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
          if (!workspace[0])
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
       }
+   }
+   if (!include_all && !project[0] && !workspace[0])
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"an authorized project or workspace is required\","
+               "\"type\":\"scope_required\"}}");
+      return 409;
    }
    kb_client_memory_scope_context_set(workspace, project, include_all);
    char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");

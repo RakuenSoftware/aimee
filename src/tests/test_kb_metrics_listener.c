@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/un.h>
@@ -177,6 +178,18 @@ static void test_unix_lifecycle(void)
 
 int main(void)
 {
+   /* kb_metrics_listener writes responses with plain write(2), which raises
+    * SIGPIPE when a scrape client hangs up mid-response. That is safe in the
+    * real service because kb_main.c ignores SIGPIPE process-wide before any
+    * listener starts (see the comment at its signal(SIGPIPE, SIG_IGN)), and the
+    * listener is written against that contract.
+    *
+    * This binary links the listener WITHOUT kb_main, so it inherited the default
+    * disposition and died of SIGPIPE instead of failing an assertion: under
+    * parallel load the suite saw a bare exit 141, no message, roughly one run in
+    * five. Reproduce the process contract the component depends on. */
+   signal(SIGPIPE, SIG_IGN);
+
    test_disabled_and_fail_closed();
    test_loopback_bearer();
    test_unix_lifecycle();

@@ -184,12 +184,12 @@ static void trim_token(char *tok)
    tok[len - start] = '\0';
 }
 
-static int append_issue(char *buf, size_t buf_len, const char *fmt, const char *value)
+static int append_issue(char *buf, size_t buf_len, const char *prefix, const char *value)
 {
    size_t used = strlen(buf);
    if (used >= buf_len)
       return 0;
-   int written = snprintf(buf + used, buf_len - used, fmt, value);
+   int written = snprintf(buf + used, buf_len - used, "%s%s\n", prefix, value);
    return written > 0 ? 1 : 0;
 }
 
@@ -221,7 +221,7 @@ static int scan_text_for_missing_refs(const char *text, char *issues, size_t iss
                if ((strcmp(prev, "file") == 0 || token_looks_like_path(token)) &&
                    !path_ref_exists(token))
                {
-                  errors += append_issue(issues, issues_len, "missing file reference: %s\n", token);
+                  errors += append_issue(issues, issues_len, "missing file reference: ", token);
                }
                else if ((strcmp(prev, "symbol") == 0 || strcmp(prev, "function") == 0 ||
                          strcmp(prev, "method") == 0 || strcmp(prev, "class") == 0 ||
@@ -231,7 +231,7 @@ static int scan_text_for_missing_refs(const char *text, char *issues, size_t iss
                   term_hit_t hits[1];
                   if (kb_client_index_find(token, hits, 1) <= 0)
                      errors +=
-                         append_issue(issues, issues_len, "missing symbol reference: %s\n", token);
+                         append_issue(issues, issues_len, "missing symbol reference: ", token);
                }
                snprintf(prev, sizeof(prev), "%s", token);
             }

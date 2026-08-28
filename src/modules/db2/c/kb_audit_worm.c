@@ -21,6 +21,11 @@ void aimee_db2_register_audit_hash_provider(db2_audit_hash_fn provider)
    (void)provider;
 }
 
+void aimee_db2_register_audit_hash_v2_provider(db2_audit_hash_v2_fn provider)
+{
+   (void)provider;
+}
+
 /* Capture gate (S6). Resolved once from config.audit_worm_enabled (default-off)
  * and cached, so the hot kb-audit seam costs one branch after the first call. */
 static int g_kb_worm_enabled = -1;

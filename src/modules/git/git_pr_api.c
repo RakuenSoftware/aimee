@@ -6,7 +6,8 @@
 #include "agent_exec.h"      /* agent_http_get/put/patch — the ops still on HTTP */
 #include "cJSON.h"           /* request/response JSON */
 #include "git_cred_inject.h" /* git_cred_inject_resolve_token — the ONE cred policy */
-#include "util.h"            /* run_cmd */
+#include "egress_credential_envelope.h"
+#include "util.h" /* run_cmd */
 
 #include "headers/module_json_call.h" /* forge operations run in the module */
 #include <aimee/git/module_api.h>
@@ -313,16 +314,31 @@ static int gh_get(const gh_ctx_t *cx, const char *path, char **resp)
  * frees) or NULL when the module could not be reached. */
 static cJSON *forge_stage(const gh_ctx_t *cx, const char *op, cJSON *extra)
 {
+   char resource[sizeof(cx->owner) + sizeof(cx->repo) + 1];
+   if (!cx || !op ||
+       (size_t)snprintf(resource, sizeof(resource), "%s/%s", cx->owner, cx->repo) >=
+           sizeof(resource))
+   {
+      cJSON_Delete(extra);
+      return NULL;
+   }
+   cJSON *credential = aimee_egress_wrap_forge_credential(cx->token, op, resource);
+   if (!credential)
+   {
+      cJSON_Delete(extra);
+      return NULL;
+   }
    cJSON *request = cJSON_CreateObject();
    if (!request)
    {
+      cJSON_Delete(credential);
       cJSON_Delete(extra);
       return NULL;
    }
    cJSON_AddStringToObject(request, "op", op);
    cJSON_AddStringToObject(request, "owner", cx->owner);
    cJSON_AddStringToObject(request, "repo", cx->repo);
-   cJSON_AddStringToObject(request, "token", cx->token);
+   cJSON_AddItemToObject(request, "credential", credential);
    if (extra)
    {
       cJSON *field = extra->child;

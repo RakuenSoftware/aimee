@@ -30,6 +30,11 @@ static cJSON *kb_last_result_object(const char *message)
    return result ? result : jo_err(message);
 }
 
+static int cross_scope_allowed(const server_conn_t *conn)
+{
+   return conn && (conn->capabilities & CAP_CROSS_SCOPE_READ) != 0;
+}
+
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
@@ -46,6 +51,8 @@ int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "index.find scope must be current or all", NULL);
    if (scope && strcmp(scope, "all") == 0)
    {
+      if (!cross_scope_allowed(conn))
+         return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
       all_projects = 1;
       if (project_arg && project_arg[0])
          snprintf(project, sizeof(project), "%s", project_arg);
@@ -322,6 +329,8 @@ int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (scope && strcmp(scope, "all") != 0 && strcmp(scope, "current") != 0)
       return server_send_error(conn, "index.hybrid scope must be current or all", NULL);
    int all_projects = (scope && strcmp(scope, "all") == 0) ? 1 : 0;
+   if (all_projects && !cross_scope_allowed(conn))
+      return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
 
    char project_buf[MAX_PATH_LEN] = "";
    const char *project = jo_str(req, "project", NULL);
@@ -733,6 +742,8 @@ int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
       return server_send_error(conn, "index.callers scope must be current or all", NULL);
    if (scope && strcmp(scope, "all") == 0)
    {
+      if (!cross_scope_allowed(conn))
+         return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);

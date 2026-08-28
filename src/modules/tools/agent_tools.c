@@ -1140,7 +1140,7 @@ char *tool_bash(const char *command, int timeout_ms)
 /* Validate a file path: delegates to the shared guardrail-level check. */
 static const char *validate_file_path(const char *path, char *resolved, size_t resolved_len)
 {
-   return guardrails_validate_file_path(path, resolved, resolved_len);
+   return guardrails_check_sensitive_path(path, resolved, resolved_len);
 }
 
 const char *path_in_thread_cwd(const char *path, char *buf, size_t buf_len)
@@ -1444,7 +1444,7 @@ char *tool_list_files(const char *path, const char *pattern)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *err = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *err = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
 
@@ -1664,7 +1664,7 @@ char *tool_verify(const char *check_type, const char *target, const char *expect
    else if (strcmp(check_type, "file_contains") == 0)
    {
       char resolved[MAX_PATH_LEN];
-      const char *verr = guardrails_validate_file_path(target, resolved, sizeof(resolved));
+      const char *verr = guardrails_check_sensitive_path(target, resolved, sizeof(resolved));
       if (verr)
       {
          cJSON_AddBoolToObject(result, "pass", 0);
@@ -1757,7 +1757,7 @@ char *tool_grep(const char *path, const char *pattern, int max_results)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (verr)
       return safe_strdup(verr);
 
@@ -2012,8 +2012,7 @@ char *tool_code_search(const char *query, const char *project, int max_results)
  * Shared knowledge lives behind the knowledge service; server-side delegates
  * reach it via the kb_client RPC bridge. */
 
-static char *render_notes_json_to_text(const char *json, const char *empty_msg, int include_content,
-                                       const char *prefix)
+static char *render_notes_json_to_text(const char *json, const char *empty_msg, int include_content)
 {
    if (!json)
       return safe_strdup("error: knowledge service unavailable for notes");
@@ -2039,7 +2038,8 @@ static char *render_notes_json_to_text(const char *json, const char *empty_msg, 
       return out;
    }
    char buf[8192];
-   int pos = snprintf(buf, sizeof(buf), prefix, count);
+   int pos = include_content ? snprintf(buf, sizeof(buf), "Found %d note(s):\n\n", count)
+                             : snprintf(buf, sizeof(buf), "Investigation notes (%d):\n\n", count);
    cJSON *n = NULL;
    cJSON_ArrayForEach(n, notes)
    {
@@ -2109,8 +2109,7 @@ char *tool_list_notes(const char *tag, int limit)
    if (limit <= 0 || limit > 20)
       limit = 20;
    char *json = kb_client_note_list_json((tag && tag[0]) ? tag : NULL, limit);
-   char *out = render_notes_json_to_text(json, "No investigation notes found.", 0,
-                                         "Investigation notes (%d):\n\n");
+   char *out = render_notes_json_to_text(json, "No investigation notes found.", 0);
    free(json);
    return out;
 }
@@ -2122,7 +2121,7 @@ char *tool_search_notes(const char *query)
    char *json = kb_client_note_search_json(query, 10);
    char none[256];
    snprintf(none, sizeof(none), "No notes matching '%s'.", query);
-   char *out = render_notes_json_to_text(json, none, 1, "Found %d note(s):\n\n");
+   char *out = render_notes_json_to_text(json, none, 1);
    free(json);
    return out;
 }

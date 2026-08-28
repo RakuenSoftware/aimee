@@ -30,6 +30,8 @@ void test_oauth_tokens_reset(void);
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include <aimee/audit/audit_action.h>
+#include <aimee/audit/audit_worm.h>
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
@@ -1721,7 +1723,7 @@ static void test_tool_read_file(void)
    /* Nonexistent path */
    result = tool_read_file("/nonexistent/path/file.txt", 0, 0, 1);
    assert(result != NULL);
-   assert(strstr(result, "error: cannot open") != NULL);
+   assert(strstr(result, "error: parent path cannot be resolved") != NULL);
    free(result);
 
    unsigned char binary_content[] = {0x7f, 'E', 'L', 'F', '\0', 0x01, 0x02, 0x03};
@@ -2754,7 +2756,7 @@ static void test_tool_list_files(void)
    free(result);
    result = tool_list_files("/nonexistent_dir_12345", NULL);
    assert(result != NULL);
-   assert(result[0] == '\0');
+   assert(strstr(result, "error:") != NULL);
    free(result);
    unlink(alpha);
    unlink(beta);
@@ -3462,6 +3464,8 @@ static void test_agent_name_valid(void)
  * whose normalized target is outside an aimee-managed worktree. */
 static void test_session_isolation_guard(void)
 {
+   const char *current_home = getenv("AIMEE_HOME");
+   char *saved_aimee_home = current_home ? strdup(current_home) : NULL;
    char home[512];
    snprintf(home, sizeof(home), "%s/aimee_sess_iso_XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
@@ -3508,7 +3512,13 @@ static void test_session_isolation_guard(void)
    assert(agent_tools_session_isolation_blocks(NULL, NULL) == 0);
 
    remove(cfg);
-   assert(platform_setenv("AIMEE_HOME", "") == 0); /* clear override */
+   if (saved_aimee_home)
+   {
+      assert(platform_setenv("AIMEE_HOME", saved_aimee_home) == 0);
+      free(saved_aimee_home);
+   }
+   else
+      assert(platform_unsetenv("AIMEE_HOME") == 0);
    printf("session_isolation guard (Layer 2) OK\n");
 }
 
@@ -3773,6 +3783,10 @@ int main(void)
     * operator's real agents.json. Set it before any config or agent call. */
    assert(platform_setenv("AIMEE_HOME", tmp_home) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   char audit_db[640];
+   snprintf(audit_db, sizeof(audit_db), "%s/audit-worm.db", tmp_home);
+   assert(audit_ensure_key() == 0);
+   assert(audit_worm_init_at(audit_db) == 0);
    assert(config_output_dir()[0] != '\0');
 
    /* Guard the sandbox itself: if agent_config_path() ever resolves outside the
@@ -3913,6 +3927,7 @@ int main(void)
     * (#2569); tmp_home is a unique mkdtemp path, so this targets only this
     * test's own daemon. */
    {
+      audit_worm_close();
       char cmd[640];
       snprintf(cmd, sizeof(cmd), "pkill -KILL -f 'aimee-kb --socket=%s' 2>/dev/null", tmp_home);
       (void)system(cmd);

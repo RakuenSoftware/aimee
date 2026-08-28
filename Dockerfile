@@ -8,7 +8,7 @@
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 
-FROM golang:1.25-bookworm AS module-go-build
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS module-go-build
 WORKDIR /src/server-go
 COPY server-go/go.mod server-go/go.sum ./
 RUN go mod download
@@ -17,7 +17,7 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module \
     && CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-config \
          github.com/RakuenSoftware/aimee-module-config/runtime
 
-FROM debian:trixie-slim AS build
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -74,7 +74,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
 # with no dependency on this repo's source at all. The old comment here claimed CI
 # cached the layer; it never did (the buildx GHA cache was thrashing its quota and
 # restored nothing), so the compile ran in full on every single run.
-FROM debian:trixie-slim AS pgvectorscale-build
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
 # TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
@@ -116,7 +116,7 @@ RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'v
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 # python3 runs the sidecar clients the kb popens (llm-chat.py,
 # learning-synthesize.py, curator-extract.py -> LLM endpoint) AND the in-container
@@ -176,16 +176,16 @@ RUN set -eux; \
     else \
       python3 -m venv "$EMBEDDER_VENV"; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          --index-url https://download.pytorch.org/whl/cpu torch; \
+          --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          "sentence-transformers>=3.3" "transformers>=5.2" einops; \
+          "sentence-transformers==5.2.3" "transformers==4.57.6" "einops==0.8.2"; \
       # onnxruntime is the CPU serving path this embedder was characterised on.
       # Without it sentence-transformers falls back to fp32 torch, which costs
       # ~2000 ms for one ~512-token text on 4 cores (25M-parameter model) and
       # made corpus ingest run at ~20 s/file. optimum provides the ORT backend
       # sentence-transformers loads via backend="onnx".
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          "optimum[onnxruntime]>=1.23"; \
+          "optimum[onnxruntime]==2.1.0" "onnxruntime==1.29.0"; \
       find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
       rm -rf /root/.cache/pip; \
     fi
@@ -420,15 +420,20 @@ def code_repos(snapshot_dir):
 
 
 for name, spec in table.items():
-    repo, revision = spec["repo"], spec.get("revision") or "main"
+    repo, revision = spec["repo"], spec.get("revision")
+    if not revision or len(revision) != 40:
+        raise RuntimeError(f"{name}: revision must be an immutable 40-character commit")
     print(f"baking {name}: {repo}@{revision}", flush=True)
     local = fetch(repo, revision=revision, ignore_patterns=SKIP)
-    # Code repos are referenced by name only — auto_map carries no revision — so these
-    # take the default branch. That is a looser pin than the weights get; a model whose
-    # code must be pinned needs its auto_map repo added to the registry explicitly.
+    # auto_map carries no revision. Refuse external code unless the registry binds
+    # every referenced repository to an immutable commit.
+    code_revisions = spec.get("code_revisions") or {}
     for code_repo in sorted(code_repos(local)):
-        print(f"  + code: {code_repo}", flush=True)
-        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        code_revision = code_revisions.get(code_repo)
+        if not code_revision or len(code_revision) != 40:
+            raise RuntimeError(f"{name}: unpinned auto_map code repository {code_repo}")
+        print(f"  + code: {code_repo}@{code_revision}", flush=True)
+        fetch(code_repo, revision=code_revision, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so

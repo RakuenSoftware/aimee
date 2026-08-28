@@ -36,7 +36,7 @@ module_worker() {
         done
         [ "$worker_stopping" -eq 0 ] || break
         log "starting $module_id"
-        "$executable" "$bus_socket" &
+        AIMEE_MODULE_PLACEMENT="$placement" "$executable" "$bus_socket" &
         child=$!
         rc=0
         wait "$child" || rc=$?

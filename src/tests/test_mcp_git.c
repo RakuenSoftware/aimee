@@ -59,6 +59,11 @@ static void setup_git_repo(void)
             g_tmpdir);
    assert(system(cmd) == 0);
 
+   /* Explicit MCP git paths are intentionally accepted only inside a
+    * registered workspace. Register each throwaway repository through the
+    * production config API so path-authority tests exercise that boundary. */
+   assert(config_workspace_add(g_tmpdir, "shared", NULL, NULL) == 0);
+
    assert(getcwd(g_saved_cwd, sizeof(g_saved_cwd)) != NULL);
    assert(chdir(g_tmpdir) == 0);
 }
@@ -66,6 +71,7 @@ static void setup_git_repo(void)
 static void teardown_git_repo(void)
 {
    assert(chdir(g_saved_cwd) == 0);
+   assert(config_workspace_remove(g_tmpdir) == 0);
    char cmd[512];
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_tmpdir);
    system(cmd);
@@ -253,6 +259,18 @@ static void test_explicit_path_is_authoritative_and_live(void)
    args = cJSON_CreateObject();
    cJSON_AddStringToObject(args, "path", "/tmp/aimee-path-that-does-not-exist");
    assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+   cJSON_Delete(args);
+
+   char canary[MAX_PATH_LEN];
+   snprintf(canary, sizeof(canary), "%s/aimee-mcp-injection-canary-%d", platform_tmpdir(),
+            (int)getpid());
+   unlink(canary);
+   char injection[MAX_PATH_LEN];
+   snprintf(injection, sizeof(injection), "%s; touch %s; #", g_tmpdir, canary);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "path", injection);
+   assert(mcp_chdir_git_root(NULL, 0, args, NULL) == -2);
+   assert(access(canary, F_OK) != 0);
    cJSON_Delete(args);
 
    run_cmd_set_cwd(NULL);

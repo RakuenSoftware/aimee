@@ -103,6 +103,8 @@ int learning_policy_select(const char *decision_point, char *out, size_t out_len
       return -1;
 
    const char *chosen = learning_policy_default_arm(decision_point);
+   char sampled[LEARNING_POLICY_ARM_LEN];
+   sampled[0] = '\0';
 
    if (g_sampler)
    {
@@ -115,7 +117,10 @@ int learning_policy_select(const char *decision_point, char *out, size_t out_len
           * the sampler lives in another process and a bad one must never be
           * able to inject a fragment this point does not declare. */
          if (idx >= 0 && idx < n)
-            chosen = arms[idx];
+         {
+            snprintf(sampled, sizeof(sampled), "%s", arms[idx]);
+            chosen = sampled;
+         }
       }
    }
 

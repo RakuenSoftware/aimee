@@ -104,6 +104,11 @@ double wfe_autonomy_default_max_cost_usd(void)
    return 5.0;
 }
 
+int wfe_autonomy_killed(void)
+{
+   return 0;
+}
+
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
 {
@@ -1691,6 +1696,8 @@ int main(void)
       /* memory:admin must not leak into the read-only set, and must stay inside
        * the authenticated set (the operator can still administer their store). */
       assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_DASHBOARD_READ) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_DASHBOARD_READ) == 0);
       assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
       assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
 

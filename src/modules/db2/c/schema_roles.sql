@@ -59,6 +59,9 @@ BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_token_authority_store_owner') THEN
     CREATE ROLE aimee_kb_token_authority_store_owner NOLOGIN NOINHERIT NOBYPASSRLS;
   END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'aimee_kb_privacy_erasure') THEN
+    CREATE ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS;
+  END IF;
 END
 $$;
 
@@ -91,6 +94,9 @@ ALTER ROLE aimee_kb_jwks_runtime_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB 
 ALTER ROLE aimee_kb_token_authority_definer NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_token_authority_runtime LOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 ALTER ROLE aimee_kb_token_authority_store_owner NOLOGIN NOINHERIT NOBYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+-- Cross-tenant subject erasure is confined to two SECURITY DEFINER functions.
+-- The request process remains NOBYPASSRLS and receives EXECUTE only.
+ALTER ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
 
 -- migrate acts as owner for DDL; runtime never does.
 GRANT aimee_kb_owner TO aimee_kb_migrate;

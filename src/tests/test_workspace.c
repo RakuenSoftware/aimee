@@ -29,6 +29,11 @@ static void write_test_config(const char *yaml)
 #include "session_worktree_key.h"
 #include "platform_test_util.h"
 
+/* Discovery's maximum result matrix is 1 MiB. Reuse one test scratch buffer;
+ * putting one matrix in each lexical block makes ASan reserve all ten red-zoned
+ * lifetimes in main's frame and overflows the default 8 MiB process stack. */
+static char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
+
 static void remove_tree(const char *path)
 {
    DIR *dir = opendir(path);
@@ -129,7 +134,6 @@ int main(void)
       snprintf(empty, sizeof(empty), "%s/empty", tmpdir);
       mkdir(empty, 0755);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count = workspace_discover_projects(empty, MAX_WORKSPACE_DEPTH, projects,
                                               MAX_DISCOVERED_PROJECTS);
       assert(count == 0);
@@ -141,7 +145,6 @@ int main(void)
       snprintf(repo, sizeof(repo), "%s/single-repo", tmpdir);
       create_git_repo(repo);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(repo, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 1);
@@ -167,7 +170,6 @@ int main(void)
       snprintf(non_git, sizeof(non_git), "%s/docs", ws);
       mkdir(non_git, 0755);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 3);
@@ -191,8 +193,6 @@ int main(void)
       mkdir(org, 0755);
       create_git_repo(repo_a);
       create_git_repo(repo_b);
-
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
 
       /* Depth 3 from the base: base(0) user(1) org(2) repo(3) -- reachable only
        * because the layout is exactly three deep. One more nesting level, or a
@@ -236,7 +236,6 @@ int main(void)
       snprintf(shallow_repo, sizeof(shallow_repo), "%s/shallow-proj", ws);
       create_git_repo(shallow_repo);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 2);
@@ -276,7 +275,6 @@ int main(void)
       snprintf(deep_nested, sizeof(deep_nested), "%s/vendored", deep_parent);
       create_git_repo(deep_nested);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 3);
@@ -312,7 +310,6 @@ int main(void)
       create_git_repo(l3);
 
       /* With depth 1, should NOT find it */
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count = workspace_discover_projects(ws, 1, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 0);
 
@@ -340,7 +337,6 @@ int main(void)
       snprintf(real, sizeof(real), "%s/real-proj", ws);
       create_git_repo(real);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 1);
@@ -366,7 +362,6 @@ int main(void)
       snprintf(wtgit, sizeof(wtgit), "%s/.git", wt);
       write_text_file(wtgit, "gitdir: /home/x/main/.git/worktrees/wt-copy\n");
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 1); /* only the real checkout, not the worktree */
@@ -395,7 +390,6 @@ int main(void)
       snprintf(link, sizeof(link), "%s/src", repo);
       assert(symlink(".", link) == 0);
 
-      char projects[MAX_DISCOVERED_PROJECTS][MAX_PATH_LEN];
       int count =
           workspace_discover_projects(ws, MAX_WORKSPACE_DEPTH, projects, MAX_DISCOVERED_PROJECTS);
       assert(count == 1); /* discovered exactly once, not N times */

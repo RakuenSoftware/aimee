@@ -177,7 +177,7 @@ static void test_sse_happy_path_with_auth(void)
    cJSON_Delete(result);
    cJSON_Delete(args);
    mock_server_stop(&server);
-   mcp_transport_close(transport);
+   mcp_client_session_close(&session);
 }
 
 static void test_sse_reconnects_after_stream_drop(void)
@@ -194,7 +194,7 @@ static void test_sse_reconnects_after_stream_drop(void)
    assert(server.stream_connects >= 2);
 
    mock_server_stop(&server);
-   mcp_transport_close(transport);
+   mcp_client_session_close(&session);
 }
 
 int main(void)

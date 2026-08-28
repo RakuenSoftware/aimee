@@ -85,14 +85,17 @@ services:
   aimee-store-db:
     restart: unless-stopped
     image: ${AIMEE_STORE_DB_IMAGE:-postgres:18}
+    entrypoint: ["/opt/aimee/postgres-secure-entrypoint.sh"]
     environment:
       # Literal, not per-field knobs. AIMEE_STORE_URL below is the ONE override
       # that matters: an operator with their own PostgreSQL points it there and
       # this service goes unused. Per-field variables would have to be kept in
       # agreement with that DSN by hand, and a password that disagrees with the
       # URL fails as "the store is unreachable".
-      POSTGRES_USER: aimee
-      POSTGRES_PASSWORD: aimee
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AIMEE_STORE_ADMIN_PASSWORD:?AIMEE_STORE_ADMIN_PASSWORD is required}
+      AIMEE_STORE_MIGRATOR_PASSWORD: ${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}
+      AIMEE_STORE_RUNTIME_PASSWORD: ${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}
       POSTGRES_DB: aimee_store
       # The LOCALE travels with the encoding. initdb refuses a UTF8 encoding
       # against a locale whose own encoding differs, and aborts before the
@@ -109,10 +112,14 @@ services:
     # No published port: the store is reached only across this compose network,
     # by aimee-server. Publishing it would put the daemon's whole state on the
     # host interface for no deployment that needs it there.
+    networks: [store]
     volumes:
       - aimee-store-db:/var/lib/postgresql/data
+      - ../../scripts/postgres-secure-entrypoint.sh:/opt/aimee/postgres-secure-entrypoint.sh:ro
+      - ../../scripts/postgres-store-init.sh:/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro
+      - aimee-store-tls:/var/lib/postgresql/secure
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "aimee", "-d", "aimee_store"]
+      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "aimee_store"]
       interval: 2s
       timeout: 2s
       retries: 30
@@ -131,7 +138,8 @@ services:
       # AIMEE_DB1_URL, which named a SQLite file for a C module that no longer
       # exists -- nothing had read it since the store became a Go module, so it
       # was telling operators the server kept a database it does not keep.
-      AIMEE_STORE_URL: ${AIMEE_STORE_URL:-postgres://aimee:aimee@aimee-store-db:5432/aimee_store}
+      AIMEE_STORE_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_runtime password=${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
+      AIMEE_STORE_MIGRATION_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_migrator password=${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
       AIMEE_KB_API_URL: http://aimee-kb:8741
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
@@ -154,12 +162,20 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [default, store]
     volumes:
       - aimee-server-home:/var/lib/aimee
+      - aimee-store-tls:/run/aimee-store-tls:ro
       - aimee-server-workspaces:/var/lib/aimee-workspaces
 
 volumes:
   aimee-store-db:
+  aimee-store-tls:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
+
+networks:
+  default:
+  store:
+    internal: true

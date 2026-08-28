@@ -1,17 +1,16 @@
 package memory
 
 import (
-	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
 
 // Breaker defaults, matching DEPENDENCY_BREAKER_DEFAULT_* in C.
@@ -163,8 +162,6 @@ type EmbedResponse struct {
 	Error        string    `json:"error,omitempty"`
 }
 
-var embedHTTPClient = &http.Client{Timeout: embedTimeout}
-
 // EmbedIsHTTP reports whether a configured embedder command names an HTTP
 // endpoint rather than a program to run.
 func EmbedIsHTTP(command string) bool {
@@ -179,7 +176,11 @@ func nowOr(nowMS int64) int64 {
 }
 
 // Embed performs one embedding, owning the breaker around it.
-func Embed(request EmbedRequest) EmbedResponse {
+func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
+	request EmbedRequest) EmbedResponse {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	now := nowOr(request.NowMS)
 
 	if !EmbedIsHTTP(request.BaseURL) {
@@ -208,35 +209,35 @@ func Embed(request EmbedRequest) EmbedResponse {
 	if request.InputType != "" {
 		endpoint += "?input_type=" + url.QueryEscape(request.InputType)
 	}
-	httpRequest, err := http.NewRequest(http.MethodPost, endpoint,
-		bytes.NewReader([]byte(request.Text)))
-	if err != nil {
+	const method = "POST"
+	if executor == nil {
 		breaker.cancelProbe()
-		return EmbedResponse{Error: "embed: " + err.Error()}
+		return EmbedResponse{Error: "embed: egress transport is not configured"}
 	}
-	httpRequest.Header.Set("Content-Type", "text/plain")
-
-	response, err := embedHTTPClient.Do(httpRequest)
+	body := []byte(request.Text)
+	response, err := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
+		TargetURL: endpoint, Purpose: "embedding", Method: method,
+		RequestSHA256: egress.RequestDigest(method, endpoint, body, false)},
+		Headers: map[string]string{"Content-Type": "text/plain"}, Body: body,
+		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedTimeout.Milliseconds()})
 	if err != nil {
 		breaker.reportFailure(now)
 		return EmbedResponse{Error: "embed: " + err.Error()}
 	}
-	defer response.Body.Close()
-	payload, readErr := io.ReadAll(io.LimitReader(response.Body, int64(bus.ModuleMessageMaxBody)))
 
-	if response.StatusCode == http.StatusUnauthorized || response.StatusCode == http.StatusForbidden {
+	if response.Status == 401 || response.Status == 403 {
 		// Reached and refused. Non-retryable, and it CLOSES any earlier outage.
 		breaker.reportSuccess(now)
 		return EmbedResponse{Unauthorized: true,
-			Error: fmt.Sprintf("embed: not authorized (HTTP %d)", response.StatusCode)}
+			Error: fmt.Sprintf("embed: not authorized (HTTP %d)", response.Status)}
 	}
-	if readErr != nil || response.StatusCode < 200 || response.StatusCode > 299 || len(payload) == 0 {
+	if response.Status < 200 || response.Status > 299 || len(response.Body) == 0 {
 		breaker.reportFailure(now)
-		return EmbedResponse{Error: fmt.Sprintf("embed: HTTP %d", response.StatusCode)}
+		return EmbedResponse{Error: fmt.Sprintf("embed: HTTP %d", response.Status)}
 	}
 
 	var raw []float64
-	if json.Unmarshal(payload, &raw) != nil {
+	if json.Unmarshal(response.Body, &raw) != nil {
 		breaker.reportFailure(now)
 		return EmbedResponse{Error: "embed: response is not a JSON array of numbers"}
 	}
@@ -263,7 +264,7 @@ func Embed(request EmbedRequest) EmbedResponse {
 }
 
 // handleEmbed serves memory:3 embedding.
-func handleEmbed(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleEmbed(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var decoded EmbedRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -271,7 +272,7 @@ func handleEmbed(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.M
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(Embed(decoded))
+	encoded, err := json.Marshal(Embed(context.Background(), invocation.TraceID, executor, decoded))
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}

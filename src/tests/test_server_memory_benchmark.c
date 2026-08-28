@@ -26,6 +26,11 @@ static int g_scoring_failure = 0;
 static int g_scoring_calls = 0;
 static int g_latency_failure = 0;
 static int g_latency_calls = 0;
+/* server_ctx_t contains the full server runtime and is larger than an ASan
+ * stack frame can safely hold. These tests are serial and reuse one zeroed
+ * fixture instance. */
+static server_ctx_t ctx;
+static server_conn_t conn;
 
 int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
 {
@@ -98,6 +103,8 @@ static void reset_capture(void)
    g_scoring_calls = 0;
    g_latency_failure = 0;
    g_latency_calls = 0;
+   memset(&ctx, 0, sizeof(ctx));
+   memset(&conn, 0, sizeof(conn));
 }
 
 int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, size_t label_len)
@@ -160,8 +167,6 @@ int mem_eval_fusion_arm_resolve(const char *matrix_path, const char *arm, char *
 
 static void test_live_corpus_suite(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "corpus");
    cJSON_AddStringToObject(req, "fusion_state", "shadow");
@@ -195,8 +200,6 @@ static void test_live_corpus_suite(void)
  * they benchmarked live memory). */
 static void test_live_suite_rejects_corpus_file(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "memory-retrieval");
    cJSON_AddStringToObject(req, "corpus", "/tmp/some_corpus.json");
@@ -210,8 +213,6 @@ static void test_live_suite_rejects_corpus_file(void)
 
 static void test_code_graph_suite(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "code-graph-fusion");
    cJSON_AddStringToObject(req, "arm", "baseline");
@@ -229,8 +230,6 @@ static void test_code_graph_suite(void)
 
 static void test_scoring_module_failure_fails_once(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "corpus");
    cJSON_AddNumberToObject(req, "max_cases", 2);
@@ -246,8 +245,6 @@ static void test_scoring_module_failure_fails_once(void)
 
 static void test_latency_module_failure_fails_once(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "corpus");
    cJSON_AddNumberToObject(req, "max_cases", 2);
@@ -263,8 +260,6 @@ static void test_latency_module_failure_fails_once(void)
 
 static void test_all_retrieval_failures_do_not_send_success(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "corpus");
    cJSON_AddNumberToObject(req, "max_cases", 2);
@@ -280,8 +275,6 @@ static void test_all_retrieval_failures_do_not_send_success(void)
 
 static void test_async_only_and_unknown(void)
 {
-   server_ctx_t ctx = {0};
-   server_conn_t conn = {0};
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "suite", "longmemeval");
    assert(handle_memory_benchmark(&ctx, &conn, req) == 0);

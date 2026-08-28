@@ -469,8 +469,14 @@ static void scrub_inherited_credential_env(void)
 int main(void)
 {
    scrub_inherited_credential_env();
+   assert(vault_env_egress_parent_path_ok("/usr/local/libexec/aimee-modules/aimee-module-egress"));
+   assert(!vault_env_egress_parent_path_ok(
+       "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));
+   assert(!vault_env_egress_parent_path_ok("/tmp/aimee-module-egress"));
+   assert(vault_env_egress_parent_attest() != 0);
+   assert(vault_env_print_egress_credential("AIMEE_MCP_712_TOKEN") != 0);
 
-   snprintf(g_root, sizeof(g_root), "/tmp/aimee-vaultboot-test-%d", (int)getpid());
+   snprintf(g_root, sizeof(g_root), "%s/aimee-vaultboot-test-%d", platform_tmpdir(), (int)getpid());
    snprintf(g_home, sizeof(g_home), "%s/home", g_root);
    char mk[700];
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", g_root, g_home);

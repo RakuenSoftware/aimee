@@ -36,10 +36,12 @@ type ModuleStage struct {
 // ModuleInvocation is the transport-owned state visible to a module handler.
 // A handler should call Cancelled around bounded units of work.
 type ModuleInvocation struct {
-	StageID    uint32
-	DeadlineNS uint64
-	TraceID    uint64
-	cancelled  *cancelFlag
+	StageID        uint32
+	DeadlineNS     uint64
+	TraceID        uint64
+	PrincipalClass uint32
+	PrincipalRef   uint32
+	cancelled      *cancelFlag
 }
 
 // Cancelled reports a bus cancellation or an expired absolute CLOCK_MONOTONIC
@@ -86,6 +88,9 @@ type ModuleProcessConfig struct {
 	PrincipalRef   uint32
 	Stages         []ModuleStage
 	Handler        ModuleHandler
+	// AfterAttach hardens process state that would otherwise prevent the host
+	// from authenticating this executable through its peer credentials.
+	AfterAttach func() error
 }
 
 type cancelFlag struct{ set atomic.Bool }
@@ -99,8 +104,14 @@ type moduleAssembly struct {
 type moduleWork struct {
 	eventKind     uint32
 	correlationID uint64
+	requesterRef  uint32
 	invocation    ModuleInvocation
 	cancelled     *cancelFlag
+}
+
+type moduleCallKey struct {
+	principalRef  uint32
+	correlationID uint64
 }
 
 type moduleResult struct {
@@ -196,6 +207,12 @@ func RunModuleProcess(ctx context.Context, config ModuleProcessConfig) error {
 		return fmt.Errorf("%w: %s attach: %v", ErrModuleRuntime, config.ModuleName, err)
 	}
 	defer client.Detach()
+	if config.AfterAttach != nil {
+		if err := config.AfterAttach(); err != nil {
+			return fmt.Errorf("%w: %s post-attach hardening: %v", ErrModuleRuntime,
+				config.ModuleName, err)
+		}
+	}
 	return runModuleClient(ctx, config, stages, client)
 }
 
@@ -304,9 +321,10 @@ func invalidModuleRequest(ctx context.Context, client moduleBus, event Event, st
 		stageID, traceID, ModuleStatusInvalidRequest, nil)
 }
 
-func finishModuleWork(ctx context.Context, client moduleBus, jobs map[uint64]*moduleWork,
+func finishModuleWork(ctx context.Context, client moduleBus, jobs map[moduleCallKey]*moduleWork,
 	result moduleResult) error {
-	delete(jobs, result.work.correlationID)
+	delete(jobs, moduleCallKey{principalRef: result.work.requesterRef,
+		correlationID: result.work.correlationID})
 	return replyModuleResult(ctx, client, result.work.eventKind, result.work.correlationID,
 		result.work.invocation.StageID, result.work.invocation.TraceID, result.status, result.body)
 }
@@ -316,8 +334,8 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 	if ctx == nil || client == nil {
 		return ErrModuleConfig
 	}
-	assemblies := make(map[uint64]*moduleAssembly)
-	jobs := make(map[uint64]*moduleWork)
+	assemblies := make(map[moduleCallKey]*moduleAssembly)
+	jobs := make(map[moduleCallKey]*moduleWork)
 	done := make(chan moduleResult, moduleMaxInFlight)
 
 	for {
@@ -339,7 +357,8 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			}
 			for len(jobs) > 0 {
 				result := <-done
-				delete(jobs, result.work.correlationID)
+				delete(jobs, moduleCallKey{principalRef: result.work.requesterRef,
+					correlationID: result.work.correlationID})
 			}
 			return nil
 		default:
@@ -364,11 +383,12 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			continue
 		}
 		correlation := event.Frame.CorrelationID
+		key := moduleCallKey{principalRef: event.Frame.PrincipalRef, correlationID: correlation}
 		if event.Frame.HdrFlags&FCancel != 0 {
-			if work := jobs[correlation]; work != nil {
+			if work := jobs[key]; work != nil {
 				work.cancelled.set.Store(true)
 			}
-			delete(assemblies, correlation)
+			delete(assemblies, key)
 			continue
 		}
 		if event.Frame.HdrFlags&FRequest == 0 {
@@ -377,9 +397,9 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 
 		expectedStage := stages[event.Frame.EventKind]
 		message, decodeErr := DecodeModuleMessage(event.Payload)
-		assembly := assemblies[correlation]
+		assembly := assemblies[key]
 		invalid := expectedStage == 0 || decodeErr != nil || message.Operation != ModuleOpInvoke ||
-			message.StageID != expectedStage || jobs[correlation] != nil
+			message.StageID != expectedStage || jobs[key] != nil
 		if !invalid && assembly != nil {
 			invalid = assembly.eventKind != event.Frame.EventKind ||
 				assembly.message.StageID != message.StageID ||
@@ -387,7 +407,7 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 				assembly.message.TraceID != message.TraceID
 		}
 		if invalid {
-			delete(assemblies, correlation)
+			delete(assemblies, key)
 			if err := invalidModuleRequest(ctx, client, event, expectedStage, 0); err != nil {
 				return err
 			}
@@ -402,11 +422,11 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 				continue
 			}
 			assembly = &moduleAssembly{eventKind: event.Frame.EventKind, message: message}
-			assemblies[correlation] = assembly
+			assemblies[key] = assembly
 		}
 		body := event.Payload[ModuleMessageHeaderLen : ModuleMessageHeaderLen+int(message.BodyLen)]
 		if uint64(len(assembly.body))+uint64(len(body)) > uint64(ModuleMessageMaxBody) {
-			delete(assemblies, correlation)
+			delete(assemblies, key)
 			if err := replyModuleResult(ctx, client, event.Frame.EventKind, correlation,
 				expectedStage, message.TraceID, ModuleStatusInternal, nil); err != nil {
 				return err
@@ -417,7 +437,7 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 		if event.Frame.HdrFlags&FMore != 0 {
 			continue
 		}
-		delete(assemblies, correlation)
+		delete(assemblies, key)
 		if message.DeadlineExpired(now) {
 			if err := replyModuleResult(ctx, client, event.Frame.EventKind, correlation,
 				expectedStage, message.TraceID, ModuleStatusDeadlineExceeded, nil); err != nil {
@@ -441,9 +461,12 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 		}
 		cancelled := &cancelFlag{}
 		work := &moduleWork{eventKind: event.Frame.EventKind, correlationID: correlation,
-			cancelled: cancelled, invocation: ModuleInvocation{StageID: expectedStage,
-				DeadlineNS: message.DeadlineNS, TraceID: message.TraceID, cancelled: cancelled}}
-		jobs[correlation] = work
+			requesterRef: event.Frame.PrincipalRef,
+			cancelled:    cancelled, invocation: ModuleInvocation{StageID: expectedStage,
+				DeadlineNS: message.DeadlineNS, TraceID: message.TraceID,
+				PrincipalClass: 1, PrincipalRef: event.Frame.PrincipalRef,
+				cancelled: cancelled}}
+		jobs[key] = work
 		requestBody := append([]byte(nil), assembly.body...)
 		go runHandler(done, work, config.Handler, requestBody)
 	}

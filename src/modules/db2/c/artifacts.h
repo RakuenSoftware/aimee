@@ -23,7 +23,7 @@ extern "C"
 
    /* Generate a random UUID string (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
     * into buf.  buf must be at least 37 bytes. */
-   void db2_artifact_gen_id(char *buf, size_t len);
+   int db2_artifact_gen_id(char *buf, size_t len);
 
    /* Insert an artifact row.  id must be a pre-generated UUID from
     * db2_artifact_gen_id.  All string params may be NULL (stored as "").

@@ -213,6 +213,10 @@ static int node_key_is_code(const char *key)
  * this constant instead of by seed_count * fan-out^max_hops. */
 #define GRAPH_EXPAND_MAX_NODES 192
 
+/* Rows a single batched level read may return: a full chunk of the frontier,
+ * each node contributing up to the per-node neighbour cap. */
+#define GRAPH_BATCH_NEIGHBORS (EE_FRONTIER_BATCH_MAX * 8)
+
 typedef struct
 {
    char key[GRAPH_ENDPOINT_MAX];
@@ -319,6 +323,17 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
       return 0;
    int n_queue = 0;
 
+   /* Heap for the same reason as the queue: a batched level returns up to
+    * GRAPH_BATCH_NEIGHBORS rows, which is far too large to sit on this call
+    * chain's stack. */
+   db2_entity_edge_weighted_neighbor_t *neighbors =
+       calloc(GRAPH_BATCH_NEIGHBORS, sizeof(*neighbors));
+   if (!neighbors)
+   {
+      free(queue);
+      return 0;
+   }
+
    int count = 0;
 
    /* Level 0: the seeds themselves. Memories attached to a seed node (the node the
@@ -356,11 +371,22 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
 
    for (int hop = 1; hop <= max_hops && count < max; hop++)
    {
-      for (int qi = level_start; qi < level_end && count < max; qi++)
+      /* One statement per LEVEL, not per node. The frontier is read in chunks of
+       * at most EE_FRONTIER_BATCH_MAX so the generated SQL stays bounded; within
+       * a chunk each node still contributes at most `cap` neighbours, so the
+       * traversal visits what it visited before at a fraction of the round
+       * trips. This is what makes a two-hop walk cost two reads rather than one
+       * per node on the first ring. */
+      for (int chunk = level_start; chunk < level_end && count < max;
+           chunk += EE_FRONTIER_BATCH_MAX)
       {
-         db2_entity_edge_weighted_neighbor_t neighbors[64];
-         int n = db2_entity_edge_neighbors_weighted(queue[qi].key, neighbors, cap, cap,
-                                                    utility_scoring_enabled);
+         const char *frontier[EE_FRONTIER_BATCH_MAX];
+         int fn = 0;
+         for (int qi = chunk; qi < level_end && fn < EE_FRONTIER_BATCH_MAX; qi++)
+            frontier[fn++] = queue[qi].key;
+
+         int n = db2_entity_edge_neighbors_weighted_batch(
+             frontier, fn, neighbors, GRAPH_BATCH_NEIGHBORS, cap, utility_scoring_enabled);
          for (int i = 0; i < n && count < max; i++)
          {
             if (!neighbors[i].node[0])
@@ -403,6 +429,7 @@ int memory_graph_expand_from_seeds(const char **node_keys, int seed_count, int m
          break;
    }
 
+   free(neighbors);
    free(queue);
    return count;
 }

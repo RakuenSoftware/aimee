@@ -22,6 +22,11 @@ int provider_name_settable(const char *name, const agent_config_t *acfg);
 /* Forward declaration */
 typedef struct cJSON cJSON;
 
+/* Authenticated hook memory interception, implemented with the other hook
+ * helpers so the main method table does not own storage-policy details. */
+int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+                            const char *client, char *msg, size_t msg_len);
+
 #define SERVER_PROTOCOL_VERSION 1
 /* Per-server cap on concurrent connections held in the dispatch table.
  * Paired with SERVER_LISTEN_BACKLOG: the kernel queue holds connects
@@ -124,6 +129,9 @@ typedef struct cJSON cJSON;
 #define CAP_INDEX_ADMIN    (1u << 12)
 #define CAP_SESSION_READ   (1u << 13)
 #define CAP_SESSION_ADMIN  (1u << 14)
+/* Operator/auditor-only. Dashboard and audit views aggregate principals,
+ * workspaces, prompts, tool arguments, and policy outcomes; a generic bearer
+ * must never receive this capability merely because it can perform reads. */
 #define CAP_DASHBOARD_READ (1u << 15)
 /* Operator-level: approve/reject autonomous-workflow human gates. Deliberately
  * OUTSIDE CAPS_AUTHENTICATED (full-trust / UDS / webchat-admin only), so a mere
@@ -154,12 +162,16 @@ typedef struct cJSON cJSON;
  * inside CAPS_AUTHENTICATED (an operator-grade bearer may still administer its
  * own store) but outside the narrower memory:write grants handed to delegates. */
 #define CAP_MEMORY_ADMIN (1u << 19)
+/* Explicit authority to read across project/workspace boundaries.  Kept out of
+ * every bearer set; only the filesystem-attested UDS/operator path receives
+ * CAPS_ALL. Caller JSON such as scope=all is never authority by itself. */
+#define CAP_CROSS_SCOPE_READ (1u << 20)
 
 /* Composite capability sets */
-#define CAPS_ALL 0xFFFFFu
+#define CAPS_ALL 0x1FFFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
-    CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
+    CAP_DESCRIBE_READ)
 #define CAPS_AUTHENTICATED                                                                         \
    (CAPS_READ_ONLY | CAP_DELEGATE | CAP_TOOL_EXECUTE | CAP_TOOL_BASH | CAP_TOOL_WRITE |            \
     CAP_MEMORY_WRITE | CAP_MEMORY_ADMIN | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
@@ -497,6 +509,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

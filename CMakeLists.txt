@@ -94,6 +94,7 @@ include_directories(
     "${AIMEE_SRC_DIR}/modules/tools/include"
     "${AIMEE_SRC_DIR}/modules/workspace/include"
     "${AIMEE_SRC_DIR}/modules/git/include"
+    "${AIMEE_SRC_DIR}/modules/egress/include"
     "${AIMEE_SRC_DIR}/modules/response-composition/include"
     "${AIMEE_SRC_DIR}/modules/skills/include"
     "${AIMEE_SRC_DIR}/modules/routing/include"
@@ -155,7 +156,8 @@ if(AIMEE_LEAN)
         -Wextra
         -Werror
         -Wno-unused-parameter
-        -Wno-format-truncation
+        -Wformat=2
+        -Wformat-security
         -Wno-unused-result
         -ffunction-sections
         -fdata-sections
@@ -168,11 +170,18 @@ else()
         -Wextra
         -Werror
         -Wno-unused-parameter
-        -Wno-format-truncation
+        -Wformat=2
+        -Wformat-security
         -Wno-unused-result
         -ffunction-sections
         -fdata-sections
     )
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_compile_options(-D_FORTIFY_SOURCE=3 -fstack-protector-strong
+                        -fstack-clash-protection -fPIE -fcf-protection=full)
+    add_link_options(-pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack)
 endif()
 
 # --- Platform-specific source selection ---
@@ -554,6 +563,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/util_url.c
     ${AIMEE_SRC_DIR}/kb/kb_identity.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_action.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_worm.c
+    ${AIMEE_SRC_DIR}/modules/audit/audit_worm_chain.c
     ${AIMEE_SRC_DIR}/modules/audit/audit_ledger.c
     ${AIMEE_SRC_DIR}/report_enrichment.c
     ${AIMEE_SRC_DIR}/delivery_target.c
@@ -574,6 +585,8 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/shared/kb_paths.c
     ${AIMEE_SRC_DIR}/compact.c
     ${AIMEE_SRC_DIR}/platform_random.c
+    ${AIMEE_SRC_DIR}/artifact_trust.c
+    ${AIMEE_SRC_DIR}/hook_session_token.c
     ${AIMEE_SRC_DIR}/slop_detect.c
     ${AIMEE_SRC_DIR}/proxy_bootstrap.c
     ${AIMEE_SRC_DIR}/client_integrations.c
@@ -616,6 +629,7 @@ set(CORE_SRCS
 )
 
 set(DATA_SRCS
+    ${AIMEE_SRC_DIR}/integrity_ingress.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
@@ -860,6 +874,10 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_main.c
     ${AIMEE_SRC_DIR}/cli_agent_setup.c
     ${AIMEE_SRC_DIR}/cli_session_start.c
+    ${AIMEE_SRC_DIR}/hook_session_token.c
+    # hook_session_token_mint uses the portable hex wrapper; the platform
+    # backend in CLIENT_SUPPORT_SRCS supplies platform_random_bytes only.
+    ${AIMEE_SRC_DIR}/platform_random.c
     # cli_session_start renders the degraded-dependency notice from here; the
     # CLI links it directly, so it must be listed in BOTH build systems.
     ${AIMEE_SRC_DIR}/session_degraded_notice.c
@@ -1161,6 +1179,7 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/fact_grounding.c
 )
 set(KB_DATA_SRCS
+    ${AIMEE_SRC_DIR}/integrity_ingress.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
     ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
@@ -1217,9 +1236,10 @@ list(REMOVE_ITEM KB_CORE_SRCS
 )
 
 find_package(Threads REQUIRED)
-# On Windows the HTTP layer uses WinHTTP; OpenSSL is only required on POSIX.
-if(WIN32)
-    find_package(OpenSSL)
+# The HTTP transport uses WinHTTP on Windows, but executable workflow artifacts
+# still require OpenSSL for SHA-256 and signed-manifest verification.
+if(AIMEE_THIN_CLIENT)
+    find_package(OpenSSL REQUIRED COMPONENTS Crypto)
 else()
     find_package(OpenSSL REQUIRED)
 endif()
@@ -1422,12 +1442,8 @@ else()
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--gc-sections")
 endif()
 
-# Lean build: additionally strip symbols
-if(AIMEE_LEAN)
-    if(NOT WIN32 AND NOT APPLE)
-        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -s")
-    endif()
-endif()
+# Preserve symbols in the built artifact for crash forensics. Packaging may
+# publish detached symbols, but link-time stripping cannot be the only copy.
 
 file(STRINGS "${AIMEE_SRC_DIR}/core/VERSION" AIMEE_CORE_SOURCE_VERSION LIMIT_COUNT 1)
 set(AIMEE_CORE_REQUIRED_VERSION "${AIMEE_CORE_SOURCE_VERSION}" CACHE STRING
@@ -1488,6 +1504,7 @@ add_executable(aimee
     ${AIMEE_SRC_DIR}/aimee_home.c
     ${AIMEE_SRC_DIR}/code_collect.c
     ${AIMEE_SRC_DIR}/codex_auth.c
+    ${AIMEE_SRC_DIR}/artifact_trust.c
     ${AIMEE_SRC_DIR}/dstr.c
     ${AIMEE_SRC_DIR}/history.c
     ${AIMEE_SRC_DIR}/markdown.c
@@ -1514,8 +1531,9 @@ target_include_directories(aimee PRIVATE
     ${AIMEE_SRC_DIR}/vendor/headers
     ${AIMEE_SRC_DIR}/db1_client
     ${AIMEE_SRC_DIR}/modules/db2/c)
+target_compile_definitions(aimee PRIVATE AIMEE_ARTIFACT_TRUST_NO_AUDIT=1)
 target_compile_options(aimee PRIVATE ${AIMEE_COMMON_WARNINGS})
-target_link_libraries(aimee PRIVATE aimee-core-connection)
+target_link_libraries(aimee PRIVATE aimee-core-connection OpenSSL::Crypto)
 find_package(ZLIB QUIET)
 if(ZLIB_FOUND)
     target_sources(aimee PRIVATE ${AIMEE_SRC_DIR}/http_content_encoding.c)
@@ -1534,7 +1552,7 @@ if(NOT WIN32)
 endif()
 if(WIN32)
     target_compile_definitions(aimee PRIVATE AIMEE_WINDOWS _WIN32_WINNT=0x0A00)
-    target_link_libraries(aimee PRIVATE ws2_32)
+    target_link_libraries(aimee PRIVATE ws2_32 bcrypt)
     # LTO + --gc-sections on MinGW fails to drop the dead is_noise_utterance
     # (util.c, pulled in for opt_parse etc.) which references tokenize_for_search
     # (text.c — not part of the thin client). Disabling IPO for this target lets

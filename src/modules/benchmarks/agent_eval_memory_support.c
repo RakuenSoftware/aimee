@@ -498,20 +498,20 @@ static int mem_eval_run_codex_exec(const agent_t *runner, const char *system_pro
    if (!getcwd(cwd, sizeof(cwd)))
       snprintf(cwd, sizeof(cwd), ".");
 
-   char *esc_prompt = shell_escape(prompt_path);
-   char *esc_output = shell_escape(output_path);
-   char *esc_cwd = shell_escape(cwd);
-   char *esc_model = runner->model[0] ? shell_escape(runner->model) : NULL;
+   char *esc_prompt = shell_quote(prompt_path);
+   char *esc_output = shell_quote(output_path);
+   char *esc_cwd = shell_quote(cwd);
+   char *esc_model = runner->model[0] ? shell_quote(runner->model) : NULL;
    char model_arg[256];
    if (esc_model)
-      snprintf(model_arg, sizeof(model_arg), " -m '%s'", esc_model);
+      snprintf(model_arg, sizeof(model_arg), " -m %s", esc_model);
    else
       model_arg[0] = '\0';
 
    char cmd[4096];
    snprintf(cmd, sizeof(cmd),
-            "codex exec --skip-git-repo-check --sandbox read-only --color never -C '%s'%s "
-            "--output-last-message '%s' - < '%s' 2>&1",
+            "codex exec --skip-git-repo-check --sandbox read-only --color never -C %s%s "
+            "--output-last-message %s - < %s 2>&1",
             esc_cwd, model_arg, esc_output, esc_prompt);
 
    int rc = 0;

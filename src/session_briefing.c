@@ -173,7 +173,11 @@ char *session_briefing_render_skill_index(const char *project_root, int limit)
       limit = SKILL_MAX_SKILLS;
 
    char names[SKILL_MAX_SKILLS][SKILL_NAME_MAX];
-   int n = skill_list(project_root, names, limit);
+   /* List the full bounded catalog, then apply the display limit only after a
+    * skill has passed load/approval checks. Otherwise an unapproved project
+    * skill at the front of the precedence order can consume the limit and hide
+    * trusted bundled skills from the session prompt. */
+   int n = skill_list(project_root, names, SKILL_MAX_SKILLS);
    if (n <= 0)
       return NULL;
 
@@ -191,6 +195,8 @@ char *session_briefing_render_skill_index(const char *project_root, int limit)
    int rendered = 0;
    for (int i = 0; i < n; i++)
    {
+      if (rendered >= limit)
+         break;
       char desc[512] = "";
       if (skill_description(project_root, names[i], desc, sizeof(desc)) != 0 || !desc[0])
          continue;

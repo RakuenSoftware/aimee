@@ -21,6 +21,7 @@ extern char **environ;
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -32,6 +33,8 @@ extern char **environ;
 /* Track whether the current MCP git operation is running in a worktree.
  * Thread-local so concurrent sessions don't clobber each other. */
 static __thread int s_in_worktree = 0;
+
+static void trim_trailing_newline(char *s);
 
 void mcp_git_set_worktree(int val)
 {
@@ -86,6 +89,90 @@ static const char *workspace_remote_for_root(const char *root)
       }
    }
    return NULL;
+}
+
+static int git_registered_workspace_path(const char *path, char *out, size_t out_cap)
+{
+   const workspace_provider_t *ws = workspace_provider_active();
+
+   /* A detached path exists on the registered runner, not on this server.
+    * Canonicalise both operands with a fixed command whose cwd is transported
+    * separately from the shell string. This closes symlink escapes without
+    * interpolating the caller-controlled path into /bin/sh. */
+   if (ws && ws->kind == WS_PROVIDER_DETACHED)
+   {
+      ws_stat_t st;
+      if (!path || path[0] != '/' || !out || out_cap == 0 || ws->stat(ws, path, &st) != 0 ||
+          !st.exists || !st.is_dir)
+         return 0;
+
+      char saved[MAX_PATH_LEN] = "";
+      const char *previous = run_cmd_get_cwd();
+      if (previous)
+         snprintf(saved, sizeof(saved), "%s", previous);
+
+      run_cmd_set_cwd(path);
+      int path_rc = -1;
+      char *canonical_path = ws->exec_shell(ws, "pwd -P", &path_rc);
+      run_cmd_set_cwd(saved[0] ? saved : NULL);
+      if (path_rc != 0 || !canonical_path)
+      {
+         free(canonical_path);
+         return 0;
+      }
+      trim_trailing_newline(canonical_path);
+
+      int authorized = 0;
+      for (int i = 0; i < config_workspace_count() && !authorized; i++)
+      {
+         const char *configured = config_workspaces(i);
+         if (!configured || configured[0] != '/')
+            continue;
+         run_cmd_set_cwd(configured);
+         int root_rc = -1;
+         char *canonical_root = ws->exec_shell(ws, "pwd -P", &root_rc);
+         run_cmd_set_cwd(saved[0] ? saved : NULL);
+         if (root_rc == 0 && canonical_root)
+         {
+            trim_trailing_newline(canonical_root);
+            size_t root_len = strlen(canonical_root);
+            size_t path_len = strlen(canonical_path);
+            authorized = root_len > 0 && path_len >= root_len &&
+                         memcmp(canonical_path, canonical_root, root_len) == 0 &&
+                         (canonical_path[root_len] == '\0' || canonical_path[root_len] == '/');
+         }
+         free(canonical_root);
+      }
+      free(canonical_path);
+      if (!authorized || strlen(path) >= out_cap)
+         return 0;
+      snprintf(out, out_cap, "%s", path);
+      return 1;
+   }
+
+   char resolved[MAX_PATH_LEN];
+   struct stat st;
+   if (!path || !path[0] || !out || out_cap == 0 || !realpath(path, resolved) ||
+       lstat(resolved, &st) != 0 || !S_ISDIR(st.st_mode))
+      return 0;
+
+   size_t path_len = strlen(resolved);
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      char root[MAX_PATH_LEN];
+      const char *configured = config_workspaces(i);
+      if (!configured || !configured[0] || !realpath(configured, root))
+         continue;
+      size_t root_len = strlen(root);
+      if (path_len >= root_len && memcmp(resolved, root, root_len) == 0 &&
+          (resolved[root_len] == '\0' || resolved[root_len] == '/'))
+      {
+         snprintf(out, out_cap, "%s", resolved);
+         return strlen(resolved) < out_cap;
+      }
+   }
+   out[0] = '\0';
+   return 0;
 }
 
 static int forge_workspace_for_cwd(const char *cwd, int provider_kind, int *runs_on_server,
@@ -337,10 +424,14 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static cJSON *mcp_error(const char *fmt, const char *detail)
+static cJSON *mcp_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static cJSON *mcp_error(const char *fmt, ...)
 {
    char buf[1024];
-   snprintf(buf, sizeof(buf), fmt, detail);
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
    return mcp_text(buf);
 }
 
@@ -351,12 +442,27 @@ static int mcp_git_candidate_root(const char *candidate, char *git_root, size_t 
 
    git_root[0] = '\0';
 
-   char git_cmd[MAX_PATH_LEN + 64];
-   char *esc = shell_escape(candidate);
-   snprintf(git_cmd, sizeof(git_cmd), "git -C %s rev-parse --show-toplevel 2>/dev/null", esc);
-   free(esc);
-   int rc;
-   char *out = mcp_git_run(git_cmd, &rc);
+   /* candidate is supplied by the MCP caller. Keep it out of /bin/sh entirely:
+    * the child changes directory before execve and receives only fixed argv. */
+   char *out = NULL;
+   int rc = -1;
+   const workspace_provider_t *ws = workspace_provider_active();
+   if (ws && ws->kind == WS_PROVIDER_DETACHED)
+   {
+      char saved[MAX_PATH_LEN] = "";
+      const char *previous = run_cmd_get_cwd();
+      if (previous)
+         snprintf(saved, sizeof(saved), "%s", previous);
+      run_cmd_set_cwd(candidate);
+      /* Fixed command; the caller path is a separate runner cwd field. */
+      out = ws->exec_shell(ws, "git rev-parse --show-toplevel", &rc);
+      run_cmd_set_cwd(saved[0] ? saved : NULL);
+   }
+   else
+   {
+      const char *const argv[] = {"git", "rev-parse", "--show-toplevel", NULL};
+      rc = safe_exec_capture_cwd_env_timeout(argv, candidate, environ, &out, GIT_BUF_SIZE, 5000);
+   }
    if (rc == 0 && out && out[0])
    {
       trim_trailing_newline(out);
@@ -368,6 +474,11 @@ static int mcp_git_candidate_root(const char *candidate, char *git_root, size_t 
       }
    }
    free(out);
+
+   /* A detached runner owns directory enumeration; do not accidentally scan
+    * the server's same-named path as a fallback. */
+   if (ws && ws->kind == WS_PROVIDER_DETACHED)
+      return -1;
 
    /* Fallback for launcher directories that contain checked-out projects.
     * Skip filesystem root to avoid an expensive and low-signal scan of /. */
@@ -684,8 +795,8 @@ cJSON *handle_git_log(cJSON *args)
    char cmd[1024];
    if (cJSON_IsString(jref) && jref->valuestring[0])
    {
-      char *esc = shell_escape(jref->valuestring);
-      snprintf(cmd, sizeof(cmd), "git log --format='%%h %%ar  %%s'%s -n %d '%s' 2>&1", stat_flag,
+      char *esc = shell_quote(jref->valuestring);
+      snprintf(cmd, sizeof(cmd), "git log --format='%%h %%ar  %%s'%s -n %d %s 2>&1", stat_flag,
                count, esc);
       free(esc);
    }
@@ -737,8 +848,8 @@ cJSON *handle_git_diff_summary(cJSON *args)
    {
       if (cJSON_IsString(jref) && jref->valuestring[0])
       {
-         char *esc = shell_escape(jref->valuestring);
-         n = snprintf(cmd, sizeof(cmd), "git diff --stat '%s'", esc);
+         char *esc = shell_quote(jref->valuestring);
+         n = snprintf(cmd, sizeof(cmd), "git diff --stat %s", esc);
          free(esc);
       }
       else
@@ -751,8 +862,8 @@ cJSON *handle_git_diff_summary(cJSON *args)
       /* Full diff but we'll compress it */
       if (cJSON_IsString(jref) && jref->valuestring[0])
       {
-         char *esc = shell_escape(jref->valuestring);
-         n = snprintf(cmd, sizeof(cmd), "git diff '%s'", esc);
+         char *esc = shell_quote(jref->valuestring);
+         n = snprintf(cmd, sizeof(cmd), "git diff %s", esc);
          free(esc);
       }
       else
@@ -774,8 +885,8 @@ cJSON *handle_git_diff_summary(cJSON *args)
          cJSON *f = cJSON_GetArrayItem(jfiles, i);
          if (cJSON_IsString(f))
          {
-            char *esc = shell_escape(f->valuestring);
-            n = snprintf(cmd + cmd_len, sizeof(cmd) - cmd_len, " '%s'", esc);
+            char *esc = shell_quote(f->valuestring);
+            n = snprintf(cmd + cmd_len, sizeof(cmd) - cmd_len, " %s", esc);
             free(esc);
             if (n < 0 || cmd_len + (size_t)n >= sizeof(cmd))
                break;
@@ -944,7 +1055,8 @@ cJSON *handle_git_issue(cJSON *args)
 
 /* --- CWD helper for git tools --- */
 
-int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mismatch_err)
+int mcp_chdir_git_root_authorized(char *old_cwd, size_t old_cwd_len, cJSON *args,
+                                  char **mismatch_err, int path_pre_authorized)
 {
    if (mismatch_err)
       *mismatch_err = NULL;
@@ -979,7 +1091,30 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
     * different checkout. Clone dispatch removes its destination path before
     * calling this resolver because that path need not exist yet. */
    if (explicit_path)
-      mcp_git_add_candidate(candidates, &candidate_count, 8, jpath->valuestring);
+   {
+      char authorized[MAX_PATH_LEN];
+      int authorized_ok = 0;
+      if (path_pre_authorized)
+      {
+         char resolved[MAX_PATH_LEN];
+         struct stat st;
+         authorized_ok = realpath(jpath->valuestring, resolved) && lstat(resolved, &st) == 0 &&
+                         S_ISDIR(st.st_mode) && strlen(resolved) < sizeof(authorized);
+         if (authorized_ok)
+            snprintf(authorized, sizeof(authorized), "%s", resolved);
+      }
+      else
+         authorized_ok =
+             git_registered_workspace_path(jpath->valuestring, authorized, sizeof(authorized));
+      if (!authorized_ok)
+      {
+         if (mismatch_err)
+            *mismatch_err =
+                strdup("error: explicit git path is outside every authorized workspace");
+         return -2;
+      }
+      mcp_git_add_candidate(candidates, &candidate_count, 8, authorized);
+   }
 
    /* Priority 2: session CWD tracking file (thread-safe: keyed by session_id) */
    if (!no_session_redirect)
@@ -1085,8 +1220,8 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
                   {
                      char cmd_root[MAX_PATH_LEN + 64];
                      char cmd_wt[MAX_PATH_LEN + 64];
-                     char *esc_root = shell_escape(git_root);
-                     char *esc_wt = shell_escape(wt);
+                     char *esc_root = shell_quote(git_root);
+                     char *esc_wt = shell_quote(wt);
                      snprintf(cmd_root, sizeof(cmd_root),
                               "git -C %s rev-parse --abbrev-ref HEAD 2>/dev/null", esc_root);
                      snprintf(cmd_wt, sizeof(cmd_wt),
@@ -1176,7 +1311,7 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
       char repo_path[MAX_PATH_LEN] = "";
       {
          char cmd[MAX_PATH_LEN + 64];
-         char *esc = shell_escape(git_root);
+         char *esc = shell_quote(git_root);
          snprintf(cmd, sizeof(cmd), "git -C %s rev-parse --git-common-dir 2>/dev/null", esc);
          free(esc);
          int rc;
@@ -1214,7 +1349,7 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
       char branch_name[256] = "";
       {
          char cmd[MAX_PATH_LEN + 64];
-         char *esc = shell_escape(git_root);
+         char *esc = shell_quote(git_root);
          snprintf(cmd, sizeof(cmd), "git -C %s rev-parse --abbrev-ref HEAD 2>/dev/null", esc);
          free(esc);
          int rc;
@@ -1246,4 +1381,9 @@ int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mi
 
    run_cmd_set_cwd(git_root);
    return 1;
+}
+
+int mcp_chdir_git_root(char *old_cwd, size_t old_cwd_len, cJSON *args, char **mismatch_err)
+{
+   return mcp_chdir_git_root_authorized(old_cwd, old_cwd_len, args, mismatch_err, 0);
 }

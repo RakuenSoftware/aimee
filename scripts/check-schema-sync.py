@@ -115,6 +115,9 @@ DB1_ONLY_TABLES = {
     "remote_client_grants",
     "project_clones",
     "server_sessions",
+    # Cross-store subject-erasure retry journal. It retains only an irreversible
+    # subject digest and the committed DB1 deletion count.
+    "db1_subject_erasure_request",
     "server_mgmt_nonce",
     "server_mgmt_status_hwm",
     "server_management_jti",

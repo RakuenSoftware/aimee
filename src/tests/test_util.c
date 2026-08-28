@@ -344,35 +344,35 @@ static void test_run_cmd_env(void)
 }
 #endif
 
-static void test_shell_escape(void)
+static void test_shell_quote(void)
 {
    char *out;
 
-   printf("test_shell_escape\n");
+   printf("test_shell_quote\n");
 
-   out = shell_escape("hello");
+   out = shell_quote("hello");
    assert(out != NULL);
-   assert(strcmp(out, "hello") == 0);
+   assert(strcmp(out, "'hello'") == 0);
    free(out);
 
-   out = shell_escape("it's");
+   out = shell_quote("it's");
    assert(out != NULL);
-   assert(strcmp(out, "it'\\''s") == 0);
+   assert(strcmp(out, "'it'\\''s'") == 0);
    free(out);
 
-   out = shell_escape(NULL);
+   out = shell_quote(NULL);
    assert(out != NULL);
-   assert(strcmp(out, "") == 0);
+   assert(strcmp(out, "''") == 0);
    free(out);
 }
 
-static void test_shell_escape_injection_payloads(void)
+static void test_shell_quote_injection_payloads(void)
 {
-   /* Verify shell_escape handles injection payloads correctly */
+   /* Verify shell_quote handles injection payloads correctly */
    char *e;
 
    /* Single quote injection: '; rm -rf / # */
-   e = shell_escape("'; rm -rf / #");
+   e = shell_quote("'; rm -rf / #");
    assert(e != NULL);
    assert(strstr(e, "rm -rf") != NULL); /* content preserved */
    assert(e[0] == '\'');                /* leading quote is escaped */
@@ -380,25 +380,25 @@ static void test_shell_escape_injection_payloads(void)
    free(e);
 
    /* Backtick injection */
-   e = shell_escape("`whoami`");
-   assert(strcmp(e, "`whoami`") == 0); /* backticks inside single quotes are safe */
+   e = shell_quote("`whoami`");
+   assert(strcmp(e, "'`whoami`'") == 0);
    free(e);
 
    /* Dollar expansion */
-   e = shell_escape("$(cat /etc/passwd)");
-   assert(strcmp(e, "$(cat /etc/passwd)") == 0); /* $ inside single quotes is literal */
+   e = shell_quote("$(cat /etc/passwd)");
+   assert(strcmp(e, "'$(cat /etc/passwd)'") == 0);
    free(e);
 
    /* Null input */
-   e = shell_escape(NULL);
+   e = shell_quote(NULL);
    assert(e != NULL);
-   assert(strcmp(e, "") == 0);
+   assert(strcmp(e, "''") == 0);
    free(e);
 
    /* Empty input */
-   e = shell_escape("");
+   e = shell_quote("");
    assert(e != NULL);
-   assert(strcmp(e, "") == 0);
+   assert(strcmp(e, "''") == 0);
    free(e);
 }
 
@@ -550,8 +550,8 @@ int main(void)
    test_shlex_split();
    test_split_camel_case();
    test_is_contradiction();
-   test_shell_escape();
-   test_shell_escape_injection_payloads();
+   test_shell_quote();
+   test_shell_quote_injection_payloads();
    test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
    test_run_cmd();

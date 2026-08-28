@@ -446,15 +446,15 @@ int learning_router_record_signal(const learning_signal_input_t *raw_input,
                 strcmp(raw_input->signal_type, "mark_rule") == 0)
                src = INTEGRITY_SOURCE_USER_STATED;
 
-            integrity_result_t gate = integrity_gate_check(text, src);
+            integrity_result_t gate;
+            int parked = integrity_ingress_decide(text, src, "learning", 1, &gate);
             if (gate.verdict != INTEGRITY_VERDICT_ACCEPT)
             {
                LOG_WARN("integrity", "gate: signal=%s source=%s verdict=%s category=%s dry_run=%d",
                         raw_input->signal_type, integrity_source_name(src),
                         integrity_verdict_name(gate.verdict), gate.match_category,
                         config_integrity_dry_run());
-               if (!config_integrity_dry_run() && src != INTEGRITY_SOURCE_USER_STATED &&
-                   gate.verdict == INTEGRITY_VERDICT_REJECT)
+               if (parked)
                {
                   learning_dispatch_clear(out);
                   return -1;

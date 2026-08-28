@@ -18,6 +18,27 @@ static int g_temporal_enabled = 0;
 static int g_temporal_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
 
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+void obs_bus_emit_durable_event(const char *event_type, const char *subject, const char *verdict,
+                                const char *detail)
+{
+   (void)event_type;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+}
+
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
  * dragging in the kb client / config-load object graph. */
@@ -238,10 +259,14 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
    (void)n;
    return 0;
 }
+static int g_random_failure;
+
 /* Stub: deterministic but varying-per-call, so the mint-uniqueness assertion
  * holds without linking the platform layer into this pure unit test. */
 int platform_random_bytes(void *buf, size_t len)
 {
+   if (g_random_failure)
+      return -1;
    static unsigned char ctr = 0;
    unsigned char *p = (unsigned char *)buf;
    for (size_t i = 0; i < len; i++)
@@ -769,8 +794,8 @@ static void test_turn_id_mint_and_thread_local(void)
 {
    /* mint produces a canonical 8-4-4-4-12 UUID. */
    char a[40], b[40];
-   ingress_preinject_mint_turn_id(a, sizeof(a));
-   ingress_preinject_mint_turn_id(b, sizeof(b));
+   assert(ingress_preinject_mint_turn_id(a, sizeof(a)) == 0);
+   assert(ingress_preinject_mint_turn_id(b, sizeof(b)) == 0);
    assert(strlen(a) == 36);
    assert(a[8] == '-' && a[13] == '-' && a[18] == '-' && a[23] == '-');
    for (int i = 0; a[i]; i++)
@@ -779,6 +804,12 @@ static void test_turn_id_mint_and_thread_local(void)
       assert(c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
    }
    assert(strcmp(a, b) != 0); /* random — two mints differ */
+
+   g_random_failure = 1;
+   strcpy(a, "must-be-cleared");
+   assert(ingress_preinject_mint_turn_id(a, sizeof(a)) != 0);
+   assert(a[0] == '\0');
+   g_random_failure = 0;
 
    /* the thread-local set/get round-trips and clears on NULL/"" */
    assert(ingress_preinject_turn_id()[0] == '\0'); /* unset by default */

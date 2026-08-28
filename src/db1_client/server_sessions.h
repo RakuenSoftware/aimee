@@ -82,6 +82,12 @@ extern "C"
    /* Delete all sessions older than `threshold_seconds`. Returns rows deleted. */
    int db1_server_session_delete_expired(int threshold_seconds);
 
+   /* List/erase the complete mutable DB1 content graph owned by one verified
+    * principal. Immutable audit/WORM rows are never members of that graph. */
+   int db1_server_session_list_by_subject(const char *principal, char (*out_ids)[DB1_SS_ID_LEN],
+                                          int max);
+   int db1_server_session_erase_subject(const char *request_id, const char *principal);
+
 #ifdef __cplusplus
 }
 #endif

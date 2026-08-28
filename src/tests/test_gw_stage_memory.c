@@ -29,6 +29,27 @@ static int g_no_recall = 0;
 static int g_test_placement =
     0; /* drives ingress_cache_placement_enabled in legacy_config_read stub */
 
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+void obs_bus_emit_durable_event(const char *event_type, const char *subject, const char *verdict,
+                                const char *detail)
+{
+   (void)event_type;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+}
+
 /* --- stubs: make ingress_preinject_build deterministic without the kb graph --- */
 char *kb_client_memory_context_block(const char *query, const char *block_type, int limit)
 {

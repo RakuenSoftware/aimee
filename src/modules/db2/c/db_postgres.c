@@ -1151,6 +1151,26 @@ int db2_pg_conninfo_with_bounds(const char *conninfo, char *out, size_t out_sz)
    return 0;
 }
 
+/* Statement counter for the test-only $(OBJDIR)/db2/ object namespace, so the
+ * SAME test can assert round-trip count against real libpq as against the
+ * sqlite shim. Never defined for a production build: tests/Rules.mk sets
+ * AIMEE_PG_STMT_COUNTER on that object alone, the way it already sets
+ * AIMEE_TEST_PG_BACKEND on db2_test_shim.o. */
+#ifdef AIMEE_PG_STMT_COUNTER
+static long s_pg_stmt_count = 0;
+void aimee_pg_test_stmt_count_reset(void)
+{
+   s_pg_stmt_count = 0;
+}
+long aimee_pg_test_stmt_count(void)
+{
+   return s_pg_stmt_count;
+}
+#define AIMEE_PG_STMT_TICK() (s_pg_stmt_count++)
+#else
+#define AIMEE_PG_STMT_TICK() ((void)0)
+#endif
+
 #ifdef AIMEE_DISABLE_POSTGRES
 
 /* Build-time opt-out for platforms where libpq isn't available (mostly
@@ -1213,6 +1233,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *c, const char *s, char *e, size_t n)
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *c, const char *s, aimee_pg_prepare_error_t *kind,
                                      char *e, size_t n)
 {
+   AIMEE_PG_STMT_TICK();
    (void)c;
    (void)s;
    if (kind)
@@ -1582,6 +1603,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
                                      char *errbuf, size_t errlen)
 {
+   AIMEE_PG_STMT_TICK();
    if (kind)
       *kind = AIMEE_PG_PREPARE_INVALID;
    if (!pg_conn || !sql)

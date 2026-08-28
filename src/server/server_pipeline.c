@@ -26,7 +26,7 @@
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
-#include "util.h"          /* shell_escape */
+#include "util.h"          /* shell_quote */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -557,7 +557,7 @@ const char *rtp_git_cwd(const rtp_run_t *run)
    return "";
 }
 
-/* Prepend `cd '<cwd>' && ` (escaped) when a checkout is recorded. */
+/* Prepend `cd <quoted-cwd> && ` when a checkout is recorded. */
 size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
 {
    const char *cwd = rtp_git_cwd(run);
@@ -566,8 +566,8 @@ size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
       buf[0] = '\0';
       return 0;
    }
-   char *e = shell_escape(cwd);
-   int n = snprintf(buf, cap, "cd '%s' && ", e ? e : cwd);
+   char *e = shell_quote(cwd);
+   int n = snprintf(buf, cap, "cd %s && ", e);
    free(e);
    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
 }
@@ -575,10 +575,10 @@ size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
 /* `git rev-parse <ref>` in the recorded checkout. out is empty on failure. */
 int git_rev_parse(const rtp_run_t *run, const char *ref, char *out, size_t cap)
 {
-   char *eref = shell_escape(ref);
+   char *eref = shell_quote(ref);
    char cmd[RTP_PATH_LEN + 96];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse '%s' 2>/dev/null", eref ? eref : ref);
+   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse %s 2>/dev/null", eref);
    free(eref);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -605,10 +605,10 @@ static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
 static char *capture_diff(const rtp_run_t *run)
 {
    const char *base = run->base_branch[0] ? run->base_branch : "HEAD~1";
-   char *eb = shell_escape(base);
+   char *eb = shell_quote(base);
    char cmd[RTP_PATH_LEN + 128];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "git diff '%s'...HEAD 2>/dev/null", eb ? eb : base);
+   snprintf(cmd + p, sizeof(cmd) - p, "git diff %s...HEAD 2>/dev/null", eb);
    free(eb);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -650,20 +650,19 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
             "Roundtable authoring pipeline #%d (%s phase). Done-bar met; PR opened by the pipeline "
             "controller.",
             run->id, phase);
-   char *et = shell_escape(title);
-   char *eb = shell_escape(body);
-   char *ebase = shell_escape(run->base_branch[0] ? run->base_branch : "testing");
-   char *ehead = run->head_branch[0] ? shell_escape(run->head_branch) : NULL;
+   char *et = shell_quote(title);
+   char *eb = shell_quote(body);
+   char *ebase = shell_quote(run->base_branch[0] ? run->base_branch : "testing");
+   char *ehead = run->head_branch[0] ? shell_quote(run->head_branch) : NULL;
 
    char cmd[RTP_PATH_LEN + 1280];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
    if (ehead)
       snprintf(cmd + p, sizeof(cmd) - p,
-               "gh pr create --title '%s' --body '%s' --base '%s' --head '%s' 2>&1", et ? et : "",
-               eb ? eb : "", ebase ? ebase : "testing", ehead);
+               "gh pr create --title %s --body %s --base %s --head %s 2>&1", et, eb, ebase, ehead);
    else
-      snprintf(cmd + p, sizeof(cmd) - p, "gh pr create --title '%s' --body '%s' --base '%s' 2>&1",
-               et ? et : "", eb ? eb : "", ebase ? ebase : "testing");
+      snprintf(cmd + p, sizeof(cmd) - p, "gh pr create --title %s --body %s --base %s 2>&1", et, eb,
+               ebase);
    free(et);
    free(eb);
    free(ebase);
@@ -1027,17 +1026,15 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
 static int create_worktree(const rtp_run_t *run, const char *branch, const char *wt,
                            const char *from_ref)
 {
-   char *erepo = shell_escape(run->repo_root);
-   char *ewt = shell_escape(wt);
-   char *ebr = shell_escape(branch);
-   char *efrom = (from_ref && from_ref[0]) ? shell_escape(from_ref) : NULL;
+   char *erepo = shell_quote(run->repo_root);
+   char *ewt = shell_quote(wt);
+   char *ebr = shell_quote(branch);
+   char *efrom = (from_ref && from_ref[0]) ? shell_quote(from_ref) : NULL;
    char cmd[RTP_PATH_LEN * 3 + 160];
    if (efrom)
-      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' '%s' 2>&1",
-               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt, efrom);
+      snprintf(cmd, sizeof(cmd), "git -C %s worktree add -B %s %s %s 2>&1", erepo, ebr, ewt, efrom);
    else
-      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' 2>&1",
-               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt);
+      snprintf(cmd, sizeof(cmd), "git -C %s worktree add -B %s %s 2>&1", erepo, ebr, ewt);
    free(erepo);
    free(ewt);
    free(ebr);
@@ -1076,12 +1073,12 @@ static int ref_contains_commit(const rtp_run_t *run, const char *ref, const char
 {
    if (!ref || !ref[0] || !sha || !sha[0])
       return 0;
-   char *erepo = shell_escape(run->repo_root);
-   char *eref = shell_escape(ref);
-   char *esha = shell_escape(sha);
+   char *erepo = shell_quote(run->repo_root);
+   char *eref = shell_quote(ref);
+   char *esha = shell_quote(sha);
    char cmd[RTP_PATH_LEN + 160];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' merge-base --is-ancestor '%s' '%s' 2>/dev/null",
-            erepo ? erepo : run->repo_root, esha ? esha : sha, eref ? eref : ref);
+   snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s %s 2>/dev/null", erepo, esha,
+            eref);
    free(erepo);
    free(eref);
    free(esha);
@@ -1108,13 +1105,12 @@ int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
     * Use an explicit refspec — a plain `fetch <remote> <base>` only updates
     * FETCH_HEAD, not refs/remotes/<remote>/<base>, so the fallback could branch
     * from a stale origin/<base> (#2). */
-   char *erepo = shell_escape(run->repo_root);
-   char *erem = shell_escape(remote);
-   char *ebase = shell_escape(base);
+   char *erepo = shell_quote(run->repo_root);
+   char *erem = shell_quote(remote);
+   char *ebase = shell_quote(base);
    char fcmd[RTP_PATH_LEN + 256];
-   snprintf(fcmd, sizeof(fcmd), "git -C '%s' fetch '%s' '%s:refs/remotes/%s/%s' 2>&1",
-            erepo ? erepo : run->repo_root, erem ? erem : remote, ebase ? ebase : base,
-            erem ? erem : remote, ebase ? ebase : base);
+   snprintf(fcmd, sizeof(fcmd), "git -C %s fetch %s %s:refs/remotes/%s/%s 2>&1", erepo, erem, ebase,
+            erem, ebase);
    free(erepo);
    free(erem);
    free(ebase);
@@ -1195,13 +1191,13 @@ static int write_proposal_file(rtp_run_t *run, const char *content, const char *
 
    /* commit on the dedicated branch BEFORE touching the ledger; an unchanged
     * file (re-review of the same content) is a no-op, not a failure. */
-   char *erel = shell_escape(rel);
+   char *erel = shell_quote(rel);
    char cmd[RTP_PATH_LEN * 2 + 320];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
    snprintf(cmd + p, sizeof(cmd) - p,
-            "git add '%s' && { git diff --cached --quiet -- '%s' || git commit -q -m 'roundtable "
+            "git add %s && { git diff --cached --quiet -- %s || git commit -q -m 'roundtable "
             "proposal #%d (skeleton/revision)'; } 2>&1",
-            erel ? erel : rel, erel ? erel : rel, run->id);
+            erel, erel, run->id);
    free(erel);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);

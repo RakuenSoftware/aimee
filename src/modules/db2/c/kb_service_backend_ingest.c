@@ -287,13 +287,16 @@ int db2_kb_file_index_upsert(const char *project, const char *file_path, const c
    aimee_pg_stmt_t *s =
        aimee_pg_prepare(conn,
                         "INSERT INTO kb_file_index"
-                        " (project,generation,file_path,file_hash,content)"
+                        " (project,generation,file_path,file_hash,content,owner_principal)"
                         " VALUES (?1,(SELECT current_generation FROM projects"
-                        " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4)"
+                        " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,"
+                        " COALESCE(NULLIF(current_setting('aimee.principal',true),''),"
+                        " 'internal:system'))"
                         " ON CONFLICT (project, generation, file_path) DO UPDATE"
                         " SET file_hash=EXCLUDED.file_hash,"
                         "     ingested_at=pg_now_text(),"
-                        "     content = COALESCE(EXCLUDED.content, kb_file_index.content)",
+                        "     content = COALESCE(EXCLUDED.content, kb_file_index.content),"
+                        "     owner_principal=EXCLUDED.owner_principal",
                         err, sizeof(err));
    if (!s)
       return -1;

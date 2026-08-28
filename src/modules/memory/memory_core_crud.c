@@ -30,6 +30,7 @@
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
+#include "integrity.h"
 #include "util.h"       /* util_now_ms — memory.search stage timing */
 #include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
@@ -84,6 +85,18 @@ int memory_gate_check(const char *tier, const char *kind, const char *key, const
 
    if (!content || !content[0])
       return 0; /* L0 scratch allows empty content */
+
+   /* Durable memory becomes future prompt context, so treat it as agent-message
+    * authority unless a future typed ingress carries an authenticated user
+    * provenance. Ambiguous provenance fails closed. */
+   integrity_result_t integrity;
+   if (integrity_ingress_decide(content, INTEGRITY_SOURCE_AGENT_MESSAGE, "memory", 1, &integrity))
+   {
+      verdict->result = GATE_REJECT;
+      snprintf(verdict->reason, sizeof(verdict->reason), "integrity: %s (%s)",
+               integrity_verdict_name(integrity.verdict), integrity.match_category);
+      return 0;
+   }
 
    /* Gate 1: Sensitivity check (secrets, PII) */
    int sens =
@@ -553,6 +566,13 @@ int memory_update_content_as(int64_t id, const char *content, memory_authority_t
       *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+   integrity_result_t integrity;
+   integrity_source_t integrity_source = authority == MEMORY_AUTHORITY_USER
+                                             ? INTEGRITY_SOURCE_USER_STATED
+                                             : INTEGRITY_SOURCE_AGENT_MESSAGE;
+   if (integrity_ingress_decide(content, integrity_source, "memory",
+                                authority != MEMORY_AUTHORITY_USER, &integrity))
+      return -4;
    char epistemic_kind[32] = "world_fact";
    (void)db2_memory_epistemic_kind(id, epistemic_kind, sizeof(epistemic_kind));
    if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)

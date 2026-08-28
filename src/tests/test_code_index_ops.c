@@ -197,8 +197,6 @@ int main(void)
                               "sub/.hidden/.gitmodules"};
       const char *keep[] = {"src/a.c"};
       const char *projs[] = {"hp", "hp2"};
-      const char *seed = "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
-                         " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')";
       for (size_t pj = 0; pj < 2; pj++)
       {
          char ins[512];
@@ -208,17 +206,26 @@ int main(void)
          assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], spared[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], spared[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
          for (size_t i = 0; i < sizeof(purged) / sizeof(purged[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], purged[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], purged[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
          for (size_t i = 0; i < sizeof(keep) / sizeof(keep[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], keep[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], keep[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
       }

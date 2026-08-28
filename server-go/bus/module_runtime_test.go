@@ -60,7 +60,8 @@ func moduleRequestEvent(t *testing.T, kind uint32, correlation uint64, message M
 	if more {
 		flags |= FMore
 	}
-	return Event{Frame: Frame{HdrFlags: flags, EventKind: kind, CorrelationID: correlation},
+	return Event{Frame: Frame{HdrFlags: flags, EventKind: kind, PrincipalRef: 70,
+		CorrelationID: correlation},
 		Payload: payload}
 }
 
@@ -93,7 +94,8 @@ func TestGoModuleRuntimeFragmentedRoundTrip(t *testing.T) {
 	config := ModuleProcessConfig{SocketPath: "/unused", ModuleName: "go-test",
 		PrincipalClass: 1, PrincipalRef: 7, Stages: []ModuleStage{{EventKind: kind, StageID: 1}},
 		Handler: func(invocation ModuleInvocation, body []byte) ([]byte, ModuleStatus) {
-			if invocation.StageID != 1 || invocation.TraceID != 77 || !bytes.Equal(body, request) {
+			if invocation.StageID != 1 || invocation.TraceID != 77 || invocation.PrincipalClass != 1 ||
+				invocation.PrincipalRef != 70 || !bytes.Equal(body, request) {
 				return nil, ModuleStatusInvalidRequest
 			}
 			return append([]byte(nil), body...), ModuleStatusOK
@@ -135,7 +137,7 @@ func TestGoModuleRuntimeCancellationAndCapabilityAbsent(t *testing.T) {
 	fake := &fakeModuleBus{budget: 128}
 	fake.input = []Event{
 		moduleRequestEvent(t, kind, 12, message, []byte("wait"), false),
-		{Frame: Frame{HdrFlags: FCancel, EventKind: kind, CorrelationID: 12}},
+		{Frame: Frame{HdrFlags: FCancel, EventKind: kind, PrincipalRef: 70, CorrelationID: 12}},
 	}
 	config := ModuleProcessConfig{SocketPath: "/unused", ModuleName: "go-cancel",
 		PrincipalClass: 1, PrincipalRef: 9, Stages: []ModuleStage{{EventKind: kind, StageID: 1}},

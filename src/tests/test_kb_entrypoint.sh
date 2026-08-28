@@ -27,15 +27,21 @@ export AIMEE_KB_ENTRYPOINT_SOURCE_ONLY
 . "$entrypoint"
 
 echo "embedded store module receives the local socket DSN"
-unset AIMEE_STORE_URL 2>/dev/null || true
-embedded_test_dsn='postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee'
-configure_embedded_store_module "$embedded_test_dsn"
-if [ "${AIMEE_STORE_URL:-}" = "$embedded_test_dsn" ]; then
-    ok "embedded DSN exported as AIMEE_STORE_URL"
+unset AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL 2>/dev/null || true
+embedded_runtime_dsn='postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee_store_runtime'
+embedded_migration_dsn='postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee_store_migrator'
+configure_embedded_store_module "$embedded_runtime_dsn" "$embedded_migration_dsn"
+if [ "${AIMEE_STORE_URL:-}" = "$embedded_runtime_dsn" ]; then
+    ok "embedded runtime DSN exported as AIMEE_STORE_URL"
 else
-    bad "embedded DSN did not reach AIMEE_STORE_URL"
+    bad "embedded runtime DSN did not reach AIMEE_STORE_URL"
 fi
-unset AIMEE_STORE_URL
+if [ "${AIMEE_STORE_MIGRATION_URL:-}" = "$embedded_migration_dsn" ]; then
+    ok "embedded migration DSN exported as AIMEE_STORE_MIGRATION_URL"
+else
+    bad "embedded migration DSN did not reach AIMEE_STORE_MIGRATION_URL"
+fi
+unset AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
 
 echo "kb_is_serving: flags mean serve, a bare word means one-shot"
 kb_is_serving            && ok "no args -> serving"            || bad "no args should serve"

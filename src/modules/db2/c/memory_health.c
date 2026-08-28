@@ -316,22 +316,38 @@ int db2_memory_health_delete_by_sensitivity(const char *sensitivity, int days)
    if (!conn)
       return 0;
 
-   char window[32];
-   snprintf(window, sizeof(window), "-%d days", days);
-
-   static const char *sql = "DELETE FROM memories"
-                            " WHERE sensitivity = ?1"
-                            "   AND created_at < pg_now_text(?2)";
+   static const char *sql = "SELECT kb_memory_sensitivity_retention_reap(?1,?2)";
    char err[MH_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
       return 0;
    aimee_pg_bind_text(st, "?1", sensitivity);
-   aimee_pg_bind_text(st, "?2", window);
-   int rc = aimee_pg_step(st, err, sizeof(err));
-   int changes = (rc == AIMEE_PG_DONE) ? aimee_pg_stmt_changes(st) : 0;
+   aimee_pg_bind_int(st, "?2", days);
+   int changes = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      changes = aimee_pg_column_int(st, 0);
    aimee_pg_finalize(st);
    return changes;
+}
+
+int db2_memory_health_delete_older_than(int days)
+{
+   if (days <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   static const char *sql = "SELECT kb_memory_retention_reap(?1)";
+   char err[MH_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_int(st, "?1", days);
+   int deleted = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      deleted = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return deleted;
 }
 
 int db2_memory_stats_counts(memory_stats_t *out)

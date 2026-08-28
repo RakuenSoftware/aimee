@@ -96,6 +96,19 @@ static void write_grant(const char *policy_dir, const char *executable)
            executable, AIMEE_GIT_EVENT_OPERATION, AIMEE_GIT_EVENT_REF_VALIDATE,
            AIMEE_GIT_EVENT_CI_GRADE, AIMEE_GIT_EVENT_VERIFY_RUN);
    must(fclose(file) == 0, "write the grant manifest");
+
+   /* The production Git process attaches a second, request-only identity for
+    * forge transport. This fixture never invokes forge, but admitting the
+    * identity keeps the real process contract intact instead of relying on a
+    * noisy failed attachment during a non-network test. */
+   snprintf(path, sizeof(path), "%s/git-egress.grant", policy_dir);
+   file = fopen(path, "w");
+   must(file != NULL, "open the Git egress grant manifest");
+   fprintf(file,
+           "version=1\nprincipal_class=1\nprincipal_ref=71\nuid=self\n"
+           "executable=%s\nrequest=12290\n",
+           executable);
+   must(fclose(file) == 0, "write the Git egress grant manifest");
 }
 
 static void start_module(const char *executable, const char *socket_path)
@@ -243,13 +256,13 @@ static void test_absent_module_fails_closed(const char *repo)
 
 int main(int argc, char **argv)
 {
-   /* The suite runs its binaries with no arguments. Requiring one kept this
-      fixture out of every run list, so the only proof the git module actually
-      serves has never executed in CI. Default to where the Makefile builds the
-      module and it can simply be listed like any other test. */
-   const char *module_binary = (argc >= 2) ? argv[1] : "build/obj/aimee-module";
-   must(access(module_binary, X_OK) == 0,
-        "find the module binary (pass its path, or build build/obj/aimee-module)");
+   /* The suite runs its binaries with no arguments and exports the matching
+      module from its selected object tree (normal, sanitizer, coverage, ...).
+      The focused make target still passes the binary explicitly. */
+   const char *module_binary = (argc >= 2) ? argv[1] : getenv("AIMEE_TEST_MODULE_BIN");
+   must(module_binary != NULL && module_binary[0] != '\0',
+        "find AIMEE_TEST_MODULE_BIN (or pass the module binary path)");
+   must(access(module_binary, X_OK) == 0, "find the module binary named by the test runner");
 
    snprintf(g_tmp, sizeof(g_tmp), "/tmp/aimee-verify-bus-%d", (int)getpid());
    char policy[640], socket_path[512], executable[640], repo[640];

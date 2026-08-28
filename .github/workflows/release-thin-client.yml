@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 jobs:
   build:
@@ -51,7 +52,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -140,7 +141,10 @@ jobs:
         shell: powershell
         run: |
           $url = "https://www.sqlite.org/2024/sqlite-amalgamation-3470200.zip"
+          $want = "aa73d8748095808471deaa8e6f34aa700e37f2f787f4425744f53fdd15a89c40"
           Invoke-WebRequest -Uri $url -OutFile sqlite.zip
+          $got = (Get-FileHash -Algorithm SHA256 sqlite.zip).Hash.ToLowerInvariant()
+          if ($got -ne $want) { throw "SQLite archive digest mismatch: $got" }
           Expand-Archive sqlite.zip -DestinationPath sqlite-tmp
           New-Item -ItemType Directory -Force -Path src\vendor\sqlite3
           Copy-Item sqlite-tmp\sqlite-amalgamation-3470200\sqlite3.c src\vendor\sqlite3\
@@ -164,7 +168,7 @@ jobs:
         run: .\${{ matrix.asset }} version
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ${{ matrix.asset }}
           path: ${{ matrix.asset }}
@@ -182,13 +186,22 @@ jobs:
       # digest-* artifacts too; an unscoped download would pull those into dist/
       # (and onto the Release) and widen the flaky-download surface.
       - name: Download thin-client artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
         with:
           pattern: aimee-*
           path: dist
           merge-multiple: true
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Create checksums and keyless signature bundles
+        working-directory: dist
+        run: |
+          sha256sum aimee-* > SHA256SUMS
+          for asset in aimee-* SHA256SUMS; do
+            cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
+          done
       - name: Publish release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           # Empty tag_name -> action falls back to the pushed tag (github.ref).
           tag_name: ${{ inputs.version != '' && format('v{0}', inputs.version) || '' }}

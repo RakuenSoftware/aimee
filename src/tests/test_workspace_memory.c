@@ -788,8 +788,77 @@ static void test_api_memory_stats_includes_functional_tiers(void)
    teardown();
 }
 
+/* ---------------------------------------------------------------------------
+ * Ranking a candidate set must cost ONE statement, not one per candidate.
+ *
+ * Two assertions, and the first matters more: the batch reader must agree with
+ * the single-id reader on every id. This is a visibility ladder -- a batch form
+ * that ranks even one row differently silently changes who can see what, and
+ * that would be a far worse bug than the latency it set out to fix.
+ *
+ * The second asserts round-trip COUNT rather than elapsed time: deterministic,
+ * no clock, no load sensitivity, and it fails identically on every machine.
+ */
+void aimee_pg_test_stmt_count_reset(void);
+long aimee_pg_test_stmt_count(void);
+
+static void test_scope_rank_batch_matches_single_and_costs_one_statement(void)
+{
+   setup();
+   db2_memory_scope_context_set("active-workspace", "active-project", 0);
+
+   /* One memory per rank tier, plus an unscoped row and an id that does not
+    * exist -- the two cases a naive IN(...) batch gets wrong. */
+   memory_t proj, ws, shared, plain;
+   memory_insert(TIER_L2, KIND_FACT, "rb-proj", "batch rank project row", 0.9, "s", &proj);
+   memory_insert(TIER_L2, KIND_FACT, "rb-ws", "batch rank workspace row", 0.9, "s", &ws);
+   memory_insert(TIER_L2, KIND_FACT, "rb-shared", "batch rank shared row", 0.9, "s", &shared);
+   memory_insert(TIER_L2, KIND_FACT, "rb-plain", "batch rank unscoped row", 0.9, "s", &plain);
+   assert(memory_tag_project(proj.id, "active-project") == 0);
+   assert(memory_tag_workspace(ws.id, "active-workspace") == 0);
+   assert(memory_tag_workspace(shared.id, SHARED_WORKSPACE) == 0);
+
+   int64_t ids[6];
+   ids[0] = proj.id;
+   ids[1] = ws.id;
+   ids[2] = shared.id;
+   ids[3] = plain.id;
+   ids[4] = proj.id;         /* a repeated id must rank at BOTH positions */
+   ids[5] = plain.id + 9999; /* absent from `memories` -> rank 0 */
+
+   int single[6];
+   for (int i = 0; i < 6; i++)
+      single[i] = db2_memory_scope_context_rank(ids[i]);
+
+   int batch[6];
+   aimee_pg_test_stmt_count_reset();
+   db2_memory_scope_context_rank_batch(ids, 6, batch);
+   long batch_stmts = aimee_pg_test_stmt_count();
+
+   /* Equivalence: identical verdict for every position, repeats and misses too. */
+   for (int i = 0; i < 6; i++)
+      assert(batch[i] == single[i]);
+   assert(batch[5] == 0);        /* absent id */
+   assert(batch[0] == batch[4]); /* repeated id ranked twice */
+
+   /* Cost: one statement for six ids, not six. */
+   assert(batch_stmts == 1);
+
+   /* And the single-id reader really is the per-id shape being replaced, so the
+    * saving is proportional to the candidate set rather than a constant. */
+   aimee_pg_test_stmt_count_reset();
+   for (int i = 0; i < 6; i++)
+      (void)db2_memory_scope_context_rank(ids[i]);
+   assert(aimee_pg_test_stmt_count() == 6);
+
+   db2_memory_scope_context_clear();
+   teardown();
+   printf("  PASS: test_scope_rank_batch_matches_single_and_costs_one_statement\n");
+}
+
 int main(void)
 {
+   test_scope_rank_batch_matches_single_and_costs_one_statement();
    test_tag_workspace();
    test_tag_generic_scope();
    test_tag_multiple_workspaces();

@@ -33,6 +33,11 @@ int wfe_autonomy_run(const char *work_item_id, char *err, size_t errlen);
  * cost cap. Returns the cap in USD; 0 means "no cap". */
 double wfe_autonomy_default_max_cost_usd(void);
 
+/* Emergency, process-live stop for every autonomous intake and driver. The
+ * switch is intentionally environment-owned so an operator can stop effects
+ * immediately without a writable configuration service. */
+int wfe_autonomy_killed(void);
+
 /* Human-only escape from a stuck gate: records a signed override (counts as a
  * human approval), increments override_count, and clears the pause so the next
  * run advances. On the (WFE_MAX_OVERRIDES+1)th override the work item is forced

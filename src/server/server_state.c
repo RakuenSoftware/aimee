@@ -617,6 +617,8 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "kb.search scope must be current or all", NULL);
    if (scope && strcmp(scope, "all") == 0)
    {
+      if (!conn || (conn->capabilities & CAP_CROSS_SCOPE_READ) == 0)
+         return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);

@@ -1760,6 +1760,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/hooks/pre", NULL, RM_EXACT, "hooks.pre", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/post", NULL, RM_EXACT, "hooks.post", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/session_start", NULL, RM_EXACT, "hooks.session_start", 0, rh_dispatch_op},
+    {"POST", "/v1/hooks/session_end", NULL, RM_EXACT, "hooks.session_end", 0, rh_dispatch_op},
     /* Workspace-independent SessionStart brief for the remote thin client
      * (Proposal 1 Phase 1): side-effect-free build_session_context assembly,
      * distinct from /v1/sessions/brief (which reads a persisted brief). */
@@ -2029,6 +2030,7 @@ const http_route_t g_v1_routes[] = {
      * the async lane like the rest: kb.reembed drops and recreates every derived
      * vector table, memory.embed re-embeds the memory corpus after it. */
     {"POST", "/v1/kb/reembed", NULL, RM_EXACT, "kb.reembed", 0, rh_dispatch_op_async},
+    {"POST", "/v1/kb/erase-subject", NULL, RM_EXACT, "kb.erase-subject", 0, rh_dispatch_op_async},
     {"POST", "/v1/memory/embed", NULL, RM_EXACT, "memory.embed", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},

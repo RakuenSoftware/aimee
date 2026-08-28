@@ -1,6 +1,6 @@
 module github.com/JBailes/aimee/server-go
 
-go 1.25.0
+go 1.26.7
 
 require (
 	github.com/RakuenSoftware/aimee-module-config v0.2.1-0.20260824205422-3d2964383b91

@@ -1991,7 +1991,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
       if (config_kb_evidence_emit_enabled())
       {
          char tid[40];
-         ingress_preinject_mint_turn_id(tid, sizeof(tid));
+         if (ingress_preinject_mint_turn_id(tid, sizeof(tid)) != 0)
+         {
+            send_response(fd, 503,
+                          "{\"error\":{\"message\":\"secure entropy is unavailable\","
+                          "\"type\":\"service_unavailable\"}}",
+                          request_id);
+            free(body);
+            return;
+         }
          ingress_preinject_set_turn_id(tid);
       }
    }

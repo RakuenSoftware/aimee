@@ -681,27 +681,27 @@ int cli_session_create(cli_session_t *s, const char *session_name, const char *c
     * them and the pane exits instantly ("failed to send prompt to tmux
     * session"). A non-login shell inherits the tmux server's env (= aimee-
     * server's, which carries the image PATH), so the CLI resolves. */
-   /* shell_escape() only escapes embedded single quotes; the caller supplies the
-    * surrounding '...'. Leaving them off worked only while cli_cmd was a single
+   /* shell_quote() returns a complete shell token. Leaving the command unquoted
+    * worked only while cli_cmd was a single
     * word ("claude"): a multi-word command (the AIMEE_SESSION_ID=<sid> stamp, or
     * --model/--dangerously-skip-permissions flags) gets word-split by the outer
     * shell, tmux re-joins the pieces, and the pane's `sh -c` ends up executing
     * just the leading env assignment — exiting 0 instantly and taking the tmux
     * server down with it ("failed to send prompt to tmux session"). */
    char create_cmd[1024];
-   char *esc_cli = shell_escape(cli_cmd && cli_cmd[0] ? cli_cmd : "claude");
+   char *esc_cli = shell_quote(cli_cmd && cli_cmd[0] ? cli_cmd : "claude");
    if (work_dir && work_dir[0])
    {
-      char *esc_dir = shell_escape(work_dir);
+      char *esc_dir = shell_quote(work_dir);
       snprintf(create_cmd, sizeof(create_cmd),
-               "tmux new-session -d -s '%s' -x 220 -y 50 -c '%s' /bin/sh -c '%s' 2>/dev/null",
+               "tmux new-session -d -s '%s' -x 220 -y 50 -c %s /bin/sh -c %s 2>/dev/null",
                session_name, esc_dir, esc_cli);
       free(esc_dir);
    }
    else
    {
       snprintf(create_cmd, sizeof(create_cmd),
-               "tmux new-session -d -s '%s' -x 220 -y 50 /bin/sh -c '%s' 2>/dev/null", session_name,
+               "tmux new-session -d -s '%s' -x 220 -y 50 /bin/sh -c %s 2>/dev/null", session_name,
                esc_cli);
    }
    free(esc_cli);
@@ -1347,7 +1347,10 @@ int cli_session_recv(cli_session_t *s, char *out, size_t out_max, int timeout_ms
    int marker_cli = strstr(s->cli_kind, "claude") != NULL || strstr(s->cli_kind, "codex") != NULL;
    long long last_hb = 0; /* mono_ms of the last liveness heartbeat (0 = never) */
    free(s->stream_emitted);
-   s->stream_emitted = strdup("");
+   /* NULL is the canonical empty stream state below (`prev` already maps it to
+    * ""). Avoid a one-byte allocation on every receive and leave short-lived
+    * stack fixtures with no allocation to reclaim when no delta is emitted. */
+   s->stream_emitted = NULL;
 
    for (;;)
    {

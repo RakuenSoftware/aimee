@@ -629,6 +629,86 @@ void db2_kb_documents_delete_for_file(const char *project, const char *file_path
    aimee_pg_finalize(st);
 }
 
+int db2_kb_documents_delete_older_than(int days)
+{
+   if (days <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+   static const char *sql = "SELECT kb_document_retention_reap(?1)";
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_int(st, "?1", days);
+   int deleted = 0;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+      deleted = aimee_pg_column_int(st, 0);
+   aimee_pg_finalize(st);
+   return deleted;
+}
+
+int db2_subject_erasure_begin(const char *request_id, const char *subject,
+                              const char *sessions_json, int64_t *memory_count,
+                              int64_t *document_count, int *already_done)
+{
+   if (memory_count)
+      *memory_count = 0;
+   if (document_count)
+      *document_count = 0;
+   if (already_done)
+      *already_done = 0;
+   void *conn = db2_conn();
+   if (!conn || !request_id || !request_id[0] || !subject || !subject[0] || !sessions_json)
+      return -1;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT deleted_memories,deleted_documents,already_done"
+                                          " FROM kb_subject_erasure_begin(?1,?2,?3::jsonb)",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", request_id);
+   aimee_pg_bind_text(st, "?2", subject);
+   aimee_pg_bind_text(st, "?3", sessions_json);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
+   if (ok)
+   {
+      if (memory_count)
+         *memory_count = aimee_pg_column_int64(st, 0);
+      if (document_count)
+         *document_count = aimee_pg_column_int64(st, 1);
+      if (already_done)
+         *already_done = aimee_pg_column_int(st, 2) != 0;
+   }
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
+int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                 int *event_created)
+{
+   if (event_created)
+      *event_created = 0;
+   void *conn = db2_conn();
+   if (!conn || !request_id || !request_id[0] || !actor || !actor[0] || db1_count < 0)
+      return -1;
+   char err[KBP_ERRBUF] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn, "SELECT kb_subject_erasure_complete(?1,?2,?3)", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", request_id);
+   aimee_pg_bind_text(st, "?2", actor);
+   aimee_pg_bind_int64(st, "?3", db1_count);
+   int ok = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW;
+   if (ok && event_created)
+      *event_created = aimee_pg_column_int(st, 0) != 0;
+   aimee_pg_finalize(st);
+   return ok ? 0 : -1;
+}
+
 int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path,
                                       const char *file_hash, int chunk_index,
                                       const char *heading_path, int line_start, int line_end,
@@ -652,9 +732,10 @@ int64_t db2_kb_documents_insert_chunk(const char *project, const char *file_path
        "INSERT INTO kb_documents"
        " (project, generation, file_path, file_hash, chunk_index, heading_path, line_start, "
        "line_end,"
-       "  content, token_count, updated_at)"
+       "  content, token_count, updated_at, owner_principal)"
        " VALUES (?1,(SELECT current_generation FROM projects"
-       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,pg_now_text())"
+       " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,pg_now_text(),"
+       " COALESCE(NULLIF(current_setting('aimee.principal',true),''),'internal:system'))"
        " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
@@ -739,10 +820,11 @@ int64_t db2_kb_documents_insert_chunk_pdf(const char *project, const char *file_
        " (project, generation, file_path, file_hash, chunk_index, heading_path, line_start, "
        "line_end,"
        "  content, token_count, doc_kind, chunk_strategy, page_start, page_end,"
-       "  sensitivity_class, quarantine_state, updated_at)"
+       "  sensitivity_class, quarantine_state, updated_at, owner_principal)"
        " VALUES (?1,(SELECT current_generation FROM projects"
        " WHERE name=?1 AND lifecycle_state='current'),?2,?3,?4,?5,?6,?7,?8,?9,'pdf',"
-       " ?10,?11,?12,?13,?14,pg_now_text())"
+       " ?10,?11,?12,?13,?14,pg_now_text(),"
+       " COALESCE(NULLIF(current_setting('aimee.principal',true),''),'internal:system'))"
        " RETURNING id";
    char err[KBP_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

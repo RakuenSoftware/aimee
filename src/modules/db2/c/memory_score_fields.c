@@ -687,9 +687,10 @@ int64_t db2_memory_row_insert_epistemic_ex(const char *tier, const char *kind,
        "INSERT INTO memories (tier, kind, key, content, use_cases, confidence,"
        " use_count, last_used_at, source_session, created_at,"
        " updated_at, sensitivity, evidence_strength, salience, surprise, observation_count,"
-       " provenance_category, epistemic_kind, confidence_ceiling, scope_type, scope_value)"
+       " provenance_category, epistemic_kind, confidence_ceiling, scope_type, scope_value,"
+       " owner_principal)"
        " VALUES (?1, ?2, ?3, ?4, ?5, ?6, 1, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, 1, ?15, ?16, ?17, "
-       "?18, ?19)"
+       "?18, ?19,COALESCE(NULLIF(current_setting('aimee.principal',true),''),'internal:system'))"
        " RETURNING id";
    char err[MSF_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));

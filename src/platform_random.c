@@ -8,7 +8,7 @@
 
 int platform_random_hex(char *out, size_t hex_len)
 {
-   if (hex_len == 0 || (hex_len % 2) != 0)
+   if (!out || hex_len == 0 || (hex_len % 2) != 0)
       return -1;
 
    size_t raw_len = hex_len / 2;
@@ -18,8 +18,7 @@ int platform_random_hex(char *out, size_t hex_len)
 
    if (platform_random_bytes(raw, raw_len) != 0)
    {
-      memset(out, '0', hex_len);
-      out[hex_len] = '\0';
+      out[0] = '\0';
       return -1;
    }
 

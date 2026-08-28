@@ -89,6 +89,9 @@ var schemaHistory = []struct {
 	// candidates and approach memory landed there with no Go equivalent, and
 	// src/db1_client already calls all ten of their operations.
 	{22, "schema_eval_candidates.sql"},
+	// Privacy erasure spans DB2 and DB1.  Persist the DB1 result by request id
+	// so a completion retry carries the original count rather than zero.
+	{23, "schema_subject_erasure.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.

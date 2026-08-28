@@ -120,15 +120,18 @@ int handle_post_code_project_lifecycle_route(const char *method, const char *ope
       rc = db2_code_project_detach(project, principal, &generation);
       if (rc == 0)
       {
-         cJSON_Delete(root);
          cJSON *resp = cJSON_CreateObject();
          if (!resp)
+         {
+            cJSON_Delete(root);
             return code_scan_write_error(out_buf, out_cap, "out of memory");
+         }
          cJSON_AddStringToObject(resp, "status", "ok");
          cJSON_AddStringToObject(resp, "operation", "detach");
          cJSON_AddStringToObject(resp, "project", project);
          cJSON_AddNumberToObject(resp, "generation", (double)generation);
          cJSON_AddStringToObject(resp, "state", "detached");
+         cJSON_Delete(root);
          char *json = cJSON_PrintUnformatted(resp);
          snprintf(out_buf, (size_t)out_cap, "%s", json ? json : "{\"error\":\"out of memory\"}");
          free(json);

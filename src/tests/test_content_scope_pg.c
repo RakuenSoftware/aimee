@@ -6,6 +6,9 @@
  * mirroring test_vault_pg.c, so `make unit-tests` stays green without one. The
  * vector ownership half also requires pgvector; a database where schema apply
  * deliberately omitted those optional relations skips this combined proof.
+ * Set AIMEE_TEST_PG_RUNTIME_POOL=1 only for a disposable database to make lazy
+ * pool connections assume aimee_kb_runtime, and set AIMEE_TEST_EMBEDDING_COMMAND
+ * to scripts/test-embedding-fixture.py for the hermetic vector-writer proof.
  *
  * WHAT IS PINNED HERE, and why each would otherwise be silent:
  *
@@ -143,6 +146,10 @@ static int scalar(const char *sql, char *out, size_t cap)
       snprintf(out, cap, "%s", v ? v : "");
       rc = 0;
    }
+   else
+   {
+      fprintf(stderr, "step failed: %s\n  sql: %s\n", err[0] ? err : "unexpected result", sql);
+   }
    aimee_pg_finalize(st);
    return rc;
 }
@@ -160,7 +167,35 @@ int main(void)
       fprintf(stderr, "content_scope_pg: db2_init failed for %s\n", url);
       return 1;
    }
+   /* The production KB host registers this adapter during module assembly.
+    * This standalone binary must do the same or every authenticated tenant
+    * scope fails before PostgreSQL can exercise the RLS policy. */
+   aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
+
+   /* The fixture's already-open connection remains the disposable schema
+    * owner, while every lazily opened pool connection starts as the production
+    * runtime role. ALTER ROLE ... IN DATABASE is confined to this scratch
+    * database and disappears with it; the opt-in prevents accidental use on a
+    * shared database. */
+   int runtime_pool = 0;
+   const char *runtime_pool_env = getenv("AIMEE_TEST_PG_RUNTIME_POOL");
+   if (runtime_pool_env && strcmp(runtime_pool_env, "1") == 0)
+   {
+      char alter_pool_role[256] = "";
+      assert(scalar("SELECT format('ALTER ROLE %I IN DATABASE %I SET role TO %I',"
+                    "session_user,current_database(),'aimee_kb_runtime')",
+                    alter_pool_role, sizeof(alter_pool_role)) == 0);
+      assert(exec_sql(alter_pool_role) == 0);
+      runtime_pool = 1;
+   }
    printf("test_content_scope_pg\n");
+
+   /* Product KB objects deliberately compile out the in-process lexical test
+    * embedder. Live-PG runners can provide a hermetic external command; local
+    * fixture builds retain the explicit in-process fallback. */
+   const char *embedding_command = getenv("AIMEE_TEST_EMBEDDING_COMMAND");
+   if (!embedding_command || !embedding_command[0])
+      embedding_command = MEMORY_EMBED_TEST_FIXTURE;
 
    char vector_relations[16] = "";
    if (scalar("SELECT (to_regclass('kb_embeddings') IS NOT NULL)::int"
@@ -220,21 +255,21 @@ int main(void)
    printf("  PASS: they are inert until an operator enables them\n");
 
    /* 5. The release declares reader readiness without enabling RLS. Enabling
-    *    still refuses while any content is unattributed: turning it on over an
-    *    orphan does not give a weaker control, it hides that row from everyone. */
+    *    moves legacy unattributed projects into the permanently invisible
+    *    quarantine tenancy before FORCE RLS turns on. */
    {
       expect("SELECT value FROM kb_meta WHERE key='content_scope_reader_ready'", "1");
       printf("  PASS: reader readiness is declared without enabling content scope\n");
 
       char orphan_id[64] = "";
-      assert(scalar("INSERT INTO projects(name,root,scanned_at,kb_project)"
-                    " VALUES ('scope-unattributed','/scope/unattributed','',NULL)"
-                    " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id",
-                    orphan_id, sizeof(orphan_id)) == 0);
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project='scope-unattributed'"
                       " AND file_path='scope-unattributed.md'") == 0);
       assert(exec_sql("DELETE FROM projects WHERE name='scope-unattributed'") == 0);
+      assert(scalar("INSERT INTO projects(name,root,scanned_at,kb_project)"
+                    " VALUES ('scope-unattributed','/scope/unattributed','',NULL)"
+                    " ON CONFLICT (name) DO UPDATE SET kb_project=NULL RETURNING id",
+                    orphan_id, sizeof(orphan_id)) == 0);
       assert(scalar("INSERT INTO kb_documents"
                     " (project,generation,file_path,file_hash,chunk_index,heading_path,"
                     "  line_start,line_end,content,token_count)"
@@ -244,33 +279,31 @@ int main(void)
                     " (SELECT id FROM projects WHERE name='scope-unattributed') RETURNING id",
                     orphan_id, sizeof(orphan_id)) == 0);
 
-      char err[512] = "";
-      aimee_pg_stmt_t *st =
-          aimee_pg_prepare(db2_conn(), "SELECT kb_content_scope_enable()", err, sizeof(err));
-      int refused = 0;
-      if (st)
-      {
-         if (aimee_pg_step(st, err, sizeof(err)) != AIMEE_PG_ROW)
-            refused = 1;
-         aimee_pg_finalize(st);
-      }
-      else
-      {
-         refused = 1;
-      }
-      if (!refused)
-         fprintf(stderr, "kb_content_scope_enable() accepted an unattributed row\n");
-      assert(refused);
-      printf("  PASS: enabling refuses while content is unattributed\n");
-      /* Whatever happened, leave the tables as they were found. */
+      expect("SELECT kb_content_scope_enable()", "content scope enabled on project content tables");
+      expect("SELECT count(*) FROM projects p JOIN kb_project k ON k.id=p.kb_project"
+             " JOIN kb_team t ON t.id=k.parent WHERE p.name='scope-unattributed'"
+             " AND k.operator_id='system:content-quarantine'"
+             " AND t.operator_id='system:content-quarantine'",
+             "1");
+      assert(exec_sql("SET ROLE aimee_kb_runtime") == 0);
+      expect("SELECT count(*) FROM kb_documents WHERE project='scope-unattributed'", "0");
+      assert(exec_sql("RESET ROLE") == 0);
+      printf("  PASS: enabling quarantines unattributed legacy content before FORCE RLS\n");
       expect("SELECT count(*) FROM pg_class"
              " WHERE relname IN ('kb_documents','kb_file_index','kb_embeddings',"
              " 'kb_pdf_embeddings','kb_doc_regions','kb_table_cells','kb_doc_assets')"
              "   AND (relrowsecurity OR relforcerowsecurity)",
-             "0");
+             "7");
+      expect("SELECT kb_content_scope_disable()", "content scope disabled");
       assert(exec_sql("DELETE FROM kb_documents"
                       " WHERE project='scope-unattributed'"
                       " AND file_path='scope-unattributed.md'") == 0);
+      assert(exec_sql("DELETE FROM projects WHERE name='scope-unattributed'") == 0);
+      assert(exec_sql("DELETE FROM kb_project WHERE name='scope-unattributed'"
+                      " AND operator_id='system:content-quarantine'") == 0);
+      assert(exec_sql("DELETE FROM kb_team WHERE name='__aimee_content_quarantine__'"
+                      " AND NOT EXISTS (SELECT 1 FROM kb_project"
+                      " WHERE parent=kb_team.id)") == 0);
    }
 
    /* 6. A tenant scope must not survive its transaction.
@@ -504,6 +537,11 @@ int main(void)
       assert(exec_sql("ALTER TABLE kb_pdf_embeddings FORCE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_doc_assets ENABLE ROW LEVEL SECURITY") == 0);
       assert(exec_sql("ALTER TABLE kb_doc_assets FORCE ROW LEVEL SECURITY") == 0);
+      /* The fixture connection is a schema-owning superuser so it can provision
+       * and tear down the disposable database. Assume the production runtime
+       * role for every assertion below; otherwise PostgreSQL would bypass even
+       * FORCE RLS and these maintenance-policy checks would be vacuous. */
+      assert(exec_sql("SET ROLE aimee_kb_runtime") == 0);
       assert(db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "scope-maintenance-a") == 0);
       assert(db2_maintenance_scope_begin_current() == 1);
       expect("SELECT current_setting('aimee.maintenance_project',true)", "scope-maintenance-a");
@@ -511,7 +549,10 @@ int main(void)
       db2_maintenance_job_leave();
 
       assert(db2_maintenance_job_enter(DB2_MAINTENANCE_REEMBED, "scope-maintenance-a") == 0);
-      assert(kb_doc_embed_backfill("scope-maintenance-a", MEMORY_EMBED_TEST_FIXTURE, 1) == 1);
+      int backfilled = kb_doc_embed_backfill("scope-maintenance-a", embedding_command, 1);
+      if (backfilled != 1)
+         fprintf(stderr, "re-embed backfill returned %d, expected 1\n", backfilled);
+      assert(backfilled == 1);
       assert(db2_maintenance_scope_begin_current() == 1);
       snprintf(sql, sizeof(sql),
                "SELECT CASE WHEN e.project='scope-maintenance-a' AND p.kb_project=%s"
@@ -573,6 +614,7 @@ int main(void)
                       " FROM projects WHERE name='scope-maintenance-a'") != 0);
       db2_maintenance_scope_rollback();
       db2_maintenance_job_leave();
+      assert(exec_sql("RESET ROLE") == 0);
       printf("  PASS: re-embed reapplies exact-project scope after the embedder round-trip\n");
       printf("  PASS: re-embed cannot cross into an unselected sibling chunk\n");
       printf("  PASS: both vector writers reject cached-project relabelling\n");
@@ -843,11 +885,14 @@ int main(void)
       expect("SELECT kb_content_scope_enable()", "content scope enabled on project content tables");
       printf("  PASS: an already-enabled deployment can re-run the expanded switch atomically\n");
 
+      /* As above, the disposable-database owner must shed BYPASSRLS before the
+       * ordinary reader and caller-less search assertions are meaningful. */
+      assert(exec_sql("SET ROLE aimee_kb_runtime") == 0);
       assert(db2_tenant_scope_begin(&reader_a, (int64_t)atoll(team_a)) == 0);
       expect_project_content_counts("scope-reader-a", "1");
       expect_project_content_counts("scope-reader-b", "0");
       char *result_a =
-          kb_search_json_ex(NULL, "readinessisolationtoken", MEMORY_EMBED_TEST_FIXTURE, 10, "rrf");
+          kb_search_json_ex(NULL, "readinessisolationtoken", embedding_command, 10, "rrf");
       assert(result_a);
       int result_a_own = search_project_count(result_a, "scope-reader-a");
       int result_a_other = search_project_count(result_a, "scope-reader-b");
@@ -859,7 +904,7 @@ int main(void)
       assert(db2_tenant_scope_commit() == 0);
 
       char *anonymous =
-          kb_search_json_ex(NULL, "readinessisolationtoken", MEMORY_EMBED_TEST_FIXTURE, 10, "rrf");
+          kb_search_json_ex(NULL, "readinessisolationtoken", embedding_command, 10, "rrf");
       assert(anonymous);
       int anonymous_a = search_project_count(anonymous, "scope-reader-a");
       int anonymous_b = search_project_count(anonymous, "scope-reader-b");
@@ -875,7 +920,7 @@ int main(void)
       expect_project_content_counts("scope-reader-a", "0");
       expect_project_content_counts("scope-reader-b", "1");
       char *result_b =
-          kb_search_json_ex(NULL, "readinessisolationtoken", MEMORY_EMBED_TEST_FIXTURE, 10, "rrf");
+          kb_search_json_ex(NULL, "readinessisolationtoken", embedding_command, 10, "rrf");
       assert(result_b);
       int result_b_own = search_project_count(result_b, "scope-reader-b");
       int result_b_other = search_project_count(result_b, "scope-reader-a");
@@ -886,6 +931,7 @@ int main(void)
       free(result_b);
       assert(db2_tenant_scope_commit() == 0);
 
+      assert(exec_sql("RESET ROLE") == 0);
       expect("SELECT kb_content_scope_disable()", "content scope disabled");
       printf("  PASS: two users on two teams search only their own project under FORCE RLS\n");
       printf("  PASS: every vector and structured-document child inherits exact ownership\n");
@@ -911,6 +957,14 @@ int main(void)
                       " WHERE name IN ('scope-reader-team-a','scope-reader-team-b')") == 0);
    }
 
+   if (runtime_pool)
+   {
+      char reset_pool_role[256] = "";
+      assert(scalar("SELECT format('ALTER ROLE %I IN DATABASE %I RESET role',"
+                    "session_user,current_database())",
+                    reset_pool_role, sizeof(reset_pool_role)) == 0);
+      assert(exec_sql(reset_pool_role) == 0);
+   }
    db2_shutdown();
    printf("All tests passed.\n");
    return 0;

@@ -57,16 +57,20 @@ static void fm_now(char out[32])
    strftime(out, 32, "%Y-%m-%d %H:%M:%S", &tmv);
 }
 
-static void fm_commit_id(char out[FACT_COMMIT_ID_MAX])
+static int fm_commit_id(char out[FACT_COMMIT_ID_MAX])
 {
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      out[0] = '\0';
+      return -1;
+   }
    snprintf(out, FACT_COMMIT_ID_MAX,
             "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-"
             "%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 static int fm_actor_ok(const fact_actor_t *actor)
@@ -440,7 +444,8 @@ static int fm_load_exact(void *conn, const char *source, const char *relation, c
 static int fm_commit_open(void *conn, const fact_actor_t *actor, const char *operation,
                           int reversible, char id[FACT_COMMIT_ID_MAX])
 {
-   fm_commit_id(id);
+   if (fm_commit_id(id) != 0)
+      return -1;
    char err[FM_ERRBUF] = "";
    aimee_pg_stmt_t *ctx = aimee_pg_prepare(
        conn,

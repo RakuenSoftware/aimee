@@ -36,6 +36,7 @@ const method_policy_t method_registry[] = {
     {"hooks.pre", CAP_TOOL_EXECUTE, "pre-tool hook"},
     {"hooks.post", CAP_TOOL_EXECUTE, "post-tool hook"},
     {"hooks.session_start", CAP_TOOL_EXECUTE, "session-start hook"},
+    {"hooks.session_end", CAP_TOOL_EXECUTE, "session-end hook"},
     /* Sessions (prefix) */
     {"session.*", CAP_SESSION_READ, "session operation"},
     {"trajectory.export", CAP_SESSION_READ, "trajectory export"},
@@ -200,6 +201,7 @@ const method_policy_t method_registry[] = {
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
     {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
+    {"kb.erase-subject", CAP_SESSION_ADMIN, "erase one subject's mutable content graph"},
     {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
@@ -297,14 +299,19 @@ int server_ct_equal(const char *a, const char *b)
 #include "platform_process.h"
 
 /* Generate a UUID using platform random */
-static void generate_uuid(char *buf, size_t len)
+static int generate_uuid(char *buf, size_t len)
 {
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      if (buf && len)
+         buf[0] = '\0';
+      return -1;
+   }
    snprintf(buf, len, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -316,7 +323,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Generate session ID (persisted in DB, not RAM) */
    char sid[64];
-   generate_uuid(sid, sizeof(sid));
+   if (generate_uuid(sid, sizeof(sid)) != 0)
+      return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
    /* Build principal from peer UID */
    char principal[32];

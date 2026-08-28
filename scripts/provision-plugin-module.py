@@ -48,6 +48,10 @@ KIND_ORIGIN = 4096
 KIND_STRIDE = 256
 STAGE_INVOKE = 1
 STAGE_DECLARE = 2
+EGRESS_EVENTS = "12291-12294"
+EGRESS_CLIENT_OFFSET = 512
+MCP_CREDENTIAL_RE = re.compile(
+    r"^AIMEE_MCP_[A-Z0-9_]+(?:_TOKEN|_SECRET|_API_KEY|_BEARER|_CREDENTIAL)$")
 
 # Principal refs reserved for plugin instances. Canonical module refs are 1..30
 # (tests/baselines/modules/canonical-inventory.yaml) and are handed out in order,
@@ -157,8 +161,8 @@ def main():
                     help="remote plugin: the MCP SSE endpoint (alternative to --argv)")
     ap.add_argument("--bearer-env",
                     help="with --sse-url: NAME of the env var holding the bearer token. "
-                         "The name travels, never the secret -- the declared argv is "
-                         "reported over the bus and logged.")
+                         "It must be an AIMEE_MCP_* credential name; provisioning binds "
+                         "it to an opaque caller-scoped handle read only by egress.")
     ap.add_argument("--module-bin", required=True,
                     help="absolute path to the aimee-module executable")
     ap.add_argument("--permission", default="read",
@@ -187,8 +191,9 @@ def main():
         # field doing one job: the daemon's OSV gate reads argv[0] as an
         # executable, and a bare URL there would be scanned as a package launch.
         argv = ["sse:" + args.sse_url]
-        if args.bearer_env:
-            argv.append(args.bearer_env)
+        if args.bearer_env and not MCP_CREDENTIAL_RE.fullmatch(args.bearer_env):
+            die("--bearer-env must be an uppercase AIMEE_MCP_* credential name ending "
+                "in _TOKEN, _SECRET, _API_KEY, _BEARER or _CREDENTIAL")
     else:
         try:
             argv = json.loads(args.argv)
@@ -203,6 +208,8 @@ def main():
         # The grant checks the peer's /proc/<pid>/exe against this exact string,
         # so a relative path can never match and the module is denied at attach.
         die("--module-bin must be an absolute path (the grant compares it to /proc/<pid>/exe)")
+    if args.daemon not in ("server", "kb"):
+        die("--daemon must be server or kb")
     if not args.dry_run and not os.path.exists(args.module_bin):
         die(f"--module-bin {args.module_bin} does not exist")
 
@@ -250,15 +257,42 @@ def main():
     ]) + "\n"
 
     grant_path = os.path.join(policy_dir, grant_name)
+    egress_ref = ref + EGRESS_CLIENT_OFFSET
+    credential_handle = f"mcp:{egress_ref}"
+    if args.bearer_env:
+        expected_bearer_env = f"AIMEE_MCP_{egress_ref}_TOKEN"
+        if args.bearer_env != expected_bearer_env:
+            die(f"--bearer-env for this instance must be {expected_bearer_env}; "
+                "the caller-derived name prevents one plugin selecting another plugin's secret")
+        argv.append(credential_handle)
+    egress_name = f"{band['prefix']}-{args.instance}-egress.grant"
+    egress_grant = "\n".join([
+        "version=1",
+        "principal_class=1",
+        f"principal_ref={egress_ref}",
+        "uid=self",
+        f"executable={args.module_bin}",
+        "publish=",
+        "subscribe=",
+        f"request={EGRESS_EVENTS}",
+        "serve=",
+    ]) + "\n"
+    egress_path = os.path.join(policy_dir, egress_name)
     if args.dry_run:
         print(f"--- would write {grant_path} ---")
         print(grant, end="")
+        print(f"--- would write {egress_path} ---")
+        print(egress_grant, end="")
     else:
         os.makedirs(policy_dir, mode=0o700, exist_ok=True)
         with open(grant_path, "w", encoding="utf-8") as fh:
             fh.write(grant)
         os.chmod(grant_path, 0o600)
         print(f"wrote {grant_path}", file=sys.stderr)
+        with open(egress_path, "w", encoding="utf-8") as fh:
+            fh.write(egress_grant)
+        os.chmod(egress_path, 0o600)
+        print(f"wrote {egress_path}", file=sys.stderr)
 
     # The executable name is what selects the module: aimee-module is a multicall
     # binary dispatching on argv[0].

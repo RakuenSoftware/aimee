@@ -221,7 +221,7 @@ int config_set_learning_implicit_workflow_repetition(int value)
 
 int config_cross_verify(void)
 {
-   double value = 0;
+   double value = 1; /* verification fails closed when config authority is unavailable */
    (void)config_client_read_number("cross_verify", &value);
    return (int)value;
 }
@@ -317,7 +317,7 @@ int config_set_autonomy_max_resumes(int value)
 
 int config_mcp_osv_enabled(void)
 {
-   double value = 0;
+   double value = 1; /* package vulnerability gate is default-on-failure */
    (void)config_client_read_number("mcp_osv_enabled", &value);
    return (int)value;
 }
@@ -329,7 +329,7 @@ int config_set_mcp_osv_enabled(int value)
 
 int config_integrity_enabled(void)
 {
-   double value = 0;
+   double value = 1; /* untrusted-content gate is default-on-failure */
    (void)config_client_read_number("integrity_enabled", &value);
    return (int)value;
 }

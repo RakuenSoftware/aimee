@@ -9,4 +9,8 @@
 int kb_http_governance_route(const char *method, const char *path, const char *query_string,
                              const char *body, char *out_buf, int out_cap);
 
+/* Two-phase, owner-only cross-store subject erasure coordinator. */
+int kb_http_subject_erasure_route(const char *method, const char *path, const char *body,
+                                  int owner_scope, char *out_buf, int out_cap);
+
 #endif /* KB_HTTP_GOVERNANCE_H */

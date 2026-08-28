@@ -37,6 +37,15 @@ KB_URL="${KB_URL:-http://localhost:8741}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
+# The container deliberately refuses to expose its HTTP listener on 0.0.0.0
+# without an API bearer.  Give this disposable topology a test-only value before
+# the Vault bootstrap helper runs, then authenticate every request that crosses
+# the published port.  Operators can still override it to exercise a chosen
+# first-boot credential.
+: "${AIMEE_KB_API_BEARER_TOKEN:=aimee-kb-docker-smoke-bearer}"
+export AIMEE_KB_API_BEARER_TOKEN
+AUTH=(-H "Authorization: Bearer ${AIMEE_KB_API_BEARER_TOKEN}")
+
 # The kb embeds in-container from weights baked into the image, so there is no tier
 # to pick and nothing to download. Select the bundled model (the image pre-selects
 # nothing) and let EMBEDDER_DIMS default from config so the schema width and
@@ -87,7 +96,8 @@ check() {
   # check <name> <expected-substring> <curl-args...>
   local name="$1" expect="$2"; shift 2
   local body
-  if body="$(curl -fsS --max-time 15 "$@" 2>/dev/null)" && [[ "$body" == *"$expect"* ]]; then
+  if body="$(curl -fsS --max-time 15 "${AUTH[@]}" "$@" 2>/dev/null)" &&
+     [[ "$body" == *"$expect"* ]]; then
     green  "  PASS  $name"
     PASS=$((PASS + 1))
   else

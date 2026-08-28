@@ -127,6 +127,10 @@ const char *config_search_backend(void)
 {
    return "";
 }
+int config_search_fetch_pages(void)
+{
+   return 0;
+}
 
 /* run_engine takes the _copy form (the value crosses an HTTP round trip). Empty
  * is what the zeroed struct gave it: both engines skipped as unconfigured. */

@@ -737,9 +737,9 @@ char *run_cmd(const char *cmd, int *exit_code)
    if (!tl_run_cwd[0])
       return run_cmd_impl(cmd, exit_code);
 
-   /* Prepend "cd '<dir>' && " so the shell child starts in the thread's
+   /* Prepend "cd <quoted-dir> && " so the shell child starts in the thread's
     * designated directory without mutating the process-global CWD. */
-   char *esc = shell_escape(tl_run_cwd);
+   char *esc = shell_quote(tl_run_cwd);
    size_t len = strlen(esc) + strlen(cmd) + 16;
    char *full = malloc(len);
    if (!full)
@@ -771,7 +771,7 @@ char *run_cmd_env_fd(const char *cmd, char *const envp[], int *exit_code, int pa
    char *line = NULL;
    if (tl_run_cwd[0])
    {
-      char *esc = shell_escape(tl_run_cwd);
+      char *esc = shell_quote(tl_run_cwd);
       if (esc)
       {
          size_t len = strlen(esc) + strlen(cmd) + 16;
@@ -953,15 +953,18 @@ int has_shell_metachar(const char *s)
    return 0;
 }
 
-char *shell_escape(const char *raw)
+char *shell_quote(const char *raw)
 {
    if (!raw)
-      return strdup("");
+      return strdup("''");
    size_t len = strlen(raw);
-   char *esc = malloc(len * 4 + 1);
+   if (len > (SIZE_MAX - 3) / 4)
+      return NULL;
+   char *esc = malloc(len * 4 + 3);
    if (!esc)
-      return strdup("");
+      abort();
    size_t j = 0;
+   esc[j++] = '\'';
    for (size_t i = 0; i < len; i++)
    {
       if (raw[i] == '\'')
@@ -976,6 +979,7 @@ char *shell_escape(const char *raw)
          esc[j++] = raw[i];
       }
    }
+   esc[j++] = '\'';
    esc[j] = '\0';
    return esc;
 }

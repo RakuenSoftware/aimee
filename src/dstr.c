@@ -61,6 +61,13 @@ void dstr_append_char(dstr_t *s, char c)
    dstr_append(s, &c, 1);
 }
 
+#if defined(__clang__)
+/* fmt is necessarily non-literal here: dstr_appendf's public declaration carries
+ * the printf format attribute, so callers are still checked at compile time, while
+ * this va_list implementation forwards that already-checked format to libc. */
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wformat-nonliteral"
+#endif
 void dstr_vappendf(dstr_t *s, const char *fmt, va_list ap)
 {
    va_list ap2;
@@ -97,6 +104,9 @@ void dstr_vappendf(dstr_t *s, const char *fmt, va_list ap)
    s->len += (size_t)n;
    va_end(ap2);
 }
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 
 void dstr_appendf(dstr_t *s, const char *fmt, ...)
 {

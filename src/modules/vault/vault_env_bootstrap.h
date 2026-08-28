@@ -58,4 +58,12 @@ int vault_env_seal_webchat_record(const char *record_name);
  * success, -1 on a rejected name or a fail-closed Vault error. */
 int vault_env_seal_forge_credential(const char *cred_name);
 
+/* Linux container credential broker for the sole network-owning process. The
+ * helper refuses every parent except the root-owned installed egress binary,
+ * disables dumpability before Vault hydration, and writes only a narrowly
+ * named AIMEE_MCP_* secret to its stdout pipe. */
+int vault_env_egress_parent_attest(void);
+int vault_env_print_egress_credential(const char *env_name);
+int vault_env_egress_parent_path_ok(const char *path);
+
 #endif /* AIMEE_VAULT_ENV_BOOTSTRAP_H */

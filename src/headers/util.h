@@ -394,8 +394,9 @@ int git_net_exec(const char *cwd, const char *const *git_argv, char **out_buf, s
 /* Returns 1 if string contains shell metacharacters (;|&$`(){}><\n\r'"\\). */
 int has_shell_metachar(const char *s);
 
-/* Shell-escape a string for use inside single quotes (' -> '\''). Caller frees. */
-char *shell_escape(const char *raw);
+/* Return one complete POSIX shell token, including its quote delimiters.
+ * Callers interpolate it as bare %s and must not add another quote layer. */
+char *shell_quote(const char *raw);
 
 /* printf-append into buf at pos, returning the new pos clamped to [0, cap].
  * Use instead of the unsafe `pos += snprintf(buf + pos, cap - pos, ...)` idiom:

@@ -49,8 +49,9 @@ cJSON *session_search_mcp_tool(void)
 {
    return NULL;
 }
-cJSON *mcp_client_registry_build_namespaced_tools(void)
+cJSON *mcp_client_registry_build_namespaced_tools(int timeout_ms)
 {
+   (void)timeout_ms;
    return NULL;
 }
 
@@ -63,8 +64,13 @@ static cJSON *schema_for(const char *tool_name)
    {
       const cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
       if (cJSON_IsString(name) && strcmp(name->valuestring, tool_name) == 0)
-         return cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+      {
+         cJSON *schema = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(tool, "inputSchema"), 1);
+         cJSON_Delete(tools);
+         return schema;
+      }
    }
+   cJSON_Delete(tools);
    return NULL;
 }
 
@@ -110,6 +116,8 @@ int main(void)
    assert(cJSON_GetObjectItemCaseSensitive(props, "id") != NULL);     /* additive */
    assert(cJSON_GetObjectItemCaseSensitive(props, "handle") != NULL); /* additive */
 
+   cJSON_Delete(schema);
+   cJSON_Delete(mg);
    printf("ok\n");
    return 0;
 }

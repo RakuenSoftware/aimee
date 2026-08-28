@@ -27,6 +27,19 @@ static int activation_writes;
 static int64_t activation_write_id;
 static int64_t activation_write_turn;
 
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+
 const char *session_id(void)
 {
    return "activation-client-session";
@@ -521,6 +534,99 @@ static void test_pii_never_reaches_kb(void)
    printf("  PASS: test_pii_never_reaches_kb\n");
 }
 
+/* ---------------------------------------------------------------------------
+ * The screen guards EVERY content-carrying write, not just memory.store.
+ *
+ * memory.store, memory.update and memory.supersede were screened first; the
+ * other eleven builders that persist session-authored prose into aimee-kb were
+ * not, which is the same defect in a different file. The invariant asserted
+ * here is the one that matters and the one that holds for every wrapper
+ * whatever its return type: THE SECRET NEVER APPEARS ON THE WIRE. A wrapper
+ * may satisfy it by withholding the request entirely or by sending a redacted
+ * form -- both are safe, and which one applies depends on whether the
+ * classifier could locate the span.
+ *
+ * A new content-carrying wrapper that forgets the screen fails here.
+ */
+static void assert_secret_never_sent(const char *what)
+{
+   if (g_pii_posts > 0 && strstr(g_pii_last_body, "hunter2trustno1") != NULL)
+   {
+      fprintf(stderr, "FAIL: %s transmitted the secret to aimee-kb: %s\n", what, g_pii_last_body);
+      assert(0);
+   }
+}
+
+#define PII_CASE(what, call)                                                                       \
+   do                                                                                              \
+   {                                                                                               \
+      mock_agent_http_reset();                                                                     \
+      mock_agent_http_set_post_handler(recording_post_handler);                                    \
+      g_pii_posts = 0;                                                                             \
+      g_pii_last_body[0] = '\0';                                                                   \
+      call;                                                                                        \
+      assert_secret_never_sent(what);                                                              \
+   } while (0)
+
+static void test_every_content_wrapper_screens(void)
+{
+   const char *secret = "my password: hunter2trustno1";
+   char *json = NULL;
+   aimee_task_t task;
+   anti_pattern_t ap;
+   db2_decision_log_row_t dec;
+   int reinforced = 0;
+
+   /* Wrappers returning a response document. */
+   PII_CASE("notes.create", json = kb_client_note_create_json("t", secret, "tag", "a"));
+   free(json);
+   PII_CASE("notes.create(title)", json = kb_client_note_create_json(secret, "c", "tag", "a"));
+   free(json);
+   PII_CASE("memory.prospective_create",
+            json = kb_client_memory_prospective_create_json(secret, "do it", "", "", "", ""));
+   free(json);
+   PII_CASE("memory.prospective_create(action)",
+            json = kb_client_memory_prospective_create_json("when", secret, "", "", "", ""));
+   free(json);
+   PII_CASE("memory.directive_create", json = kb_client_memory_directive_create_json(
+                                           secret, "topic", "", "", "cause", 1, "s", ""));
+   free(json);
+   PII_CASE("memory.directive_resolve",
+            json = kb_client_memory_directive_resolve_json(7, 0, secret));
+   free(json);
+   PII_CASE("curiosity.create",
+            json = kb_client_curiosity_create_json("gap", "", "topic", secret, 1.0, 1.0, "s"));
+   free(json);
+
+   /* Wrappers returning a status code. */
+   PII_CASE("rules.insert", (void)kb_client_rules_insert("positive", "title", secret, 1));
+   PII_CASE("feedback.record",
+            (void)kb_client_feedback_record("positive", "title", secret, 1, &reinforced));
+   PII_CASE("anti_pattern.insert",
+            (void)kb_client_anti_pattern_insert(secret, "desc", "src", "ref", 1.0, &ap));
+   PII_CASE("decision_log.insert",
+            (void)kb_client_decision_log_insert(1, "opts", "chosen", secret, "assume", &dec));
+   PII_CASE("collab_rules.propose", (void)kb_client_collab_rules_propose(secret, "why", "me"));
+   PII_CASE("task.create", (void)kb_client_task_create(secret, "s", 0, &task));
+   PII_CASE("memory.upsert_workflow",
+            (void)kb_client_memory_upsert_workflow("ws", "sig", secret, 1.0, "s"));
+   PII_CASE("memory.reject", (void)kb_client_memory_reject(42, secret));
+
+   /* And the screen must not have turned these into blanket refusals: clean
+    * content still reaches the kb. */
+   mock_agent_http_reset();
+   mock_agent_http_set_post_handler(recording_post_handler);
+   g_pii_posts = 0;
+   g_pii_last_body[0] = '\0';
+   json = kb_client_note_create_json("title", "the sky is blue", "tag", "a");
+   free(json);
+   assert(g_pii_posts == 1);
+   assert(strstr(g_pii_last_body, "the sky is blue") != NULL);
+
+   mock_agent_http_reset();
+   printf("  PASS: test_every_content_wrapper_screens\n");
+}
+
 int main(void)
 {
    /* A configured kb URL routes kb_client_v1_post_json through agent_http_post
@@ -536,6 +642,7 @@ int main(void)
    test_recall_carries_and_records_production_activation();
    test_as_of_reaches_the_kb_and_its_verdict_comes_back();
    test_pii_never_reaches_kb();
+   test_every_content_wrapper_screens();
 
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");

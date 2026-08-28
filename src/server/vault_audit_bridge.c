@@ -77,6 +77,9 @@ static void emit_vault_row(const char *principal, const char *op, const char *ag
    snprintf(args_hash, sizeof args_hash, "v1-");
    audit_args_hash(op, NULL, args_hash, sizeof args_hash);
 
+   if (obs_bus_commit_action(principal, op, args_hash, command, transport, reason, verdict,
+                             /*task_id=*/0) != 0)
+      fprintf(stderr, "audit: vault WORM commit failed for %s\n", op ? op : "");
    obs_bus_emit(principal, op, args_hash, command, transport, reason, verdict, /*task_id=*/0);
 }
 

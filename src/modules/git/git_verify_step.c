@@ -89,17 +89,17 @@ static char *verify_normalize_step_command(const verify_thread_ctx_t *ctx, const
                             "export TEST_RUN_JOBS; ");
    if (ctx && ctx->step && ctx->step->scope_changed)
    {
-      char *changed_file = shell_escape(ctx->changed_files_path);
-      char *baseline = shell_escape(ctx->baseline_ref);
-      char *matched = shell_escape(ctx->changed_matched);
+      char *changed_file = shell_quote(ctx->changed_files_path);
+      char *baseline = shell_quote(ctx->baseline_ref);
+      char *matched = shell_quote(ctx->changed_matched);
       dstr_appendf(&out,
-                   "AIMEE_VERIFY_CHANGED_FILES_FILE='%s'; export "
+                   "AIMEE_VERIFY_CHANGED_FILES_FILE=%s; export "
                    "AIMEE_VERIFY_CHANGED_FILES_FILE; ",
                    changed_file ? changed_file : "");
-      dstr_appendf(&out, "AIMEE_VERIFY_BASELINE_REF='%s'; export AIMEE_VERIFY_BASELINE_REF; ",
+      dstr_appendf(&out, "AIMEE_VERIFY_BASELINE_REF=%s; export AIMEE_VERIFY_BASELINE_REF; ",
                    baseline ? baseline : "");
       dstr_appendf(&out,
-                   "AIMEE_VERIFY_CHANGED_MATCHED='%s'; export "
+                   "AIMEE_VERIFY_CHANGED_MATCHED=%s; export "
                    "AIMEE_VERIFY_CHANGED_MATCHED; ",
                    matched ? matched : "");
       dstr_appendf(&out, "AIMEE_VERIFY_CHANGED_ALL=%d; export AIMEE_VERIFY_CHANGED_ALL; ",
@@ -120,7 +120,7 @@ static char *verify_build_step_command(const verify_thread_ctx_t *ctx)
    if (!ctx || !ctx->project_root[0])
       return normalized;
 
-   char *esc = shell_escape(ctx->project_root);
+   char *esc = shell_quote(ctx->project_root);
    size_t len = strlen(esc) + strlen(normalized) + 16;
    char *cmd = malloc(len);
    if (!cmd)
@@ -128,7 +128,7 @@ static char *verify_build_step_command(const verify_thread_ctx_t *ctx)
       free(esc);
       return normalized;
    }
-   snprintf(cmd, len, "cd '%s' && %s", esc, normalized);
+   snprintf(cmd, len, "cd %s && %s", esc, normalized);
    free(esc);
    free(normalized);
    return cmd;

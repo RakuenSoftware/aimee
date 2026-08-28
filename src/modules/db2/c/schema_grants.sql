@@ -107,6 +107,9 @@ BEGIN
     FROM aimee_kb_runtime;
   GRANT EXECUTE ON FUNCTION kb_audit_worm_submit(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT),
     kb_audit_worm_pending() TO aimee_kb_runtime;
+  REVOKE ALL ON TABLE kb_subject_erasure_request FROM aimee_kb_runtime;
+  GRANT EXECUTE ON FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB),
+    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
 
   -- Memory governance uses the compatibility definer, which now submits an
   -- outbox intent rather than appending the chain in the runtime process.
@@ -436,6 +439,82 @@ BEGIN
     aimee_kb_worm_api.ack(BIGINT,BIGINT) TO aimee_kb_worm_worker;
 END
 $$;
+
+-- Subject erasure must cross tenant RLS without giving the request-serving
+-- process BYPASSRLS.  A NOLOGIN definer owns only the two bounded erasure
+-- functions and receives the exact table verbs those functions need.  The
+-- runtime role can invoke the functions but cannot SET ROLE to this authority.
+DO $privacy_erasure_grants$
+DECLARE edge RECORD;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_runtime') OR
+     NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_owner') THEN
+    RAISE NOTICE 'privacy erasure grants: hardened roles absent (dev tier) -- skipping';
+    RETURN;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_privacy_erasure') THEN
+    CREATE ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS
+      NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+  END IF;
+  ALTER ROLE aimee_kb_privacy_erasure NOLOGIN NOINHERIT BYPASSRLS
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;
+  FOR edge IN
+    SELECT granted.rolname AS granted_role,member.rolname AS member_role
+      FROM pg_auth_members membership
+      JOIN pg_roles granted ON granted.oid=membership.roleid
+      JOIN pg_roles member ON member.oid=membership.member
+     WHERE granted.rolname='aimee_kb_privacy_erasure'
+        OR member.rolname='aimee_kb_privacy_erasure'
+  LOOP
+    EXECUTE format('REVOKE %I FROM %I',edge.granted_role,edge.member_role);
+  END LOOP;
+  EXECUTE format('REVOKE ALL ON DATABASE %I FROM aimee_kb_privacy_erasure',current_database());
+  EXECUTE format('GRANT CONNECT ON DATABASE %I TO aimee_kb_privacy_erasure',current_database());
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_privacy_erasure;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_privacy_erasure;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_privacy_erasure;
+  GRANT USAGE ON SCHEMA public TO aimee_kb_privacy_erasure;
+  GRANT SELECT,DELETE ON memories,memory_units,memory_embeddings,
+    derived_rederivation_queue,derived_memory_dependencies,derived_memory_registry,
+    report_enrichments,memory_evidence_events,prospective_memories,
+    epistemic_directives,learning_signals,artifacts,artifact_citations,
+    vector_index_ops,kb_async_jobs,kb_embeddings,kb_pdf_embeddings,
+    kb_doc_assets,kb_table_cells,kb_doc_regions,kb_file_index,kb_documents
+    TO aimee_kb_privacy_erasure;
+  -- The existing evidence triggers on memories and derived rows remain active
+  -- during erasure.  They retain content-free lifecycle evidence and therefore
+  -- need their normal append/update stores; granting them here avoids weakening
+  -- those triggers for the privacy path.
+  GRANT SELECT ON fact_evidence TO aimee_kb_privacy_erasure;
+  GRANT SELECT,INSERT,UPDATE ON fact_graph_commits,fact_graph_changes,
+    memory_evidence_events TO aimee_kb_privacy_erasure;
+  GRANT USAGE,SELECT ON ALL SEQUENCES IN SCHEMA public TO aimee_kb_privacy_erasure;
+  GRANT SELECT,INSERT,UPDATE ON kb_subject_erasure_request TO aimee_kb_privacy_erasure;
+  GRANT EXECUTE ON FUNCTION pg_now_text(TEXT),
+    evidence_envelope_json(JSONB),kb_fact_commit_worm_seal(TEXT,TEXT),
+    memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
+    kb_audit_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT,TEXT)
+    TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_subject_erasure_begin(TEXT,TEXT,JSONB)
+    OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_subject_erasure_complete(TEXT,TEXT,BIGINT)
+    OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_memory_retention_reap(INTEGER)
+    OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_memory_sensitivity_retention_reap(TEXT,INTEGER)
+    OWNER TO aimee_kb_privacy_erasure;
+  ALTER FUNCTION kb_document_retention_reap(INTEGER)
+    OWNER TO aimee_kb_privacy_erasure;
+  REVOKE ALL ON FUNCTION kb_memory_retention_reap(INTEGER),
+    kb_memory_sensitivity_retention_reap(TEXT,INTEGER),
+    kb_document_retention_reap(INTEGER),kb_subject_erasure_begin(TEXT,TEXT,JSONB),
+    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) FROM PUBLIC;
+  GRANT EXECUTE ON FUNCTION kb_memory_retention_reap(INTEGER),
+    kb_memory_sensitivity_retention_reap(TEXT,INTEGER),
+    kb_document_retention_reap(INTEGER),kb_subject_erasure_begin(TEXT,TEXT,JSONB),
+    kb_subject_erasure_complete(TEXT,TEXT,BIGINT) TO aimee_kb_runtime;
+END
+$privacy_erasure_grants$;
 
 -- P7-reseal-d3a dedicated operator-status authority.  The login role cannot
 -- inherit this capability implicitly; the runtime must prove its posture and

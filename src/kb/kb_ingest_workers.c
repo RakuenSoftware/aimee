@@ -37,6 +37,7 @@
 #include "modules/db2/c/pgvec_kb_service.h"
 #include "code_collect.h" /* git_resolve_default_sha, code_index_source_is_worktree */
 #include "kb_doc_hash.h"
+#include "integrity.h"
 #include "memory.h"
 
 #include <dirent.h>
@@ -689,9 +690,6 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
       return -1;
 
-   if (delete_file_chunks(project, source_path) != 0)
-      return -1; /* purge fence: drop this document */
-
    text_chunk_t *chunks = malloc(MAX_CHUNKS_PER_FILE * sizeof(text_chunk_t));
    if (!chunks)
       return -1;
@@ -700,6 +698,29 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    {
       free(chunks);
       return 0;
+   }
+
+   /* Repository, watcher, upload, and future converted-document sources all
+    * converge here. Classify every bounded chunk before deleting prior state or
+    * writing any new row, so an instruction-bearing document is parked without
+    * creating a partial ingest. */
+   for (int ci = 0; ci < n_chunks; ci++)
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(chunks[ci].content, INTEGRITY_SOURCE_DOCUMENT, "document", 1,
+                                   &gate))
+      {
+         LOG_WARN("integrity", "document ingest parked (%s): %s",
+                  integrity_verdict_name(gate.verdict), gate.match_category);
+         free(chunks);
+         return -1;
+      }
+   }
+
+   if (delete_file_chunks(project, source_path) != 0)
+   {
+      free(chunks);
+      return -1; /* purge fence: drop this document */
    }
 
    /* Phase 1: all chunk rows + neighbour links in ONE guarded, fenced

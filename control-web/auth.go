@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
@@ -8,10 +9,13 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -65,19 +69,15 @@ func (j *jwksCache) key(kid string) (*rsa.PublicKey, error) {
 }
 
 func (j *jwksCache) refresh() error {
-	// HTTPS-only, no redirects, bounded body — the basic SSRF/rebind defenses.
-	// S2b adds the full private-range denial + DNS-rebind re-check when the URL
-	// becomes operator-editable via /v1/config/oidc.
-	if u, err := url.Parse(j.url); err != nil || u.Scheme != "https" || u.Host == "" {
+	u, err := url.Parse(j.url)
+	if err != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.Hostname() == "" {
 		return errors.New("jwks url must be an absolute https URL")
 	}
 	client := j.client
 	if client == nil {
-		client = &http.Client{
-			Timeout: 5 * time.Second,
-			CheckRedirect: func(*http.Request, []*http.Request) error {
-				return errors.New("jwks: redirects not allowed")
-			},
+		client, err = hardenedJWKSClient(u)
+		if err != nil {
+			return err
 		}
 	}
 	resp, err := client.Get(j.url)
@@ -116,6 +116,61 @@ func (j *jwksCache) refresh() error {
 	j.keys = next
 	j.fetched = time.Now()
 	return nil
+}
+
+func jwksAddressAllowed(ip netip.Addr) bool {
+	return ip.IsValid() && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() &&
+		!ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsMulticast() &&
+		!ip.IsUnspecified()
+}
+
+// hardenedJWKSClient resolves once, rejects every non-public answer, and dials
+// only those validated addresses. DNS cannot redirect a later connection to a
+// different address because the transport never resolves the hostname again.
+func hardenedJWKSClient(u *url.URL) (*http.Client, error) {
+	host := u.Hostname()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil || len(addrs) == 0 {
+		return nil, fmt.Errorf("jwks: host resolution failed: %w", err)
+	}
+	validated := make([]netip.Addr, 0, len(addrs))
+	for _, ip := range addrs {
+		if !jwksAddressAllowed(ip) {
+			return nil, fmt.Errorf("jwks: non-public address refused for %q", host)
+		}
+		validated = append(validated, ip.Unmap())
+	}
+	port := u.Port()
+	if port == "" {
+		port = "443"
+	}
+	dialer := &net.Dialer{Timeout: 3 * time.Second, KeepAlive: 30 * time.Second}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialHost, dialPort, err := net.SplitHostPort(address)
+		if err != nil || !strings.EqualFold(strings.TrimSuffix(dialHost, "."), strings.TrimSuffix(host, ".")) || dialPort != port {
+			return nil, errors.New("jwks: unexpected dial target")
+		}
+		var last error
+		for _, ip := range validated {
+			conn, err := dialer.DialContext(ctx, network, net.JoinHostPort(ip.String(), port))
+			if err == nil {
+				return conn, nil
+			}
+			last = err
+		}
+		return nil, last
+	}
+	return &http.Client{
+		Transport: transport,
+		Timeout:   5 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("jwks: redirects not allowed")
+		},
+	}, nil
 }
 
 func rsaKeyFromNE(nB64, eB64 string) (*rsa.PublicKey, error) {

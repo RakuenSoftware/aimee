@@ -1,14 +1,43 @@
 package memory
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	"github.com/JBailes/aimee/server-go/modules/egress"
 )
+
+type testEgress struct{}
+
+func (testEgress) Authorize(context.Context, uint64, egress.Request) (egress.Decision, error) {
+	return egress.Decision{Allowed: true, PolicyRevision: egress.PolicyRevision}, nil
+}
+
+func (testEgress) Do(ctx context.Context, _ uint64, request egress.HTTPRequest) (egress.HTTPResponse, error) {
+	req, err := http.NewRequestWithContext(ctx, request.Method, request.TargetURL, bytes.NewReader(request.Body))
+	if err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	for name, value := range request.Headers {
+		req.Header.Set(name, value)
+	}
+	response, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return egress.HTTPResponse{}, err
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, request.MaxResponseBytes+1))
+	return egress.HTTPResponse{Status: response.StatusCode, Body: body}, err
+}
+
+var allowEgress egress.Executor = testEgress{}
 
 // Each test starts from a closed breaker: the state is process-local, so a test
 // that inherits an open breaker from the one before it passes or fails for
@@ -52,7 +81,7 @@ func TestEmbedPostsRawTextWithThePolarityInTheQuery(t *testing.T) {
 	stub := &embedStub{reply: `[0.5,-0.25,1]`}
 	base := stub.start(t)
 
-	out := Embed(EmbedRequest{BaseURL: base, InputType: "query", Text: "hello", MaxDim: 8, NowMS: 1000})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: base, InputType: "query", Text: "hello", MaxDim: 8, NowMS: 1000})
 	if out.Error != "" {
 		t.Fatalf("unexpected error: %s", out.Error)
 	}
@@ -77,7 +106,7 @@ func TestEmbedReportsTruncationRatherThanHidingIt(t *testing.T) {
 	stub := &embedStub{reply: `[1,2,3,4,5]`}
 	base := stub.start(t)
 
-	out := Embed(EmbedRequest{BaseURL: base, Text: "t", MaxDim: 3, NowMS: 1000})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: base, Text: "t", MaxDim: 3, NowMS: 1000})
 	if !out.Truncated {
 		t.Fatal("over-long output must be reported as truncated")
 	}
@@ -88,7 +117,7 @@ func TestEmbedReportsTruncationRatherThanHidingIt(t *testing.T) {
 	// At or under the cap there is nothing to report.
 	resetBreaker(t)
 	stub2 := &embedStub{reply: `[1,2,3]`}
-	out = Embed(EmbedRequest{BaseURL: stub2.start(t), Text: "t", MaxDim: 3, NowMS: 1000})
+	out = Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: stub2.start(t), Text: "t", MaxDim: 3, NowMS: 1000})
 	if out.Truncated || out.Dim != 3 {
 		t.Fatalf("exactly at the cap is not truncation: %+v", out)
 	}
@@ -104,7 +133,7 @@ func TestUnauthorizedIsReachabilityNotFailure(t *testing.T) {
 	breaker.reportFailure(1000)
 
 	stub := &embedStub{status: 401, reply: `nope`}
-	out := Embed(EmbedRequest{BaseURL: stub.start(t), Text: "t", MaxDim: 4, NowMS: 2000})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: stub.start(t), Text: "t", MaxDim: 4, NowMS: 2000})
 
 	if !out.Unauthorized || out.Error == "" {
 		t.Fatalf("out = %+v", out)
@@ -125,7 +154,7 @@ func TestBreakerOpensAfterThreeFailuresAndSuppressesWithoutCalling(t *testing.T)
 	base := stub.start(t)
 
 	for i := 0; i < breakerThreshold; i++ {
-		out := Embed(EmbedRequest{BaseURL: base, Text: "t", MaxDim: 4, NowMS: 1000})
+		out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: base, Text: "t", MaxDim: 4, NowMS: 1000})
 		if out.Error == "" {
 			t.Fatalf("attempt %d should have failed", i)
 		}
@@ -136,7 +165,7 @@ func TestBreakerOpensAfterThreeFailuresAndSuppressesWithoutCalling(t *testing.T)
 	callsBefore := stub.calls
 
 	// Now suppressed: the point of the breaker is that NOTHING is sent.
-	out := Embed(EmbedRequest{BaseURL: base, Text: "t", MaxDim: 4, NowMS: 1001})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: base, Text: "t", MaxDim: 4, NowMS: 1001})
 	if !out.Unavailable {
 		t.Fatalf("the breaker should be open: %+v", out)
 	}
@@ -185,7 +214,7 @@ func TestLocalRefusalReleasesTheProbeWithoutCountingAFailure(t *testing.T) {
 	stub := &embedStub{reply: `[1]`}
 	base := stub.start(t)
 
-	out := Embed(EmbedRequest{BaseURL: base, Text: "", MaxDim: 4, NowMS: 1000})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: base, Text: "", MaxDim: 4, NowMS: 1000})
 	if out.Error == "" {
 		t.Fatal("empty text must be refused")
 	}
@@ -205,7 +234,7 @@ func TestSuccessClosesAnEarlierOutage(t *testing.T) {
 	breaker.reportFailure(1000)
 	breaker.reportFailure(1000)
 	stub := &embedStub{reply: `[1,2]`}
-	if out := Embed(EmbedRequest{BaseURL: stub.start(t), Text: "t", MaxDim: 4, NowMS: 2000}); out.Error != "" {
+	if out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: stub.start(t), Text: "t", MaxDim: 4, NowMS: 2000}); out.Error != "" {
 		t.Fatalf("unexpected: %+v", out)
 	}
 	if breaker.failureStreak != 0 || breaker.openCount != 0 {
@@ -232,7 +261,7 @@ func TestDelayGrowsAndIsCapped(t *testing.T) {
 
 func TestNonHTTPEmbedderIsDeclinedWithoutTouchingTheBreaker(t *testing.T) {
 	resetBreaker(t)
-	out := Embed(EmbedRequest{BaseURL: "/usr/local/bin/embed", Text: "t", MaxDim: 4, NowMS: 1000})
+	out := Embed(context.Background(), 0, allowEgress, EmbedRequest{BaseURL: "/usr/local/bin/embed", Text: "t", MaxDim: 4, NowMS: 1000})
 	if out.Error == "" {
 		t.Fatal("a program-based embedder is not served here")
 	}
@@ -256,7 +285,7 @@ func TestHandleEmbedRoutesThroughStageThree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	body, status := Handle(bus.ModuleInvocation{StageID: StageEmbed}, request)
+	body, status := NewHandler(allowEgress)(bus.ModuleInvocation{StageID: StageEmbed}, request)
 	if status != bus.ModuleStatusOK {
 		t.Fatalf("status = %v", status)
 	}
@@ -267,7 +296,7 @@ func TestHandleEmbedRoutesThroughStageThree(t *testing.T) {
 	if decoded.Dim != 2 || decoded.Vector[1] != 0.5 {
 		t.Fatalf("decoded = %+v", decoded)
 	}
-	if _, status := Handle(bus.ModuleInvocation{StageID: StageEmbed}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
+	if _, status := NewHandler(allowEgress)(bus.ModuleInvocation{StageID: StageEmbed}, []byte("{")); status != bus.ModuleStatusInvalidRequest {
 		t.Fatalf("malformed JSON must be rejected, got %v", status)
 	}
 }
