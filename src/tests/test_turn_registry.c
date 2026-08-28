@@ -43,6 +43,36 @@ static void test_publish_and_collision(void)
    printf("ok: publish + collision\n");
 }
 
+/* Cross-principal cancel: the caller's ATTESTED principal must match the
+ * session's presence owner. An attacker can declare any owner at attach time
+ * but cannot authenticate as it, so this comparison is what keeps one attested
+ * caller from cancelling another's session. handle_chat_graceful_cancel and
+ * handle_chat_interrupt both render a -1 here as "forbidden: not the session
+ * owner"; without the comparison those branches are unreachable. */
+static void test_cancel_authz(void)
+{
+   turn_entry_t *e = turn_registry_publish("sess-D", "turn-1");
+   assert(e);
+   snprintf(g_stub_owner, sizeof(g_stub_owner), "webuser:alice");
+   /* A different principal is refused (-1) and does NOT set the flag. */
+   assert(turn_registry_cancel("sess-D", "webuser:bob") == -1);
+   assert(turn_entry_cancelled(e) == 0);
+   /* The matching principal succeeds. */
+   assert(turn_registry_cancel("sess-D", "webuser:alice") == 1);
+   assert(turn_entry_cancelled(e) == 1);
+   /* A trusted-local caller (NULL principal) is exempt: it binds session id to
+    * its authenticated caller before forwarding. */
+   turn_entry_t *f = turn_registry_publish("sess-E", "turn-2");
+   assert(f && turn_registry_cancel("sess-E", NULL) == 1);
+   /* An unknown session is still 0, so the route can tell "nothing to cancel"
+    * from "cancelled" rather than reporting success for a typo. */
+   assert(turn_registry_cancel("sess-D-gone", "webuser:alice") == 0);
+   g_stub_owner[0] = '\0';
+   turn_registry_clear(e);
+   turn_registry_clear(f);
+   printf("ok: cancel authz (cross-principal cancel refused)\n");
+}
+
 static void test_cancel_and_find(void)
 {
    turn_entry_t *e = turn_registry_publish("sess-C", "turn-1");
@@ -57,27 +87,6 @@ static void test_cancel_and_find(void)
    turn_registry_clear(e);
    assert(turn_registry_find("sess-C") == NULL);
    printf("ok: cancel + find\n");
-}
-
-static void test_cancel_actor_is_attribution_not_ownership(void)
-{
-   turn_entry_t *e = turn_registry_publish("sess-D", "turn-1");
-   assert(e);
-   /* The server is single-tenant: a session belongs to the environment, not to
-    * the PAM actor who happened to start it. The actor is carried for audit and
-    * is not an ownership test here — whether a caller may cancel at all is
-    * decided at the route, which refuses an unattested caller outright
-    * (server_session.c) before this is ever reached. */
-   snprintf(g_stub_owner, sizeof(g_stub_owner), "webuser:alice");
-   assert(turn_registry_cancel("sess-D", "webuser:bob") == 1);
-   assert(turn_entry_cancelled(e) == 1);
-   g_stub_owner[0] = '\0';
-   turn_registry_clear(e);
-
-   /* An unknown session is still 0, so the route can tell "nothing to cancel"
-    * from "cancelled" rather than reporting success for a typo. */
-   assert(turn_registry_cancel("sess-D-gone", "webuser:alice") == 0);
-   printf("ok: cancel attributes an actor without gating on it\n");
 }
 
 static void test_cancel_all(void)
@@ -159,7 +168,7 @@ int main(void)
    turn_registry_init();
    test_publish_and_collision();
    test_cancel_and_find();
-   test_cancel_actor_is_attribution_not_ownership();
+   test_cancel_authz();
    test_cancel_all();
    test_reaped();
    test_steer_set_take();

@@ -215,14 +215,17 @@ static void test_rekey_empty_and_missing_vault(void)
 {
    const uint8_t old_pw[] = "carol-old", new_pw[] = "carol-new", wrong[] = "carol-wrong";
 
-   /* (b) A principal with NO legacy vault has nothing to rekey: the environment
-    * vault is sealed under the server master KEK, not a PAM password, so a
-    * password change is a no-op rather than an error. The property that still
-    * matters is unchanged and asserted below — it must not MATERIALIZE a vault
-    * for a principal that has none. */
+   /* (b) A principal with NO legacy vault has nothing to rekey — and must not be
+    * told the rekey SUCCEEDED. The old password is verified further down by
+    * deriving from this principal's salt, so answering VAULT_OK here makes
+    * handle_vault_rekey reply {"status":"ok"} to a password change that
+    * verified no old password and re-wrapped nothing. The environment vault
+    * being independent of PAM passwords is a reason there is nothing to rekey,
+    * not a reason to call a no-op a success. It must also not MATERIALIZE a
+    * vault for a principal that has none (asserted next). */
    assert(vault_service_rekey_password("webuser:nobody", ATTEST_WEBCHAT_TRUSTED, old_pw,
                                        sizeof(old_pw) - 1, new_pw, sizeof(new_pw) - 1,
-                                       T0) == VAULT_OK);
+                                       T0) == VAULT_ERR_CRYPTO);
    uint8_t salt[VAULT_SALT_LEN];
    assert(vault_store_salt_readonly("webuser:nobody", salt) == -1); /* no vault materialized */
 
