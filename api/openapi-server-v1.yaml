@@ -4068,6 +4068,16 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "400":
+          description: Missing kind, key, or content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Per-user memory store unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /tools/execute:
     post:
       summary: Execute a tool via the workspace plane (privileged)

@@ -1327,6 +1327,15 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+RESP=$(http_call POST /v1/memory/user_capture '{}') || true
+check_output "memory.user_capture missing fields stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.user_capture missing fields returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.user_capture missing-fields HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
 if [ "$KB_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
