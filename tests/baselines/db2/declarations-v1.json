@@ -27103,12 +27103,12 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "3076780eb9b2cb35df5fec13223e3cc13b71ba95ffbcdf94cefa82d9042f6e29",
+  "fingerprint": "ac1df12d300eb1b405a73b9d198bada9ac4e694544e35181666f1a1d8b4794fe",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 742,
-    "declarations": 1493,
+    "audit_pending": 744,
+    "declarations": 1495,
     "headers": 143,
     "internal_unconsumed": 173,
     "private_test_only": 284,
