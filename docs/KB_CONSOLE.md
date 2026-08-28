@@ -21,6 +21,18 @@ Place the console near the KB, expose only its HTTPS listener, and keep the KB o
 OIDC issuer, audience, signing algorithms, JWKS behavior, and the admin claim. Do not enable
 break-glass permanently.
 
+For the shipped Compose topology, install the scoped credential in the mounted secrets directory:
+
+```bash
+mkdir -p control-web-secrets
+sudo install -m 0600 -o 10001 -g 10001 /path/to/console.cred \
+  control-web-secrets/console.cred
+```
+
+Override the host directory with `CONTROL_WEB_CRED_DIR`. The numeric ownership matches the
+non-root `controlweb` user in the published image. When the file is absent, the optional console
+idles without opening a listener and remains healthy; restart the service after provisioning it.
+
 ## Verify
 
 - unauthenticated and non-admin users cannot reach proxy routes;
