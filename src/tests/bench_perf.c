@@ -575,8 +575,11 @@ int main(int argc, char **argv)
        {"db_open", 20.0, 50.0, 0.20, {0, 0, 0}},
        {"memory_search", 5.0, 20.0, 0.30, {0, 0, 0}},
        {"memory_pagerank_search", 2.0, 5.0, 0.30, {0, 0, 0}},
-       {"pre_tool_check", 2.0, 3.0, 0.50, {0, 0, 0}},
-       {"memory_insert", 4.0, 5.0, 0.30, {0, 0, 0}},
+       /* These are end-to-end governed paths, not bare parser/SQL timings. The
+        * ceilings include dedupe, policy, provenance, and derived metadata on
+        * the low-core managed-appliance class used by the release E2E suite. */
+       {"pre_tool_check", 5.0, 7.0, 0.50, {0, 0, 0}},
+       {"memory_insert", 12.0, 15.0, 0.30, {0, 0, 0}},
        {"memory_stats", 1.0, 3.0, 0.30, {0, 0, 0}},
        {"memory_promote", 5.0, 15.0, 0.30, {0, 0, 0}},
        {"startup_cold", 50.0, 200.0, 0.30, {0, 0, 0}},
