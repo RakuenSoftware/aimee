@@ -717,6 +717,8 @@ ENV_DESC = {
     # Server runtime
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
+    "AIMEE_RUNTIME_WEB_ENABLED": ("Server runtime", "Enable the browser runtime and its optional runtime-web process. The shipped container default is on; `0`, `false`, `off`, or `no` disables both unless `AIMEE_MODULE_RUNTIME_WEB` explicitly enables the process."),
+    "AIMEE_MODULE_RUNTIME_WEB": ("Server runtime", "Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default."),
     "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Legacy value: `off`, `data`, or `full`. Still parsed, but no longer authorizes user writes; non-off values warn and feed `remote_writes.global_ignored`."),
     "AIMEE_API_MTLS": ("Server runtime", "Client-certificate mode: `off`, `optional`, or `required`. The managed server image defaults to `optional` so enrollment works before the durable roster promotes the listener to required."),
     "AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT": (

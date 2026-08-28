@@ -55,6 +55,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -118,6 +119,30 @@ static int ready_interval_secs(void)
 static int ready_stale_secs(void)
 {
    return env_int("AIMEE_READY_STALE_SECS", READY_STALE_DEFAULT, ready_interval_secs(), 86400);
+}
+
+static int env_switch_is(const char *value, int enabled)
+{
+   if (!value || !value[0])
+      return 0;
+   if (enabled)
+      return strcasecmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+             strcasecmp(value, "on") == 0 || strcasecmp(value, "yes") == 0;
+   return strcasecmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+          strcasecmp(value, "off") == 0 || strcasecmp(value, "no") == 0;
+}
+
+/* Keep readiness aligned with optional-modules-lib.sh. An explicit module
+ * switch wins; otherwise runtime-web follows the browser UI switch. Invalid or
+ * absent values preserve the image's default-on manifest entry. */
+static int runtime_web_required(void)
+{
+   const char *module_intent = getenv("AIMEE_MODULE_RUNTIME_WEB");
+   if (env_switch_is(module_intent, 1))
+      return 1;
+   if (env_switch_is(module_intent, 0))
+      return 0;
+   return !env_switch_is(getenv("AIMEE_RUNTIME_WEB_ENABLED"), 0);
 }
 
 static const char *dep_name(dep_state_t s)
@@ -222,6 +247,8 @@ void server_ready_sample_now(void)
    s.modules = DEP_OK;
    for (size_t i = 0; i < sizeof(required_modules) / sizeof(required_modules[0]); ++i)
    {
+      if (required_modules[i].kind == AIMEE_RUNTIME_WEB_EVENT_CLASSIFY && !runtime_web_required())
+         continue;
       if (obs_bus_module_available(required_modules[i].kind))
          continue;
       s.modules = DEP_FAIL;
