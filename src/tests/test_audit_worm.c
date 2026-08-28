@@ -1,7 +1,10 @@
 /* test_audit_worm.c: S0 WORM audit store — chain integrity, gap-free seq,
  * WORM triggers, cross-store determinism, and crypto tamper detection. */
 #include <assert.h>
+#include <dirent.h>
 #include <fcntl.h>
+#include <linux/fs.h> /* FS_IOC_GETFLAGS/SETFLAGS, FS_IMMUTABLE_FL */
+#include <sys/ioctl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -18,6 +21,74 @@ static void mk_tmpdir(void)
 {
    snprintf(g_dir, sizeof g_dir, "%s/worm_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_dir) != NULL);
+}
+
+/* audit_worm_seal() makes each sealed snapshot OS-immutable, which is the point
+ * of a WORM store -- and it means this test cannot simply leave its directory
+ * behind. Where the process holds CAP_LINUX_IMMUTABLE the seal really takes, and
+ * nothing (not even root) can unlink the file until FS_IMMUTABLE_FL is cleared:
+ * the suite's own tmpdir cleanup then fails with "Operation not permitted" and
+ * takes the whole run down with it. CI containers usually lack the capability,
+ * so the seal degrades to crypto-only there and the leak stays invisible until
+ * the suite runs somewhere privileged.
+ *
+ * Unseal what we sealed, then remove the directory. Best-effort throughout: a
+ * filesystem without the flag, or a process without the capability, never sealed
+ * anything in the first place. */
+static void unseal(const char *path)
+{
+   int fd = open(path, O_RDONLY);
+   if (fd < 0)
+      return;
+   int flags = 0;
+   if (ioctl(fd, FS_IOC_GETFLAGS, &flags) == 0 && (flags & FS_IMMUTABLE_FL))
+   {
+      flags &= ~FS_IMMUTABLE_FL;
+      (void)ioctl(fd, FS_IOC_SETFLAGS, &flags);
+   }
+   close(fd);
+}
+
+static void rm_tmpdir(void)
+{
+   if (!g_dir[0])
+      return;
+   DIR *d = opendir(g_dir);
+   if (d)
+   {
+      struct dirent *e;
+      while ((e = readdir(d)) != NULL)
+      {
+         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+         char child[512];
+         snprintf(child, sizeof child, "%s/%s", g_dir, e->d_name);
+         unseal(child);
+         if (remove(child) != 0)
+         {
+            /* A nested directory: the audit/ subdir the sealed snapshots live in. */
+            DIR *sub = opendir(child);
+            if (sub)
+            {
+               struct dirent *se;
+               while ((se = readdir(sub)) != NULL)
+               {
+                  if (strcmp(se->d_name, ".") == 0 || strcmp(se->d_name, "..") == 0)
+                     continue;
+                  char leaf[1024];
+                  snprintf(leaf, sizeof leaf, "%s/%s", child, se->d_name);
+                  unseal(leaf);
+                  (void)remove(leaf);
+               }
+               closedir(sub);
+               (void)rmdir(child);
+            }
+         }
+      }
+      closedir(d);
+   }
+   (void)rmdir(g_dir);
+   g_dir[0] = '\0';
 }
 
 static void db_path(char *out, size_t n)
@@ -413,6 +484,7 @@ static void test_cross_engine_vector(void)
 int main(void)
 {
    mk_tmpdir();
+   assert(atexit(rm_tmpdir) == 0);
    test_cross_engine_vector();
    test_metric_snapshot();
    test_detail_capped();
