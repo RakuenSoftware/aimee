@@ -963,8 +963,13 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
    cJSON *chk = cJSON_Parse(resp);
    if (!chk)
       return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
+   int status = 200;
+   cJSON *declared_status = cJSON_GetObjectItemCaseSensitive(chk, "http_status");
+   if (cJSON_IsNumber(declared_status) && declared_status->valueint >= 400 &&
+       declared_status->valueint <= 599)
+      status = declared_status->valueint;
    cJSON_Delete(chk);
-   return 200;
+   return status;
 }
 
 int server_http_route(const char *method, const char *path, const char *body, int body_len,

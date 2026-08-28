@@ -265,7 +265,10 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
-   const char *r = "{\"status\":\"ok\",\"result\":42}\n";
+   const char *r = strstr(g_disp_body, "\"test_http_status\":true")
+                       ? "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                         "\"http_status\":400}\n"
+                       : "{\"status\":\"ok\",\"result\":42}\n";
    ssize_t w = write(conn->fd, r, strlen(r));
    (void)w;
    return 0;
@@ -2478,6 +2481,16 @@ int main(void)
           server_http_route("POST", "/v1/cron/add", spoof, (int)strlen(spoof), resp, sizeof(resp));
       assert(st == 200);
       assert(strcmp(g_disp_method, "cron.add") == 0);
+
+      /* Typed NDJSON errors carry their transport-independent HTTP mapping in
+       * the envelope. The first-class HTTP adapter must honor it rather than
+       * reporting a failed operation as a successful 200 response. */
+      const char *typed_error = "{\"test_http_status\":true}";
+      st = server_http_route("POST", "/v1/cron/add", typed_error, (int)strlen(typed_error), resp,
+                             sizeof(resp));
+      assert(st == 400);
+      assert(strcmp(resp, "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                          "\"http_status\":400}") == 0);
    }
 
    /* (The /v1/rpc method-allowlist tests were removed with the bridge: each method
