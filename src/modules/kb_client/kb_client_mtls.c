@@ -28,6 +28,7 @@
 #include <math.h>
 #include <openssl/crypto.h>
 #include <openssl/pem.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -787,22 +788,27 @@ static void pool_return(kb_pool_entry_t *entry, int reusable)
  * chasing the wrong half of the system. */
 static void warn_unusable_identity_once(void)
 {
-   static int warned = 0;
-   if (warned)
+   static atomic_flag warned = ATOMIC_FLAG_INIT;
+   if (atomic_flag_test_and_set_explicit(&warned, memory_order_relaxed))
       return;
 
    char path[1024];
    if (identity_path(path, sizeof(path)) != 0)
+   {
+      atomic_flag_clear_explicit(&warned, memory_order_relaxed);
       return;
+   }
    cJSON *j = identity_document_load(path);
    if (!j)
+   {
+      atomic_flag_clear_explicit(&warned, memory_order_relaxed);
       return; /* absent is the ordinary un-enrolled case, not a failure */
+   }
 
    const cJSON *version = cJSON_GetObjectItemCaseSensitive(j, "version");
    const cJSON *state = cJSON_GetObjectItemCaseSensitive(j, "state");
    const char *state_text = cJSON_IsString(state) && state->valuestring[0] ? state->valuestring
                                                                           : "unset";
-   warned = 1;
    LOG_WARN("kb_client",
             "%s exists but is not usable (version=%d state=%s), so this server has no mTLS "
             "identity for the kb and will fall back to the plain endpoint. Managed server "
