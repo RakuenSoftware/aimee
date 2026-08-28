@@ -43,6 +43,11 @@ def main() -> int:
         failures.append("server identity must share the managed KB network")
     if 'AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"' not in managed:
         failures.append("explicit no-swap memory-hardening fallback")
+    if (
+        "mem_limit: 1g" not in authority_service
+        or "memswap_limit: 1g" not in authority_service
+    ):
+        failures.append("authority bootstrap must enforce a zero-swap child cgroup")
     # An unlimited memlock ulimit is not portable to nested/unprivileged
     # containers. The OCI runtime rejects it before the bootstrap process can
     # exercise the explicit no-swap fallback above.
