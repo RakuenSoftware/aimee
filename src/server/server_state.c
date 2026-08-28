@@ -39,7 +39,6 @@
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 /* Send a response object and delete it. Returns send rc. */
 int send_and_free(server_conn_t *conn, cJSON *resp)
@@ -84,23 +83,30 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    cJSON *jkw = cJSON_GetObjectItemCaseSensitive(req, "keywords");
-   int limit = jo_int(req, "limit", 10);
-
+   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   if (jlimit &&
+       (!cJSON_IsNumber(jlimit) || !isfinite(jlimit->valuedouble) || jlimit->valuedouble < 1 ||
+        jlimit->valuedouble > 32 || jlimit->valuedouble != (double)(int)jlimit->valuedouble))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search limit must be an integer between 1 and 32",
+                                    NULL);
+   int limit = jlimit ? (int)jlimit->valuedouble : 10;
    if (!cJSON_IsArray(jkw) || cJSON_GetArraySize(jkw) == 0)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "missing or empty keywords array", NULL);
-
    int count = cJSON_GetArraySize(jkw);
    if (count > 16)
-      count = 16;
-
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search accepts at most 16 keywords", NULL);
    char *clusters[16];
    for (int i = 0; i < count; i++)
    {
       cJSON *item = cJSON_GetArrayItem(jkw, i);
-      clusters[i] = cJSON_IsString(item) ? item->valuestring : "";
+      if (!cJSON_IsString(item) || !item->valuestring[0])
+         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                       "memory.search keywords must be non-empty strings", NULL);
+      clusters[i] = item->valuestring;
    }
-
    /* Build query string for fact search */
    char query_buf[2048];
    int qpos = 0;

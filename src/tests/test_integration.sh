@@ -1318,6 +1318,15 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+RESP=$(http_call POST /v1/memory/search '{"keywords":[123]}') || true
+check_output "memory.search rejects non-string keywords" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/search '{"keywords":[""],"limit":10}') || true
+check_output "memory.search rejects empty keywords" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/search '{"keywords":["probe"],"limit":-1}') || true
+check_output "memory.search rejects invalid limits" '"kind":"invalid_argument"' echo "$RESP"
+
 RESP=$(http_call POST /v1/memory/get '{}') || true
 check_output "memory.get missing id stays typed" '"kind":"invalid_argument"' echo "$RESP"
 if echo "$RESP" | grep -q '"http_status":400'; then
