@@ -131,27 +131,24 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/completions", s.openAIProxyHandler("/v1/completions"))
 	mux.HandleFunc("/v1/responses", s.openAIProxyHandler("/v1/responses"))
 	mux.HandleFunc("/v1/embeddings", s.openAIProxyHandler("/v1/embeddings"))
+	// Memory Center uses the canonical /v1 spellings. These are browser-session
+	// routes, not the public bearer API: forward the authenticated webuser over
+	// the kernel-attested UDS boundary for scoping and audit attribution.
+	mux.HandleFunc("/v1/memory/review", s.requireAuth(s.memoryProxyHandler("/v1/memory/review")))
+	mux.HandleFunc("/v1/memory/reject", s.requireAuth(s.memoryProxyHandler("/v1/memory/reject")))
+	mux.HandleFunc("/v1/memory/restore", s.requireAuth(s.memoryProxyHandler("/v1/memory/restore")))
 
-	// SPA pages (session required → redirect to login)
+	// SPA pages (session required → redirect to login). Keep this list in sync
+	// with frontend/src/App.tsx: client-side navigation can hide a missing server
+	// route until a bookmark or hard refresh turns it into a 404.
 	mux.HandleFunc("/", s.requireAuth(s.handleRoot))
-	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/logs", s.requireAuth(s.handleSPA))
-	// Workflow surfaces: "Edit Workflows" (the def/graph editor) and "Workflow
-	// Actions" (author → autonomous-run → status/history). Both are SPA routes so a
-	// hard refresh / direct link serves index.html and React Router takes over.
-	mux.HandleFunc("/edit-workflows", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/workflow-actions", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/projects", s.requireAuth(s.handleSPA))
-	// Code-graph visualization (§8): a read-only SPA page backed by the /api/graph/*
-	// proxies (which forward aimee-server's index_graph_* MCP tools).
-	mux.HandleFunc("/graph", s.requireAuth(s.handleSPA))
-	// Roundtable configuration tab (named presets: seats, models, personas, loop
-	// knobs). SPA route so a hard refresh / direct link serves index.html.
-	mux.HandleFunc("/roundtable", s.requireAuth(s.handleSPA))
-	// The Editor tab is a SPA page that embeds the in-app VSCode in an iframe, so
-	// the nav shell stays visible. The iframe's src is the /vscode proxy below.
-	mux.HandleFunc("/editor", s.requireAuth(s.handleSPA))
+	for _, path := range []string{
+		"/chat", "/dashboard", "/logs", "/edit-workflows", "/workflow-actions",
+		"/providers", "/models", "/agents", "/delegates", "/personas", "/roles",
+		"/roundtable", "/projects", "/graph", "/editor", "/memory", "/settings",
+	} {
+		mux.HandleFunc(path, s.requireAuth(s.handleSPA))
+	}
 	// In-app VSCode (code-server) reverse-proxy (WP-J): the iframe document and
 	// all its assets/WebSocket traffic go through /vscode -> aimee-server's
 	// per-user editor port. Not an /api path, so requireAuth redirects to /login
@@ -391,7 +388,7 @@ func ensureTLSCertificate(cfg *config, vault webchatVaultStore) (tls.Certificate
 
 	certPEM, readErr := os.ReadFile(certPath)
 	if readErr == nil {
-		if pair, err := tls.X509KeyPair(certPEM, keyPEM); err == nil {
+		if pair, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && certificateCoversCurrentSANs(certPEM) {
 			return pair, nil
 		}
 	}
@@ -406,6 +403,33 @@ func ensureTLSCertificate(cfg *config, vault webchatVaultStore) (tls.Certificate
 		return tls.Certificate{}, err
 	}
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// certificateCoversCurrentSANs detects certificates minted by older runtime-web
+// builds (typically DNS:localhost only). The private key remains sealed in Vault;
+// only the public self-signed certificate is regenerated when the address set no
+// longer covers how this instance can be reached.
+func certificateCoversCurrentSANs(certPEM []byte) bool {
+	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil || time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
+		return false
+	}
+	dnsNames, ipAddrs := certSANs()
+	for _, name := range dnsNames {
+		if cert.VerifyHostname(name) != nil {
+			return false
+		}
+	}
+	for _, ip := range ipAddrs {
+		if cert.VerifyHostname(ip.String()) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func wipeBytes(value []byte) {

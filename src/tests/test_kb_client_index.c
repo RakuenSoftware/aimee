@@ -249,20 +249,20 @@ static void test_format_skipped_cooldown(void)
 static void test_scan_timeout_is_tunable_and_bounded(void)
 {
    unsetenv("AIMEE_KB_SCAN_TIMEOUT_MS");
-   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   assert(kb_client_index_scan_timeout_ms() == 15 * 60 * 1000);
 
    setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "1800000", 1);
    assert(kb_client_index_scan_timeout_ms() == 1800000);
 
    /* Rejected: zero, negative, junk, and beyond the 24h ceiling all fall back. */
    setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "0", 1);
-   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   assert(kb_client_index_scan_timeout_ms() == 15 * 60 * 1000);
    setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "-1", 1);
-   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   assert(kb_client_index_scan_timeout_ms() == 15 * 60 * 1000);
    setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "banana", 1);
-   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   assert(kb_client_index_scan_timeout_ms() == 15 * 60 * 1000);
    setenv("AIMEE_KB_SCAN_TIMEOUT_MS", "999999999", 1);
-   assert(kb_client_index_scan_timeout_ms() == 5 * 60 * 1000);
+   assert(kb_client_index_scan_timeout_ms() == 15 * 60 * 1000);
    unsetenv("AIMEE_KB_SCAN_TIMEOUT_MS");
 }
 

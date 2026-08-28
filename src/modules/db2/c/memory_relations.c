@@ -10,6 +10,8 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #define MR_ERRBUF 256
@@ -68,6 +70,77 @@ int db2_memory_link_query(int64_t memory_id, memory_link_t *out, int max)
    aimee_pg_bind_int64(st, "?1", memory_id);
    aimee_pg_bind_int64(st, "?2", memory_id);
    aimee_pg_bind_int(st, "?3", max);
+
+   int n = 0;
+   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      out[n].id = aimee_pg_column_int64(st, 0);
+      out[n].source_id = aimee_pg_column_int64(st, 1);
+      out[n].target_id = aimee_pg_column_int64(st, 2);
+      const char *rel = aimee_pg_column_text(st, 3);
+      snprintf(out[n].relation, sizeof(out[n].relation), "%s", rel ? rel : "");
+      const char *ts = aimee_pg_column_text(st, 4);
+      snprintf(out[n].created_at, sizeof(out[n].created_at), "%s", ts ? ts : "");
+      n++;
+   }
+   aimee_pg_finalize(st);
+   return n;
+}
+
+int db2_memory_link_query_many(const int64_t *memory_ids, int id_count, memory_link_t *out, int max)
+{
+   if (!memory_ids || id_count <= 0 || !out || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   size_t list_cap = (size_t)id_count * 22 + 1;
+   char *id_list = malloc(list_cap);
+   if (!id_list)
+      return 0;
+   size_t used = 0;
+   int valid = 0;
+   for (int i = 0; i < id_count; i++)
+   {
+      if (memory_ids[i] <= 0)
+         continue;
+      int wrote = snprintf(id_list + used, list_cap - used, "%s%lld", valid ? "," : "",
+                           (long long)memory_ids[i]);
+      if (wrote < 0 || (size_t)wrote >= list_cap - used)
+      {
+         free(id_list);
+         return 0;
+      }
+      used += (size_t)wrote;
+      valid++;
+   }
+   if (valid == 0)
+   {
+      free(id_list);
+      return 0;
+   }
+
+   size_t sql_cap = used * 2 + 256;
+   char *sql = malloc(sql_cap);
+   if (!sql)
+   {
+      free(id_list);
+      return 0;
+   }
+   snprintf(sql, sql_cap,
+            "SELECT id, source_id, target_id, relation, created_at FROM memory_links"
+            " WHERE source_id IN (%s) OR target_id IN (%s)"
+            " ORDER BY created_at DESC LIMIT ?1",
+            id_list, id_list);
+   free(id_list);
+
+   char err[MR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   free(sql);
+   if (!st)
+      return 0;
+   aimee_pg_bind_int(st, "?1", max);
 
    int n = 0;
    while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)

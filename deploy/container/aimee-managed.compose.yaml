@@ -164,17 +164,13 @@ services:
     image: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
     user: "0:0"
     network_mode: none
-    ulimits:
-      # mlockall protects the complete offline process while root material is
-      # live. Docker otherwise inherits the host's commonly tiny 8 MiB limit,
-      # which makes bootstrap fail even when the host can safely raise it.
-      memlock:
-        soft: -1
-        hard: -1
     environment:
       # The offline tools still attempt mlockall first. Unprivileged LXC cannot
-      # raise RLIMIT_MEMLOCK, so the managed one-shot may continue only after a
-      # fail-closed /proc/swaps check proves there is no active swap.
+      # apply an unlimited RLIMIT_MEMLOCK at container creation time: asking the
+      # OCI runtime to do so prevents the container from starting, before this
+      # fail-closed fallback can inspect /proc/swaps. Inherit the runtime limit;
+      # the managed one-shot attempts mlockall and may continue only after it
+      # proves there is no active swap.
       AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"
     depends_on:
       aimee-kb: { condition: service_healthy }

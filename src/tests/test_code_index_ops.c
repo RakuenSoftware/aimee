@@ -192,9 +192,16 @@ int main(void)
    {
       void *conn = db2_conn();
       char e[256] = "";
-      const char *spared[] = {".gitmodules", "sub/.gitmodules", "a/b/.gitmodules"};
-      const char *purged[] = {".bashrc", ".git/config", "sub/.hidden.c", ".git/.gitmodules",
-                              "sub/.hidden/.gitmodules"};
+      const char *spared[] = {".gitmodules",      "sub/.gitmodules", "a/b/.gitmodules",
+                              ".travis.yml",      ".eslintrc.json",  "sub/.hidden.c",
+                              "sub/.babelrc.json"};
+      const char *purged[] = {".bashrc",
+                              ".env",
+                              ".npmrc",
+                              ".git/config",
+                              ".git/.gitmodules",
+                              "sub/.hidden/.gitmodules",
+                              ".github/workflows/ci.yml"};
       const char *keep[] = {"src/a.c"};
       const char *projs[] = {"hp", "hp2"};
       for (size_t pj = 0; pj < 2; pj++)
@@ -272,14 +279,14 @@ int main(void)
       assert(aimee_pg_exec(conn,
                            "INSERT INTO files(project_id,generation,path,hash,scanned_at) VALUES"
                            " ((SELECT id FROM projects WHERE name='historical-hidden'),1,"
-                           " '.hidden.c','old','t'),"
+                           " '.bashrc','old','t'),"
                            " ((SELECT id FROM projects WHERE name='historical-hidden'),2,"
-                           " '.hidden.c','new','t')",
+                           " '.bashrc','new','t')",
                            e, sizeof e) == 0);
       (void)db2_code_index_purge_hidden_pollution();
-      assert(file_count_path_generation("historical-hidden", ".hidden.c", 1) == 1);
-      assert(file_count_path_generation("historical-hidden", ".hidden.c", 2) == 0);
-      assert(file_count_path("historical-hidden", ".hidden.c") == 1);
+      assert(file_count_path_generation("historical-hidden", ".bashrc", 1) == 1);
+      assert(file_count_path_generation("historical-hidden", ".bashrc", 2) == 0);
+      assert(file_count_path("historical-hidden", ".bashrc") == 1);
       printf("  startup hidden cleanup preserves retained generations OK\n");
    }
 

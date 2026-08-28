@@ -33,6 +33,25 @@ type Executor interface {
 	Execute(context.Context, delegatecontract.Invocation) delegatecontract.InvocationResult
 }
 
+// compatibleBool preserves the roster format accepted by the C routing side.
+// Current writers emit JSON booleans, while pre-migration agents.json files may
+// contain 0/1. Reject every other shape so malformed operator configuration
+// still fails loudly instead of silently enabling an agent.
+type compatibleBool bool
+
+func (b *compatibleBool) UnmarshalJSON(data []byte) error {
+	switch string(bytes.TrimSpace(data)) {
+	case "true", "1":
+		*b = true
+		return nil
+	case "false", "0":
+		*b = false
+		return nil
+	default:
+		return fmt.Errorf("expected boolean or legacy 0/1, got %s", data)
+	}
+}
+
 // NewDefaultHandler is the independently exported delegates process entry
 // point. The shared multicall binary performs the same construction explicitly
 // so it can report registry errors in its process log.
@@ -45,18 +64,18 @@ func NewDefaultHandler() bus.ModuleHandler {
 }
 
 type agentEntry struct {
-	Name        string   `json:"name"`
-	Model       string   `json:"model"`
-	Backend     string   `json:"backend"`
-	Provider    string   `json:"provider"`
-	CLIKind     string   `json:"cli_kind"`
-	CLICmd      string   `json:"cli_cmd"`
-	Enabled     *bool    `json:"enabled"`
-	PrimaryOnly bool     `json:"primary_only"`
-	Roles       []string `json:"roles"`
-	Personas    []string `json:"personas"`
-	MaxParallel *int     `json:"max_parallel"`
-	Available   *bool    `json:"delegate_available"`
+	Name        string          `json:"name"`
+	Model       string          `json:"model"`
+	Backend     string          `json:"backend"`
+	Provider    string          `json:"provider"`
+	CLIKind     string          `json:"cli_kind"`
+	CLICmd      string          `json:"cli_cmd"`
+	Enabled     *compatibleBool `json:"enabled"`
+	PrimaryOnly bool            `json:"primary_only"`
+	Roles       []string        `json:"roles"`
+	Personas    []string        `json:"personas"`
+	MaxParallel *int            `json:"max_parallel"`
+	Available   *compatibleBool `json:"delegate_available"`
 }
 
 type agentRegistry struct {
@@ -145,9 +164,9 @@ func (r *RegistryExecutor) load() (agentRegistry, error) {
 	return registry, nil
 }
 
-func enabled(a agentEntry) bool { return a.Enabled == nil || *a.Enabled }
+func enabled(a agentEntry) bool { return a.Enabled == nil || bool(*a.Enabled) }
 
-func available(a agentEntry) bool { return a.Available == nil || *a.Available }
+func available(a agentEntry) bool { return a.Available == nil || bool(*a.Available) }
 
 func containsOrWildcard(values []string, wanted string, emptyMeansAll bool) bool {
 	if len(values) == 0 {

@@ -28,6 +28,7 @@ static char *g_last_files_body = NULL;
 static int g_post_calls = 0;
 static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
 static size_t g_max_body_bytes = 0;  /* largest single request body seen */
+static int g_next_status = 200;
 static const char *g_next_response =
     "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 
@@ -54,8 +55,14 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       g_last_files_body = cJSON_PrintUnformatted(body);
    }
    if (status_out)
-      *status_out = 200;
+      *status_out = g_next_status;
    return strdup(g_next_response);
+}
+
+char *kb_client_v1_post_json_keep_error(const char *path, cJSON *body, int timeout_ms,
+                                        int *status_out)
+{
+   return kb_client_v1_post_json(path, body, timeout_ms, status_out);
 }
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
@@ -84,6 +91,8 @@ static void reset_stub(void)
    g_files_pushed_total = 0;
    g_max_body_bytes = 0;
    g_remote_mode = 0;
+   g_next_status = 200;
+   g_next_response = "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 }
 
 /* ------------------------------------------------------------------ */
@@ -351,6 +360,27 @@ static void test_remote_mode_missing_args(void)
    reset_stub();
 }
 
+/* A non-2xx response still carries the kb's refusal body. The production
+ * transport deliberately retains it, so the scan layer must not replace a
+ * precise policy/validation error with a bare HTTP status. */
+static void test_scan_refusal_preserves_kb_error(void)
+{
+   reset_stub();
+   g_next_status = 403;
+   g_next_response = "{\"error\":\"project enrollment is required\","
+                     "\"code\":\"project_not_enrolled\"}";
+
+   kb_client_index_scan_result_t res;
+   int rc = kb_client_index_scan("proj", "/some/path", 0, &res);
+   assert(rc == -1);
+   assert(res.skipped == 1);
+   assert(strcmp(res.reason, "error") == 0);
+   assert(strstr(res.message, "HTTP 403") != NULL);
+   assert(strstr(res.message, "project enrollment is required") != NULL);
+   assert(strstr(res.message, "project_not_enrolled") != NULL);
+   reset_stub();
+}
+
 int main(void)
 {
    test_local_mode_no_files_array();
@@ -358,6 +388,7 @@ int main(void)
    test_remote_mode_empty_dir();
    test_remote_mode_batches_large_tree();
    test_remote_mode_missing_args();
+   test_scan_refusal_preserves_kb_error();
    printf("kb_client_index_remote: all tests passed\n");
    return 0;
 }

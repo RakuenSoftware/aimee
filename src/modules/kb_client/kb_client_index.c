@@ -14,7 +14,7 @@
 /* Scan timeout is generous because canonical scans of large monorepos can take
  * tens of seconds. The shared v1 helpers choose remote HTTP when configured and
  * otherwise tunnel the same /v1 route over the local UDS transport. */
-#define KB_CLIENT_INDEX_SCAN_TIMEOUT_DEFAULT_MS (5 * 60 * 1000)
+#define KB_CLIENT_INDEX_SCAN_TIMEOUT_DEFAULT_MS (15 * 60 * 1000)
 
 static int kb_index_find_parse(cJSON *resp, term_hit_t *out, int max)
 {
@@ -187,9 +187,11 @@ static int kb_client_code_scan_request(const char *name, const char *root, int f
 
    int timeout_ms = kb_client_index_scan_timeout_ms();
    int http_status = 0;
-   char *json = kb_client_v1_post_json("/v1/code/scan", req, timeout_ms, &http_status);
+   /* _keep_error, not the plain post: the kb explains itself on a refusal, and
+    * discarding that body left the operator with a bare status code. */
+   char *json = kb_client_v1_post_json_keep_error("/v1/code/scan", req, timeout_ms, &http_status);
    cJSON_Delete(req);
-   if (!json)
+   if (http_status >= 400 || !json)
    {
       /* Say which failure this was. Collapsing every empty reply into "knowledge
        * service unavailable" hid a scan that simply outran its timeout while the
@@ -200,14 +202,30 @@ static int kb_client_code_scan_request(const char *name, const char *root, int f
       {
          snprintf(out->reason, sizeof(out->reason), "error");
          if (http_status >= 400)
+         {
+            char detail[192] = "";
+            cJSON *body = json ? cJSON_Parse(json) : NULL;
+            if (body)
+            {
+               const cJSON *error = cJSON_GetObjectItemCaseSensitive(body, "error");
+               const cJSON *code = cJSON_GetObjectItemCaseSensitive(body, "code");
+               if (cJSON_IsString(error) && error->valuestring[0])
+                  snprintf(detail, sizeof(detail), ": %s%s%s", error->valuestring,
+                           cJSON_IsString(code) && code->valuestring[0] ? " / " : "",
+                           cJSON_IsString(code) && code->valuestring[0] ? code->valuestring : "");
+               cJSON_Delete(body);
+            }
             snprintf(out->message, sizeof(out->message),
-                     "code index scan rejected by the knowledge service (HTTP %d)", http_status);
+                     "code index scan rejected by the knowledge service (HTTP %d)%s", http_status,
+                     detail);
+         }
          else
             snprintf(out->message, sizeof(out->message),
                      "code index scan got no reply within %ds — the knowledge service may still "
                      "be scanning; raise AIMEE_KB_SCAN_TIMEOUT_MS for a tree this size",
                      timeout_ms / 1000);
       }
+      free(json);
       return rc;
    }
 

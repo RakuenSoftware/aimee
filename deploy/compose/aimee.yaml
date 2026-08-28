@@ -11,7 +11,9 @@ name: aimee
 services:
   aimee-kb:
     restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:latest}
+    # The default includes the bundled embedder; plain aimee-kb intentionally has
+    # no weights. AIMEE_IMAGE_TAG moves this topology as one tested channel.
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
     ulimits:
       stack: 67108864
     environment:
@@ -133,7 +135,7 @@ services:
 
   aimee-server:
     restart: unless-stopped
-    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:latest}
+    image: ${AIMEE_SERVER_IMAGE:-ghcr.io/rakuensoftware/aimee-server:${AIMEE_IMAGE_TAG:-latest}}
     ulimits:
       stack: 67108864
     environment:

@@ -43,11 +43,11 @@ def main() -> int:
         failures.append("server identity must share the managed KB network")
     if 'AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"' not in managed:
         failures.append("explicit no-swap memory-hardening fallback")
-    if not re.search(
-        r"ulimits:[\s\S]{0,400}memlock:[\s\S]{0,100}soft: -1\s+hard: -1",
-        authority_service,
-    ):
-        failures.append("authority bootstrap unlimited memlock limit")
+    # An unlimited memlock ulimit is not portable to nested/unprivileged
+    # containers. The OCI runtime rejects it before the bootstrap process can
+    # exercise the explicit no-swap fallback above.
+    if re.search(r"(?:^|\n)\s+memlock:\s*(?:\n|$)", authority_service):
+        failures.append("authority bootstrap must inherit the runtime memlock limit")
     if "privileged: true" in managed or "cap_add:" in managed:
         failures.append("authority bootstrap must not request ineffective extra privilege")
     if "network_mode: none" not in managed:

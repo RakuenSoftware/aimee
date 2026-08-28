@@ -1,5 +1,4 @@
 #include "kb_http_code.h"
-#include "kb_curator_queue.h"
 #include "modules/db2/c/canonical_index.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -133,7 +132,6 @@ int code_scan_handle_phase(cJSON *root, const char *project, const char *root_pa
       }
       if (rc != 0)
          return code_scan_write_error(out_buf, out_cap, "scan seal failed");
-      kb_curator_queue_code_units_for_project(project, root_path);
       snprintf(out_buf, (size_t)out_cap,
                "{\"status\":\"ok\",\"phase\":\"seal\",\"skipped\":false,"
                "\"project\":\"%s\",\"files\":%d,\"inspected\":%d,"
