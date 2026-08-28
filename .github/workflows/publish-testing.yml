@@ -1,14 +1,14 @@
-# Build the deployable aimee images on every push to `testing` and publish them
-# under a DELIBERATELY non-semver tag (`:testing` + `:testing-<sha>`), so the
-# testing branch can be deployed/validated (e.g. on .254) WITHOUT promoting to
-# main.
+# Publish the deployable aimee image set on relevant pushes to `testing` under a
+# DELIBERATELY non-semver tag (`:testing` + `:testing-<sha>`), so the testing branch
+# can be deployed/validated (e.g. on .254) WITHOUT promoting to main.  An image is
+# rebuilt only when one of its declared inputs changed.  Otherwise its existing
+# manifest is promoted registry-side to the new immutable `testing-<sha>` tag.
 #
-# Builds the split images, the control console, ALL THREE kb embedder variants, and
-# the isolated one-shot authority bootstrap, so every committed Compose topology can
-# pull a single coherent `:testing`
-# channel whichever embedder the wizard selected. Synthesis is NOT here: it is its own
-# image on its own trigger (publish-llm.yml), rebuilt when the model changes rather
-# than when kb code does.
+# The published set covers the split images, the control console, ALL THREE kb
+# embedder variants, and the isolated one-shot authority bootstrap, so every committed
+# Compose topology has a coherent immutable channel revision whichever embedder the
+# wizard selected. Synthesis is NOT here: it is its own image on its own trigger
+# (publish-llm.yml), rebuilt when the model changes rather than when kb code does.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -49,44 +49,53 @@ permissions:
   packages: write
 
 jobs:
-  build:
+  # Compute the image set from a source-controlled input contract.  Unchanged images
+  # are promoted registry-side below; they are not pulled and they are not rebuilt.
+  # Unknown paths fail safe by selecting every image.  workflow_dispatch is the
+  # explicit recovery/force-rebuild path.
+  plan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.images.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Select images whose inputs changed
+        id: images
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = workflow_dispatch ]; then
+            matrix=$(python3 scripts/publish_testing_plan.py --all </dev/null)
+          else
+            if [ -z "${BEFORE_SHA:-}" ] ||
+               [ "$BEFORE_SHA" = 0000000000000000000000000000000000000000 ] ||
+               ! git cat-file -e "${BEFORE_SHA}^{commit}"; then
+              echo "::error::cannot resolve the previous testing commit; use workflow_dispatch to force a complete rebuild"
+              exit 1
+            fi
+            matrix=$(git diff --name-only -z "$BEFORE_SHA" "$GITHUB_SHA" |
+              python3 scripts/publish_testing_plan.py --null)
+          fi
+          python3 -m json.tool <<< "$matrix"
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  publish:
+    needs: [plan]
+    name: ${{ matrix.image.name }} (${{ matrix.image.rebuild && 'build' || 'reuse' }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        # Same image set + Dockerfiles as the release pipeline
-        # (publish-images.yml), minus the css leg that testing does not redeploy.
-        # Cache scopes match publish-images so testing reuses the release layer
-        # cache and never restarts the LTO C build from scratch.
-        #
-        # NO -llm LEGS HERE, and that is the point. An image carrying llama.cpp and
-        # multi-gigabyte weights must not be rebuilt because kb code changed, and
-        # every leg in this matrix rebuilds on every push that touches src/**. The
-        # two -llm kb variants published from here cost a full kb rebuild each —
-        # under a separate cache scope, so the LTO C build, postgres, pgvectorscale
-        # and torch were all built three times per push for one code change.
-        #
-        # Bundled synthesis moves to its own aimee-llm-e{2,4}b image, deployed
-        # beside the kb, rebuilt only when the model or the model list changes. The
-        # weights stay baked — that property is why they were baked in the first
-        # place — they are just baked into the image whose inputs are stable.
-        #
-        # ALL THREE EMBEDDER VARIANTS, not a subset. An earlier version of this matrix
-        # carried the bekko legs only, on the reasoning that nomic is a one-way choice
-        # this channel had never deployed. That reasoning was wrong: a variant absent
-        # from the channel cannot be deployed FROM the channel, so an operator who
-        # selects nomic on a :testing stack gets a manifest that does not exist. The
-        # deploy layer now picks the image from the embedder choice
-        # (AIMEE_KB_VARIANT), so every choice it can emit has to be publishable here.
-        image:
-          - { name: aimee-server,    dockerfile: Dockerfile.server }
-          - { name: aimee-control-web, dockerfile: Dockerfile.control-web }
-          - { name: aimee-kb,        dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=none" }
-          - { name: aimee-kb-a25m,   dockerfile: Dockerfile, args: "AIMEE_EMBEDDER=bekko-a25m" }
-          - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
-              args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe" }
-          - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
+        # The planner always returns the complete image set.  Each entry says whether
+        # its declared inputs changed; the other entries reuse their current manifest
+        # while still receiving this revision's immutable testing-<sha> tag.
+        image: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
@@ -103,14 +112,26 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Point the -llm legs at the model image the `models` job just guaranteed, so
-      # the build copies a registry layer. The fetch fallback is kept for the same
-      # reason publish-images keeps it: it makes the model image an optimisation
-      # rather than a dependency, so a quant bump still builds.
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
+      # A missing moving tag is a real need to build, even when source inputs did not
+      # change (for example when bootstrapping a new package registry).  Otherwise an
+      # unchanged manifest is promoted without downloading any of its layers.
+      - name: Find reusable ${{ matrix.image.name }} manifest
+        id: have
+        env:
+          IMAGE: ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}
+        run: |
+          if docker manifest inspect "$IMAGE:testing" >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No existing $IMAGE:testing manifest; a bootstrap build is required"
+          fi
+
       - name: Build and push ${{ matrix.image.name }}:testing
+        if: ${{ matrix.image.rebuild || steps.have.outputs.exists != 'true' }}
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
@@ -137,6 +158,23 @@ jobs:
           tags: |
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing
             ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}:testing-${{ env.SHA7 }}
+
+      - name: Reuse ${{ matrix.image.name }} without rebuilding
+        if: ${{ !matrix.image.rebuild && steps.have.outputs.exists == 'true' }}
+        env:
+          IMAGE: ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            --tag "$IMAGE:testing-${SHA7}" \
+            "$IMAGE:testing"
+          old=$(docker buildx imagetools inspect "$IMAGE:testing" --raw | sha256sum | cut -d' ' -f1)
+          new=$(docker buildx imagetools inspect "$IMAGE:testing-${SHA7}" --raw | sha256sum | cut -d' ' -f1)
+          if [ "$old" != "$new" ]; then
+            echo "::error::registry-side promotion changed the manifest digest ($old != $new)"
+            exit 1
+          fi
+          echo "Reused $IMAGE:testing as $IMAGE:testing-${SHA7} ($new)"
 
   # The thin client, published on the SAME cadence as the images it talks to.
   #
