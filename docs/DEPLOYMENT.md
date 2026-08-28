@@ -14,19 +14,15 @@ boundary.
 
 ## Split stack
 
-> **This profile does not currently complete the server-to-KB link.** Everything below brings both
-> halves up healthy, and then every server call to the KB fails. Use the managed profile until this
-> is resolved; the detail is in [What is broken](#what-is-broken-in-this-profile) so a deployment is
-> not attempted on the assumption that it merely needs more configuration.
-
 ```bash
 cp -n .env.example .env
 for v in ADMIN MIGRATOR RUNTIME; do
   echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
 done
-export AIMEE_KB_API_BEARER_TOKEN=$(openssl rand -hex 32)
+export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
 ./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
-unset AIMEE_KB_API_BEARER_TOKEN
+unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
 docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
 
@@ -35,41 +31,17 @@ embedding and synthesis role placements. Each role can run inside the KB contain
 endpoint supported by the selected profile. There is no separate inference service. This is intended
 as the safer default when the server must not control Docker.
 
-`all`, not `kb`: the same token is the KB's inbound credential and the server's outbound one, so
-sealing it into only the KB leaves the halves unable to talk at all.
+`all`, not `kb`: the connection bearer and application-identity token must be sealed into both
+Vaults. The one-shot `aimee-server-identity` service then issues the server's separate client
+certificate before the long-lived server starts. Server-to-KB requests use all three checks over
+mTLS on the private Compose network. The KB's plain HTTP listener remains loopback-only for its
+container healthcheck and is not published on the host.
 
 **`--env-file .env` is not optional on this path.** Compose takes its project directory from the
 first `-f` file, so for `deploy/compose/aimee.yaml` it looks for `deploy/compose/.env` and never
 reads the one at the repository root. Without the flag the command fails on the store passwords even
 though the file exists. The root-level profiles need no flag, because their project directory
 already is the repository root.
-
-### What is broken in this profile
-
-The three requirements below cannot all be satisfied at once, so no value of
-`AIMEE_KB_API_BEARER_TOKEN` makes this profile work:
-
-1. The profile sets `AIMEE_KB_HTTP_BIND=1`, and it has to: the server reaches the KB across the
-   Compose network by name, and a loopback-only listener is unreachable from another container.
-2. Binding `0.0.0.0` with no bearer is a hard refusal, not a warning. The KB logs
-   `refusing to bind 0.0.0.0:8741 with no bearer configured` and exits, and because the container is
-   `restart: unless-stopped` that presents as a KB restarting every thirty seconds while
-   `aimee-server` sits in `Created` behind its `service_healthy` gate.
-3. Once a bearer exists, the server refuses to present it over the profile's own
-   `AIMEE_KB_API_URL: http://aimee-kb:8741`, because that is cleartext to a non-loopback host:
-
-   ```text
-   kb_client: refusing to send the kb bearer in cleartext to non-loopback host 'aimee-kb';
-   use the mTLS endpoint or terminate TLS in front of the kb
-   ```
-
-   The request is never sent, so `/v1/kb/status` reports `did not respond` and the circuit opens.
-   That line goes to `/var/lib/aimee/server.log` inside the container and not to `docker logs`, so
-   the visible symptom carries none of the cause.
-
-Resolving it needs the server to reach the KB over mTLS or through a TLS terminator, which this
-profile does not yet configure. Both halves report healthy throughout, so container health is not a
-signal that the link works.
 
 The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
 route among several KB containers with explicit corpus, authority, and capability identity. Fleet
@@ -146,7 +118,7 @@ Use the compose files and generated configuration as the source of truth. Typica
 | --- | ---: | --- |
 | browser | 8443 | user network, HTTPS |
 | server `/v1` | 8743 | enrolled clients only |
-| KB `/v1` | 8741 | deployment network only |
+| KB service mTLS | 8745 | deployment network only |
 | remote model endpoint | provider-defined | deployment network only |
 
 Do not publish PostgreSQL or a remote model endpoint unless a separate host needs it. Apply TLS and

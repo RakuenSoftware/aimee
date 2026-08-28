@@ -349,8 +349,19 @@ docker compose -f compose.server-managed.yaml logs --tail=100 aimee-server
 If the server must not control Docker, use the split stack instead:
 
 ```bash
-docker compose -f deploy/compose/aimee.yaml up -d
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
+export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
+unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
+docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
+
+This profile installs a dedicated server-to-KB client certificate and uses mTLS; it does not expose
+the KB's plain HTTP listener. See [Deployment](DEPLOYMENT.md#split-stack) for the trust boundaries.
 
 The old combined image is gone.
 
