@@ -427,6 +427,57 @@ def kb_mtls_failures(text: str) -> list[str]:
     ]
 
 
+def split_kb_identity_failures(text: str) -> list[str]:
+    """Keep the no-Docker-socket profile on the authenticated mTLS path."""
+    if yaml is None:
+        return ["PyYAML is required to validate the effective Compose model"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    if not isinstance(services, dict):
+        return ["missing services mapping"]
+    kb = services.get("aimee-kb")
+    server = services.get("aimee-server")
+    identity = services.get("aimee-server-identity")
+    if not all(isinstance(service, dict) for service in (kb, server, identity)):
+        return ["split stack requires KB, server, and server-identity services"]
+
+    failures: list[str] = []
+    kb_env = kb.get("environment")
+    if not isinstance(kb_env, dict) or kb_env.get("AIMEE_KB_HTTP_BIND") != "":
+        failures.append("KB must override the image's public HTTP bind with an empty value")
+    if kb.get("ports"):
+        failures.append("KB plain HTTP listener must not be published")
+    server_env = server.get("environment")
+    if not isinstance(server_env, dict) or "AIMEE_KB_API_URL" in server_env:
+        failures.append("server must not retain a cleartext KB fallback URL")
+
+    server_dep = server.get("depends_on")
+    identity_dep = server_dep.get("aimee-server-identity") if isinstance(server_dep, dict) else None
+    if not isinstance(identity_dep, dict) or identity_dep.get("condition") != "service_completed_successfully":
+        failures.append("server must wait for successful KB client identity installation")
+    helper_dep = identity.get("depends_on")
+    kb_dep = helper_dep.get("aimee-kb") if isinstance(helper_dep, dict) else None
+    if not isinstance(kb_dep, dict) or kb_dep.get("condition") != "service_healthy":
+        failures.append("server identity helper must wait for a healthy KB")
+    command = identity.get("command")
+    if not isinstance(command, list) or not all(
+        required in command
+        for required in ("managed-server-identity", "install", "--host=aimee-kb", "--port=8745")
+    ):
+        failures.append("server identity helper command must install for aimee-kb:8745")
+    helper_volumes = identity.get("volumes")
+    for required in (
+        "aimee-kb-home:/var/lib/aimee",
+        "aimee-server-home:/var/lib/aimee-server",
+    ):
+        if not isinstance(helper_volumes, list) or required not in helper_volumes:
+            failures.append(f"server identity helper missing {required}")
+    return failures
+
+
 def server_default_config_failures(text: str) -> list[str]:
     if yaml is None:
         return ["PyYAML is required to validate the server container defaults"]
@@ -658,6 +709,16 @@ def check(root: Path) -> list[str]:
         for failure in managed_kb_llm_contract_failures(managed_text):
             failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
 
+    split_compose = root / "deploy" / "compose" / "aimee.yaml"
+    if not split_compose.exists():
+        failures.append("missing deploy/compose/aimee.yaml")
+    else:
+        split_text = read(split_compose)
+        for failure in kb_mtls_failures(split_text):
+            failures.append(f"deploy/compose/aimee.yaml {failure}")
+        for failure in split_kb_identity_failures(split_text):
+            failures.append(f"deploy/compose/aimee.yaml {failure}")
+
     if not dockerignore.exists():
         failures.append("missing .dockerignore")
     else:
@@ -816,6 +877,33 @@ def plant_test() -> int:
             "      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}\n",
             encoding="utf-8",
         )
+        (root / "deploy/compose").mkdir(parents=True)
+        (root / "deploy/compose/aimee.yaml").write_text(
+            "services:\n"
+            "  aimee-kb:\n"
+            "    environment:\n"
+            '      AIMEE_KB_HTTP_BIND: ""\n'
+            "      AIMEE_KB_MTLS_HOST: aimee-kb\n"
+            '      AIMEE_KB_MTLS_PORT: "8745"\n'
+            "  aimee-server:\n"
+            "    environment: {}\n"
+            "    depends_on:\n"
+            "      aimee-server-identity:\n"
+            "        condition: service_completed_successfully\n"
+            "  aimee-server-identity:\n"
+            "    command:\n"
+            "      - managed-server-identity\n"
+            "      - install\n"
+            "      - --host=aimee-kb\n"
+            "      - --port=8745\n"
+            "    depends_on:\n"
+            "      aimee-kb:\n"
+            "        condition: service_healthy\n"
+            "    volumes:\n"
+            "      - aimee-kb-home:/var/lib/aimee\n"
+            "      - aimee-server-home:/var/lib/aimee-server\n",
+            encoding="utf-8",
+        )
         (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(
             'aimee:\n  api:\n    remote_writes: "off"\n', encoding="utf-8"
         )
@@ -879,6 +967,29 @@ def plant_test() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+        split_text = read(root / "deploy/compose/aimee.yaml")
+        split_plants = (
+            split_text.replace('      AIMEE_KB_HTTP_BIND: ""\n', "", 1),
+            split_text.replace("    environment: {}\n", "    environment:\n"
+                               "      AIMEE_KB_API_URL: http://aimee-kb:8741\n", 1),
+            split_text.replace("        condition: service_completed_successfully\n",
+                               "        condition: service_started\n", 1),
+            split_text.replace("      - --host=aimee-kb\n", "", 1),
+            split_text.replace("      - aimee-server-home:/var/lib/aimee-server\n", "", 1),
+        )
+        for planted in split_plants:
+            if not split_kb_identity_failures(planted):
+                print("kb-container-packaging plant: missed split mTLS contract", file=sys.stderr)
+                return 1
+        published_split = split_text.replace(
+            "    environment:\n      AIMEE_KB_HTTP_BIND:",
+            '    ports: ["8741:8741"]\n    environment:\n      AIMEE_KB_HTTP_BIND:',
+            1,
+        )
+        if not split_kb_identity_failures(published_split):
+            print("kb-container-packaging plant: missed published split KB", file=sys.stderr)
+            return 1
 
         # The sidecar may exist, but not ungated and not without the kb ordering it
         # depends on. Planting a bare service definition exercises both.

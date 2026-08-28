@@ -7291,6 +7291,36 @@ static void test_http_listener_concurrent_requests(void)
    kb_http_stop();
 }
 
+static void test_http_listener_refuses_unsafe_public_bind(void)
+{
+   int port = reserve_tcp_port();
+   assert(setenv("AIMEE_KB_HTTP_BIND", "1", 1) == 0);
+   assert(kb_http_start(port, NULL) == KB_HTTP_START_UNSAFE_BIND);
+   assert(unsetenv("AIMEE_KB_HTTP_BIND") == 0);
+
+   /* A refused start must close its socket and leave the listener reusable. */
+   assert(kb_http_start(port, NULL) == KB_HTTP_START_OK);
+   kb_http_stop();
+}
+
+static void test_http_listener_classifies_port_collision(void)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = 0;
+   assert(bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   assert(listen(fd, 1) == 0);
+   socklen_t n = sizeof(sa);
+   assert(getsockname(fd, (struct sockaddr *)&sa, &n) == 0);
+
+   assert(kb_http_start(ntohs(sa.sin_port), NULL) == KB_HTTP_START_ADDRESS_IN_USE);
+   close(fd);
+}
+
 /* ---- embedding is asynchronous, full stop ------------------------------------
  *
  * RED-GREEN. /v1/code/build used to do the whole build inline: doc embedding,
@@ -7436,6 +7466,8 @@ int main(void)
    test_mtls_listener();
    test_http_body_too_large_413();
    test_http_listener_concurrent_requests();
+   test_http_listener_refuses_unsafe_public_bind();
+   test_http_listener_classifies_port_collision();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();

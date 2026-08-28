@@ -12,9 +12,18 @@
 
 #include "kb_identity.h"
 
+typedef enum
+{
+   KB_HTTP_START_OK = 0,
+   KB_HTTP_START_ERROR = -1,
+   KB_HTTP_START_ADDRESS_IN_USE = -2,
+   KB_HTTP_START_UNSAFE_BIND = -3
+} kb_http_start_result_t;
+
 /* Start the HTTP listener thread on the given port.
- * bearer_token may be NULL or empty to disable auth.
- * Returns 0 on success, -1 on error. */
+ * bearer_token may be NULL or empty to disable auth on the loopback listener.
+ * A non-loopback listener without a bearer fails with
+ * KB_HTTP_START_UNSAFE_BIND. */
 int kb_http_start(int port, const char *bearer_token);
 
 /* Signal the listener thread to stop and wait for it to exit. */

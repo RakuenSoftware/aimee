@@ -194,6 +194,18 @@ func TestGoModuleRuntimeConfigAndBodyLimitMatchC(t *testing.T) {
 	}
 }
 
+func TestModuleIdleBackoffCaps(t *testing.T) {
+	delay := moduleIdle
+	want := []time.Duration{2 * time.Millisecond, 4 * time.Millisecond, 8 * time.Millisecond,
+		moduleIdleMax, moduleIdleMax}
+	for i, expected := range want {
+		delay = nextModuleIdle(delay)
+		if delay != expected {
+			t.Fatalf("backoff step %d = %v, want %v", i, delay, expected)
+		}
+	}
+}
+
 func TestConnectModuleWaitsOutStaleSocket(t *testing.T) {
 	path := t.TempDir() + "/stale.sock"
 	fd, err := unix.Socket(unix.AF_UNIX, unix.SOCK_SEQPACKET|unix.SOCK_CLOEXEC, 0)

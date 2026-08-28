@@ -56,14 +56,19 @@ services:
       # Set it ONLY for an external EMBEDDER_URL, whose width the kb cannot
       # know.
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
-      AIMEE_KB_HTTP_BIND: "1"
+      # Keep plain HTTP process-local for the healthcheck. Server traffic uses
+      # the independently authenticated mTLS lane below; a bearer must never
+      # cross the Compose network in cleartext.
+      AIMEE_KB_HTTP_BIND: ""
+      AIMEE_KB_MTLS_HOST: aimee-kb
+      AIMEE_KB_MTLS_PORT: "8745"
       # The curator adapter reads the same SYNTHESIS_ENDPOINT above. It used to need
       # its own LLM_ENDPOINT, defaulted to a container this file never defined, so a
       # fresh deployment aimed the adapter at a dead host while the KB used
       # AIMEE_LLM_URL. One endpoint, one spelling.
     command: ["--http-port=8741"]
-    ports:
-      - "8741:8741"
+    expose:
+      - "8745"
     healthcheck:
       test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
       interval: 10s
@@ -156,7 +161,6 @@ services:
       # was telling operators the server kept a database it does not keep.
       AIMEE_STORE_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_runtime password=${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
       AIMEE_STORE_MIGRATION_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_migrator password=${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
-      AIMEE_KB_API_URL: http://aimee-kb:8741
       AIMEE_SERVER_HTTP_BIND: "1"
       AIMEE_RUNTIME_WEB_ENABLED: ${AIMEE_RUNTIME_WEB_ENABLED:-1}
       # First-boot credentials are streamed into Vault before `up`; this
@@ -172,6 +176,8 @@ services:
         condition: service_healthy
       aimee-kb:
         condition: service_healthy
+      aimee-server-identity:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD-SHELL",
              "body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf '%s' \"$$body\" | grep -q '\"db1\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"modules\":\"ok\"'"]
@@ -183,6 +189,31 @@ services:
       - aimee-server-home:/var/lib/aimee
       - aimee-store-tls:/run/aimee-store-tls:ro
       - aimee-server-workspaces:/var/lib/aimee-workspaces
+
+  # Issue the server's dedicated KB client identity before its long-lived
+  # process starts. The helper owns no durable state: it writes the client
+  # identity to the server home while the KB keeps its CA and DB2 private.
+  aimee-server-identity:
+    restart: "no"
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+    depends_on:
+      aimee-kb:
+        condition: service_healthy
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
 
 volumes:
   aimee-store-db:
