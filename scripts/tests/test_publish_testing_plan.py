@@ -96,9 +96,16 @@ def main() -> None:
         "tests are not runtime inputs",
     )
     failures += expect(
-        [".github/workflows/publish-testing.yml", "scripts/publish_testing_plan.py"],
+        [
+            ".github/workflows/ci.yml",
+            ".github/workflows/publish-testing.yml",
+            "scripts/check-published-compose-images.py",
+            "scripts/publish_testing_plan.py",
+            "scripts/tests/test_check_published_compose_images.py",
+            "scripts/tests/test_publish_testing_plan.py",
+        ],
         set(),
-        "publication orchestration is not image content",
+        "this publication-only PR does not rebuild runtime images",
     )
     failures += expect(["new/runtime/input"], all_images, "unknown input fails safe")
 

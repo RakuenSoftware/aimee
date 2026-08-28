@@ -46,9 +46,11 @@ AUTHORITY = frozenset(("aimee-authority-bootstrap",))
 
 # Files that define publication, not image bytes.  Keeping these out of every image
 # is important: fixing this planner must not itself trigger six unrelated rebuilds.
-ORCHESTRATION = frozenset(
+PUBLISH_TOOLING = frozenset(
     (
+        ".github/workflows/ci.yml",
         ".github/workflows/publish-testing.yml",
+        "scripts/check-published-compose-images.py",
         "scripts/publish_testing_plan.py",
         "scripts/tests/test_publish_testing_plan.py",
     )
@@ -90,7 +92,7 @@ def consumers(path: str) -> frozenset[str]:
     """
 
     path = path.removeprefix("./")
-    if not path or path in ORCHESTRATION:
+    if not path or path in PUBLISH_TOOLING:
         return frozenset()
     if path.startswith("src/tests/") or path.startswith("scripts/tests/"):
         return frozenset()
