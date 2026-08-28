@@ -82,3 +82,36 @@ func TestLegacyTLSCertificateIsRotatedForCurrentAddresses(t *testing.T) {
 		t.Fatalf("rotated certificate does not cover the current address set: %v", err)
 	}
 }
+
+func TestCertSANsIncludeDeploymentOverrides(t *testing.T) {
+	t.Setenv("AIMEE_TLS_EXTRA_SAN", "DNS:shared.example, IP:192.0.2.44 shared-alt.example")
+	t.Setenv("AIMEE_WEBCHAT_TLS_SANS", "webchat.example,192.0.2.45")
+
+	dnsNames, ipAddrs := certSANs()
+	wantDNS := map[string]bool{
+		"shared.example":     false,
+		"shared-alt.example": false,
+		"webchat.example":    false,
+	}
+	for _, name := range dnsNames {
+		if _, ok := wantDNS[name]; ok {
+			wantDNS[name] = true
+		}
+	}
+	for name, found := range wantDNS {
+		if !found {
+			t.Errorf("configured DNS SAN %q is absent from %v", name, dnsNames)
+		}
+	}
+	wantIPs := map[string]bool{"192.0.2.44": false, "192.0.2.45": false}
+	for _, ip := range ipAddrs {
+		if _, ok := wantIPs[ip.String()]; ok {
+			wantIPs[ip.String()] = true
+		}
+	}
+	for value, found := range wantIPs {
+		if !found {
+			t.Errorf("configured IP SAN %q is absent from %v", value, ipAddrs)
+		}
+	}
+}

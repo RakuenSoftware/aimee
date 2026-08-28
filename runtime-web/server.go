@@ -463,8 +463,10 @@ func parseTLSPrivateKey(keyPEM []byte) (crypto.Signer, error) {
 // the usual warning) makes browsers refuse to register VSCode's service worker
 // ("An SSL certificate error occurred when fetching the script") so the editor's
 // webviews break. We include localhost, every non-loopback interface IP, the
-// hostname, and any operator-supplied AIMEE_WEBCHAT_TLS_SANS (comma-separated
-// IPs/DNS names) so an operator who trusts this cert gets a fully valid context.
+// hostname, and any operator-supplied AIMEE_TLS_EXTRA_SAN or
+// AIMEE_WEBCHAT_TLS_SANS entries so an operator who trusts this cert gets a
+// fully valid context. AIMEE_TLS_EXTRA_SAN is the public deployment setting and
+// accepts the same comma/space-separated DNS:/IP: syntax as the native server.
 func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 	dnsSeen := map[string]bool{}
 	ipSeen := map[string]bool{}
@@ -495,17 +497,27 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 			}
 		}
 	}
-	// Operator override for names/IPs not derivable here (e.g. a reverse-proxy
-	// hostname): AIMEE_WEBCHAT_TLS_SANS="aimee.lan,10.0.0.5".
-	for _, s := range strings.Split(os.Getenv("AIMEE_WEBCHAT_TLS_SANS"), ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if ip := net.ParseIP(s); ip != nil {
-			addIP(ip)
-		} else {
-			addDNS(s)
+	// Operator overrides for names/IPs not derivable here (e.g. a reverse-proxy
+	// hostname). Keep the webchat-specific variable for compatibility, but honor
+	// the shared deployment setting used by Compose and SmoothNAS first.
+	for _, envName := range []string{"AIMEE_TLS_EXTRA_SAN", "AIMEE_WEBCHAT_TLS_SANS"} {
+		for _, s := range strings.FieldsFunc(os.Getenv(envName), func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+		}) {
+			s = strings.TrimSpace(s)
+			if len(s) >= 4 && strings.EqualFold(s[:4], "DNS:") {
+				s = s[4:]
+			} else if len(s) >= 3 && strings.EqualFold(s[:3], "IP:") {
+				s = s[3:]
+			}
+			if s == "" {
+				continue
+			}
+			if ip := net.ParseIP(s); ip != nil {
+				addIP(ip)
+			} else {
+				addDNS(s)
+			}
 		}
 	}
 	return dnsNames, ipAddrs
