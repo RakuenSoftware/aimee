@@ -1345,6 +1345,12 @@ check_output "memory.get rejects fractional ids" '"kind":"invalid_argument"' ech
 RESP=$(http_call POST /v1/memory/get '{"id":1e30}') || true
 check_output "memory.get rejects unrepresentable ids" '"kind":"invalid_argument"' echo "$RESP"
 
+RESP=$(http_call POST /v1/memory/get '{"id":9007199254740992}') || true
+check_output "memory.get rejects ids above the JSON safe integer range" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call POST /v1/memory/get '{"id":9007199254740993}') || true
+check_output "memory.get rejects ids rounded onto the JSON safe integer boundary" '"kind":"invalid_argument"' echo "$RESP"
+
 RESP=$(http_call POST /v1/memory/user_capture '{}') || true
 check_output "memory.user_capture missing fields stays typed" '"kind":"invalid_argument"' echo "$RESP"
 if echo "$RESP" | grep -q '"http_status":400'; then

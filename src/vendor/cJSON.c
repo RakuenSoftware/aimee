@@ -630,7 +630,10 @@ static cJSON_bool print_number(const cJSON *const item, printbuffer *const outpu
       length = sprintf((char *)number_buffer, "%1.15g", d);
 
       /* Check whether the original double can be recovered */
-      if ((sscanf((char *)number_buffer, "%lg", &test) != 1) || !compare_double((double)test, d))
+      /* Serialization is a transport boundary, so approximate equality is not
+       * enough here. In particular, treating a two-unit difference near 2^53
+       * as equal can rewrite one integer ID into another before dispatch. */
+      if ((sscanf((char *)number_buffer, "%lg", &test) != 1) || test != d)
       {
          /* If not, print with 17 decimal places of precision */
          length = sprintf((char *)number_buffer, "%1.17g", d);
