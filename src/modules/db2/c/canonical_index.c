@@ -262,14 +262,17 @@ static int64_t ci_upsert_file(void *conn, int64_t project_id, const char *rel_pa
  * transaction-free lets a sealed complete manifest publish every changed file,
  * every retraction, and its revision bump as one database commit. */
 static int ci_replace_file_data_txn(void *conn, int64_t file_id, const char *ext,
-                                    const char *content)
+                                    const char *content, int clear_existing)
 {
    char err[CI_ERRBUF] = "";
 
-   db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
-   db2_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id);
-   db2_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id);
-   db2_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id);
+   if (clear_existing)
+   {
+      db2_exec_conn_int64(conn, "DELETE FROM file_exports WHERE file_id = ?1", file_id);
+      db2_exec_conn_int64(conn, "DELETE FROM file_imports WHERE file_id = ?1", file_id);
+      db2_exec_conn_int64(conn, "DELETE FROM terms WHERE file_id = ?1", file_id);
+      db2_exec_conn_int64(conn, "DELETE FROM code_calls WHERE file_id = ?1", file_id);
+   }
 
    /* Record the content hash so the code-embed pass can skip unchanged files. */
    {
@@ -446,7 +449,7 @@ static int ci_replace_file_data(void *conn, const char *project, int64_t file_id
       LOG_WARN(CI_LOG_TAG, "BEGIN failed: %s", err);
       return -1;
    }
-   if (ci_replace_file_data_txn(conn, file_id, ext, content) != 0)
+   if (ci_replace_file_data_txn(conn, file_id, ext, content, 1) != 0)
    {
       aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
       return -1;
@@ -566,17 +569,21 @@ static int ci_path_has_hidden_component(const char *path)
    return 0;
 }
 
-/* Build manifests whose filename legitimately starts with '.' (currently only
- * .gitmodules — git submodule declarations). A thin-client push sends these (the
- * client's code_file_wanted accepts them); the kb must not drop them as "hidden"
- * the way it drops files inside .git/.aimee/etc. dirs (recall §2.2). */
-static int ci_is_dotfile_manifest(const char *component, size_t len)
+/* A hidden final filename the thin-client collector legitimately sends. Mirror
+ * its structural extension rule so one accepted dot-file cannot be dropped here
+ * and make the complete manifest's expected count impossible to satisfy. */
+static int ci_is_wanted_dotfile(const char *component, size_t len)
 {
-   return len == 11 && strncmp(component, ".gitmodules", 11) == 0;
+   if (len == 11 && strncmp(component, ".gitmodules", 11) == 0)
+      return 1;
+   for (size_t i = 1; i + 1 < len; i++)
+      if (component[i] == '.')
+         return 1;
+   return 0;
 }
 
 /* Like ci_path_has_hidden_component, but a hidden FINAL (filename) component is
- * allowed when it is a wanted dotfile build manifest (ci_is_dotfile_manifest).
+ * allowed when it is a wanted dotfile (ci_is_wanted_dotfile).
  * For thin-client file ingest: the client already gated the file set, and a
  * .gitmodules must be ingested; interior hidden DIRECTORY components (.git/,
  * .github/, ...) are still rejected. The exemption is for the FINAL component at
@@ -598,7 +605,7 @@ static int ci_path_ingest_excluded(const char *path)
          size_t len = (size_t)(p - start);
          int is_final = (*p == '\0');
          if (ci_path_component_is_hidden(start, len) &&
-             !(is_final && ci_is_dotfile_manifest(start, len)))
+             !(is_final && ci_is_wanted_dotfile(start, len)))
             return 1;
          if (is_final)
             break;
@@ -1415,6 +1422,54 @@ static int ci_scan_session_count(void *conn, const char *scan_id)
    return count;
 }
 
+/* Clear derived rows for every changed file with one statement per table.
+ * A complete first scan of aimee is currently about 5,700 files; issuing four
+ * DELETEs per file made the atomic seal spend most of its deadline on protocol
+ * round trips. Postgres can identify the changed set directly from the staged
+ * manifest. The sqlite test shim retains the per-file path below because it
+ * does not implement Postgres' DELETE ... USING syntax. */
+static int ci_scan_clear_changed_rows(void *conn, const char *table, const char *file_column,
+                                      int64_t project_id, int64_t generation, const char *scan_id)
+{
+   char sql[768];
+   int n = snprintf(sql, sizeof(sql),
+                    "DELETE FROM %s d USING files f, code_scan_manifest_files m "
+                    "WHERE d.%s=f.id AND f.project_id=?1 AND f.generation=?2 "
+                    "AND m.scan_id=?3 AND m.path=f.path "
+                    "AND f.hash IS DISTINCT FROM m.content_hash",
+                    table, file_column);
+   if (n < 0 || (size_t)n >= sizeof(sql))
+      return -1;
+   char err[CI_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_int64(st, "?1", project_id);
+   aimee_pg_bind_int64(st, "?2", generation);
+   aimee_pg_bind_text(st, "?3", scan_id);
+   int rc = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE ? 0 : -1;
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+static int ci_scan_clear_all_changed_rows(void *conn, int64_t project_id, int64_t generation,
+                                          const char *scan_id)
+{
+   static const struct
+   {
+      const char *table;
+      const char *file_column;
+   } derived[] = {{"file_exports", "file_id"},
+                  {"file_imports", "file_id"},
+                  {"terms", "file_id"},
+                  {"code_calls", "file_id"}};
+   for (size_t i = 0; i < sizeof(derived) / sizeof(derived[0]); ++i)
+      if (ci_scan_clear_changed_rows(conn, derived[i].table, derived[i].file_column, project_id,
+                                     generation, scan_id) != 0)
+         return -1;
+   return 0;
+}
+
 int canonical_index_scan_seal(const char *scan_id, int expected_files,
                               canonical_index_seal_result_t *out)
 {
@@ -1478,12 +1533,19 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
        baseline != current_revision || ci_scan_session_count(conn, scan_id) != expected_files)
       goto stale;
 
+   int per_file_clear = aimee_pg_is_shim();
+   if (!per_file_clear &&
+       ci_scan_clear_all_changed_rows(conn, project_id, generation, scan_id) != 0)
+      goto storage_fail;
+
    char ts[32];
    now_utc(ts, sizeof(ts));
    aimee_pg_stmt_t *rows = aimee_pg_prepare(
        conn,
-       "SELECT path,content,content_hash FROM code_scan_manifest_files WHERE scan_id=?1 "
-       "ORDER BY path",
+       "SELECT m.path,m.content,m.content_hash,f.hash FROM code_scan_manifest_files m "
+       "JOIN code_scan_sessions s ON s.scan_id=m.scan_id "
+       "LEFT JOIN files f ON f.project_id=s.project_id AND f.generation=s.generation "
+       "AND f.path=m.path WHERE m.scan_id=?1 ORDER BY m.path",
        err, sizeof(err));
    if (!rows)
       goto storage_fail;
@@ -1503,30 +1565,12 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
          aimee_pg_finalize(rows);
          goto storage_fail;
       }
-      int changed = 1;
-      aimee_pg_stmt_t *old = aimee_pg_prepare(
-          conn,
-          "SELECT f.hash FROM files f JOIN projects p ON p.id=f.project_id WHERE f.project_id=?1 "
-          "AND f.generation=p.current_generation AND f.path=?2",
-          err, sizeof(err));
-      if (!old)
-      {
-         free(path);
-         free(content);
-         aimee_pg_finalize(rows);
-         goto storage_fail;
-      }
-      aimee_pg_bind_int64(old, "?1", project_id);
-      aimee_pg_bind_text(old, "?2", path);
-      if (aimee_pg_step(old, err, sizeof(err)) == AIMEE_PG_ROW)
-      {
-         const char *old_hash = aimee_pg_column_text(old, 0);
-         changed = !old_hash || strcmp(old_hash, hash) != 0;
-      }
-      aimee_pg_finalize(old);
+      const char *old_hash =
+          aimee_pg_column_is_null(rows, 3) ? NULL : aimee_pg_column_text(rows, 3);
+      int changed = !old_hash || strcmp(old_hash, hash) != 0;
       int64_t file_id = ci_upsert_file(conn, project_id, path, ts);
       if (file_id < 0 || (changed && ci_replace_file_data_txn(conn, file_id, ci_get_extension(path),
-                                                              content) != 0))
+                                                              content, per_file_clear) != 0))
       {
          free(path);
          free(content);
@@ -1602,36 +1646,32 @@ int canonical_index_scan_seal(const char *scan_id, int expected_files,
     * only after the source snapshot is visible. */
    if (config_present() && config_css_style_graph_enabled())
    {
-      for (int offset = 0;; offset++)
+      aimee_pg_stmt_t *css = aimee_pg_prepare(
+          conn,
+          "SELECT f.id,m.path,m.content FROM code_scan_manifest_files m "
+          "JOIN code_scan_sessions s ON s.scan_id=m.scan_id "
+          "JOIN files f ON f.project_id=s.project_id AND f.generation=s.generation "
+          "AND f.path=m.path WHERE m.scan_id=?1 ORDER BY m.path",
+          err, sizeof(err));
+      if (css)
       {
-         aimee_pg_stmt_t *css = aimee_pg_prepare(
-             conn,
-             "SELECT path,content FROM code_scan_manifest_files WHERE scan_id=?1 ORDER BY path "
-             "LIMIT 1 OFFSET ?2",
-             err, sizeof(err));
-         if (!css)
-            break;
          aimee_pg_bind_text(css, "?1", scan_id);
-         aimee_pg_bind_int(css, "?2", offset);
-         if (aimee_pg_step(css, err, sizeof(err)) != AIMEE_PG_ROW)
+         while (aimee_pg_step(css, err, sizeof(err)) == AIMEE_PG_ROW)
          {
-            aimee_pg_finalize(css);
-            break;
-         }
-         char *path = strdup(aimee_pg_column_text(css, 0));
-         char *content = strdup(aimee_pg_column_text(css, 1));
-         aimee_pg_finalize(css);
-         if (!path || !content)
-         {
+            int64_t file_id = aimee_pg_column_int64(css, 0);
+            char *path = strdup(aimee_pg_column_text(css, 1));
+            char *content = strdup(aimee_pg_column_text(css, 2));
+            if (!path || !content)
+            {
+               free(path);
+               free(content);
+               break;
+            }
+            ci_css_index_file(file_id, ci_get_extension(path), content, 1);
             free(path);
             free(content);
-            break;
          }
-         int64_t file_id = ci_resolve_file_id(conn, project_id, path);
-         if (file_id >= 0)
-            ci_css_index_file(file_id, ci_get_extension(path), content, 1);
-         free(path);
-         free(content);
+         aimee_pg_finalize(css);
       }
    }
    return 0;

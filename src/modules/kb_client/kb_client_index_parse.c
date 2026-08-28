@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "json_fluent.h"
 #include "kb_client.h"
+#include "kb_index_timeouts.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,11 +17,11 @@
 /* Build the wire-level response object for an index.scan call from the
  * kb_client_index_scan result. Caller takes ownership of the returned
  * cJSON. Centralised so the dispatch path and tests share one truth. */
-/* Tunable because "large" has no fixed size: a ~3000-file checkout on a busy kb
- * crosses five minutes, and when it does the POST below returns nothing and the
- * caller reports the service as unavailable -- while the kb is still scanning,
- * holding the db2 connection it leased. Operators scanning big trees need to
- * raise this rather than watch every scan report a healthy service as down. */
+/* Tunable because "large" has no fixed size. A clean 5,699-file checkout takes
+ * a little over five minutes to parse and publish on the supported managed LXC
+ * profile, so five minutes made the default release smoke fail deterministically
+ * while the healthy kb was still working. Fifteen minutes keeps the operation
+ * bounded while covering a first index on a substantial repository. */
 /* Read timeout for the code-index query routes.
  *
  * This was a hardcoded 5s. Measured against a 3825-file checkout on CT403, the
@@ -47,14 +48,7 @@ int kb_client_index_read_timeout_ms(void)
 
 int kb_client_index_scan_timeout_ms(void)
 {
-   const char *env = getenv("AIMEE_KB_SCAN_TIMEOUT_MS");
-   if (env && env[0])
-   {
-      long v = strtol(env, NULL, 10);
-      if (v > 0 && v <= 24L * 60 * 60 * 1000)
-         return (int)v;
-   }
-   return (5 * 60 * 1000);
+   return aimee_kb_index_scan_timeout_ms();
 }
 
 void *kb_client_index_scan_format_response(int kb_rc, const kb_client_index_scan_result_t *res)

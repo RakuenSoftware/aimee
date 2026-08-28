@@ -970,9 +970,13 @@ static SSL *server_tls_management_accept(int fd)
    return tls_accept_with_ssl(fd, ssl);
 }
 
-/* How long server_tls_wait_for_store waits. The module attaches in well under a
-   second when it is coming at all, and this is paid once, at startup. */
-#define TLS_STORE_WAIT_MS 5000
+/* The store usually attaches in under a second, but image pulls, PostgreSQL
+   recovery, and nested-container CPU contention can delay its first usable
+   reply well beyond five seconds. That old deadline permanently disabled the
+   TLS listener even when the module became healthy moments later. Keep a
+   bounded startup window, but make it long enough to cover the deployment's
+   normal dependency recovery envelope. */
+#define TLS_STORE_WAIT_MS 60000
 #define TLS_STORE_POLL_MS 50
 
 /* Wait for the store before the mTLS ramp runs.
@@ -989,12 +993,12 @@ static SSL *server_tls_management_accept(int fd)
  * The probe is a parameter rather than a direct call so this file keeps no DB1
  * dependency: its unit test links it alone, deliberately. Only waits when mTLS
  * is configured on, since that is the only mode whose init needs the store. A
- * module that is coming attaches in well under a second; one that is not leaves
- * TLS refused exactly as before, having cost a second once, and says why. */
-void server_tls_wait_for_store(int (*store_ready)(void))
+ * module that is coming normally attaches quickly; one that is not leaves TLS
+ * refused after the bounded window and says why. */
+int server_tls_wait_for_store(int (*store_ready)(void))
 {
    if (!store_ready || config_server_api_mtls() <= 0)
-      return;
+      return 1;
    for (int waited_ms = 0; waited_ms < TLS_STORE_WAIT_MS && !store_ready();
         waited_ms += TLS_STORE_POLL_MS)
    {
@@ -1002,10 +1006,14 @@ void server_tls_wait_for_store(int (*store_ready)(void))
       nanosleep(&ts, NULL);
    }
    if (!store_ready())
+   {
       aimee_log(LOG_WARN, "server.tls",
                 "the store did not answer within %dms; the mTLS ramp needs it, so TLS may be "
                 "refused",
                 TLS_STORE_WAIT_MS);
+      return 0;
+   }
+   return 1;
 }
 
 int server_tls_init_default(void)

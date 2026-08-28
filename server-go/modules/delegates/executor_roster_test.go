@@ -22,7 +22,7 @@ const oneModel = `{
 
 const oneAgent = `{
   "default_agent": "legacy",
-  "agents": [{"name":"legacy","model":"default","enabled":true,
+  "agents": [{"name":"legacy","model":"default","enabled":1,
               "roles":["explain"],"max_parallel":1}]
 }`
 
@@ -56,6 +56,50 @@ func TestRegistryReadsBothRosterSpellings(t *testing.T) {
 				t.Errorf("%s: entry = %q, want %q", tc.file, got[0].Name, tc.want)
 			}
 		})
+	}
+}
+
+func TestRegistryReadsLegacyNumericBooleans(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		enabled   string
+		available string
+		want      bool
+	}{
+		{name: "one is true", enabled: "1", available: "1", want: true},
+		{name: "zero is false", enabled: "0", available: "0", want: false},
+		{name: "booleans remain supported", enabled: "true", available: "true", want: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			body := `{"agents":[{"name":"legacy","model":"default","roles":["explain"],` +
+				`"enabled":` + tc.enabled + `,"delegate_available":` + tc.available + `}]}`
+			if err := os.WriteFile(filepath.Join(home, "agents.json"), []byte(body), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			executor, err := NewRegistryExecutor(home)
+			if err != nil {
+				t.Fatalf("legacy registry did not load: %v", err)
+			}
+			entry := executor.registry.roster()[0]
+			if got := enabled(entry); got != tc.want {
+				t.Errorf("enabled=%v want %v", got, tc.want)
+			}
+			if got := available(entry); got != tc.want {
+				t.Errorf("available=%v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRegistryRejectsInvalidLegacyBoolean(t *testing.T) {
+	home := t.TempDir()
+	body := `{"agents":[{"name":"legacy","model":"default","roles":["explain"],"enabled":2}]}`
+	if err := os.WriteFile(filepath.Join(home, "agents.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewRegistryExecutor(home); err == nil {
+		t.Fatal("invalid legacy boolean loaded successfully")
 	}
 }
 

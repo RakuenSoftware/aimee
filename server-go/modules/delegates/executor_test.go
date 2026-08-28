@@ -476,7 +476,7 @@ func TestSelectAgentFallsBackFromHTTPDefaultButHonoursExplicitModel(t *testing.T
 }
 
 func TestSelectAgentExcludesUnavailableAgents(t *testing.T) {
-	unavailable, available := false, true
+	unavailable, available := compatibleBool(false), compatibleBool(true)
 	registry := agentRegistry{DefaultAgent: "offline", Agents: []agentEntry{
 		{Name: "offline", Model: "offline-model", CLIKind: "codex", CLICmd: "codex",
 			Roles: []string{"review"}, Available: &unavailable},

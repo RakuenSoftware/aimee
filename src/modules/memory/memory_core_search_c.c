@@ -270,11 +270,17 @@ int memory_generate_candidates(const char *query, const char *norm_query,
       }
    }
 
-   /* Fallback: LIKE search */
+   /* Indexed lexical lane. The former unconditional LOWER(... LIKE ...) scan
+    * walked the full memories table on every hybrid recall, even when the
+    * vector and structured lanes had already produced candidates. Preserve
+    * substring recall only as a compatibility fallback when word-based FTS
+    * finds nothing. */
    MEMORY_AUTOFREE memory_t *like_matches = calloc(128, sizeof(*like_matches));
    if (!like_matches)
       return count;
-   int like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches, 128);
+   int like_count = db2_memory_find_facts_fts(norm_query, fetch_limit, like_matches, 128);
+   if (like_count == 0)
+      like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches, 128);
    if (like_count > 0)
       memory_record_query_stage_metric(plan, "like");
    for (int i = 0; i < like_count && count < max; i++)

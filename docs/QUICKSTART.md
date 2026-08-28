@@ -15,9 +15,27 @@ can start the KB container.
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
 docker compose -f compose.server-managed.yaml up -d
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
+
+The store runs three separate PostgreSQL roles (an admin, a migrator and a runtime), and every
+Compose profile that starts `aimee-store-db` requires a password for each. There is deliberately no
+default, so no deployment can inherit a password that ships in the repository; without them Compose
+stops before it creates anything:
+
+```text
+error while interpolating services.aimee-store-db.environment.POSTGRES_PASSWORD:
+required variable AIMEE_STORE_ADMIN_PASSWORD is missing a value
+```
+
+Compose reads `.env` on its own, so generating them once as above is all that is needed. Keep the
+file: those are the credentials for the data directory that now exists, and changing one later does
+not re-run `initdb`.
 
 When you do not supply a dashboard login, the server generates one on first boot and prints it once
 in that log. The values below show the format. Your values will be different:

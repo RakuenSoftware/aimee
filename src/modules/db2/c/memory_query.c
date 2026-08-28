@@ -202,6 +202,52 @@ int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int 
    return n;
 }
 
+int db2_memory_find_facts_fts(const char *query, int limit, memory_t *out, int max)
+{
+   if (!query || !query[0] || !out || limit <= 0 || max <= 0)
+      return 0;
+   void *conn = db2_conn();
+   if (!conn)
+      return 0;
+
+   /* `memories_fts MATCH` and bm25 are native FTS5 under the sqlite shim and
+    * are translated to the generated tsvector/ts_rank pair by db_postgres.c.
+    * Joining through rowid keeps the existing scope and lifecycle predicates
+    * authoritative while avoiding the repeated full-table LOWER(... LIKE ...)
+    * scans previously performed once per query token. */
+   static const char *sql =
+       "SELECT m.id, m.tier, m.kind, m.key, m.content, m.confidence, m.use_count,"
+       " m.last_used_at, m.created_at, m.updated_at, m.source_session, m.salience,"
+       " m.provenance_category"
+       " FROM memories_fts JOIN memories m ON m.id = memories_fts.rowid"
+       " WHERE memories_fts MATCH ?1" DB2_MEMORY_RECALL_FILTER_SQL(
+           "m.id") " ORDER BY " DB2_MEMORY_SCOPE_RANK_SQL("m.id") " DESC,"
+                                                                  " bm25(memories_fts),"
+                                                                  " CASE m.tier WHEN 'L3' THEN 0 "
+                                                                  "WHEN 'L2' THEN 1 WHEN 'L1' "
+                                                                  "THEN 2 ELSE 3 END,"
+                                                                  " m.use_count DESC, m.confidence "
+                                                                  "DESC LIMIT ?2";
+   char err[MQ_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return 0;
+   aimee_pg_bind_text(st, "?1", query);
+   aimee_pg_bind_int(st, "?2", limit);
+   db2_memory_scope_bind_current(st);
+
+   int n = 0;
+   aimee_pg_step_t step = AIMEE_PG_DONE;
+   while (n < max && (step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+      db2_fill_memory_12col_pg(st, &out[n++]);
+   if (step == AIMEE_PG_ERR)
+      fprintf(stderr, "memory lexical query failed: %s\n", err[0] ? err : "unknown database error");
+   if (getenv("AIMEE_MEMORY_LEXICAL_TRACE"))
+      fprintf(stderr, "memory lexical query=%s rows=%d step=%d\n", query, n, (int)step);
+   aimee_pg_finalize(st);
+   return n;
+}
+
 int db2_memory_collect_alias_matches(const char *alias, int limit, memory_t *out, int max)
 {
    if (!alias || !alias[0] || !out || limit <= 0 || max <= 0)

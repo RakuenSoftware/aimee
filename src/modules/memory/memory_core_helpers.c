@@ -247,22 +247,26 @@ int memory_append_linked_neighbors(memory_t *matches, int count, int max_count,
       return count;
 
    int seed_count = count;
-   for (int i = 0; i < seed_count && count < max_count; i++)
+   int64_t seed_ids[128];
+   for (int i = 0; i < seed_count; i++)
+      seed_ids[i] = matches[i].id;
+   int link_cap = seed_count * 64;
+   memory_link_t *links = calloc((size_t)link_cap, sizeof(*links));
+   if (!links)
+      return count;
+   int n = db2_memory_link_query_many(seed_ids, seed_count, links, link_cap);
+   for (int j = 0; j < n && count < max_count; j++)
    {
-      memory_link_t links[64];
-      int n = db2_memory_link_query(matches[i].id, links, (int)(sizeof(links) / sizeof(links[0])));
-      for (int j = 0; j < n && count < max_count; j++)
-      {
-         int64_t neighbor_id =
-             links[j].source_id == matches[i].id ? links[j].target_id : links[j].source_id;
-         if (neighbor_id <= 0 || !memory_relation_allowed(allowed_relations, links[j].relation))
-            continue;
-         if (memory_find_index_by_id(matches, count, neighbor_id) >= 0)
-            continue;
-         if (memory_get(neighbor_id, &matches[count]) == 0)
-            count++;
-      }
+      int source_is_seed = memory_find_index_by_id(matches, seed_count, links[j].source_id) >= 0;
+      int64_t neighbor_id = source_is_seed ? links[j].target_id : links[j].source_id;
+      if (neighbor_id <= 0 || !memory_relation_allowed(allowed_relations, links[j].relation))
+         continue;
+      if (memory_find_index_by_id(matches, count, neighbor_id) >= 0)
+         continue;
+      if (memory_get(neighbor_id, &matches[count]) == 0)
+         count++;
    }
+   free(links);
    return count;
 }
 
@@ -287,22 +291,25 @@ int memory_compute_pagerank_scores(const memory_t *matches, int count,
    for (int i = 0; i < count; i++)
       scores[i] = 1.0 / (double)count;
 
+   int64_t candidate_ids[128];
    for (int i = 0; i < count; i++)
+      candidate_ids[i] = matches[i].id;
+   int link_cap = count * 64;
+   memory_link_t *links = calloc((size_t)link_cap, sizeof(*links));
+   if (!links)
+      return 0;
+   int nlinks = db2_memory_link_query_many(candidate_ids, count, links, link_cap);
+   for (int k = 0; k < nlinks; k++)
    {
-      memory_link_t links[64];
-      int n = db2_memory_link_query(matches[i].id, links, (int)(sizeof(links) / sizeof(links[0])));
-      for (int k = 0; k < n; k++)
-      {
-         int64_t other_id =
-             links[k].source_id == matches[i].id ? links[k].target_id : links[k].source_id;
-         int j = memory_find_index_by_id(matches, count, other_id);
-         if (j < 0 || i == j || !memory_relation_allowed(cfg->relations, links[k].relation))
-            continue;
-         adjacency[i][j] += 1.0;
-         adjacency[j][i] += 1.0;
-         edge_count += 2;
-      }
+      int i = memory_find_index_by_id(matches, count, links[k].source_id);
+      int j = memory_find_index_by_id(matches, count, links[k].target_id);
+      if (i < 0 || j < 0 || i == j || !memory_relation_allowed(cfg->relations, links[k].relation))
+         continue;
+      adjacency[i][j] += 1.0;
+      adjacency[j][i] += 1.0;
+      edge_count += 2;
    }
+   free(links);
 
    const double damping = 0.85;
    for (int iter = 0; iter < cfg->iterations; iter++)

@@ -431,7 +431,12 @@ static char *rewrite_db2_text_search(const char *sql)
          if (*close == ')' && id_end > id_start && is_fts_ident(id_start, id_end))
          {
             const char *mstart = NULL, *mend = NULL;
-            if (find_any_match_arg(close + 1, &mstart, &mend))
+            /* ORDER BY follows WHERE in SQL, so the MATCH that supplies the
+             * rank expression normally appears before bm25().  Search the
+             * complete statement rather than only the suffix after bm25;
+             * find_any_match_arg intentionally supports the single-MATCH
+             * query shape used by this compatibility surface. */
+            if (find_any_match_arg(sql, &mstart, &mend))
             {
                if (is_trigram_fts(id_start, id_end))
                {
