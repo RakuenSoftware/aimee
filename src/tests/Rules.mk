@@ -626,6 +626,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
                $(TESTPREFIX)/unit-test-delegate-liveness \
+               $(TESTPREFIX)/unit-test-delegate-exit-classify \
                $(TESTPREFIX)/unit-test-agent-parallel \
                $(TESTPREFIX)/unit-test-server-cli-oauth \
                $(TESTPREFIX)/unit-test-workspace-manifest \
@@ -5078,6 +5079,11 @@ $(TESTPREFIX)/unit-test-delegate-ensemble: $(OBJDIR)/tests/test_delegate_ensembl
 
 $(TESTPREFIX)/unit-test-delegate-liveness: $(OBJDIR)/tests/test_delegate_liveness.o \
                                     $(OBJDIR)/server/liveness.o
+	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
+
+$(TESTPREFIX)/unit-test-delegate-exit-classify: \
+                                    $(OBJDIR)/tests/test_delegate_exit_classify.o \
+                                    $(OBJDIR)/delegate_exit_classify.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-agent-parallel: $(OBJDIR)/tests/test_agent_parallel.o \

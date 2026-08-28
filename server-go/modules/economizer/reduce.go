@@ -293,8 +293,8 @@ func Reduce(messages *JSONValue, systemPrompt string, seam Seam, cfg *ReduceConf
 	var compressedOwned *JSONValue
 
 	// Compress runs FIRST so the fold, when also enabled, sees already-shrunk
-	// bodies. Unlike the fold it needs no clean-user-turn boundary, so it engages
-	// on autonomous tool-loops where the fold never can.
+	// bodies. It needs no completed-cycle boundary, so it can engage earlier in
+	// autonomous tool loops and can still shrink bodies inside the retained tail.
 	if cfg.Compress && !cfg.MeasureOnly {
 		cc := FoldConfig{
 			Enabled:               true,

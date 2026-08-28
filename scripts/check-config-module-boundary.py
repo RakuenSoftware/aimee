@@ -15,6 +15,7 @@ EXTERNAL_MODULE = "github.com/RakuenSoftware/aimee-module-config"
 FROZEN_EVIDENCE = (
     Path("benchmarks/fixtures/gemma4-unified/ab-v1"),
     Path("benchmarks/results/gemma4-unified/ab-v1"),
+    Path("benchmarks/results/roi"),
     Path("benchmarks/hashline/corpus.generated.json"),
 )
 

@@ -236,8 +236,11 @@ func TestFoldFreezeReusesBoundary(t *testing.T) {
 	}
 }
 
-// A transcript with no clean user-turn boundary must not fold at all.
-func TestFoldNoCleanBoundary(t *testing.T) {
+// Autonomous tool loops have no second plain user turn. A complete assistant
+// tool cycle is nevertheless a safe boundary: the call and its result remain
+// together in the retained tail, and the synthetic folded user summary becomes
+// the user message that precedes the assistant call.
+func TestFoldUsesAutonomousToolCycleBoundary(t *testing.T) {
 	m := NewArray()
 	m.Append(mkUser("start"))
 	for k := 0; k < 10; k++ {
@@ -247,8 +250,27 @@ func TestFoldNoCleanBoundary(t *testing.T) {
 	}
 	cfg := &FoldConfig{Enabled: true, RetainedMsgs: 4, MinFoldMsgs: 4,
 		ReasoningExcerptBytes: 40, Closet: ClosetConfig{Enabled: true}}
+	r := FoldView(m, cfg, nil)
+	if !r.Folded || r.Messages == nil {
+		t.Fatal("a complete autonomous tool loop should fold")
+	}
+	if got := r.Messages.At(1).GetString("role"); got != "assistant" {
+		t.Fatalf("tail must begin with its assistant tool call, got role %q", got)
+	}
+	if repairs := MessageHistoryRepair(r.Messages.Clone()); repairs != 0 {
+		t.Fatalf("tool-cycle fold produced %d structural repair(s)", repairs)
+	}
+}
+
+func TestFoldRejectsOrphanOnlyTailAsBoundary(t *testing.T) {
+	m := NewArray()
+	m.Append(mkUser("start"))
+	for k := 0; k < 10; k++ {
+		m.Append(mkToolResult(fmt.Sprintf("missing_%02d", k), "orphan result"))
+	}
+	cfg := &FoldConfig{Enabled: true, RetainedMsgs: 4, MinFoldMsgs: 4}
 	if r := FoldView(m, cfg, nil); r.Folded {
-		t.Error("a tool loop has no clean boundary and must not fold")
+		t.Error("orphan tool results do not create a safe fold boundary")
 	}
 }
 

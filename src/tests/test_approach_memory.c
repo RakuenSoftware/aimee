@@ -9,6 +9,7 @@
 
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "db1.h"
@@ -176,6 +177,52 @@ static void test_render_reports_and_never_instructs(void)
    assert(out[0] == '\0');
 }
 
+static void test_no_progress_failure_becomes_retry_context(void)
+{
+   if (!store_module_fixture_available())
+      return;
+
+   const char *goal = "Diagnose and repair trust bundle readiness across the Aimee repository";
+   const char *failure =
+       "no-progress circuit breaker tripped after 28 successful calls without an edit";
+
+   /* The source identifies who paid to discover the dead end. Recall below has
+    * no source/session/model filter: the lesson belongs to this shared KB and
+    * is available to another authorized consumer with a similar goal. */
+   assert(approach_store_record_no_progress(goal, failure,
+                                            "delegate:user-a/session-1/qwen-local") == 0);
+
+   learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
+   int n = approach_store_recall("Repair Aimee repository trust bundle readiness", hits,
+                                 APPROACH_MEM_MAX_RECALL);
+   assert(n == 1);
+   assert(strcmp(hits[0].approach_text,
+                 "broad repository exploration with repeated or overlapping retrievals and no "
+                 "edit") == 0);
+   assert(strcmp(hits[0].failure_mode, failure) == 0);
+   assert(hits[0].occurrences == 1);
+
+   char *retry = approach_store_retry_context("Repair Aimee repository trust bundle readiness");
+   assert(retry != NULL);
+   assert(strstr(retry, "<prior_failure_learning>") != NULL);
+   assert(strstr(retry, hits[0].approach_text) != NULL);
+   assert(strstr(retry, "materially different plan") != NULL);
+   assert(strstr(retry, "smallest justified edit or decisive test") != NULL);
+   free(retry);
+
+   /* A repeated stop reinforces the same learned approach rather than creating
+    * an unbounded series of prose variants. */
+   assert(approach_store_record_no_progress(goal, failure, "delegate:user-b/session-9/terra") == 0);
+   n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
+   assert(n == 1);
+   assert(hits[0].occurrences == 2);
+
+   /* Goal similarity is the scope boundary: unrelated delegates do not receive
+    * this task's failure history. */
+   retry = approach_store_retry_context("Write the quarterly customer newsletter");
+   assert(retry == NULL);
+}
+
 static void test_never_touches_the_blocking_path(void)
 {
    /* Asserts that recording created no anti-pattern rows. With no store
@@ -232,6 +279,7 @@ int main(void)
    test_overlap_scoring();
    test_recall_surfaces_the_dead_end();
    test_render_reports_and_never_instructs();
+   test_no_progress_failure_becomes_retry_context();
    test_never_touches_the_blocking_path();
    test_absent_store_means_nothing_known();
 

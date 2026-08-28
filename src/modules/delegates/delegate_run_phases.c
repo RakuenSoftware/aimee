@@ -12,6 +12,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
+#include "approach_store.h"
 #include "cmd_agent_delegate_impl.h"
 #include "db1_client/delegate_learning.h"
 #include "db1_client/interaction_events.h"
@@ -70,7 +71,7 @@ static int delegate_file_snapshot_changed(delegate_file_snapshot_t before,
  * verbatim from delegate_worker. */
 void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
                                    int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent)
+                                   agent_t *target_agent, const char *goal, const char *source_ref)
 {
    dl_exit_metrics_t dlm;
    memset(&dlm, 0, sizeof(dlm));
@@ -98,6 +99,16 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
    }
    db1_delegate_learning_record(sid, role, dl_failure_mode_to_string(dlc.failure_mode), dlc.lesson,
                                 evidence_json ? evidence_json : dlc.evidence, dlc.confidence);
+   int approach_failure_recorded = -1;
+   if (dlc.failure_mode == DL_MODE_NO_PROGRESS && goal && goal[0])
+   {
+      approach_failure_recorded =
+          approach_store_record_no_progress(goal, result->error, source_ref) == 0;
+      aimee_log(approach_failure_recorded ? LOG_INFO : LOG_WARN, "delegate",
+                "delegate %s: no-progress failed approach %s for future similar goals",
+                source_ref ? source_ref : "",
+                approach_failure_recorded ? "recorded" : "not recorded");
+   }
    free(evidence_json);
    cJSON_Delete(evidence);
 
@@ -112,6 +123,8 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
       cJSON_AddStringToObject(payload, "agent", result->agent_name);
       cJSON_AddStringToObject(payload, "provider", event_agent ? event_agent->provider : "");
       cJSON_AddStringToObject(payload, "model", event_agent ? event_agent->model : "");
+      if (approach_failure_recorded >= 0)
+         cJSON_AddBoolToObject(payload, "approach_failure_recorded", approach_failure_recorded);
       char *payload_json = cJSON_PrintUnformatted(payload);
       (void)db1_interaction_event_record(sid, ie_event_type_name(IE_DELEGATE_EXIT), "system",
                                          payload_json ? payload_json : "{}",

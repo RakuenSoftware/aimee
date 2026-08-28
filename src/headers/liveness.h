@@ -7,6 +7,7 @@
  * Signals monitored:
  *   1. Empty or whitespace-only final responses.
  *   2. Repeated identical tool calls (circuit breaker).
+ *   3. Write-capable agents that keep retrieving without making progress.
  *
  * Thresholds:
  *   LIVENESS_REPEAT_WARN_THRESHOLD  — inject warning after N identical calls in a row.
@@ -23,6 +24,67 @@
 
 /* Number of warning injections before the circuit breaker trips and the loop aborts. */
 #define LIVENESS_REPEAT_ABORT_THRESHOLD 3
+
+/* A write-capable delegate gets an action checkpoint after this many successful
+ * non-mutating calls, even when every retrieval was unique. */
+#define LIVENESS_PROGRESS_INITIAL_CALLS 12
+
+/* After a checkpoint, this many further successful non-mutating calls escalate
+ * the warning. The third ignored checkpoint terminates the loop. */
+#define LIVENESS_PROGRESS_FOLLOWUP_CALLS 8
+
+/* Two retrievals that duplicate or overlap an item still in the sliding window
+ * are enough to bring the initial checkpoint forward. */
+#define LIVENESS_PROGRESS_DUPLICATE_HITS 2
+
+#define LIVENESS_PROGRESS_WINDOW 12
+#define LIVENESS_PROGRESS_TOOL_MAX 64
+#define LIVENESS_PROGRESS_TARGET_MAX 256
+
+typedef enum
+{
+   LIVENESS_PROGRESS_NONE = 0,
+   LIVENESS_PROGRESS_CHECKPOINT = 1,
+   LIVENESS_PROGRESS_ESCALATE = 2,
+   LIVENESS_PROGRESS_ABORT = 3
+} liveness_progress_action_t;
+
+typedef struct
+{
+   char tool[LIVENESS_PROGRESS_TOOL_MAX];
+   char target[LIVENESS_PROGRESS_TARGET_MAX];
+   int range_start;
+   int range_end;
+   int has_range;
+} liveness_progress_retrieval_t;
+
+typedef struct
+{
+   liveness_progress_retrieval_t window[LIVENESS_PROGRESS_WINDOW];
+   int window_count;
+   int window_next;
+   int calls_since_mutation;
+   int calls_since_checkpoint;
+   int duplicate_hits;
+   int checkpoints;
+   int successful_mutations;
+} liveness_progress_state_t;
+
+/* Initialize a sliding-window progress guard. */
+void liveness_progress_init(liveness_progress_state_t *state);
+
+/* Observe one completed tool call. `target` is the stable retrieval identity
+ * (normally a path, query, or canonical arguments). Ranges are inclusive.
+ * Unsuccessful calls do not advance the guard. A successful mutation clears
+ * all no-progress evidence. */
+liveness_progress_action_t
+liveness_progress_observe(liveness_progress_state_t *state, const char *tool, const char *target,
+                          int range_start, int range_end, int has_range, int successful,
+                          int mutation);
+
+/* Format the model-visible instruction associated with CHECKPOINT or ESCALATE. */
+void liveness_format_progress_hint(const liveness_progress_state_t *state,
+                                   liveness_progress_action_t action, char *buf, size_t bufsz);
 
 /* Returns 1 if content is NULL, empty, or contains only whitespace characters.
  * A delegate that returns such a response has not produced usable output. */

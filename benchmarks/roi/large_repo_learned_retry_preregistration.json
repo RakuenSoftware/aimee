@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "registered_at": "2026-08-27T09:30:00Z",
+  "purpose": "Test whether task-scoped knowledge recorded by Aimee's no-progress stop changes the next attempt enough to produce an edit, regression test, or completed repair instead of repeating broad retrieval.",
+  "source_failure_artifact_sha256": "9f33c6e1949a1e53fab48ec7ea2baf50f92c1d8c60500b391d6f8b9ee4e1cbb4",
+  "source_failure_task": "trust_bundle_readiness",
+  "source_failure_condition": "aimee_progress",
+  "source_failure_terminal_reason": "progress_abort",
+  "controller": {
+    "initial_calls": 12,
+    "followup_calls": 8,
+    "duplicate_hits": 2,
+    "window": 12
+  },
+  "conditions": {
+    "aimee_learned_retry": "Production Go economizer and write-progress controller, with production-equivalent goal-scoped failed-approach recall derived only from the sealed prior run."
+  },
+  "initial_task": "trust_bundle_readiness",
+  "initial_repeats": 1,
+  "fixed_controls": [
+    "Qwen3.8 27B Q4_K_XL",
+    "temperature zero",
+    "same buggy parent revision",
+    "same task and base system prompt",
+    "same tools and tool-output limits",
+    "same 65536-token context cap",
+    "same hidden child-era tests",
+    "same 30-turn maximum",
+    "same economizer and progress-controller thresholds as the sealed failure"
+  ],
+  "intervention": "Before the first provider call, inject the task-scoped failed approach and measured stop evidence using the same prior_failure_learning wording as the production retry path. No solution, target file, hidden test, or later-fix information is injected.",
+  "primary_outcome": "hidden grader passes",
+  "secondary_outcomes": [
+    "a successful repository mutation occurs before 28 successful non-mutating tool calls",
+    "candidate authors regression-sensitive tests",
+    "terminal reason differs from progress_abort",
+    "provider-reported billable input and output tokens",
+    "wall time",
+    "checkpoint, escalation, and repeated-retrieval counts"
+  ],
+  "success_claim": "A learned-retry completion requires hidden grader passes. A behavior-change claim requires an earlier successful mutation, a regression-sensitive authored test, or a terminal reason other than progress_abort. Token savings are reported descriptively against the sealed source run and are not a population estimate.",
+  "stopping_rule": "Run the single planned learned retry to submit, assistant final, provider/context failure, progress abort, or 30 turns. Do not change the learned evidence, thresholds, prompts, task, grader, or stopping rules after dispatch begins.",
+  "interpretation_guardrail": "This is a sequential within-task demonstration from one sealed failure and one retry, not an independent paired estimate or population claim."
+}

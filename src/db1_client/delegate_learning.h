@@ -11,6 +11,7 @@ typedef enum
    DL_MODE_STALL_NO_WRITES,   /* write_enforce fired, 0 writes */
    DL_MODE_STALL_SLOW_WRITES, /* write_enforce fired but eventually wrote */
    DL_MODE_MAX_TURNS,         /* max-turn budget exhausted */
+   DL_MODE_NO_PROGRESS,       /* successful retrieval loop made no write progress */
    DL_MODE_DRIFT_PREFLIGHT,   /* pre-flight drift detected */
    DL_MODE_DRIFT_BRANCH,      /* branch drift detected */
    DL_MODE_CANCELLED,         /* delegate was cancelled */

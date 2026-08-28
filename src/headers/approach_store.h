@@ -30,6 +30,14 @@ extern "C"
    int approach_store_record(const char *goal, const char *approach, const char *failure_mode,
                              const char *source, const char *source_ref);
 
+   /* Record the controller's specific failed approach in the shared KB. The
+    * source_ref is provenance, not a recall boundary: later authorized users,
+    * sessions, and models on the same KB can reuse the lesson when their goal
+    * is sufficiently similar. The approach text is stable so a retry of the
+    * same goal reinforces one row instead of creating prose variants. */
+   int approach_store_record_no_progress(const char *goal, const char *failure_mode,
+                                         const char *source_ref);
+
    /* Approaches that already failed against a goal like this one, best match
     * first, filtered to APPROACH_MEM_MIN_SIMILARITY. Returns rows written
     * (capped at max), 0 when nothing is similar enough or the store is empty,
@@ -47,6 +55,10 @@ extern "C"
     * which is a legitimate outcome and not a failure. */
    int approach_store_render(const char *goal, char *out, size_t out_len, char *arm_out,
                              size_t arm_out_len);
+
+   /* Heap-allocated system-prompt block for a retry, or NULL when no similar
+    * failed approach is known/the selected advisory arm is off. Caller frees. */
+   char *approach_store_retry_context(const char *goal);
 
 #ifdef __cplusplus
 }

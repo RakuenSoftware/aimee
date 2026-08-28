@@ -8,18 +8,45 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
+	"sync"
 
 	"github.com/JBailes/aimee/server-go/bus"
 	"github.com/JBailes/aimee/server-go/modules/economizer"
 )
 
+// memoryStateStore gives multi-turn benchmark conversations the same
+// StateStore contract that production serves from DB1. The probe remains
+// process-local and disposable, but a state_key now exercises warm freeze
+// boundaries and recall state instead of silently degrading every turn cold.
+type memoryStateStore struct {
+	mu     sync.Mutex
+	states map[string]string
+}
+
+func (s *memoryStateStore) LoadState(_ context.Context, key string) (string, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	value, found := s.states[key]
+	return value, found, nil
+}
+
+func (s *memoryStateStore) SaveState(_ context.Context, key, value string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.states[key] = value
+	return nil
+}
+
 func main() {
 	scanner := bufio.NewScanner(os.Stdin)
 	scanner.Buffer(make([]byte, 64*1024), 32*1024*1024)
-	handler := economizer.NewHandler()
+	handler := economizer.NewHandlerWithStore(&memoryStateStore{
+		states: make(map[string]string),
+	})
 	encoder := json.NewEncoder(os.Stdout)
 
 	for scanner.Scan() {

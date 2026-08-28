@@ -9,6 +9,7 @@
 #include "server_delegate_monitor.h" /* delegate heartbeat begin/end (keep slow delegates alive) */
 #include "server_compute_impl.h"
 #include "agent_config.h"
+#include "approach_store.h"
 #include <aimee/gateway/gateway_policy.h>
 #include "presence.h"
 #include "compute_pool.h"
@@ -735,6 +736,7 @@ void delegate_worker(void *arg)
    const char *role =
        delegate_role_canonicalize(cJSON_IsString(jrole) ? jrole->valuestring : "execute");
    const char *prompt = cJSON_IsString(jprompt) ? jprompt->valuestring : "";
+   const char *learning_goal = prompt; /* Preserve before worktree/evidence rewrites. */
    int max_tokens = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0; /* 0 => model-derived */
    double max_cost_usd = cJSON_IsNumber(jmaxcost) ? jmaxcost->valuedouble : 0.0;
    const char *system_prompt = cJSON_IsString(jsystem) ? jsystem->valuestring : NULL;
@@ -1410,6 +1412,19 @@ void delegate_worker(void *arg)
    delegate_append_owned_block(&system_prompt, &template_sys_prompt,
                                delegate_inject_graph_context(prompt, cwd));
 
+   /* Goal-specific negative knowledge closes the failure loop: a no-progress
+    * abort records the failed approach at exit, and a sufficiently similar
+    * future goal receives it before the first provider call. */
+   if (delegate_allows_writes)
+   {
+      char *retry_context = approach_store_retry_context(learning_goal);
+      if (retry_context)
+         aimee_log(LOG_INFO, "delegate",
+                   "delegate %s: injecting prior failed-approach learning for a similar goal",
+                   deleg_id);
+      delegate_append_owned_block(&system_prompt, &template_sys_prompt, retry_context);
+   }
+
    /* Named-file drift guard: extract any repo-relative paths named in the prompt
     * and check pre-flight conditions before running the agent. */
    char named_paths[DELEGATE_DRIFT_MAX_PATHS][DELEGATE_DRIFT_PATH_MAX];
@@ -1923,7 +1938,8 @@ void delegate_worker(void *arg)
    }
 
    /* Classify and record a learning from this delegate exit. */
-   delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent);
+   delegate_record_exit_learning(sid, role, &result, rc, max_turns, &acfg, target_agent,
+                                 learning_goal, deleg_id);
 
    /* Close the delegate_routing bandit decision (if one was sampled) with the run
     * outcome. By default success (rc == 0) -> 1.0, otherwise 0.0. When the
