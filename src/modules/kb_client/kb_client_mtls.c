@@ -768,6 +768,50 @@ static void pool_return(kb_pool_entry_t *entry, int reusable)
    pthread_mutex_unlock(&g_lock);
 }
 
+/* An identity file that exists but is not usable is NOT the same as having no
+ * identity, and reporting it as "not configured" is what makes this failure so
+ * expensive to diagnose.
+ *
+ * A managed deploy whose `managed-server-identity install` step does not finish
+ * leaves a v2 record with state "pending" and no ca/cert/key. identity_load
+ * rejects it, so the caller falls back to the plain http:// kb URL -- and then
+ * kb_plain_would_leak refuses to send the bearer in cleartext to a non-loopback
+ * host, because that is exactly what it is there to prevent. The KB is
+ * unreachable from that moment on, every container still reports healthy, and
+ * the only line in the log is the cleartext refusal, which names the transport
+ * rather than the reason it was chosen. Following that message leads away from
+ * the cause: the enrollment never completed.
+ *
+ * So say it, once, naming the file and the state. This changes no decision --
+ * an unusable identity is still not configured -- it only stops the operator
+ * chasing the wrong half of the system. */
+static void warn_unusable_identity_once(void)
+{
+   static int warned = 0;
+   if (warned)
+      return;
+
+   char path[1024];
+   if (identity_path(path, sizeof(path)) != 0)
+      return;
+   cJSON *j = identity_document_load(path);
+   if (!j)
+      return; /* absent is the ordinary un-enrolled case, not a failure */
+
+   const cJSON *version = cJSON_GetObjectItemCaseSensitive(j, "version");
+   const cJSON *state = cJSON_GetObjectItemCaseSensitive(j, "state");
+   const char *state_text = cJSON_IsString(state) && state->valuestring[0] ? state->valuestring
+                                                                          : "unset";
+   warned = 1;
+   LOG_WARN("kb_client",
+            "%s exists but is not usable (version=%d state=%s), so this server has no mTLS "
+            "identity for the kb and will fall back to the plain endpoint. Managed server "
+            "identity enrollment did not complete; re-run the wizard's Deploy. Until it does, "
+            "kb calls fail and the visible error is about cleartext bearers, not about this.",
+            path, cJSON_IsNumber(version) ? (int)version->valuedouble : 0, state_text);
+   cJSON_Delete(j);
+}
+
 int kb_client_mtls_configured(void)
 {
    char connection[4096];
@@ -781,6 +825,8 @@ int kb_client_mtls_configured(void)
        identity_load(NULL, ca, sizeof(ca), cert, sizeof(cert), key, sizeof(key), &metadata) == 0 &&
        metadata.version == 2;
    OPENSSL_cleanse(key, sizeof(key));
+   if (!configured)
+      warn_unusable_identity_once();
    return configured;
 }
 
