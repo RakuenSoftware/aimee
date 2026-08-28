@@ -132,8 +132,10 @@ static void test_worm_triggers_block_mutation(void)
    printf("  test_worm_triggers_block_mutation: ok\n");
 }
 
-/* Same inputs, two independent stores -> identical row_hash for seq=1. This is
- * the reproducibility the cross-engine (SQLite/Postgres) vectors rest on. */
+/* Same inputs, including the producer timestamp, in two independent stores ->
+ * identical row_hash for seq=1. This is the reproducibility the cross-engine
+ * (SQLite/Postgres) vectors rest on. Use the durable-producer seam so the test
+ * does not accidentally compare different wall-clock seconds. */
 static void test_cross_store_determinism(void)
 {
    char pa[300], pb[300];
@@ -145,8 +147,11 @@ static void test_cross_store_determinism(void)
    {
       const char *p = i == 0 ? pa : pb;
       assert(audit_worm_init_at(p) == 0);
-      assert(audit_worm_append("primary", "u1", "tool.read", "v1-fixed", "allow", "{\"x\":1}") ==
-             0);
+      long long seq = 0;
+      assert(audit_worm_append_idempotent("evt-fixed", "2026-01-02T03:04:05Z", "primary", "u1",
+                                          "tool.read", "v1-fixed", "allow", "{\"x\":1}",
+                                          &seq) == 0);
+      assert(seq == 1);
       audit_worm_close();
       sqlite3 *raw = NULL;
       assert(sqlite3_open(p, &raw) == SQLITE_OK);
