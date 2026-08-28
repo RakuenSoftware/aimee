@@ -20,8 +20,9 @@ operations. Exact command and config tables are generated from source:
 - `aimee-wfe` owns workflow definitions and lifecycle state.
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
-- Each KB owns its embedding and synthesis placements. A role can run inside that KB container or
-  use a remote endpoint; there is no separate inference service.
+- Each KB owns its embedding and synthesis placements. Embedding runs in the KB image or selected
+  embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar, and remote
+  synthesis uses the configured endpoint.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -317,11 +318,16 @@ users need a short-lived KB-signed identity token and a grant for the exact
 agent, delegate, runner, and workspace control.
 
 The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
-`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. The legacy `aimee kb grant` grammar may still appear in
+client help, but server-side dispatch is removed. An administrator or team lead manages grants on
+the KB's authenticated `/v1/write-tier-grants` API. For example:
 
 ```bash
-aimee kb grant set --server <id> --team <n> --subject <subject> --tier data
-aimee kb grant list --server <id> --team <n>
+curl --fail-with-body --cacert "$KB_CA" --cert "$ADMIN_CERT" --key "$ADMIN_KEY" \
+  -H "Authorization: Bearer $AIMEE_KB_API_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"server_id":"<id>","team_id":<n>,"subject":"<subject>","tier":"data"}' \
+  "$AIMEE_KB_SERVICE_URL/v1/write-tier-grants/set"
 ```
 
 `aimee.api.remote_writes` remains readable for compatibility but no longer authorizes user writes.
@@ -352,7 +358,8 @@ failure, preserve the store, and investigate before rotating or truncating anyth
 
 Before an upgrade, back up:
 
-- `~/.config/aimee/` including DB1, config, vault material, TLS state, and workflow files;
+- `~/.config/aimee/` including config, vault material, TLS state, and local workflow files;
+- the DB1 PostgreSQL database with `pg_dump` or the deployment's export procedure;
 - the KB PostgreSQL database with `pg_dump` or the container export helper;
 - the server and KB WORM SQLite stores using a consistent SQLite backup or seal;
 - any external witness or audit seal destination.
@@ -416,7 +423,7 @@ deployments. Preserve the first error and the operation ID; later failures are o
 <workspace>/aimee.workspace.yaml
 ```
 
-DB1 and DB2 are PostgreSQL stores, not files under the config directory. DB1 is served through the
+DB1 and DB2 data lives outside the config directory in PostgreSQL. DB1 is served through the
 `aimee` and `postgres` modules; workflow lifecycle rows use that same store contract even though the
 Go control plane owns their behavior.
 

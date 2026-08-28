@@ -125,6 +125,8 @@ Subcommands:
   grant revoke     Revoke one subject's grant (--server, --team, --subject)
 ```
 
+> `kb grant set`, `show`, `list`, and `revoke` remain in legacy help grammar, but server-side dispatch was removed in 0.4.0. Manage grants directly through the KB `/v1/write-tier-grants` API.
+
 ### `aimee launch`
 
 Launch any client in an isolated Aimee session.

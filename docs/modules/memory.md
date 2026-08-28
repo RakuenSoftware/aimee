@@ -113,7 +113,7 @@ evidence are recalled from the same required knowledge capability.
 ## Data and migrations
 
 Durable state spans DB1 memory records and DB2/PostgreSQL memory, embedding, code-index, graph, and
-artifact relations; their concrete schemas live under `src/db1` and `src/modules/db2/c`. Embedding dimension and
+artifact relations; their concrete schemas live under `server-go/modules/aimee/families` and `src/modules/db2/c`. Embedding dimension and
 model-version migrations must keep text, vector rows, provenance, and active-version metadata coherent;
 deleting vectors is safe only where the source records are demonstrably regenerable.
 
@@ -142,7 +142,7 @@ The descriptor's sixteen direct tests are `test_memory.c`, `test_memory_advanced
 defined in `memory_core.c`, which is why slice 44 excluded it from workspace.
 
 The `memory` name collides in two directions, so a `*memory*` filename is not an ownership signal.
-DB1 owns a separate working-memory store (`src/db1/wm.c`, tested by `test_working_memory.c`), and the
+DB1 owns a separate working-memory family (`server-go/modules/aimee/families/conversation_wm.go`), and the
 root-level `src/harness_memory_*.c` files implement the memory-interception harness (tested by the four
 `test_harness_memory*.c` files). Neither is claimed here, nor is `test_kb_client_memory.c` (a kb_client
 test) or `test_server_memory_benchmark.c` (a server test). Together with the code curator/index tests

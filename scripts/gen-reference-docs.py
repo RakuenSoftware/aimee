@@ -116,6 +116,13 @@ def render_cli(entries):
                 out.append(e["subs"])
                 out.append("```")
                 out.append("")
+            if e["name"] == "kb":
+                out.append(
+                    "> `kb grant set`, `show`, `list`, and `revoke` remain in legacy help grammar, "
+                    "but server-side dispatch was removed in 0.4.0. Manage grants directly through "
+                    "the KB `/v1/write-tier-grants` API."
+                )
+                out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
@@ -145,23 +152,16 @@ CFG_KEY_DESC = {
     "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
-    "aimee_with_llamacpp": "Whether THIS IMAGE bundles llama.cpp (\"1\" on the "
-    "aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact "
-    "about the running image, and the setup wizard reads it to decide whether the local "
-    "synthesis models can be offered at all.",
-    "synthesis_endpoint": "The ONE synthesis endpoint, remote or loopback. Empty means "
-    "synthesis is off, which is supported - embedding, search, recall and indexing "
-    "never call it. On a *-llm image the container entrypoint sets this to loopback "
-    "itself after starting the bundled model.",
-    "synthesis_model": "Synthesis model. On a *-llm image this selects the bundled model "
-    "to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model "
-    "label sent to the configured endpoint.",
+    "aimee_with_llamacpp": "Compatibility image flag. Managed 0.4.0 profiles deploy a "
+    "model-specific synthesis sidecar instead of bundling a generic llama.cpp gateway.",
+    "synthesis_endpoint": "OpenAI-compatible synthesis endpoint. Empty disables synthesis; "
+    "managed local profiles supply the model-specific sidecar endpoint over mTLS.",
+    "synthesis_model": "Model identity requested from the synthesis endpoint. A managed local "
+    "sidecar fixes the model family selected by its image.",
     "synthesis_api_key": "Bearer token for the synthesis endpoint (blank for a keyless "
     "or loopback endpoint).",
     "synthesis_thinking": "Let the synthesis model think before answering (default on). "
-    "It measured positive-to-neutral everywhere it was tried. Global rather than "
-    "per-stage, and the operator's call: turn it off only for a model that reasons past "
-    "its output budget without answering.",
+    "The measured effect was positive-to-neutral; the setting applies to every synthesis stage.",
 
     "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
     "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
@@ -550,7 +550,7 @@ def render_config(fields, sections, flat):
            "CLI commands + flags are documented separately in "
            "[`cli-commands.md`](cli-commands.md).",
            "",
-           "Configuration lives in the per-`AIMEE_HOME` config store. Scalar keys "
+           "Configuration lives in the per-`AIMEE_HOME` config store; DB1 lives in PostgreSQL. Scalar keys "
            "in the table below are settable from the CLI:",
            "",
            "```",
@@ -684,9 +684,8 @@ ENV_GROUP_ORDER = [
 
 ENV_DESC = {
     # Paths & assets
-    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default."),
+    "AIMEE_HOME": ("Paths & assets", "Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory."),
     "AIMEE_CAPTURE_DIR": ("Paths & assets", "Directory for best-effort event-bus capture sessions. Defaults to `AIMEE_HOME`; capture failure is exposed in health and recorded in the WORM ledger."),
-    "AIMEE_DB1_PATH": ("Paths & assets", "SQLite database the DB1 module process opens. The module is a separate process and cannot read the config store, so it is told the path and refuses to start without it rather than guessing a default and serving a different, empty database. Set it whenever `db1_path` is overridden in the configuration; the container entrypoint otherwise defaults it to `<AIMEE_HOME>/aimee.db`, which is config's own default."),
     "AIMEE_INSTALL_PREFIX": ("Paths & assets", "Install prefix used to locate bundled assets and plugins."),
     "AIMEE_BUNDLED_SKILLS_DIR": ("Paths & assets", "Override directory for the bundled skills."),
     "AIMEE_TOOLSETS_CONFIG": ("Paths & assets", "Path to a toolsets config file (overrides the default tool allowlists)."),
@@ -1200,9 +1199,9 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
-    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
-    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
-    "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential the KB presents to its configured synthesis endpoint; prefer Vault custody."),
+    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the KB, including a managed model-specific mTLS sidecar."),
+    "SYNTHESIS_MODEL": ("Provider endpoints", "Model identity the KB requests from its configured synthesis endpoint."),
     "SYNTHESIS_CA_FILE": ("Provider endpoints", "CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued."),
     "SYNTHESIS_CERT_FILE": ("Provider endpoints", "Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names."),
     "SYNTHESIS_KEY_FILE": ("Provider endpoints", "Private key for `SYNTHESIS_CERT_FILE`."),

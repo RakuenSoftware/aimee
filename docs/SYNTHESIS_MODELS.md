@@ -1,8 +1,9 @@
 # Choosing a synthesis model
 
 aimee makes every KB reasoning call (extraction, indexing, entity judgement,
-topic synthesis) through one endpoint, `SYNTHESIS_ENDPOINT`. This page is about what
-you put behind it.
+topic synthesis) through one endpoint, `SYNTHESIS_ENDPOINT`. It is empty by default because the old
+generic gateway is retired. A managed local profile supplies its model-specific sidecar endpoint;
+otherwise configure a remote OpenAI-compatible endpoint. This page is about what you put behind it.
 
 There used to be two answers to that question, a cheap model for the mechanical
 stages and a capable one for the reasoning stages. Measurement did not support

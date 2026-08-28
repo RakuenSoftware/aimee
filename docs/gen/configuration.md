@@ -12,7 +12,7 @@ This reference covers every configurable surface:
 
 CLI commands + flags are documented separately in [`cli-commands.md`](cli-commands.md).
 
-Configuration lives in the per-`AIMEE_HOME` config store. Scalar keys in the table below are settable from the CLI:
+Configuration lives in the per-`AIMEE_HOME` config store; DB1 lives in PostgreSQL. Scalar keys in the table below are settable from the CLI:
 
 ```
 aimee config show                 # print the effective config
@@ -29,7 +29,7 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | Key | Type | Description |
 |-----|------|-------------|
 | `aimee_synthesis_model` | string | n/a |
-| `aimee_with_llamacpp` | string | Whether THIS IMAGE bundles llama.cpp ("1" on the aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact about the running image, and the setup wizard reads it to decide whether the local synthesis models can be offered at all. |
+| `aimee_with_llamacpp` | string | Compatibility image flag. Managed 0.4.0 profiles deploy a model-specific synthesis sidecar instead of bundling a generic llama.cpp gateway. |
 | `audit_action_enabled` | bool | Publish governed tool-action audit rows (default on); disabling it creates an audit coverage gap. |
 | `audit_worm_enabled` | bool | Dual-write governed-action audit rows into the append-only, hash-chained WORM store alongside audit.log (default off). |
 | `autonomous` | bool | Legacy mode flag. The current Go WFE records run mode at admission but does not branch scheduler behavior on it; human gates always park. |
@@ -101,9 +101,9 @@ The everyday runtime surface. Deploy-time, advanced-tuning, and dev-only keys ar
 | `require_aimee_memory` | bool | Block agent writes to external file-based agent-memory stores (~/.claude/projects/<slug>/memory/...) and redirect durable memories into aimee's memory system via `aimee memory store` (default on). |
 | `require_session_worktree` | bool | Fail closed on mutating ops outside this session's isolated worktree (session-isolation guard; default on). |
 | `subagent_ban_enabled` | bool | Prevent provider-native sub-agent tools when an aimee delegate is available, and install the matching client guardrails (default on). |
-| `synthesis_endpoint` | string | The ONE synthesis endpoint, remote or loopback. Empty means synthesis is off, which is supported - embedding, search, recall and indexing never call it. On a *-llm image the container entrypoint sets this to loopback itself after starting the bundled model. |
-| `synthesis_model` | string | Synthesis model. On a *-llm image this selects the bundled model to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model label sent to the configured endpoint. |
-| `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). It measured positive-to-neutral everywhere it was tried. Global rather than per-stage, and the operator's call: turn it off only for a model that reasons past its output budget without answering. |
+| `synthesis_endpoint` | string | OpenAI-compatible synthesis endpoint. Empty disables synthesis; managed local profiles supply the model-specific sidecar endpoint over mTLS. |
+| `synthesis_model` | string | Model identity requested from the synthesis endpoint. A managed local sidecar fixes the model family selected by its image. |
+| `synthesis_thinking` | bool | Let the synthesis model think before answering (default on). The measured effect was positive-to-neutral; the setting applies to every synthesis stage. |
 | `tsr_command` | string | TSR sidecar endpoint/command for structured-PDF table recognition (resolves like embedding_command; AIMEE_TSR_URL env fallback). |
 | `verify_cmd` | string | Command run after a delegated fix to verify it. |
 | `verify_cross_project` | bool | Let `aimee git verify` span other projects. |
@@ -301,7 +301,7 @@ The binaries read 258 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_FORENSICS_DIR` | Directory for shutdown-forensics dumps. |
 | `AIMEE_GUARDRAILS_PATH` | Path to the guardrails policy file. |
 | `AIMEE_HARNESS_MEMORY_SCOPES` | Path to the agent memory-surface registry config (default `<AIMEE_HOME>/harness_memory_scopes.conf`). Each `client:projects_root:memory_seg` line adds a new agent or overrides a built-in's paths for memory-write interception (writes are redirected into aimee's db1). |
-| `AIMEE_HOME` | Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default. |
+| `AIMEE_HOME` | Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
 | `AIMEE_PACK_DIR` | Directory of memory profile packs. |
@@ -614,7 +614,7 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `GEMINI_API_KEY_AUTH_MECHANISM` | Selects the Gemini key auth mechanism. |
 | `GOOGLE_API_KEY` | Google API key fallback for Gemini (via `api_key_env`). |
 | `OPENAI_API_KEY` | OpenAI API key (default for OpenAI-family agents). |
-| `SYNTHESIS_API_KEY` | Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command. |
+| `SYNTHESIS_API_KEY` | Bearer credential the KB presents to its configured synthesis endpoint; prefer Vault custody. |
 
 ### Provider endpoints
 
@@ -624,9 +624,9 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `OLLAMA_HOST` | Ollama server host/URL for local models. |
 | `SYNTHESIS_CA_FILE` | CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued. |
 | `SYNTHESIS_CERT_FILE` | Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names. |
-| `SYNTHESIS_ENDPOINT` | OpenAI-compatible base URL used by the generic llm-chat sidecar. |
+| `SYNTHESIS_ENDPOINT` | OpenAI-compatible base URL used by the KB, including a managed model-specific mTLS sidecar. |
 | `SYNTHESIS_KEY_FILE` | Private key for `SYNTHESIS_CERT_FILE`. |
-| `SYNTHESIS_MODEL` | Model requested by the generic llm-chat sidecar. |
+| `SYNTHESIS_MODEL` | Model identity the KB requests from its configured synthesis endpoint. |
 
 ### Network / proxy
 

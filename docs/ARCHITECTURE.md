@@ -16,7 +16,7 @@ flowchart LR
     F -->|typed resource calls| S
     S -->|typed /v1| K[aimee-kb, one-KB profile]
     S -->|provider API| P[model providers]
-    K -->|remote model role, when configured| X[model endpoint]
+    K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
     S -->|module bus| M[aimee store module]
     F -->|module bus| M
     M -->|postgres module| D1[(DB1 PostgreSQL)]
@@ -136,12 +136,11 @@ See [Event bus](EVENT_BUS.md).
 
 ## Storage
 
-There are two product data tiers, one workflow store, and separate WORM evidence stores.
+There are two product data tiers and separate WORM evidence stores.
 
 | Store | Owner | Contents |
 | --- | --- | --- |
-| DB1, PostgreSQL | `aimee-store` module | sessions, working memory, local state, agent jobs, policy and audit state, caches |
-| Workflow SQLite | `aimee-wfe` | definitions, immutable snapshots, work items, lifecycle events, artifacts, retries and parks |
+| DB1, PostgreSQL | `aimee` domain module through `postgres` | sessions, working memory, local state, agent jobs, policy and audit state, caches, workflow definitions and lifecycle rows |
 | DB2, PostgreSQL + pgvector | `aimee-kb` | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
 | Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
 | KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
@@ -192,8 +191,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 2. The server authorizes the principal and calls the KB's typed endpoint.
 3. The KB owns the transaction, lexical/dense indexes, and evidence.
 4. Mutations publish a PII-safe audit identity on the KB bus.
-5. Recall returns bounded evidence; optional synthesis runs inside the selected KB container or at
-   that KB's configured remote endpoint.
+5. Recall returns bounded evidence; optional synthesis runs in that KB's model-specific sidecar or
+   at its configured remote endpoint.
 
 ### Delegate turn
 
@@ -208,8 +207,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 
 1. **Admit immutable input.** `aimee-wfe` validates and snapshots the definition and request.
 2. **Persist before dispatch.** The scheduler writes the transition before starting work.
-3. **Cross a typed resource boundary.** Agent and roundtable work calls the C server; credentials never cross
-   back into the workflow store.
+3. **Cross a typed resource boundary.** Agent and roundtable work calls the C server; credentials never enter
+   the workflow rows in DB1.
 4. **Confine each slice.** Every child gets its own worktree and branch.
 5. **Keep evidence separate.** Verification, review, merge, and forge operations produce distinct artifacts.
 6. **Stop at human authority.** A human gate parks until a browser or API decision arrives. The service stores
