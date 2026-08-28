@@ -4,7 +4,7 @@
  * by passing an explicit clock, so staleness and roll-up behavior are tested
  * deterministically rather than by sleeping past a real sampling interval.
  *
- * The sampler's own I/O (kb_client_health / db1_is_initialized) is stubbed:
+ * The sampler's own I/O (kb_client_health / db1_store_probe) is stubbed:
  * this suite is about the decision, not about reaching the dependencies. */
 #include "server_http.h"
 #include "kb_client.h"
@@ -17,8 +17,11 @@
 #include <string.h>
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
-int db1_is_initialized(void)
+static int g_db1_probe_calls;
+
+int db1_store_probe(void)
 {
+   g_db1_probe_calls++;
    return 1;
 }
 
@@ -64,6 +67,7 @@ int main(void)
    unsetenv("AIMEE_RUNTIME_WEB_ENABLED");
    unsetenv("AIMEE_MODULE_RUNTIME_WEB");
    server_ready_sample_now();
+   assert(g_db1_probe_calls == 1);
    assert(g_runtime_web_checked == 1);
    assert(g_skills_trigger_checked == 1);
    assert(g_git_ref_checked == 1);
