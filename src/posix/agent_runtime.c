@@ -667,7 +667,7 @@ native_provider_http:
    char last_tool_result[512] = {0};
    int repeat_count = 0;
    int total_repeat_triggers =
-       0;   /* circuit breaker: aborts after LIVENESS_REPEAT_ABORT_THRESHOLD */
+       0; /* circuit breaker: aborts after LIVENESS_REPEAT_ABORT_THRESHOLD */
    liveness_progress_state_t progress;
    liveness_progress_init(&progress);
    int progress_enabled = delegate_role_is_write(budget_role);

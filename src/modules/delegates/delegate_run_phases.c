@@ -71,8 +71,7 @@ static int delegate_file_snapshot_changed(delegate_file_snapshot_t before,
  * verbatim from delegate_worker. */
 void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
                                    int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent, const char *goal,
-                                   const char *source_ref)
+                                   agent_t *target_agent, const char *goal, const char *source_ref)
 {
    dl_exit_metrics_t dlm;
    memset(&dlm, 0, sizeof(dlm));
@@ -107,7 +106,8 @@ void delegate_record_exit_learning(const char *sid, const char *role, const agen
           approach_store_record_no_progress(goal, result->error, source_ref) == 0;
       aimee_log(approach_failure_recorded ? LOG_INFO : LOG_WARN, "delegate",
                 "delegate %s: no-progress failed approach %s for future similar goals",
-                source_ref ? source_ref : "", approach_failure_recorded ? "recorded" : "not recorded");
+                source_ref ? source_ref : "",
+                approach_failure_recorded ? "recorded" : "not recorded");
    }
    free(evidence_json);
    cJSON_Delete(evidence);

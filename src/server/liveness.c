@@ -15,9 +15,9 @@ void liveness_progress_init(liveness_progress_state_t *state)
       memset(state, 0, sizeof(*state));
 }
 
-static int progress_retrieval_matches(const liveness_progress_retrieval_t *prior,
-                                      const char *tool, const char *target, int range_start,
-                                      int range_end, int has_range)
+static int progress_retrieval_matches(const liveness_progress_retrieval_t *prior, const char *tool,
+                                      const char *target, int range_start, int range_end,
+                                      int has_range)
 {
    if (!prior || !tool || !target || strcmp(prior->tool, tool) != 0 ||
        strcmp(prior->target, target) != 0)
@@ -27,10 +27,10 @@ static int progress_retrieval_matches(const liveness_progress_retrieval_t *prior
    return range_start <= prior->range_end && prior->range_start <= range_end;
 }
 
-liveness_progress_action_t
-liveness_progress_observe(liveness_progress_state_t *state, const char *tool, const char *target,
-                          int range_start, int range_end, int has_range, int successful,
-                          int mutation)
+liveness_progress_action_t liveness_progress_observe(liveness_progress_state_t *state,
+                                                     const char *tool, const char *target,
+                                                     int range_start, int range_end, int has_range,
+                                                     int successful, int mutation)
 {
    if (!state || !successful)
       return LIVENESS_PROGRESS_NONE;
@@ -74,16 +74,14 @@ liveness_progress_observe(liveness_progress_state_t *state, const char *tool, co
          state->window_count++;
    }
 
-   if (state->checkpoints == 0 &&
-       (state->calls_since_mutation >= LIVENESS_PROGRESS_INITIAL_CALLS ||
-        state->duplicate_hits >= LIVENESS_PROGRESS_DUPLICATE_HITS))
+   if (state->checkpoints == 0 && (state->calls_since_mutation >= LIVENESS_PROGRESS_INITIAL_CALLS ||
+                                   state->duplicate_hits >= LIVENESS_PROGRESS_DUPLICATE_HITS))
    {
       state->checkpoints = 1;
       state->calls_since_checkpoint = 0;
       return LIVENESS_PROGRESS_CHECKPOINT;
    }
-   if (state->checkpoints > 0 &&
-       state->calls_since_checkpoint >= LIVENESS_PROGRESS_FOLLOWUP_CALLS)
+   if (state->checkpoints > 0 && state->calls_since_checkpoint >= LIVENESS_PROGRESS_FOLLOWUP_CALLS)
    {
       state->checkpoints++;
       state->calls_since_checkpoint = 0;

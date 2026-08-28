@@ -182,20 +182,19 @@ static void test_no_progress_failure_becomes_retry_context(void)
    if (!store_module_fixture_available())
       return;
 
-   const char *goal =
-       "Diagnose and repair trust bundle readiness across the Aimee repository";
+   const char *goal = "Diagnose and repair trust bundle readiness across the Aimee repository";
    const char *failure =
        "no-progress circuit breaker tripped after 28 successful calls without an edit";
 
    /* The source identifies who paid to discover the dead end. Recall below has
     * no source/session/model filter: the lesson belongs to this shared KB and
     * is available to another authorized consumer with a similar goal. */
-   assert(approach_store_record_no_progress(
-              goal, failure, "delegate:user-a/session-1/qwen-local") == 0);
+   assert(approach_store_record_no_progress(goal, failure,
+                                            "delegate:user-a/session-1/qwen-local") == 0);
 
    learning_approach_hit_t hits[APPROACH_MEM_MAX_RECALL];
-   int n = approach_store_recall(
-       "Repair Aimee repository trust bundle readiness", hits, APPROACH_MEM_MAX_RECALL);
+   int n = approach_store_recall("Repair Aimee repository trust bundle readiness", hits,
+                                 APPROACH_MEM_MAX_RECALL);
    assert(n == 1);
    assert(strcmp(hits[0].approach_text,
                  "broad repository exploration with repeated or overlapping retrievals and no "
@@ -203,8 +202,7 @@ static void test_no_progress_failure_becomes_retry_context(void)
    assert(strcmp(hits[0].failure_mode, failure) == 0);
    assert(hits[0].occurrences == 1);
 
-   char *retry = approach_store_retry_context(
-       "Repair Aimee repository trust bundle readiness");
+   char *retry = approach_store_retry_context("Repair Aimee repository trust bundle readiness");
    assert(retry != NULL);
    assert(strstr(retry, "<prior_failure_learning>") != NULL);
    assert(strstr(retry, hits[0].approach_text) != NULL);
@@ -214,8 +212,7 @@ static void test_no_progress_failure_becomes_retry_context(void)
 
    /* A repeated stop reinforces the same learned approach rather than creating
     * an unbounded series of prose variants. */
-   assert(approach_store_record_no_progress(
-              goal, failure, "delegate:user-b/session-9/terra") == 0);
+   assert(approach_store_record_no_progress(goal, failure, "delegate:user-b/session-9/terra") == 0);
    n = approach_store_recall(goal, hits, APPROACH_MEM_MAX_RECALL);
    assert(n == 1);
    assert(hits[0].occurrences == 2);

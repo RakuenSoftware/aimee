@@ -82,8 +82,8 @@ void classify_delegate_exit(const dl_exit_metrics_t *m, dl_classification_t *out
                   "attempt the smallest justified edit or decisive test before broadening "
                   "exploration.");
          snprintf(out->evidence, sizeof(out->evidence),
-                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0}",
-                  m->error, m->turns, m->tool_calls);
+                  "{\"error\":\"%s\",\"turns\":%d,\"tool_calls\":%d,\"had_writes\":0}", m->error,
+                  m->turns, m->tool_calls);
       }
       else if (m->write_enforce_fired && !m->had_writes)
       {
