@@ -986,6 +986,28 @@ char *kb_client_mtls_request_timeout_with_type(const char *method, const char *p
                       content_type, 0, resp, cap, &status, &reusable)
                 : -1;
    pool_return(entry, rc == 0 && reusable);
+
+   /* A pooled keep-alive can outlive a KB container restart. The first write
+    * then discovers the dead socket even though a fresh handshake would work,
+    * which previously made an already-recovered KB look unavailable until the
+    * next breaker probe (or a server restart). Retry a response-free read once
+    * on a newly borrowed connection. Writes are deliberately excluded: the
+    * peer may have committed a POST before the connection disappeared. */
+   if (rc != 0 && status < 0 && (strcasecmp(method, "GET") == 0 || strcasecmp(method, "HEAD") == 0))
+   {
+      entry = pool_borrow(&pool_error);
+      if (entry)
+      {
+         status = -1;
+         reusable = 0;
+         rc = kb_tls_client_conn_set_timeout(entry->conn, timeout_ms) == 0
+                  ? kb_tls_client_conn_request_with_type(
+                        entry->conn, method, path, (body && body[0]) ? body : NULL, authorization,
+                        content_type, 0, resp, cap, &status, &reusable)
+                  : -1;
+         pool_return(entry, rc == 0 && reusable);
+      }
+   }
    if (status_out)
       *status_out = status;
    /* Body preserved on non-2xx as above; *status_out distinguishes. */

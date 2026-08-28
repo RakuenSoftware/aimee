@@ -111,12 +111,16 @@ def main():
     repo, revision = spec["repo"], spec.get("revision") or "main"
     print(f"baking {selected}: {repo}@{revision}", flush=True)
     local = fetch(repo, revision=revision, ignore_patterns=SKIP)
-    # Code repos are referenced by name only -- auto_map carries no revision -- so these
-    # take the default branch. A looser pin than the weights get; a model whose code must
-    # be pinned needs its auto_map repo added to the registry explicitly.
+    # auto_map carries no revision. Refuse external code unless the registry binds
+    # every referenced repository to an immutable commit, matching the Docker bake.
+    code_revisions = spec.get("code_revisions") or {}
     for code_repo in sorted(code_repos(local)):
-        print(f"  + code: {code_repo}", flush=True)
-        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        code_revision = code_revisions.get(code_repo)
+        if not code_revision or len(code_revision) != 40:
+            raise RuntimeError(f"{selected}: unpinned auto_map code repository {code_repo}")
+        print(f"  + code: {code_repo}@{code_revision}", flush=True)
+        fetch(code_repo, revision=code_revision,
+              allow_patterns=["*.py", "*.json", "*.txt"])
 
 
 if __name__ == "__main__":

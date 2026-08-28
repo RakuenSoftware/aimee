@@ -180,7 +180,13 @@ endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_compile_options(-D_FORTIFY_SOURCE=3 -fstack-protector-strong
-                        -fstack-clash-protection -fPIE -fcf-protection=full)
+                        -fstack-clash-protection -fPIE)
+    # -fcf-protection enables Intel CET and is rejected by GCC on AArch64.
+    # Gate it on the target processor (not the build host, so cross-compiles
+    # select the same flags as native builds).
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64|i[3-6]86)$")
+        add_compile_options(-fcf-protection=full)
+    endif()
     add_link_options(-pie -Wl,-z,relro,-z,now -Wl,-z,noexecstack)
 endif()
 

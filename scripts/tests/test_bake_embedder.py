@@ -6,6 +6,7 @@ in a CI log.
 """
 import importlib.util
 import json
+import os
 import pathlib
 import sys
 import tempfile
@@ -127,10 +128,64 @@ def test_auto_map_code_repos_are_followed():
     print("  auto_map code repos are followed, missing config.json is not an error")
 
 
+def test_nomic_external_code_is_immutably_pinned():
+    registry = json.loads((ROOT / "scripts" / "embedders.json").read_text())
+    nomic = registry["embedders"]["nomic-embed-text-v2-moe"]
+    code_revision = (nomic.get("code_revisions") or {}).get("nomic-ai/nomic-bert-2048")
+    assert code_revision == "e5042dce39060cc34bc223455f25cf1d26db4655", code_revision
+    assert len(code_revision) == 40 and all(c in "0123456789abcdef" for c in code_revision)
+    print("  nomic external auto_map code is bound to its compatible immutable commit")
+
+
+def test_external_code_fetch_uses_registry_revision():
+    m = load()
+    revision = "1" * 40
+    code_revision = "2" * 40
+    with tempfile.TemporaryDirectory() as d:
+        root = pathlib.Path(d)
+        snapshot = root / "snapshot"
+        snapshot.mkdir()
+        (snapshot / "config.json").write_text(json.dumps({"auto_map": {
+            "AutoModel": "example/code--modeling.Example",
+        }}))
+        registry = root / "embedders.json"
+        registry.write_text(json.dumps({"embedders": {"example": {
+            "repo": "example/model",
+            "revision": revision,
+            "code_revisions": {"example/code": code_revision},
+        }}}))
+        calls = []
+
+        def fake_fetch(repo, **kwargs):
+            calls.append((repo, kwargs))
+            return str(snapshot)
+
+        m.REGISTRY = str(registry)
+        m.fetch = fake_fetch
+        os.environ["AIMEE_EMBEDDER"] = "example"
+        m.main()
+        assert calls[1][0] == "example/code", calls
+        assert calls[1][1]["revision"] == code_revision, calls
+
+        registry.write_text(json.dumps({"embedders": {"example": {
+            "repo": "example/model", "revision": revision,
+        }}}))
+        calls.clear()
+        try:
+            m.main()
+        except RuntimeError as exc:
+            assert "unpinned auto_map code repository example/code" in str(exc), exc
+        else:
+            raise AssertionError("external auto_map code without a revision was accepted")
+    print("  external auto_map code fetches use immutable registry revisions")
+
+
 if __name__ == "__main__":
     test_transient_is_retried()
     test_permanent_is_not_retried()
     test_exhaustion_is_bounded()
     test_unknown_embedder_is_a_build_failure()
     test_auto_map_code_repos_are_followed()
+    test_nomic_external_code_is_immutably_pinned()
+    test_external_code_fetch_uses_registry_revision()
     print("test_bake_embedder: ok")

@@ -1415,6 +1415,9 @@ jobs:
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
 
+      - name: Historical store volume upgrades in place
+        run: cd src && make postgres-store-upgrade-test
+
       # Cheap and image-free: the gate that decides whether a kb may start without an
       # embedder. Getting it wrong in either direction ships a broken deploy — too
       # loose and an unconfigured kb serves nothing usable, too tight and the

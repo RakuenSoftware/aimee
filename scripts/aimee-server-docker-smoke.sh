@@ -35,6 +35,8 @@
 #                 list several to layer an override, e.g. to remap host ports
 #                 on a host where 8740/8741 are already taken
 #   WAIT_SECONDS  health wait budget on --up      (default 300)
+#   AIMEE_STORE_{ADMIN,MIGRATOR,RUNTIME}_PASSWORD may be supplied; --up
+#                 generates independent values when they are absent
 #
 # Exit code: 0 = all checks passed, non-zero otherwise.
 
@@ -88,6 +90,10 @@ if [[ "$DO_UP" == 1 ]]; then
   export AIMEE_API_BEARER_TOKEN="$BEARER"
   export AIMEE_KB_API_BEARER_TOKEN="$KB_BEARER"
   export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+  : "${AIMEE_STORE_ADMIN_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_MIGRATOR_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_RUNTIME_PASSWORD:=$(openssl rand -hex 32)}"
+  export AIMEE_STORE_ADMIN_PASSWORD AIMEE_STORE_MIGRATOR_PASSWORD AIMEE_STORE_RUNTIME_PASSWORD
 fi
 : "${KB_BEARER:=$BEARER}"
 
@@ -263,7 +269,11 @@ check "GET /v1/rules -> kb" '"rules"' "${SERVER_URL}/v1/rules"
 # No `-f`: an HTTP error must leave the body readable so a failure here is
 # diagnosable, and the assignment is guarded so a non-zero curl cannot trip
 # `set -e` and kill the run between checks with no message.
-as_of_seed="$(curl -sS -k --max-time 20 "${KB_AUTH[@]}" -X POST -H 'content-type: application/json' \
+# The first write can overlap the fresh KB's initial reflection/index pass. Its
+# production request budget is longer than the generic 20-second read probe, so
+# give this write enough time to return its committed id instead of reporting a
+# false failure after the KB has accepted it.
+as_of_seed="$(curl -sS -k --max-time 60 "${KB_AUTH[@]}" -X POST -H 'content-type: application/json' \
   -d '{"key":"e2e-as-of","content":"as-of smoke value","tier":"L0","kind":"fact"}' \
   "${KB_URL}/v1/actions/memory.store" 2>&1 || true)"
 mem_id="$(printf '%s' "$as_of_seed" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
@@ -288,6 +298,9 @@ check_status "GET /v1/health (no bearer) rejected" 401 "${SERVER_URL}/v1/health"
 
 bold "==> Sanity: kb container is directly healthy at ${KB_URL}"
 check_kb "GET /v1/health (kb direct)" '"status"' "${KB_URL}/v1/health"
+check_kb "GET /v1/health reports DB2 schema ready" '"db2_ok":true' "${KB_URL}/v1/health"
+check_kb "GET /v1/health reports KB tables ready" '"db2_kb_tables_ok":true' \
+         "${KB_URL}/v1/health"
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

@@ -389,8 +389,14 @@ static cJSON *kb_service_health_object(void)
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-   int db2_ok = (kb_module_postgres_health_probe(&schema_ok, &have_pg_trgm, &kb_tables_ok) == 0 &&
-                 schema_ok);
+   /* DB2 still runs in-process in the KB owner. The generic PostgreSQL process
+    * module reads AIMEE_STORE_URL (the server-store DSN), while the staged DB2
+    * bus adapter is not attached until that ownership migration completes.
+    * Probing either one here returns capability_absent on a healthy managed KB.
+    * Use the same thread-safe DB2 probes as startup readiness. */
+   int db2_ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
+   if (db2_kb_health_probe(&kb_tables_ok) != 0)
+      kb_tables_ok = 0;
    cJSON_AddBoolToObject(resp, "db2_ok", db2_ok);
    cJSON_AddBoolToObject(resp, "db2_kb_tables_ok", kb_tables_ok);
 
