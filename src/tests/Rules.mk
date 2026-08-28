@@ -815,6 +815,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-kb-management-action \
                $(TESTPREFIX)/unit-test-aws-eventstream
 TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
+TEST_TARGETS += $(TESTPREFIX)/unit-test-server-ready
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
 TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
 TEST_TARGETS += 
@@ -5764,7 +5765,7 @@ $(TESTPREFIX)/unit-test-server-cert-grant: $(OBJDIR)/tests/test_server_cert_gran
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-server-ready: $(OBJDIR)/tests/test_server_ready.o \
-                           $(OBJDIR)/server/server_ready.o $(OBJDIR)/log.o $(OBJDIR)/db1_store_ready.o
+                           $(OBJDIR)/server/server_ready.o $(OBJDIR)/log.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 

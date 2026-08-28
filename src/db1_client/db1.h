@@ -67,7 +67,7 @@ extern "C"
    int db1_store_ready(void);
 
    /* Whether the store can be USED right now, asked by calling it. Costs a
-    * round trip (cached for a second), so this is for the health endpoint, not
+    * round trip (cached for a second), so this is for dependency readiness, not
     * for the guard in front of every store-backed command -- that is
     * db1_store_ready above.
     *

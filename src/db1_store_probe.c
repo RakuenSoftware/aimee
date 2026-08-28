@@ -5,7 +5,7 @@
  * call that will report its own failure, and it must stay cheap because it runs
  * before all of them.
  *
- * The health endpoint is asking a different question, and the difference is
+ * The readiness endpoint is asking a different question, and the difference is
  * visible for about half a minute. Module availability is registry state, and
  * the registry is corrected by the bus's heartbeat reaper: 30s of staleness
  * plus a reap that runs every 7.5s. Kill the module and, measured twice on a
@@ -14,13 +14,13 @@
  *
  * That window is the beginning of an outage -- the part someone is watching,
  * and the part a container healthcheck would have to catch to restart anything.
- * A health endpoint that disagrees with the calls beside it during exactly that
- * window is worse than a slow one, so this asks the store a real question.
+ * A readiness endpoint that disagrees with the calls beside it during exactly
+ * that window is worse than a slow one, so this asks the store a real question.
  *
  * The question is server_session_count over an impossible window: it is
  * declared safe, takes one bound parameter, touches one indexed table and
  * returns a scalar. It is not free, which is why the answer is cached for a
- * second -- long enough that polling health cannot turn into load on the
+ * second -- long enough that polling readiness cannot turn into load on the
  * module, short enough that the reported state and the store's actual state
  * cannot diverge in a way anybody could act on.
  */
