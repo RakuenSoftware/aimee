@@ -1296,6 +1296,12 @@ if [ "$KB_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.list","tier":"L0","limit":10}') || true
     check_output "memory.list has stored entry" "integ-test" echo "$RESP"
 
+    # An explicit all-project search is a complete scope, even when the caller
+    # supplies no cwd/project/workspace. Reporting active_context_missing=true
+    # here made a real KB outage falsely blame the caller's project context.
+    RESP=$(srv_auth_req '{"method":"memory.search","keywords":["integ-test"],"scope":"all","limit":10}') || true
+    check_output "memory.search scope=all is not missing context" '"active_context_missing":false' echo "$RESP"
+
     RESP=$(srv_auth_req "{\"method\":\"memory.get\",\"id\":$MEM_ID}") || true
     check_output "memory.get by ID" "integration test value" echo "$RESP"
 
