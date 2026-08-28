@@ -14,14 +14,62 @@ boundary.
 
 ## Split stack
 
+> **This profile does not currently complete the server-to-KB link.** Everything below brings both
+> halves up healthy, and then every server call to the KB fails. Use the managed profile until this
+> is resolved; the detail is in [What is broken](#what-is-broken-in-this-profile) so a deployment is
+> not attempted on the assumption that it merely needs more configuration.
+
 ```bash
-docker compose -f deploy/compose/aimee.yaml up -d
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
+export AIMEE_KB_API_BEARER_TOKEN=$(openssl rand -hex 32)
+./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
+unset AIMEE_KB_API_BEARER_TOKEN
+docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
 
 Server and one KB are declared together, and no browser action needs to create them. The KB owns its
 embedding and synthesis role placements. Each role can run inside the KB container or use a remote
-endpoint supported by the selected profile. There is no separate inference service. This is the
-safer default when the server must not control Docker.
+endpoint supported by the selected profile. There is no separate inference service. This is intended
+as the safer default when the server must not control Docker.
+
+`all`, not `kb`: the same token is the KB's inbound credential and the server's outbound one, so
+sealing it into only the KB leaves the halves unable to talk at all.
+
+**`--env-file .env` is not optional on this path.** Compose takes its project directory from the
+first `-f` file, so for `deploy/compose/aimee.yaml` it looks for `deploy/compose/.env` and never
+reads the one at the repository root. Without the flag the command fails on the store passwords even
+though the file exists. The root-level profiles need no flag, because their project directory
+already is the repository root.
+
+### What is broken in this profile
+
+The three requirements below cannot all be satisfied at once, so no value of
+`AIMEE_KB_API_BEARER_TOKEN` makes this profile work:
+
+1. The profile sets `AIMEE_KB_HTTP_BIND=1`, and it has to: the server reaches the KB across the
+   Compose network by name, and a loopback-only listener is unreachable from another container.
+2. Binding `0.0.0.0` with no bearer is a hard refusal, not a warning. The KB logs
+   `refusing to bind 0.0.0.0:8741 with no bearer configured` and exits, and because the container is
+   `restart: unless-stopped` that presents as a KB restarting every thirty seconds while
+   `aimee-server` sits in `Created` behind its `service_healthy` gate.
+3. Once a bearer exists, the server refuses to present it over the profile's own
+   `AIMEE_KB_API_URL: http://aimee-kb:8741`, because that is cleartext to a non-loopback host:
+
+   ```text
+   kb_client: refusing to send the kb bearer in cleartext to non-loopback host 'aimee-kb';
+   use the mTLS endpoint or terminate TLS in front of the kb
+   ```
+
+   The request is never sent, so `/v1/kb/status` reports `did not respond` and the circuit opens.
+   That line goes to `/var/lib/aimee/server.log` inside the container and not to `docker logs`, so
+   the visible symptom carries none of the cause.
+
+Resolving it needs the server to reach the KB over mTLS or through a TLS terminator, which this
+profile does not yet configure. Both halves report healthy throughout, so container health is not a
+signal that the link works.
 
 The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
 route among several KB containers with explicit corpus, authority, and capability identity. Fleet
@@ -43,6 +91,11 @@ unused:
 export AIMEE_STORE_URL='postgres://user:password@host:5432/aimee_store'
 docker compose -f compose.server.yaml up -d
 ```
+
+The bundled service still needs `AIMEE_STORE_ADMIN_PASSWORD`,
+`AIMEE_STORE_MIGRATOR_PASSWORD` and `AIMEE_STORE_RUNTIME_PASSWORD` to be set even when
+`AIMEE_STORE_URL` points elsewhere, because Compose interpolates every service it parses before it
+decides which to start. Generate them into `.env` as above.
 
 Create that database `ENCODING UTF8 TEMPLATE template0`. This is load-bearing
 rather than tidiness: the store bounds text with `octet_length`, and in a
