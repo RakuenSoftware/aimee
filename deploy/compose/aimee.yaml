@@ -36,7 +36,17 @@ services:
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      #
+      # DEFAULTED, and it must stay PAIRED with the image default above. There is
+      # no wizard on this topology to write embedder_model into the kb's config,
+      # so on a fresh volume read_cfg_embedding_model finds nothing and the
+      # entrypoint exits 1 with "no embedder selected, and there is no fallback".
+      # Pointing the image default at the bundled-embedder variant was necessary
+      # but not sufficient: the weights are in the image and it still refuses,
+      # because nothing selected them. Pinning AIMEE_KB_IMAGE to another variant
+      # means setting this to match it (nomic-embed-text-v2-moe for aimee-kb-nomic);
+      # EMBEDDER_URL still wins outright, so the external case is unaffected.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}
       EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim. Leave EMPTY so the kb uses the dimension of the embedder it
       # actually serves (the bundled bekko-a25m is 384). This carried the retired
