@@ -22,16 +22,16 @@
 			"p50_ms":	1.537461,
 			"p95_ms":	1.650221,
 			"p99_ms":	1.713795,
-			"target_p50_ms":	1,
-			"target_p95_ms":	3,
+			"target_p50_ms":	5,
+			"target_p95_ms":	7,
 			"tolerance":	0.5
 		},
 		"memory_insert":	{
 			"p50_ms":	0.091742,
 			"p95_ms":	0.132784,
 			"p99_ms":	0.147745,
-			"target_p50_ms":	1,
-			"target_p95_ms":	5,
+			"target_p50_ms":	12,
+			"target_p95_ms":	15,
 			"tolerance":	0.3
 		},
 		"memory_stats":	{

@@ -64,6 +64,12 @@ typedef struct
    const char *response;
 } stub_arg_t;
 
+static const char *test_tmpdir(void)
+{
+   const char *tmp = getenv("TMPDIR");
+   return tmp && tmp[0] ? tmp : "/tmp";
+}
+
 static void *stub_server(void *a)
 {
    stub_arg_t *s = (stub_arg_t *)a;
@@ -94,7 +100,7 @@ static void *stub_server(void *a)
 static cJSON *run_stub_case(const char *response, int *status_out)
 {
    stub_arg_t arg;
-   snprintf(arg.path, sizeof(arg.path), "/tmp/aimee_http_test_%d.sock", (int)getpid());
+   snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_test_%d.sock", test_tmpdir(), (int)getpid());
    arg.response = response;
    pthread_t th;
    assert(pthread_create(&th, NULL, stub_server, &arg) == 0);
@@ -148,7 +154,8 @@ static void test_http_stream(void)
    const char *resp = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n"
                       "data: {\"i\":1}\n\ndata: {\"i\":2}\n\ndata: [DONE]\n\n";
    stub_arg_t arg;
-   snprintf(arg.path, sizeof(arg.path), "/tmp/aimee_http_stream_%d.sock", (int)getpid());
+   snprintf(arg.path, sizeof(arg.path), "%s/aimee_http_stream_%d.sock", test_tmpdir(),
+            (int)getpid());
    arg.response = resp;
    pthread_t th;
    assert(pthread_create(&th, NULL, stub_server, &arg) == 0);
@@ -166,6 +173,52 @@ static void test_http_stream(void)
    assert(cJSON_IsNumber(i) && i->valueint == 2);
    cJSON_Delete(last);
    printf("  http_stream: ok\n");
+}
+
+/* A reachable server that refuses this identity is not an old server. Pin the
+ * operator-facing distinction because the wrong diagnosis sends people toward
+ * an upgrade when they actually need to inspect or renew enrollment. */
+static void test_manifest_auth_refusal_diagnosis(void)
+{
+   const char *resp = "HTTP/1.1 403 Forbidden\r\nContent-Type: application/json\r\n"
+                      "Content-Length: 21\r\nConnection: close\r\n\r\n"
+                      "{\"error\":\"forbidden\"}";
+   stub_arg_t arg;
+   snprintf(arg.path, sizeof(arg.path), "%s/aimee_manifest_test_%d.sock", test_tmpdir(),
+            (int)getpid());
+   arg.response = resp;
+   pthread_t th;
+   assert(pthread_create(&th, NULL, stub_server, &arg) == 0);
+   usleep(30000);
+
+   char endpoint[180];
+   snprintf(endpoint, sizeof(endpoint), "unix:%s", arg.path);
+   setenv("AIMEE_API_ENDPOINT", endpoint, 1);
+
+   FILE *capture = tmpfile();
+   assert(capture != NULL);
+   int saved_stderr = dup(STDERR_FILENO);
+   assert(saved_stderr >= 0);
+   fflush(stderr);
+   assert(dup2(fileno(capture), STDERR_FILENO) >= 0);
+
+   const char *verb = NULL;
+   assert(cli_v1_route_for_method("anything", &verb) == NULL);
+   fflush(stderr);
+   assert(dup2(saved_stderr, STDERR_FILENO) >= 0);
+   close(saved_stderr);
+   pthread_join(th, NULL);
+   unsetenv("AIMEE_API_ENDPOINT");
+
+   rewind(capture);
+   char diagnosis[1024] = "";
+   assert(fread(diagnosis, 1, sizeof(diagnosis) - 1, capture) > 0);
+   fclose(capture);
+   assert(strstr(diagnosis, "authorization, not version") != NULL);
+   assert(strstr(diagnosis, "aimee remote status") != NULL);
+   assert(strstr(diagnosis, "aimee remote enroll") != NULL);
+   assert(strstr(diagnosis, "older than this client") == NULL);
+   printf("  manifest_auth_refusal_diagnosis: ok\n");
 }
 
 /* ---- method -> /v1 route lookup, over a server-supplied manifest ---- */
@@ -299,6 +352,7 @@ int main(void)
    printf("cli_http_transport:\n");
    test_transport_parse();
    test_build_request();
+   test_manifest_auth_refusal_diagnosis();
    test_v1_route_map();
    test_served_dispatch();
    test_served_marshal();

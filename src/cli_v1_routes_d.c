@@ -12,6 +12,7 @@
 #include "util.h"         /* safe_exec_capture (workspace.mirror-sync ships the client diff) */
 #include "aimee_client.h" /* aimee_client_request: transport-agnostic /v1 client (Windows path) */
 #include "code_collect.h" /* code_collect_files + code_collect_discover_repos (thin-client push) */
+#include "kb_index_timeouts.h"
 #include <stdatomic.h>
 #include <time.h>
 #if !defined(_WIN32) && !defined(_WIN64)
@@ -602,15 +603,19 @@ static const cJSON *cli_v1_manifest(void)
          return g_cli_manifest;
       }
       free(remote);
-      /* Say which of the two it is. status == 0 means the transport never got an
-       * answer (server down, wrong endpoint); a 4xx means it answered and has no
-       * such route, i.e. it predates the manifest. Reporting "your server is old"
-       * for an unreachable server would be the same misattribution this endpoint
-       * exists to remove — the caller otherwise falls through to "has no /v1
-       * route", which blames the command. */
+      /* Say which failure class this is. status == 0 means the transport never
+       * answered; 401/403 means this client's identity was refused; another 4xx
+       * can mean the server predates the manifest route. */
       if (status == 0)
          fprintf(stderr, "aimee: cannot reach aimee-server to ask what commands it "
                          "has (GET /v1/cli/manifest).\n");
+      else if (status == 401 || status == 403)
+         fprintf(stderr,
+                 "aimee: the server refused this client's identity "
+                 "(GET /v1/cli/manifest -> %d). This is authorization, not version: "
+                 "check `aimee remote status`, and re-enroll with `aimee remote enroll` "
+                 "if the certificate is missing or no longer accepted.\n",
+                 status);
       else
          fprintf(stderr,
                  "aimee: this server does not describe its commands "
@@ -1291,7 +1296,11 @@ static int cli_ws_ingest_phase(const char *remote, const char *bearer, const cha
    if (!body_json)
       return 1;
 
-   cJSON *resp = cli_v1_run_and_poll(remote, bearer, "POST", "/v1/index/ingest", body_json, 600000);
+   /* The server's seal request uses the same scan bound. Give the outer async
+    * operation one additional minute to publish and relay its terminal result. */
+   int poll_timeout_ms = aimee_kb_index_scan_timeout_ms() + 60 * 1000;
+   cJSON *resp =
+       cli_v1_run_and_poll(remote, bearer, "POST", "/v1/index/ingest", body_json, poll_timeout_ms);
    free(body_json);
    if (!resp)
       return 1;

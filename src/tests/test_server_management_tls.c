@@ -26,6 +26,7 @@ static int g_server_cert_ensure_calls;
 static int g_client_ca_ensure_calls;
 static int g_revoked = 1;
 static const char *g_default_dir = "/nonexistent";
+static int g_store_probe_calls;
 
 const char *config_default_dir(void)
 {
@@ -80,6 +81,11 @@ void server_conn_io_set_ssl(int fd, SSL *ssl)
 void server_conn_io_clear(int fd)
 {
    (void)fd;
+}
+
+static int store_ready_after_three_probes(void)
+{
+   return ++g_store_probe_calls >= 3;
 }
 
 static void write_text(const char *path, const char *text)
@@ -223,6 +229,13 @@ static int present_main(const char *ca, const char *cert, const char *key)
 int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
+
+   /* A transiently unavailable DB1 module must be polled until it becomes
+    * usable instead of permanently stranding the TLS listener. */
+   g_default_mtls_mode = 1;
+   g_store_probe_calls = 0;
+   assert(server_tls_wait_for_store(store_ready_after_three_probes) == 1);
+   assert(g_store_probe_calls >= 3);
 
    /* Fresh wizard installs use optional mTLS so the first bearer-authenticated
     * client can enroll its certificate. That mode must still provision the
