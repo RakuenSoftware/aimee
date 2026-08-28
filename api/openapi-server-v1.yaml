@@ -3584,8 +3584,8 @@ paths:
               type: object
               required: [keywords]
               properties:
-                keywords: { type: array, items: { type: string } }
-                limit: { type: integer }
+                keywords: { type: array, minItems: 1, maxItems: 16, items: { type: string, minLength: 1 } }
+                limit: { type: integer, minimum: 1, maximum: 32 }
       responses:
         "200":
           description: Memory search envelope
@@ -3594,6 +3594,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing keywords or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3906,7 +3911,7 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer }
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
       responses:
         "200":
           description: Memory envelope
@@ -3915,6 +3920,16 @@ paths:
               schema: { type: object }
         "400":
           description: Missing id or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Memory not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -4053,6 +4068,16 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "400":
+          description: Missing kind, key, or content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Per-user memory store unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /tools/execute:
     post:
       summary: Execute a tool via the workspace plane (privileged)
