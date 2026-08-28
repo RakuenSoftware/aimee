@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 import re
 import sys
@@ -18,12 +19,45 @@ WORKFLOWS = (
     ROOT / ".github/workflows/publish-images.yml",
 )
 LLM_WORKFLOW = ROOT / ".github/workflows/publish-llm.yml"
+TESTING_PLANNER = ROOT / "scripts/publish_testing_plan.py"
 BUNDLED_KB_COMPOSE = (ROOT / "compose.yaml", ROOT / "compose.server.yaml")
 BUNDLED_KB_IMAGE = "ghcr.io/rakuensoftware/aimee-kb-a25m:"
 
 
 class PublisherError(RuntimeError):
     """A Compose image has no coherent publishing path."""
+
+
+def testing_planner_images(root: Path) -> set[str]:
+    """Read the canonical testing matrix without executing repository code."""
+
+    path = root / TESTING_PLANNER.relative_to(ROOT)
+    if not path.exists():
+        raise PublisherError(f"{path.relative_to(root)} is missing")
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, ast.Assign) or not any(
+            isinstance(target, ast.Name) and target.id == "IMAGES"
+            for target in node.targets
+        ):
+            continue
+        if not isinstance(node.value, (ast.Tuple, ast.List)):
+            break
+        names: set[str] = set()
+        for entry in node.value.elts:
+            if (
+                isinstance(entry, ast.Call)
+                and isinstance(entry.func, ast.Name)
+                and entry.func.id == "Image"
+                and entry.args
+                and isinstance(entry.args[0], ast.Constant)
+                and isinstance(entry.args[0].value, str)
+            ):
+                names.add(entry.args[0].value)
+        if names:
+            return names
+        break
+    raise PublisherError(f"{path.relative_to(root)} has no static IMAGES contract")
 
 
 def compose_files(root: Path) -> list[Path]:
@@ -77,8 +111,21 @@ def validate(root: Path = ROOT) -> tuple[int, int]:
     workflows = tuple(root / path.relative_to(ROOT) for path in WORKFLOWS)
     for workflow in workflows:
         text = workflow.read_text(encoding="utf-8")
+        if workflow.name == "publish-testing.yml":
+            planner_ref = "scripts/publish_testing_plan.py"
+            if planner_ref not in text:
+                errors.append(
+                    f"{workflow.relative_to(root)} does not invoke {planner_ref}"
+                )
+            published = testing_planner_images(root)
+        else:
+            published = {
+                image
+                for image in images
+                if re.search(MATRIX_ENTRY % re.escape(image), text)
+            }
         for image in sorted(images):
-            if not re.search(MATRIX_ENTRY % re.escape(image), text):
+            if image not in published:
                 errors.append(f"{workflow.relative_to(root)} does not publish {image}")
 
     if llm_images:

@@ -306,6 +306,12 @@ jobs:
       - name: Test the CI change classifier
         run: python3 -I scripts/tests/test_ci_change_scope.py
 
+      # This controls whether multi-gigabyte release images are rebuilt or their
+      # existing manifest is reused.  Run its contract test unconditionally: a
+      # docs-only change can still expose drift in the workflow or Dockerfile inputs.
+      - name: Test the testing-image publication planner
+        run: python3 -I scripts/tests/test_publish_testing_plan.py
+
       # docs_CHANGED, not docs_only. Gated on docs_only, this never ran for a pull
       # request that touched documentation AND anything else -- which is most of them,
       # and is how six em-dash violations reached testing in #2280: that PR edited
