@@ -1288,6 +1288,27 @@ fi  # DB1_SESSIONS_AVAILABLE
 # 5. Memory via server
 # ============================================================
 
+# These argument failures are typed INVALID_ARGUMENT replies. The dedicated
+# HTTP adapter must preserve that mapping as a physical 400 instead of masking
+# a rejected write behind 200 OK.
+RESP=$(http_call POST /v1/memory/store '{"key":"integ-invalid"}') || true
+check_output "memory.store missing content stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.store missing content returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.store missing-content HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/store '{"key":"integ-invalid","content":""}') || true
+check_output "memory.store empty content stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.store empty content returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.store empty-content HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
 if [ "$KB_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"

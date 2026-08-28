@@ -189,7 +189,8 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    const char *key, *content;
    if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
        jo_need_str((cJSON *)req, "content", &content) < 0)
-      return jo_err("missing key or content");
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a key and content", NULL);
    /* An empty key or content is a malformed REQUEST, not a storage failure. The
     * store already refuses it, but the refusal surfaced as "failed to store
     * memory" -- which reads as the database declining a valid write and sends
