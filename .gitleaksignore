@@ -109,3 +109,18 @@ fe477fefa01b7474cbb1a9a6f2c344eca9e2e236:.upgrade-rehearsal/compose.combined.yam
 ff8e4ed59e0e562c126abcf7abfad0f53679dd13:compose.combined.yaml:curl-auth-header:21
 ff8e4ed59e0e562c126abcf7abfad0f53679dd13:compose.server-standalone.yaml:curl-auth-header:14
 ff8e4ed59e0e562c126abcf7abfad0f53679dd13:compose.server.yaml:curl-auth-header:16
+
+# Published ROI benchmark outputs preserve model-visible corpus and tool output.
+# These exact historical findings are prose and placeholder Authorization examples.
+1593aa2aa3375f5689951c1223c81f0e3ddbbdc7:benchmarks/results/roi/large-repo-qwen38-expansion-r1.json:curl-auth-header:13822
+1593aa2aa3375f5689951c1223c81f0e3ddbbdc7:benchmarks/results/roi/large-repo-qwen38-expansion-r1.json:curl-auth-header:7189
+6f320473e7060d60d9dccad713656b5b6447f6b5:benchmarks/results/roi/large-repo-qwen38-trust-fold-fixed.json:generic-api-key:807
+83a24b093fa68ff1d8331ad6a5e6fed3429f09b2:benchmarks/results/roi/large-repo-qwen38-trust-progress.json:generic-api-key:5646
+83a24b093fa68ff1d8331ad6a5e6fed3429f09b2:benchmarks/results/roi/large-repo-qwen38-trust-progress.json:generic-api-key:591
+8fc9d0a08c7b5245cc20366f6b71fdfdcf7a4f7d:benchmarks/results/roi/large-repo-qwen38-db1-fixture-r2.checkpoint.json:curl-auth-header:4800
+8fc9d0a08c7b5245cc20366f6b71fdfdcf7a4f7d:benchmarks/results/roi/large-repo-qwen38-db1-fixture-r2.checkpoint.json:curl-auth-header:528
+8fc9d0a08c7b5245cc20366f6b71fdfdcf7a4f7d:benchmarks/results/roi/large-repo-qwen38-db1-fixture-r2.json:curl-auth-header:4800
+8fc9d0a08c7b5245cc20366f6b71fdfdcf7a4f7d:benchmarks/results/roi/large-repo-qwen38-db1-fixture-r2.json:curl-auth-header:528
+c8daa4b3d58c20c00ada3c9bdebb0e1bb8c8ebeb:benchmarks/results/roi/large-repo-qwen38-trust-pilot.json:generic-api-key:15560
+c8daa4b3d58c20c00ada3c9bdebb0e1bb8c8ebeb:benchmarks/results/roi/large-repo-qwen38-trust-pilot.json:generic-api-key:903
+ed7de9861abc301a488773bf0b3db84dc54e65c8:benchmarks/results/roi/large-repo-qwen38-trust-learned-retry.json:generic-api-key:556
