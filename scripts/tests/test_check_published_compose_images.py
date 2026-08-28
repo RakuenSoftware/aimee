@@ -25,6 +25,7 @@ class PublishedComposeImagesTests(unittest.TestCase):
             "compose.server.yaml",
             ".github/workflows/publish-testing.yml",
             ".github/workflows/publish-images.yml",
+            "scripts/publish_testing_plan.py",
         ):
             source = REPO / relative
             target = root / relative
@@ -42,20 +43,34 @@ class PublishedComposeImagesTests(unittest.TestCase):
     def test_repository_passes(self) -> None:
         image_count, workflow_count = checker.validate(REPO)
         self.assertGreaterEqual(image_count, 4)
-        self.assertEqual(workflow_count, 2)
+        self.assertEqual(workflow_count, 3)
 
     def test_compose_image_missing_from_either_publisher_is_rejected(self) -> None:
         for workflow in ("publish-testing.yml", "publish-images.yml"):
             with self.subTest(workflow=workflow):
                 def remove_control_web(root: Path, name: str = workflow) -> None:
-                    path = root / ".github/workflows" / name
-                    path.write_text(path.read_text().replace(
-                        "{ name: aimee-control-web, dockerfile: Dockerfile.control-web }",
-                        "{ name: omitted-control-web, dockerfile: Dockerfile.control-web }",
-                        1,
-                    ))
+                    if name == "publish-testing.yml":
+                        path = root / "scripts/publish_testing_plan.py"
+                        old = 'Image("aimee-control-web", "Dockerfile.control-web")'
+                        new = 'Image("omitted-control-web", "Dockerfile.control-web")'
+                    else:
+                        path = root / ".github/workflows" / name
+                        old = "{ name: aimee-control-web, dockerfile: Dockerfile.control-web }"
+                        new = "{ name: omitted-control-web, dockerfile: Dockerfile.control-web }"
+                    path.write_text(path.read_text().replace(old, new, 1))
 
                 self.assert_rejected(remove_control_web, "does not publish aimee-control-web")
+
+    def test_testing_workflow_must_invoke_the_planner(self) -> None:
+        def disconnect_planner(root: Path) -> None:
+            path = root / ".github/workflows/publish-testing.yml"
+            path.write_text(
+                path.read_text().replace(
+                    "scripts/publish_testing_plan.py", "scripts/disconnected_plan.py"
+                )
+            )
+
+        self.assert_rejected(disconnect_planner, "does not invoke")
 
     def test_weightless_image_is_rejected_for_bekko_topologies(self) -> None:
         def select_weightless(root: Path) -> None:

@@ -15,7 +15,7 @@
  *               detail, key_id, prev_hash, row_hash)
  *
  *   seq        1..N, gap-free (allocated MAX(seq)+1 inside the write txn)
- *   ts         RFC3339-UTC, ADVISORY — excluded from row_hash, not an ordering key
+ *   ts         RFC3339-UTC, bound into the current v2-full row_hash; not an ordering key
  *   row_hash   SHA256( AUDIT_WORM_DOMAIN "\n" prev_hash "\n" canonical(record) )
  *   prev_hash  the previous row's row_hash; for seq=1 the genesis is 32 zero bytes
  *              rendered as 64 hex '0's (AUDIT_WORM_GENESIS_PREV)
