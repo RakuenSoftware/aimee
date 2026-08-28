@@ -47,6 +47,12 @@ on:
         required: false
         type: boolean
         default: false
+  workflow_call:
+    inputs:
+      version:
+        description: 'Approved release version; promotes the pinned build to :<version> + :latest'
+        required: true
+        type: string
 
 concurrency:
   group: publish-llm-${{ github.ref }}
@@ -151,6 +157,23 @@ jobs:
           tags: |
             ${{ steps.have.outputs.pinned }}
             ghcr.io/${{ env.OWNER }}/${{ matrix.name }}:testing
+
+      # Registry-side promotion of the pinned build. This intentionally does not
+      # pull or rebuild the multi-gigabyte synthesis images during a release.
+      - name: Promote to :${{ inputs.version }} and :latest
+        if: ${{ inputs.version != '' }}
+        run: |
+          set -euo pipefail
+          pinned='${{ steps.have.outputs.pinned }}'
+          image="ghcr.io/${OWNER}/${{ matrix.name }}"
+          if ! docker manifest inspect "$pinned" >/dev/null 2>&1; then
+            echo "::error::$pinned is not published; cannot promote ${{ matrix.name }} to a release"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --tag "${image}:${{ inputs.version }}" \
+            --tag "${image}:latest" \
+            "$pinned"
 
       - name: Report
         run: |

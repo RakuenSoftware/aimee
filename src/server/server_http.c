@@ -2363,8 +2363,8 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
     * vault's attested write path. */
    if (tls_port > 0)
    {
-      server_tls_wait_for_store(db1_store_probe);
-      int tls_rc = server_tls_init_default();
+      int tls_rc = server_tls_wait_for_store(db1_store_probe) ? server_tls_init_default()
+                                                              : SERVER_TLS_INIT_ERR_MTLS_RAMP;
       if (tls_rc == SERVER_TLS_INIT_OK)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else

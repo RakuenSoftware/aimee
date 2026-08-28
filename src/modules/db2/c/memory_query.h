@@ -42,6 +42,11 @@ extern "C"
     * key-prefix, then tier (L3>L2>L1) and use_count. */
    int db2_memory_find_facts_like(const char *query, int limit, memory_t *out, int max);
 
+   /* Indexed lexical lookup over memories_fts. Unlike the LIKE fallback above,
+    * this is safe to call once per query token without rescanning the memories
+    * table. The query must be normalized plain text. */
+   int db2_memory_find_facts_fts(const char *query, int limit, memory_t *out, int max);
+
    /* Negation lexical recall over the Postgres-only memory_negation_fts_tsv GIN
     * index. `neg_tokens` is the extract_negation_tokens() output. Returns 0 on the
     * sqlite shim (GENERATED tsvector unsupported) so callers keep their fallback. */

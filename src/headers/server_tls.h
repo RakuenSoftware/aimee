@@ -87,9 +87,9 @@ extern "C"
    typedef enum
    {
       SERVER_TLS_INIT_OK = 0,
-      SERVER_TLS_INIT_ERR_MTLS_RAMP = -1,  /* the ramp self-test refused (DB1 pki) */
-      SERVER_TLS_INIT_ERR_CLIENT_CA = -2,  /* aimee's client CA could not be made/loaded */
-      SERVER_TLS_INIT_ERR_IDENTITY = -3,   /* the server cert/key itself */
+      SERVER_TLS_INIT_ERR_MTLS_RAMP = -1, /* the ramp self-test refused (DB1 pki) */
+      SERVER_TLS_INIT_ERR_CLIENT_CA = -2, /* aimee's client CA could not be made/loaded */
+      SERVER_TLS_INIT_ERR_IDENTITY = -3,  /* the server cert/key itself */
    } server_tls_init_result_t;
 
    /* A human-readable cause for the value above. Never NULL. */
@@ -101,8 +101,9 @@ extern "C"
 
    /* Wait for the store the mTLS ramp needs before server_tls_init_default runs.
       The caller supplies the probe so this translation unit keeps no DB1
-      dependency. No-op unless mTLS is configured on. */
-   void server_tls_wait_for_store(int (*store_ready)(void));
+      dependency. Returns one when initialization may proceed, including when
+      mTLS is off, and zero after the bounded readiness window expires. */
+   int server_tls_wait_for_store(int (*store_ready)(void));
 
    /* Live cert reload (live-config-reload): re-read the same public cert and
     * Vault key (or explicit test key path) and atomically swap the SSL_CTX;

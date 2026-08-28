@@ -5876,6 +5876,10 @@ static void test_code_scan_phases_and_verify_states(void)
    assert(strstr(buf, "\"index_state\":\"current\"") != NULL);
    assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
    assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
+   /* Sealing publishes the source snapshot only. Code-unit curation belongs to
+    * the background embed stage; keeping it off this request is what makes a
+    * repository-scale seal return when publication commits. */
+   assert(g_curator_code_queued == 0);
 
    const char *verify = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp\",\"phase\":\"verify\","
                         "\"deep\":true}";

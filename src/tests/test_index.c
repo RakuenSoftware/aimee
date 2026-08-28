@@ -695,7 +695,10 @@ int main(void)
       canonical_index_file_input_t inputs[] = {
           {"src/app.c", "void app_entry(void) {}\n"},
           {".gitmodules", gitmod_body},
-          {".bashrc", "export X=1\n"},                /* hidden non-manifest dotfile */
+          {".travis.yml", "language: c\n"},
+          {".eslintrc.json", "{\"env\":{}}\n"},
+          {".bashrc", "export X=1\n"},
+          {".env", "SECRET=1\n"},
           {".github/workflows/ci.yml", "name: ci\n"}, /* file inside a hidden dir */
           {".gitmodules/payload.txt", "x\n"},         /* .gitmodules as an interior DIR */
       };
@@ -704,11 +707,14 @@ int main(void)
           "pushproj", "remote", inputs, (int)(sizeof(inputs) / sizeof(inputs[0])), 1, &inspected);
       /* canonical_index_scan_files upserts the project; of 5 inputs only the 2
        * non-excluded (src/app.c + .gitmodules) are counted (inspected is post-filter). */
-      assert(inspected == 2);
-      assert(scanned == 2);
+      assert(inspected == 4);
+      assert(scanned == 4);
       assert(file_row_count("pushproj", ".gitmodules") == 1); /* dotfile manifest ingested */
       assert(file_row_count("pushproj", "src/app.c") == 1);
+      assert(file_row_count("pushproj", ".travis.yml") == 1);
+      assert(file_row_count("pushproj", ".eslintrc.json") == 1);
       assert(file_row_count("pushproj", ".bashrc") == 0); /* hidden non-manifest excluded */
+      assert(file_row_count("pushproj", ".env") == 0);
       assert(file_row_count("pushproj", ".github/workflows/ci.yml") == 0); /* hidden dir excluded */
       assert(file_row_count("pushproj", ".gitmodules/payload.txt") ==
              0); /* interior dir excluded */

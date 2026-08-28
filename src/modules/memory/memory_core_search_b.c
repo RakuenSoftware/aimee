@@ -33,6 +33,7 @@
 #include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "util.h"                       /* util_now_ms — memory.search stage timing */
 #include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
+
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -1073,28 +1074,52 @@ int memory_find_facts_lexical_fallback(const char *query, const char *scope_type
    if (fetch_limit > cap)
       fetch_limit = cap;
 
+   char norm_query[512];
+   char tokens[24][64];
+   normalize_key(query, norm_query, sizeof(norm_query));
+   int token_count = memory_split_tokens(norm_query, tokens, 24);
+
    int count = 0;
-   int got = memory_find_facts_like(query, fetch_limit, scratch, cap);
+   int got = db2_memory_find_facts_fts(norm_query, fetch_limit, scratch, cap);
    if (got < 0)
       return got;
    got = memory_filter_scope(scratch, got, scope_type, scope_value);
    for (int i = 0; i < got && count < limit; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
 
-   char norm_query[512];
-   char tokens[24][64];
-   normalize_key(query, norm_query, sizeof(norm_query));
-   int token_count = memory_split_tokens(norm_query, tokens, 24);
    for (int t = 0; t < token_count && count < limit; t++)
    {
-      if (!memory_is_signal_token(tokens[t]))
+      if (!memory_is_signal_token(tokens[t]) || strcmp(tokens[t], norm_query) == 0)
          continue;
-      got = memory_find_facts_like(tokens[t], fetch_limit, scratch, cap);
+      got = db2_memory_find_facts_fts(tokens[t], fetch_limit, scratch, cap);
       if (got < 0)
          return got;
       got = memory_filter_scope(scratch, got, scope_type, scope_value);
       for (int i = 0; i < got && count < limit; i++)
          count = memory_append_unique(out, count, max, &scratch[i]);
+   }
+
+   /* FTS is word based. Preserve the historical substring behavior as a true
+    * last resort, paid only when the indexed query found nothing. */
+   if (count == 0)
+   {
+      got = memory_find_facts_like(query, fetch_limit, scratch, cap);
+      if (got < 0)
+         return got;
+      got = memory_filter_scope(scratch, got, scope_type, scope_value);
+      for (int i = 0; i < got && count < limit; i++)
+         count = memory_append_unique(out, count, max, &scratch[i]);
+      for (int t = 0; t < token_count && count < limit; t++)
+      {
+         if (!memory_is_signal_token(tokens[t]) || strcmp(tokens[t], norm_query) == 0)
+            continue;
+         got = memory_find_facts_like(tokens[t], fetch_limit, scratch, cap);
+         if (got < 0)
+            return got;
+         got = memory_filter_scope(scratch, got, scope_type, scope_value);
+         for (int i = 0; i < got && count < limit; i++)
+            count = memory_append_unique(out, count, max, &scratch[i]);
+      }
    }
 
    return count;

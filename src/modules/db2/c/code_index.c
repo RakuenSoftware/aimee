@@ -992,17 +992,17 @@ int db2_code_index_purge_files_matching(int64_t project_id, const char *path_glo
    return affected;
 }
 
-/* SQL predicate (on `path`) selecting a project-relative path that HAS a hidden
- * component yet is NOT a wanted dotfile build manifest, so the hidden-path purges
- * delete exactly what the ingest layer would have refused (ci_path_ingest_excluded
- * / ci_is_dotfile_manifest — recall §2.2). A .gitmodules is spared ONLY when every
- * ANCESTOR component is non-hidden: the repo-root `.gitmodules`, or `dir/.gitmodules`
- * with no hidden dir before it. A .gitmodules under a hidden ancestor (`.git/.gitmodules`,
- * `a/.hidden/.gitmodules`) is still purged — ingest never admits it. */
+/* SQL mirror of ci_path_ingest_excluded / ci_is_wanted_dotfile. A hidden
+ * ancestor is always refused; a hidden final filename is retained only when it
+ * has a real extension or is .gitmodules. Keep the top-level OR parenthesized
+ * because callers splice this predicate between other AND terms. */
+#define CIDX_HIDDEN_ANCESTOR "(path LIKE '.%/%' OR path LIKE '%/.%/%')"
+#define CIDX_FINAL_HIDDEN    "((path LIKE '.%' AND path NOT LIKE '%/%') OR path LIKE '%/.%')"
+#define CIDX_FINAL_WANTED                                                                          \
+   "(path = '.gitmodules' OR path LIKE '%/.gitmodules' OR path LIKE '.%.%' "                       \
+   "OR path LIKE '%/.%.%')"
 #define CIDX_HIDDEN_NOT_MANIFEST                                                                   \
-   "(path LIKE '.%' OR path LIKE '%/.%') "                                                         \
-   "AND NOT (path = '.gitmodules' OR (path LIKE '%/.gitmodules' AND path NOT LIKE '.%' "           \
-   "                                  AND path NOT LIKE '%/.%/.gitmodules'))"
+   "(" CIDX_HIDDEN_ANCESTOR " OR (" CIDX_FINAL_HIDDEN " AND NOT " CIDX_FINAL_WANTED "))"
 
 int db2_code_index_purge_hidden_except_manifests(int64_t project_id)
 {

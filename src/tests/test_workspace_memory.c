@@ -16,6 +16,7 @@
 #include "../modules/db2/c/memory_query.h"
 #include "../modules/db2/c/memory_relations.h"
 #include "../modules/db2/c/memory_scope_query.h"
+#include "../modules/memory/memory_core_internal.h"
 
 static char tmpdir[64];
 
@@ -856,8 +857,74 @@ static void test_scope_rank_batch_matches_single_and_costs_one_statement(void)
    printf("  PASS: test_scope_rank_batch_matches_single_and_costs_one_statement\n");
 }
 
+static void test_indexed_lexical_recall_and_substring_compatibility(void)
+{
+   setup();
+   memory_t indexed, substring;
+   assert(memory_insert(TIER_L2, KIND_FACT, "perf-indexed",
+                        "indexed performance regression detection", 0.9, "fts", &indexed) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "releasecandidate",
+                        "the releasecandidate marker is deliberately unseparated", 0.9, "fts",
+                        &substring) == 0);
+
+   memory_t rows[8];
+   aimee_pg_test_stmt_count_reset();
+   int n = db2_memory_find_facts_fts("performance", 8, rows, 8);
+   assert(n >= 1);
+   assert(rows[0].id == indexed.id);
+   assert(aimee_pg_test_stmt_count() == 1);
+
+   /* FTS is word based, so an infix-only legacy match deliberately misses the
+    * index and must still be recovered by the lexical compatibility fallback. */
+   assert(db2_memory_find_facts_fts("candidate", 8, rows, 8) == 0);
+   n = memory_find_facts_lexical_fallback("candidate", NULL, NULL, 8, rows, 8);
+   assert(n >= 1);
+   int found = 0;
+   for (int i = 0; i < n; i++)
+      if (rows[i].id == substring.id)
+         found = 1;
+   assert(found);
+
+   teardown();
+   printf("  PASS: test_indexed_lexical_recall_and_substring_compatibility\n");
+}
+
+static void test_memory_link_batch_matches_single_query_surface(void)
+{
+   setup();
+   memory_t a, b, c;
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-a", "batch link a", 0.9, "links", &a) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-b", "batch link b", 0.9, "links", &b) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-c", "batch link c", 0.9, "links", &c) == 0);
+   assert(memory_link_create(a.id, b.id, "depends_on") == 0);
+   assert(memory_link_create(c.id, b.id, "related") == 0);
+
+   int64_t ids[] = {a.id, c.id};
+   memory_link_t rows[8];
+   aimee_pg_test_stmt_count_reset();
+   int n = db2_memory_link_query_many(ids, 2, rows, 8);
+   assert(aimee_pg_test_stmt_count() == 1);
+   assert(n == 2);
+   int saw_depends = 0, saw_related = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (rows[i].source_id == a.id && rows[i].target_id == b.id &&
+          strcmp(rows[i].relation, "depends_on") == 0)
+         saw_depends = 1;
+      if (rows[i].source_id == c.id && rows[i].target_id == b.id &&
+          strcmp(rows[i].relation, "related") == 0)
+         saw_related = 1;
+   }
+   assert(saw_depends && saw_related);
+
+   teardown();
+   printf("  PASS: test_memory_link_batch_matches_single_query_surface\n");
+}
+
 int main(void)
 {
+   test_indexed_lexical_recall_and_substring_compatibility();
+   test_memory_link_batch_matches_single_query_surface();
    test_scope_rank_batch_matches_single_and_costs_one_statement();
    test_tag_workspace();
    test_tag_generic_scope();

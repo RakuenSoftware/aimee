@@ -47,6 +47,37 @@ int kb_mgmt_offline_swaps_text_active(const char *text, size_t len)
    return 0;
 }
 
+int kb_mgmt_offline_cgroup_swap_text_disabled(const char *text, size_t len)
+{
+   if (!text || !len || text[0] != '0')
+      return 0;
+   for (size_t i = 1; i < len; i++)
+      if (!isspace((unsigned char)text[i]))
+         return 0;
+   return 1;
+}
+
+static int cgroup_has_swap_disabled(void)
+{
+   int fd = open("/sys/fs/cgroup/memory.swap.max", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return 0;
+#ifdef CGROUP2_SUPER_MAGIC
+   struct statfs fs;
+   if (fstatfs(fd, &fs) != 0 || (unsigned long)fs.f_type != (unsigned long)CGROUP2_SUPER_MAGIC)
+   {
+      close(fd);
+      return 0;
+   }
+#endif
+   char text[32], extra;
+   ssize_t got = read(fd, text, sizeof(text));
+   ssize_t tail = got == (ssize_t)sizeof(text) ? read(fd, &extra, 1) : 0;
+   int close_rc = close(fd);
+   return got > 0 && tail == 0 && close_rc == 0 &&
+          kb_mgmt_offline_cgroup_swap_text_disabled(text, (size_t)got);
+}
+
 static int kernel_has_no_active_swap(void)
 {
    int fd = open("/proc/swaps", O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
@@ -83,7 +114,8 @@ static int kernel_has_no_active_swap(void)
 static int explicit_no_swap_fallback(void)
 {
    const char *enabled = getenv("AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK");
-   return enabled && strcmp(enabled, "1") == 0 && kernel_has_no_active_swap();
+   return enabled && strcmp(enabled, "1") == 0 &&
+          (kernel_has_no_active_swap() || cgroup_has_swap_disabled());
 }
 
 const char *kb_mgmt_offline_harden_process(void)
