@@ -16,6 +16,22 @@ void server_error_kind_register_http_status_provider(server_error_http_status_pr
    g_http_status_provider = provider;
 }
 
+void server_error_kind_apply(cJSON *resp, const char *kind)
+{
+   if (!resp)
+      return;
+
+   cJSON_DeleteItemFromObjectCaseSensitive(resp, "kind");
+   if (kind && kind[0])
+      cJSON_AddStringToObject(resp, "kind", kind);
+
+   cJSON_DeleteItemFromObjectCaseSensitive(resp, "http_status");
+   uint32_t http_status = 0;
+   if (g_http_status_provider && g_http_status_provider(kind, &http_status) == 0 &&
+       http_status >= 400u && http_status <= 599u)
+      cJSON_AddNumberToObject(resp, "http_status", (double)http_status);
+}
+
 /* Send a dispatch error, naming WHO was at fault.
  *
  * The envelope otherwise carries only {status:"error", message}, so anything in
@@ -53,12 +69,7 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "error");
    cJSON_AddStringToObject(resp, "message", message);
-   if (kind && kind[0])
-      cJSON_AddStringToObject(resp, "kind", kind);
-   uint32_t http_status = 0;
-   if (g_http_status_provider && g_http_status_provider(kind, &http_status) == 0 &&
-       http_status >= 400u && http_status <= 599u)
-      cJSON_AddNumberToObject(resp, "http_status", (double)http_status);
+   server_error_kind_apply(resp, kind);
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    return resp;

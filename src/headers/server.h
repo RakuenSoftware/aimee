@@ -344,6 +344,12 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
  * one. Same function builds both forms, so they cannot drift. */
 cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id);
 
+/* Add or replace the typed-error classification on an existing response. This
+ * preserves richer dependency fields (retryability, dependency, retry delay)
+ * while giving the HTTP boundary the same authoritative status mapping used by
+ * server_error_kind_json(). */
+void server_error_kind_apply(cJSON *resp, const char *kind);
+
 int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id);
 
