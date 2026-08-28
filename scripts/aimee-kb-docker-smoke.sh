@@ -143,6 +143,28 @@ if [[ "$DO_UP" == 1 ]]; then
     fi
     sleep 3
   done
+
+  # control-web ships enabled but has no credential on a fresh scripted stack.
+  # Its supported first-boot behavior is to idle without a listener, so Compose
+  # must report that state healthy instead of poisoning the default topology.
+  bold "==> Waiting for credential-free control-web idle health"
+  control_deadline=$((SECONDS + 90))
+  while true; do
+    control_state="$("${DC[@]}" ps --format '{{.Service}} {{.Health}}' 2>/dev/null | awk '$1=="aimee-control-web"{print $2}')"
+    [[ "$control_state" == "healthy" ]] && {
+      green "  PASS  control-web credential-free idle is healthy"
+      PASS=$((PASS + 1))
+      break
+    }
+    if (( SECONDS >= control_deadline )); then
+      red "  FAIL  control-web credential-free idle is ${control_state:-unknown}, want healthy"
+      "${DC[@]}" ps -a
+      "${DC[@]}" logs --tail=40 aimee-control-web || true
+      FAIL=$((FAIL + 1))
+      break
+    fi
+    sleep 3
+  done
 fi
 
 bold "==> Exercising the kb /v1 surface at ${KB_URL}"
