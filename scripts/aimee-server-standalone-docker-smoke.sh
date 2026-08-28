@@ -19,7 +19,8 @@
 #
 # Env: SERVER_URL (default https://localhost:8743), BEARER (required for an
 #      existing stack; generated as a first-boot secret with --up), COMPOSE_FILE
-#      (default compose.server-standalone.yaml), WAIT_SECONDS (300).
+#      (default compose.server-standalone.yaml), WAIT_SECONDS (300). Store
+#      passwords may be supplied explicitly; --up generates isolated values.
 #
 # Exit code: 0 = all checks passed.
 
@@ -57,6 +58,10 @@ if [[ -z "$BEARER" ]]; then
 fi
 if [[ "$DO_UP" == 1 ]]; then
   export AIMEE_API_BEARER_TOKEN="$BEARER"
+  : "${AIMEE_STORE_ADMIN_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_MIGRATOR_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_RUNTIME_PASSWORD:=$(openssl rand -hex 32)}"
+  export AIMEE_STORE_ADMIN_PASSWORD AIMEE_STORE_MIGRATOR_PASSWORD AIMEE_STORE_RUNTIME_PASSWORD
 fi
 
 cd "$(dirname "$0")/.."

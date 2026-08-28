@@ -98,7 +98,7 @@ services:
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
     command: ["--http-port=8741"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
       interval: 10s
       timeout: 5s
       retries: 5

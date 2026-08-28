@@ -87,7 +87,8 @@ services:
       - ./scripts/postgres-store-init.sh:/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro
       - aimee-store-tls:/var/lib/postgresql/secure
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "aimee_store"]
+      test: ["CMD-SHELL",
+             "PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_MIGRATOR_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_migrator -d aimee_store -Atqc 'SELECT 1' | grep -qx 1 && PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_RUNTIME_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store -Atqc 'SELECT 1' | grep -qx 1"]
       interval: 2s
       timeout: 2s
       retries: 30
@@ -220,7 +221,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     healthcheck:
       test: ["CMD-SHELL",
-             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+             "body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf '%s' \"$$body\" | grep -q '\"db1\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"modules\":\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 5

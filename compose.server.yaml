@@ -59,7 +59,7 @@ services:
     ports:
       - "127.0.0.1:8741:8741"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -154,7 +154,8 @@ services:
       - ./scripts/postgres-store-init.sh:/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro
       - aimee-store-tls:/var/lib/postgresql/secure
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "postgres", "-d", "aimee_store"]
+      test: ["CMD-SHELL",
+             "PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_MIGRATOR_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_migrator -d aimee_store -Atqc 'SELECT 1' | grep -qx 1 && PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_RUNTIME_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store -Atqc 'SELECT 1' | grep -qx 1"]
       interval: 2s
       timeout: 2s
       retries: 30
@@ -225,7 +226,7 @@ services:
     ports:
       # Remote /v1 is served over native TLS on 8743 (the server refuses to expose
       # plaintext /v1 off-loopback). Plaintext 8740 stays bound to 127.0.0.1 inside
-      # the container (the healthcheck below still uses it) and is NOT published.
+      # the container and is NOT published.
       - "8743:8743"
       # webchat UI — on by default; gated off only by AIMEE_RUNTIME_WEB_ENABLED=0 above.
       - "8443:8443"
@@ -234,11 +235,11 @@ services:
         condition: service_healthy
       aimee-kb:
         condition: service_healthy
-    # An unauthenticated probe gets 401, which still proves the listener is up;
-    # treat 200/401 as healthy so this stays correct if the bearer is overridden.
+    # Probe the privileged local socket so credentials are unnecessary, but
+    # require the core store and module graph to be ready before admitting work.
     healthcheck:
       test: ["CMD-SHELL",
-             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+             "body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf '%s' \"$$body\" | grep -q '\"db1\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"modules\":\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 5

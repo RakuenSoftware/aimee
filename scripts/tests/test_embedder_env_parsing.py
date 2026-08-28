@@ -37,6 +37,16 @@ def load_env_int():
     return ns["_env_int"]
 
 
+def load_model_code_revision():
+    """Import the registry helper without importing torch or loading a model."""
+    src = MODULE.read_text(encoding="utf-8")
+    start = src.index("def model_code_revision(")
+    end = src.index("MODEL_CODE_REVISION = ")
+    ns = {"RegistryError": RuntimeError}
+    exec(compile(src[start:end], str(MODULE), "exec"), ns)
+    return ns["model_code_revision"]
+
+
 class TestEnvInt(unittest.TestCase):
     def setUp(self):
         self._env_int = load_env_int()
@@ -90,6 +100,24 @@ class TestEnvInt(unittest.TestCase):
         os.environ["T_PROBE"] = ""
         self.assertEqual(self._env_int("T_PROBE", expensive), 99)
         self.assertEqual(len(calls), 1)
+
+
+class TestCodeRevision(unittest.TestCase):
+    def setUp(self):
+        self.revision = load_model_code_revision()
+
+    def test_pinned_external_code_revision_is_forwarded(self):
+        commit = "e5042dce39060cc34bc223455f25cf1d26db4655"
+        self.assertEqual(self.revision({"code_revisions": {"repo": commit}}), commit)
+
+    def test_missing_external_code_needs_no_loader_argument(self):
+        self.assertIsNone(self.revision({}))
+
+    def test_floating_or_ambiguous_external_code_is_rejected(self):
+        with self.assertRaisesRegex(RuntimeError, "immutable commit"):
+            self.revision({"code_revisions": {"repo": "main"}})
+        with self.assertRaisesRegex(RuntimeError, "multiple"):
+            self.revision({"code_revisions": {"one": "1" * 40, "two": "2" * 40}})
 
 
 if __name__ == "__main__":

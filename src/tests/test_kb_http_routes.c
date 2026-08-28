@@ -3981,6 +3981,24 @@ static void test_mtls_listener(void)
       assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
       assert(pool_exhausted == 0);
 
+      /* A managed KB restart leaves an apparently reusable socket in the
+       * server pool. The first read must discard that dead connection and
+       * reconnect immediately; waiting for a process restart or idle reaper
+       * turns a recovered KB into a prolonged user-visible outage. */
+      unsigned long handshakes_before_listener_restart = 0, resumed_before_listener_restart = 0;
+      kb_client_mtls_tls_stats(&handshakes_before_listener_restart,
+                               &resumed_before_listener_restart);
+      kb_mtls_stop();
+      assert(kb_mtls_start(port, cfg, "localhost") == 0);
+      assert(kb_mtls_bound_port() == port);
+      r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      unsigned long handshakes_after_listener_restart = 0, resumed_after_listener_restart = 0;
+      kb_client_mtls_tls_stats(&handshakes_after_listener_restart, &resumed_after_listener_restart);
+      assert(handshakes_after_listener_restart == handshakes_before_listener_restart + 1);
+      assert(resumed_after_listener_restart >= resumed_before_listener_restart);
+
       unsigned long caller_handshakes = 0, caller_resumed = 0;
       kb_client_mtls_tls_stats(&caller_handshakes, &caller_resumed);
       snprintf(g_test_outbound_caller, sizeof(g_test_outbound_caller), "%s", "alice");

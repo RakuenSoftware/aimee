@@ -9325,6 +9325,7 @@
         "src/cmd_core.c",
         "src/cmd_doctor.c",
         "src/kb/kb_main.c",
+        "src/kb/kb_service_kb.c",
         "src/tests/test_db2.c",
         "src/tests/test_witness_checkpoint_produce_pg.c"
       ],
@@ -10262,6 +10263,7 @@
     },
     {
       "consumers": [
+        "src/kb/kb_service_kb.c",
         "src/tests/test_db2.c",
         "src/tests/test_witness_checkpoint_produce_pg.c"
       ],
@@ -27069,7 +27071,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "8c9cc91927e85e39d4d1f4366c649355135a22d1089018669b580e8a9a247932",
+  "fingerprint": "3076780eb9b2cb35df5fec13223e3cc13b71ba95ffbcdf94cefa82d9042f6e29",
   "module": "db2",
   "schema_version": 1,
   "summary": {

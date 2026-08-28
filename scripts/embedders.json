@@ -70,6 +70,9 @@
     "nomic-embed-text-v2-moe": {
       "repo": "nomic-ai/nomic-embed-text-v2-moe",
       "revision": "1066b6599d099fbb93dfcb64f9c37a7c9e503e85",
+      "code_revisions": {
+        "nomic-ai/nomic-bert-2048": "e5042dce39060cc34bc223455f25cf1d26db4655"
+      },
       "pooling": "mean",
       "dim": 768,
       "context": 2048,

@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 255 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 257 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -344,6 +344,8 @@ The binaries read 255 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_MGMT_STATUS_KEY_ID` | Identifier of the management-status verification key. |
 | `AIMEE_MGMT_STATUS_PUBLIC_KEY` | Hex-encoded Ed25519 key used to verify management-status staples. |
 | `AIMEE_MODULE_ROUNDTABLE` | Enable the optional roundtable module; invalid values fail closed to off. |
+| `AIMEE_MODULE_RUNTIME_WEB` | Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default. |
+| `AIMEE_RUNTIME_WEB_ENABLED` | Enable the browser runtime and its optional runtime-web process. The shipped container default is on; `0`, `false`, `off`, or `no` disables both unless `AIMEE_MODULE_RUNTIME_WEB` explicitly enables the process. |
 | `AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT` | Permit the operator-configured search backend (`search.searxng_url`) to resolve to a private, loopback, or link-local address. Off by default: every outbound fetch is validated and pinned, so a self-hosted SearXNG on a LAN address is refused unless this is set. Deliberately an environment variable rather than a config key, because `config.set` is reachable from inside the running system and pointing the search backend at a cloud metadata address would exfiltrate instance credentials through a tool that looks like search. Set to exactly `1`; any other value is off. Never widens fetches of model-supplied or search-result URLs, which stay denied. |
 | `AIMEE_SERVER_HTTP_BIND` | TCP bind address for the server `/v1` HTTP listener (else UDS-only). |
 | `AIMEE_SERVER_MGMT_BIND` | Bind address that enables the server management listener when its full TLS configuration is present. |
