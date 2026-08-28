@@ -87,7 +87,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    int limit = jo_int(req, "limit", 10);
 
    if (!cJSON_IsArray(jkw) || cJSON_GetArraySize(jkw) == 0)
-      return server_send_error(conn, "missing or empty keywords array", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "missing or empty keywords array", NULL);
 
    int count = cJSON_GetArraySize(jkw);
    if (count > 16)
@@ -413,7 +414,7 @@ cJSON *memory_get_command(cJSON *req)
 
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(jid))
-      return jo_err("missing id");
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT, "memory.get requires an id", NULL);
 
    /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
     * the only thing between the flag and aimee-kb, which owns the interval. It

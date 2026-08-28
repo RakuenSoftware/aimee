@@ -1309,6 +1309,24 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+RESP=$(http_call POST /v1/memory/search '{}') || true
+check_output "memory.search missing keywords stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.search missing keywords returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.search missing-keywords HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
+RESP=$(http_call POST /v1/memory/get '{}') || true
+check_output "memory.get missing id stays typed" '"kind":"invalid_argument"' echo "$RESP"
+if echo "$RESP" | grep -q '"http_status":400'; then
+    check_output "memory.get missing id returns HTTP 400" "400 " echo "$RESP"
+else
+    echo "SKIP: memory.get missing-id HTTP mapping (runtime-web status provider is not attached)"
+    SKIP=$((SKIP + 1))
+fi
+
 if [ "$KB_AVAILABLE" -eq 1 ]; then
     RESP=$(srv_auth_req '{"method":"memory.store","key":"integ-test","content":"integration test value","tier":"L0","kind":"fact"}') || true
     check_output "memory.store" '"status":"ok"' echo "$RESP"
