@@ -78,10 +78,26 @@ static int hex_decode(const char *hex, uint8_t *out, size_t n)
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   vault_status_t st = VAULT_OK;
-   uint8_t legacy_salt[VAULT_SALT_LEN];
-   int has_legacy_vault = vault_store_salt_readonly(conn->vault_principal, legacy_salt) == 0;
-   OPENSSL_cleanse(legacy_salt, sizeof(legacy_salt));
+   /* No legacy actor vault means there is nothing to unlock: the environment
+    * vault needs no unlock, and vault_service_unlock_password would MINT a new
+    * per-actor vault on first use (vault_store_get_or_create_salt), which the
+    * shared-environment model does not want.
+    *
+    * Answered here with an early return, not by gating the unlock calls below.
+    * The credentials are verified INSIDE vault_service_unlock*, so any path that
+    * skips those calls and still reaches the success tail authenticates nobody —
+    * this route would answer {"status":"ok"} to any password. Returning before
+    * `st` exists makes that state unreachable rather than dependent on how `st`
+    * happens to be initialised. */
+   {
+      uint8_t legacy_salt[VAULT_SALT_LEN];
+      int has_legacy_vault = vault_store_salt_readonly(conn->vault_principal, legacy_salt) == 0;
+      OPENSSL_cleanse(legacy_salt, sizeof(legacy_salt));
+      if (!has_legacy_vault)
+         return vault_send_status_error(conn, VAULT_NO_ENTRY);
+   }
+
+   vault_status_t st;
 
    /* A webchat-asserted webuser principal unlocks with its login password
     * (scrypt KEK, WP-C.2); a kernel-attested uid: peer unlocks with its 32-byte
@@ -92,10 +108,9 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *jpw = cJSON_GetObjectItemCaseSensitive(req, "password");
       if (!cJSON_IsString(jpw))
          return server_send_error(conn, "vault: missing password", NULL);
-      if (has_legacy_vault)
-         st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
-                                            (const uint8_t *)jpw->valuestring,
-                                            strlen(jpw->valuestring), time(NULL));
+      st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
+                                         (const uint8_t *)jpw->valuestring,
+                                         strlen(jpw->valuestring), time(NULL));
       /* Best-effort scrub of the request-body copy of the password. */
       OPENSSL_cleanse(jpw->valuestring, strlen(jpw->valuestring));
    }
@@ -107,9 +122,8 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       uint8_t root_key[VAULT_ROOT_KEY_LEN];
       if (hex_decode(jrk->valuestring, root_key, sizeof(root_key)) != 0)
          return server_send_error(conn, "vault: root_key_hex must be 64 hex chars", NULL);
-      if (has_legacy_vault)
-         st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
-                                   sizeof(root_key), time(NULL));
+      st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
+                                sizeof(root_key), time(NULL));
       OPENSSL_cleanse(root_key, sizeof(root_key));
    }
    if (st != VAULT_OK)

@@ -89,9 +89,32 @@ turn_entry_t *turn_registry_publish(const char *session_id, const char *turn_id)
 
 int turn_registry_cancel(const char *session_id, const char *owner_principal)
 {
-   /* PAM identity is actor/audit metadata, not session ownership. Route-level
-    * authentication and capabilities decide whether the actor may cancel. */
-   (void)owner_principal;
+   /* Cross-principal protection. `owner_principal` is the CALLER'S ATTESTED
+    * identity (conn->vault_principal); the presence owner is what the attaching
+    * client declared. Requiring them to match is what stops one attested caller
+    * cancelling another's session: an attacker can claim any owner at attach
+    * time, but cannot authenticate as it.
+    *
+    * This is not "PAM identity as session ownership" — it is the only ownership
+    * signal the cancel path has. handle_chat_graceful_cancel and
+    * handle_chat_interrupt both pass the principal and both render a `rc < 0`
+    * as "forbidden: not the session owner", so dropping the comparison here
+    * does not move the check to the route, it deletes it and leaves those
+    * branches unreachable. A trusted-local caller passes NULL and is exempt,
+    * because it binds session id to authenticated caller before forwarding.
+    *
+    * Decided OUTSIDE the registry lock: presence has its own lock and the
+    * leaf-mutex rule forbids holding g_lock across a presence call. */
+   if (owner_principal && owner_principal[0])
+   {
+      char owner[PRESENCE_OWNER_MAX];
+      if (!presence_session_owner(session_id, owner, sizeof(owner)) ||
+          strcmp(owner, owner_principal) != 0)
+      {
+         LOG_WARN("turn_registry", "refused cross-principal cancel of session %s", session_id);
+         return -1;
+      }
+   }
    pthread_mutex_lock(&g_lock);
    turn_entry_t *e = find_locked(session_id);
    if (!e)
