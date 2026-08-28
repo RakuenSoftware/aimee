@@ -1984,6 +1984,14 @@ kb-intelligence-surfaced-check:
 proposal-links-check:
 	@python3 ../scripts/check-proposal-links.py
 
+# Per-actor authorization survives the shared-environment model. Merging the
+# per-actor NAMESPACES (one vault, one workspace root, one runtime dir) did not
+# require dropping per-actor authorization DECISIONS, but four went with them.
+# This pins the repaired sites. --plant-test proves the gate is not vacuous.
+actor-authz-check:
+	@python3 ../scripts/check-actor-authz.py --plant-test
+	@python3 ../scripts/check-actor-authz.py
+
 # The dated pending-audit manifest must keep describing the tree: every row's
 # final path resolves, archived rows carry a done state and a reciprocal residual
 # in pending/. This gate existed but nothing ran it, so it drifted; its own unit
@@ -2144,7 +2152,7 @@ lint:
 	echo "lint: all $$n checks passed"
 
 # Appended separately to keep the already-wide canonical check list readable.
-LINT_CHECKS += event-durability-check shell-quote-check workflow-pin-check build-input-integrity-check config-failopen-check security-claims-check
+LINT_CHECKS += actor-authz-check event-durability-check shell-quote-check workflow-pin-check build-input-integrity-check config-failopen-check security-claims-check
 
 background-skill-curator-absence-check:
 	@python3 -I -S ../scripts/check_background_skill_curator_absence.py
