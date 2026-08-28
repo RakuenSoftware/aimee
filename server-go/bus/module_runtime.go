@@ -15,11 +15,23 @@ import (
 const (
 	moduleMaxInFlight  = 16
 	moduleIdle         = time.Millisecond
+	moduleIdleMax      = 10 * time.Millisecond
 	moduleConnectRetry = 100 * time.Millisecond
 	// Well inside the host's 30s stale window, so a client stays admitted
 	// across an idle stretch without heartbeating hot.
 	clientHeartbeatInterval = 5 * time.Second
 )
+
+func nextModuleIdle(delay time.Duration) time.Duration {
+	if delay >= moduleIdleMax {
+		return moduleIdleMax
+	}
+	delay *= 2
+	if delay > moduleIdleMax {
+		return moduleIdleMax
+	}
+	return delay
+}
 
 var (
 	ErrModuleConfig  = errors.New("bus: invalid module process configuration")
@@ -337,6 +349,7 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 	assemblies := make(map[moduleCallKey]*moduleAssembly)
 	jobs := make(map[moduleCallKey]*moduleWork)
 	done := make(chan moduleResult, moduleMaxInFlight)
+	idleDelay := moduleIdle
 
 	for {
 		for {
@@ -379,9 +392,11 @@ func runModuleClient(ctx context.Context, config ModuleProcessConfig, stages map
 			return err
 		}
 		if !ok {
-			time.Sleep(moduleIdle)
+			time.Sleep(idleDelay)
+			idleDelay = nextModuleIdle(idleDelay)
 			continue
 		}
+		idleDelay = moduleIdle
 		correlation := event.Frame.CorrelationID
 		key := moduleCallKey{principalRef: event.Frame.PrincipalRef, correlationID: correlation}
 		if event.Frame.HdrFlags&FCancel != 0 {
