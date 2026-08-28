@@ -484,8 +484,27 @@ static void test_sse_keepalive_slow_generation(void)
    assert(strstr(buf, "keep-alive") != NULL);
 }
 
+static void test_json_number_serialization_is_exact(void)
+{
+   const char *cases[] = {"9007199254740991", "9007199254740992", "9007199254740993"};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      cJSON *before = cJSON_Parse(cases[i]);
+      assert(cJSON_IsNumber(before));
+      char *encoded = cJSON_PrintUnformatted(before);
+      assert(encoded != NULL);
+      cJSON *after = cJSON_Parse(encoded);
+      assert(cJSON_IsNumber(after));
+      assert(after->valuedouble == before->valuedouble);
+      cJSON_Delete(after);
+      free(encoded);
+      cJSON_Delete(before);
+   }
+}
+
 int main(void)
 {
+   test_json_number_serialization_is_exact();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 

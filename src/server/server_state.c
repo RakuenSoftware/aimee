@@ -292,10 +292,10 @@ int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
-       item->valuedouble > 9007199254740991.0 || floor(item->valuedouble) != item->valuedouble)
+       item->valuedouble >= 9223372036854775808.0 || floor(item->valuedouble) != item->valuedouble)
       return -1;
    *out = (int64_t)item->valuedouble;
-   return 0;
+   return *out <= INT64_C(9007199254740991) ? 0 : -1;
 }
 
 /* Replace a memory with a corrected one, linking the two.
