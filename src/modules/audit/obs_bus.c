@@ -877,7 +877,9 @@ static void *consumer_main(void *arg)
    /* Nap only when idle. During a burst the consumer must keep pace with the
     * producer or the ring backs up and the producer is forced to wait, so it
     * loops without napping as long as it is moving rows. */
-   const struct timespec nap = {.tv_sec = 0, .tv_nsec = 200 * 1000}; /* 200 us */
+   const long nap_min_ns = 200 * 1000;      /* 200 us */
+   const long nap_max_ns = 5 * 1000 * 1000; /* 5 ms */
+   long nap_ns = nap_min_ns;
    while (!atomic_load_explicit(&g.stop, memory_order_acquire))
    {
       uint64_t now = bus_runtime_monotonic_ns();
@@ -889,7 +891,11 @@ static void *consumer_main(void *arg)
       pthread_mutex_lock(&g.host_lock);
       if (g.runtime)
          (void)bus_runtime_maintain(g.runtime, now);
-      bus_host_pump(&g.host); /* the tap records each routed event into g.capture */
+      /* The tap records each routed event into g.capture. Keep this count separate
+       * from drain(): a routed module request may target another client rather than
+       * the observability consumer, but it is still activity that must reset the
+       * idle backoff so a burst is pumped without delay. */
+      uint32_t routed = bus_host_pump(&g.host);
       pthread_mutex_unlock(&g.host_lock);
       uint32_t n = drain();
       n += flush_pending_durable();
@@ -898,8 +904,19 @@ static void *consumer_main(void *arg)
        * waiting for more traffic). */
       if (g.capture.broken || g.capture.len >= AB_CAP_FLUSH_AT || (n == 0 && g.capture.len > 0))
          capture_flush();
-      if (n == 0)
+      if (n == 0 && routed == 0)
+      {
+         struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
          nanosleep(&nap, NULL);
+         if (nap_ns < nap_max_ns)
+         {
+            nap_ns *= 2;
+            if (nap_ns > nap_max_ns)
+               nap_ns = nap_max_ns;
+         }
+      }
+      else
+         nap_ns = nap_min_ns;
    }
    /* Final lossless drain: pump+drain until two consecutive empty rounds, so a
     * row published just before stop is handed to its sink before this thread
