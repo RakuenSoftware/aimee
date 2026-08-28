@@ -144,6 +144,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       free(json);
       if (!err)
          return server_send_error(conn, detail, NULL);
+      server_error_kind_apply(err, active_context_missing ? SERVER_ERR_INVALID_ARGUMENT
+                                                          : SERVER_ERR_UNAVAILABLE);
       cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
       return send_and_free(conn, err);
    }
@@ -462,15 +464,18 @@ cJSON *memory_get_command(cJSON *req)
    }
    else if (rc > 0)
    {
-      resp = jo_err("memory not found");
+      resp = server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
    }
    else
    {
       char *typed = kb_client_last_result_json("memory lookup failed");
       resp = typed ? cJSON_Parse(typed) : NULL;
       free(typed);
-      if (!resp)
-         resp = jo_err("knowledge service unavailable");
+      if (resp)
+         server_error_kind_apply(resp, SERVER_ERR_UNAVAILABLE);
+      else
+         resp =
+             server_error_kind_json(SERVER_ERR_UNAVAILABLE, "knowledge service unavailable", NULL);
    }
    return resp;
 }

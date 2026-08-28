@@ -3597,6 +3597,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/list:
     post:
       summary: List memories by tier/kind
@@ -3915,6 +3920,16 @@ paths:
               schema: { type: object }
         "400":
           description: Missing id or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Memory not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
