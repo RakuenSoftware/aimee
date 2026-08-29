@@ -13,7 +13,11 @@ That makes adding a new build input expensive until it is classified, never sile
 from __future__ import annotations
 
 import argparse
+import functools
 import json
+import pathlib
+import re
+import subprocess
 import sys
 from dataclasses import dataclass
 
@@ -44,19 +48,147 @@ CONTROL = frozenset(("aimee-control-web",))
 KB = frozenset(("aimee-kb", "aimee-kb-a25m", "aimee-kb-nomic"))
 AUTHORITY = frozenset(("aimee-authority-bootstrap",))
 
-# The KB link target deliberately reuses these leaf implementations from the
-# server directory.  scripts/tests/test_publish_testing_plan.py expands the real
-# Make graph and requires this declaration to match it exactly, so a new KB
-# consumer cannot silently inherit server-only classification.
-KB_SHARED_SERVER_C = frozenset(
-    (
-        "src/server/embedder_probe.c",
-        "src/server/failover.c",
-        "src/server/http_retry.c",
-        "src/server/oauth_pkce.c",
-        "src/server/osv_check.c",
+ROOT = pathlib.Path(__file__).resolve().parents[1]
+
+
+@functools.lru_cache(maxsize=1)
+def _shipping_object_closures() -> dict[str, frozenset[str]] | None:
+    """Expand the transitive C link graph for every published runtime image."""
+
+    try:
+        proc = subprocess.run(
+            ["make", "-C", str(ROOT / "src"), "-pnRrq"],
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if not proc.stdout:
+        return None
+
+    rules: dict[str, set[str]] = {}
+    assignments = {"=", ":=", "::=", "?=", "+="}
+    for line in proc.stdout.splitlines():
+        if not line or line[0].isspace() or line.startswith("#") or ":" not in line:
+            continue
+        left, right = line.split(":", 1)
+        prerequisites = right.split("|", 1)[0].split()
+        if any(token in assignments for token in prerequisites):
+            continue
+        for target in left.split():
+            rules.setdefault(target, set()).update(prerequisites)
+
+    roots = {
+        "aimee-server": ("../aimee-server",),
+        "aimee-kb": ("../aimee-kb", "../aimee-kb-worm"),
+        "aimee-kb-a25m": ("../aimee-kb", "../aimee-kb-worm"),
+        "aimee-kb-nomic": ("../aimee-kb", "../aimee-kb-worm"),
+        "aimee-authority-bootstrap": (
+            "../aimee-kb-token-roots-provision",
+            "../aimee-kb-jwks-publish",
+        ),
+    }
+    closures: dict[str, frozenset[str]] = {}
+    for image, image_roots in roots.items():
+        seen: set[str] = set()
+        pending = list(image_roots)
+        while pending:
+            target = pending.pop()
+            if target in seen:
+                continue
+            seen.add(target)
+            pending.extend(rules.get(target, ()))
+        closures[image] = frozenset(item for item in seen if item.endswith(".o"))
+    if any(not closures[image] for image in roots):
+        return None
+    return closures
+
+
+def _c_source_consumers(path: str) -> frozenset[str]:
+    """Map a C source to images containing any of its compiled object variants."""
+
+    closures = _shipping_object_closures()
+    if closures is None:
+        return ALL
+    stem = path.removeprefix("src/").removesuffix(".c")
+    candidates = {
+        f"build/obj/{stem}.o",
+        f"build/obj/server/{stem}.o",
+        f"build/obj/kb/{stem}.o",
+    }
+    return frozenset(
+        image for image, objects in closures.items() if not candidates.isdisjoint(objects)
     )
-)
+
+
+@functools.lru_cache(maxsize=1)
+def _shipping_header_consumers() -> dict[str, frozenset[str]]:
+    """Attribute checked-in headers through the shipping source include graph.
+
+    Ambiguous include names are deliberately resolved to every matching header,
+    which can cause an extra rebuild but cannot omit a real consumer.
+    """
+
+    source_root = ROOT / "src"
+    files = sorted(source_root.rglob("*.c")) + sorted(source_root.rglob("*.h"))
+    relative = {path: path.relative_to(source_root).as_posix() for path in files}
+    aliases: dict[str, set[str]] = {}
+    for path, rel in relative.items():
+        if path.suffix != ".h":
+            continue
+        aliases.setdefault(rel, set()).add(rel)
+        aliases.setdefault(path.name, set()).add(rel)
+        if "/include/" in rel:
+            aliases.setdefault(rel.split("/include/", 1)[1], set()).add(rel)
+
+    include_re = re.compile(r'^\s*#\s*include\s*[<"]([^">]+)[">]', re.MULTILINE)
+    edges: dict[str, set[str]] = {}
+    for path, rel in relative.items():
+        try:
+            names = include_re.findall(path.read_text(encoding="utf-8", errors="ignore"))
+        except OSError:
+            continue
+        resolved: set[str] = set()
+        for name in names:
+            local = (path.parent / name).resolve()
+            try:
+                if local.is_file() and local.is_relative_to(source_root):
+                    resolved.add(local.relative_to(source_root).as_posix())
+            except OSError:
+                pass
+            resolved.update(aliases.get(name, ()))
+        edges[rel] = resolved
+
+    consumers: dict[str, set[str]] = {}
+    for path, rel in relative.items():
+        if path.suffix != ".c":
+            continue
+        images = _c_source_consumers(f"src/{rel}")
+        if not images:
+            continue
+        seen: set[str] = set()
+        pending = list(edges.get(rel, ()))
+        while pending:
+            header = pending.pop()
+            if header in seen:
+                continue
+            seen.add(header)
+            pending.extend(edges.get(header, ()))
+        for header in seen:
+            consumers.setdefault(f"src/{header}", set()).update(images)
+    return {path: frozenset(images) for path, images in consumers.items()}
+
+
+def _header_consumers(path: str) -> frozenset[str]:
+    consumers = _shipping_header_consumers()
+    if path in consumers:
+        return consumers[path]
+    # A present header with no include edge is not an image input. A deleted or
+    # otherwise unresolved header fails closed because its former edges are gone.
+    return frozenset() if (ROOT / path).is_file() else ALL
 
 # Files that define publication, not image bytes.  Keeping these out of every image
 # is important: fixing this planner must not itself trigger six unrelated rebuilds.
@@ -148,25 +280,23 @@ def consumers(path: str) -> frozenset[str]:
             out |= CONTROL
         return out
 
+    if path.endswith(".c") and path.startswith("src/"):
+        return _c_source_consumers(path)
+    if path.endswith(".h") and path.startswith("src/"):
+        return _header_consumers(path)
     if path.startswith("src/modules/kb_client/"):
-        # Makefile's KB_CLIENT_OBJS are linked only into aimee-server.  A regression
-        # test enforces that this directory never enters an aimee-kb target unnoticed.
+        # Non-C files in the thin KB client are server-owned. C ownership comes
+        # from the expanded shipping link graph above.
         return SERVER
-    if path in KB_SHARED_SERVER_C:
-        return SERVER | KB
     if path.startswith("src/server/"):
-        # C implementations under server/ are server-owned except for the exact
-        # KB leaf closure above.  Headers remain conservative because a shared
-        # leaf can include them transitively without appearing as a link object.
-        return SERVER | KB if path.endswith(".h") else SERVER
+        return SERVER
     if path == "src/gen_openapi_server.py":
         return SERVER
     if path == "src/gen_openapi.py":
         return KB
     if path.startswith("src/"):
-        # The C make graph has broad shared closures.  Until a narrower ownership
-        # boundary is mechanically proven, source outside the two exclusions above
-        # invalidates every C image.  This is conservative, not a guessed omission.
+        # Header and generated-input dependencies are not fully represented by
+        # link objects, so non-C source inputs remain conservative.
         return SERVER | KB | AUTHORITY
 
     if path in KB_CONTAINER_FILES:

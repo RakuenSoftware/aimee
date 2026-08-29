@@ -72,9 +72,10 @@ def main() -> None:
     )
     failures += expect(
         ["src/kb/kb_service.c"],
-        set(planner.SERVER | planner.KB | planner.AUTHORITY),
-        "shared C source is conservative",
+        kb,
+        "KB runtime C source",
     )
+    failures += expect(["src/cli_argspec.c"], set(), "thin-client-only C source")
     failures += expect(
         [
             "api/openapi-server-v1.yaml",
@@ -90,9 +91,19 @@ def main() -> None:
         "server leaf linked into KB",
     )
     failures += expect(
-        ["src/server/server_state.h"],
+        ["src/modules/memory/memory_core_search_c.c"],
         set(planner.SERVER | planner.KB),
-        "server header remains conservative",
+        "shared server and KB C source",
+    )
+    failures += expect(
+        ["src/kb/kb_mgmt_token_roots_provision_main.c"],
+        set(planner.AUTHORITY),
+        "authority-only C source",
+    )
+    failures += expect(
+        ["src/headers/server_skill.h"],
+        set(planner.SERVER),
+        "server-only header include closure",
     )
     failures += expect(
         ["api/openapi-v1.yaml", "src/gen_openapi.py"],
@@ -154,10 +165,8 @@ def main() -> None:
     else:
         print("  ok    KB_CLIENT_OBJS remains server-owned")
 
-    # Expand the actual shipping KB targets and compare every object linked from
-    # src/server/.  This is the mechanical ownership guard for the narrow
-    # server-source rule above; adding or removing a shared leaf requires the
-    # publication contract to move in the same commit.
+    # Independently expand the actual shipping KB targets and ensure every direct
+    # server leaf is classified as a KB consumer by the transitive graph.
     make_db = subprocess.run(
         ["make", "-C", str(ROOT / "src"), "-pnRrq"],
         check=False,
@@ -174,15 +183,17 @@ def main() -> None:
         f"src/server/{name}.c"
         for name in re.findall(r"build/obj/server/([A-Za-z0-9_./-]+)\.o", kb_target_lines)
     }
-    if linked_server_sources != set(planner.KB_SHARED_SERVER_C):
+    misclassified = sorted(
+        path for path in linked_server_sources if not planner.KB.issubset(planner.consumers(path))
+    )
+    if misclassified:
         print(
-            "  FAIL  KB-linked server sources drifted: "
-            f"actual={sorted(linked_server_sources)} "
-            f"declared={sorted(planner.KB_SHARED_SERVER_C)}"
+            "  FAIL  KB-linked server sources are not classified for KB: "
+            f"{misclassified}"
         )
         failures += 1
     else:
-        print("  ok    KB-linked server sources match the expanded Make graph")
+        print("  ok    KB-linked server sources are classified from the Make graph")
 
     # If a Dockerfile starts copying another container file, the contract must be
     # updated in the same change.  This prevents selective publishing from drifting.
