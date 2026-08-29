@@ -227,10 +227,11 @@ int handle_provider_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(req, "name");
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
-      return server_send_error(conn, "provider name required", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "provider name required",
+                                    NULL);
    model_provider_t *p = model_provider_get(jname->valuestring);
    if (!p)
-      return server_send_error(conn, "provider not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "provider not found", NULL);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "provider", server_provider_json(p));
@@ -244,16 +245,18 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(req, "name");
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
-      return server_send_error(conn, "provider name required", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "provider name required",
+                                    NULL);
    model_provider_t *p = model_provider_get(jname->valuestring);
    if (!p)
-      return server_send_error(conn, "provider not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "provider not found", NULL);
    if (!p->fetch_models)
-      return server_send_error(conn, "provider does not support model listing", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "provider does not support model listing", NULL);
    provider_model_t *models = NULL;
    int n = 0;
    if (server_provider_models_cached(p, &models, &n) != 0)
-      return server_send_error(conn, "failed to fetch models", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to fetch models", NULL);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -466,14 +469,16 @@ int handle_model_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       if (!model_capability_resolve_ref(name, resolved_provider, sizeof(resolved_provider),
                                         resolved_model, sizeof(resolved_model), &cap))
-         return server_send_error(conn, "model capability lookup failed", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "model capability lookup failed",
+                                       NULL);
    }
    else
    {
       if (!model || !model[0])
-         return server_send_error(conn, "model required", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "model required", NULL);
       if (!model_capability_get(provider, model, &cap))
-         return server_send_error(conn, "model capability metadata not found", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                       "model capability metadata not found", NULL);
    }
 
    cJSON *resp = cJSON_CreateObject();
