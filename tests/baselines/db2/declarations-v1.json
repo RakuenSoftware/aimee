@@ -1540,6 +1540,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_reasoning.c",
@@ -1941,6 +1942,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_mining.c",
@@ -2134,6 +2136,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -2338,6 +2341,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -2519,6 +2523,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -5144,6 +5149,7 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_memory_facts.c",
@@ -12598,7 +12604,8 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
+        "src/kb/kb_service_memory.c",
+        "src/tests/test_kb.c"
       ],
       "locations": [
         {
@@ -19116,7 +19123,9 @@
       "symbol": "db2_memory_scenes_list_recent"
     },
     {
-      "consumers": [],
+      "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_memory.c"
+      ],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_scope_query.h",
@@ -19125,7 +19134,7 @@
       ],
       "signature": "void db2_memory_scope_bind_current ( aimee_pg_stmt_t * st )",
       "signature_sha256": "093697bbecdca2cd69a7fcbead866e9612a1ecd44ea3080c981c8436c258f84d",
-      "status": "internal-unconsumed",
+      "status": "audit-pending",
       "symbol": "db2_memory_scope_bind_current"
     },
     {
@@ -19147,6 +19156,7 @@
         "src/kb/kb_service_memory.c",
         "src/modules/memory/memory_core_search_c.c",
         "src/tests/support/kb_http_route_stubs.c",
+        "src/tests/test_kb.c",
         "src/tests/test_memory_advanced.c",
         "src/tests/test_typed_facts.c",
         "src/tests/test_workspace_memory.c"
@@ -27103,14 +27113,14 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "981528b8098ebdbc6d16d0a5d4430a0695e1bd4be18f126530f2976b6f37c5d3",
+  "fingerprint": "bc377b05cba86b6e89d7b2ad294bd3f65383cfeb84b31abdf23de64ff6995270",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 744,
+    "audit_pending": 745,
     "declarations": 1495,
     "headers": 143,
-    "internal_unconsumed": 173,
+    "internal_unconsumed": 172,
     "private_test_only": 284,
     "reviewed": 294
   }
