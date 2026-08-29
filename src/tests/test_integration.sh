@@ -1209,6 +1209,25 @@ for r in (doc.get('marshal') or []):
 check_output "a served spec arrives with its fields" "capability,json,open_weights_only" \
     echo "$CATALOG_SPEC"
 
+# Read routes backed by the command dispatcher used to turn every handler error
+# into 502 Bad Gateway. Missing arguments and absent configuration are not
+# upstream transport failures: keep the typed kind in the envelope so the HTTP
+# bridge can return an actionable 4xx status and clients will not retry it.
+RESP=$(http_call GET /v1/model/local '{}') || true
+check_output "model.local missing endpoint stays typed" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call GET /v1/provider/models '{}') || true
+check_output "provider.models missing name stays typed" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call GET /v1/provider/models '{"name":"integ-no-such-provider"}') || true
+check_output "provider.models unknown provider stays typed" '"kind":"not_found"' echo "$RESP"
+
+RESP=$(http_call GET /v1/catalog/show '{}') || true
+check_output "catalog.show missing model stays typed" '"kind":"invalid_argument"' echo "$RESP"
+
+RESP=$(http_call GET /v1/agent/list '{}') || true
+check_output "agent.list absent config stays typed" '"kind":"not_found"' echo "$RESP"
+
 # ============================================================
 # 4. Session management
 # ============================================================

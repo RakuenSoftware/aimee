@@ -283,7 +283,8 @@ if [ "$external_db" -eq 0 ]; then
     # (it chowns the server identity it installs), and PostgreSQL forbids running
     # the SERVER as root, not connecting to one as root. Refusing here failed
     # managed server identity enrollment on every clean install.
-    if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+    if "$PGBIN/pg_isready" --host="$PGSOCK" --username=aimee --dbname=postgres \
+            --quiet 2>/dev/null; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
         # Enrollment and informational one-shots share the live KB's volume,
