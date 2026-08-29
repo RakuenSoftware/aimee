@@ -469,7 +469,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
                             "max_tokens is required and must be a positive integer", 0);
       }
       const cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-      if (jmsgs && (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0))
+      if (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0)
       {
          cJSON_Delete(req);
          return write_error(resp, cap, 400, "invalid_request_error",

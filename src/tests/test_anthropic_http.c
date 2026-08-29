@@ -1207,6 +1207,20 @@ static void test_count_tokens_validates_request_shape(void)
    PASS("count_tokens_validates_request_shape");
 }
 
+static void test_messages_buffered_rejects_missing_messages(void)
+{
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &openai;
+   assert(messages_buffered("{\"max_tokens\":16}", resp, sizeof(resp)) == 400);
+   assert(strstr(resp, "messages must be a non-empty array") != NULL);
+   assert(g_last_body == NULL);
+   reset_capture();
+   PASS("messages_buffered_rejects_missing_messages");
+}
+
 int main(void)
 {
    test_explicit_unknown_model_is_rejected();
@@ -1229,6 +1243,7 @@ int main(void)
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
    test_count_tokens_validates_request_shape();
+   test_messages_buffered_rejects_missing_messages();
    printf("anthropic_http: OK\n");
    return 0;
 }
