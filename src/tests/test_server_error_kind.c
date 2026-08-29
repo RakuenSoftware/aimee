@@ -77,6 +77,7 @@ int main(void)
    expect_status(SERVER_ERR_NOT_FOUND, 404);
    expect_status(SERVER_ERR_PERMISSION_DENIED, 403);
    expect_status(SERVER_ERR_UNAVAILABLE, 503);
+   expect_status(SERVER_ERR_PAYLOAD_TOO_LARGE, 413);
    expect_status("unknown", 502);
    expect_status(NULL, 502);
 

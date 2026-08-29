@@ -45,7 +45,10 @@ services:
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      # Keep the selection paired with the default bundled-image variant. The
+      # entrypoint intentionally refuses to guess a vector space, so an empty
+      # value makes the default image restart forever despite carrying A25M.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}
       EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
@@ -95,6 +98,11 @@ services:
       - --port=8745
       - --endpoint=https://aimee-server:8743
       - --uid=1000
+      # `docker compose exec aimee-server aimee ...` enters as root (the image
+      # has no Config.User). The server resolves that kernel-attested UDS peer
+      # to KB subject "root", so enroll the standard appliance operator beside
+      # the service identity or every content read is denied on a clean install.
+      - --member=root
     depends_on:
       aimee-kb: { condition: service_healthy }
     volumes:

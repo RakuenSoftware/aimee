@@ -208,6 +208,10 @@ services:
       - --port=8745
       - --endpoint=https://aimee-server:8743
       - --uid=1000
+      # The published image's standard `docker compose exec` caller is root;
+      # managed-server-identity must enroll that attested KB subject as well as
+      # the server service identity for content reads to intersect a team.
+      - --member=root
     depends_on:
       aimee-kb:
         condition: service_healthy
