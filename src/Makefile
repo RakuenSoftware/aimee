@@ -249,7 +249,7 @@ L_GATEWAY = $(L_MINIMAL) -lssl -lcrypto $(HTTP_LIB)
 # store-bound call through the kb client socket. Keep the audit hardening flags
 # on this newer direct-store topology.
 L_SERVER  = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) $(PQ_LIB) -lsqlite3 -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
-L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) $(PQ_LIB) -lm -lpthread -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
+L_KB      = -Os -flto -ffunction-sections -fdata-sections -Wl,--gc-sections $(HARDEN_L_FLAGS) $(PQ_LIB) -lm -lpthread -lz -lzstd $(EXTRA_L_FLAGS) $(CORE_CONNECTION_LIB) -lssl -lcrypto $(HTTP_LIB) $(PAM_LIBS) $(LIBSECRET_LIBS) $(PLATFORM_FRAMEWORKS) $(WINDOWS_LIBS)
 ifeq ($(OS),Windows_NT)
     L_FULL += -ladvapi32
     L_KB += -ladvapi32
@@ -648,6 +648,7 @@ $(OBJDIR)/kb/kb_module_stage_adapters.o $(OBJDIR)/modules/db2/client/generated.o
 KB_SRCS += kb/managed_server_identity.c kb/managed_server_identity_install.c
 KB_SRCS += kb/http/kb_http_content_policy.c
 KB_SRCS += kb/http/kb_http_entry.c
+KB_SRCS += kb/kb_document_inspector.c
 KB_SRCS += kb/http/kb_http_code_context.c
 KB_SRCS += kb/http/kb_http_code_lifecycle.c
 KB_SRCS += kb/kb_tenancy_cli.c

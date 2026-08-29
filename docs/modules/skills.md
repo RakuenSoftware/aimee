@@ -64,14 +64,23 @@ underlying contracts, and GUI controls must be hidden when their actual consumer
 
 ## Surfaces
 
-The primary user surface is `aimee skill` with list, show, lint, eval, create, edit, patch, archive,
-export, import, rollback, lifecycle, autostub, pin, and unpin verbs. Project `.aimee/skills`, user skill
+The primary user surface is `aimee skill` with list, show, lint, eval, `eval-fixtures`, the opt-in
+`eval-exec` pilot, create, edit, patch, archive, export, import, rollback, lifecycle, autostub, pin,
+and unpin verbs. Project `.aimee/skills`, user skill
 directories, delegate prompt injection, session briefings, and review payloads are also supported
 surfaces with bounded content and stable precedence.
 
+`eval` and `eval-fixtures` score the existing stored baseline/treatment fixtures. `eval-exec` instead
+loads operator-held cases from `.aimee/skill-evals/<name>/*.json`, makes balanced tool-free baseline
+and treatment calls through one frozen non-CLI model route, and reports the skill, case-set, policy,
+and trial-manifest digests. It is deliberately a pilot: it attributes tokens, latency, and known
+provider cost, fails inconclusive on route drift, unknown cost, denied effects, runner failure, or
+budget excess, and does not feed promotion automatically.
+
 ## Data and migrations
 
-Skill bodies and support files are filesystem data; usage, state, snapshots, and review records use
+Skill bodies, support files, and operator-held executable-eval cases are filesystem data; usage,
+state, snapshots, and review records use
 sidecars or repository databases according to the current implementation. Canonical source ownership
 under `src/modules/skills` does not change project-over-user precedence, archive behavior, size limits,
 or rollback snapshot interpretation.
@@ -101,7 +110,7 @@ emits the conservative advisory instead of becoming a silent non-match.
 
 ## Operational diagnostics
 
-Use `aimee skill list|show|lint|eval`, review records, and lifecycle result counts to diagnose
+Use `aimee skill list|show|lint|eval-fixtures|eval-exec`, review records, and lifecycle result counts to diagnose
 precedence, malformed content, stale state, or failed automation. Diagnostics should include the resolved
 source class and safe path context while avoiding logging full private skill bodies or injected secrets.
 

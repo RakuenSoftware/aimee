@@ -92,6 +92,10 @@ var schemaHistory = []struct {
 	// Privacy erasure spans DB2 and DB1.  Persist the DB1 result by request id
 	// so a completion retry carries the original count rather than zero.
 	{23, "schema_subject_erasure.sql"},
+	// Review convergence previously recognized only byte-identical artifact and
+	// feedback hashes. Retain a bounded canonical set of structured blockers so
+	// cosmetic edits and blocker substitution cannot reset the progress budget.
+	{24, "schema_convergence_blocker_sets.sql"},
 }
 
 // Migration is one versioned change to aimee's schema.
