@@ -691,6 +691,123 @@ static double memory_source_fusion_bonus(const memory_candidate_source_t *stats,
    return bonus;
 }
 
+/* Lane names for the MEM_SOURCE_* bits, indexed by bit position. A NULL entry
+ * is an unnamed bit and is skipped rather than reported under a wrong name. */
+static const char *const memory_lane_names[] = {
+    "lexical",  /* MEM_SOURCE_LEXICAL  */
+    "alias",    /* MEM_SOURCE_ALIAS    */
+    "entity",   /* MEM_SOURCE_ENTITY   */
+    "summary",  /* MEM_SOURCE_SUMMARY  */
+    "event",    /* MEM_SOURCE_EVENT    */
+    "chunk",    /* MEM_SOURCE_CHUNK    */
+    "unit",     /* MEM_SOURCE_UNIT     */
+    "temporal", /* MEM_SOURCE_TEMPORAL */
+    "semantic", /* MEM_SOURCE_SEMANTIC */
+    "like",     /* MEM_SOURCE_LIKE     */
+    "code",     /* MEM_SOURCE_CODE     */
+    "graph"     /* MEM_SOURCE_GRAPH    */
+};
+
+#define MEMORY_LANE_COUNT ((int)(sizeof(memory_lane_names) / sizeof(memory_lane_names[0])))
+
+static unsigned int memory_lane_mask_for(const memory_candidate_source_t *stats, int stats_count,
+                                         int64_t memory_id)
+{
+   for (int i = 0; i < stats_count; i++)
+   {
+      if (stats[i].memory_id == memory_id)
+         return stats[i].source_mask;
+   }
+   return 0u;
+}
+
+/* Per-lane outcome accounting, recorded after ranking has fixed the order.
+ *
+ * The candidate collector already tags every row with the lane(s) that produced
+ * it (memory_note_candidate_sources), but that tagging was only ever consumed as
+ * a ranking input (memory_source_fusion_bonus). Nothing recorded whether a lane's
+ * contribution SURVIVED ranking, so a lane that produces candidates on every
+ * query and never places one in the served set is indistinguishable from a lane
+ * that carries the answer.
+ *
+ * This is measurement, not control: no lane is skipped, reordered, or truncated
+ * on the strength of these counters. It exists so that a decision to drop a lane
+ * can be made from evidence about this corpus, the way the reranker's removal
+ * was. Deciding sufficiency mid-collection would need the lanes to be ordered by
+ * expected yield relative to each other, and they are not.
+ *
+ * `served` is the count the caller is about to hand back; rows beyond it were
+ * ranked and dropped, and are counted only as candidates.
+ */
+void memory_record_lane_outcome_metrics(const memory_query_plan_t *plan, const memory_t *matches,
+                                        int served, const memory_candidate_source_t *source_stats,
+                                        int source_stats_count)
+{
+   char key[160];
+   int candidates[MEMORY_LANE_COUNT];
+   int wins[MEMORY_LANE_COUNT];
+   const char *route_name = plan ? memory_query_route_name(plan->route) : NULL;
+
+   if (!source_stats || source_stats_count <= 0)
+      return;
+   if (served < 0)
+      served = 0;
+
+   for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+   {
+      candidates[lane] = 0;
+      wins[lane] = 0;
+   }
+
+   for (int i = 0; i < source_stats_count; i++)
+   {
+      unsigned int mask = source_stats[i].source_mask;
+      for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+      {
+         if (mask & (1u << lane))
+            candidates[lane]++;
+      }
+   }
+
+   if (matches)
+   {
+      for (int i = 0; i < served; i++)
+      {
+         unsigned int mask =
+             memory_lane_mask_for(source_stats, source_stats_count, matches[i].id);
+         for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+         {
+            if (mask & (1u << lane))
+               wins[lane]++;
+         }
+      }
+   }
+
+   for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+   {
+      if (!memory_lane_names[lane] || candidates[lane] == 0)
+         continue;
+      snprintf(key, sizeof(key), "memory.query.lane.%s.candidates", memory_lane_names[lane]);
+      memory_runtime_state_increment(key, candidates[lane]);
+      snprintf(key, sizeof(key), "memory.query.lane.%s.served", memory_lane_names[lane]);
+      memory_runtime_state_increment(key, wins[lane]);
+      /* A lane that contributed candidates and placed none is the shape worth
+       * counting on its own: summing served==0 across queries is what tells a
+       * lane apart from one that merely ranks low. */
+      if (wins[lane] == 0)
+      {
+         snprintf(key, sizeof(key), "memory.query.lane.%s.shutout", memory_lane_names[lane]);
+         memory_runtime_state_increment(key, 1);
+      }
+      if (route_name)
+      {
+         snprintf(key, sizeof(key), "memory.query.route.%s.lane.%s.served", route_name,
+                  memory_lane_names[lane]);
+         memory_runtime_state_increment(key, wins[lane]);
+      }
+   }
+}
+
 void memory_record_query_stage_metric(const memory_query_plan_t *plan, const char *stage_name)
 {
    char key[128];

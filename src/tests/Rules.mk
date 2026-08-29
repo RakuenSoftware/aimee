@@ -307,6 +307,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-entity-nodes \
                $(TESTPREFIX)/unit-test-memory-ranker-boundary \
                $(TESTPREFIX)/unit-test-memory-lanes \
+               $(TESTPREFIX)/unit-test-memory-lane-outcome \
                $(TESTPREFIX)/unit-test-workspace \
                $(TESTPREFIX)/unit-test-cross-repo-deps \
                $(TESTPREFIX)/unit-test-cross-repo-stats \
@@ -1926,6 +1927,9 @@ $(TESTPREFIX)/unit-test-memory-ranker-boundary: $(OBJDIR)/tests/test_memory_rank
 
 $(TESTPREFIX)/unit-test-memory-lanes: $(OBJDIR)/tests/test_memory_lanes.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-memory-lane-outcome: $(OBJDIR)/tests/test_memory_lane_outcome.o $(TEST_DATA_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
                           $(OBJDIR)/worktree_gc.o \

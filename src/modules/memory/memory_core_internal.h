@@ -272,6 +272,9 @@ int memory_query_wants_future(const char *norm_query);
 int memory_query_wants_past(const char *norm_query);
 int memory_query_wants_recent(const char *norm_query);
 memory_ranker_input_t memory_ranker_input_from(const memory_t *m);
+void memory_record_lane_outcome_metrics(const memory_query_plan_t *plan, const memory_t *matches,
+                                        int served, const memory_candidate_source_t *source_stats,
+                                        int source_stats_count);
 void memory_record_query_plan_metrics(const memory_query_plan_t *plan, double elapsed_ms);
 void memory_record_query_stage_metric(const memory_query_plan_t *plan, const char *stage_name);
 int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, int limit,

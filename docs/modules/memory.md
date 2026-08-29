@@ -156,6 +156,33 @@ and `memory_health` diagnostics to separate empty knowledge from provider or ind
 retain the concrete database, sidecar, and HTTP error rather than collapsing every failure into a generic
 `index unavailable` message.
 
+### Per-lane recall outcomes
+
+Recall runs several candidate lanes (graph, variant, decomposition, unit-semantic, semantic,
+negation, FTS) and each candidate is already tagged with the lane that produced it. That tagging fed
+ranking, through the multi-source fusion bonus, and nothing else: whether a lane's contribution
+*survived* ranking was never recorded, so a lane that produces candidates on every query and never
+places one looked identical to a lane carrying the answer.
+
+After ranking fixes the order, `memory_record_lane_outcome_metrics()` attributes the served window
+back to its lanes:
+
+| Counter | Meaning |
+| --- | --- |
+| `memory.query.lane.<lane>.candidates` | rows this lane contributed to the pool |
+| `memory.query.lane.<lane>.served` | of those, how many are in the window handed back |
+| `memory.query.lane.<lane>.shutout` | queries where the lane contributed and placed nothing |
+| `memory.query.route.<route>.lane.<lane>.served` | the same, split by query route |
+
+A lane that contributed nothing emits no counters, so a silent lane and a losing lane are not summed
+together.
+
+This is measurement, not control. No lane is skipped, reordered, or truncated on the strength of
+these counters, and no recall decision reads them back. Stopping collection early would need the
+lanes ordered by expected yield relative to each other, and they are not: candidate volume is not
+evidence that the lane holding the answer has already run. The counters exist so a decision to drop
+a lane can be made from evidence about this corpus, the way the reranker's removal was.
+
 ## Compatibility
 
 Public `memory_*`, KB-client JSON, CLI, route, schema, and embedding-version contracts remain stable
