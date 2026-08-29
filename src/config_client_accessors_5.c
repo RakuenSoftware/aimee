@@ -159,6 +159,21 @@ int config_set_memory_rewrite_decompose(int value)
    return config_client_set_number("memory_rewrite_decompose", (double)value);
 }
 
+/* Heuristic (non-LLM) sub-query expansion inside candidate generation.
+ * Seeded to 1 so an unset config keeps the stage running: this flag exists to
+ * make the stage ablatable, not to silently remove it from live recall. */
+int config_memory_decompose_heuristic_enabled(void)
+{
+   double value = 1;
+   (void)config_client_read_number("memory_decompose_heuristic_enabled", &value);
+   return (int)value;
+}
+
+int config_set_memory_decompose_heuristic_enabled(int value)
+{
+   return config_client_set_number("memory_decompose_heuristic_enabled", (double)value);
+}
+
 int config_memory_recall_lanes_k_fact(void)
 {
    double value = 0;
