@@ -44,6 +44,20 @@ CONTROL = frozenset(("aimee-control-web",))
 KB = frozenset(("aimee-kb", "aimee-kb-a25m", "aimee-kb-nomic"))
 AUTHORITY = frozenset(("aimee-authority-bootstrap",))
 
+# The KB link target deliberately reuses these leaf implementations from the
+# server directory.  scripts/tests/test_publish_testing_plan.py expands the real
+# Make graph and requires this declaration to match it exactly, so a new KB
+# consumer cannot silently inherit server-only classification.
+KB_SHARED_SERVER_C = frozenset(
+    (
+        "src/server/embedder_probe.c",
+        "src/server/failover.c",
+        "src/server/http_retry.c",
+        "src/server/oauth_pkce.c",
+        "src/server/osv_check.c",
+    )
+)
+
 # Files that define publication, not image bytes.  Keeping these out of every image
 # is important: fixing this planner must not itself trigger six unrelated rebuilds.
 PUBLISH_TOOLING = frozenset(
@@ -117,6 +131,15 @@ def consumers(path: str) -> frozenset[str]:
     if path.startswith("config/"):
         return SERVER
 
+    if path == "api/openapi-server-v1.yaml":
+        return SERVER
+    if path == "api/openapi-v1.yaml":
+        return KB
+    if path.startswith("api/"):
+        # Generated SDKs and API documentation are publication artifacts, not
+        # inputs to any runtime image.
+        return frozenset()
+
     if path.startswith("server-go/"):
         out = SERVER | KB  # both images build the module multicall runtime
         if path in ("server-go/go.mod", "server-go/go.sum") or path.startswith(
@@ -129,6 +152,17 @@ def consumers(path: str) -> frozenset[str]:
         # Makefile's KB_CLIENT_OBJS are linked only into aimee-server.  A regression
         # test enforces that this directory never enters an aimee-kb target unnoticed.
         return SERVER
+    if path in KB_SHARED_SERVER_C:
+        return SERVER | KB
+    if path.startswith("src/server/"):
+        # C implementations under server/ are server-owned except for the exact
+        # KB leaf closure above.  Headers remain conservative because a shared
+        # leaf can include them transitively without appearing as a link object.
+        return SERVER | KB if path.endswith(".h") else SERVER
+    if path == "src/gen_openapi_server.py":
+        return SERVER
+    if path == "src/gen_openapi.py":
+        return KB
     if path.startswith("src/"):
         # The C make graph has broad shared closures.  Until a narrower ownership
         # boundary is mechanically proven, source outside the two exclusions above

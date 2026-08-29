@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import re
+import subprocess
 import sys
 
 
@@ -75,6 +76,30 @@ def main() -> None:
         "shared C source is conservative",
     )
     failures += expect(
+        [
+            "api/openapi-server-v1.yaml",
+            "src/server/server_state.c",
+            "src/tests/test_integration.sh",
+        ],
+        set(planner.SERVER),
+        "#2892 server and server OpenAPI change",
+    )
+    failures += expect(
+        ["src/server/oauth_pkce.c"],
+        set(planner.SERVER | planner.KB),
+        "server leaf linked into KB",
+    )
+    failures += expect(
+        ["src/server/server_state.h"],
+        set(planner.SERVER | planner.KB),
+        "server header remains conservative",
+    )
+    failures += expect(
+        ["api/openapi-v1.yaml", "src/gen_openapi.py"],
+        kb,
+        "KB OpenAPI inputs",
+    )
+    failures += expect(
         ["frontend/src/App.tsx"],
         set(planner.SERVER | planner.CONTROL),
         "shared browser frontend",
@@ -128,6 +153,36 @@ def main() -> None:
         failures += 1
     else:
         print("  ok    KB_CLIENT_OBJS remains server-owned")
+
+    # Expand the actual shipping KB targets and compare every object linked from
+    # src/server/.  This is the mechanical ownership guard for the narrow
+    # server-source rule above; adding or removing a shared leaf requires the
+    # publication contract to move in the same commit.
+    make_db = subprocess.run(
+        ["make", "-C", str(ROOT / "src"), "-pnRrq"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout
+    kb_target_lines = "\n".join(
+        line
+        for line in make_db.splitlines()
+        if line.startswith("../aimee-kb:") or line.startswith("../aimee-kb-worm:")
+    )
+    linked_server_sources = {
+        f"src/server/{name}.c"
+        for name in re.findall(r"build/obj/server/([A-Za-z0-9_./-]+)\.o", kb_target_lines)
+    }
+    if linked_server_sources != set(planner.KB_SHARED_SERVER_C):
+        print(
+            "  FAIL  KB-linked server sources drifted: "
+            f"actual={sorted(linked_server_sources)} "
+            f"declared={sorted(planner.KB_SHARED_SERVER_C)}"
+        )
+        failures += 1
+    else:
+        print("  ok    KB-linked server sources match the expanded Make graph")
 
     # If a Dockerfile starts copying another container file, the contract must be
     # updated in the same change.  This prevents selective publishing from drifting.
