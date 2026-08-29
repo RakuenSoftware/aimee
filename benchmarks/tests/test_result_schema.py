@@ -16,7 +16,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 
 from benchmarks.common.result_schema import (
     PROVENANCE_FIELDS,
+    make_coverage,
+    require_complete_run,
     retrieval_outcome_bucket,
+    run_is_complete,
+    validate_coverage,
     validate_direct_result,
     validate_llm_result,
     validate_provenance,
@@ -226,6 +230,63 @@ class ProvenanceSchemaTest(unittest.TestCase):
             any("seed" in e and "wrong type" in e for e in errors),
             f"Expected type error for seed, got {errors}",
         )
+
+
+class TestRunCoverage(unittest.TestCase):
+    """A subsampled run must not be usable where a full run is required.
+
+    The failure this guards is on record: the reranker investigation measured
+    +0.020 on a 600-question subsample and -0.0048 on the full 10,000 - a sign
+    flip - and the two result files were indistinguishable.
+    """
+
+    def test_uncapped_run_is_complete(self) -> None:
+        block = make_coverage(samples_run=500, questions_run=10000)
+        validate_coverage(block)
+        self.assertTrue(block["complete"])
+        self.assertTrue(run_is_complete({"coverage": block}))
+        require_complete_run({"coverage": block}, "baseline eligibility")
+
+    def test_capped_samples_is_partial(self) -> None:
+        block = make_coverage(max_samples=10, samples_run=10, questions_run=600)
+        validate_coverage(block)
+        self.assertFalse(block["complete"])
+        with self.assertRaises(ValueError) as ctx:
+            require_complete_run({"coverage": block}, "baseline eligibility")
+        self.assertIn("max_samples=10", str(ctx.exception))
+
+    def test_capped_questions_is_partial(self) -> None:
+        block = make_coverage(max_questions=5, samples_run=10, questions_run=50)
+        self.assertFalse(block["complete"])
+        with self.assertRaises(ValueError):
+            require_complete_run({"coverage": block}, "baseline eligibility")
+
+    def test_missing_coverage_is_unknown_not_complete(self) -> None:
+        # None, not False: a legacy file may be a full run, but it cannot show it.
+        self.assertIsNone(run_is_complete({"result_count": 3}))
+        with self.assertRaises(ValueError) as ctx:
+            require_complete_run({"result_count": 3}, "baseline eligibility")
+        self.assertIn("no coverage block", str(ctx.exception))
+
+    def test_complete_flag_cannot_contradict_limits(self) -> None:
+        # The flag a reader trusts must not be settable independently of the
+        # caps that determine it.
+        forged = make_coverage(max_questions=5, samples_run=1, questions_run=5)
+        forged["complete"] = True
+        with self.assertRaises(ValueError):
+            validate_coverage(forged)
+
+    def test_negative_counts_rejected(self) -> None:
+        block = make_coverage(samples_run=1, questions_run=1)
+        block["counts"]["questions_run"] = -1
+        with self.assertRaises(ValueError):
+            validate_coverage(block)
+
+    def test_source_is_named_in_the_error(self) -> None:
+        block = make_coverage(max_samples=2, samples_run=2, questions_run=8)
+        with self.assertRaises(ValueError) as ctx:
+            require_complete_run({"coverage": block}, "comparison", source="lme_lite.json")
+        self.assertIn("lme_lite.json", str(ctx.exception))
 
 
 if __name__ == "__main__":

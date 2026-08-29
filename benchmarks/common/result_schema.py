@@ -212,3 +212,122 @@ def retrieval_outcome_bucket(row: dict[str, Any]) -> str:
         f"{'complete' if sufficient else 'partial_or_insufficient'}_context__"
         f"{'correct' if correct else 'wrong'}_answer"
     )
+
+
+# ---------------------------------------------------------------------------
+# Run coverage: whether a result file describes a complete run
+# ---------------------------------------------------------------------------
+#
+# A subsampled run and a full run produce byte-identical result schemas, so a
+# number measured over 600 questions can be compared against a baseline measured
+# over 10,000 and reported as a reproduction. That is not hypothetical here: the
+# reranker investigation measured +0.020 on a 600-question subsample and -0.0048
+# on the full 10,000, a sign flip, and the recommendation was nearly shipped on
+# the subsample (docs/blog/we-measured-our-reranker-and-deleted-it.md).
+#
+# The fix is to make the distinction a recorded property rather than something a
+# reader is expected to remember. `coverage` states the caps that were in force
+# and how much actually ran; `require_complete_run` refuses a partial file where
+# a full one is required.
+#
+# Validation stays lenient and eligibility is strict, deliberately: existing
+# result files predate this block and must keep validating, but a file that
+# cannot prove it was complete is not eligible to back a baseline. Absent
+# coverage is refused for the same reason a partial run is - unknown provenance
+# is not evidence of a full run.
+
+COVERAGE_REQUIRED = {
+    "complete": bool,
+    "limits": dict,
+    "counts": dict,
+}
+
+
+def make_coverage(
+    *,
+    max_samples: int = 0,
+    max_questions: int = 0,
+    samples_run: int = 0,
+    questions_run: int = 0,
+) -> dict[str, Any]:
+    """Build the coverage block for a result payload.
+
+    A run is complete when no cap was in force. `max_samples`/`max_questions`
+    follow the harness convention where 0 means unbounded.
+
+    `max_samples` records the per-run sample cap whatever the producer calls its
+    flag: the LongMemEval benches spell it `--max-cases`, the LoCoMo and memory
+    benches `--max-samples`, and both mean the same thing here.
+    """
+    return {
+        "complete": int(max_samples) == 0 and int(max_questions) == 0,
+        "limits": {
+            "max_samples": int(max_samples),
+            "max_questions": int(max_questions),
+        },
+        "counts": {
+            "samples_run": int(samples_run),
+            "questions_run": int(questions_run),
+        },
+    }
+
+
+def validate_coverage(block: dict[str, Any]) -> None:
+    _ensure(isinstance(block, dict), "coverage must be a dict")
+    _validate_required(block, COVERAGE_REQUIRED)
+    for field in ("max_samples", "max_questions"):
+        _ensure(field in block["limits"], f"missing coverage.limits.{field}")
+        _ensure(isinstance(block["limits"][field], int), f"coverage.limits.{field} must be an int")
+        _ensure(block["limits"][field] >= 0, f"coverage.limits.{field} must be non-negative")
+    for field in ("samples_run", "questions_run"):
+        _ensure(field in block["counts"], f"missing coverage.counts.{field}")
+        _ensure(isinstance(block["counts"][field], int), f"coverage.counts.{field} must be an int")
+        _ensure(block["counts"][field] >= 0, f"coverage.counts.{field} must be non-negative")
+    capped = block["limits"]["max_samples"] != 0 or block["limits"]["max_questions"] != 0
+    _ensure(
+        block["complete"] is not capped,
+        "coverage.complete contradicts coverage.limits",
+    )
+
+
+def run_coverage(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Return the payload's coverage block, or None when it records none."""
+    block = payload.get("coverage")
+    if block is None:
+        return None
+    validate_coverage(block)
+    return block
+
+
+def run_is_complete(payload: dict[str, Any]) -> bool | None:
+    """True/False when coverage was recorded, None when it was not.
+
+    None is not False: a legacy file may well be a full run. It is unproven,
+    which is why require_complete_run refuses it and this helper does not
+    silently assert either way.
+    """
+    block = run_coverage(payload)
+    return None if block is None else bool(block["complete"])
+
+
+def require_complete_run(payload: dict[str, Any], purpose: str, *, source: str = "") -> None:
+    """Raise unless the payload proves it came from an uncapped run.
+
+    Call this at every point a score is promoted rather than merely printed:
+    baseline eligibility, cross-run comparison, published claims.
+    """
+    where = f"{source}: " if source else ""
+    state = run_is_complete(payload)
+    if state is None:
+        raise ValueError(
+            f"{where}{purpose} requires a complete run, and this result file records no "
+            "coverage block, so the question count it was measured over is unknown"
+        )
+    if not state:
+        limits = payload["coverage"]["limits"]
+        counts = payload["coverage"]["counts"]
+        raise ValueError(
+            f"{where}{purpose} requires a complete run, but this result file was capped "
+            f"(max_samples={limits['max_samples']}, max_questions={limits['max_questions']}; "
+            f"ran {counts['samples_run']} samples / {counts['questions_run']} questions)"
+        )

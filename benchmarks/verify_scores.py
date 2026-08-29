@@ -13,6 +13,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from benchmarks.common.harness import category_accuracy
 from benchmarks.common.result_schema import (
     label_field_for_dataset,
+    require_complete_run,
+    run_coverage,
     validate_direct_report,
     validate_direct_result,
     validate_llm_result,
@@ -22,6 +24,15 @@ from benchmarks.common.result_schema import (
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument("result_file", nargs="+")
+    parser.add_argument(
+        "--require-complete",
+        action="store_true",
+        help=(
+            "fail unless every result file proves it came from an uncapped run. "
+            "Use whenever a score is promoted rather than merely read: baseline "
+            "eligibility, cross-run comparison, published claims."
+        ),
+    )
     return parser
 
 
@@ -32,6 +43,26 @@ def verify_file(path: Path) -> dict[str, object]:
     track = payload["track"]
     system_name = str(payload.get("system") or (payload.get("results") or [{}])[0].get("system", "unknown"))
     print(f"{path}: dataset={dataset_name} track={track}")
+
+    # Coverage is printed for every file, complete or not, so the reader never
+    # has to infer the question count a score was measured over.
+    coverage = run_coverage(payload)
+    if coverage is None:
+        print("  coverage: unrecorded (cannot be shown to be a complete run)")
+    elif coverage["complete"]:
+        print(
+            f"  coverage: complete "
+            f"(samples={coverage['counts']['samples_run']} "
+            f"questions={coverage['counts']['questions_run']})"
+        )
+    else:
+        print(
+            f"  coverage: PARTIAL "
+            f"(max_samples={coverage['limits']['max_samples']} "
+            f"max_questions={coverage['limits']['max_questions']}; "
+            f"ran samples={coverage['counts']['samples_run']} "
+            f"questions={coverage['counts']['questions_run']})"
+        )
 
     if track == "direct" and "segments" in payload and "results" not in payload:
         validate_direct_report(payload, label_field)
@@ -181,6 +212,19 @@ def main() -> int:
     reports = []
     for item in args.result_file:
         reports.append(verify_file(Path(item)))
+    if args.require_complete:
+        failures = []
+        for report in reports:
+            try:
+                require_complete_run(
+                    report["payload"], "score verification", source=str(report["path"])
+                )
+            except ValueError as exc:
+                failures.append(str(exc))
+        if failures:
+            for message in failures:
+                print(f"ERROR {message}", file=sys.stderr)
+            return 1
     grouped: dict[tuple[str, str], list[dict[str, object]]] = {}
     for report in reports:
         key = (str(report["dataset"]), str(report["track"]))

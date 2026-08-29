@@ -33,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from benchmarks.common.harness import AimeeHarness, git_commit
 from benchmarks.common.llm_eval import judge_majority, llm_cost_breakdown
+from benchmarks.common.result_schema import make_coverage
 from benchmarks.common.runner import build_summary, print_summary, write_result_file
 
 _BENCH_META = {
@@ -140,7 +141,9 @@ def main() -> int:
     results: list[dict[str, Any]] = []
     try:
         adapter.call({"op": "describe"})
+        samples_run = 0
         for sample in _load_cases(args.bench, args.dataset, args.max_samples):
+            samples_run += 1
             events = _flatten_events(sample, args.bench)
             ingest = adapter.call({"op": "ingest", "session_id": sample.get("id", "bench"), "events": events})
             state_ref = ingest.get("state_ref", "")
@@ -192,6 +195,15 @@ def main() -> int:
         "track": "llm",
         "git_commit": git_commit(root),
         "result_count": len(results),
+        # Records whether this run was capped, so a subsample cannot later be
+        # compared against a full-run baseline without the difference showing.
+        # See require_complete_run in benchmarks/common/result_schema.py.
+        "coverage": make_coverage(
+            max_samples=args.max_samples,
+            max_questions=args.max_questions,
+            samples_run=samples_run,
+            questions_run=len(results),
+        ),
         "agent_model": harness.current_model,
         "judge_runs": 3,
         "judge_profile": "frontier",

@@ -60,6 +60,25 @@ Record:
 
 Keep raw machine output beside the summary when practical.
 
+### Coverage is recorded, not remembered
+
+Every result file the memory and retrieval producers write carries a `coverage`
+block stating the caps that were in force (`--max-samples` / `--max-cases` /
+`--max-questions`) and how much actually ran. A run with no cap is `complete`.
+
+A subsampled run and a full run are otherwise the same shape, so a score from a
+short run can be read back as a reproduction of a long one. That has already
+cost us once: reranking measured **+0.020** on a 600-question subsample and
+**-0.0048** on the full 10,000 — a sign flip — and the recommendation was nearly
+shipped on the subsample. See
+[the retrieval writeup](blog/we-measured-our-reranker-and-deleted-it.md).
+
+`benchmarks/verify_scores.py` prints coverage for every file, and
+`--require-complete` fails the run unless every file proves it was uncapped. Use
+it wherever a score is promoted rather than merely read: baseline eligibility,
+cross-run comparison, and published claims. A file with no coverage block is
+refused there too — an unknown question count is not evidence of a full run.
+
 ## Compare
 
 Change one variable at a time. Compare against the same corpus and acceptance metric. A cheaper or
