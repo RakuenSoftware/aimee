@@ -95,6 +95,11 @@ services:
       - --port=8745
       - --endpoint=https://aimee-server:8743
       - --uid=1000
+      # `docker compose exec aimee-server aimee ...` enters as root (the image
+      # has no Config.User). The server resolves that kernel-attested UDS peer
+      # to KB subject "root", so enroll the standard appliance operator beside
+      # the service identity or every content read is denied on a clean install.
+      - --member=root
     depends_on:
       aimee-kb: { condition: service_healthy }
     volumes:
