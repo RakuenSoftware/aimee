@@ -83,7 +83,7 @@ int server_http_request_framing_valid(const char *request, size_t total)
       return 0;
 
    size_t content_len = 0;
-   int have_cl = 0, have_connection = 0, headers = 0;
+   int have_cl = 0, have_connection = 0, have_host = 0, headers = 0;
    const char *p = line_end + 2;
    while (p < head_end)
    {
@@ -99,6 +99,14 @@ int server_http_request_framing_valid(const char *request, size_t total)
       size_t name_len = (size_t)(colon - p);
       if (name_len == 17 && !strncasecmp(p, "Transfer-Encoding", 17))
          return 0;
+      if (name_len == 4 && !strncasecmp(p, "Host", 4))
+      {
+         const char *value = colon + 1;
+         while (value < end && (*value == ' ' || *value == '\t'))
+            value++;
+         if (have_host++ || value == end)
+            return 0;
+      }
       if (name_len == 10 && !strncasecmp(p, "Connection", 10) && have_connection++)
          return 0;
       if (name_len == 14 && !strncasecmp(p, "Content-Length", 14))
@@ -119,5 +127,5 @@ int server_http_request_framing_valid(const char *request, size_t total)
       }
       p = end + 2;
    }
-   return total <= head_len + content_len;
+   return have_host == 1 && total <= head_len + content_len;
 }
