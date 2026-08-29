@@ -279,24 +279,17 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
       }
    }
 
-   /* Check for shared keywords in key and content */
-   char lower_buf[1024];
-   int li = 0;
-   const char *texts[] = {key, content, NULL};
-   for (int t = 0; texts[t] && li < (int)sizeof(lower_buf) - 1; t++)
-   {
-      for (int i = 0; texts[t][i] && li < (int)sizeof(lower_buf) - 1; i++)
-         lower_buf[li++] = (char)tolower((unsigned char)texts[t][i]);
-      lower_buf[li++] = ' ';
-   }
-   lower_buf[li] = '\0';
-
+   /* memory_keyword_present is already case-insensitive, so scan the original
+    * strings directly. The old lowercase scratch buffer was capped at 1 KiB,
+    * missed keywords later in a long memory, and wrote its terminator one byte
+    * out of bounds when key + content reached the cap. */
    for (int i = 0; shared_keywords[i]; i++)
    {
       /* Whole-word: as a bare substring "auth" matched "author"/"authored" and
        * "cert" matched "certain", tagging ordinary memories as shared
        * cross-cutting infrastructure. */
-      if (memory_keyword_present(lower_buf, shared_keywords[i]))
+      if (memory_keyword_present(key, shared_keywords[i]) ||
+          memory_keyword_present(content, shared_keywords[i]))
       {
          db2_memory_workspace_tag_insert(memory_id, SHARED_WORKSPACE);
          return 0;

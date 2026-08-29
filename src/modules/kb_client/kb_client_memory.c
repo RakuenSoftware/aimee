@@ -1395,12 +1395,14 @@ int kb_client_memory_get(int64_t id, memory_t *out)
    return kb_client_memory_get_as_of(id, NULL, out, NULL);
 }
 
-int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_valid_at_t *verdict)
+int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
+                                    kb_valid_at_t *verdict)
 {
    if (verdict)
       *verdict = KB_VALID_AT_UNASKED;
    if (!out)
       return -1;
+   *out = NULL;
 
    cJSON *req = cJSON_CreateObject();
    kb_client_memory_scope_context_apply(req);
@@ -1434,7 +1436,6 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
       cJSON_Delete(resp);
       return -1;
    }
-   kbc_memory_row_from_json(mem_j, out);
    /* aimee-kb answers with a bool, or the string "unknown" when it could not
     * tell. A missing key means it was not asked. */
    if (verdict)
@@ -1445,7 +1446,21 @@ int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_
       else if (cJSON_IsBool(v))
          *verdict = cJSON_IsTrue(v) ? KB_VALID_AT_YES : KB_VALID_AT_NO;
    }
+   *out = cJSON_DetachItemFromObjectCaseSensitive(resp, "memory");
    cJSON_Delete(resp);
+   return *out ? 0 : -1;
+}
+
+int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_valid_at_t *verdict)
+{
+   if (!out)
+      return -1;
+   cJSON *mem_j = NULL;
+   int rc = kb_client_memory_get_json_as_of(id, as_of, &mem_j, verdict);
+   if (rc != 0)
+      return rc;
+   kbc_memory_row_from_json(mem_j, out);
+   cJSON_Delete(mem_j);
    return 0;
 }
 
