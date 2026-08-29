@@ -215,6 +215,8 @@ static struct
    void *guardrail_ctx;
    obs_bus_durable_sink_fn durable;
    void *durable_ctx;
+   obs_bus_sink_idle_fn sink_idle;
+   void *sink_idle_ctx;
    char module_socket[108];
    char module_policy_dir[4096];
    char capture_fault[24]; /* deterministic unit-test seam; empty in production */
@@ -906,6 +908,15 @@ static void *consumer_main(void *arg)
          capture_flush();
       if (n == 0 && routed == 0)
       {
+         /* Idle: let the sink drop anything it is holding per-thread before we
+          * sleep. The KB's WORM append leases a pooled DB2 connection lazily and
+          * nothing in this loop ever ends a unit of work, so without this the
+          * consumer pinned one pool member from its first durable row until
+          * process exit -- the pool reaper reported it as a stuck lease held for
+          * the whole uptime. Only on the idle path: during a burst the lease is
+          * worth keeping, and this is exactly where the burst has ended. */
+         if (sinks.sink_idle)
+            sinks.sink_idle(sinks.sink_idle_ctx);
          struct timespec nap = {.tv_sec = 0, .tv_nsec = nap_ns};
          nanosleep(&nap, NULL);
          if (nap_ns < nap_max_ns)
@@ -1624,6 +1635,20 @@ int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx)
    }
    sinks.durable = sink;
    sinks.durable_ctx = sink ? ctx : NULL;
+   pthread_mutex_unlock(&start_lock);
+   return 0;
+}
+
+int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx)
+{
+   pthread_mutex_lock(&start_lock);
+   if (g.started)
+   {
+      pthread_mutex_unlock(&start_lock);
+      return -1;
+   }
+   sinks.sink_idle = hook;
+   sinks.sink_idle_ctx = hook ? ctx : NULL;
    pthread_mutex_unlock(&start_lock);
    return 0;
 }

@@ -14762,6 +14762,7 @@
         "src/kb/kb_ingest_workers.c",
         "src/kb/kb_main.c",
         "src/kb/kb_memory_facts.c",
+        "src/kb/kb_obs_bus_adapter.c",
         "src/kb/kb_reflection.c",
         "src/kb/kb_service_code_embed.c",
         "src/kb/kb_service_workers.c",
@@ -27113,7 +27114,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "bc377b05cba86b6e89d7b2ad294bd3f65383cfeb84b31abdf23de64ff6995270",
+  "fingerprint": "db0cec3312cf0d9e20aae5960b5e26996166cda9610dda16cf2f99b1ae8e8dae",
   "module": "db2",
   "schema_version": 1,
   "summary": {
