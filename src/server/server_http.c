@@ -846,9 +846,8 @@ int route_native_post(server_http_completion_fn fn, const char *body, char *resp
    return fn(body ? body : "", resp, cap);
 }
 
-/* GET a native resource whose provider returns a heap JSON body (emitted +
- * freed here). 503 when unwired, 502 when the backend (aimee-kb) is
- * unreachable. `what` names the resource for the error messages. */
+/* GET a native resource whose provider returns heap JSON. Typed errors may
+ * declare `http_status`; otherwise 503 means unwired and NULL means 502. */
 int route_json_provider(server_http_json_provider fn, char *resp, int cap, const char *what)
 {
    if (!fn)
@@ -864,9 +863,12 @@ int route_json_provider(server_http_json_provider fn, char *resp, int cap, const
       snprintf(msg, sizeof(msg), "%s backend unavailable", what);
       return err_json(resp, cap, 502, msg);
    }
+   int status = server_http_declared_status(j);
+   if (!status)
+      status = 200;
    snprintf(resp, (size_t)cap, "%s", j);
    free(j);
-   return 200;
+   return status;
 }
 
 /* Dispatch a POST /v1/{chat/completions,completions} body to the registered
@@ -960,15 +962,9 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
       resp[--total] = '\0';
    if (total == 0)
       return err_json(resp, resp_cap, 502, "rpc produced no response");
-   cJSON *chk = cJSON_Parse(resp);
-   if (!chk)
+   int status = server_http_declared_status(resp);
+   if (!status)
       return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
-   int status = 200;
-   cJSON *declared_status = cJSON_GetObjectItemCaseSensitive(chk, "http_status");
-   if (cJSON_IsNumber(declared_status) && declared_status->valueint >= 400 &&
-       declared_status->valueint <= 599)
-      status = declared_status->valueint;
-   cJSON_Delete(chk);
    return status;
 }
 

@@ -157,6 +157,11 @@ static char *stub_rules_provider(void)
    return strdup("{\"epoch\":3,\"rules\":[{\"id\":\"r1\"}]}");
 }
 
+static char *stub_typed_not_found_provider(void)
+{
+   return strdup("{\"status\":\"error\",\"kind\":\"not_found\",\"http_status\":404}");
+}
+
 /* Stub models provider: appends two fixed agent names to /v1/models. */
 static int stub_models_provider(char ids[][SERVER_HTTP_MODEL_ID_MAX], int max)
 {
@@ -1039,6 +1044,10 @@ int main(void)
       st = server_http_route("GET", "/v1/agents", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"epoch\":3")); /* stub body */
+      server_http_set_agents_provider(stub_typed_not_found_provider);
+      st = server_http_route("GET", "/v1/agents", NULL, 0, resp, sizeof(resp));
+      assert(st == 404);
+      assert(strstr(resp, "\"kind\":\"not_found\""));
       server_http_set_agents_provider(NULL);
    }
 
