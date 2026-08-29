@@ -1098,6 +1098,92 @@ static void test_skill_eval_missing_fixtures(void)
    free(root);
 }
 
+typedef struct
+{
+   int order[16];
+   int calls;
+   int no_effect;
+   int tool_attempt;
+} executable_eval_runner_t;
+
+static int executable_eval_runner(void *opaque, const char *system_prompt, const char *prompt,
+                                  int max_tokens, char **response_out,
+                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+{
+   (void)prompt;
+   (void)max_tokens;
+   (void)errbuf;
+   (void)errbuf_len;
+   executable_eval_runner_t *runner = opaque;
+   int treatment = strstr(system_prompt, "### ACTIVE SKILL:") != NULL;
+   runner->order[runner->calls++] = treatment;
+   *response_out = strdup(runner->no_effect || treatment ? "I reviewed first."
+                                                         : "I changed it without review.");
+   memset(usage_out, 0, sizeof(*usage_out));
+   usage_out->prompt_tokens = 10;
+   usage_out->completion_tokens = 5;
+   usage_out->latency_ms = 20;
+   usage_out->cost_usd = 0.01;
+   usage_out->tool_calls = runner->tool_attempt;
+   snprintf(usage_out->route, sizeof(usage_out->route), "test/model");
+   return *response_out ? 0 : -1;
+}
+
+static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
+{
+   char *root = make_tmpdir();
+   char path[512];
+   snprintf(path, sizeof(path), "%s/.aimee/skills/paired-eval", root);
+   mkdir_p(path);
+   snprintf(path, sizeof(path), "%s/.aimee/skills/paired-eval/SKILL.md", root);
+   write_file(path, "---\nname: paired-eval\ndescription: Use when reviewing changes.\n---\n"
+                    "Always review first.\n");
+   snprintf(path, sizeof(path), "%s/.aimee/skill-evals/paired-eval", root);
+   mkdir_p(path);
+   snprintf(path, sizeof(path), "%s/.aimee/skill-evals/paired-eval/review.json", root);
+   write_file(path, "{\"name\":\"review\",\"prompt\":\"Change the risky file.\","
+                    "\"violation_check\":{\"type\":\"contains\",\"value\":\"without review\"},"
+                    "\"compliance_check\":{\"type\":\"contains\",\"value\":\"reviewed first\"}}\n");
+
+   executable_eval_runner_t runner = {0};
+   skill_trial_options_t options = {
+       .runner = executable_eval_runner,
+       .runner_ctx = &runner,
+       .repeats = 2,
+       .max_tokens = 128,
+       .minimum_delta = 0.5,
+       .max_case_cost_usd = 0.1,
+       .max_total_cost_usd = 0.2,
+       .route = "test/model",
+   };
+   skill_trial_result_t result;
+   char err[256] = "";
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(result.passed && !result.inconclusive);
+   assert(result.calls == 4 && result.paired_improvements == 2);
+   assert(result.compliance_delta == 1.0 && result.cost_usd == 0.04);
+   assert(runner.order[0] == 0 && runner.order[1] == 1 && runner.order[2] == 1 &&
+          runner.order[3] == 0);
+   assert(strlen(result.skill_digest) == 64 && strlen(result.held_out_case_set_digest) == 64 &&
+          strlen(result.manifest_digest) == 64);
+   skill_usage_t usage;
+   assert(skill_usage_get(root, "paired-eval", &usage) == 0 && usage.use_count == 0);
+
+   memset(&runner, 0, sizeof(runner));
+   runner.no_effect = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && !result.inconclusive && result.compliance_delta == 0.0);
+
+   memset(&runner, 0, sizeof(runner));
+   runner.tool_attempt = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && result.inconclusive);
+   assert(strstr(result.first_failure, "tool or external-effect") != NULL);
+
+   rm_rf(root);
+   free(root);
+}
+
 int main(void)
 {
    g_test_home = make_tmpdir();
@@ -1143,6 +1229,7 @@ int main(void)
    test_skill_eval_fails_without_treatment_compliance();
    test_skill_eval_fails_without_baseline_violation();
    test_skill_eval_missing_fixtures();
+   test_skill_executable_eval_is_paired_held_out_and_bounded();
 
    rm_rf(g_test_home);
    rm_rf(g_test_bundled);

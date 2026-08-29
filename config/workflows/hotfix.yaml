@@ -20,6 +20,8 @@ nodes:
     block: implement
     in:
       plan: understand.out
+    params:
+      admitted_regressions: observe
     next: freeze
   - id: freeze
     block: freeze
@@ -33,6 +35,7 @@ nodes:
     params:
       reviewer: contrarian
       max_rounds: 2
+      blocker_convergence: observe
     on_pass: rt_gate
     on_fail: implement
   - id: rt_gate
@@ -49,6 +52,7 @@ nodes:
           - reviewer
       quorum: 4
       max_rounds: 2
+      blocker_convergence: observe
     on_pass: deliver
     on_fail: implement
   - id: deliver
