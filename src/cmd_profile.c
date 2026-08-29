@@ -33,7 +33,17 @@ static int profile_config_operation(const char *operation, const char *name)
    return client_config_operation(operation, value);
 }
 
-int cmd_profile_run(int argc, char **argv)
+static void profile_print_json(cJSON *value)
+{
+   char *json = cJSON_PrintUnformatted(value);
+   if (json)
+   {
+      puts(json);
+      free(json);
+   }
+}
+
+int cmd_profile_run(int argc, char **argv, int json_output)
 {
    if (argc < 1)
    {
@@ -46,7 +56,20 @@ int cmd_profile_run(int argc, char **argv)
    if (strcmp(sub, "current") == 0)
    {
       const char *p = getenv("AIMEE_PROFILE");
-      printf("%s\n", (p && p[0]) ? p : "default");
+      const char *current = (p && p[0]) ? p : "default";
+      if (json_output)
+      {
+         cJSON *result = cJSON_CreateObject();
+         if (!result || !cJSON_AddStringToObject(result, "profile", current))
+         {
+            cJSON_Delete(result);
+            return 1;
+         }
+         profile_print_json(result);
+         cJSON_Delete(result);
+      }
+      else
+         printf("%s\n", current);
       return 0;
    }
 
@@ -58,15 +81,30 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error listing profiles through the server\n");
          return 1;
       }
-      if (cJSON_GetArraySize(profiles) == 0)
-         printf("(no profiles)\n");
-      cJSON *profile = NULL;
-      cJSON_ArrayForEach(profile, profiles)
+      if (json_output)
       {
-         if (cJSON_IsString(profile))
-            printf("%s\n", profile->valuestring);
+         cJSON *result = cJSON_CreateObject();
+         if (!result)
+         {
+            cJSON_Delete(profiles);
+            return 1;
+         }
+         cJSON_AddItemToObject(result, "profiles", profiles);
+         profile_print_json(result);
+         cJSON_Delete(result);
       }
-      cJSON_Delete(profiles);
+      else
+      {
+         if (cJSON_GetArraySize(profiles) == 0)
+            printf("(no profiles)\n");
+         cJSON *profile = NULL;
+         cJSON_ArrayForEach(profile, profiles)
+         {
+            if (cJSON_IsString(profile))
+               printf("%s\n", profile->valuestring);
+         }
+         cJSON_Delete(profiles);
+      }
       return 0;
    }
 
@@ -88,8 +126,13 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error creating profile config through the server\n");
          return 1;
       }
-      printf("profile: %s\n", name);
-      printf("config:  present\n");
+      if (json_output)
+         printf("{\"profile\":\"%s\",\"config\":\"present\"}\n", name);
+      else
+      {
+         printf("profile: %s\n", name);
+         printf("config:  present\n");
+      }
       return 0;
    }
 
@@ -117,8 +160,13 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error: profile not found: %s\n", name);
          return 1;
       }
-      printf("profile: %s\n", name);
-      printf("config:  present\n");
+      if (json_output)
+         printf("{\"profile\":\"%s\",\"config\":\"present\"}\n", name);
+      else
+      {
+         printf("profile: %s\n", name);
+         printf("config:  present\n");
+      }
       return 0;
    }
 
@@ -186,7 +234,10 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error deleting profile through the server\n");
          return 1;
       }
-      printf("deleted: %s\n", name);
+      if (json_output)
+         printf("{\"deleted\":\"%s\"}\n", name);
+      else
+         printf("deleted: %s\n", name);
       return 0;
    }
 
