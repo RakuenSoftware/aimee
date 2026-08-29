@@ -653,6 +653,21 @@ static int client_command_has_subcommands(const char *cmd)
    return 0;
 }
 
+static int client_command_has_bare_default(const char *cmd)
+{
+   if (!cmd)
+      return 0;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cli_v1_manifest_commands())
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name) || strcmp(cmd, name->valuestring) != 0)
+         continue;
+      return cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "bare_default"));
+   }
+   return 0;
+}
+
 static int wants_subcommand_help(int sub_argc, char **sub_argv)
 {
    if (sub_argc < 1)
@@ -2230,7 +2245,8 @@ int main(int argc, char **argv)
       return 0;
    }
 
-   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv))
+   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv) &&
+       !(sub_argc == 0 && client_command_has_bare_default(cmd)))
    {
       char *help_arg[] = {(char *)cmd};
       (void)json_output;

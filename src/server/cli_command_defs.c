@@ -20,6 +20,7 @@
 #include "cJSON.h"
 
 #include <stddef.h>
+#include <string.h>
 
 typedef struct
 {
@@ -53,6 +54,14 @@ static const char *tier_name(aimee_cmd_tier_t t)
    return "core";
 }
 
+/* The display catalogue's `subcommands` field also carries flag and positional
+ * usage text, so it cannot by itself tell the client whether an empty argv is
+ * valid. Keep that routing semantic explicit in the served manifest. */
+static int command_has_bare_default(const char *name)
+{
+   return name && (strcmp(name, "presence") == 0 || strcmp(name, "primary") == 0);
+}
+
 size_t cli_command_defs_count(void)
 {
    return sizeof(g_cli_commands) / sizeof(g_cli_commands[0]);
@@ -80,6 +89,8 @@ cJSON *cli_command_defs_to_json(void)
          cJSON_AddBoolToObject(row, "hidden_default", 1);
       if (c->subcommands && c->subcommands[0])
          cJSON_AddStringToObject(row, "subcommands", c->subcommands);
+      if (command_has_bare_default(c->name))
+         cJSON_AddBoolToObject(row, "bare_default", 1);
       cJSON_AddItemToArray(arr, row);
    }
    return arr;

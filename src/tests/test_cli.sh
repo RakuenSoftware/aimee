@@ -122,6 +122,17 @@ check "version" $AIMEE version
 check "version flag" $AIMEE --version
 check_output "version --json" "\"version\"" $AIMEE --json version
 
+# Flag/argument help is displayed in the same manifest field as real
+# subcommands. These two commands explicitly declare a bare default action, so
+# an empty argv must dispatch rather than being intercepted by group help.
+check_output "bare presence dispatches its default list" "[" $AIMEE --json presence
+check_output_not_contains "bare presence does not print help" "Subcommands:" \
+    $AIMEE presence
+check_output "bare primary dispatches its default get" "\"agent\"" \
+    $AIMEE --json primary
+check_output_not_contains "bare primary does not print help" "Subcommands:" \
+    $AIMEE primary
+
 # --- Unknown commands ---
 # A typo used to take the same fallback as a genuine routing gap and answer
 # "command 'foobarbaz' has no /v1 route", pointing at the route table for a word
