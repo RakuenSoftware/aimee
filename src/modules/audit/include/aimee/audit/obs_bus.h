@@ -82,6 +82,16 @@ extern "C"
     * running is refused. */
    int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx);
 
+   /* Called on the consumer thread each time the bus goes idle, before it naps.
+    * A durable sink that holds a per-thread resource uses this to let go of it
+    * between bursts: aimee-kb's WORM append lazily leases a pooled DB2
+    * connection, and without this hook that lease is held for the life of the
+    * process, because the consumer thread never ends a unit of work. obs_bus
+    * stays storage-neutral -- it only says "idle now" and the adapter decides
+    * what that costs. Optional; leaving it unset is a no-op. */
+   typedef void (*obs_bus_sink_idle_fn)(void *ctx);
+   int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx);
+
    /* Commit one action-class record synchronously to the daemon's WORM sink.
     * This is the durability edge for security-relevant bridges whose ordinary
     * ACTION event is intentionally asynchronous.  Returns 0 only after the

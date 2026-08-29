@@ -19,7 +19,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdatomic.h>
 #include <time.h>
+#include <unistd.h>
 
 #include <aimee/audit/obs_bus.h>
 #include <aimee/audit/audit_ledger.h>
@@ -30,6 +32,20 @@
 #define N 5000
 
 static int worm_commits;
+
+/* The consumer thread never ends a unit of work, so a durable sink that takes a
+ * per-thread resource on first use holds it until the process exits. That is not
+ * hypothetical: aimee-kb's WORM append leases a pooled DB2 connection lazily, and
+ * it pinned one of sixteen pool members from the first audit row onward, which
+ * the pool reaper reported as a stuck lease held for the whole uptime. The bus
+ * hands the sink an idle edge to let go on; this counts it. */
+static _Atomic int idle_calls;
+
+static void count_idle(void *ctx)
+{
+   (void)ctx;
+   atomic_fetch_add(&idle_calls, 1);
+}
 
 static int test_worm_sink(const char *actor_role, const char *actor_principal, const char *action,
                           const char *subject, const char *verdict, const char *detail, void *ctx)
@@ -90,6 +106,7 @@ int main(void)
                                 "allow", 17) == 0);
    assert(worm_commits == 1);
    assert(obs_bus_set_durable_sink(NULL, NULL) == 0);
+   assert(obs_bus_set_sink_idle_hook(count_idle, NULL) == 0);
 
    if (obs_bus_start() != 0)
    {
@@ -120,6 +137,24 @@ int main(void)
       obs_bus_emit("primary", tool, hash, "cd ; rm", "approve", "read_before_write", "block", i);
       emit_ns[i] = now_ns() - s;
    }
+
+   /* Once the backlog is drained the consumer must reach its idle edge and tell
+    * the sink so, repeatedly -- not once at startup. Poll rather than sleep a
+    * fixed span: the consumer naps 200us and backs off to 5ms, so this settles
+    * in milliseconds and the bound only exists so a broken build fails instead
+    * of hanging. */
+   int first_idle = 0;
+   for (int i = 0; i < 2000 && (first_idle = atomic_load(&idle_calls)) == 0; i++)
+      usleep(1000);
+   assert(first_idle > 0);
+   for (int i = 0; i < 2000 && atomic_load(&idle_calls) <= first_idle; i++)
+      usleep(1000);
+   assert(atomic_load(&idle_calls) > first_idle);
+   printf("  sink idle edge fired %d time(s) while idle\n", atomic_load(&idle_calls));
+
+   /* Reconfiguration while running is refused, for the idle hook as for the
+    * sinks it accompanies. */
+   assert(obs_bus_set_sink_idle_hook(NULL, NULL) == -1);
 
    /* Stop drains every in-flight row before returning. */
    obs_bus_stop();
