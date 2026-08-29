@@ -17,6 +17,7 @@
 #include "../modules/db2/c/artifacts.h"
 #include "../modules/db2/c/kb_payload.h"
 #include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/memory_scope_query.h"
 #include "../modules/db2/c/lifecycle.h"
 #include "../modules/db2/c/pgvec_kb_service.h"
 #include "../modules/db2/c/sketch.h"
@@ -1293,6 +1294,31 @@ static void test_excludes_node_modules(void)
    printf("  PASS: node_modules directory is excluded from indexing\n");
 }
 
+static void test_memory_get_json_preserves_long_content(void)
+{
+   open_test_db();
+   db2_memory_scope_context_clear();
+
+   char content[5001];
+   memset(content, 'q', sizeof(content) - 1);
+   content[sizeof(content) - 1] = '\0';
+   memory_t stored;
+   assert(memory_insert(TIER_L2, KIND_FACT, "kb-get-long-content", content, 0.9, "test-session",
+                        &stored) == 0);
+
+   cJSON *response = db2_kb_service_memory_get_json(stored.id, NULL);
+   assert(response != NULL);
+   cJSON *memory = cJSON_GetObjectItemCaseSensitive(response, "memory");
+   cJSON *returned = cJSON_GetObjectItemCaseSensitive(memory, "content");
+   assert(cJSON_IsString(returned));
+   assert(strlen(returned->valuestring) == strlen(content));
+   assert(strcmp(returned->valuestring, content) == 0);
+   cJSON_Delete(response);
+
+   close_test_db();
+   printf("  PASS: memory.get JSON preserves long content\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* Main                                                                 */
 /* ------------------------------------------------------------------ */
@@ -1340,6 +1366,8 @@ int main(void)
 
    /* Status test */
    test_status_format();
+
+   test_memory_get_json_preserves_long_content();
 
    /* Exclusion test */
    test_excludes_node_modules();

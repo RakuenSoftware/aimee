@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import pathlib
 import re
+import subprocess
 import sys
 
 
@@ -71,8 +72,43 @@ def main() -> None:
     )
     failures += expect(
         ["src/kb/kb_service.c"],
-        set(planner.SERVER | planner.KB | planner.AUTHORITY),
-        "shared C source is conservative",
+        kb,
+        "KB runtime C source",
+    )
+    failures += expect(["src/cli_argspec.c"], set(), "thin-client-only C source")
+    failures += expect(
+        [
+            "api/openapi-server-v1.yaml",
+            "src/server/server_state.c",
+            "src/tests/test_integration.sh",
+        ],
+        set(planner.SERVER),
+        "#2892 server and server OpenAPI change",
+    )
+    failures += expect(
+        ["src/server/oauth_pkce.c"],
+        set(planner.SERVER | planner.KB),
+        "server leaf linked into KB",
+    )
+    failures += expect(
+        ["src/modules/memory/memory_core_search_c.c"],
+        set(planner.SERVER | planner.KB),
+        "shared server and KB C source",
+    )
+    failures += expect(
+        ["src/kb/kb_mgmt_token_roots_provision_main.c"],
+        set(planner.AUTHORITY),
+        "authority-only C source",
+    )
+    failures += expect(
+        ["src/headers/server_skill.h"],
+        set(planner.SERVER),
+        "server-only header include closure",
+    )
+    failures += expect(
+        ["api/openapi-v1.yaml", "src/gen_openapi.py"],
+        kb,
+        "KB OpenAPI inputs",
     )
     failures += expect(
         ["frontend/src/App.tsx"],
@@ -128,6 +164,36 @@ def main() -> None:
         failures += 1
     else:
         print("  ok    KB_CLIENT_OBJS remains server-owned")
+
+    # Independently expand the actual shipping KB targets and ensure every direct
+    # server leaf is classified as a KB consumer by the transitive graph.
+    make_db = subprocess.run(
+        ["make", "-C", str(ROOT / "src"), "-pnRrq"],
+        check=False,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+    ).stdout
+    kb_target_lines = "\n".join(
+        line
+        for line in make_db.splitlines()
+        if line.startswith("../aimee-kb:") or line.startswith("../aimee-kb-worm:")
+    )
+    linked_server_sources = {
+        f"src/server/{name}.c"
+        for name in re.findall(r"build/obj/server/([A-Za-z0-9_./-]+)\.o", kb_target_lines)
+    }
+    misclassified = sorted(
+        path for path in linked_server_sources if not planner.KB.issubset(planner.consumers(path))
+    )
+    if misclassified:
+        print(
+            "  FAIL  KB-linked server sources are not classified for KB: "
+            f"{misclassified}"
+        )
+        failures += 1
+    else:
+        print("  ok    KB-linked server sources are classified from the Make graph")
 
     # If a Dockerfile starts copying another container file, the contract must be
     # updated in the same change.  This prevents selective publishing from drifting.

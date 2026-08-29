@@ -12,6 +12,7 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define MSF_ERRBUF 256
@@ -489,11 +490,12 @@ int db2_memory_lookup_by_key(const char *key, int64_t *id_out, char *content_out
    return hit;
 }
 
-int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char *content_out,
-                                   int content_len, double *confidence_out, int *use_count_out,
-                                   double *surprise_out, int *observation_count_out,
-                                   double *evidence_out)
+int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char **content_out,
+                                   double *confidence_out, int *use_count_out, double *surprise_out,
+                                   int *observation_count_out, double *evidence_out)
 {
+   if (content_out)
+      *content_out = NULL;
    if (!key || !key[0])
       return 0;
    void *conn = db2_conn();
@@ -512,8 +514,19 @@ int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char *conte
       if (id_out)
          *id_out = aimee_pg_column_int64(st, 0);
       const char *c = aimee_pg_column_text(st, 1);
-      if (content_out && content_len > 0)
-         snprintf(content_out, (size_t)content_len, "%s", c ? c : "");
+      if (content_out)
+      {
+         const char *src = c ? c : "";
+         size_t n = strlen(src) + 1;
+         char *copy = malloc(n);
+         if (!copy)
+         {
+            aimee_pg_finalize(st);
+            return 0;
+         }
+         memcpy(copy, src, n);
+         *content_out = copy;
+      }
       if (confidence_out)
          *confidence_out = aimee_pg_column_double(st, 2);
       if (use_count_out)

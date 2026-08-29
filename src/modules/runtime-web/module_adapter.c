@@ -13,6 +13,8 @@ static uint32_t rpc_fault_http_status(const char *kind)
       return 403u;
    if (strcmp(kind, "unavailable") == 0)
       return 503u;
+   if (strcmp(kind, "payload_too_large") == 0)
+      return 413u;
    return 502u;
 }
 
