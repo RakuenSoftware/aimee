@@ -960,6 +960,8 @@ static int memory_find_facts_scoped_impl(const char *query, const char *scope_ty
                                  config_memory_recall_lanes_floor_fact(), eff);
       }
    }
+   memory_record_lane_outcome_metrics(&plan, candidates, reranked, source_stats,
+                                      source_stats_count);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
 
@@ -1165,6 +1167,8 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
     * Re-apply the hard scope order last so relevance features can only move
     * candidates within their scope bucket. */
    memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
+   memory_record_lane_outcome_metrics(&plan, candidates, reranked, source_stats,
+                                      source_stats_count);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
    clock_gettime(CLOCK_MONOTONIC, &ts1);

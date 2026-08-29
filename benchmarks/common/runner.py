@@ -14,6 +14,7 @@ from benchmarks.common.harness import (
     summarize_costs,
     summarize_latencies,
 )
+from benchmarks.common.result_schema import validate_coverage
 
 # ---------------------------------------------------------------------------
 # Abstention detection
@@ -125,6 +126,11 @@ def build_summary(
 
 
 def write_result_file(path: Path, payload: dict[str, Any]) -> None:
+    # A malformed coverage block is worse than none: it would be read back as
+    # proof of a complete run. Reject it at the point of writing, where the
+    # producer that got it wrong is still on the stack.
+    if "coverage" in payload:
+        validate_coverage(payload["coverage"])
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
