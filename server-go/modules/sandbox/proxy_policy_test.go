@@ -37,6 +37,11 @@ func TestProxyIPv6Policy(t *testing.T) {
 		"::1", "::", "fe80::1", "fc00::1", "fd12:3456::1", "ff02::1",
 		"::ffff:127.0.0.1", "::ffff:169.254.169.254", "::ffff:10.0.0.1",
 		"64:ff9b::7f00:1", "64:ff9b::a9fe:a9fe", "2002:7f00:1::",
+		"64:ff9b:1::a9fe:a9fe", // local-use NAT64 prefix
+		// Teredo: trailing 32 bits are the client v4, complemented.
+		"2001::5601:5601", // ^169.254.169.254
+		"2001::80ff:fffe", // ^127.0.0.1
+		"2001::f5ff:fffe", // ^10.0.0.1
 	}
 	for _, address := range blocked {
 		if !proxyIPBlocked(net.ParseIP(address)) {
@@ -46,6 +51,7 @@ func TestProxyIPv6Policy(t *testing.T) {
 	public := []string{
 		"::ffff:8.8.8.8", "64:ff9b::808:808", "2002:808:808::",
 		"2606:4700:4700::1111", "2001:4860:4860::8888",
+		"2001::f7f7:f7f7", // Teredo carrying public 8.8.8.8
 	}
 	for _, address := range public {
 		if proxyIPBlocked(net.ParseIP(address)) {

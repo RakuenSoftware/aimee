@@ -183,3 +183,118 @@ cJSON *tool_args_coerce(const cJSON *declared_schema, const cJSON *raw_args)
 
    return result;
 }
+
+/* --- Canonicalization: one shape, decided once ----------------------------
+ *
+ * WHY THIS EXISTS
+ *
+ * A tool call used to be normalized twice, differently, and authorized on
+ * neither result. agent_policy.c's validator resolved aliases and coerced ints
+ * on a copy it then threw away; the dispatcher resolved a DIFFERENT alias set
+ * and ran the schema coercion below, and that result is what executed. In
+ * between, execution-policy and the audit record both saw the raw arguments.
+ *
+ * So the authorizer could permit {"paths": "/etc/passwd"} while the tool ran
+ * {"paths": ["/etc/passwd"]}, and the ledger recorded arguments that never
+ * executed. The fix is not a better transform, it is a single one: the caller
+ * canonicalizes once, before the gates, and every gate plus the executor plus
+ * the audit record see the same bytes.
+ *
+ * Idempotent by construction, so the dispatcher can keep calling it for its
+ * other entry points (script RPC, the MCP gateway) without double-transforming
+ * a turn the agent loop already canonicalized. */
+
+/* Names a model commonly emits instead of a tool's declared parameter. The
+ * union of the two tables that previously disagreed. */
+typedef struct
+{
+   const char *alias;
+   const char *canonical;
+} arg_alias_t;
+
+static const arg_alias_t g_arg_aliases[] = {
+    {"filepath", "path"},  {"file_path", "path"},  {"file", "path"},      {"filename", "path"},
+    {"file_name", "path"}, {"dir", "path"},        {"directory", "path"}, {"cmd", "command"},
+    {"q", "query"},        {"max", "max_results"}, {"cnt", "count"},      {"num", "count"},
+    {"msg", "message"},    {NULL, NULL},
+};
+
+/* Fields historically coerced by name for tools with no registry schema. */
+static const char *g_int_fields[] = {"offset", "limit", "count", "max_results", NULL};
+
+static void apply_aliases(cJSON *args, const cJSON *properties)
+{
+   for (const arg_alias_t *a = g_arg_aliases; a->alias; a++)
+   {
+      if (!cJSON_GetObjectItem(args, a->alias))
+         continue;
+      if (cJSON_GetObjectItem(args, a->canonical))
+         continue; /* the real parameter is already present */
+      if (properties)
+      {
+         /* With a schema in hand, rewrite ONLY when the alias is not itself a
+          * declared parameter and the canonical name is one. A tool with a real
+          * `file` parameter and no `path` keeps its argument; the unguarded
+          * rewrite the dispatcher used to do would have silently renamed it. */
+         if (cJSON_GetObjectItemCaseSensitive(properties, a->alias))
+            continue;
+         if (!cJSON_GetObjectItemCaseSensitive(properties, a->canonical))
+            continue;
+      }
+      cJSON *detached = cJSON_DetachItemFromObject(args, a->alias);
+      if (detached)
+         cJSON_AddItemToObject(args, a->canonical, detached);
+   }
+}
+
+static void coerce_named_int_fields(cJSON *args)
+{
+   for (int i = 0; g_int_fields[i]; i++)
+   {
+      cJSON *f = cJSON_GetObjectItem(args, g_int_fields[i]);
+      if (!f || !cJSON_IsString(f))
+         continue;
+      char *end = NULL;
+      long v = strtol(f->valuestring, &end, 10);
+      if (end && *end == '\0' && f->valuestring != end)
+         cJSON_ReplaceItemInObject(args, g_int_fields[i], cJSON_CreateNumber((double)v));
+   }
+}
+
+cJSON *tool_args_canonicalize(const cJSON *declared_schema, const cJSON *raw_args)
+{
+   if (!cJSON_IsObject(raw_args))
+      return cJSON_Duplicate(raw_args, 1);
+
+   cJSON *work = cJSON_Duplicate(raw_args, 1);
+   if (!work)
+      return NULL;
+
+   const cJSON *properties =
+       declared_schema ? cJSON_GetObjectItemCaseSensitive(declared_schema, "properties") : NULL;
+   if (properties && !cJSON_IsObject(properties))
+      properties = NULL;
+
+   apply_aliases(work, properties);
+   coerce_named_int_fields(work);
+
+   cJSON *coerced = tool_args_coerce(declared_schema, work);
+   cJSON_Delete(work);
+   return coerced;
+}
+
+char *tool_args_canonicalize_json(const cJSON *declared_schema, const char *raw_args_json)
+{
+   if (!raw_args_json)
+      return NULL;
+   cJSON *raw = cJSON_Parse(raw_args_json);
+   if (!raw)
+      return NULL; /* invalid JSON is the validator's error to report, not ours */
+   cJSON *canonical = tool_args_canonicalize(declared_schema, raw);
+   cJSON_Delete(raw);
+   if (!canonical)
+      return NULL;
+   char *out = cJSON_PrintUnformatted(canonical);
+   cJSON_Delete(canonical);
+   return out;
+}

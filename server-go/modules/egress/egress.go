@@ -277,7 +277,73 @@ func validDigest(value string) bool {
 	return true
 }
 
+// egressBlockedIPv4 are the ranges a module-initiated call must not reach.
+// Deliberately in step with server-go/modules/delegates/proxyguard.go and
+// server-go/modules/sandbox/proxy_policy.go: the same destination must not be
+// refused on one plane and dialed on another. The stdlib predicates alone are
+// not enough -- IsPrivate covers RFC1918 and fc00::/7 but not CGNAT, the
+// TEST-NETs, or the reserved space.
+var egressBlockedIPv4 = func() []*net.IPNet {
+	cidrs := []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16",
+		"172.16.0.0/12", "192.0.0.0/24", "192.0.2.0/24", "192.88.99.0/24", "192.168.0.0/16",
+		"198.18.0.0/15", "198.51.100.0/24", "203.0.113.0/24", "224.0.0.0/4", "240.0.0.0/4",
+	}
+	nets := make([]*net.IPNet, 0, len(cidrs))
+	for _, cidr := range cidrs {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			nets = append(nets, n)
+		}
+	}
+	return nets
+}()
+
+// egressEmbeddedIPv4 returns the IPv4 an IPv6 address translates or tunnels to.
+// Covers v4-mapped, v4-compatible, NAT64 (both prefixes), 6to4 and Teredo: each
+// spells an IPv4 destination as an IPv6 literal that matches no blocked v6
+// prefix, so a guard that skips this step admits 169.254.169.254 by another name.
+func egressEmbeddedIPv4(ip net.IP) net.IP {
+	v6 := ip.To16()
+	if v6 == nil || ip.To4() != nil {
+		return nil
+	}
+	hasPrefix := func(prefix []byte) bool {
+		for i, b := range prefix {
+			if v6[i] != b {
+				return false
+			}
+		}
+		return true
+	}
+	switch {
+	case hasPrefix([]byte{0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0}),
+		hasPrefix([]byte{0x00, 0x64, 0xFF, 0x9B, 0x00, 0x01, 0, 0, 0, 0, 0, 0}):
+		return net.IPv4(v6[12], v6[13], v6[14], v6[15]) // NAT64
+	case hasPrefix([]byte{0x20, 0x01, 0x00, 0x00}):
+		return net.IPv4(^v6[12], ^v6[13], ^v6[14], ^v6[15]) // Teredo
+	case v6[0] == 0x20 && v6[1] == 0x02:
+		return net.IPv4(v6[2], v6[3], v6[4], v6[5]) // 6to4
+	case hasPrefix(make([]byte, 12)) && (v6[12]|v6[13]|v6[14]|v6[15]) != 0:
+		return net.IPv4(v6[12], v6[13], v6[14], v6[15]) // v4-compatible
+	}
+	return nil
+}
+
 func publicIP(ip net.IP) bool {
+	if ip == nil {
+		return false
+	}
+	if embedded := egressEmbeddedIPv4(ip); embedded != nil {
+		ip = embedded
+	}
+	if v4 := ip.To4(); v4 != nil {
+		for _, blocked := range egressBlockedIPv4 {
+			if blocked.Contains(v4) {
+				return false
+			}
+		}
+		return true
+	}
 	return !ip.IsLoopback() && !ip.IsPrivate() && !ip.IsUnspecified() &&
 		!ip.IsLinkLocalMulticast() && !ip.IsLinkLocalUnicast() && !ip.IsMulticast()
 }

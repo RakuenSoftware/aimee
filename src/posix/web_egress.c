@@ -12,6 +12,7 @@
 #include "aimee.h"
 
 #include "agent_exec.h"
+#include "ip_transition.h"
 #include "log.h"
 #include "web_egress.h"
 
@@ -27,25 +28,40 @@
 /* ---------------- SSRF egress deny-list ---------------- */
 
 /* 1 if this IPv4 (host byte order) is in a private/reserved/link-local range. */
+/* Every range a model- or ranking-chosen destination has no business reaching.
+ * Kept deliberately in step with blockedIPv4Nets in
+ * server-go/modules/delegates/proxyguard.go and the table in
+ * server-go/modules/sandbox/proxy_policy.go: the same destination must not be
+ * refused on one plane and dialed on another. */
 static int ipv4_blocked(uint32_t a)
 {
-   uint8_t b0 = (a >> 24) & 0xff, b1 = (a >> 16) & 0xff;
-   if (b0 == 0)
-      return 1; /* 0.0.0.0/8 */
-   if (b0 == 10)
-      return 1; /* 10/8 private */
-   if (b0 == 127)
-      return 1; /* loopback */
-   if (b0 == 169 && b1 == 254)
-      return 1; /* link-local incl. 169.254.169.254 metadata */
-   if (b0 == 172 && b1 >= 16 && b1 <= 31)
-      return 1; /* 172.16/12 private */
-   if (b0 == 192 && b1 == 168)
-      return 1; /* 192.168/16 private */
-   if (b0 == 100 && b1 >= 64 && b1 <= 127)
-      return 1; /* 100.64/10 CGNAT */
-   if (b0 >= 224)
-      return 1; /* 224/4 multicast + 240/4 reserved + 255.255.255.255 */
+   static const struct
+   {
+      uint32_t network;
+      unsigned bits;
+   } blocked[] = {
+       {0x00000000u, 8},  /* 0.0.0.0/8 this-network / unspecified */
+       {0x0a000000u, 8},  /* 10/8 private */
+       {0x64400000u, 10}, /* 100.64/10 CGNAT */
+       {0x7f000000u, 8},  /* 127/8 loopback */
+       {0xa9fe0000u, 16}, /* 169.254/16 link-local incl. 169.254.169.254 metadata */
+       {0xac100000u, 12}, /* 172.16/12 private */
+       {0xc0000000u, 24}, /* 192.0.0/24 IETF protocol assignments */
+       {0xc0000200u, 24}, /* 192.0.2/24 TEST-NET-1 */
+       {0xc0586300u, 24}, /* 192.88.99/24 6to4 relay anycast (deprecated) */
+       {0xc0a80000u, 16}, /* 192.168/16 private */
+       {0xc6120000u, 15}, /* 198.18/15 benchmarking */
+       {0xc6336400u, 24}, /* 198.51.100/24 TEST-NET-2 */
+       {0xcb007100u, 24}, /* 203.0.113/24 TEST-NET-3 */
+       {0xe0000000u, 4},  /* 224/4 multicast */
+       {0xf0000000u, 4},  /* 240/4 reserved incl. 255.255.255.255 */
+   };
+   for (size_t i = 0; i < sizeof(blocked) / sizeof(blocked[0]); i++)
+   {
+      uint32_t mask = blocked[i].bits == 0 ? 0u : (~0u << (32 - blocked[i].bits));
+      if ((a & mask) == blocked[i].network)
+         return 1;
+   }
    return 0;
 }
 
@@ -68,20 +84,12 @@ static int ipv6_blocked(const struct in6_addr *a)
       return 1; /* fe80::/10 link-local */
    if (b[0] == 0xff)
       return 1; /* ff00::/8 multicast */
-   /* ::ffff:0:0/96 IPv4-mapped -> validate the embedded v4 */
-   int mapped = 1;
-   for (int i = 0; i < 10; i++)
-      if (b[i])
-      {
-         mapped = 0;
-         break;
-      }
-   if (mapped && b[10] == 0xff && b[11] == 0xff)
-   {
-      uint32_t v4 =
-          ((uint32_t)b[12] << 24) | ((uint32_t)b[13] << 16) | ((uint32_t)b[14] << 8) | b[15];
-      return ipv4_blocked(v4);
-   }
+   /* A transition address names an IPv4 destination; judge it as that IPv4.
+    * Covers v4-mapped, NAT64, 6to4, Teredo and v4-compatible -- see
+    * headers/ip_transition.h for why checking only v4-mapped is a bypass. */
+   uint32_t embedded = 0;
+   if (ip_embedded_ipv4(a, &embedded))
+      return ipv4_blocked(embedded);
    return 0;
 }
 

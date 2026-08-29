@@ -103,11 +103,17 @@ func proxyIPBlocked(ip net.IP) bool {
 		}
 	}
 	nat64 := []byte{0x00, 0x64, 0xff, 0x9b, 0, 0, 0, 0, 0, 0, 0, 0}
-	if (compat && (v6[12]|v6[13]|v6[14]|v6[15]) != 0) || string(v6[:12]) == string(nat64) {
+	nat64Local := []byte{0x00, 0x64, 0xff, 0x9b, 0x00, 0x01, 0, 0, 0, 0, 0, 0}
+	if (compat && (v6[12]|v6[13]|v6[14]|v6[15]) != 0) || string(v6[:12]) == string(nat64) ||
+		string(v6[:12]) == string(nat64Local) {
 		return ipv4Blocked(binary.BigEndian.Uint32(v6[12:16]))
 	}
 	if v6[0] == 0x20 && v6[1] == 0x02 { // 6to4: 2002:V4:V4::
 		return ipv4Blocked(binary.BigEndian.Uint32(v6[2:6]))
+	}
+	// Teredo 2001::/32: the client v4 is the trailing 32 bits, complemented.
+	if v6[0] == 0x20 && v6[1] == 0x01 && v6[2] == 0x00 && v6[3] == 0x00 {
+		return ipv4Blocked(^binary.BigEndian.Uint32(v6[12:16]))
 	}
 
 	allZero := true

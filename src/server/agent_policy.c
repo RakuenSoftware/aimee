@@ -51,77 +51,6 @@ static const char *tool_prompts_lookup_embedded(const char *name)
    return NULL;
 }
 
-/* --- Argument alias table --- */
-
-typedef struct
-{
-   const char *alias;
-   const char *canonical;
-} arg_alias_t;
-
-static const arg_alias_t g_arg_aliases[] = {
-    {"filepath", "path"},  {"file_path", "path"},  {"file", "path"}, {"filename", "path"},
-    {"file_name", "path"}, {"cmd", "command"},     {"dir", "path"},  {"directory", "path"},
-    {"q", "query"},        {"max", "max_results"}, {"cnt", "count"}, {"num", "count"},
-    {"msg", "message"},    {NULL, NULL},
-};
-
-/* Normalize argument names: resolve aliases, coerce "123" to 123 for integer
- * fields. Modifies args in-place. Returns the number of normalizations. */
-static int normalize_args(cJSON *args, cJSON *schema_props)
-{
-   if (!args || !cJSON_IsObject(args))
-      return 0;
-   int count = 0;
-
-   /* Alias resolution: rename aliased keys to canonical names */
-   for (const arg_alias_t *a = g_arg_aliases; a->alias; a++)
-   {
-      cJSON *field = cJSON_GetObjectItem(args, a->alias);
-      if (!field)
-         continue;
-      /* Only rename if the canonical name is not already present */
-      if (cJSON_GetObjectItem(args, a->canonical))
-         continue;
-      /* cJSON doesn't support key rename, so detach and re-add */
-      cJSON *detached = cJSON_DetachItemFromObject(args, a->alias);
-      if (detached)
-      {
-         cJSON_AddItemToObject(args, a->canonical, detached);
-         count++;
-      }
-   }
-
-   /* Type coercion: string "123" → integer 123 for integer fields */
-   if (schema_props && cJSON_IsObject(schema_props))
-   {
-      cJSON *prop = schema_props->child;
-      while (prop)
-      {
-         cJSON *field = cJSON_GetObjectItem(args, prop->string);
-         if (field && cJSON_IsString(field))
-         {
-            cJSON *type_spec = cJSON_GetObjectItem(prop, "type");
-            if (type_spec && cJSON_IsString(type_spec) &&
-                (strcmp(type_spec->valuestring, "integer") == 0 ||
-                 strcmp(type_spec->valuestring, "number") == 0))
-            {
-               const char *s = field->valuestring;
-               char *end = NULL;
-               long val = strtol(s, &end, 10);
-               if (end && *end == '\0' && s != end)
-               {
-                  cJSON_ReplaceItemInObject(args, prop->string, cJSON_CreateNumber(val));
-                  count++;
-               }
-            }
-         }
-         prop = prop->next;
-      }
-   }
-   return count;
-}
-
 static int validate_against_schema(const char *args_json, cJSON *schema, char *err_out,
                                    size_t err_len)
 {
@@ -135,8 +64,11 @@ static int validate_against_schema(const char *args_json, cJSON *schema, char *e
       return -1;
    }
 
+   /* No normalization here. Arguments arrive canonical (the agent loop rewrites
+    * them in place before any gate runs), so this judges the shape that will
+    * actually execute. Normalizing a private copy here -- which is what this
+    * used to do -- validated one shape and let another run. */
    cJSON *props = cJSON_GetObjectItem(schema, "properties");
-   normalize_args(args, props);
 
    cJSON *required = cJSON_GetObjectItem(schema, "required");
    if (required && cJSON_IsArray(required))
@@ -188,6 +120,25 @@ static int validate_against_schema(const char *args_json, cJSON *schema, char *e
             }
          }
          prop = prop->next;
+      }
+   }
+
+   /* Enforce additionalProperties ONLY when the schema says false. Standard
+    * JSON Schema semantics, so a tool author opts in and nothing that omits the
+    * keyword changes behaviour. Without this an undeclared key the model
+    * invented passed every gate and reached the handler. */
+   cJSON *additional = cJSON_GetObjectItem(schema, "additionalProperties");
+   if (additional && cJSON_IsFalse(additional) && props && cJSON_IsObject(props) &&
+       cJSON_IsObject(args))
+   {
+      for (cJSON *field = args->child; field; field = field->next)
+      {
+         if (field->string && !cJSON_GetObjectItem(props, field->string))
+         {
+            snprintf(err_out, err_len, "unknown field '%s'", field->string);
+            cJSON_Delete(args);
+            return -1;
+         }
       }
    }
 

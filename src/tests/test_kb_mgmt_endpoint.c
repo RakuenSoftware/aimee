@@ -46,5 +46,22 @@ int main(void)
    assert(!allowed6("fe80::1") && !allowed6("fc00::1") && !allowed6("ff02::1"));
    assert(!allowed6("::ffff:127.0.0.1"));
    assert(allowed6("::ffff:8.8.8.8"));
+   /* v4-mapped is only one spelling. NAT64, 6to4, Teredo and the deprecated
+    * v4-compatible form all name an IPv4 endpoint without matching a blocked v6
+    * prefix, so checking only ::ffff: left an internal endpoint permitted. */
+   assert(!allowed6("64:ff9b::7f00:1"));      /* NAT64 -> 127.0.0.1 */
+   assert(!allowed6("64:ff9b::a9fe:a9fe"));   /* NAT64 -> 169.254.169.254 */
+   assert(!allowed6("64:ff9b:1::a9fe:a9fe")); /* local-use NAT64 prefix */
+   assert(!allowed6("2002:7f00:1::"));        /* 6to4 -> 127.0.0.1 */
+   assert(!allowed6("2002:a9fe:a9fe::"));     /* 6to4 -> 169.254.169.254 */
+   assert(!allowed6("::a9fe:a9fe"));          /* v4-compatible -> metadata */
+   assert(!allowed6("2001::5601:5601"));      /* Teredo -> ^169.254.169.254 */
+   assert(!allowed6("2001::80ff:fffe"));      /* Teredo -> ^127.0.0.1 */
+   /* The same forms carrying a public v4 stay reachable, and 2001:4860::/32 is
+    * ordinary global unicast rather than Teredo. */
+   assert(allowed6("64:ff9b::808:808"));
+   assert(allowed6("2002:808:808::"));
+   assert(allowed6("2001::f7f7:f7f7"));
+   assert(allowed6("2001:4860:4860::8888"));
    return 0;
 }
