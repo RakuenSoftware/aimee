@@ -230,9 +230,15 @@ extern "C"
 
    /* Merge-on-key probe: reads the fields memory_insert needs for the
     * exact-key merge path. Returns 1 on hit (writes all outputs), 0 on miss.
-    * `content_out` is truncated to `content_len`. */
-   int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char *content_out,
-                                      int content_len, double *confidence_out, int *use_count_out,
+    *
+    * On hit `*content_out` receives a malloc'd NUL-terminated copy of the whole
+    * stored content, which the caller frees; it is never NULL on a hit, and is
+    * "" when the row's content is NULL. Deliberately allocated rather than
+    * copied into a caller buffer: the merge path can write this value back to
+    * the row, so a fixed buffer would silently shorten a long memory every time
+    * it was re-stored. */
+   int db2_memory_lookup_merge_fields(const char *key, int64_t *id_out, char **content_out,
+                                      double *confidence_out, int *use_count_out,
                                       double *surprise_out, int *observation_count_out,
                                       double *evidence_out);
 
