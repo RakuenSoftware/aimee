@@ -678,7 +678,8 @@ static void test_runtime_web(void)
       uint32_t status;
    } cases[] = {
        {"invalid_argument", 400u}, {"not_found", 404u}, {"permission_denied", 403u},
-       {"unavailable", 503u},      {"", 502u},          {"unknown", 502u},
+       {"unavailable", 503u},      {"payload_too_large", 413u},
+       {"", 502u},                 {"unknown", 502u},
    };
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i)
    {
