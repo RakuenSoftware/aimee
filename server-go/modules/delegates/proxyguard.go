@@ -121,8 +121,9 @@ func ProxyAddressBlocked(ip net.IP) bool {
 // embeddedIPv4 returns the IPv4 address carried inside an IPv6 address, or nil.
 //
 // Covers v4-mapped (::ffff:a.b.c.d), v4-compatible (::a.b.c.d, deprecated),
-// NAT64 (64:ff9b::a.b.c.d) and 6to4 (2002:AABB:CCDD::), each of which is a way
-// to name an IPv4 destination without looking like one.
+// NAT64 (64:ff9b::a.b.c.d and the 64:ff9b:1::/48 local-use prefix), 6to4
+// (2002:AABB:CCDD::) and Teredo (2001::/32, trailing v4 complemented), each of
+// which is a way to name an IPv4 destination without looking like one.
 func embeddedIPv4(ip net.IP) net.IP {
 	v6 := ip.To16()
 	if v6 == nil || ip.To4() != nil {
@@ -145,6 +146,14 @@ func embeddedIPv4(ip net.IP) net.IP {
 	// NAT64 64:ff9b::/96
 	if isPrefix([]byte{0x00, 0x64, 0xFF, 0x9B, 0, 0, 0, 0, 0, 0, 0, 0}) {
 		return net.IPv4(v6[12], v6[13], v6[14], v6[15])
+	}
+	// NAT64 local-use 64:ff9b:1::/48, at the /96 suffix length aimee accepts.
+	if isPrefix([]byte{0x00, 0x64, 0xFF, 0x9B, 0x00, 0x01, 0, 0, 0, 0, 0, 0}) {
+		return net.IPv4(v6[12], v6[13], v6[14], v6[15])
+	}
+	// Teredo 2001::/32 carries the client v4 in the trailing 32 bits, complemented.
+	if isPrefix([]byte{0x20, 0x01, 0x00, 0x00}) {
+		return net.IPv4(^v6[12], ^v6[13], ^v6[14], ^v6[15])
 	}
 	// v4-compatible ::a.b.c.d, excluding :: and ::1 which are handled as v6.
 	if isPrefix(make([]byte, 12)) && (v6[12]|v6[13]|v6[14]|v6[15]) != 0 {

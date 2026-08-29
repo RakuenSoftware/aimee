@@ -84,6 +84,11 @@ func TestProxyAddressBlocksIPv4EmbeddedInIPv6(t *testing.T) {
 		{"v4-compatible private", "::192.168.1.1"},
 		{"NAT64 metadata", "64:ff9b::169.254.169.254"},
 		{"NAT64 private", "64:ff9b::10.0.0.1"},
+		{"NAT64 local-use metadata", "64:ff9b:1::169.254.169.254"},
+		// Teredo carries the client v4 complemented in the trailing 32 bits:
+		// ^169.254.169.254 == 0x56015601, ^127.0.0.1 == 0x80fffffe.
+		{"Teredo metadata", "2001::5601:5601"},
+		{"Teredo loopback", "2001::80ff:fffe"},
 	}
 	for _, c := range cases {
 		ip := net.ParseIP(c.addr)
@@ -108,6 +113,14 @@ func TestProxyAddressBlocksIPv4EmbeddedInIPv6(t *testing.T) {
 	// A v4-mapped PUBLIC address must still be reachable.
 	if ProxyAddressBlocked(net.ParseIP("::ffff:1.1.1.1")) {
 		t.Error("a v4-mapped public address was blocked")
+	}
+	// So must a Teredo address whose client v4 is public (^8.8.8.8).
+	if ProxyAddressBlocked(net.ParseIP("2001::f7f7:f7f7")) {
+		t.Error("a Teredo address embedding a public v4 was blocked")
+	}
+	// 2001::/32 is Teredo, but 2001:4860::/32 is ordinary global unicast.
+	if ProxyAddressBlocked(net.ParseIP("2001:4860:4860::8888")) {
+		t.Error("a global-unicast 2001: address was misread as Teredo")
 	}
 }
 
