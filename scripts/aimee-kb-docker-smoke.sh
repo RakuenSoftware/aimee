@@ -28,6 +28,8 @@
 #   COMPOSE_FILE    compose file(s), space-separated (default compose.yaml);
 #                   list several to layer an override (e.g. remap host ports)
 #   WAIT_SECONDS    health wait budget on --up   (default 300)
+#   REQUEST_TIMEOUT_SECONDS       ordinary API request budget (default 15)
+#   FUSION_REQUEST_TIMEOUT_SECONDS cold fusion request budget (default 60)
 #
 # Exit code: 0 = all checks passed, non-zero = first failure.
 
@@ -36,6 +38,8 @@ set -euo pipefail
 KB_URL="${KB_URL:-http://localhost:8741}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
+REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-15}"
+FUSION_REQUEST_TIMEOUT_SECONDS="${FUSION_REQUEST_TIMEOUT_SECONDS:-60}"
 
 # The container deliberately refuses to expose its HTTP listener on 0.0.0.0
 # without an API bearer.  Give this disposable topology a test-only value before
@@ -95,8 +99,8 @@ FAIL=0
 check() {
   # check <name> <expected-substring> <curl-args...>
   local name="$1" expect="$2"; shift 2
-  local body
-  if body="$(curl -fsS --max-time 15 "${AUTH[@]}" "$@" 2>/dev/null)" &&
+  local body timeout="${CHECK_TIMEOUT_SECONDS:-$REQUEST_TIMEOUT_SECONDS}"
+  if body="$(curl -fsS --max-time "$timeout" "${AUTH[@]}" "$@" 2>/dev/null)" &&
      [[ "$body" == *"$expect"* ]]; then
     green  "  PASS  $name"
     PASS=$((PASS + 1))
@@ -186,6 +190,7 @@ check "POST /v1/search"           '"hits"'     -X POST -H 'content-type: applica
 # unless the container has a 64 MB stack ulimit — a regression the /v1/search
 # check above does NOT catch. curl -fsS fails here if the kb crashed, so this
 # guards the ulimit fix. An empty "facts" array on a fresh DB is a pass.
+CHECK_TIMEOUT_SECONDS="$FUSION_REQUEST_TIMEOUT_SECONDS" \
 check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: application/json' \
                                                -d '{"query":"docker smoke test","limit":3,"graph_code_fusion_state":"on"}' \
                                                "${KB_URL}/v1/actions/memory.find_facts"
