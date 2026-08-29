@@ -432,7 +432,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "feedback_encode_failed", err, step.CostUSD)
 		}
 		transition, err := e.db.RecordRequestedChanges(ctx, item.ID, node.ID, node.OnFail,
-			reviewed.Hash, wfe.Hash(encoded), unresolvedBlockers(step.Feedback),
+			reviewed.Hash, wfe.Hash(encoded),
+			convergencePayload(node.ID, unresolvedBlockers(step.Feedback), step.Feedback,
+				paramString(node, "blocker_convergence", "observe")),
 			maxIterations(node), e.maxNoProgress, step.CostUSD)
 		if err != nil {
 			return out, err
