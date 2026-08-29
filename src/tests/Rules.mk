@@ -702,6 +702,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-kb-tls \
                $(TESTPREFIX)/unit-test-kb-releases-db \
                $(TESTPREFIX)/unit-test-kb-ingest-format \
+               $(TESTPREFIX)/unit-test-kb-document-inspector \
                $(TESTPREFIX)/unit-test-kb-ingest-worker-cap \
                $(TESTPREFIX)/unit-test-kb-dense-vector-scope \
                $(TESTPREFIX)/unit-test-mcp-roundtable-contract \
@@ -6595,6 +6596,11 @@ $(TESTPREFIX)/unit-test-kb-ingest-worker-cap: $(OBJDIR)/tests/test_kb_ingest_wor
 $(TESTPREFIX)/unit-test-kb-ingest-format: $(OBJDIR)/tests/test_kb_ingest_format.o \
                      $(OBJDIR)/kb/kb_ingest_normalize.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
+
+$(TESTPREFIX)/unit-test-kb-document-inspector: $(OBJDIR)/tests/test_kb_document_inspector.o \
+                     $(OBJDIR)/kb/kb_document_inspector.o $(OBJDIR)/kb/kb_doc_hash.o \
+                     $(OBJDIR)/integrity_gate.o $(PLATFORM_BASIC_OBJS)
+	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lz
 
 $(TESTPREFIX)/unit-test-session-degraded-notice: $(OBJDIR)/tests/test_session_degraded_notice.o $(OBJDIR)/session_degraded_notice.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)

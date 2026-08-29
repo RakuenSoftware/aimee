@@ -2,7 +2,9 @@ package families
 
 import (
 	"context"
+	"encoding/json"
 	"math"
+	"strings"
 
 	store "github.com/JBailes/aimee/server-go/modules/aimee"
 )
@@ -104,16 +106,17 @@ const (
 	                     WHERE work_item_id = $2 AND current_stage = $3
 	                       AND state = 'active' AND pause_reason = 'human_gate'`
 
-	wfeConvergenceSeenSQL = `SELECT artifact_hash, feedback_hash, identical_repeats
+	wfeConvergenceSeenSQL = `SELECT artifact_hash, feedback_hash, identical_repeats, blocker_set
 	                           FROM wfe_convergence WHERE work_item_id = $1 AND gate = $2`
 
 	wfeConvergenceObserveSQL = `INSERT INTO wfe_convergence
-	        (work_item_id, gate, artifact_hash, feedback_hash, identical_repeats)
-	    VALUES ($1, $2, $3, $4, $5)
+	        (work_item_id, gate, artifact_hash, feedback_hash, identical_repeats, blocker_set)
+	    VALUES ($1, $2, $3, $4, $5, $6)
 	    ON CONFLICT (work_item_id, gate) DO UPDATE SET
 	        artifact_hash = EXCLUDED.artifact_hash,
 	        feedback_hash = EXCLUDED.feedback_hash,
 	        identical_repeats = EXCLUDED.identical_repeats,
+	        blocker_set = EXCLUDED.blocker_set,
 	        updated_at = now()`
 
 	wfeConvergenceParkSQL = `UPDATE lifecycle_work_item
@@ -624,14 +627,96 @@ func wfeRecoverLostReplay(ctx context.Context, db store.DB, f []string) (uint32,
 
 // wfeRecordRequestedChanges is op 65: a reviewer asked for changes, and the
 // question is whether the loop is still making progress.
-//
+type convergencePayloadV1 struct {
+	Version    int    `json:"version"`
+	Mode       string `json:"mode"`
+	Summary    string `json:"summary"`
+	BlockerSet string `json:"blocker_set"`
+}
+
+// convergenceFields accepts the versioned payload emitted by the workflow
+// engine while preserving the old plain-text field for every other client.
+func convergenceFields(raw string) (summary, blockerSet, mode string) {
+	var payload convergencePayloadV1
+	if json.Unmarshal([]byte(raw), &payload) != nil || payload.Version != 1 {
+		return raw, "", "legacy"
+	}
+	if canonicalBlockerSet(payload.BlockerSet) {
+		blockerSet = payload.BlockerSet
+	}
+	mode = strings.ToLower(strings.TrimSpace(payload.Mode))
+	if mode != "enforce" {
+		mode = "observe"
+	}
+	return payload.Summary, blockerSet, mode
+}
+
+func canonicalBlockerSet(raw string) bool {
+	if raw == "" || len(raw) > 4160 {
+		return false
+	}
+	parts := strings.Split(raw, ",")
+	if len(parts) > 64 {
+		return false
+	}
+	previous := ""
+	for _, part := range parts {
+		if len(part) != 64 || (previous != "" && part <= previous) {
+			return false
+		}
+		for _, c := range part {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				return false
+			}
+		}
+		previous = part
+	}
+	return true
+}
+
+func blockerSetRelationship(previous, current string) string {
+	prior := make(map[string]struct{})
+	for _, fingerprint := range strings.Split(previous, ",") {
+		prior[fingerprint] = struct{}{}
+	}
+	present := make(map[string]struct{})
+	for _, fingerprint := range strings.Split(current, ",") {
+		present[fingerprint] = struct{}{}
+	}
+	currentInsidePrior := true
+	for fingerprint := range present {
+		if _, ok := prior[fingerprint]; !ok {
+			currentInsidePrior = false
+			break
+		}
+	}
+	priorInsideCurrent := true
+	for fingerprint := range prior {
+		if _, ok := present[fingerprint]; !ok {
+			priorInsideCurrent = false
+			break
+		}
+	}
+	switch {
+	case currentInsidePrior && len(present) < len(prior):
+		return "progress"
+	case currentInsidePrior && priorInsideCurrent:
+		return "stalled"
+	case priorInsideCurrent:
+		return "regression"
+	default:
+		return "churn"
+	}
+}
+
 // Two separate limits, because they catch different failures: max_iterations
-// bounds how many rounds a gate may take at all, and max_identical catches a
-// loop producing the SAME artifact against the SAME feedback -- which is not
-// progress however many rounds are left.
+// bounds how many rounds a gate may take at all, and max_identical catches
+// consecutive rounds without demonstrated blocker-set shrinkage. Legacy callers
+// without a structured blocker set retain exact artifact+feedback comparison.
 func wfeRecordRequestedChanges(ctx context.Context, db store.DB, f []string) (uint32, []string, error) {
 	workItemID, gate, planStage := f[0], f[1], f[2]
-	planHash, feedbackHash, unresolved := f[3], f[4], f[5]
+	planHash, feedbackHash := f[3], f[4]
+	unresolved, blockerSet, convergenceMode := convergenceFields(f[5])
 	maxIterations, okIter := store.Atoi(f[6])
 	maxIdentical, okIdent := store.Atoi(f[7])
 	cost, okCost := store.Atof(f[8])
@@ -667,12 +752,24 @@ func wfeRecordRequestedChanges(ctx context.Context, db store.DB, f []string) (ui
 	// Has this gate seen exactly this artifact against exactly this feedback
 	// before? Missing is not an error: the first round has nothing to compare.
 	repeats := int64(1)
-	var oldPlan, oldFeedback string
+	var oldPlan, oldFeedback, oldBlockerSet string
 	var oldRepeats int64
+	relationship := ""
 	switch err := tx.QueryRow(ctx, wfeConvergenceSeenSQL, workItemID, gate).
-		Scan(&oldPlan, &oldFeedback, &oldRepeats); {
+		Scan(&oldPlan, &oldFeedback, &oldRepeats, &oldBlockerSet); {
 	case err == nil:
-		if oldPlan == planHash && oldFeedback == feedbackHash {
+		structuredComparison := convergenceMode == "enforce" && blockerSet != "" && oldBlockerSet != ""
+		if blockerSet != "" && oldBlockerSet != "" {
+			relationship = blockerSetRelationship(oldBlockerSet, blockerSet)
+			if structuredComparison && relationship != "progress" {
+				repeats = oldRepeats + 1
+			}
+		}
+		// Enforced structured comparison is authoritative only when both rounds
+		// supplied a valid set. A producer outage or rollout gap must retain the
+		// pre-existing exact-hash safety rule instead of silently resetting the
+		// no-progress counter.
+		if !structuredComparison && oldPlan == planHash && oldFeedback == feedbackHash {
 			repeats = oldRepeats + 1
 		}
 	case !store.IsNoRows(err):
@@ -680,7 +777,7 @@ func wfeRecordRequestedChanges(ctx context.Context, db store.DB, f []string) (ui
 	}
 
 	if _, err := tx.Exec(ctx, wfeConvergenceObserveSQL, workItemID, gate,
-		planHash, feedbackHash, repeats); err != nil {
+		planHash, feedbackHash, repeats, blockerSet); err != nil {
 		return 0, nil, err
 	}
 
@@ -714,8 +811,14 @@ func wfeRecordRequestedChanges(ctx context.Context, db store.DB, f []string) (ui
 			workItemID); err != nil {
 			return 0, nil, err
 		}
+		detail := "requested_changes"
+		if relationship != "" {
+			detail += ": blocker_set_" + relationship + " mode_" + convergenceMode
+		} else if blockerSet == "" {
+			detail += ": blocker_set_unavailable"
+		}
 		if _, err := tx.Exec(ctx, wfeEventSQL, workItemID, gate, "loop", "go-wfe",
-			"requested_changes", planHash, cost); err != nil {
+			detail, planHash, cost); err != nil {
 			return 0, nil, err
 		}
 	}

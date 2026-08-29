@@ -2290,6 +2290,73 @@ static void test_number_is_refused_not_coerced(void)
    cJSON_Delete(spec);
 }
 
+/* A positional join must carry the whole argument, however long it is. This was
+ * a fixed 8 KiB buffer whose loop stopped once the next word would not fit, so
+ * `aimee memory store <key> <long note>` silently dropped the tail -- and when
+ * the first word alone exceeded the buffer the join came out EMPTY, which the
+ * server then refused as "requires a non-empty key and content", blaming the
+ * caller for text the client had discarded. Measured boundary before the fix:
+ * 8191 bytes stored, 8192 reported as empty. */
+static void test_positional_join_is_not_truncated(void)
+{
+   cJSON *spec = cJSON_Parse("{\"usage\":\"u\",\"fields\":["
+                             "{\"json\":\"key\",\"from\":\"positional\",\"index\":0},"
+                             "{\"json\":\"content\",\"from\":\"positional_join\","
+                             "\"from_index\":1}]}");
+   if (!spec)
+   {
+      fail("join", "could not parse the probe spec");
+      return;
+   }
+
+   const size_t sizes[] = {8191, 8192, 40000};
+   for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++)
+   {
+      const size_t n = sizes[s];
+      char *big = malloc(n + 1);
+      if (!big)
+      {
+         fail("join", "allocation for the probe argument failed");
+         break;
+      }
+      memset(big, 'x', n);
+      big[n] = '\0';
+
+      char *argv[] = {(char *)"k", big};
+      cJSON *req = cli_argspec_build("memory.store", spec, 2, argv);
+      if (!req)
+         fail("join", "refused a request it should have built");
+      else
+      {
+         const cJSON *c = cJSON_GetObjectItemCaseSensitive(req, "content");
+         if (!cJSON_IsString(c))
+            fail("join", "content was not emitted as a string");
+         else if (strlen(c->valuestring) != n)
+            fail("join", "content was truncated or padded");
+         cJSON_Delete(req);
+      }
+      free(big);
+   }
+
+   /* Multiple positionals still join with single spaces, across the old limit. */
+   {
+      char *word = malloc(5001);
+      if (word)
+      {
+         memset(word, 'y', 5000);
+         word[5000] = '\0';
+         char *argv[] = {(char *)"k", word, word};
+         cJSON *req = cli_argspec_build("memory.store", spec, 3, argv);
+         const cJSON *c = req ? cJSON_GetObjectItemCaseSensitive(req, "content") : NULL;
+         if (!cJSON_IsString(c) || strlen(c->valuestring) != 5000 + 1 + 5000)
+            fail("join", "multi-word join lost bytes across the old 8 KiB limit");
+         cJSON_Delete(req);
+         free(word);
+      }
+   }
+   cJSON_Delete(spec);
+}
+
 int main(void)
 {
    /* The session source resolves --session, then $AIMEE_SESSION_ID, then the
@@ -2308,6 +2375,7 @@ int main(void)
    for (size_t i = 0; i < sizeof(SAMPLES) / sizeof(SAMPLES[0]); i++)
       check_same(&SAMPLES[i]);
    test_refuses_what_it_cannot_build();
+   test_positional_join_is_not_truncated();
    test_number_is_refused_not_coerced();
 
    if (g_fail == 0)

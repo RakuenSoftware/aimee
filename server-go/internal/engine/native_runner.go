@@ -25,8 +25,9 @@ type Verifier interface {
 }
 
 type CommandVerifier struct {
-	Command  []string
-	LockFile string
+	Command           []string
+	RegressionCommand []string
+	LockFile          string
 }
 
 const defaultCommandVerifyLock = "aimee-wfe-command-verify.lock"
@@ -815,6 +816,20 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 				if err := r.verifier.Verify(ctx, workdir); err != nil {
 					return StepResult{Status: StepChanges, Detail: err.Error()}, nil
 				}
+				regressionDetail, err := r.verifyAdmittedRegressions(ctx, req, workdir)
+				if err != nil {
+					return StepResult{Status: StepChanges, Detail: err.Error()}, nil
+				}
+				detail := "reviewed worktree advanced; verified and re-freezing exact repair"
+				if regressionDetail != "" {
+					detail += "; " + regressionDetail
+				}
+				head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
+				if headErr != nil {
+					return StepResult{}, headErr
+				}
+				return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch,
+					ContentHash: head, Detail: detail}, nil
 			}
 			head, headErr := gitText(ctx, workdir, "rev-parse", "HEAD")
 			if headErr != nil {
@@ -936,6 +951,16 @@ func (r *NativeRunner) mutate(ctx context.Context, req StepRequest, docs bool) (
 		if err := r.verifier.Verify(ctx, workdir); err != nil {
 			return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
 		}
+		regressionDetail, err := r.verifyAdmittedRegressions(ctx, req, workdir)
+		if err != nil {
+			return StepResult{Status: StepChanges, Detail: err.Error(), CostUSD: cost, CostUnknown: costUnknown}, nil
+		}
+		head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
+		if err != nil {
+			return StepResult{}, err
+		}
+		return StepResult{Status: StepAdvanced, ArtifactType: "branch", Artifact: branch,
+			ContentHash: head, Detail: regressionDetail, CostUSD: cost, CostUnknown: costUnknown}, nil
 	}
 	head, err := gitText(ctx, workdir, "rev-parse", "HEAD")
 	if err != nil {
