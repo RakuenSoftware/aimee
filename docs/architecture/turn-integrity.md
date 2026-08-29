@@ -9,6 +9,25 @@ The server installs a bridge from the observation hook to the durable event bus.
 Other binaries can use the same state machine without linking server or audit
 dependencies.
 
+```mermaid
+flowchart LR
+    CALLER[turn owner] --> CORE[protocol-neutral<br/>turn-integrity state machine]
+    CORE --> BIND[bind identity, configuration,<br/>toolset, route, policy, and context]
+    BIND --> TRANS[monotonic typed transitions]
+    TRANS --> HOOK[optional bounded observation hook]
+    HOOK -->|server build only| BRIDGE[turn-integrity audit bridge]
+    BRIDGE --> BUS[durability event on<br/>server event bus]
+    BUS --> CAP[ordered diagnostic capture]
+    BUS --> SINK[(configured daemon WORM sink)]
+    CORE --> RESULT[caller-owned control result]
+    BUS -. never authorizes .-> RESULT
+```
+
+The callback exports bounded transition metadata, not prompts, arguments, tool
+results, or model responses. Its bus and WORM paths make the transition
+observable; they do not participate in the authorization decision or permit a
+terminal state to reopen.
+
 ## Invariants
 
 - A turn identity exists before work is dispatched.

@@ -39,6 +39,38 @@ verdict bus, another memory layer, or fleet-coordination machinery. Aimee alread
 has the governing lifecycle and evidence substrate. Duplicating it would add
 reconciliation failure modes without improving the decision boundary.
 
+### Integration map
+
+Each control terminates in an existing owner. None introduces a parallel
+scheduler, bus, audit history, or memory system.
+
+```mermaid
+flowchart TB
+    subgraph WORKFLOW[Existing workflow and DB1 lifecycle]
+        RF[review feedback] --> BS[normalized blocker set]
+        BS --> CR[compare prior round]
+        CR --> LP[existing loop or park transition]
+
+        CP[changed paths] --> RS[relevant admitted-regression selector]
+        EL[(existing eval-candidate ledger)] --> RS
+        RS --> MF[revision-bound selection manifest]
+        MF --> OE[observe evidence or enforce<br/>through existing eval runner]
+    end
+
+    subgraph KB[Existing KB ingress and DB2]
+        DOC[raw rich-document bytes] --> INS[bounded structural inspection]
+        INS -->|clean| NORM[existing normalizer and ingest]
+        INS -->|non-clean| STOP[stop before persistence]
+        NORM --> DB2[(existing DB2 document lifecycle)]
+    end
+
+    subgraph SKILLS[Existing skills owner]
+        SK[resolved skill + held-out cases] --> AB[paired baseline / treatment trials]
+        AB --> REP[digest- and budget-bound report]
+        REP --> OP[operator review<br/>no automatic promotion]
+    end
+```
+
 ## Net assessment
 
 The transferable value is **real but not foundational**. The useful residue is
