@@ -1020,7 +1020,20 @@ if ! kill -0 "$SERVER_PID_BEFORE" 2>/dev/null; then
 fi
 
 check_output "local version long flag" "aimee" $AIMEE --version
-check "index overview route" $AIMEE index overview
+
+# This harness intentionally has no KB process. A reachable route is not a
+# successful empty index: the client must preserve the dependency failure and
+# exit non-zero so automation cannot mistake an outage for "no projects".
+INDEX_OVERVIEW=$($AIMEE --json index overview 2>&1) && INDEX_RC=0 || INDEX_RC=$?
+if [ "$INDEX_RC" -eq 1 ]; then
+    PASS=$((PASS + 1))
+else
+    echo "FAIL: index overview route (expected exit 1 without KB, got $INDEX_RC)"
+    dump_server_log
+    FAIL=$((FAIL + 1))
+fi
+check_output "index overview reports KB outage" '"status":"unavailable"' echo "$INDEX_OVERVIEW"
+check_output "index overview maps KB outage to HTTP 503" '"http_status":503' echo "$INDEX_OVERVIEW"
 
 RESP=$(mcp_framed_req '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"integration-test","version":"1"}}}') || true
 check_output "mcp initialize over stdio framing" '"protocolVersion":"2024-11-05"' echo "$RESP"
@@ -1227,6 +1240,13 @@ check_output "catalog.show missing model stays typed" '"kind":"invalid_argument"
 
 RESP=$(http_call GET /v1/agent/list '{}') || true
 check_output "agent.list absent config stays typed" '"kind":"not_found"' echo "$RESP"
+
+# The dashboard's native list reads the same local config as agent.list. A
+# clean install without agents.json is an absent resource, not a failed
+# gateway, and must preserve both the typed body and the HTTP status.
+RESP=$(http_call GET /v1/agents '{}') || true
+check_output "dashboard agents absent config is not found" '404 ' echo "$RESP"
+check_output "dashboard agents absent config stays typed" '"kind":"not_found"' echo "$RESP"
 
 # ============================================================
 # 4. Session management

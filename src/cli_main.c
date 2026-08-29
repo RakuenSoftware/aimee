@@ -663,6 +663,15 @@ static int wants_subcommand_help(int sub_argc, char **sub_argv)
           strcmp(sub_argv[0], "help") == 0;
 }
 
+/* These command families document arguments/options in the manifest's
+ * "subcommands" text, but they also have a useful default action with no
+ * arguments.  Do not let the generic family-help shortcut make those default
+ * routes unreachable. */
+static int client_command_has_default_action(const char *cmd)
+{
+   return cmd && (strcmp(cmd, "presence") == 0 || strcmp(cmd, "primary") == 0);
+}
+
 static int is_help_arg(const char *arg)
 {
    return arg && (strcmp(arg, "--help") == 0 || strcmp(arg, "-h") == 0 || strcmp(arg, "help") == 0);
@@ -2013,7 +2022,7 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "clean") == 0)
       return cli_clean(sub_argc, sub_argv);
    if (strcmp(cmd, "profile") == 0)
-      return cmd_profile_run(sub_argc, sub_argv);
+      return cmd_profile_run(sub_argc, sub_argv, json_output);
    if (strcmp(cmd, "claude-proxy") == 0)
       return cli_claude_proxy(sub_argc, sub_argv);
    /* optimize: dispatches optimize.export to its first-class /v1 route, then
@@ -2230,7 +2239,8 @@ int main(int argc, char **argv)
       return 0;
    }
 
-   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv))
+   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv) &&
+       !(sub_argc == 0 && client_command_has_default_action(cmd)))
    {
       char *help_arg[] = {(char *)cmd};
       (void)json_output;

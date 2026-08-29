@@ -24,10 +24,33 @@ static int send_and_free(server_conn_t *conn, cJSON *resp)
 
 static cJSON *kb_last_result_object(const char *message)
 {
+   kb_client_result_status_t status = kb_client_last_result_status();
    char *json = kb_client_last_result_json(message);
    cJSON *result = json ? cJSON_Parse(json) : NULL;
    free(json);
-   return result ? result : jo_err(message);
+   if (!result)
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, message, NULL);
+
+   /* kb_client preserves the dependency's typed result (unauthorized,
+    * unavailable, stale, ...), but the physical HTTP boundary only changes a
+    * response's status when the dispatch envelope also carries an authoritative
+    * error kind/http_status. Without that bridge every failed index read was
+    * emitted as HTTP 200; clients then rendered a missing result array as an
+    * empty successful index. Preserve the richer KB fields while classifying
+    * who owns the failure. */
+   const char *kind = status == KB_CLIENT_RESULT_UNAUTHORIZED ? SERVER_ERR_PERMISSION_DENIED
+                                                              : SERVER_ERR_UNAVAILABLE;
+   const int http_status = status == KB_CLIENT_RESULT_UNAUTHORIZED ? 403 : 503;
+   server_error_kind_apply(result, kind);
+
+   /* runtime-web normally supplies the kind -> HTTP mapping. It is optional,
+    * though, and split/headless deployments deliberately disable it. The KB
+    * result enum is already an authoritative transport classification, so keep
+    * this boundary correct even when that optional provider is absent. Do not
+    * overwrite a provider-owned status when one is available. */
+   if (!cJSON_GetObjectItemCaseSensitive(result, "http_status"))
+      cJSON_AddNumberToObject(result, "http_status", http_status);
+   return result;
 }
 
 static int cross_scope_allowed(const server_conn_t *conn)

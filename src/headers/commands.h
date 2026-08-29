@@ -280,6 +280,6 @@ extern const command_t commands[];
 /* Build aimee capabilities reference text. Caller owns the returned string. */
 char *build_capabilities_text(void);
 
-int cmd_profile_run(int argc, char **argv);
+int cmd_profile_run(int argc, char **argv, int json_output);
 
 #endif

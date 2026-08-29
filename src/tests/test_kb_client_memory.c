@@ -438,6 +438,29 @@ static void test_as_of_reaches_the_kb_and_its_verdict_comes_back(void)
    assert(kb_client_memory_get(42, &m) == 0);
    assert(strstr(last_request_body, "as_of") == NULL);
 
+   /* Presentation callers can request the raw object without routing content
+    * through memory_t.content[2048]. This is what keeps memory.get lossless
+    * after the KB returns a long stored value. */
+   char long_content[5001];
+   memset(long_content, 'q', sizeof(long_content) - 1);
+   long_content[sizeof(long_content) - 1] = '\0';
+   size_t reply_size = strlen(long_content) + 128;
+   char *long_reply = malloc(reply_size);
+   assert(long_reply != NULL);
+   snprintf(long_reply, reply_size,
+            "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\","
+            "\"content\":\"%s\"}}",
+            long_content);
+   as_of_reply = long_reply;
+   cJSON *raw_memory = NULL;
+   assert(kb_client_memory_get_json_as_of(42, NULL, &raw_memory, &verdict) == 0);
+   cJSON *raw_content = cJSON_GetObjectItemCaseSensitive(raw_memory, "content");
+   assert(cJSON_IsString(raw_content));
+   assert(strlen(raw_content->valuestring) == strlen(long_content));
+   cJSON_Delete(raw_memory);
+   free(long_reply);
+   as_of_reply = NULL;
+
    mock_agent_http_reset();
    printf("  PASS: test_as_of_reaches_the_kb_and_its_verdict_comes_back\n");
 }

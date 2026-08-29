@@ -465,9 +465,17 @@ def split_kb_identity_failures(text: str) -> list[str]:
     command = identity.get("command")
     if not isinstance(command, list) or not all(
         required in command
-        for required in ("managed-server-identity", "install", "--host=aimee-kb", "--port=8745")
+        for required in (
+            "managed-server-identity",
+            "install",
+            "--host=aimee-kb",
+            "--port=8745",
+            "--member=root",
+        )
     ):
-        failures.append("server identity helper command must install for aimee-kb:8745")
+        failures.append(
+            "server identity helper command must install for aimee-kb:8745 and enroll root"
+        )
     helper_volumes = identity.get("volumes")
     for required in (
         "aimee-kb-home:/var/lib/aimee",
@@ -589,6 +597,30 @@ SHIPPED_COMPOSE_FILES = (
 )
 
 
+def bundled_embedder_default_failures(text: str) -> list[str]:
+    """Keep an image carrying A25M paired with an explicit A25M selection."""
+    if yaml is None:
+        return ["PyYAML is required to validate bundled embedder defaults"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-kb") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return []
+    image = str(service.get("image", ""))
+    if "aimee-kb-a25m:" not in image:
+        return []
+    environment = service.get("environment")
+    selected = environment.get("EMBEDDER_MODEL") if isinstance(environment, dict) else None
+    if selected != "${EMBEDDER_MODEL:-bekko-a25m}":
+        return [
+            "defaults to aimee-kb-a25m but does not default EMBEDDER_MODEL to bekko-a25m"
+        ]
+    return []
+
+
 def empty_key_failures(text: str) -> list[str]:
     """Catch a service key that is present but null.
 
@@ -624,7 +656,10 @@ def check(root: Path) -> list[str]:
     for rel in SHIPPED_COMPOSE_FILES:
         path = root / rel
         if path.exists():
-            for failure in empty_key_failures(read(path)):
+            text = read(path)
+            for failure in empty_key_failures(text):
+                failures.append(f"{rel} {failure}")
+            for failure in bundled_embedder_default_failures(text):
                 failures.append(f"{rel} {failure}")
     dockerfile = root / "Dockerfile"
     compose = root / "compose.yaml"
@@ -803,9 +838,11 @@ def plant_test() -> int:
                     "    build:",
                     "      context: .",
                     "      dockerfile: Dockerfile",
+                    "    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}",
                     "    environment:",
                     "      AIMEE_HOME: /var/lib/aimee",
                     "      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}",
+                    "      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}",
                     "      AIMEE_KB_MTLS_HOST: aimee-kb",
                     '      AIMEE_KB_MTLS_PORT: "8745"',
                     "    ports:",
@@ -896,6 +933,7 @@ def plant_test() -> int:
             "      - install\n"
             "      - --host=aimee-kb\n"
             "      - --port=8745\n"
+            "      - --member=root\n"
             "    depends_on:\n"
             "      aimee-kb:\n"
             "        condition: service_healthy\n"
@@ -976,6 +1014,7 @@ def plant_test() -> int:
             split_text.replace("        condition: service_completed_successfully\n",
                                "        condition: service_started\n", 1),
             split_text.replace("      - --host=aimee-kb\n", "", 1),
+            split_text.replace("      - --member=root\n", "", 1),
             split_text.replace("      - aimee-server-home:/var/lib/aimee-server\n", "", 1),
         )
         for planted in split_plants:
@@ -1082,6 +1121,17 @@ def plant_test() -> int:
             '      - "127.0.0.1:8741:8741"\n      - $KB_PORT:8741',
         ]
         safe_compose = read(root / "compose.server.yaml")
+        missing_embedder_default = safe_compose.replace(
+            "EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}",
+            "EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}",
+            1,
+        )
+        if missing_embedder_default == safe_compose:
+            print("kb-container-packaging plant: embedder-default mutation did not apply", file=sys.stderr)
+            return 1
+        if not bundled_embedder_default_failures(missing_embedder_default):
+            print("kb-container-packaging plant: missed empty bundled embedder selection", file=sys.stderr)
+            return 1
         for bad in bad_publications:
             planted = safe_compose.replace('      - "127.0.0.1:8741:8741"', bad)
             if planted == safe_compose:

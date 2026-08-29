@@ -17,9 +17,11 @@
 #include "agent_types.h"
 #include <aimee/workspace/workspace.h>
 #include "cJSON.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* GET /v1/rules provider: the active collab rules as a heap JSON object
  * ({"epoch":N,"rules":[...]}) or NULL when aimee-kb is unreachable. The route
@@ -82,12 +84,30 @@ static char *notes_list_provider(void)
 /* GET /v1/agents provider: the configured agents + default, built server-side
  * from agent config (not a kb proxy). Shape:
  *   {"default":"<name>","agents":[{"name","provider","model","enabled","roles":[...]}]}
- * Returns NULL (→ 502) when the agent config can't be loaded. */
+ * A missing file is a first-run 404, while an existing config that cannot be
+ * loaded is a 503. Neither is an upstream gateway failure. */
 static char *agents_provider(void)
 {
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
-      return NULL;
+   {
+      const char *path = agent_config_path();
+      errno = 0;
+      int missing = path && access(path, F_OK) != 0 && errno == ENOENT;
+      cJSON *err = cJSON_CreateObject();
+      if (!err)
+         return NULL;
+      cJSON_AddStringToObject(err, "status", "error");
+      cJSON_AddStringToObject(
+          err, "message",
+          missing ? "no agents are configured yet: choose a provider in the setup wizard"
+                  : "agent configuration exists but could not be loaded");
+      cJSON_AddStringToObject(err, "kind", missing ? "not_found" : "unavailable");
+      cJSON_AddNumberToObject(err, "http_status", missing ? 404 : 503);
+      char *s = cJSON_PrintUnformatted(err);
+      cJSON_Delete(err);
+      return s;
+   }
    cJSON *root = cJSON_CreateObject();
    if (!root)
       return NULL;
