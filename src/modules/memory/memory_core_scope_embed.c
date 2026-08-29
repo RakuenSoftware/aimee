@@ -280,14 +280,22 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
    }
 
    /* Check for shared keywords in key and content */
+   /* The separator append and the terminator both have to respect the bound,
+    * not just the copy loop. They did not: the inner loop stopped at
+    * li == sizeof(lower_buf) - 1, then the unguarded `lower_buf[li++] = ' '`
+    * took li to sizeof(lower_buf), and the terminator wrote one byte past the
+    * end of the array. Any key+content pair longer than this buffer reached it,
+    * so storing a memory of about a kilobyte or more overflowed the stack by a
+    * byte. Keeping li strictly below the last index leaves room for the NUL. */
    char lower_buf[1024];
-   int li = 0;
+   size_t li = 0;
    const char *texts[] = {key, content, NULL};
-   for (int t = 0; texts[t] && li < (int)sizeof(lower_buf) - 1; t++)
+   for (int t = 0; texts[t] && li + 1 < sizeof(lower_buf); t++)
    {
-      for (int i = 0; texts[t][i] && li < (int)sizeof(lower_buf) - 1; i++)
+      for (int i = 0; texts[t][i] && li + 1 < sizeof(lower_buf); i++)
          lower_buf[li++] = (char)tolower((unsigned char)texts[t][i]);
-      lower_buf[li++] = ' ';
+      if (li + 1 < sizeof(lower_buf))
+         lower_buf[li++] = ' ';
    }
    lower_buf[li] = '\0';
 
