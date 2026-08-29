@@ -69,6 +69,7 @@ void handle_conn(int fd, int is_tcp, int is_management);
 /* promoted cross-TU (former .inc statics) */
 int emit(char *resp, int cap, cJSON *obj);
 int err_json(char *resp, int cap, int status, const char *msg);
+int server_http_declared_status(const char *json);
 int write_all_fd(int fd, const char *buf, int len);
 void write_sse_headers(int fd, const char *request_id);
 
