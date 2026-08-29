@@ -2285,6 +2285,23 @@ int main(void)
       assert(server_http_route("GET", "/v1/nope", NULL, 0, rb, sizeof(rb)) == 404);
       /* A wrong-verb known path 404s (no matching row). */
       assert(server_http_route("DELETE", "/v1/health", NULL, 0, rb, sizeof(rb)) == 404);
+      /* cJSON_Parse accepts a valid prefix by default. The HTTP contract is one
+       * JSON document: trailing whitespace is valid, a second value is not, and
+       * neither synchronous nor queued routes may execute the prefix. */
+      const char *trailing = "{\"name\":\"probe\"} {}";
+      g_disp_method[0] = '\0';
+      assert(server_http_route("POST", "/v1/cron/add", trailing, (int)strlen(trailing), rb,
+                               sizeof(rb)) == 400);
+      assert(strstr(rb, "invalid JSON body"));
+      assert(g_disp_method[0] == '\0');
+      openai_runs_store_reset();
+      assert(server_http_route("POST", "/v1/roundtable/review", trailing, (int)strlen(trailing), rb,
+                               sizeof(rb)) == 400);
+      assert(strstr(rb, "invalid JSON body"));
+      const char *with_ws = "{\"name\":\"probe\"} \r\n\t";
+      assert(server_http_route("POST", "/v1/cron/add", with_ws, (int)strlen(with_ws), rb,
+                               sizeof(rb)) == 200);
+      assert(strcmp(g_disp_method, "cron.add") == 0);
       /* A real route with no handler seam wired in this test returns 503, not 404
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);

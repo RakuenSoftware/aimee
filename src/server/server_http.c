@@ -1946,13 +1946,16 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
 
-   /* Shadow-traffic mirror: fire-and-forget a copy of every completion request to
-    * a configured peer aimee before we serve it, so a build under test can be
-    * validated against live traffic without being deployed here. No-op unless a
-    * peer is configured. The X-Aimee-Shadow header on an INBOUND request means we
-    * are the peer receiving a mirror -- do not re-mirror (loop guard). Placed
-    * after the body is read and before dispatch so it covers both the streaming
-    * and buffered completion paths, and it never blocks or alters the real turn. */
+   /* Reject invalid JSON before streaming dispatch or completion mirroring. */
+   if (strcmp(method, "POST") == 0 &&
+       (shadow_mirror_is_mirrorable_path(path) || strcmp(path, "/v1/chat/stream") == 0) &&
+       !server_http_json_body_is_single_value(body, body_len))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
+      free(body);
+      return;
+   }
+   /* Mirror completion traffic; the inbound shadow header prevents loops. */
    if (strcmp(method, "POST") == 0 && shadow_mirror_is_mirrorable_path(path))
    {
       char shadow_hdr[8] = "";

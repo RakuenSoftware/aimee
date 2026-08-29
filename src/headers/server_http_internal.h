@@ -134,6 +134,27 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+/* Request bodies are one JSON document, not a JSON prefix. cJSON_Parse accepts
+ * a valid value followed by arbitrary bytes, which let `{} {}` reach every
+ * generic /v1 dispatch route and perform the first object's mutation. Keep the
+ * check transport-wide so bespoke, synchronous, and async handlers share the
+ * same framing contract. Empty bodies remain valid for no-argument routes. */
+static inline int server_http_json_body_is_single_value(const char *body, int body_len)
+{
+   if (!body || body_len == 0)
+      return 1;
+   if (body_len < 0)
+      return 0;
+   const char *end = NULL;
+   cJSON *parsed = cJSON_ParseWithOpts(body, &end, 0);
+   if (!parsed)
+      return 0;
+   cJSON_Delete(parsed);
+   while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
+      end++;
+   return end == body + body_len;
+}
+
 typedef enum
 {
    RM_EXACT,  /* path == entry->path */
