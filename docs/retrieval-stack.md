@@ -141,7 +141,7 @@ produce them do not share a score scale.
 This is a capacity decision before it is a ranking one. The candidate array is 96 slots and a single
 retrieval pass can fill it alone, so concatenating spends the budget on whichever list runs first:
 the second sub-query gets what is left, and the legs that run after the merge can get nothing.
-Nothing downstream can see that happen — the evicted rows never became candidates. Published paired
+Nothing downstream can see that happen: the evicted rows never became candidates. Published paired
 measurements on multi-hop retrieval put naive parallel-and-pool sub-query expansion *below* running
 no expansion at all, with interleaved fusion well above both.
 
