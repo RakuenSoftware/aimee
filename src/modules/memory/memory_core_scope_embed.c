@@ -279,32 +279,17 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
       }
    }
 
-   /* Check for shared keywords in key and content */
-   /* The separator append and the terminator both have to respect the bound,
-    * not just the copy loop. They did not: the inner loop stopped at
-    * li == sizeof(lower_buf) - 1, then the unguarded `lower_buf[li++] = ' '`
-    * took li to sizeof(lower_buf), and the terminator wrote one byte past the
-    * end of the array. Any key+content pair longer than this buffer reached it,
-    * so storing a memory of about a kilobyte or more overflowed the stack by a
-    * byte. Keeping li strictly below the last index leaves room for the NUL. */
-   char lower_buf[1024];
-   size_t li = 0;
-   const char *texts[] = {key, content, NULL};
-   for (int t = 0; texts[t] && li + 1 < sizeof(lower_buf); t++)
-   {
-      for (int i = 0; texts[t][i] && li + 1 < sizeof(lower_buf); i++)
-         lower_buf[li++] = (char)tolower((unsigned char)texts[t][i]);
-      if (li + 1 < sizeof(lower_buf))
-         lower_buf[li++] = ' ';
-   }
-   lower_buf[li] = '\0';
-
+   /* memory_keyword_present is already case-insensitive, so scan the original
+    * strings directly. The old lowercase scratch buffer was capped at 1 KiB,
+    * missed keywords later in a long memory, and wrote its terminator one byte
+    * out of bounds when key + content reached the cap. */
    for (int i = 0; shared_keywords[i]; i++)
    {
       /* Whole-word: as a bare substring "auth" matched "author"/"authored" and
        * "cert" matched "certain", tagging ordinary memories as shared
        * cross-cutting infrastructure. */
-      if (memory_keyword_present(lower_buf, shared_keywords[i]))
+      if (memory_keyword_present(key, shared_keywords[i]) ||
+          memory_keyword_present(content, shared_keywords[i]))
       {
          db2_memory_workspace_tag_insert(memory_id, SHARED_WORKSPACE);
          return 0;
