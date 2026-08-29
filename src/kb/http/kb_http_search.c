@@ -34,12 +34,18 @@ int kb_http_search_project_scope(const char *body, char *project, size_t project
       return kbhs_error(out_buf, out_cap, 400, "invalid json");
    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
    const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "scope");
-   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
+   /* Settle the shape of "scope" before reading it: absent defaults to
+    * "current", present-but-not-a-string is a client error. Reading
+    * js->valuestring first and only then testing `js` for NULL read as a
+    * null-deref to cppcheck (nullPointerRedundantCheck), which is what the
+    * ratchet caught -- and it is genuinely harder to follow. After this guard
+    * js is either NULL or a string, so the default below needs no type test. */
    if (js && !cJSON_IsString(js))
    {
       cJSON_Delete(root);
       return kbhs_error(out_buf, out_cap, 400, "scope must be current or all");
    }
+   const char *scope = js ? js->valuestring : "current";
    if (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
    {
       cJSON_Delete(root);
