@@ -1263,7 +1263,7 @@ if echo "$RESP" | grep -qF '"status":"ok"'; then
 else
     DB1_SESSIONS_AVAILABLE=0
     echo "SKIP: session management (the DB1 sessions stage is not reachable from this process)"
-    SKIP=$((SKIP + 12))
+    SKIP=$((SKIP + 14))
 fi
 
 if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
@@ -1271,6 +1271,12 @@ if [ "$DB1_SESSIONS_AVAILABLE" -eq 1 ]; then
 # assignment, which is how one broken response silently swallowed every check
 # after it. An empty SID fails its own assertions instead, visibly.
 SID=$(echo "$RESP" | python3 -c "import sys,json; print(json.load(sys.stdin)['session_id'])" 2>/dev/null || true)
+
+# This in-process integration server has no HTTP status provider, so assert the
+# typed error here; the live HTTP test separately verifies its 400 mapping.
+RESP=$(srv_auth_req '{"method":"session.get"}') || true
+check_output "session.get missing id is a client error" \
+  '"kind":"invalid_argument"' echo "$RESP"
 
 RESP=$(srv_auth_req '{"method":"session.list"}') || true
 check_output "session.list has session" "$SID" echo "$RESP"
@@ -1299,6 +1305,8 @@ check_output "client session close via server" "$CLOSE_SID" echo "$RESP"
 
 RESP=$(srv_auth_req "{\"method\":\"session.get\",\"session_id\":\"$CLOSE_SID\"}") || true
 check_output "client session close removed session" "session not found" echo "$RESP"
+check_output "session.get closed id is not found" \
+  '"kind":"not_found"' echo "$RESP"
 
 RESP=$(srv_auth_req "{\"method\":\"session.close\",\"session_id\":\"$SID\"}") || true
 check_output "session.close" '"status":"ok"' echo "$RESP"
