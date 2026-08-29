@@ -179,6 +179,7 @@ static void reset_capture(void)
       cJSON_Delete(g_last_response);
    g_last_response = NULL;
    g_last_error[0] = '\0';
+   g_last_error_kind[0] = '\0';
    g_cli_calls = g_http_calls = g_execute_failure = 0;
    memset(&g_executed_agent, 0, sizeof(g_executed_agent));
 }
@@ -211,7 +212,36 @@ static void test_load_failure_is_an_error_not_empty(void)
    /* Must NOT be a silent success with an empty roster. */
    assert(g_last_response == NULL);
    assert(g_last_error[0] != '\0');
+   assert(strcmp(g_last_error_kind, SERVER_ERR_NOT_FOUND) == 0);
    printf("  PASS: a config load failure returns an error, not an empty roster\n");
+}
+
+static void test_malformed_config_is_unavailable(void)
+{
+   set_home_empty();
+   write_agents("{not-json");
+   reset_capture();
+
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+
+   assert(g_last_response == NULL);
+   assert(strstr(g_last_error, "could not be loaded") != NULL);
+   assert(strcmp(g_last_error_kind, SERVER_ERR_UNAVAILABLE) == 0);
+   printf("  PASS: a malformed existing config is unavailable, not an upstream 502\n");
+}
+
+static void test_local_requires_endpoint_as_invalid_argument(void)
+{
+   set_home_empty();
+   reset_capture();
+   cJSON *req = cJSON_CreateObject();
+
+   assert(handle_agent_local(NULL, NULL, req) == 0);
+
+   cJSON_Delete(req);
+   assert(strcmp(g_last_error, "model.local requires endpoint") == 0);
+   assert(strcmp(g_last_error_kind, SERVER_ERR_INVALID_ARGUMENT) == 0);
+   printf("  PASS: model.local missing endpoint is an invalid argument\n");
 }
 
 static void test_empty_config_is_ok_with_empty_array(void)
@@ -736,6 +766,8 @@ int main(void)
 {
    printf("agent_list_handler:\n");
    test_load_failure_is_an_error_not_empty();
+   test_malformed_config_is_unavailable();
+   test_local_requires_endpoint_as_invalid_argument();
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
    test_delegate_default_is_independent_and_persists();
