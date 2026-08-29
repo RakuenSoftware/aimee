@@ -29,7 +29,11 @@ for smoke_spec in \
     smoke_bootstrap_line=$(grep -nF \
         "scripts/aimee-compose-vault-bootstrap.sh -f \"\$bootstrap_compose\" $bootstrap_target" \
         "$smoke_script" | cut -d: -f1)
-    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | cut -d: -f1)
+    # The full-stack smoke intentionally has two staged `up` calls. Compare the
+    # bootstrap against the first one; passing both line numbers to `[` makes
+    # the integer comparison error and silently treats a broken ordering as OK.
+    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | \
+        head -1 | cut -d: -f1)
     if [ -z "$smoke_build_line" ] || [ -z "$smoke_bootstrap_line" ] || [ -z "$smoke_up_line" ] ||
        [ "$smoke_build_line" -ge "$smoke_bootstrap_line" ] ||
        [ "$smoke_bootstrap_line" -ge "$smoke_up_line" ] ||
