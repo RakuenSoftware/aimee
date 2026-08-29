@@ -69,7 +69,7 @@ block stating the caps that were in force (`--max-samples` / `--max-cases` /
 A subsampled run and a full run are otherwise the same shape, so a score from a
 short run can be read back as a reproduction of a long one. That has already
 cost us once: reranking measured **+0.020** on a 600-question subsample and
-**-0.0048** on the full 10,000 — a sign flip — and the recommendation was nearly
+**-0.0048** on the full 10,000, a sign flip, and the recommendation was nearly
 shipped on the subsample. See
 [the retrieval writeup](blog/we-measured-our-reranker-and-deleted-it.md).
 
@@ -77,7 +77,7 @@ shipped on the subsample. See
 `--require-complete` fails the run unless every file proves it was uncapped. Use
 it wherever a score is promoted rather than merely read: baseline eligibility,
 cross-run comparison, and published claims. A file with no coverage block is
-refused there too — an unknown question count is not evidence of a full run.
+refused there too: an unknown question count is not evidence of a full run.
 
 ## Compare
 

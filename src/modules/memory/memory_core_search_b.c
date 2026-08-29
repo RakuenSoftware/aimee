@@ -773,8 +773,7 @@ void memory_record_lane_outcome_metrics(const memory_query_plan_t *plan, const m
    {
       for (int i = 0; i < served; i++)
       {
-         unsigned int mask =
-             memory_lane_mask_for(source_stats, source_stats_count, matches[i].id);
+         unsigned int mask = memory_lane_mask_for(source_stats, source_stats_count, matches[i].id);
          for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
          {
             if (mask & (1u << lane))
