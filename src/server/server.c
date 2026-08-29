@@ -1445,8 +1445,14 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       snprintf(errmsg, sizeof(errmsg),
                "PAYLOAD_TOO_LARGE: %zu bytes exceeds %zu limit for method '%s'", msg_len, limit,
                quick_method);
-      return server_send_error(conn, errmsg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_PAYLOAD_TOO_LARGE, errmsg, NULL);
    }
+
+   /* cJSON accepts arbitrary bytes inside quoted strings. Reject them before
+    * parsing so every JSON surface observes the same Unicode text contract. */
+   if (strlen(msg) != msg_len || !text_is_valid_utf8(msg))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "invalid JSON: input is not valid UTF-8", NULL);
 
    cJSON *req = cJSON_Parse(msg);
    if (!req)
@@ -1456,7 +1462,8 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    if (json_check_depth(req, 0, JSON_MAX_DEPTH) != 0)
    {
       cJSON_Delete(req);
-      return server_send_error(conn, "PAYLOAD_MALFORMED: JSON exceeds depth/field limits", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "PAYLOAD_MALFORMED: JSON exceeds depth/field limits", NULL);
    }
 
    cJSON *method = cJSON_GetObjectItemCaseSensitive(req, "method");
