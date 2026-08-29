@@ -1244,6 +1244,31 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          return 503;
       }
 
+      /* The ranked backend returns a JSON error object for dependency and
+       * storage failures. Do not run that object through the hit reshaper: it
+       * has no results array, so doing so turns a failed embedding request into
+       * a misleading HTTP 200 with zero hits. */
+      cJSON *raw_json = cJSON_Parse(raw);
+      const cJSON *raw_error =
+          raw_json ? cJSON_GetObjectItemCaseSensitive(raw_json, "error") : NULL;
+      const cJSON *raw_results =
+          raw_json ? cJSON_GetObjectItemCaseSensitive(raw_json, "results") : NULL;
+      if (cJSON_IsString(raw_error))
+      {
+         snprintf(out_buf, (size_t)out_cap, "%s", raw);
+         cJSON_Delete(raw_json);
+         free(raw);
+         return 503;
+      }
+      if (!cJSON_IsObject(raw_json) || !cJSON_IsArray(raw_results))
+      {
+         cJSON_Delete(raw_json);
+         free(raw);
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid search backend response\"}");
+         return 503;
+      }
+      cJSON_Delete(raw_json);
+
       char used_mode[64] = "rrf";
       kb_http_json_str(raw, "fusion_mode", used_mode, sizeof(used_mode));
 
