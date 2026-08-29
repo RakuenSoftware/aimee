@@ -560,10 +560,11 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * (unreadable, malformed, truncated) is a real fault and names the file. */
       const char *path = agent_config_path();
       if (path && access(path, F_OK) != 0)
-         return server_send_error(conn,
-                                  "no agents are configured yet: choose a provider in the setup "
-                                  "wizard, or run `aimee provider list --available`",
-                                  NULL);
+         return server_send_error_kind(
+             conn, SERVER_ERR_NOT_FOUND,
+             "no agents are configured yet: choose a provider in the setup "
+             "wizard, or run `aimee provider list --available`",
+             NULL);
       /* The file is there and the load still failed: unreadable, malformed, or
        * truncated. Deliberately no strerror() — reaching here means access() SUCCEEDED,
        * so errno carries nothing about this failure and printing it invents a cause. */
@@ -572,7 +573,7 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                "agent configuration at %s exists but could not be loaded; "
                "check that it is readable and valid JSON",
                path ? path : "?");
-      return server_send_error(conn, msg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, msg, NULL);
    }
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_CreateArray();
@@ -978,7 +979,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!name || !name[0])
       name = "local";
    if (!endpoint_arg || !endpoint_arg[0])
-      return server_send_error(conn, "model.local requires endpoint", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "model.local requires endpoint", NULL);
 
    char endpoint[MAX_ENDPOINT_LEN];
    server_agent_normalize_endpoint(endpoint_arg, endpoint, sizeof(endpoint));
@@ -1008,7 +1010,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                      sizeof(slot_probe_msg));
    }
    if (!model[0])
-      return server_send_error(conn, "model.local could not determine model; pass --model", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "model.local could not determine model; pass --model", NULL);
    if (slots <= 0 && detected_slots > 0)
       slots = detected_slots;
    if (slots <= 0)

@@ -8,6 +8,31 @@
 the modules in its own container. The thin client does not link it, and the bus
 never carries server-to-KB or thinclient-to-server traffic.
 
+```mermaid
+flowchart LR
+    TC[thin client] -->|UDS or authenticated /v1| SR[server resource plane]
+
+    subgraph SERVER[aimee-server daemon]
+        SR <--> SB[server bus host]
+        SB <--> S1[private queue pair<br/>module A]
+        SB <--> S2[private queue pair<br/>module B]
+        SB --> ST[server full-stream tap]
+    end
+
+    SR -->|authenticated typed /v1| KR
+
+    subgraph KB[aimee-kb daemon]
+        KR[KB resource plane] <--> KBH[KB bus host]
+        KBH <--> K1[private queue pair<br/>module A]
+        KBH <--> K2[private queue pair<br/>module B]
+        KBH --> KT[KB full-stream tap]
+    end
+```
+
+The two hosts use the same library and wire contract but share no rings, arena,
+sequence, or tap. Crossing the daemon boundary returns to authenticated network
+transport through the resource planes.
+
 ## Owns
 
 - wire frame and version negotiation;
@@ -57,15 +82,17 @@ policies at `<config>/modules.d/<daemon>`; the environment can override those
 with `AIMEE_MODULE_BUS_SOCKET` and `AIMEE_MODULE_POLICY_DIR`.
 
 `src/modules/process-contracts.json` is also the implementation-language switch
-for supervised processes. Across sixteen migrated batches, every process identity
-moved to the Go multicall executable in `server-go/cmd/aimee-module`: `memory`,
-`learning`, `routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
-`response-composition`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
-`runtime-web`, `control-web`, and `benchmarks`. Its basename selects an isolated
-identity and one module package under `server-go/modules`. The runtime bundle emits no C process
-source for those entries. Their C `module_adapter.c` files serve only as
-wire-parity fixtures while the deeper module-owned C surfaces are migrated in
-later batches.
+for supervised processes. Twenty-three identities run in the Go multicall
+executable in `server-go/cmd/aimee-module`: `config`, `memory`, `learning`,
+`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
+`response-composition`, `execution-policy`, `governance`, `workflows`,
+`roundtable`, `kb-synthesis`, `runtime-web`, `control-web`, `benchmarks`,
+`sandbox`, `economizer`, `postgres`, `aimee`, and `egress`. Its basename selects
+an isolated identity and one module package under `server-go/modules`. The runtime
+bundle emits no C process source for those entries. Their C `module_adapter.c`
+files serve only as wire-parity fixtures while the deeper module-owned C surfaces
+are migrated in later batches. DB2 remains the separately supervised C process
+in the current catalog and crosses the same bus admission and wire boundary.
 
 Each migrated process owns one bounded decision and nothing around it:
 
