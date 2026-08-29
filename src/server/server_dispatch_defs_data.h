@@ -138,6 +138,7 @@
     {"skill.show", handle_skill_show},
     {"skill.lint", handle_skill_lint},
     {"skill.eval", handle_skill_eval},
+    {"skill.eval_exec", handle_skill_eval_exec},
     {"skill.create", handle_skill_create},
     {"skill.edit", handle_skill_edit},
     {"skill.patch", handle_skill_patch},

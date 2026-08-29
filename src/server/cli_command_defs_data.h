@@ -70,6 +70,9 @@
     {"skill", "Project-scoped skill context injection", AIMEE_CMD_TIER_CORE, 0,
      "  list             List available skills\n"
      "  show <name>      Print a skill body or support file\n"
+     "  eval <name>      Run stored-response skill eval fixtures\n"
+     "  eval-fixtures <name>  Alias for eval\n"
+     "  eval-exec <name> Run paired executable held-out skill trials\n"
      "  create           Create a project skill from a markdown file\n"
      "  patch            Patch a project skill by string replacement\n"
      "  lifecycle        Apply stale/archive lifecycle transitions\n"

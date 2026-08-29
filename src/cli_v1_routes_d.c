@@ -2054,6 +2054,12 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
    {
       exit_rc = 1;
    }
+   else if (strcmp(route->method, "skill.eval_exec") == 0)
+   {
+      cJSON *passed = cJSON_GetObjectItemCaseSensitive(resp, "passed");
+      if (!cJSON_IsTrue(passed))
+         exit_rc = 1;
+   }
 
    if (!effective_json_output && strcmp(route->method, "delegate") == 0)
    {
@@ -2102,7 +2108,8 @@ static int cli_v1_finish_response(const cli_v1_route_t *route, cJSON *resp, int 
          /* Successful JSON responses keep their payload but omit the transport
           * status marker. Error envelopes returned above are intentionally not
           * stripped: status/error/message are part of their machine contract. */
-         cJSON_DeleteItemFromObjectCaseSensitive(resp, "status");
+         if (strcmp(route->method, "skill.eval_exec") != 0)
+            cJSON_DeleteItemFromObjectCaseSensitive(resp, "status");
          cli_v1_print_json_response(resp);
          cJSON_Delete(resp);
       }

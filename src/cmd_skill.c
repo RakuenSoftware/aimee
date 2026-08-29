@@ -2,11 +2,9 @@
 #include "aimee.h"
 #include "commands.h"
 #include <aimee/skills/skill.h>
-#include "agent.h"
 #include "config.h"
 #include "cJSON.h"
 #include "kb_client.h"
-#include "token_tracker.h"
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -18,9 +16,7 @@ static void skill_print_help(void)
                    "  show <name> [--file references/<path>]\n"
                    "                    Print a skill body or support file\n\n"
                    "  lint <name> | --all\n"
-                   "  eval <name> [--json]            Stored-response fixture compatibility\n"
-                   "  eval-fixtures <name> [--json]   Run stored-response fixtures\n"
-                   "  eval-exec <name> [options]      Run paired held-out model trials\n"
+                   "  eval <name> [--json]\n"
                    "  create <name> <file> [--agent]\n"
                    "  edit <name> <file>\n"
                    "  patch <name> <old> <new> [--all]\n"
@@ -311,213 +307,6 @@ static void skill_cmd_eval(app_ctx_t *ctx, int argc, char **argv)
          printf("first failure: %s\n", result.first_failure);
    }
 
-   if (!result.passed)
-      exit(1);
-}
-
-typedef struct
-{
-   agent_config_t config;
-   char agent_name[MAX_AGENT_NAME];
-} skill_cli_trial_runner_t;
-
-static int skill_cli_text_agent(const agent_t *agent)
-{
-   return agent && agent->enabled && strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) != 0 &&
-          strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) != 0 &&
-          strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) != 0;
-}
-
-static agent_t *skill_cli_select_agent(agent_config_t *config, const char *requested)
-{
-   if (requested && requested[0])
-   {
-      agent_t *agent = agent_find(config, requested);
-      return skill_cli_text_agent(agent) ? agent : NULL;
-   }
-   if (config->default_agent[0])
-   {
-      agent_t *agent = agent_find(config, config->default_agent);
-      if (skill_cli_text_agent(agent))
-         return agent;
-   }
-   for (int i = 0; i < config->agent_count; i++)
-      if (skill_cli_text_agent(&config->agents[i]))
-         return &config->agents[i];
-   return NULL;
-}
-
-static int skill_cli_trial_run(void *opaque, const char *system_prompt, const char *prompt,
-                               int max_tokens, char **response_out, skill_trial_usage_t *usage_out,
-                               char *errbuf, size_t errbuf_len)
-{
-   skill_cli_trial_runner_t *runner = opaque;
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   if (agent_generate(&runner->config, runner->agent_name, system_prompt, prompt, max_tokens, 0.0,
-                      &result) != 0)
-   {
-      snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
-      free(result.response);
-      return -1;
-   }
-   *response_out = result.response;
-   result.response = NULL;
-   memset(usage_out, 0, sizeof(*usage_out));
-   usage_out->prompt_tokens = result.prompt_tokens;
-   usage_out->completion_tokens = result.completion_tokens;
-   usage_out->cache_read_tokens = result.cache_read_tokens;
-   usage_out->cache_write_tokens = result.cache_write_tokens;
-   usage_out->latency_ms = result.latency_ms;
-   usage_out->tool_calls = result.tool_calls;
-   const char *served = result.served_model[0] ? result.served_model : result.model;
-   if (!served[0])
-   {
-      agent_t *configured = agent_find(&runner->config, result.agent_name);
-      served = configured ? configured->model : "";
-   }
-   snprintf(usage_out->route, sizeof(usage_out->route), "%s/%s", result.agent_name, served);
-   token_usage_t token_usage = {
-       .input_tokens = result.prompt_tokens,
-       .output_tokens = result.completion_tokens,
-       .cache_write_tokens = result.cache_write_tokens,
-       .cache_read_tokens = result.cache_read_tokens,
-   };
-   int priced = 0;
-   usage_out->cost_usd =
-       token_estimate_cost_ex(result.model[0] ? result.model : served, &token_usage, &priced);
-   usage_out->cost_unknown = !priced;
-   return 0;
-}
-
-static void skill_cmd_eval_exec(app_ctx_t *ctx, int argc, char **argv)
-{
-   int json_output = ctx && ctx->json_output;
-   const char *name = NULL, *agent_name = NULL;
-   int repeats = 2, max_tokens = 256;
-   double minimum_delta = 0.25, max_case_cost = 0.50, max_total_cost = 2.00;
-   for (int i = 0; i < argc; i++)
-   {
-      if (strcmp(argv[i], "--json") == 0)
-         json_output = 1;
-      else if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc)
-         agent_name = argv[++i];
-      else if (strcmp(argv[i], "--repeats") == 0 && i + 1 < argc)
-         repeats = atoi(argv[++i]);
-      else if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc)
-         max_tokens = atoi(argv[++i]);
-      else if (strcmp(argv[i], "--min-delta") == 0 && i + 1 < argc)
-         minimum_delta = strtod(argv[++i], NULL);
-      else if (strcmp(argv[i], "--max-case-cost") == 0 && i + 1 < argc)
-         max_case_cost = strtod(argv[++i], NULL);
-      else if (strcmp(argv[i], "--max-cost") == 0 && i + 1 < argc)
-         max_total_cost = strtod(argv[++i], NULL);
-      else if (!name && argv[i][0] != '-')
-         name = argv[i];
-      else
-      {
-         fprintf(stderr, "Usage: aimee skill eval-exec <name> [--agent NAME] [--repeats 1..5] "
-                         "[--max-tokens N] [--min-delta N] [--max-case-cost USD] [--max-cost USD] "
-                         "[--json]\n");
-         exit(2);
-      }
-   }
-   if (!name)
-   {
-      fprintf(stderr, "Usage: aimee skill eval-exec <name> [options]\n");
-      exit(2);
-   }
-   char cwd[MAX_PATH_LEN], err[256] = "";
-   if (!getcwd(cwd, sizeof(cwd)))
-      cwd[0] = '\0';
-   skill_cli_trial_runner_t runner;
-   memset(&runner, 0, sizeof(runner));
-   if (agent_load_config(&runner.config) != 0)
-   {
-      fprintf(stderr, "could not load agent configuration\n");
-      exit(2);
-   }
-   agent_t *agent = skill_cli_select_agent(&runner.config, agent_name);
-   if (!agent)
-   {
-      fprintf(stderr, "executable skill eval requires an enabled non-CLI text agent\n");
-      exit(2);
-   }
-   snprintf(runner.agent_name, sizeof(runner.agent_name), "%s", agent->name);
-   char route[SKILL_TRIAL_ROUTE_MAX];
-   snprintf(route, sizeof(route), "%s/%s", agent->name, agent->model);
-   skill_trial_options_t options = {
-       .runner = skill_cli_trial_run,
-       .runner_ctx = &runner,
-       .repeats = repeats,
-       .max_tokens = max_tokens,
-       .minimum_delta = minimum_delta,
-       .max_case_cost_usd = max_case_cost,
-       .max_total_cost_usd = max_total_cost,
-       .route = route,
-   };
-   skill_trial_result_t result;
-   agent_http_init();
-   int rc = skill_eval_executable(cwd, name, &options, &result, err, sizeof(err));
-   agent_http_cleanup();
-   if (rc != 0)
-   {
-      fprintf(stderr, "%s\n", err[0] ? err : "executable skill eval failed");
-      exit(2);
-   }
-
-   if (json_output)
-   {
-      cJSON *root = cJSON_CreateObject();
-      cJSON_AddStringToObject(root, "skill", name);
-      cJSON_AddStringToObject(root, "status",
-                              result.inconclusive ? "inconclusive"
-                              : result.passed     ? "pass"
-                                                  : "fail");
-      cJSON_AddBoolToObject(root, "passed", result.passed);
-      cJSON_AddBoolToObject(root, "inconclusive", result.inconclusive);
-      cJSON_AddStringToObject(root, "manifest_digest", result.manifest_digest);
-      cJSON_AddStringToObject(root, "skill_digest", result.skill_digest);
-      cJSON_AddStringToObject(root, "held_out_case_set_digest", result.held_out_case_set_digest);
-      cJSON_AddStringToObject(root, "policy_digest", result.policy_digest);
-      cJSON_AddStringToObject(root, "model_and_route", result.route);
-      cJSON_AddStringToObject(root, "tool_contract", "none-v1");
-      cJSON_AddStringToObject(root, "seed_policy", "balanced-no-seed");
-      cJSON_AddNumberToObject(root, "scenarios", result.scenarios);
-      cJSON_AddNumberToObject(root, "repeats", result.repeats);
-      cJSON_AddNumberToObject(root, "calls", result.calls);
-      cJSON_AddNumberToObject(root, "baseline_compliances", result.baseline_compliances);
-      cJSON_AddNumberToObject(root, "treatment_compliances", result.treatment_compliances);
-      cJSON_AddNumberToObject(root, "paired_improvements", result.paired_improvements);
-      cJSON_AddNumberToObject(root, "paired_regressions", result.paired_regressions);
-      cJSON_AddNumberToObject(root, "compliance_delta", result.compliance_delta);
-      cJSON_AddNumberToObject(root, "prompt_tokens", result.prompt_tokens);
-      cJSON_AddNumberToObject(root, "completion_tokens", result.completion_tokens);
-      cJSON_AddNumberToObject(root, "latency_ms", result.latency_ms);
-      cJSON_AddNumberToObject(root, "cost_usd", result.cost_usd);
-      cJSON_AddBoolToObject(root, "cost_unknown", result.cost_unknown);
-      if (result.first_failure[0])
-         cJSON_AddStringToObject(root, "first_failure", result.first_failure);
-      char *rendered = cJSON_Print(root);
-      if (rendered)
-      {
-         puts(rendered);
-         free(rendered);
-      }
-      cJSON_Delete(root);
-   }
-   else
-   {
-      printf("skill executable eval: %s %s\n", name,
-             result.inconclusive ? "INCONCLUSIVE"
-             : result.passed     ? "PASS"
-                                 : "FAIL");
-      printf("manifest: %s\n", result.manifest_digest);
-      printf("route: %s | calls: %d | delta: %.3f | cost: $%.4f%s\n", result.route, result.calls,
-             result.compliance_delta, result.cost_usd, result.cost_unknown ? " (incomplete)" : "");
-      if (result.first_failure[0])
-         printf("first failure: %s\n", result.first_failure);
-   }
    if (!result.passed)
       exit(1);
 }
@@ -868,8 +657,6 @@ const subcmd_t *get_skill_subcmds(void)
        {"show", "Print a skill body or support file", skill_cmd_show},
        {"lint", "Lint skill frontmatter and authoring conventions", skill_cmd_lint},
        {"eval", "Run skill compliance eval fixtures", skill_cmd_eval},
-       {"eval-fixtures", "Run stored-response skill eval fixtures", skill_cmd_eval},
-       {"eval-exec", "Run paired executable held-out skill trials", skill_cmd_eval_exec},
        {"create", "Create a project skill from a markdown file", skill_cmd_create},
        {"edit", "Replace a project skill from a markdown file", skill_cmd_edit},
        {"patch", "Patch a project skill by string replacement", skill_cmd_patch},
