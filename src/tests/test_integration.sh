@@ -1209,6 +1209,26 @@ for r in (doc.get('marshal') or []):
 check_output "a served spec arrives with its fields" "capability,json,open_weights_only" \
     echo "$CATALOG_SPEC"
 
+# The display text for these commands looks like a subcommand group, but their
+# empty argv has documented behavior. The manifest must carry that semantic so
+# the thin client does not replace a valid request with help before dispatch.
+BARE_DEFAULTS=$(printf '%s' "$MANIFEST" | python3 -c "
+import json, sys
+try:
+    doc = json.load(sys.stdin)
+except Exception:
+    raise SystemExit
+print(','.join(sorted(r.get('name', '') for r in (doc.get('commands') or [])
+                      if r.get('bare_default') is True)))
+" 2>/dev/null) || true
+check_output "manifest identifies bare default actions" "presence,primary" \
+    echo "$BARE_DEFAULTS"
+
+RESP=$($AIMEE --json presence 2>&1) || true
+check_output "bare presence executes instead of printing help" "[" echo "$RESP"
+RESP=$($AIMEE --json primary 2>&1) || true
+check_output "bare primary executes its documented default get" '"agent"' echo "$RESP"
+
 # ============================================================
 # 4. Session management
 # ============================================================
