@@ -2676,6 +2676,9 @@ int main(void)
    {
       const char *valid = "GET /v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
       const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
+      const char *missing_host = "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+      const char *empty_host = "GET /v1/health HTTP/1.1\r\nHost:   \r\n\r\n";
+      const char *duplicate_host = "GET /v1/health HTTP/1.1\r\nHost: one\r\nHost: two\r\n\r\n";
       const char *partial =
           "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
       const char *route_oversize =
@@ -2693,6 +2696,9 @@ int main(void)
           "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\nGET /v1/health HTTP/1.1\r\n\r\n";
       assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
       assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
+      assert(server_http_request_framing_valid(missing_host, strlen(missing_host)) == 0);
+      assert(server_http_request_framing_valid(empty_host, strlen(empty_host)) == 0);
+      assert(server_http_request_framing_valid(duplicate_host, strlen(duplicate_host)) == 0);
       assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
       assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
       assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
