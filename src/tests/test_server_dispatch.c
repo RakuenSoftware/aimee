@@ -1525,6 +1525,21 @@ static void test_invalid_json(void)
    free(ctx);
 }
 
+static void test_invalid_json_utf8(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   static const char invalid[] = "{\"method\":\"status\",\"extra\":\"\xff\"}";
+   cJSON *json = dispatch_json(ctx, conn, invalid, sizeof(invalid) - 1);
+   assert(strcmp(cJSON_GetObjectItem(json, "message")->valuestring,
+                 "invalid JSON: input is not valid UTF-8") == 0);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
+   cJSON_Delete(json);
+   free(conn);
+   free(ctx);
+}
+
 static void test_missing_method(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1554,6 +1569,40 @@ static void test_oversized_payload(void)
    msg[size] = '\0';
    cJSON *json = dispatch_json(ctx, conn, msg, size);
    assert(strstr(cJSON_GetObjectItem(json, "message")->valuestring, "PAYLOAD_TOO_LARGE") != NULL);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_PAYLOAD_TOO_LARGE) ==
+          0);
+   cJSON_Delete(json);
+   free(msg);
+   free(conn);
+   free(ctx);
+}
+
+static void test_excessive_json_depth_is_invalid_argument(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+
+   const char *prefix = "{\"method\":\"status\",\"extra\":";
+   size_t depth = JSON_MAX_DEPTH + 2;
+   size_t size = strlen(prefix) + depth + 1 + depth + 1;
+   char *msg = malloc(size + 1);
+   assert(msg != NULL);
+   size_t off = 0;
+   memcpy(msg + off, prefix, strlen(prefix));
+   off += strlen(prefix);
+   memset(msg + off, '[', depth);
+   off += depth;
+   msg[off++] = '0';
+   memset(msg + off, ']', depth);
+   off += depth;
+   msg[off++] = '}';
+   msg[off] = '\0';
+   assert(off == size);
+
+   cJSON *json = dispatch_json(ctx, conn, msg, size);
+   assert(strstr(cJSON_GetObjectItem(json, "message")->valuestring, "PAYLOAD_MALFORMED") != NULL);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
    cJSON_Delete(json);
    free(msg);
    free(conn);
@@ -2448,6 +2497,7 @@ int main(void)
 {
    test_health_kb_verdict_states();
    test_invalid_json();
+   test_invalid_json_utf8();
    test_session_brief_assemble();
    test_mcp_span_shorthand_batch_parse();
    test_conn_update_events_null_evloop();
@@ -2455,6 +2505,7 @@ int main(void)
    test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();
+   test_excessive_json_depth_is_invalid_argument();
    test_large_delegate_payload_within_limit();
    test_large_roundtable_payload_within_limit();
    test_large_mcp_call_payload_within_limit();

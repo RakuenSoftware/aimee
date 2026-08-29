@@ -28,14 +28,40 @@ confidence, class, time, and review state.
 
 ## Ingest and curation
 
-```text
-content -> validate -> store source -> chunk/index -> extract candidates
-        -> resolve/link -> contradict/dedupe -> review/promote -> maintain/decay
+```mermaid
+flowchart LR
+    U[uploaded bytes] --> V[request, scope, size,<br/>and content-hash validation]
+    V --> P{PDF?}
+    P -->|yes| PDF[structured PDF ingest]
+    P -->|no| E{AIMEE_KB_DOCUMENT_INSPECTION enabled?}
+    E -->|no| N[normalize / convert]
+    E -->|yes| I[bounded in-process inspection<br/>HTML, DOCX, PPTX, XLSX, or plain]
+    I --> D{disposition}
+    D -->|clean| N
+    D -->|review, reject, invalid,<br/>unsupported, or resource limit| STOP[stop before conversion<br/>and before any DB2 row]
+    PDF --> S[(store source and<br/>lexical evidence in DB2)]
+    N --> S
+    S --> C[chunk and index]
+    C --> X[extract candidates]
+    X --> R[resolve and link]
+    R --> Q[contradict and dedupe]
+    Q --> G[review and promote]
+    G --> M[maintain and decay]
 ```
 
 The fast path commits usable source and lexical evidence. Background workers add embeddings, typed
 artifacts, links, contradiction checks, and synthesis. Workers claim durable DB2 queue rows, so a
 restart or second KB process does not duplicate the same unit.
+
+When structural inspection is enabled, it runs on raw non-PDF bytes before a
+converter can erase hidden channels. The inspector bounds package members,
+expanded bytes, compression ratio, markup nodes, and extracted text; compares
+ZIP central and local metadata; and detects hidden text, comments, notes,
+metadata, active content, external relationships, nested archives, and traversal.
+Hidden lexical content also crosses the existing integrity gate. A non-clean
+disposition returns an explicit HTTP error and digest-bearing diagnostic without
+creating a staged document row. The flag is off by default while rollout evidence
+is collected.
 
 Curator stages are independently enabled and split between model-bound and index-bound lanes. A
 missing optional model degrades that stage; it does not relabel unprocessed content as curated.

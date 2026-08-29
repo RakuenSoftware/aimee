@@ -77,6 +77,37 @@ and trial-manifest digests. It is deliberately a pilot: it attributes tokens, la
 provider cost, fails inconclusive on route drift, unknown cost, denied effects, runner failure, or
 budget excess, and does not feed promotion automatically.
 
+```mermaid
+flowchart TB
+    SKILL[locally resolved and approved SKILL.md] --> HASH[skill digest]
+    CASES[operator-held cases<br/>.aimee/skill-evals/name/*.json] --> SAFE[path containment, regular-file,<br/>count, and size checks]
+    SAFE --> CASEHASH[ordered case-set digest]
+    POLICY[fixed read-only, tool-free policy] --> POLICYHASH[policy digest]
+    ROUTE[frozen agent route, repeats,<br/>token cap, delta, and cost budgets] --> MANIFEST[trial manifest digest]
+    HASH --> MANIFEST
+    CASEHASH --> MANIFEST
+    POLICYHASH --> MANIFEST
+    MANIFEST --> ORDER[balanced AB / BA ordering<br/>for every case and repeat]
+    ORDER --> BASE[baseline: fixed policy only]
+    ORDER --> TREAT[treatment: fixed policy + skill]
+    BASE --> RUN[one tool-free agent_generate route]
+    TREAT --> RUN
+    RUN --> GUARD{route stable, known cost,<br/>no tool/effect attempt,<br/>within token and cost budgets?}
+    GUARD -->|no| INC[inconclusive / fail closed]
+    GUARD -->|yes| GRADE[deterministic compliance<br/>and violation checks]
+    GRADE --> AGG[paired improvements, regressions,<br/>usage, latency, cost, and delta]
+    AGG --> PASS{baseline violates every pair,<br/>treatment complies every pair,<br/>no regression, minimum delta met?}
+    PASS -->|yes| REPORT[pass report with all digests]
+    PASS -->|no| FAIL[failed trial]
+    REPORT -. operator review only .-> NOPROMO[no automatic promotion]
+```
+
+The baseline is intentionally required to exhibit the targeted violation. A
+case the base route already solves cannot manufacture a skill win, and a skill
+with no measured effect cannot pass. Every run reports enough identity to compare
+only trials with the same skill bytes, case bytes, policy, route, ordering
+contract, and budgets.
+
 ## Data and migrations
 
 Skill bodies, support files, and operator-held executable-eval cases are filesystem data; usage,

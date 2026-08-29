@@ -9,6 +9,7 @@
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
+#include <stdlib.h>
 #include "db1_optional.h"
 #include "modules/db2/c/entity_edges.h"
 #include "modules/db2/c/kb_runtime_state.h"
@@ -291,13 +292,40 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
    (void)0; /* source gate logs reason but does not modify confidence at insert time;
              * promotion/lifecycle will validate confidence changes separately */
 
-   /* Content safety scan */
-   char safe_content[2048];
+   /* Content safety scan.
+    *
+    * The scan needs a WRITABLE copy because memory_scan_content redacts in
+    * place, and the copy is what gets stored. It used to be a fixed
+    * `char safe_content[2048]` filled with snprintf, which silently clipped the
+    * caller's content to 2047 bytes: a 3000- and a 5000-byte value both landed
+    * in DB2 as content_len=2047, with nothing logged and success returned.
+    *
+    * The stored sensitivity label was wrong for the same reason:
+    * memory_scan_content only ever saw the first 2047 bytes, so it classified a
+    * long note from a fragment. That is not a leak, since the bytes it never
+    * read were not stored either, but it does mean the label describes less
+    * than the caller asked us to keep. Sizing the copy to the content fixes the
+    * data loss and the label together.
+    *
+    * Thread-local and grown in place, matching the per-thread buffers this
+    * module already uses, so the many return paths below need no cleanup and two
+    * threads inserting at once cannot share the buffer. */
+   static _Thread_local char *safe_content = NULL;
+   static _Thread_local size_t safe_content_cap = 0;
    const char *sensitivity = "normal";
    if (content && content[0])
    {
-      snprintf(safe_content, sizeof(safe_content), "%s", content);
-      sensitivity = memory_scan_content(safe_content, strlen(safe_content));
+      const size_t need = strlen(content) + 1;
+      if (need > safe_content_cap)
+      {
+         char *grown = realloc(safe_content, need);
+         if (!grown)
+            return -1;
+         safe_content = grown;
+         safe_content_cap = need;
+      }
+      memcpy(safe_content, content, need);
+      sensitivity = memory_scan_content(safe_content, need - 1);
       if (!sensitivity) /* blocked */
          return -1;
       content = safe_content;
@@ -362,15 +390,18 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
    /* Check for exact key match */
    {
       int64_t existing_id = 0;
-      char preserved_content[2048] = "";
+      /* Owned by us on a hit and freed on every exit from the block below.
+       * It holds the row's whole content on purpose: `merged_content` can point
+       * at it and be written straight back, so a fixed buffer would shorten a
+       * long memory each time it was re-stored under the same key. */
+      char *preserved_content = NULL;
       double old_conf = 0.0;
       int old_use = 0;
       double old_surprise = 0.0;
       int old_obs = 0;
       double old_evidence = 0.0;
-      if (db2_memory_lookup_merge_fields(norm_key, &existing_id, preserved_content,
-                                         sizeof(preserved_content), &old_conf, &old_use,
-                                         &old_surprise, &old_obs, &old_evidence))
+      if (db2_memory_lookup_merge_fields(norm_key, &existing_id, &preserved_content, &old_conf,
+                                         &old_use, &old_surprise, &old_obs, &old_evidence))
       {
          /* Merge: keep higher confidence, increment use_count */
          int semantic_profile = (strcmp(tier, TIER_L2) == 0 && memory_is_semantic_profile_key(key));
@@ -399,7 +430,10 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
          if (db2_memory_merge_update_ex(existing_id, merged_content ? merged_content : content,
                                         use_cases, new_conf, new_use, new_obs, new_evidence,
                                         memory_content_salience(content), new_surprise, ts) != 0)
+         {
+            free(preserved_content);
             return -1;
+         }
 
          memory_refresh_derived_metadata(
              existing_id, norm_key, merged_content ? merged_content : (content ? content : ""));
@@ -417,8 +451,10 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
          /* An existing memory's content was overwritten by an exact-key merge —
           * a real mutation, audited (distinct op so merges stay filterable). */
          mem_audit("memory.merge", existing_id, tier, kind, norm_key, new_conf, session_id);
+         free(preserved_content);
          return 0;
       }
+      free(preserved_content);
    }
 
    /* Check trigram near-duplicate against same-kind memories. Skipped for
