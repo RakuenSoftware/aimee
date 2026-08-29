@@ -46,6 +46,10 @@ type Store struct {
 	client *wire.Client
 }
 
+// EvalCandidate is the workflow selector's read-only view of an admitted
+// regression. State transitions remain owned by the telemetry family.
+type EvalCandidate = wire.EvalCandidate
+
 // OpenBus seats the store on a module-bus client. There is no Open(path): the
 // engine no longer has a path, which is the point of the change.
 func OpenBus(client *wire.Client) (*Store, error) {
@@ -65,6 +69,13 @@ func (s *Store) ready() error {
 		return errors.New("db1 store is not configured")
 	}
 	return nil
+}
+
+func (s *Store) EvalCandidates(ctx context.Context, state string, max int) ([]EvalCandidate, error) {
+	if err := s.ready(); err != nil {
+		return nil, err
+	}
+	return s.client.EvalCandidateList(ctx, state, max)
 }
 
 // notFound turns the module's "no row" into the error the API layer already

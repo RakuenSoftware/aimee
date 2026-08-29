@@ -583,6 +583,8 @@ char *kb_service_ingest_status_json(void)
  * parses. Default 0 keeps every other test on the empty-results path. */
 static int g_test_search_populated = 0;
 static int g_test_search_scoped_all = 0;
+static int g_test_search_error = 0;
+static int g_test_search_malformed = 0;
 static char g_test_search_embedding[256];
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
@@ -591,11 +593,16 @@ char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, cons
    (void)m;
    (void)f;
    snprintf(g_test_search_embedding, sizeof(g_test_search_embedding), "%s", e ? e : "");
-   const char *src = g_test_search_populated
-                         ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"project\":\"proj-alpha\","
-                           "\"file_path\":\"docs/alpha.md\","
-                           "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
-                         : "{\"fusion_mode\":\"rrf\",\"results\":[]}";
+   const char *src = "{\"fusion_mode\":\"rrf\",\"results\":[]}";
+   if (g_test_search_error)
+      src = "{\"error\":\"error: documentation query embedding failed; "
+            "server-side embedding configuration is unavailable\"}";
+   else if (g_test_search_malformed)
+      src = "{\"fusion_mode\":\"rrf\"}";
+   else if (g_test_search_populated)
+      src = "{\"fusion_mode\":\"rrf\",\"results\":[{\"project\":\"proj-alpha\","
+            "\"file_path\":\"docs/alpha.md\","
+            "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}";
    char *r = malloc(strlen(src) + 1);
    if (r)
       strcpy(r, src);
@@ -6900,6 +6907,32 @@ static void test_search_scope_all_keeps_active_project_first(void)
    assert(strstr(buf, "\"project\":\"proj-other\"") != NULL);
 }
 
+static void test_search_backend_error_is_503(void)
+{
+   char buf[1024];
+   g_test_search_error = 1;
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   g_test_search_error = 0;
+   assert(s == 503);
+   assert(strstr(buf, "query embedding failed") != NULL);
+   assert(strstr(buf, "\"hits\"") == NULL);
+}
+
+static void test_search_malformed_backend_response_is_503(void)
+{
+   char buf[1024];
+   g_test_search_malformed = 1;
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   g_test_search_malformed = 0;
+   assert(s == 503);
+   assert(strstr(buf, "invalid search backend response") != NULL);
+   assert(strstr(buf, "\"hits\"") == NULL);
+}
+
 /* A managed KB normally has no raw embedding_command in aimee.yaml: the
  * wizard supplies SYNTHESIS_ENDPOINT. Search must resolve that deployment default
  * before entering the ranked backend, or it silently queries a 1024-dim corpus
@@ -7479,6 +7512,8 @@ int main(void)
    test_invalidations_route();
    test_search_ok();
    test_search_scope_all_keeps_active_project_first();
+   test_search_backend_error_is_503();
+   test_search_malformed_backend_response_is_503();
    test_search_uses_managed_embedder();
    test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();

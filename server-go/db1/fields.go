@@ -165,6 +165,13 @@ func Atof(cell string) (float64, error) {
 // that carried its own copy of this would be 45 chances to get the framing
 // subtly different.
 func (c *Client) callFields(ctx context.Context, op uint32, fields []string) (uint32, []string, error) {
+	return c.callFieldsAt(ctx, EventLifecycle, StageLifecycle, op, fields)
+}
+
+// callFieldsAt is the common counted-field transport for families other than
+// lifecycle. Keeping framing here prevents a telemetry client from growing a
+// subtly different decoder merely because it uses another event/stage pair.
+func (c *Client) callFieldsAt(ctx context.Context, event, stage, op uint32, fields []string) (uint32, []string, error) {
 	if c == nil || c.caller == nil {
 		return 0, nil, ErrConfig
 	}
@@ -172,7 +179,7 @@ func (c *Client) callFields(ctx context.Context, op uint32, fields []string) (ui
 	if err != nil {
 		return 0, nil, err
 	}
-	response, err := c.caller.Call(ctx, EventLifecycle, StageLifecycle, 0, c.deadline, frame)
+	response, err := c.caller.Call(ctx, event, stage, 0, c.deadline, frame)
 	if err != nil {
 		return 0, nil, err
 	}
