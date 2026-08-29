@@ -465,9 +465,17 @@ def split_kb_identity_failures(text: str) -> list[str]:
     command = identity.get("command")
     if not isinstance(command, list) or not all(
         required in command
-        for required in ("managed-server-identity", "install", "--host=aimee-kb", "--port=8745")
+        for required in (
+            "managed-server-identity",
+            "install",
+            "--host=aimee-kb",
+            "--port=8745",
+            "--member=root",
+        )
     ):
-        failures.append("server identity helper command must install for aimee-kb:8745")
+        failures.append(
+            "server identity helper command must install for aimee-kb:8745 and enroll root"
+        )
     helper_volumes = identity.get("volumes")
     for required in (
         "aimee-kb-home:/var/lib/aimee",
@@ -925,6 +933,7 @@ def plant_test() -> int:
             "      - install\n"
             "      - --host=aimee-kb\n"
             "      - --port=8745\n"
+            "      - --member=root\n"
             "    depends_on:\n"
             "      aimee-kb:\n"
             "        condition: service_healthy\n"
@@ -1005,6 +1014,7 @@ def plant_test() -> int:
             split_text.replace("        condition: service_completed_successfully\n",
                                "        condition: service_started\n", 1),
             split_text.replace("      - --host=aimee-kb\n", "", 1),
+            split_text.replace("      - --member=root\n", "", 1),
             split_text.replace("      - aimee-server-home:/var/lib/aimee-server\n", "", 1),
         )
         for planted in split_plants:
