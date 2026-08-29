@@ -1966,6 +1966,7 @@ const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/get", NULL, RM_EXACT, "wm.get", 0, rh_dispatch_op},
     {"POST", "/v1/skills/autostub", NULL, RM_EXACT, "skill.autostub", 0, rh_dispatch_op},
     {"POST", "/v1/skills/eval", NULL, RM_EXACT, "skill.eval", 0, rh_dispatch_op},
+    {"POST", "/v1/skills/eval-exec", NULL, RM_EXACT, "skill.eval_exec", 0, rh_dispatch_op},
     {"POST", "/v1/skills/lifecycle", NULL, RM_EXACT, "skill.lifecycle", 0, rh_dispatch_op},
     {"POST", "/v1/skills/lint", NULL, RM_EXACT, "skill.lint", 0, rh_dispatch_op},
     {"POST", "/v1/skills/patch", NULL, RM_EXACT, "skill.patch", 0, rh_dispatch_op},

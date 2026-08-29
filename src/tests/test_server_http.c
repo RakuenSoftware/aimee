@@ -1715,6 +1715,8 @@ int main(void)
       assert(server_capability_for_method("memory.update") != CAP_MEMORY_READ);
       /* Mirrors the rules split this is modelled on. */
       assert(server_capability_for_method("rules.delete") == CAP_RULES_ADMIN);
+      assert(server_capability_for_method("skill.eval_exec") == CAP_DELEGATE);
+      assert(server_http_route_caps("POST", "/v1/skills/eval-exec") == CAP_DELEGATE);
       /* memory:admin must not leak into the read-only set, and must stay inside
        * the authenticated set (the operator can still administer their store). */
       assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);

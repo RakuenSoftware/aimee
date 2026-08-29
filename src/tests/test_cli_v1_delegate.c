@@ -1767,6 +1767,33 @@ static void test_skill_eval_route_marshaled(void)
    printf("  PASS: test_skill_eval_route_marshaled\n");
 }
 
+static void test_skill_eval_exec_route_marshaled(void)
+{
+   cli_v1_route_t route;
+   char *fixture_argv[] = {"eval-fixtures", "verification-before-completion"};
+   assert(cli_v1_lookup("skill", 2, fixture_argv, &route));
+   assert(strcmp(route.method, "skill.eval") == 0);
+
+   char *argv[] = {"eval-exec", "verification-before-completion", "--agent", "reviewer",
+                   "--repeats", "3", "--max-tokens", "128", "--min-delta", "0.5",
+                   "--max-case-cost", "0.25", "--max-cost", "1.5", "--json"};
+   assert(cli_v1_lookup("skill", 15, argv, &route));
+   assert(strcmp(route.method, "skill.eval_exec") == 0);
+   assert(route.timeout_ms == 900000);
+   cJSON *req = marshal_request(route.method, 14, argv + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring,
+                 "verification-before-completion") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "agent")->valuestring, "reviewer") == 0);
+   assert(cJSON_GetObjectItem(req, "repeats")->valueint == 3);
+   assert(cJSON_GetObjectItem(req, "max_tokens")->valueint == 128);
+   assert(cJSON_GetObjectItem(req, "minimum_delta")->valuedouble == 0.5);
+   assert(cJSON_GetObjectItem(req, "max_case_cost_usd")->valuedouble == 0.25);
+   assert(cJSON_GetObjectItem(req, "max_total_cost_usd")->valuedouble == 1.5);
+   cJSON_Delete(req);
+   printf("  PASS: test_skill_eval_exec_route_marshaled\n");
+}
+
 static void test_skill_autostub_route_marshaled(void)
 {
    cli_v1_route_t route;
@@ -2298,6 +2325,7 @@ int main(void)
    test_insights_text_output();
    test_skill_lint_route_marshaled();
    test_skill_eval_route_marshaled();
+   test_skill_eval_exec_route_marshaled();
    test_skill_autostub_route_marshaled();
    test_trajectory_export_route_marshaled();
    test_trajectory_batch_route_marshaled();

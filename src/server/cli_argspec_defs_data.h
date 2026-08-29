@@ -352,6 +352,19 @@
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
  "\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}]}"},
 
+{"skill.eval_exec",
+ "{\"bool_flags\":[\"json\"],\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},"
+ "{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"},"
+ "{\"json\":\"agent\",\"from\":\"flag\",\"flag\":\"agent\"},"
+ "{\"json\":\"repeats\",\"from\":\"flag\",\"flag\":\"repeats\","
+ "\"type\":\"number_lenient\"},{\"json\":\"max_tokens\",\"from\":\"flag\","
+ "\"flag\":\"max-tokens\",\"type\":\"number_lenient\"},"
+ "{\"json\":\"minimum_delta\",\"from\":\"flag\",\"flag\":\"min-delta\","
+ "\"type\":\"number_lenient_real\"},{\"json\":\"max_case_cost_usd\","
+ "\"from\":\"flag\",\"flag\":\"max-case-cost\",\"type\":\"number_lenient_real\"},"
+ "{\"json\":\"max_total_cost_usd\",\"from\":\"flag\",\"flag\":\"max-cost\","
+ "\"type\":\"number_lenient_real\"}]}"},
+
 {"skill.show",
  "{\"fields\":[{\"json\":\"cwd\",\"from\":\"cwd\"},{\"json\":\"name\","
  "\"argc_min\":1,\"from\":\"argv_index\",\"index\":0,\"empty\":\"emit\"}"

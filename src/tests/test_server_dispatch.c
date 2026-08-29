@@ -982,6 +982,10 @@ int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "skill.eval");
 }
+int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "skill.eval_exec");
+}
 int handle_skill_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "skill.create");

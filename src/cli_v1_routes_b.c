@@ -122,6 +122,28 @@ static cJSON *marshal_skill_request(const char *method, int argc, char **argv)
       return req;
    }
 
+   if (strcmp(method, "skill.eval_exec") == 0)
+   {
+      if (argc >= 1)
+         cJSON_AddStringToObject(req, "name", argv[0]);
+      for (int i = 1; i < argc; i++)
+      {
+         if (strcmp(argv[i], "--agent") == 0 && i + 1 < argc)
+            cJSON_AddStringToObject(req, "agent", argv[++i]);
+         else if (strcmp(argv[i], "--repeats") == 0 && i + 1 < argc)
+            cJSON_AddNumberToObject(req, "repeats", atoi(argv[++i]));
+         else if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc)
+            cJSON_AddNumberToObject(req, "max_tokens", atoi(argv[++i]));
+         else if (strcmp(argv[i], "--min-delta") == 0 && i + 1 < argc)
+            cJSON_AddNumberToObject(req, "minimum_delta", strtod(argv[++i], NULL));
+         else if (strcmp(argv[i], "--max-case-cost") == 0 && i + 1 < argc)
+            cJSON_AddNumberToObject(req, "max_case_cost_usd", strtod(argv[++i], NULL));
+         else if (strcmp(argv[i], "--max-cost") == 0 && i + 1 < argc)
+            cJSON_AddNumberToObject(req, "max_total_cost_usd", strtod(argv[++i], NULL));
+      }
+      return req;
+   }
+
    if (strcmp(method, "skill.lifecycle") == 0)
    {
       for (int i = 0; i < argc; i++)

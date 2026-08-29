@@ -74,6 +74,9 @@ const method_policy_t method_registry[] = {
     {"rules.*", CAP_RULES_READ, "rules operation"},
     {"skill.list", CAP_SESSION_READ, "skill list"},
     {"skill.show", CAP_SESSION_READ, "skill show"},
+    /* Executable evaluation spends delegate-provider budget and must not inherit
+     * the generic skill-management capability. */
+    {"skill.eval_exec", CAP_DELEGATE, "run executable skill evaluation"},
     {"skill.*", CAP_TOOL_WRITE, "skill mutation"},
     {"toolset.*", CAP_SESSION_READ, "toolset operation"},
     /* Collab rules (exact admin before read prefix) */
