@@ -363,7 +363,7 @@ static void test_upsert_workflow_rejects_empty_args(void)
 static void test_auto_tag_shared_keywords(void)
 {
    setup();
-   memory_t m;
+   memory_t m, long_memory;
 
    /* This memory mentions "auth" — should be auto-tagged _shared */
    memory_insert(TIER_L2, KIND_FACT, "auth-config", "PostgreSQL cert auth flow", 0.9, "s1", &m);
@@ -381,6 +381,27 @@ static void test_auto_tag_shared_keywords(void)
    aimee_pg_finalize(ws_st);
 
    /* Should have _shared tag because "auth" is a shared keyword */
+   assert(count == 1);
+
+   /* The scanner must cover the whole stored value. Its old 1 KiB scratch
+    * buffer both missed later keywords and overflowed its terminator at the
+    * boundary. */
+   char late_keyword[4097];
+   memset(late_keyword, 'x', sizeof(late_keyword) - 1);
+   late_keyword[sizeof(late_keyword) - 1] = '\0';
+   memcpy(late_keyword + 3000, " database ", 10);
+   assert(memory_insert(TIER_L2, KIND_FACT, "late-shared-keyword", late_keyword, 0.9, "s1",
+                        &long_memory) == 0);
+
+   ws_st = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2",
+       ws_err, sizeof(ws_err));
+   assert(ws_st != NULL);
+   aimee_pg_bind_int64(ws_st, "?1", long_memory.id);
+   aimee_pg_bind_text(ws_st, "?2", SHARED_WORKSPACE);
+   assert(aimee_pg_step(ws_st, ws_err, sizeof(ws_err)) == AIMEE_PG_ROW);
+   count = aimee_pg_column_int(ws_st, 0);
+   aimee_pg_finalize(ws_st);
    assert(count == 1);
 
    teardown();
