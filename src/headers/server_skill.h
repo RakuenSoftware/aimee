@@ -7,6 +7,7 @@ int handle_skill_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_lint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_edit(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_skill_patch(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

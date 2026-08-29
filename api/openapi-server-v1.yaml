@@ -3123,6 +3123,11 @@ paths:
       summary: Evaluate a skill
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Eval result, content: { application/json: { schema: { type: object } } } } }
+  /skills/eval-exec:
+    post:
+      summary: Run bounded executable held-out trials for a skill
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Executable eval result, content: { application/json: { schema: { type: object } } } } }
   /skills/lifecycle:
     post:
       summary: Skill lifecycle action

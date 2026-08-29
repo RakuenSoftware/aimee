@@ -189,6 +189,40 @@ static void test_success_with_string_error_remains_success(void)
    printf("  PASS: test_success_with_string_error_remains_success\n");
 }
 
+static void test_skill_eval_exec_preserves_verdict_and_exit_status(void)
+{
+   char out[4096], err[2048];
+   int rc = finish_response_capture(
+       "skill.eval_exec",
+       "{\"status\":\"inconclusive\",\"skill\":\"review\",\"passed\":false,"
+       "\"inconclusive\":true,\"manifest_digest\":\"abc\",\"model_and_route\":"
+       "\"agent/model\",\"calls\":2,\"compliance_delta\":0.1,\"cost_usd\":0.02,"
+       "\"cost_unknown\":false}",
+       200, 1, out, sizeof(out), err, sizeof(err));
+   assert(rc == 1);
+   assert(err[0] == '\0');
+   cJSON *printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "status")->valuestring, "inconclusive") == 0);
+   assert(cJSON_IsFalse(cJSON_GetObjectItem(printed, "passed")));
+   cJSON_Delete(printed);
+
+   rc = finish_response_capture(
+       "skill.eval_exec",
+       "{\"status\":\"pass\",\"skill\":\"review\",\"passed\":true,"
+       "\"inconclusive\":false,\"manifest_digest\":\"abc\",\"model_and_route\":"
+       "\"agent/model\",\"calls\":2,\"compliance_delta\":0.5,\"cost_usd\":0.02,"
+       "\"cost_unknown\":false}",
+       200, 1, out, sizeof(out), err, sizeof(err));
+   assert(rc == 0);
+   printed = cJSON_Parse(out);
+   assert(printed != NULL);
+   assert(strcmp(cJSON_GetObjectItem(printed, "status")->valuestring, "pass") == 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(printed, "passed")));
+   cJSON_Delete(printed);
+   printf("  PASS: test_skill_eval_exec_preserves_verdict_and_exit_status\n");
+}
+
 static void test_failed_async_run_retains_structured_result(void)
 {
    cJSON *snapshot = cJSON_Parse("{\"status\":\"failed\",\"message\":\"outer failure\"}");
@@ -1767,6 +1801,39 @@ static void test_skill_eval_route_marshaled(void)
    printf("  PASS: test_skill_eval_route_marshaled\n");
 }
 
+static void test_skill_eval_exec_route_marshaled(void)
+{
+   cli_v1_route_t route;
+   char *fixture_argv[] = {"eval-fixtures", "verification-before-completion"};
+   assert(cli_v1_lookup("skill", 2, fixture_argv, &route));
+   assert(strcmp(route.method, "skill.eval") == 0);
+
+   char *argv[] = {"eval-exec",       "verification-before-completion",
+                   "--agent",         "test-agent",
+                   "--repeats",       "3",
+                   "--max-tokens",    "512",
+                   "--min-delta",     "0.4",
+                   "--max-case-cost", "0.75",
+                   "--max-cost",      "2.5",
+                   "--json"};
+   assert(cli_v1_lookup("skill", 15, argv, &route));
+   assert(strcmp(route.method, "skill.eval_exec") == 0);
+   assert(route.timeout_ms == 900000);
+   cJSON *req = marshal_request(route.method, 14, argv + 1);
+   assert(req != NULL);
+   assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "skill.eval_exec") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring, "verification-before-completion") ==
+          0);
+   assert(strcmp(cJSON_GetObjectItem(req, "agent")->valuestring, "test-agent") == 0);
+   assert(cJSON_GetObjectItem(req, "repeats")->valueint == 3);
+   assert(cJSON_GetObjectItem(req, "max_tokens")->valueint == 512);
+   assert(cJSON_GetObjectItem(req, "minimum_delta")->valuedouble == 0.4);
+   assert(cJSON_GetObjectItem(req, "max_case_cost")->valuedouble == 0.75);
+   assert(cJSON_GetObjectItem(req, "max_total_cost")->valuedouble == 2.5);
+   cJSON_Delete(req);
+   printf("  PASS: test_skill_eval_exec_route_marshaled\n");
+}
+
 static void test_skill_autostub_route_marshaled(void)
 {
    cli_v1_route_t route;
@@ -2229,6 +2296,7 @@ int main(void)
    test_json_roundtable_failure_preserves_user_visible_envelope();
    test_human_roundtable_failure_uses_stderr();
    test_success_with_string_error_remains_success();
+   test_skill_eval_exec_preserves_verdict_and_exit_status();
    test_failed_async_run_retains_structured_result();
    test_failed_async_run_synthesizes_legacy_envelope();
    test_delegate_context_file_folded_into_prompt();
@@ -2298,6 +2366,7 @@ int main(void)
    test_insights_text_output();
    test_skill_lint_route_marshaled();
    test_skill_eval_route_marshaled();
+   test_skill_eval_exec_route_marshaled();
    test_skill_autostub_route_marshaled();
    test_trajectory_export_route_marshaled();
    test_trajectory_batch_route_marshaled();

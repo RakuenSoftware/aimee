@@ -927,6 +927,20 @@ void pt_print_skill_group(const char *method, cJSON *resp)
       else
          printf("skill lint: %d skills passed\n", json_int(resp, "checked", 0));
    }
+   else if (strcmp(method, "skill.eval_exec") == 0)
+   {
+      printf("skill executable eval: %s %s\n", json_str(resp, "skill"),
+             json_int(resp, "inconclusive", 0) ? "INCONCLUSIVE"
+             : json_int(resp, "passed", 0)     ? "PASS"
+                                               : "FAIL");
+      printf("manifest: %s\n", json_str(resp, "manifest_digest"));
+      printf("route: %s | calls: %d | delta: %.3f | cost: $%.4f%s\n",
+             json_str(resp, "model_and_route"), json_int(resp, "calls", 0),
+             json_double(resp, "compliance_delta", 0.0), json_double(resp, "cost_usd", 0.0),
+             json_int(resp, "cost_unknown", 0) ? " (incomplete)" : "");
+      if (json_str(resp, "first_failure")[0])
+         printf("first failure: %s\n", json_str(resp, "first_failure"));
+   }
    else if (strcmp(method, "skill.eval") == 0)
    {
       printf("skill eval: %s %s\n", json_str(resp, "name"),

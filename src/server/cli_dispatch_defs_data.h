@@ -82,6 +82,8 @@
     {"skill", "list", "skill.list", NULL, "skills", 0},
     {"skill", "show", "skill.show", NULL, NULL, 0}, {"skill", "lint", "skill.lint", NULL, NULL, 0},
     {"skill", "eval", "skill.eval", NULL, NULL, 0},
+    {"skill", "eval-fixtures", "skill.eval", NULL, NULL, 0},
+    {"skill", "eval-exec", "skill.eval_exec", NULL, NULL, 900000},
     {"skill", "create", "skill.create", NULL, NULL, 0},
     {"skill", "edit", "skill.edit", NULL, NULL, 0},
     {"skill", "patch", "skill.patch", NULL, NULL, 0},

@@ -1,11 +1,14 @@
 #include "server_skill.h"
 #include "aimee.h"
 #include <aimee/skills/skill.h>
+#include "agent.h"
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "kb_client.h"
 #include "modules/workspace/workspace_turn.h"
+#include "token_tracker.h"
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -185,6 +188,183 @@ int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON_AddStringToObject(resp, "message", err[0] ? err : "skill eval failed");
    else if (result.first_failure[0])
       cJSON_AddStringToObject(resp, "message", result.first_failure);
+   return server_send_ok(conn, resp);
+}
+
+typedef struct
+{
+   agent_config_t config;
+   char agent_name[MAX_AGENT_NAME];
+} skill_server_trial_runner_t;
+
+static int skill_server_text_agent(const agent_t *agent)
+{
+   return agent && agent->enabled && strcmp(agent->backend, AGENT_BACKEND_PROVIDER_CLI) != 0 &&
+          strcmp(agent->backend, AGENT_BACKEND_CLI_STDIO) != 0 &&
+          strcmp(agent->backend, AGENT_BACKEND_TMUX_CLI) != 0;
+}
+
+static agent_t *skill_server_select_agent(agent_config_t *config, const char *requested)
+{
+   if (requested && requested[0])
+   {
+      agent_t *agent = agent_find(config, requested);
+      return skill_server_text_agent(agent) ? agent : NULL;
+   }
+   if (config->default_agent[0])
+   {
+      agent_t *agent = agent_find(config, config->default_agent);
+      if (skill_server_text_agent(agent))
+         return agent;
+   }
+   for (int i = 0; i < config->agent_count; i++)
+      if (skill_server_text_agent(&config->agents[i]))
+         return &config->agents[i];
+   return NULL;
+}
+
+static int skill_server_trial_run(void *opaque, const char *system_prompt, const char *prompt,
+                                  int max_tokens, char **response_out,
+                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+{
+   skill_server_trial_runner_t *runner = opaque;
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   if (agent_generate(&runner->config, runner->agent_name, system_prompt, prompt, max_tokens, 0.0,
+                      &result) != 0)
+   {
+      snprintf(errbuf, errbuf_len, "%s", result.error[0] ? result.error : "model trial failed");
+      free(result.response);
+      return -1;
+   }
+   *response_out = result.response;
+   result.response = NULL;
+   memset(usage_out, 0, sizeof(*usage_out));
+   usage_out->prompt_tokens = result.prompt_tokens;
+   usage_out->completion_tokens = result.completion_tokens;
+   usage_out->cache_read_tokens = result.cache_read_tokens;
+   usage_out->cache_write_tokens = result.cache_write_tokens;
+   usage_out->latency_ms = result.latency_ms;
+   usage_out->tool_calls = result.tool_calls;
+   const char *served = result.served_model[0] ? result.served_model : result.model;
+   if (!served[0])
+   {
+      agent_t *configured = agent_find(&runner->config, result.agent_name);
+      served = configured ? configured->model : "";
+   }
+   snprintf(usage_out->route, sizeof(usage_out->route), "%s/%s", result.agent_name, served);
+   token_usage_t token_usage = {
+       .input_tokens = result.prompt_tokens,
+       .output_tokens = result.completion_tokens,
+       .cache_write_tokens = result.cache_write_tokens,
+       .cache_read_tokens = result.cache_read_tokens,
+   };
+   int priced = 0;
+   usage_out->cost_usd =
+       token_estimate_cost_ex(result.model[0] ? result.model : served, &token_usage, &priced);
+   usage_out->cost_unknown = !priced;
+   return 0;
+}
+
+static int skill_req_optional_number(cJSON *req, const char *name, double fallback, double *out)
+{
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(req, name);
+   if (!item)
+   {
+      *out = fallback;
+      return 0;
+   }
+   if (!cJSON_IsNumber(item))
+      return -1;
+   *out = item->valuedouble;
+   return 0;
+}
+
+int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *name = skill_req_str(req, "name");
+   if (!skill_name_is_valid(name))
+      return skill_send_error(conn, "skill.eval-exec requires a valid skill name");
+   cJSON *agent_item = cJSON_GetObjectItemCaseSensitive(req, "agent");
+   if (agent_item && !cJSON_IsString(agent_item))
+      return skill_send_error(conn, "skill.eval-exec agent must be a string");
+   const char *agent_name = skill_req_str(req, "agent");
+   char cwd[MAX_PATH_LEN], err[256] = "";
+   const char *root = skill_req_cwd(req, cwd, sizeof(cwd));
+   if (!root)
+      return skill_send_error(conn, "cwd is not inside a registered workspace");
+
+   double repeats_number, max_tokens_number, minimum_delta, max_case_cost, max_total_cost;
+   if (skill_req_optional_number(req, "repeats", 2.0, &repeats_number) != 0 ||
+       skill_req_optional_number(req, "max_tokens", 256.0, &max_tokens_number) != 0 ||
+       skill_req_optional_number(req, "minimum_delta", 0.25, &minimum_delta) != 0 ||
+       skill_req_optional_number(req, "max_case_cost", 0.50, &max_case_cost) != 0 ||
+       skill_req_optional_number(req, "max_total_cost", 2.00, &max_total_cost) != 0)
+      return skill_send_error(conn, "skill.eval-exec options must be numeric");
+   if (!isfinite(repeats_number) || !isfinite(max_tokens_number) || !isfinite(minimum_delta) ||
+       !isfinite(max_case_cost) || !isfinite(max_total_cost) || repeats_number < 1.0 ||
+       repeats_number > 5.0 || repeats_number != floor(repeats_number) || max_tokens_number < 1.0 ||
+       max_tokens_number > 4096.0 || max_tokens_number != floor(max_tokens_number) ||
+       minimum_delta <= 0.0 || minimum_delta > 1.0 || max_case_cost <= 0.0 ||
+       max_total_cost <= 0.0 || max_case_cost > max_total_cost)
+      return skill_send_error(conn, "invalid executable eval bounds");
+
+   skill_server_trial_runner_t runner;
+   memset(&runner, 0, sizeof(runner));
+   if (agent_load_config(&runner.config) != 0)
+      return skill_send_error(conn, "could not load agent configuration");
+   agent_t *agent = skill_server_select_agent(&runner.config, agent_name);
+   if (!agent)
+      return skill_send_error(conn, "executable skill eval requires an enabled non-CLI text agent");
+   snprintf(runner.agent_name, sizeof(runner.agent_name), "%s", agent->name);
+   char route[SKILL_TRIAL_ROUTE_MAX];
+   snprintf(route, sizeof(route), "%s/%s", agent->name, agent->model);
+   skill_trial_options_t options = {
+       .runner = skill_server_trial_run,
+       .runner_ctx = &runner,
+       .repeats = (int)repeats_number,
+       .max_tokens = (int)max_tokens_number,
+       .minimum_delta = minimum_delta,
+       .max_case_cost_usd = max_case_cost,
+       .max_total_cost_usd = max_total_cost,
+       .route = route,
+   };
+   skill_trial_result_t result;
+   int rc = skill_eval_executable(root, name, &options, &result, err, sizeof(err));
+   if (rc != 0)
+      return skill_send_error(conn, err[0] ? err : "executable skill eval failed");
+
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "skill", name);
+   cJSON_AddStringToObject(resp, "status",
+                           result.inconclusive ? "inconclusive"
+                           : result.passed     ? "pass"
+                                               : "fail");
+   cJSON_AddBoolToObject(resp, "passed", result.passed);
+   cJSON_AddBoolToObject(resp, "inconclusive", result.inconclusive);
+   cJSON_AddStringToObject(resp, "manifest_digest", result.manifest_digest);
+   cJSON_AddStringToObject(resp, "skill_digest", result.skill_digest);
+   cJSON_AddStringToObject(resp, "held_out_case_set_digest", result.held_out_case_set_digest);
+   cJSON_AddStringToObject(resp, "policy_digest", result.policy_digest);
+   cJSON_AddStringToObject(resp, "model_and_route", result.route);
+   cJSON_AddStringToObject(resp, "tool_contract", "none-v1");
+   cJSON_AddStringToObject(resp, "seed_policy", "balanced-no-seed");
+   cJSON_AddNumberToObject(resp, "scenarios", result.scenarios);
+   cJSON_AddNumberToObject(resp, "repeats", result.repeats);
+   cJSON_AddNumberToObject(resp, "calls", result.calls);
+   cJSON_AddNumberToObject(resp, "baseline_compliances", result.baseline_compliances);
+   cJSON_AddNumberToObject(resp, "treatment_compliances", result.treatment_compliances);
+   cJSON_AddNumberToObject(resp, "paired_improvements", result.paired_improvements);
+   cJSON_AddNumberToObject(resp, "paired_regressions", result.paired_regressions);
+   cJSON_AddNumberToObject(resp, "compliance_delta", result.compliance_delta);
+   cJSON_AddNumberToObject(resp, "prompt_tokens", result.prompt_tokens);
+   cJSON_AddNumberToObject(resp, "completion_tokens", result.completion_tokens);
+   cJSON_AddNumberToObject(resp, "latency_ms", result.latency_ms);
+   cJSON_AddNumberToObject(resp, "cost_usd", result.cost_usd);
+   cJSON_AddBoolToObject(resp, "cost_unknown", result.cost_unknown);
+   if (result.first_failure[0])
+      cJSON_AddStringToObject(resp, "first_failure", result.first_failure);
    return server_send_ok(conn, resp);
 }
 

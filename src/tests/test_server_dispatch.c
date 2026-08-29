@@ -982,6 +982,10 @@ int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "skill.eval");
 }
+int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "skill.eval_exec");
+}
 int handle_skill_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "skill.create");
@@ -1812,6 +1816,7 @@ static void test_routing(void)
    int has_cron_add = 0;
    int has_trajectory_export = 0;
    int has_trajectory_batch = 0;
+   int has_skill_eval_exec = 0;
    cJSON *m;
    cJSON_ArrayForEach(m, methods)
    {
@@ -1837,6 +1842,8 @@ static void test_routing(void)
          has_trajectory_export = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "trajectory.batch") == 0)
          has_trajectory_batch = 1;
+      if (cJSON_IsString(m) && strcmp(m->valuestring, "skill.eval_exec") == 0)
+         has_skill_eval_exec = 1;
    }
    assert(has_delegate_status);
    assert(has_delegate_launch);
@@ -1849,6 +1856,7 @@ static void test_routing(void)
    assert(has_cron_add);
    assert(has_trajectory_export);
    assert(has_trajectory_batch);
+   assert(has_skill_eval_exec);
    cJSON_Delete(json);
 
    json =
@@ -1928,6 +1936,12 @@ static void test_routing(void)
                         strlen("{\"method\":\"skill.show\",\"name\":\"review\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "skill.show") == 0);
    assert(strcmp(g_last_handler, "skill.show") == 0);
+   cJSON_Delete(json);
+
+   json = dispatch_json(ctx, conn, "{\"method\":\"skill.eval_exec\",\"name\":\"review\"}",
+                        strlen("{\"method\":\"skill.eval_exec\",\"name\":\"review\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "skill.eval_exec") == 0);
+   assert(strcmp(g_last_handler, "skill.eval_exec") == 0);
    cJSON_Delete(json);
 
    json = dispatch_json(ctx, conn,
