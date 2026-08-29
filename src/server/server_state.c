@@ -73,9 +73,9 @@ int server_memory_scope_begin(cJSON *req)
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
       }
    }
-   kb_client_memory_scope_context_set(workspace, project,
-                                      scope_arg && strcmp(scope_arg, "all") == 0);
-   return (!workspace[0] && !project[0]) ? 1 : 0;
+   int include_all = scope_arg && strcmp(scope_arg, "all") == 0;
+   kb_client_memory_scope_context_set(workspace, project, include_all);
+   return (!include_all && !workspace[0] && !project[0]) ? 1 : 0;
 }
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
