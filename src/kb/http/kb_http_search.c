@@ -34,12 +34,12 @@ int kb_http_search_project_scope(const char *body, char *project, size_t project
       return kbhs_error(out_buf, out_cap, 400, "invalid json");
    const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
    const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "scope");
-   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
    if (js && !cJSON_IsString(js))
    {
       cJSON_Delete(root);
       return kbhs_error(out_buf, out_cap, 400, "scope must be current or all");
    }
+   const char *scope = js ? js->valuestring : "current";
    if (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
    {
       cJSON_Delete(root);
