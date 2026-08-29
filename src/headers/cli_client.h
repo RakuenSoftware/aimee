@@ -324,7 +324,7 @@ int client_launch_exec(int argc, char **argv);
 
 /* Client-local command handlers (run in the client so they see its working
  * tree). Defined in cmd_profile.c / cmd_manuscript.c. */
-int cmd_profile_run(int argc, char **argv);
+int cmd_profile_run(int argc, char **argv, int json_output);
 int cmd_manuscript_run(int argc, char **argv, int json_output);
 /* `aimee optimize` — bandit optimization loop (points/baseline/replay).
  * Dispatches optimize.export to GET /v1/optimize/export. Defined in cmd_optimize.c. */
