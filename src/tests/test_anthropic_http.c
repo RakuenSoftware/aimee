@@ -1183,6 +1183,44 @@ static void test_proof_gated_ingress_wire_parity(void)
    PASS("proof_gated_ingress_wire_parity");
 }
 
+static void test_count_tokens_validates_request_shape(void)
+{
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   static const char *const invalid[] = {
+       "{", "[]", "null", "{}", "{\"messages\":\"not-an-array\"}", NULL,
+   };
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &openai;
+   for (int i = 0; invalid[i]; i++)
+   {
+      assert(count_tokens(invalid[i], resp, sizeof(resp)) == 400);
+      assert(strstr(resp, "invalid_request_error") != NULL);
+   }
+   assert(count_tokens("{\"messages\":[]}", resp, sizeof(resp)) == 200);
+   assert(strcmp(resp, "{\"input_tokens\":0}") == 0);
+   assert(count_tokens("{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}", resp,
+                       sizeof(resp)) == 200);
+   assert(strcmp(resp, "{\"input_tokens\":1}") == 0);
+   reset_capture();
+   PASS("count_tokens_validates_request_shape");
+}
+
+static void test_messages_buffered_rejects_missing_messages(void)
+{
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &openai;
+   assert(messages_buffered("{\"max_tokens\":16}", resp, sizeof(resp)) == 400);
+   assert(strstr(resp, "messages must be a non-empty array") != NULL);
+   assert(g_last_body == NULL);
+   reset_capture();
+   PASS("messages_buffered_rejects_missing_messages");
+}
+
 int main(void)
 {
    test_explicit_unknown_model_is_rejected();
@@ -1204,6 +1242,8 @@ int main(void)
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
+   test_count_tokens_validates_request_shape();
+   test_messages_buffered_rejects_missing_messages();
    printf("anthropic_http: OK\n");
    return 0;
 }

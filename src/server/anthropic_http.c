@@ -469,7 +469,7 @@ static int messages_buffered(const char *body, char *resp, int cap)
                             "max_tokens is required and must be a positive integer", 0);
       }
       const cJSON *jmsgs = cJSON_GetObjectItemCaseSensitive(req, "messages");
-      if (jmsgs && (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0))
+      if (!cJSON_IsArray(jmsgs) || cJSON_GetArraySize(jmsgs) == 0)
       {
          cJSON_Delete(req);
          return write_error(resp, cap, 400, "invalid_request_error",
@@ -1562,7 +1562,22 @@ cleanup:
 static int count_tokens(const char *body, char *resp, int cap)
 {
    cJSON *req = cJSON_Parse((body && body[0]) ? body : "{}");
-   const char *model = req ? jo_cstr(req, "model") : "";
+   if (!req)
+      return write_error(resp, cap, 400, "invalid_request_error", "invalid JSON body", 0);
+   if (!cJSON_IsObject(req))
+   {
+      cJSON_Delete(req);
+      return write_error(resp, cap, 400, "invalid_request_error",
+                         "request body must be a JSON object", 0);
+   }
+   cJSON *request_messages = cJSON_GetObjectItemCaseSensitive(req, "messages");
+   if (!cJSON_IsArray(request_messages))
+   {
+      cJSON_Delete(req);
+      return write_error(resp, cap, 400, "invalid_request_error",
+                         "messages is required and must be an array", 0);
+   }
+   const char *model = jo_cstr(req, "model");
 
    /* Proxy to Anthropic's real /v1/messages/count_tokens so Claude Code's
     * context-budget math matches api.anthropic.com, not a local estimate — only
@@ -1604,9 +1619,7 @@ static int count_tokens(const char *body, char *resp, int cap)
    }
 
    char *system_text = req ? anthropic_system_to_text(req) : NULL;
-   cJSON *messages = req ? anthropic_messages_to_openai(
-                               cJSON_GetObjectItemCaseSensitive(req, "messages"), system_text)
-                         : NULL;
+   cJSON *messages = anthropic_messages_to_openai(request_messages, system_text);
    int n = messages ? session_compact_estimate_tokens(messages) : 0;
    cJSON *out = cJSON_CreateObject();
    int status;
