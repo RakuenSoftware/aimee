@@ -86,8 +86,8 @@ static inline int aimee_runtime_web_request_decode(const uint8_t *in, size_t len
 
 static inline int aimee_runtime_web_status_valid(uint32_t status)
 {
-   return status == 400u || status == 403u || status == 404u || status == 502u ||
-          status == 503u;
+   return status == 400u || status == 403u || status == 404u || status == 413u ||
+          status == 502u || status == 503u;
 }
 
 static inline int aimee_runtime_web_response_encode(uint32_t status, uint8_t *out,

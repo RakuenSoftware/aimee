@@ -337,6 +337,7 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
 #define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
 #define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
 #define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
+#define SERVER_ERR_PAYLOAD_TOO_LARGE "payload_too_large" /* request exceeds method budget */
 
 /* The typed error as a VALUE, for commands that RETURN a result rather than write
  * one. jo_err is not a substitute: it omits `kind` and the derived `http_status`,

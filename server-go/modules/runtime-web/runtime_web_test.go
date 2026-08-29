@@ -36,6 +36,7 @@ func TestRPCFaultStatusParity(t *testing.T) {
 		{"invalid_argument", 400},
 		{"not_found", 404},
 		{"permission_denied", 403},
+		{"payload_too_large", 413},
 		{"unavailable", 503},
 		{"", 502},
 		{"unknown", 502},
