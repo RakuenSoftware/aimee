@@ -6,6 +6,8 @@
  * built with cJSON so escaping is handled for us. */
 
 #include "kb_http_search.h"
+#include "kb_reqctx.h"
+#include "kb_scope.h"
 #include "modules/db2/c/artifacts.h"
 #include "modules/db2/c/kb_releases.h"
 #include "cJSON.h"
@@ -15,6 +17,103 @@
 #include <string.h>
 
 #define KBHS_MAX_HITS 100
+
+static int kbhs_error(char *out_buf, int out_cap, int status, const char *message)
+{
+   snprintf(out_buf, (size_t)out_cap, "{\"error\":\"%s\"}", message);
+   return status;
+}
+
+int kb_http_search_project_scope(const char *body, char *project, size_t project_cap,
+                                 int *all_projects, char *out_buf, int out_cap)
+{
+   project[0] = '\0';
+   *all_projects = 0;
+   cJSON *root = cJSON_Parse(body ? body : "{}");
+   if (!root)
+      return kbhs_error(out_buf, out_cap, 400, "invalid json");
+   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
+   const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "scope");
+   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
+   if (js && !cJSON_IsString(js))
+   {
+      cJSON_Delete(root);
+      return kbhs_error(out_buf, out_cap, 400, "scope must be current or all");
+   }
+   if (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
+   {
+      cJSON_Delete(root);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"invalid_scope\",\"message\":\"scope must be current or "
+               "all\"}}");
+      return 400;
+   }
+   if (cJSON_IsString(jp) && jp->valuestring[0])
+   {
+      if (strlen(jp->valuestring) >= project_cap)
+      {
+         cJSON_Delete(root);
+         return kbhs_error(out_buf, out_cap, 400, "project id is too long");
+      }
+      snprintf(project, project_cap, "%s", jp->valuestring);
+   }
+
+   const char *verified_kind = NULL;
+   const char *verified_id = NULL;
+   int verified = kb_reqctx_verified_scope(&verified_kind, &verified_id);
+   if (strcmp(scope, "all") == 0)
+   {
+      cJSON_Delete(root);
+      /* A service credential is the managed deployment's data-plane identity:
+       * it spans projects but remains tenant-bounded by the resolved caller
+       * context and is still excluded from administrative routes. */
+      if (verified && strcmp(verified_kind, KB_SCOPE_KIND_SERVICE) != 0)
+      {
+         snprintf(out_buf, (size_t)out_cap,
+                  "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential "
+                  "cannot search all projects\"}}");
+         return 403;
+      }
+      *all_projects = 1;
+      return 0;
+   }
+
+   if (!project[0] && verified && strcmp(verified_kind, "project") == 0)
+      snprintf(project, project_cap, "%s", verified_id);
+   if (project[0] && verified && strcmp(verified_kind, "project") == 0 &&
+       strcmp(project, verified_id) != 0)
+   {
+      cJSON_Delete(root);
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":{\"type\":\"forbidden\",\"message\":\"project is outside the "
+               "verified credential scope\"}}");
+      return 403;
+   }
+   cJSON_Delete(root);
+   if (project[0])
+      return 0;
+   snprintf(out_buf, (size_t)out_cap,
+            "{\"error\":{\"type\":\"scope_required\",\"message\":\"no active project is "
+            "available; pass project or scope=all explicitly\"}}");
+   return 409;
+}
+
+int kb_http_search_validate_backend(const char *body, char *out_buf, int out_cap)
+{
+   cJSON *root = cJSON_Parse(body);
+   const cJSON *error = root ? cJSON_GetObjectItemCaseSensitive(root, "error") : NULL;
+   const cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+   int status = 0;
+   if (cJSON_IsString(error))
+   {
+      snprintf(out_buf, (size_t)out_cap, "%s", body);
+      status = 503;
+   }
+   else if (!cJSON_IsObject(root) || !cJSON_IsArray(results))
+      status = kbhs_error(out_buf, out_cap, 503, "invalid search backend response");
+   cJSON_Delete(root);
+   return status;
+}
 
 /* Pick a short excerpt from a known narrative field of the payload. */
 static void kbhs_excerpt(const char *payload_json, char *out, size_t out_cap)
