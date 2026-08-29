@@ -431,10 +431,10 @@ cJSON *memory_get_command(cJSON *req)
     * reads exactly like "not in force". */
    cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
    const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
-   memory_t m;
+   cJSON *memory_json = NULL;
    kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
    server_memory_scope_begin(req);
-   int rc = kb_client_memory_get_as_of(id, as_of, &m, &verdict);
+   int rc = kb_client_memory_get_json_as_of(id, as_of, &memory_json, &verdict);
    kb_client_memory_scope_context_clear();
 
    cJSON *resp;
@@ -453,19 +453,18 @@ cJSON *memory_get_command(cJSON *req)
          else
             cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
       }
-      cJSON *mj = memory_to_json(&m);
-      if (mj)
+      if (memory_json)
       {
          /* Merge memory fields into resp */
-         cJSON *child = mj->child;
+         cJSON *child = memory_json->child;
          while (child)
          {
             cJSON *next = child->next;
-            cJSON_DetachItemViaPointer(mj, child);
+            cJSON_DetachItemViaPointer(memory_json, child);
             cJSON_AddItemToObject(resp, child->string, child);
             child = next;
          }
-         cJSON_Delete(mj);
+         cJSON_Delete(memory_json);
       }
    }
    else if (rc > 0)
