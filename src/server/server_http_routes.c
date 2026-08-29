@@ -2390,13 +2390,19 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       return err_json(resp, resp_cap, 400, "bad request");
    if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
        strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
+   {
+      if (!server_http_json_body_is_single_value(body, body_len))
+         return err_json(resp, resp_cap, 400, "invalid JSON body");
       return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
                                       server_http_identity_principal(),
                                       (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
+   }
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)
       return err_json(resp, resp_cap, 404, "not found");
+   if (!server_http_json_body_is_single_value(body, body_len))
+      return err_json(resp, resp_cap, 400, "invalid JSON body");
    route_req_t rq = {method, path, body, body_len, id, e->op};
    return e->handler(&rq, resp, resp_cap);
 }

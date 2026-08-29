@@ -1309,6 +1309,10 @@ else
     SKIP=$((SKIP + 1))
 fi
 
+RESP=$(http_call POST /v1/memory/store '{"key":"integ-trailing","content":"must not store"} {}') || true
+check_output "memory.store rejects trailing JSON" "400 " echo "$RESP"
+check_output "memory.store trailing JSON does not dispatch" 'invalid JSON body' echo "$RESP"
+
 RESP=$(http_call POST /v1/memory/search '{}') || true
 check_output "memory.search missing keywords stays typed" '"kind":"invalid_argument"' echo "$RESP"
 if echo "$RESP" | grep -q '"http_status":400'; then
