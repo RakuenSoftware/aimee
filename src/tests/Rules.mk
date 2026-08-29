@@ -2081,6 +2081,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
  $(OBJDIR)/platform_random.o \
  $(OBJDIR)/hook_session_token.o \
  $(OBJDIR)/linux/secret_store.o $(OBJDIR)/posix/util.o \
+ $(OBJDIR)/text.o \
  $(OBJDIR)/json_fluent.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
