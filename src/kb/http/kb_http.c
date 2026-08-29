@@ -345,88 +345,6 @@ static int qparam(const char *qs, const char *key, char *out, size_t out_cap)
 
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message);
 
-/* Extract a JSON string field value from body into out. */
-
-/* Resolve POST /v1/search scope before either the facet or ranked branch.
- * Omission is local/current, never all: a verified project credential can
- * supply current; otherwise the caller must provide a stable project id.
- * Cross-project search remains available only as explicit scope=all. */
-static int kb_search_project_scope(const char *body, char *project, size_t project_cap,
-                                   int *all_projects, char *out_buf, int out_cap)
-{
-   project[0] = '\0';
-   *all_projects = 0;
-   cJSON *root = cJSON_Parse(body ? body : "{}");
-   if (!root)
-      return json_body_error(out_buf, out_cap, 400, "invalid json");
-   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
-   const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "scope");
-   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
-   if (js && !cJSON_IsString(js))
-   {
-      cJSON_Delete(root);
-      return json_body_error(out_buf, out_cap, 400, "scope must be current or all");
-   }
-   if (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":{\"type\":\"invalid_scope\",\"message\":\"scope must be current or "
-               "all\"}}");
-      return 400;
-   }
-   if (cJSON_IsString(jp) && jp->valuestring[0])
-   {
-      if (strlen(jp->valuestring) >= project_cap)
-      {
-         cJSON_Delete(root);
-         return json_body_error(out_buf, out_cap, 400, "project id is too long");
-      }
-      snprintf(project, project_cap, "%s", jp->valuestring);
-   }
-
-   const char *verified_kind = NULL;
-   const char *verified_id = NULL;
-   int verified = kb_reqctx_verified_scope(&verified_kind, &verified_id);
-   if (strcmp(scope, "all") == 0)
-   {
-      cJSON_Delete(root);
-      /* A service credential is the managed deployment's data-plane identity:
-       * it spans projects but remains tenant-bounded by the resolved caller
-       * context and is still excluded from administrative routes. */
-      if (verified && strcmp(verified_kind, KB_SCOPE_KIND_SERVICE) != 0)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential "
-                  "cannot search all projects\"}}");
-         return 403;
-      }
-      *all_projects = 1;
-      return 0;
-   }
-
-   if (!project[0] && verified && strcmp(verified_kind, "project") == 0)
-      snprintf(project, project_cap, "%s", verified_id);
-   if (project[0] && verified && strcmp(verified_kind, "project") == 0 &&
-       strcmp(project, verified_id) != 0)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":{\"type\":\"forbidden\",\"message\":\"project is outside the "
-               "verified credential scope\"}}");
-      return 403;
-   }
-   cJSON_Delete(root);
-   if (project[0])
-      return 0;
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"error\":{\"type\":\"scope_required\",\"message\":\"no active project is "
-            "available; pass project or scope=all explicitly\"}}");
-   return 409;
-}
-
-/* Extract a JSON integer field from body. Returns default_val if not found. */
-
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message)
 {
    snprintf(out_buf, (size_t)out_cap, "{\"error\":\"%s\"}", message);
@@ -1200,8 +1118,8 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
 
       char project[256] = "";
       int all_projects = 0;
-      int scope_status =
-          kb_search_project_scope(body, project, sizeof(project), &all_projects, out_buf, out_cap);
+      int scope_status = kb_http_search_project_scope(body, project, sizeof(project), &all_projects,
+                                                      out_buf, out_cap);
       if (scope_status)
          return scope_status;
 
@@ -1244,30 +1162,12 @@ int kb_http_route_ex_context_impl(const char *method, const char *path, const ch
          return 503;
       }
 
-      /* The ranked backend returns a JSON error object for dependency and
-       * storage failures. Do not run that object through the hit reshaper: it
-       * has no results array, so doing so turns a failed embedding request into
-       * a misleading HTTP 200 with zero hits. */
-      cJSON *raw_json = cJSON_Parse(raw);
-      const cJSON *raw_error =
-          raw_json ? cJSON_GetObjectItemCaseSensitive(raw_json, "error") : NULL;
-      const cJSON *raw_results =
-          raw_json ? cJSON_GetObjectItemCaseSensitive(raw_json, "results") : NULL;
-      if (cJSON_IsString(raw_error))
+      int backend_status = kb_http_search_validate_backend(raw, out_buf, out_cap);
+      if (backend_status)
       {
-         snprintf(out_buf, (size_t)out_cap, "%s", raw);
-         cJSON_Delete(raw_json);
          free(raw);
-         return 503;
+         return backend_status;
       }
-      if (!cJSON_IsObject(raw_json) || !cJSON_IsArray(raw_results))
-      {
-         cJSON_Delete(raw_json);
-         free(raw);
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"invalid search backend response\"}");
-         return 503;
-      }
-      cJSON_Delete(raw_json);
 
       char used_mode[64] = "rrf";
       kb_http_json_str(raw, "fusion_mode", used_mode, sizeof(used_mode));
