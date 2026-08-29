@@ -1241,6 +1241,13 @@ check_output "catalog.show missing model stays typed" '"kind":"invalid_argument"
 RESP=$(http_call GET /v1/agent/list '{}') || true
 check_output "agent.list absent config stays typed" '"kind":"not_found"' echo "$RESP"
 
+# The dashboard's native list reads the same local config as agent.list. A
+# clean install without agents.json is an absent resource, not a failed
+# gateway, and must preserve both the typed body and the HTTP status.
+RESP=$(http_call GET /v1/agents '{}') || true
+check_output "dashboard agents absent config is not found" '404 ' echo "$RESP"
+check_output "dashboard agents absent config stays typed" '"kind":"not_found"' echo "$RESP"
+
 # ============================================================
 # 4. Session management
 # ============================================================

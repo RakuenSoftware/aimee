@@ -48,6 +48,19 @@
 
 #define SHTTP_RATE_WINDOW_SECS 60
 
+int server_http_declared_status(const char *json)
+{
+   cJSON *doc = cJSON_Parse(json);
+   if (!doc)
+      return 0;
+   cJSON *item = cJSON_GetObjectItemCaseSensitive(doc, "http_status");
+   int status = cJSON_IsNumber(item) && item->valueint >= 400 && item->valueint <= 599
+                    ? item->valueint
+                    : 200;
+   cJSON_Delete(doc);
+   return status;
+}
+
 int server_http_rate_check(server_http_rate_state_t *st, int limit_per_min, long now)
 {
    if (!st || limit_per_min <= 0)
