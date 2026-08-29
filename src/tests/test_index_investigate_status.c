@@ -139,6 +139,26 @@ int server_send_error(server_conn_t *conn, const char *message, const char *requ
    return 0;
 }
 
+/* Model a headless split deployment where the optional runtime-web module is
+ * disabled: kind survives, but the provider contributes no HTTP status. The
+ * index bridge itself must retain the KB enum's authoritative status. */
+void server_error_kind_apply(cJSON *resp, const char *kind)
+{
+   cJSON_DeleteItemFromObjectCaseSensitive(resp, "kind");
+   cJSON_DeleteItemFromObjectCaseSensitive(resp, "http_status");
+   cJSON_AddStringToObject(resp, "kind", kind);
+}
+
+cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id)
+{
+   (void)request_id;
+   cJSON *resp = cJSON_CreateObject();
+   cJSON_AddStringToObject(resp, "status", "error");
+   cJSON_AddStringToObject(resp, "message", message);
+   server_error_kind_apply(resp, kind);
+   return resp;
+}
+
 int server_active_project_from_cwd(const char *cwd, char *out, size_t outlen)
 {
    (void)cwd;
@@ -246,6 +266,14 @@ static cJSON *investigate(cJSON *req)
    return g_sent;
 }
 
+static cJSON *list_with_status(kb_client_result_status_t status)
+{
+   g_last = status;
+   assert(handle_index_list(NULL, NULL, NULL) == 0);
+   assert(g_sent);
+   return g_sent;
+}
+
 static const char *str_field(const cJSON *o, const char *key)
 {
    const cJSON *s = cJSON_GetObjectItemCaseSensitive(o, key);
@@ -287,8 +315,23 @@ static cJSON *req_batch(const char *a, const char *b)
 
 int main(void)
 {
+   /* A KB authorization refusal is not an empty index and must not cross the
+    * HTTP adapter as 200. The typed KB status stays available for machines,
+    * while kind/http_status drive transport and CLI failure semantics. */
+   cJSON *resp = list_with_status(KB_CLIENT_RESULT_UNAUTHORIZED);
+   assert(strcmp(str_field(resp, "status"), "unauthorized") == 0);
+   assert(strcmp(str_field(resp, "kind"), SERVER_ERR_PERMISSION_DENIED) == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(resp, "http_status")->valueint == 403);
+   assert(!cJSON_GetObjectItemCaseSensitive(resp, "projects"));
+
+   resp = list_with_status(KB_CLIENT_RESULT_UNAVAILABLE);
+   assert(strcmp(str_field(resp, "status"), "unavailable") == 0);
+   assert(strcmp(str_field(resp, "kind"), SERVER_ERR_UNAVAILABLE) == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(resp, "http_status")->valueint == 503);
+   assert(!cJSON_GetObjectItemCaseSensitive(resp, "projects"));
+
    /* The index answered and had evidence. */
-   cJSON *resp = investigate(req_one("who calls the loader"));
+   resp = investigate(req_one("who calls the loader"));
    assert(strcmp(str_field(resp, "result_status"), "ok") == 0);
    assert(strcmp(row_status(resp, 0), "ok") == 0);
 
