@@ -12,13 +12,46 @@ implementation details.
 Before the bus, every new module needed its own queue, callback, logging path, and shutdown rules.
 Completeness depended on finding every call site.
 
-The bus gives each daemon one host and one full-stream tap:
+The bus gives each daemon one host, one private queue pair per client, and one
+full-stream tap. The data plane and evidence plane are related but not the same
+record:
 
-```text
-producer -> private outbound ring -> host -> private inbound ring -> consumer
-                                  |
-                                  +-> ordered capture and audit tap
+```mermaid
+flowchart LR
+    subgraph CLIENT_A[Producer client]
+        P[producer / request bridge]
+        O[private outbound ring]
+        P --> O
+    end
+
+    subgraph CORE[Daemon-owned core]
+        H[bus host<br/>admit, sequence, correlate, route]
+        A[shared payload arena]
+        T[ordered full-stream tap]
+        H <--> A
+        H --> T
+    end
+
+    subgraph CLIENT_B[Authorized consumer]
+        I[private inbound ring]
+        C[notification consumer<br/>or module handler]
+        I --> C
+    end
+
+    O --> H --> I
+    T --> CAP[prunable capture session]
+    T --> OBS[observability drain]
+    P -. ledger-classified metadata event .-> O
+    H --> DS[durability sink consumer]
+    DS --> WORM[(daemon WORM ledger)]
+    H -. overflow and producer-reap facts .-> WORM
+    CAP -. gap and prune facts .-> WORM
 ```
+
+The tap materializes the accepted stream for diagnostics. It is not the WORM
+writer. Ledger-classified module calls and rare loss/capture-state facts reach
+the durable sink through bounded paths that remain available when capture is
+missing or broken.
 
 That buys us:
 
@@ -32,14 +65,15 @@ That buys us:
 
 The last item is an extension surface, not a claim that every subsystem has moved already.
 
-Eighteen production C-to-Go process batches now cover every supervised process:
-`memory`, `learning`,
-`routing`, `delegates`, `tools`, `workspace`, `git`, `skills`,
-`response-composition`, `execution-policy`, `governance`, `workflows`, `roundtable`, `kb-synthesis`,
-`runtime-web`, `control-web`, and `benchmarks`.
+Twenty-three process identities now run in the Go multicall executable:
+`config`, `memory`, `learning`, `routing`, `delegates`, `tools`, `workspace`,
+`git`, `skills`, `response-composition`, `execution-policy`, `governance`,
+`workflows`, `roundtable`, `kb-synthesis`, `runtime-web`, `control-web`,
+`benchmarks`, `sandbox`, `economizer`, `postgres`, `aimee`, and `egress`.
 Each keeps its existing event kind and AMOD body contract, but the supervisor now
 starts an authenticated Go process for that identity. C adapters serve as parity
-fixtures.
+fixtures. DB2 remains the separately supervised C process in the current catalog;
+it uses the same admitted bus contract rather than an in-process exception.
 
 A moved stage is a bounded decision, and the storage-heavy or daemon
 orchestration code around it stays where it was. The memory rerank, the
@@ -129,6 +163,34 @@ kind. Wire version 3 permits a correlated request or reply to span ordered inlin
 message. The host keeps the route pending until the request is complete, and cancellation retires
 any partial request or reply.
 
+```mermaid
+sequenceDiagram
+    participant Caller as C caller or Go client
+    participant CallerOut as Caller outbound ring
+    participant Host as Bus host
+    participant ModuleIn as Module inbound ring
+    participant Module as Supervised module handler
+    participant ModuleOut as Module outbound ring
+    participant CallerIn as Caller inbound ring
+    participant Tap as Ordered tap
+
+    Caller->>CallerOut: request(kind, stage, correlation, deadline)
+    CallerOut->>Host: one frame or BUS_F_MORE fragments
+    Host->>Tap: accepted frames in host sequence
+    Host->>ModuleIn: route only after complete request
+    ModuleIn->>Module: bounded AMOD request body
+    Module->>ModuleOut: correlated reply or typed failure
+    ModuleOut->>Host: one frame or BUS_F_MORE fragments
+    Host->>Tap: accepted reply frames
+    Host->>CallerIn: reply only to original requester
+    CallerIn-->>Caller: success, timeout, cancellation, or capability error
+```
+
+The sequence diagram shows transport completion, not business durability.
+`publish` means the outbound ring accepted a frame; a synchronous module call
+completes only when the correlated reply is reassembled and validated. Declared
+ledger metadata is emitted beside this path without retaining raw bodies.
+
 Each client has its own queue pair. One slow consumer does not create an unbounded host queue.
 Kinds declare whether they block or may shed under pressure. Sheds become typed overflow records in
 the ordered tap and rare durable `bus.overflow` rows. Reaping a producer with blocked work similarly
@@ -200,6 +262,18 @@ A module process is not admitted because it connected. The host reads a policy d
 `<config dir>/modules.d/<daemon>` and admits only principals granted there, so a module started
 against a daemon with no matching grant is refused with `bus: attach denied` and never serves a
 stage. Each grant is one `*.grant` file (any other suffix is ignored) of `key=value` lines:
+
+```mermaid
+flowchart LR
+    M[module process] -->|SOCK_SEQPACKET attach| H[daemon bus host]
+    G[grant file] --> V[admission checks]
+    E[SO_PEERCRED and /proc executable] --> V
+    H --> V
+    V -->|deny| D[no mappings<br/>no stage service]
+    V -->|admit| F[pass control, queue-pair,<br/>and arena descriptors]
+    F --> R[read-only control region<br/>private rings + shared arena]
+    R --> HB[heartbeats, deadlines,<br/>cancellation, and reap]
+```
 
 | Key | Meaning |
 | --- | --- |
