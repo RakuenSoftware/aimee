@@ -14,6 +14,7 @@
     "src/modules/memory/gw_stage_memory.c",
     "src/modules/memory/memory_advanced.c",
     "src/modules/memory/memory_assemble.c",
+    "src/modules/memory/memory_candidate_fusion.c",
     "src/modules/memory/memory_conflict.c",
     "src/modules/memory/memory_context.c",
     "src/modules/memory/memory_core.c",

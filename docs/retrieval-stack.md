@@ -128,6 +128,36 @@ pretending their raw scores share one scale.
 Scope and authorization apply before candidates reach the result. A later filter is not sufficient
 because ranking and timing can leak excluded data.
 
+## Sub-query fusion
+
+Recall expands a query into sub-queries two ways: an LLM rewrite
+(`memory_rewrite_decompose`) and a heuristic token-window split inside candidate
+generation. Each expansion runs its own retrieval pass and produces its own ranked list.
+
+Those lists are merged **interleaved**, by rank: rank 0 from every list, then rank 1, and so on.
+They are never concatenated, and their scores are never compared across lists, because the legs that
+produce them do not share a score scale.
+
+This is a capacity decision before it is a ranking one. The candidate array is 96 slots and a single
+retrieval pass can fill it alone, so concatenating spends the budget on whichever list runs first:
+the second sub-query gets what is left, and the legs that run after the merge can get nothing.
+Nothing downstream can see that happen: the evicted rows never became candidates. Published paired
+measurements on multi-hop retrieval put naive parallel-and-pool sub-query expansion *below* running
+no expansion at all, with interleaved fusion well above both.
+
+Two ordering rules follow from the same reasoning:
+
+- the heuristic stage runs **after** the dense leg, never before it, so fragments of the query cannot
+  consume the slots the query itself needs;
+- lane membership is snapshotted and restored across sub-query passes, so the two-lane floor is built
+  from the caller's query rather than from whichever fragment ran last. The HyDE pass is deliberately
+  excluded: it is a full-fidelity pass over the real query, not a fragment.
+
+The heuristic stage has not yet been ablated on its own. It is on by default and
+`AIMEE_MEMORY_DECOMPOSE_HEURISTIC=0` turns it off for a benchmark run, which is what that flag is
+for. The fusion policy itself is in `src/modules/memory/memory_candidate_fusion.c`, split out of the
+retrieval TU so it is reachable from a unit test without a store.
+
 ## No cross-encoder rerank stage
 
 There is no reranker. Measured across 20 configurations and two embedders, the best cross-encoder
