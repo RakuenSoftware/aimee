@@ -18,6 +18,7 @@
 #include "kb_http.h"
 #include "kb_route_acl.h"
 #include "kb_scope.h"
+#include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
 #include "td_search_render.h"        /* consumer side of the /v1/search contract test */
 #include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
 #include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
@@ -4868,6 +4869,62 @@ static void test_code_callers_ok(void)
    assert(strstr(buf, "\"next_cursor\":null") != NULL);
 }
 
+/* "scope" has exactly three shapes and they are easy to conflate, because the
+ * absent case and the wrong-type case both leave no usable string. Absent must
+ * behave as "current", a valid keyword must pass through, and a present but
+ * non-string value must be a 400 -- never quietly treated as the default.
+ *
+ * Pinned here because the parse was reordered to validate before reading
+ * js->valuestring (it read the value first and only then tested the pointer,
+ * which cppcheck reported as a possible null dereference). The reorder is meant
+ * to be behaviour-preserving; this is what says so.
+ *
+ * With no verified credential and no project in the body, "current" resolves to
+ * no active project and the route asks the caller to be explicit (409). That is
+ * the success-shaped path here: it proves the value parsed as "current" rather
+ * than being rejected as malformed. */
+static void test_search_scope_absent_valid_and_wrong_type(void)
+{
+   char project[256], buf[4096];
+   int all = -1;
+
+   /* Absent behaves exactly as an explicit "current". */
+   assert(kb_http_search_project_scope("{}", project, sizeof(project), &all, buf, sizeof(buf)) ==
+          409);
+   assert(strstr(buf, "scope_required") != NULL);
+   assert(kb_http_search_project_scope("{\"scope\":\"current\"}", project, sizeof(project), &all,
+                                       buf, sizeof(buf)) == 409);
+   assert(strstr(buf, "scope_required") != NULL);
+
+   /* "current" with a project resolves. */
+   all = -1;
+   assert(kb_http_search_project_scope("{\"scope\":\"current\",\"project\":\"proj-alpha\"}",
+                                       project, sizeof(project), &all, buf, sizeof(buf)) == 0);
+   assert(all == 0);
+   assert(strcmp(project, "proj-alpha") == 0);
+
+   /* "all" resolves without a project and sets the flag. */
+   all = -1;
+   assert(kb_http_search_project_scope("{\"scope\":\"all\"}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 0);
+   assert(all == 1);
+
+   /* Present but not a string: rejected as malformed, not defaulted. A JSON
+    * null is a real cJSON item rather than a missing key, so it lands here and
+    * not on the absent path above. */
+   assert(kb_http_search_project_scope("{\"scope\":7}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 400);
+   assert(kb_http_search_project_scope("{\"scope\":null}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 400);
+
+   /* A string that is neither keyword is a 400 too. */
+   assert(kb_http_search_project_scope("{\"scope\":\"sideways\"}", project, sizeof(project), &all,
+                                       buf, sizeof(buf)) == 400);
+   assert(strstr(buf, "invalid_scope") != NULL);
+
+   printf("  search scope: absent behaves as current, wrong type rejected\n");
+}
+
 static void test_code_scope_all_keeps_active_project_first(void)
 {
    char buf[4096];
@@ -7537,6 +7594,7 @@ int main(void)
    test_code_search_ok();
    test_code_callers_missing_symbol();
    test_code_callers_ok();
+   test_search_scope_absent_valid_and_wrong_type();
    test_code_scope_all_keeps_active_project_first();
    test_code_hybrid_ok();
    test_code_hybrid_memory_leg();
