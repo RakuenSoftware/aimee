@@ -761,6 +761,11 @@ ENV_DESC = {
     "SYNTHESIS_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to SYNTHESIS_ENDPOINT's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
     "EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over SYNTHESIS_ENDPOINT for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
+    "AIMEE_KB_DOCUMENT_INSPECTION": (
+        "Knowledge base (aimee-kb)",
+        "Enable fail-closed structural inspection of HTML and OOXML hidden, active, external, "
+        "and resource channels before conversion or staged KB writes. Off when unset.",
+    ),
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
     "AIMEE_KB_CLIENT_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "Rotating bearer aimee-server presents on its mTLS connection to aimee-kb. Bootstrap seals the first-boot value into Vault and removes it from the environment; the client reads it live for every request."),
     "AIMEE_KB_CLIENT_OIDC_TOKEN": ("Knowledge base (aimee-kb)", "OIDC access token aimee-server presents as its third service-identity layer. Bootstrap seals it into Vault; the KB pins RS256, issuer, audience, typ=at+jwt, subject, and the subject-to-certificate service name."),

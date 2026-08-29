@@ -411,21 +411,42 @@ static const char *field_value(const cJSON *field, const cli_args_t *opts, const
       int start = cJSON_IsNumber(fi) ? (int)fi->valuedouble : 0;
       if (opts->pos_count <= start)
          return NULL;
-      static char joined_pos[8192];
+      /* Sized to the join, not to a guess. This was a fixed 8 KiB buffer whose
+       * loop broke once the next word would not fit, which silently discarded
+       * the rest of the user's text: `aimee memory store k <8 KiB or more>`
+       * stored a truncated note with no warning, and when the FIRST word alone
+       * exceeded the buffer the join came out empty, so the server refused it
+       * with "requires a non-empty key and content" -- blaming the caller for
+       * text it had just dropped. Measured boundary: 8191 bytes stored, 8192
+       * reported as empty.
+       *
+       * Ownership is unchanged: the result stays valid until the next call, the
+       * same contract the static array gave, so callers need no edit. */
+      static char *joined_pos = NULL;
+      static size_t joined_cap = 0;
+      size_t need = 1;
+      for (int i = start; i < opts->pos_count; i++)
+         need += (opts->positional[i] ? strlen(opts->positional[i]) : 0) + (i > start ? 1 : 0);
+      if (need > joined_cap)
+      {
+         char *grown = realloc(joined_pos, need);
+         if (!grown)
+            return NULL;
+         joined_pos = grown;
+         joined_cap = need;
+      }
       size_t at = 0;
       joined_pos[0] = '\0';
       for (int i = start; i < opts->pos_count; i++)
       {
          const char *w = opts->positional[i] ? opts->positional[i] : "";
          size_t wl = strlen(w);
-         if (at + wl + (at ? 1 : 0) >= sizeof(joined_pos))
-            break;
          if (at)
             joined_pos[at++] = ' ';
          memcpy(joined_pos + at, w, wl);
          at += wl;
-         joined_pos[at] = '\0';
       }
+      joined_pos[at] = '\0';
       /* An empty join is still a JOIN: `memory store k ""` has a positional at
        * index 1, and positionals_joined returns "" rather than NULL, so the
        * marshaller sends content:"". Returning NULL here fell through to
