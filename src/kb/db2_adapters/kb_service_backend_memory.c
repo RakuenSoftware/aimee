@@ -19,6 +19,7 @@
 #include "memory.h"
 #include "modules/db2/c/memory_export.h"
 #include "modules/db2/c/memory_lifecycle.h" /* db2_memory_valid_at */
+#include "modules/db2/c/lifecycle.h"        /* db2_conn */
 #include "modules/db2/c/memory_payload.h"
 #include "modules/db2/c/memory_query.h"
 #include "modules/db2/c/memory_scope_query.h"
@@ -61,6 +62,36 @@ static cJSON *kbs_memory_row_to_json(const memory_t *m)
    cJSON_AddNumberToObject(obj, "retrieval_score", m->retrieval_score);
    cJSON_AddNumberToObject(obj, "hybrid_rank", m->hybrid_rank);
    return obj;
+}
+
+/* memory_t intentionally remains a bounded ranking/working-set value, but a
+ * read-by-id response is an audit surface and must return the row verbatim.
+ * Fetch content separately so this one JSON path does not inherit the
+ * memory_t.content[2048] cap. The same scope predicate as db2_memory_get keeps
+ * the second query from widening visibility. */
+static char *kbs_memory_content_dup(int64_t memory_id)
+{
+   void *conn = db2_conn();
+   if (!conn || memory_id <= 0)
+      return NULL;
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT content FROM memories WHERE id=?1" DB2_MEMORY_SCOPE_FILTER_SQL("memories.id"),
+       err, sizeof(err));
+   if (!st)
+      return NULL;
+   aimee_pg_bind_int64(st, "?1", memory_id);
+   db2_memory_scope_bind_current(st);
+
+   char *content = NULL;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *value = aimee_pg_column_text(st, 0);
+      content = strdup(value ? value : "");
+   }
+   aimee_pg_finalize(st);
+   return content;
 }
 
 cJSON *db2_kb_service_memory_find_facts_json(const char *query, int limit)
@@ -1255,6 +1286,16 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
    cJSON *obj = kbs_memory_row_to_json(&m);
    if (!obj)
    {
+      cJSON_Delete(resp);
+      return NULL;
+   }
+   char *full_content = kbs_memory_content_dup(m.id);
+   cJSON *content_json = full_content ? cJSON_CreateString(full_content) : NULL;
+   free(full_content);
+   if (!content_json || !cJSON_ReplaceItemInObjectCaseSensitive(obj, "content", content_json))
+   {
+      cJSON_Delete(content_json);
+      cJSON_Delete(obj);
       cJSON_Delete(resp);
       return NULL;
    }

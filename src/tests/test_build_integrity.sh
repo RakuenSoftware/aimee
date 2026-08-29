@@ -201,6 +201,7 @@ printf 'reached-binary:%s\n' "${1:-none}"
 SH
 cat >"$kb_shared_dir/pgbin/pg_isready" <<'SH'
 #!/bin/sh
+printf '%s\n' "$*" >"$PG_ISREADY_LOG"
 exit 0
 SH
 cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
@@ -216,17 +217,21 @@ SH
 chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
     "$kb_shared_dir/pgbin/initdb" "$kb_shared_dir/bin/module-supervisor.sh"
 kb_shared_stderr="$kb_shared_dir/stderr.log"
+kb_shared_pg_isready="$kb_shared_dir/pg-isready.log"
 kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
     AIMEE_HOME="$kb_shared_dir/home" \
     AIMEE_DB2_PG_BIN="$kb_shared_dir/pgbin" \
+    PG_ISREADY_LOG="$kb_shared_pg_isready" \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
     managed-server-identity 2>"$kb_shared_stderr" || true)
 rm -rf "$kb_entrypoint_test_dir"
 if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
+    grep -q -- '--username=aimee' "$kb_shared_pg_isready" &&
+    grep -q -- '--dbname=postgres' "$kb_shared_pg_isready" &&
     ! grep -Eq 'initdb-must-not-run|module-supervisor-must-not-run' "$kb_shared_stderr"; then
-    pass "KB one-shot reuses the running cluster without duplicating its modules"
+    pass "KB one-shot reuses the running cluster with an explicit database identity"
 else
-    fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
+    fail "KB entrypoint did not reuse the running cluster cleanly ($kb_shared_output, pg_isready=$(tr '\n' ' ' <"$kb_shared_pg_isready"), stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
 fi
 rm -rf "$kb_shared_dir"
 

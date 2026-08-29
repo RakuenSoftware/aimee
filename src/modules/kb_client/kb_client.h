@@ -826,6 +826,12 @@ typedef enum
    KB_VALID_AT_UNKNOWN
 } kb_valid_at_t;
 
+/* Read-by-id JSON variant for lossless presentation/audit surfaces. The
+ * returned memory object belongs to the caller. Unlike memory_t, its content
+ * is not capped at 2047 bytes. Returns 0 on hit, 1 on miss, -1 on failure. */
+int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
+                                    kb_valid_at_t *verdict);
+
 /* As-of variant of kb_client_memory_get: forwards `as_of` to aimee-kb, which
  * owns the valid_from/valid_until interval, and hands back its verdict. The
  * plain entry point above cannot express this -- memory_t has no field for it
