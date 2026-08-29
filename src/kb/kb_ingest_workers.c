@@ -347,6 +347,11 @@ static void *kbiw_timer_thread(void *arg)
       if (interval_secs <= 0)
          interval_secs = 6 * 3600;
 
+      /* Same reason as the watch thread, over a much longer wait: the enqueue
+       * above leases lazily, and this loop then sleeps out the whole ingest
+       * interval (six hours by default) with nothing to end the unit of work. */
+      db2_lease_release_idle();
+
       int slept = 0;
       while (slept < interval_secs)
       {
@@ -431,6 +436,13 @@ static void *kbiw_watch_thread(void *arg)
    char evbuf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
    while (!ctx->ingest_stop)
    {
+      /* Let go before waiting for the next filesystem event. The enqueue below
+       * leases a pooled DB2 connection lazily and this thread has no unit of
+       * work to end, so without this it kept the connection across an idle
+       * watch -- which on a quiet tree is the whole life of the process, and
+       * the pool reaper reports it as a stuck lease. Releasing here costs one
+       * re-acquire per burst of edits, not per event. */
+      db2_lease_release_idle();
       struct pollfd pfd = {.fd = ifd, .events = POLLIN};
       if (poll(&pfd, 1, 1000) <= 0)
          continue;
