@@ -10,16 +10,38 @@ module events through one bounded bus.
 flowchart LR
     T[AI tool] -->|hooks / MCP / ACP| C[aimee thin client]
     B[Browser] --> W[aimee-runtime-web]
-    C -->|local UDS or authenticated /v1| S[aimee-server]
+
+    subgraph RUNTIME[Server container]
+        S[aimee-server resource plane]
+        F[aimee-wfe workflow harness]
+        SB[server event-bus host]
+        SM[supervised process modules]
+        M[aimee store module]
+        PG[postgres module]
+
+        S <--> SB
+        F -->|typed DB1 calls| SB
+        SB <--> SM
+        SB <--> M
+        M --> PG
+    end
+
+    subgraph KNOWLEDGE[KB container]
+        K[aimee-kb resource plane]
+        KB[kb event-bus host]
+        KM[supervised process modules]
+        K <--> KB
+        KB <--> KM
+    end
+
+    C -->|local UDS or authenticated /v1| S
     W -->|authenticated /v1| S
-    W -->|workflow API| F[aimee-wfe]
+    W -->|workflow API| F
     F -->|typed resource calls| S
-    S -->|typed /v1| K[aimee-kb, one-KB profile]
+    S -->|typed /v1| K
     S -->|provider API| P[model providers]
     K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
-    S -->|module bus| M[aimee store module]
-    F -->|module bus| M
-    M -->|postgres module| D1[(DB1 PostgreSQL)]
+    PG --> D1[(DB1 PostgreSQL)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
 ```
 
@@ -102,12 +124,19 @@ module](proposals/pending/module-egress-single-point.md).
 
 ```mermaid
 flowchart LR
-    P[producer] --> O[private outbound ring]
+    P[producer or module bridge] --> O[private outbound ring]
     O --> H[bus host]
     H --> I[private inbound ring]
     I --> C[consumer]
-    H --> A[ordered audit / capture tap]
+    H --> T[ordered full-stream tap]
     H <--> R[shared payload arena]
+    T --> CAP[diagnostic capture]
+    T --> OBS[authorized observability drain]
+    P -. declared ledger metadata event .-> O
+    H --> DS[durability sink consumer]
+    DS --> WORM[(daemon WORM ledger)]
+    H -. overflow / producer-reap facts .-> WORM
+    CAP -. gap / prune facts .-> WORM
 ```
 
 Each daemon creates one host. Admitted clients receive a read-only control region, their own queue
@@ -124,9 +153,11 @@ The current load-bearing consumer is observability:
 - MCP and tool-call activity;
 - tool completion outcomes.
 
-The host tap writes its own ordered observability stream. WORM evidence uses a
-separate producer/outbox path and does not run on, call, or depend on the tap;
-this makes compromise of either side independently detectable.
+The host tap writes its own ordered diagnostic stream. Ledger-classified module
+calls emit bounded intent/reply metadata through the durable emitter, while
+capture gaps, pruning, overflow, and producer reap use direct rare-event sinks.
+Those WORM paths do not depend on capture being healthy. Capture can therefore
+remain prunable without making an absent interval look idle.
 
 Small events are inline. Large events use generation-checked arena leases. Backpressure is bounded;
 a producer blocks or receives `would_block`, and shed delivery is represented by an overflow event.
