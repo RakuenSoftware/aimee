@@ -2,6 +2,8 @@
 #ifndef DEC_KB_HTTP_SEARCH_H
 #define DEC_KB_HTTP_SEARCH_H 1
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C"
 {
@@ -15,6 +17,16 @@ extern "C"
     * the caller falls through to the default ranked search path. */
    int kb_http_search_facets(const char *body, const char *preferred_project, int all_projects,
                              char *out_buf, int out_cap);
+
+   /* Resolve the caller-bound project scope shared by the facet and ranked
+    * search paths. Returns zero on success or an HTTP status after writing the
+    * error response. */
+   int kb_http_search_project_scope(const char *body, char *project, size_t project_cap,
+                                    int *all_projects, char *out_buf, int out_cap);
+
+   /* Reject dependency/storage errors and malformed ranked-backend envelopes
+    * before the public route reshapes their results. */
+   int kb_http_search_validate_backend(const char *body, char *out_buf, int out_cap);
 
 #ifdef __cplusplus
 }
