@@ -2060,54 +2060,19 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       return safe_strdup(cancel_msg);
    }
 
-   /* --- Argument normalization: resolve common aliases --- */
+   /* --- Argument canonicalization ---------------------------------------
+    *
+    * One shape, decided in one place (headers/tool_args_coerce.h). The agent
+    * loop canonicalizes BEFORE its gates and hands the result down, so for that
+    * caller this is a no-op; the call stays here for the entry points that do
+    * not go through the loop (script RPC, the MCP gateway), which would
+    * otherwise dispatch un-normalized arguments. Idempotent, so both are safe. */
    {
-      static const struct
+      cJSON *canonical = tool_args_canonicalize(agent_tool_get_schema_cached(name), args);
+      if (canonical && canonical != args)
       {
-         const char *from;
-         const char *to;
-      } aliases[] = {{"filepath", "path"}, {"file_path", "path"}, {"file", "path"},
-                     {"filename", "path"}, {"file_name", "path"}, {"cmd", "command"},
-                     {"dir", "path"},      {"directory", "path"}, {"msg", "message"},
-                     {NULL, NULL}};
-      for (int i = 0; aliases[i].from; i++)
-      {
-         cJSON *f = cJSON_GetObjectItem(args, aliases[i].from);
-         if (f && !cJSON_GetObjectItem(args, aliases[i].to))
-         {
-            cJSON *det = cJSON_DetachItemFromObject(args, aliases[i].from);
-            if (det)
-               cJSON_AddItemToObject(args, aliases[i].to, det);
-         }
-      }
-      /* Coerce string integers: "5" → 5 for offset/limit/count fields */
-      static const char *int_fields[] = {"offset", "limit", "count", "max_results", NULL};
-      for (int i = 0; int_fields[i]; i++)
-      {
-         cJSON *f = cJSON_GetObjectItem(args, int_fields[i]);
-         if (f && cJSON_IsString(f))
-         {
-            char *end = NULL;
-            long v = strtol(f->valuestring, &end, 10);
-            if (end && *end == '\0' && f->valuestring != end)
-               cJSON_ReplaceItemInObject(args, int_fields[i], cJSON_CreateNumber(v));
-         }
-      }
-
-      /* Schema-driven coercion (small/local model providers emit ints/bools
-       * as strings, scalars where arrays are expected, JSON strings where
-       * objects are expected). Runs after the targeted int-field block so
-       * tools whose schema isn't in the registry still benefit from the
-       * fallback. */
-      cJSON *schema = agent_tool_get_schema_cached(name);
-      if (schema)
-      {
-         cJSON *coerced = tool_args_coerce(schema, args);
-         if (coerced && coerced != args)
-         {
-            cJSON_Delete(args);
-            args = coerced;
-         }
+         cJSON_Delete(args);
+         args = canonical;
       }
    }
 

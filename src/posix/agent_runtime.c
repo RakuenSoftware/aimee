@@ -9,6 +9,7 @@
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
 #include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
+#include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
@@ -1670,6 +1671,35 @@ native_provider_http:
       agent_tools_begin_turn(turn);
 
       liveness_progress_action_t progress_action = LIVENESS_PROGRESS_NONE;
+
+      /* Canonicalize each call's arguments ONCE, here, before anything reads
+       * them.
+       *
+       * The alternative is what this replaced: validation normalized a copy it
+       * discarded, the dispatcher normalized differently and executed THAT, and
+       * in between execution-policy and the audit record both saw the raw
+       * arguments. So the authorizer could permit one shape while the tool ran
+       * another, and the ledger recorded a call that never executed.
+       *
+       * Rewriting in place is what makes that structural rather than a rule to
+       * remember: `arguments` is owned by parsed_response_t and freed by
+       * agent_free_parsed_response, so every reader below — the rounds-to-resume
+       * observer, tool_validate, policy_check_tool, directive_check_tool, the
+       * executor, the audit record and the stuck-detection signature — sees the
+       * same bytes without each having to opt in. A reader added later cannot
+       * miss it.
+       *
+       * The assistant message keeps the model's original arguments: that is the
+       * model's own turn in the transcript, not a description of what ran. */
+      for (int i = 0; i < parsed.call_count; i++)
+      {
+         char *canonical = tool_args_canonicalize_json(
+             agent_tool_get_schema_cached(parsed.calls[i].name), parsed.calls[i].arguments);
+         if (!canonical)
+            continue; /* unparseable JSON: leave it for tool_validate to report */
+         free(parsed.calls[i].arguments);
+         parsed.calls[i].arguments = canonical;
+      }
 
       /* Rounds-to-resume accounting: judge what the model ASKED for, before the
        * tools run — a re-derivation is a re-derivation whether or not it
