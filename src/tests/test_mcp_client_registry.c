@@ -1342,6 +1342,18 @@ static void test_prose_trim_keeps_tools_callable(void)
 
 int main(void)
 {
+   /* The unit-test runner deliberately gives parallel binaries one safe shared
+    * HOME.  Artifact trust pins are process-external state, though, and a
+    * concurrently launched server can legitimately populate that shared pin
+    * directory while this white-box registry fixture is changing its mock
+    * manifests.  Give this process its own trust root so the result never
+    * depends on test ordering or another binary's first-use pin. */
+   char trust_home[512];
+   snprintf(trust_home, sizeof(trust_home), "%s/aimee-mcp-registry-home-XXXXXX", platform_tmpdir());
+   assert(mkdtemp(trust_home) != NULL);
+   assert(setenv("AIMEE_HOME", trust_home, 1) == 0);
+   unsetenv("AIMEE_ARTIFACT_TRUST_MODE");
+
    test_prose_trim_keeps_tools_callable();
    printf("test_mcp_client_registry\n");
    test_tools_list_surface();
