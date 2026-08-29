@@ -8,7 +8,7 @@
 #include "client_config.h"
 #include "cJSON.h"
 
-int cmd_profile_run(int argc, char **argv);
+int cmd_profile_run(int argc, char **argv, int json_output);
 
 static int g_profile_created;
 
@@ -46,20 +46,20 @@ static void test_create_show_delete_profile(void)
    unsetenv("AIMEE_PROFILE");
 
    char *create_args[] = {(char *)"create", (char *)"coder"};
-   assert(cmd_profile_run(2, create_args) == 0);
+   assert(cmd_profile_run(2, create_args, 0) == 0);
    assert(access(root, F_OK) != 0);
 
    char *list_args[] = {(char *)"list"};
-   assert(cmd_profile_run(1, list_args) == 0);
+   assert(cmd_profile_run(1, list_args, 0) == 0);
 
    char *show_args[] = {(char *)"show", (char *)"coder"};
-   assert(cmd_profile_run(2, show_args) == 0);
+   assert(cmd_profile_run(2, show_args, 0) == 0);
 
    char *delete_args[] = {(char *)"delete", (char *)"coder", (char *)"--force"};
-   assert(cmd_profile_run(3, delete_args) == 0);
+   assert(cmd_profile_run(3, delete_args, 0) == 0);
    assert(g_profile_created == 0);
-   assert(cmd_profile_run(2, show_args) != 0);
-   assert(cmd_profile_run(1, list_args) == 0);
+   assert(cmd_profile_run(2, show_args, 0) != 0);
+   assert(cmd_profile_run(1, list_args, 0) == 0);
    assert(access(root, F_OK) != 0);
    printf("  PASS: test_create_show_delete_profile\n");
 }
@@ -72,7 +72,7 @@ static void test_invalid_profile_name_rejected(void)
    unsetenv("AIMEE_PROFILE");
 
    char *show_args[] = {(char *)"show", (char *)"../bad"};
-   assert(cmd_profile_run(2, show_args) != 0);
+   assert(cmd_profile_run(2, show_args, 0) != 0);
    assert(access(root, F_OK) != 0);
    printf("  PASS: test_invalid_profile_name_rejected\n");
 }

@@ -121,6 +121,17 @@ fi
 check "version" $AIMEE version
 check "version flag" $AIMEE --version
 check_output "version --json" "\"version\"" $AIMEE --json version
+check_output "presence default action --json" "[" $AIMEE --json presence
+check_output "primary default action --json" "\"agent\"" $AIMEE --json primary
+check_output "profile list --json" "\"profiles\":[" $AIMEE --json profile list
+check_output "profile current --json" "\"profile\":\"default\"" \
+    $AIMEE --json profile current
+check_output "profile create --json" "\"profile\":\"cli-json-test\"" \
+    $AIMEE --json profile create cli-json-test
+check_output "profile show --json" "\"config\":\"present\"" \
+    $AIMEE --json profile show cli-json-test
+check_output "profile delete --json" "\"deleted\":\"cli-json-test\"" \
+    $AIMEE --json profile delete cli-json-test --force
 
 # --- Unknown commands ---
 # A typo used to take the same fallback as a genuine routing gap and answer
