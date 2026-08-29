@@ -304,11 +304,10 @@ int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return skill_send_error(conn, "skill.eval-exec options must be numeric");
    if (!isfinite(repeats_number) || !isfinite(max_tokens_number) || !isfinite(minimum_delta) ||
        !isfinite(max_case_cost) || !isfinite(max_total_cost) || repeats_number < 1.0 ||
-       repeats_number > 5.0 || repeats_number != floor(repeats_number) ||
-       max_tokens_number < 1.0 || max_tokens_number > 4096.0 ||
-       max_tokens_number != floor(max_tokens_number) || minimum_delta <= 0.0 ||
-       minimum_delta > 1.0 || max_case_cost <= 0.0 || max_total_cost <= 0.0 ||
-       max_case_cost > max_total_cost)
+       repeats_number > 5.0 || repeats_number != floor(repeats_number) || max_tokens_number < 1.0 ||
+       max_tokens_number > 4096.0 || max_tokens_number != floor(max_tokens_number) ||
+       minimum_delta <= 0.0 || minimum_delta > 1.0 || max_case_cost <= 0.0 ||
+       max_total_cost <= 0.0 || max_case_cost > max_total_cost)
       return skill_send_error(conn, "invalid executable eval bounds");
 
    skill_server_trial_runner_t runner;
@@ -339,7 +338,9 @@ int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "skill", name);
    cJSON_AddStringToObject(resp, "status",
-                           result.inconclusive ? "inconclusive" : result.passed ? "pass" : "fail");
+                           result.inconclusive ? "inconclusive"
+                           : result.passed     ? "pass"
+                                               : "fail");
    cJSON_AddBoolToObject(resp, "passed", result.passed);
    cJSON_AddBoolToObject(resp, "inconclusive", result.inconclusive);
    cJSON_AddStringToObject(resp, "manifest_digest", result.manifest_digest);

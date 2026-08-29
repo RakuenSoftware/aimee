@@ -1822,8 +1822,8 @@ static void test_skill_eval_exec_route_marshaled(void)
    cJSON *req = marshal_request(route.method, 14, argv + 1);
    assert(req != NULL);
    assert(strcmp(cJSON_GetObjectItem(req, "method")->valuestring, "skill.eval_exec") == 0);
-   assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring,
-                 "verification-before-completion") == 0);
+   assert(strcmp(cJSON_GetObjectItem(req, "name")->valuestring, "verification-before-completion") ==
+          0);
    assert(strcmp(cJSON_GetObjectItem(req, "agent")->valuestring, "test-agent") == 0);
    assert(cJSON_GetObjectItem(req, "repeats")->valueint == 3);
    assert(cJSON_GetObjectItem(req, "max_tokens")->valueint == 512);

@@ -247,6 +247,9 @@ Subcommands:
 ```
   list             List available skills
   show <name>      Print a skill body or support file
+  eval <name>      Run stored-response skill eval fixtures
+  eval-fixtures <name>  Alias for eval
+  eval-exec <name> Run paired executable held-out skill trials
   create           Create a project skill from a markdown file
   patch            Patch a project skill by string replacement
   lifecycle        Apply stale/archive lifecycle transitions
