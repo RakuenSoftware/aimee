@@ -199,7 +199,7 @@ static void test_alias_rewrites_only_toward_a_declared_parameter(void)
 {
    cJSON *schema =
        cJSON_Parse("{\"type\":\"object\",\"properties\":{\"path\":{\"type\":\"string\"}}}");
-   cJSON *raw = cJSON_Parse("{\"filepath\":\"/tmp/x\"}");
+   cJSON *raw = cJSON_Parse("{\"filepath\":\"/doc/a.txt\"}");
    cJSON *out = tool_args_canonicalize(schema, raw);
    assert(cJSON_GetObjectItemCaseSensitive(out, "path") != NULL);
    assert(cJSON_GetObjectItemCaseSensitive(out, "filepath") == NULL);
@@ -210,10 +210,10 @@ static void test_alias_rewrites_only_toward_a_declared_parameter(void)
    /* A tool whose real parameter IS `file` keeps it. */
    cJSON *schema2 =
        cJSON_Parse("{\"type\":\"object\",\"properties\":{\"file\":{\"type\":\"string\"}}}");
-   cJSON *raw2 = cJSON_Parse("{\"file\":\"/tmp/y\"}");
+   cJSON *raw2 = cJSON_Parse("{\"file\":\"/doc/b.txt\"}");
    cJSON *out2 = tool_args_canonicalize(schema2, raw2);
    cJSON *kept = cJSON_GetObjectItemCaseSensitive(out2, "file");
-   assert(kept && cJSON_IsString(kept) && strcmp(kept->valuestring, "/tmp/y") == 0);
+   assert(kept && cJSON_IsString(kept) && strcmp(kept->valuestring, "/doc/b.txt") == 0);
    assert(cJSON_GetObjectItemCaseSensitive(out2, "path") == NULL);
    cJSON_Delete(out2);
    cJSON_Delete(raw2);

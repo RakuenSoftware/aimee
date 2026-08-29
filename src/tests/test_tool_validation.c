@@ -208,13 +208,13 @@ static void test_validate_alias_filepath_normalized(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = canonicalize_then_validate("read_file", "{\"filepath\":\"/tmp/x\"}", err, sizeof(err));
+   const char *raw = "{\"filepath\":\"/tmp/x\"}";
+   int rc = canonicalize_then_validate("read_file", raw, err, sizeof(err));
    assert(rc == 0);
 
    /* Load-bearing: the alias is resolved in the bytes that go on to execute,
     * not merely inside the validator. */
-   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached("read_file"),
-                                                 "{\"filepath\":\"/tmp/x\"}");
+   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached("read_file"), raw);
    assert(canonical != NULL);
    assert(strstr(canonical, "\"path\"") != NULL);
    assert(strstr(canonical, "filepath") == NULL);
@@ -251,7 +251,7 @@ static void test_validate_does_not_rewrite_arguments(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("read_file", "{\"filepath\":\"/tmp/x\"}", err, sizeof(err));
+   int rc = tool_validate("read_file", "{\"filepath\":\"/doc/a.txt\"}", err, sizeof(err));
    assert(rc != 0); /* `path` is required and an un-canonicalized call lacks it */
    teardown_db();
    printf("  PASS: tool_validate judges without rewriting\n");
