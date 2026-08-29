@@ -453,11 +453,11 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    if (!sid || !sid[0])
-      return server_send_error(conn, "missing session_id", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "missing session_id", NULL);
 
    db1_server_session_t row;
    if (db1_server_session_get(sid, &row) != 0)
-      return server_send_error(conn, "session not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "session not found", NULL);
 
    cJSON *resp = jo_ok();
    cJSON *s = cJSON_CreateObject();
