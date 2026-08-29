@@ -601,6 +601,76 @@ func TestChangedPlanOrFeedbackIsPositiveProgress(t *testing.T) {
 	}
 }
 
+func TestStructuredBlockerSetsRequireStrictShrinkageForProgress(t *testing.T) {
+	store, _ := newTestStore(t)
+	createTestItem(t, store, "wi_blocker_sets")
+	ctx := context.Background()
+	a := strings.Repeat("a", 64)
+	b := strings.Repeat("b", 64)
+	c := strings.Repeat("c", 64)
+	payload := func(set string) string {
+		return fmt.Sprintf(`{"version":1,"mode":"enforce","summary":"unresolved","blocker_set":%q}`, set)
+	}
+	cases := []struct {
+		set         string
+		wantRepeats int
+	}{
+		{a + "," + b, 1}, // baseline
+		{a + "," + b, 2}, // equal, despite changed hashes below
+		{a, 1},           // strict subset is demonstrated progress
+		{b, 2},           // swapped blocker is churn
+		{b + "," + c, 3}, // superset is regression
+	}
+	for i, tc := range cases {
+		out, err := store.RecordRequestedChanges(ctx, "wi_blocker_sets", "plan_gate", "plan",
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), payload(tc.set), 24, 9, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.IdenticalRepeats != tc.wantRepeats || out.Parked {
+			t.Fatalf("round %d outcome=%+v, want repeats=%d", i+1, out, tc.wantRepeats)
+		}
+	}
+}
+
+func TestStructuredBlockerSetsRemainShadowOnlyInObserveMode(t *testing.T) {
+	store, _ := newTestStore(t)
+	createTestItem(t, store, "wi_blocker_shadow")
+	ctx := context.Background()
+	set := strings.Repeat("a", 64)
+	payload := fmt.Sprintf(`{"version":1,"mode":"observe","summary":"unresolved","blocker_set":%q}`, set)
+	for i := 0; i < 2; i++ {
+		out, err := store.RecordRequestedChanges(ctx, "wi_blocker_shadow", "plan_gate", "plan",
+			fmt.Sprintf("plan-%d", i), fmt.Sprintf("feedback-%d", i), payload, 24, 2, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.Parked || out.IdenticalRepeats != 1 {
+			t.Fatalf("observe-only classification affected routing: %+v", out)
+		}
+	}
+}
+
+func TestEnforcedBlockerConvergenceFallsBackWhenStructureIsUnavailable(t *testing.T) {
+	store, _ := newTestStore(t)
+	createTestItem(t, store, "wi_blocker_fallback")
+	ctx := context.Background()
+	payload := `{"version":1,"mode":"enforce","summary":"unresolved","blocker_set":""}`
+	for i := 0; i < 2; i++ {
+		out, err := store.RecordRequestedChanges(ctx, "wi_blocker_fallback", "plan_gate", "plan",
+			"same-plan", "same-feedback", payload, 24, 2, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if out.IdenticalRepeats != i+1 {
+			t.Fatalf("round %d repeats=%d, want %d", i+1, out.IdenticalRepeats, i+1)
+		}
+		if out.Parked != (i == 1) {
+			t.Fatalf("round %d parked=%v", i+1, out.Parked)
+		}
+	}
+}
+
 func TestConcurrentStoreOpenDoesNotClearLiveBudgetLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
 	first, err := db1test.Open(t, path)

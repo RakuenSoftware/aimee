@@ -8,15 +8,18 @@
 #include "kb_http_ingest.h"
 #include "kb_http_ws.h"
 #include "kb_doc_hash.h"
+#include "kb_document_inspector.h"
 #include "kb_ingest_normalize.h"
 #include "modules/db2/c/kb_docs.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
 #include "kb_ocr_sidecar.h"
+#include "log.h"
 #include "cJSON.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <stdint.h>
 
 static int multipart_extract(const char *body, int body_len, const char *field_name, char *text_out,
@@ -99,6 +102,13 @@ static int multipart_extract(const char *body, int body_len, const char *field_n
       return 1;
    }
    return 0;
+}
+
+static int document_inspection_enabled(void)
+{
+   const char *value = getenv("AIMEE_KB_DOCUMENT_INSPECTION");
+   return value && (strcmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+                    strcasecmp(value, "on") == 0);
 }
 
 static int qparam(const char *qs, const char *key, char *val, int cap)
@@ -259,6 +269,42 @@ int handle_post_docs(const char *body, int body_len, char *out_buf, int out_cap)
                   st.chunks, st.regions, assets, text_layer, asset_only ? "true" : "false", sclass);
          return 201;
       }
+   }
+
+   /* Classify rich structure before conversion and before a staged row exists.
+    * A converter cannot erase a rejecting hidden or active channel. */
+   kb_document_channel_report_t channel_report;
+   memset(&channel_report, 0, sizeof(channel_report));
+   int inspection_enabled = document_inspection_enabled();
+   if (inspection_enabled &&
+       kb_document_inspect(filename, file_content, file_len, &channel_report) != 0)
+   {
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"document inspection failed\",\"code\":\"document_invalid\"}");
+      return 422;
+   }
+   if (inspection_enabled && channel_report.disposition != KB_DOCUMENT_CLEAN)
+   {
+      const char *disposition = kb_document_disposition_name(channel_report.disposition);
+      LOG_WARN("kb_document_inspector",
+               "document stopped before conversion disposition=%s format=%s raw_digest=%s "
+               "hidden_digest=%s",
+               disposition, channel_report.format, channel_report.raw_digest,
+               channel_report.first_hidden_digest);
+      int status = channel_report.disposition == KB_DOCUMENT_RESOURCE_LIMIT ? 413
+                   : channel_report.disposition == KB_DOCUMENT_UNSUPPORTED  ? 415
+                                                                            : 422;
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"error\":\"document stopped by structural inspection\","
+               "\"code\":\"document_%s\",\"inspector_version\":\"%s\","
+               "\"format\":\"%s\",\"raw_digest\":\"%s\",\"hidden_spans\":%d,"
+               "\"hidden_digest\":\"%s\",\"lexical_verdict\":\"%s\","
+               "\"external_relationships\":%d,\"active_content_flags\":%d}",
+               disposition, KB_DOCUMENT_INSPECTOR_VERSION, channel_report.format,
+               channel_report.raw_digest, channel_report.hidden_spans,
+               channel_report.first_hidden_digest, channel_report.lexical_verdict,
+               channel_report.external_relationships, channel_report.active_content_flags);
+      return status;
    }
 
    char *normalized = malloc((size_t)(file_len * 2 + 4096));

@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "kb_doc_hash.h"
+#include "kb_document_inspector.h"
 #include "kb_http_ingest.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
@@ -30,6 +31,45 @@ typedef struct
 } stub_doc_t;
 
 static char g_last_content_hash[KB_DOC_HASH_HEX_LEN + 1];
+static kb_document_disposition_t g_inspection_disposition = KB_DOCUMENT_CLEAN;
+
+int kb_document_inspect(const char *filename, const char *bytes, int nbytes,
+                        kb_document_channel_report_t *report)
+{
+   memset(report, 0, sizeof(*report));
+   snprintf(report->format, sizeof(report->format), "%s",
+            strstr(filename, ".html") ? "html" : "plain");
+   kb_doc_content_hash(bytes, nbytes, report->raw_digest);
+   report->disposition = g_inspection_disposition;
+   if (g_inspection_disposition == KB_DOCUMENT_REVIEW ||
+       g_inspection_disposition == KB_DOCUMENT_REJECT)
+   {
+      report->hidden_spans = 1;
+      snprintf(report->first_hidden_digest, sizeof(report->first_hidden_digest), "%064d", 1);
+      snprintf(report->lexical_verdict, sizeof(report->lexical_verdict), "%s",
+               g_inspection_disposition == KB_DOCUMENT_REJECT ? "reject" : "accept");
+   }
+   return 0;
+}
+
+const char *kb_document_disposition_name(kb_document_disposition_t disposition)
+{
+   switch (disposition)
+   {
+   case KB_DOCUMENT_REVIEW:
+      return "review";
+   case KB_DOCUMENT_REJECT:
+      return "reject";
+   case KB_DOCUMENT_UNSUPPORTED:
+      return "unsupported";
+   case KB_DOCUMENT_RESOURCE_LIMIT:
+      return "resource_limit";
+   case KB_DOCUMENT_INVALID:
+      return "invalid";
+   default:
+      return "clean";
+   }
+}
 
 int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
                          const char *converter, const char *converter_version,
@@ -296,6 +336,34 @@ static void test_post_docs_ok(void)
    assert(strcmp(g_last_content_hash, expected_hash) == 0);
 }
 
+static void test_structural_disposition_stops_before_write(void)
+{
+   const char *boundary = "----InspectBoundary";
+   char body[512], buf[1024];
+   int body_len =
+       snprintf(body, sizeof(body),
+                "--%s\r\n"
+                "Content-Disposition: form-data; name=\"file\"; filename=\"test.html\"\r\n"
+                "Content-Type: text/html\r\n\r\n"
+                "<div hidden>draft</div>\r\n"
+                "--%s--\r\n",
+                boundary, boundary);
+   g_last_content_hash[0] = '\0';
+   setenv("AIMEE_KB_DOCUMENT_INSPECTION", "1", 1);
+   g_inspection_disposition = KB_DOCUMENT_REVIEW;
+   int status = handle_post_docs(body, body_len, buf, sizeof(buf));
+   assert(status == 422);
+   assert(strstr(buf, "document_review") != NULL);
+   assert(g_last_content_hash[0] == '\0');
+
+   g_inspection_disposition = KB_DOCUMENT_UNSUPPORTED;
+   status = handle_post_docs(body, body_len, buf, sizeof(buf));
+   assert(status == 415);
+   assert(g_last_content_hash[0] == '\0');
+   g_inspection_disposition = KB_DOCUMENT_CLEAN;
+   unsetenv("AIMEE_KB_DOCUMENT_INSPECTION");
+}
+
 static void test_post_docs_missing_file(void)
 {
    char buf[256];
@@ -377,8 +445,10 @@ int main(void)
    printf("kb_http_ingest: ");
    assert(config_set_kb_pdf_ocr_enabled(0) == 0);
    assert(config_set_kb_pdf_assets_enabled(0) == 0);
+   unsetenv("AIMEE_KB_DOCUMENT_INSPECTION");
 
    test_post_docs_ok();
+   test_structural_disposition_stops_before_write();
    test_post_docs_missing_file();
    test_post_docs_manifest_filters_present_hashes();
    test_post_docs_manifest_requires_docs_array();

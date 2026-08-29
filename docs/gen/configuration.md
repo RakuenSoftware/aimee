@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 258 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 259 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -397,6 +397,7 @@ The binaries read 258 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
 | `AIMEE_KB_CONN` | First-boot KB connection string; sealed into the server Vault before long-lived startup. |
+| `AIMEE_KB_DOCUMENT_INSPECTION` | Enable fail-closed structural inspection of HTML and OOXML hidden, active, external, and resource channels before conversion or staged KB writes. Off when unset. |
 | `AIMEE_KB_EMBED_ALL_FILES` | Set to 1 to give EVERY indexed file a dense document vector, including source. Off by default because source files are already embedded by the code path, and embedding them a second time as prose was 82% of the doc-embedding token budget on a real corpus. Chunk rows are written either way, so lexical and FTS search over source is unaffected by this setting; only the redundant vector is skipped. |
 | `AIMEE_KB_EMIT_ENROLL` | Emit a client enrollment token on KB start. |
 | `AIMEE_KB_EMIT_SCOPE` | Scope for the emitted enrollment token. |
