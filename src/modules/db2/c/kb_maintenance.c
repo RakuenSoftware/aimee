@@ -301,7 +301,8 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    if (!st_ins)
    {
       /* Non-fatal — results are still valid even if we can't record the run. */
-      snprintf(out->error, sizeof(out->error), "maintenance_runs insert prepare failed: %.200s", err);
+      snprintf(out->error, sizeof(out->error), "maintenance_runs insert prepare failed: %.200s",
+               err);
    }
    else
    {
