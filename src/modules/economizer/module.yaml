@@ -17,7 +17,6 @@
     "src/modules/economizer/gateway_mutate_wire.c"
   ],
   "go_sources": [
-    "server-go/cmd/aimee-economizer-probe/main.go",
     "server-go/modules/economizer/breaker.go",
     "server-go/modules/economizer/budget.go",
     "server-go/modules/economizer/cjson.go",

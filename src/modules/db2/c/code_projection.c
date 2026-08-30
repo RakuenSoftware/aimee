@@ -786,12 +786,9 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                const char *name = aimee_pg_column_text(es, 0);
                if (!name)
                   continue;
-               char exp_key[GRAPH_ENDPOINT_MAX];
+               char exp_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                char enc_name[GRAPH_ENDPOINT_MAX];
                db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
-               char combined[GRAPH_ENDPOINT_MAX * 2];
-               snprintf(combined, sizeof(combined), "%s:%s", project,
-                        enc_name); /* simplified key */
                char enc_proj[GRAPH_ENDPOINT_MAX];
                db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
                snprintf(exp_key, sizeof(exp_key), "export:%s:%s", enc_proj, enc_name);
@@ -820,7 +817,7 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                char enc_proj[GRAPH_ENDPOINT_MAX], enc_name[GRAPH_ENDPOINT_MAX];
                db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
                db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
-               char imp_key[GRAPH_ENDPOINT_MAX];
+               char imp_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                snprintf(imp_key, sizeof(imp_key), "import:%s:%s", enc_proj, enc_name);
                if (strlen(imp_key) >= GRAPH_ENDPOINT_MAX)
                   continue;
@@ -848,7 +845,7 @@ int64_t db2_code_projection_sync_project(const char *project, int64_t gen_id)
                char enc_proj[GRAPH_ENDPOINT_MAX], enc_name[GRAPH_ENDPOINT_MAX];
                db2_entity_node_encode_component(project, enc_proj, sizeof(enc_proj));
                db2_entity_node_encode_component(name, enc_name, sizeof(enc_name));
-               char route_key[GRAPH_ENDPOINT_MAX];
+               char route_key[GRAPH_ENDPOINT_MAX * 2 + 16];
                snprintf(route_key, sizeof(route_key), "route:%s:%s", enc_proj, enc_name);
                if (strlen(route_key) >= GRAPH_ENDPOINT_MAX)
                   continue;

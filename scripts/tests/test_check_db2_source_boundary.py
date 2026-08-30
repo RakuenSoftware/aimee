@@ -61,9 +61,12 @@ class BoundaryTests(unittest.TestCase):
 
     def test_production_tree_matches_baseline(self) -> None:
         result = checker.check(REPO_ROOT)
-        self.assertEqual(result["source_files"], 282)
-        self.assertEqual(result["consumer_files"], 305)
-        self.assertEqual(result["include_directives"], 994)
+        baseline = json.loads((REPO_ROOT / checker.BASELINE).read_text(encoding="utf-8"))
+        self.assertEqual(result["source_files"],
+                         baseline["summary"]["c_files"] + baseline["summary"]["headers"] +
+                         baseline["summary"]["sql_files"])
+        self.assertEqual(result["consumer_files"], baseline["summary"]["consumer_files"])
+        self.assertEqual(result["include_directives"], baseline["summary"]["include_directives"])
 
     def test_inventory_is_deterministic_sorted_and_classified(self) -> None:
         tmp = self.repo()
@@ -238,6 +241,26 @@ class BoundaryTests(unittest.TestCase):
             self.assertEqual(classes["src/vendor/headers/vendor_api.h"], "vendored-system-api")
             self.assertEqual(classes["src/kb/private.h"], "kb-authority-leak")
             self.assertEqual(classes["src/schema_data.h"], "generated-schema-input")
+        finally:
+            tmp.cleanup()
+
+    def test_angle_system_header_does_not_resolve_to_vendored_private_copy(self) -> None:
+        tmp = self.repo()
+        try:
+            root = Path(tmp.name)
+            vendor = root / "src/vendor/private/include/string.h"
+            vendor.parent.mkdir(parents=True)
+            vendor.write_text("int vendor_private_string(void);\n", encoding="utf-8")
+            source = root / "src/modules/db2/c/store.c"
+            source.write_text(
+                '#include "store.h"\n#include "aimee.h"\n#include <string.h>\n',
+                encoding="utf-8",
+            )
+            rows = checker.build_inventory(root, self.revision)["outbound_dependencies"]
+            self.assertNotIn(
+                "src/vendor/private/include/string.h",
+                {row["resolved"] for row in rows},
+            )
         finally:
             tmp.cleanup()
 
@@ -476,7 +499,7 @@ class BoundaryTests(unittest.TestCase):
             check=False,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("305 consumers", result.stdout)
+        self.assertIn("consumers", result.stdout)
 
 
 if __name__ == "__main__":

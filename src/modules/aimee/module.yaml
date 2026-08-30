@@ -82,6 +82,7 @@
     "server-go/modules/aimee/families/catalog_test.go",
     "server-go/modules/aimee/families/checkpoints_test.go",
     "server-go/modules/aimee/families/column_order_test.go",
+    "server-go/modules/aimee/families/convergence_helpers_test.go",
     "server-go/modules/aimee/families/conversation_clarify_test.go",
     "server-go/modules/aimee/families/conversation_user_memory_test.go",
     "server-go/modules/aimee/families/delegation_test.go",

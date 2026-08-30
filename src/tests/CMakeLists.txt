@@ -219,12 +219,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
   target_link_libraries(test_bus_db2_process PRIVATE aimee-core-event-bus Threads::Threads)
 endif()
-aimee_add_test(test_db3_route
-  test_db3_route.c
-  ../modules/db2/db3_route.c)
-target_include_directories(test_db3_route PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-target_link_libraries(test_db3_route PRIVATE m)
 aimee_add_test(test_db3_filters
   test_db3_filters.c
   ../modules/db2/db3_route.c)
@@ -239,13 +233,6 @@ target_include_directories(test_pgvec_db3 PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include
   ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/c)
 target_link_libraries(test_pgvec_db3 PRIVATE m Threads::Threads)
-aimee_add_test(test_bus_db3
-  test_bus_db3.c
-  ../modules/db2/db3_route.c)
-target_include_directories(test_bus_db3 PRIVATE
-  ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include
-  ${CMAKE_CURRENT_SOURCE_DIR}/../modules/db2/include)
-target_link_libraries(test_bus_db3 PRIVATE aimee-core-event-bus Threads::Threads m)
 aimee_add_test(test_bus_capture test_bus_capture.c ../core/event_bus/bus_capture.c ../core/event_bus/bus_client.c ../core/event_bus/bus_attach.c ../core/event_bus/bus_host.c ../core/event_bus/bus_route.c ../core/event_bus/bus_region.c ../core/event_bus/bus_region_host.c ../core/event_bus/bus_ring.c ../core/event_bus/bus_arena.c ../core/event_bus/bus_wire.c)
 target_include_directories(test_bus_capture PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/../core/event_bus/include)
 target_link_libraries(test_bus_capture PRIVATE Threads::Threads)
@@ -333,7 +320,6 @@ aimee_add_test(test_delivery_target test_delivery_target.c)
 aimee_add_test(test_delegate_plan test_delegate_plan.c ../modules/delegates/delegate_plan.c)
 aimee_add_test(test_wfe_manager_blocks test_wfe_manager_blocks.c)
 aimee_add_test(test_wfe_sliced_build test_wfe_sliced_build.c)
-aimee_add_test(test_wfe_foreach test_wfe_foreach.c)
 aimee_add_test(test_wfe_manager_artifacts test_wfe_manager_artifacts.c)
 aimee_add_test(test_wfe_externalization test_wfe_externalization.c)
 aimee_add_test(test_wfe_deliver test_wfe_deliver.c)

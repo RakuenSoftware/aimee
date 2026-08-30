@@ -313,7 +313,7 @@ int db2_kb_purge_fence_acquire(const char *project, const char *generation, cons
          char *sp = strchr(value, ' ');
          if (sp)
             *sp = '\0';
-         snprintf(have_gen, sizeof(have_gen), "%s", value);
+         snprintf(have_gen, sizeof(have_gen), "%.127s", value);
          snprintf(have_pid, sizeof(have_pid), "%s", sp ? sp + 1 : "");
          have = 1;
       }

@@ -569,7 +569,7 @@ static int db2_kb_service_async_process_embed_pdf(int64_t document_id, const cha
    {
       db2_kb_txn_rollback();
       free(payload_json);
-      snprintf(errbuf, errbuf_size, "purge fence active for project '%s'", project_buf);
+      snprintf(errbuf, errbuf_size, "purge fence active for project '%.200s'", project_buf);
       return -1;
    }
    int upsert_rc = pgvec_kbpdf_upsert(document_id, vec, dim, payload_json);

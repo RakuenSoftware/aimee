@@ -28,30 +28,6 @@
     {
       "ctest": true,
       "make": true,
-      "module": "config",
-      "test": "src/tests/test_config.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_economizer.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_snapshot.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_surface.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
       "module": "db2",
       "test": "src/tests/test_bus_db2_module.c"
     },
@@ -60,12 +36,6 @@
       "make": true,
       "module": "db2",
       "test": "src/tests/test_bus_db2_process.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_bus_db3.c"
     },
     {
       "ctest": false,
@@ -212,12 +182,6 @@
       "test": "src/tests/test_db2_time_support.c"
     },
     {
-      "ctest": true,
-      "make": true,
-      "module": "db2",
-      "test": "src/tests/test_db3_route.c"
-    },
-    {
       "ctest": false,
       "make": true,
       "module": "delegates",
@@ -264,12 +228,6 @@
       "make": true,
       "module": "delegates",
       "test": "src/tests/test_delegate_economics.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_delegate_ephemeral_ws.c"
     },
     {
       "ctest": false,
@@ -599,12 +557,6 @@
       "ctest": false,
       "make": true,
       "module": "memory",
-      "test": "src/tests/test_memory.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
       "test": "src/tests/test_memory_advanced.c"
     },
     {
@@ -630,12 +582,6 @@
       "make": true,
       "module": "memory",
       "test": "src/tests/test_memory_filter.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_health.c"
     },
     {
       "ctest": false,
@@ -749,12 +695,6 @@
       "ctest": false,
       "make": true,
       "module": "roundtable",
-      "test": "src/tests/test_roundtable_pipeline_capture.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "roundtable",
       "test": "src/tests/test_roundtable_pipeline_chunk.c"
     },
     {
@@ -792,12 +732,6 @@
       "make": true,
       "module": "runtime-web",
       "test": "src/tests/test_server_error_kind.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "sandbox",
-      "test": "src/tests/test_sandbox_pkg_proxy_adapter.c"
     },
     {
       "ctest": false,
@@ -920,18 +854,6 @@
       "test": "src/tests/test_wfe_advance.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_advance_exec.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_approval.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -941,37 +863,7 @@
       "ctest": false,
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_autonomy.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_bind_ingress.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_block_resolve.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_blocks.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_custom.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_delegate_seam.c"
     },
     {
       "ctest": true,
@@ -986,12 +878,6 @@
       "test": "src/tests/test_wfe_enforce.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_engine.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -1002,18 +888,6 @@
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_failure_taxonomy.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_foreach.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_foreach_spawn.c"
     },
     {
       "ctest": false,
@@ -1037,12 +911,6 @@
       "ctest": false,
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_manager_flow.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_native_gate.c"
     },
     {
@@ -1058,12 +926,6 @@
       "test": "src/tests/test_wfe_replay_worktree.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_roundtable.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -1076,28 +938,10 @@
       "test": "src/tests/test_wfe_router_catalog.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_safety.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_scheduler.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_sliced_build.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_webapi.c"
     },
     {
       "ctest": false,

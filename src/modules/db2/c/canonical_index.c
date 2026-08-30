@@ -702,6 +702,18 @@ static void ci_trim_token(char *token)
       token[--len] = '\0';
 }
 
+static int ci_join_path(char *out, size_t out_len, const char *base, const char *leaf)
+{
+   size_t base_len = strlen(base);
+   size_t leaf_len = strlen(leaf);
+   if (base_len + 1 + leaf_len >= out_len)
+      return -1;
+   memcpy(out, base, base_len);
+   out[base_len] = '/';
+   memcpy(out + base_len + 1, leaf, leaf_len + 1);
+   return 0;
+}
+
 static void ci_exclusions_add(ci_exclusion_list_t *exclusions, const char *base_dir,
                               const char *token, int force_dir)
 {
@@ -717,9 +729,17 @@ static void ci_exclusions_add(ci_exclusion_list_t *exclusions, const char *base_
 
    char rel[256];
    if (base_dir && *base_dir)
-      snprintf(rel, sizeof(rel), "%s/%s", base_dir, token);
+   {
+      if (ci_join_path(rel, sizeof(rel), base_dir, token) != 0)
+         return;
+   }
    else
-      snprintf(rel, sizeof(rel), "%s", token);
+   {
+      size_t token_len = strlen(token);
+      if (token_len >= sizeof(rel))
+         return;
+      memcpy(rel, token, token_len + 1);
+   }
 
    const char *slash = strrchr(rel, '/');
    const char *dot = strrchr(rel, '.');
@@ -791,7 +811,10 @@ static void ci_parse_build_manifest(const char *root, const char *path,
    }
 
    char base_dir[256] = "";
-   snprintf(base_dir, sizeof(base_dir), "%s", rel);
+   size_t rel_len = strlen(rel);
+   if (rel_len >= sizeof(base_dir))
+      return;
+   memcpy(base_dir, rel, rel_len + 1);
    char *slash = strrchr(base_dir, '/');
    if (slash)
       *slash = '\0';
@@ -1827,7 +1850,12 @@ int canonical_index_verify_project(const char *name, const char *root, int deep,
    {
       const char *rel = aimee_pg_column_text(paths, 0);
       char full[MAX_PATH_LEN];
-      snprintf(full, sizeof(full), "%s/%s", abs_root, rel ? rel : "");
+      if (ci_join_path(full, sizeof(full), abs_root, rel ? rel : "") != 0)
+      {
+         out->missing_files++;
+         ci_verify_example(out, "missing", rel ? rel : "");
+         continue;
+      }
       struct stat st;
       if (stat(full, &st) != 0)
       {

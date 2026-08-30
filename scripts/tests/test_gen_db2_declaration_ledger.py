@@ -44,14 +44,8 @@ class DeclarationLedgerTests(unittest.TestCase):
     def test_production_ledger_is_reproducible_and_exhaustive(self) -> None:
         ledger.run(REPO_ROOT, False)
         value = ledger.build(REPO_ROOT)
-        self.assertEqual(value["summary"], {
-            "headers": 138,
-            "declarations": 1397,
-            "reviewed": 294,
-            "audit_pending": 664,
-            "internal_unconsumed": 153,
-            "private_test_only": 286,
-        })
+        committed = json.loads((REPO_ROOT / ledger.OUTPUT).read_text(encoding="utf-8"))
+        self.assertEqual(value["summary"], committed["summary"])
         self.assertFalse(value["declarations_complete"])
         self.assertEqual(
             [row["symbol"] for row in value["declarations"]],
@@ -60,13 +54,11 @@ class DeclarationLedgerTests(unittest.TestCase):
         pgvector = [row for row in value["declarations"] if row["symbol"].startswith("pgvec_")
                     and row["status"] == "reviewed"]
         self.assertEqual(len(pgvector), 61)
-        self.assertTrue(all(row["review"]["disposition"] == "private-db2" and
-                            row["review"]["db3_placement"] == "retained-db2"
+        self.assertTrue(all(row["review"]["disposition"] == "private-db2"
                             for row in pgvector))
         health = next(row for row in value["declarations"]
                       if row["symbol"] == "db2_health_probe")
         self.assertEqual(health["review"]["disposition"], "wire-operation")
-        self.assertEqual(health["review"]["db3_placement"], "retained-db2")
 
     def test_parser_handles_linkage_multiline_callbacks_and_comments(self) -> None:
         source = r'''
@@ -160,7 +152,6 @@ int db2_public(void);
                 "signature_sha256": "a" * 64,
                 "disposition": "private-db2",
                 "family": "index",
-                "db3_placement": "retained-db2",
                 "reason": "provider-specific implementation",
             }],
         }
@@ -168,7 +159,7 @@ int db2_public(void);
         cases = (
             (lambda value: value["reviews"][0].__setitem__("signature_sha256", "b" * 64),
              "review-signature"),
-            (lambda value: value["reviews"][0].__setitem__("db3_placement", "db3-eligible"),
+            (lambda value: value["reviews"][0].__setitem__("disposition", "wire-operation"),
              "pgvector-placement"),
             (lambda value: value["reviews"][0].__setitem__("family", "unknown"),
              "review-value"),

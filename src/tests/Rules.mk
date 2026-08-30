@@ -7706,6 +7706,7 @@ unit-test-db2-log-support-sanitize: $(TESTPREFIX)/unit-test-db2-log-support-sani
 
 DB2_REL_TYPE_SUPPORT_RENAMES = \
    -Drel_type_is_functional=db2_support_rel_type_is_functional \
+   -Drel_type_kind_allowed=db2_support_rel_type_kind_allowed \
    -Drel_type_normalize=db2_support_rel_type_normalize
 DB2_REL_TYPE_SECTION_FLAGS = -ffunction-sections -fdata-sections
 

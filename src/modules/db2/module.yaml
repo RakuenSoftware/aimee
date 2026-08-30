@@ -18,6 +18,7 @@
     "src/modules/db2/c/bandit.c",
     "src/modules/db2/c/calibration.c",
     "src/modules/db2/c/canonical_index.c",
+    "src/modules/db2/c/canonical_index_query.c",
     "src/modules/db2/c/code_audit.c",
     "src/modules/db2/c/code_index.c",
     "src/modules/db2/c/code_index_ops.c",
@@ -76,7 +77,6 @@
     "src/modules/db2/c/kb_releases.c",
     "src/modules/db2/c/kb_runtime_state.c",
     "src/modules/db2/c/kb_service_backend.c",
-    "src/modules/db2/c/kb_service_backend_context.c",
     "src/modules/db2/c/kb_service_backend_ingest.c",
     "src/modules/db2/c/kb_vectors.c",
     "src/modules/db2/c/kind_lifecycle.c",
@@ -185,8 +185,7 @@
   "contracts": [
     "src/modules/db2/eventcontract/declaration-review.json",
     "src/modules/db2/eventcontract/link-closure-v1.json",
-    "src/modules/db2/eventcontract/operations.json",
-    "src/modules/db2/eventcontract/vector-portability.json"
+    "src/modules/db2/eventcontract/operations.json"
   ],
   "private_headers": [
     "src/modules/db2/c/admin_grant.h",
@@ -197,6 +196,7 @@
     "src/modules/db2/c/bandit.h",
     "src/modules/db2/c/calibration.h",
     "src/modules/db2/c/canonical_index.h",
+    "src/modules/db2/c/canonical_index_internal.h",
     "src/modules/db2/c/code_index.h",
     "src/modules/db2/c/code_index_ops.h",
     "src/modules/db2/c/code_project_lifecycle.h",

@@ -4,7 +4,6 @@
 #include "fact_lifecycle.h"       /* db2_fact_retract */
 #include "fact_recall.h"          /* db2_fact_recall_in_query */
 #include "rel_types_store.h"      /* db2_fact_commit */
-#include "../headers/rel_types.h" /* rel_types_seed_lookup, rel_type_kind_allowed */
 #include "../headers/aimee.h"     /* legacy_config_record */
 #include "../support/db2_runtime_config.h"
 #include "modules/memory/memory_pii_gate.h" /* memory_pii_turn_requests_sensitive */

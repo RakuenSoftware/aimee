@@ -1,4 +1,4 @@
-/* db2/kb_service_backend_context.c: temporal semantic recall and default-on
+/* kb/db2_adapters/kb_service_backend_context.c: temporal semantic recall and default-on
  * typed context assembly. Kept separate from the compatibility memory RPCs so
  * the context contract can evolve without growing their translation unit. */
 

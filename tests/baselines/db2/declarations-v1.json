@@ -54,6 +54,10 @@
     },
     {
       "classification": "kb-generated-client",
+      "path": "src/kb/db2_adapters/kb_service_backend_context.c"
+    },
+    {
+      "classification": "kb-generated-client",
       "path": "src/kb/db2_adapters/kb_service_backend_export.c"
     },
     {
@@ -91,6 +95,10 @@
     {
       "classification": "kb-generated-client",
       "path": "src/kb/http/kb_http_code_lifecycle.c"
+    },
+    {
+      "classification": "kb-generated-client",
+      "path": "src/kb/http/kb_http_code_scan_phase.c"
     },
     {
       "classification": "kb-generated-client",
@@ -839,6 +847,10 @@
     {
       "classification": "private-implementation-test",
       "path": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "classification": "private-implementation-test",
+      "path": "src/tests/test_db2_rel_type_support.c"
     },
     {
       "classification": "private-implementation-test",
@@ -1941,6 +1953,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
@@ -2135,6 +2148,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
@@ -2340,6 +2354,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
@@ -2522,6 +2537,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
@@ -2916,6 +2932,7 @@
     },
     {
       "consumers": [
+        "src/kb/http/kb_http_code_scan_phase.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -2925,13 +2942,19 @@
           "line": 96
         }
       ],
+      "review": {
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Aborting a staged scan mutates DB2-owned transaction state inside the KB owner process; the HTTP phase adapter exposes a bounded request and no scan handle crosses the event bus."
+      },
       "signature": "int canonical_index_scan_abort ( const char * scan_id )",
       "signature_sha256": "b963c5e476cbd4d5a4c54f9049b914a72fdc5202e5efd85a2b6b5b1db75fb6d7",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "canonical_index_scan_abort"
     },
     {
       "consumers": [
+        "src/kb/http/kb_http_code_scan_phase.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -2941,9 +2964,14 @@
           "line": 89
         }
       ],
+      "review": {
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Beginning a staged scan allocates DB2-owned transaction state inside the KB owner process; the HTTP phase adapter validates the bounded scan identity and returns only its revision."
+      },
       "signature": "int canonical_index_scan_begin ( const char * name , const char * root_label , const char * scan_id , long long * baseline_revision_out )",
       "signature_sha256": "feef4e2256b0b5808fcf3743fb229522b2df5d4f6fc00102410ea41c80f1f28c",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "canonical_index_scan_begin"
     },
     {
@@ -2983,6 +3011,7 @@
     },
     {
       "consumers": [
+        "src/kb/http/kb_http_code_scan_phase.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -2992,13 +3021,19 @@
           "line": 94
         }
       ],
+      "review": {
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Sealing a staged scan atomically publishes DB2-owned index state inside the KB owner process; the HTTP phase adapter returns only the bounded reconciliation result."
+      },
       "signature": "int canonical_index_scan_seal ( const char * scan_id , int expected_files , canonical_index_seal_result_t * out )",
       "signature_sha256": "60f4aa386d4dddf686d5b2a6437fa7cc6f1bfe1212121b59276ab51299fef855",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "canonical_index_scan_seal"
     },
     {
       "consumers": [
+        "src/kb/http/kb_http_code_scan_phase.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -3008,9 +3043,14 @@
           "line": 91
         }
       ],
+      "review": {
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Staging file bodies is DB2-owned scan transaction work inside the KB owner process; the HTTP phase adapter validates its bounded array and no file pointer crosses the event bus."
+      },
       "signature": "int canonical_index_scan_stage ( const char * scan_id , const canonical_index_file_input_t * files , int file_count , int * accepted_out )",
       "signature_sha256": "d1c47456ebbcd7f9062bb22e9f479a4c008f458c582fe7bfec6301fcef8350b1",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "canonical_index_scan_stage"
     },
     {
@@ -3054,6 +3094,7 @@
     },
     {
       "consumers": [
+        "src/kb/http/kb_http_code_scan_phase.c",
         "src/tests/test_index.c",
         "src/tests/test_kb_http_routes.c"
       ],
@@ -3063,9 +3104,14 @@
           "line": 114
         }
       ],
+      "review": {
+        "disposition": "private-db2",
+        "family": "index",
+        "reason": "Project verification reads DB2-owned index and workspace state inside the KB owner process; the HTTP adapter serializes a bounded value result and no database handle crosses the event bus."
+      },
       "signature": "int canonical_index_verify_project ( const char * name , const char * root , int deep , canonical_index_verify_result_t * out )",
       "signature_sha256": "8c22c995ed06b23080b276ca5de63ca8fe453b53e7b5e843795b09369c2be8be",
-      "status": "private-test-only",
+      "status": "reviewed",
       "symbol": "canonical_index_verify_project"
     },
     {
@@ -5148,6 +5194,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_agent.c",
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/kb/kb_bandit.c",
@@ -7187,6 +7234,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/http/kb_http.c",
         "src/kb/http/kb_http_code.c",
         "src/kb/kb_service.c",
@@ -12147,6 +12195,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -13320,6 +13369,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/kb_service_memory.c"
       ],
       "locations": [
@@ -14436,6 +14486,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_kb_mining.c"
       ],
       "locations": [
@@ -14446,7 +14497,7 @@
       ],
       "signature": "int db2_learning_observation_list ( const char * status , const char * scope_kind , const char * scope_id , int limit , learning_observation_t * out , int max )",
       "signature_sha256": "5471082a15abe4a8dd0c0491f344e26732d988fba0cfdcf6b5c8ca7314028c6a",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_learning_observation_list"
     },
     {
@@ -14607,6 +14658,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/modules/learning/learning_router.c"
       ],
       "locations": [
@@ -19180,6 +19232,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/modules/memory/memory_assemble.c",
         "src/modules/memory/memory_core_search.c",
@@ -21751,6 +21804,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_typed_facts.c"
       ],
       "locations": [
@@ -21761,11 +21815,12 @@
       ],
       "signature": "int db2_semantic_assertion_get_filtered ( int64_t assertion_id , const char * valid_at , const char * believed_at , int include_historical , semantic_assertion_hit_t * out )",
       "signature_sha256": "1f1b4057903b220d072b2fd0aa47168af21d5730d12a2f621c924dae4751dc81",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_semantic_assertion_get_filtered"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_typed_facts.c"
       ],
       "locations": [
@@ -21776,11 +21831,12 @@
       ],
       "signature": "int db2_semantic_assertion_index_list ( int64_t after_assertion_id , semantic_assertion_index_row_t * out , int max )",
       "signature_sha256": "7d19dc9a8a0791dd22c89ead3414a2cccaf8ec859444b21c1a42ebaaa54ce1b7",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_semantic_assertion_index_list"
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_typed_facts.c"
       ],
       "locations": [
@@ -21791,7 +21847,7 @@
       ],
       "signature": "int db2_semantic_assertion_search ( const char * query , const char * valid_at , const char * believed_at , int include_historical , int limit , semantic_assertion_hit_t * out , int max )",
       "signature_sha256": "5e91a6ae1debe82d8df4086dabcb788a3a5f9274e39e020fc235b09bfa85e752",
-      "status": "private-test-only",
+      "status": "audit-pending",
       "symbol": "db2_semantic_assertion_search"
     },
     {
@@ -26446,6 +26502,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/tests/test_pgvec.c"
       ],
       "locations": [
@@ -26654,6 +26711,7 @@
     },
     {
       "consumers": [
+        "src/kb/db2_adapters/kb_service_backend_context.c",
         "src/modules/memory/memory_core_search.c",
         "src/modules/memory/memory_core_search_b.c",
         "src/tests/test_memory_embed_dim_guard.c",
@@ -27114,15 +27172,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "db0cec3312cf0d9e20aae5960b5e26996166cda9610dda16cf2f99b1ae8e8dae",
+  "fingerprint": "0834a5feabaacaabc9d8e60add91ec588b6ee6c7adc518abc63176c08acbe2f7",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 745,
+    "audit_pending": 749,
     "declarations": 1495,
     "headers": 143,
     "internal_unconsumed": 172,
-    "private_test_only": 284,
-    "reviewed": 294
+    "private_test_only": 275,
+    "reviewed": 299
   }
 }

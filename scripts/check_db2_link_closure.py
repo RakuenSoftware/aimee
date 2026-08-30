@@ -56,11 +56,59 @@ GENERATED_REL_SEED = Path("src/modules/db2/support/rel_seed_primitives.c")
 HOST_ADAPTER_REHOMES = {
     "src/modules/db2/c/kb_service_backend_agent.c":
         "src/kb/db2_adapters/kb_service_backend_agent.c",
+    "src/modules/db2/c/kb_service_backend_context.c":
+        "src/kb/db2_adapters/kb_service_backend_context.c",
     "src/modules/db2/c/kb_service_backend_export.c":
         "src/kb/db2_adapters/kb_service_backend_export.c",
     "src/modules/db2/c/kb_service_backend_memory.c":
         "src/kb/db2_adapters/kb_service_backend_memory.c",
 }
+# One-time, explicitly reviewed admissions for DB2 units that landed after the
+# frozen closure snapshot but before that snapshot was refreshed. Keeping these
+# paths here preserves the default no-growth ratchet for every other source.
+REVIEWED_SOURCE_ADDITIONS = {
+    "src/modules/db2/c/canonical_index_query.c":
+        "Pure translation-unit split from canonical_index.c in 667195bea6.",
+    "src/modules/db2/c/evidence_lifecycle.c":
+        "Evidence lifecycle implementation introduced and reviewed in 4e8c8fabc3.",
+    "src/modules/db2/c/fact_identity.c":
+        "Fact identity implementation introduced and reviewed in af8892d9ff.",
+    "src/modules/db2/c/fact_identity_unicode.c":
+        "Generated Unicode fact-identity support introduced in af8892d9ff.",
+    "src/modules/db2/c/fact_mutation.c":
+        "Fact mutation ledger implementation introduced and reviewed in 4e8c8fabc3.",
+}
+REVIEWED_SOURCE_UPDATES = {
+    path: "System-only reference growth reviewed during the ab3cf828 closure refresh."
+    for path in (
+        "src/modules/db2/c/calibration.c",
+        "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/code_projection.c",
+        "src/modules/db2/c/db_postgres.c",
+        "src/modules/db2/c/entity_edges.c",
+        "src/modules/db2/c/fact_lifecycle.c",
+        "src/modules/db2/c/learning.c",
+        "src/modules/db2/c/memory_query.c",
+        "src/modules/db2/c/memory_relations.c",
+        "src/modules/db2/c/memory_scope_query.c",
+        "src/modules/db2/c/memory_score_fields.c",
+        "src/modules/db2/c/notes.c",
+        "src/modules/db2/c/typed_facts.c",
+    )
+}
+REVIEWED_SUPPORT_UPDATES = {
+    "src/modules/db2/support/cjson.c":
+        "Pinned copy refreshed to the repository cJSON security fix.",
+    "src/modules/db2/support/random_primitives.c":
+        "CSPRNG hardened to getrandom with an ENOSYS-only fallback in 112a324ac1.",
+    "src/modules/db2/support/rel_seed_primitives.c":
+        "Seed lookup provenance extended to the reviewed fact-ingest unit.",
+    "src/modules/db2/support/rel_type_primitives.c":
+        "Endpoint-kind matching promoted for the reviewed fact-ingest unit.",
+    "src/modules/db2/support/runtime_config_primitives.c":
+        "Runtime config snapshot refreshed after the typed-facts getter retirement.",
+}
+REVIEWED_REFRESH_BASE_REVISIONS = {"ab3cf828b3acc5b1eb3ab6b06bdd903b8d373906"}
 CJSON_DEFINES = [
     "cJSON_AddArrayToObject",
     "cJSON_AddBoolToObject",
@@ -369,7 +417,7 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "provider, pgvector, DB3, allocation, configuration, I/O, or logging edge.",
 }, {
     "path": "src/modules/db2/support/cjson.c",
-    "source_sha256": "c17f53aaa58dddb899f452b02dc313b98af9111c81d87797c72607c1f6d6b4d4",
+    "source_sha256": "c9d5072097b0292a304af806f04fec3a06f955b93578fcf18b6c189db386b65b",
     "header": "src/modules/db2/support/cJSON.h",
     "header_sha256": "b3e16fec5613b4150c1e6636f4576cb54e2d8641bce391c9470dd19aa346e15a",
     "origin_source": "src/vendor/cJSON.c",
@@ -732,14 +780,18 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
                 "turn-request truth values.",
 }, {
     "path": "src/modules/db2/support/random_primitives.c",
-    "source_sha256": "2e0182a05983d863952d080b754cb90eb4ee6dcf491f4bda7140ef205c0db69f",
+    "source_sha256": "392f9f3f2a3f42fafe3e5277765ed1a8d79201f136089df00b06d90df13c8fc8",
     "header": "src/modules/db2/support/db2_random.h",
     "header_sha256": "bbbab168e217e7286ffae27ad3f1adaf8ed1797ae70a46c6c1e84bbcd32a98bb",
     "defines": ["platform_random_bytes", "platform_random_hex"],
     "resolves": ["platform_random_bytes", "platform_random_hex"],
-    "allowed_includes": ["db2_random.h", "bcrypt.h", "stdio.h", "string.h"],
+    "allowed_includes": [
+        "db2_random.h", "bcrypt.h", "errno.h", "sys/random.h", "stdio.h", "string.h",
+    ],
     "allowed_header_includes": ["stddef.h"],
-    "allowed_undefined": ["fclose", "fopen", "fread", "memset", "snprintf"],
+    "allowed_undefined": [
+        "__errno_location", "fclose", "fopen", "fread", "getrandom", "snprintf",
+    ],
     "base_references": {
         "platform_random_bytes": [
             "src/modules/db2/c/artifacts.c",
@@ -751,9 +803,10 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
     "provenance": "Portable CSPRNG and lowercase-hex definitions promoted from "
                   "src/posix/platform_random.c, src/windows/platform_random.c, and "
                   "src/platform_random.c; all four DB2 referencing units are pinned.",
-    "evidence": "The descriptor-owned implementation preserves the POSIX /dev/urandom and "
-                "Windows BCryptGenRandom branches, exports only the two reviewed APIs, and "
-                "imports only its bounded system I/O and formatting surface. It has no DB, "
+    "evidence": "The descriptor-owned implementation uses Linux getrandom with an ENOSYS-only "
+                "fallback to /dev/urandom and Windows BCryptGenRandom, exports only the two "
+                "reviewed APIs, fails without emitting predictable bytes, and imports only its "
+                "bounded system I/O and formatting surface. It has no DB, "
                 "event-bus, provider, pgvector, DB3, config, logging, or heap dependency.",
 }, {
     "path": "src/modules/db2/support/rel_enum_text_primitives.c",
@@ -788,27 +841,31 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         "rel_types_seed_at": ["src/modules/db2/c/rel_types_store.c"],
         "rel_types_seed_count": ["src/modules/db2/c/rel_types_store.c"],
         "rel_types_seed_lookup": [
-            "src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_lifecycle.c",
+            "src/modules/db2/c/entity_edges.c", "src/modules/db2/c/fact_ingest.c",
+            "src/modules/db2/c/fact_lifecycle.c",
         ],
     },
     "provenance": "Full relationship seed rows generated by walking the compiled canonical "
-                  "SEED_ONTOLOGY in src/rel_types.c; all four DB2 references are pinned.",
+                  "SEED_ONTOLOGY in src/rel_types.c; all five DB2 references are pinned.",
     "evidence": "The descriptor owns the generated database-free table and a private ABI mirror; "
                 "size, offsets, enum widths, every field, iteration bounds, pointer identity, "
                 "normalization, misses, and sanitizer behavior are compared with the monolith. "
                 "Only the adjacent normalization support API and strcmp are imported.",
 }, {
     "path": "src/modules/db2/support/rel_type_primitives.c",
-    "source_sha256": "a3a9e88f2a90c0de5d09f952c60ff90843f4f332a9c2a411e2dc1e081f31cce1",
+    "source_sha256": "8513f4f6a54aff3b57b806708646b6e645ae4accd75f023dbe145e4f8521b267",
     "header": "src/modules/db2/support/db2_rel_type_helpers.h",
     "header_sha256": "cd1b904cb2fe0ff443ab94d1044ce6eefd71aa4e004ddca4641de27be9a391a2",
-    "defines": ["rel_type_is_functional", "rel_type_normalize"],
-    "resolves": ["rel_type_is_functional", "rel_type_normalize"],
-    "allowed_includes": ["ctype.h", "db2_rel_type_helpers.h", "string.h"],
+    "defines": ["rel_type_is_functional", "rel_type_kind_allowed", "rel_type_normalize"],
+    "resolves": ["rel_type_is_functional", "rel_type_kind_allowed", "rel_type_normalize"],
+    "allowed_includes": [
+        "ctype.h", "db2_rel_seed.h", "db2_rel_type_helpers.h", "string.h",
+    ],
     "allowed_header_includes": ["stddef.h"],
     "allowed_undefined": ["__ctype_b_loc", "__ctype_tolower_loc", "strcmp"],
     "base_references": {
         "rel_type_is_functional": ["src/modules/db2/c/entity_edges.c"],
+        "rel_type_kind_allowed": ["src/modules/db2/c/fact_ingest.c"],
         "rel_type_normalize": [
             "src/modules/db2/c/fact_lifecycle.c",
             "src/modules/db2/c/ontology_evolution.c",
@@ -816,17 +873,17 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         ],
     },
     "provenance": "Definitions promoted from the DB-free core in src/rel_types.c; all DB2 calls "
-                  "audited in entity_edges.c, fact_lifecycle.c, ontology_evolution.c, and "
-                  "rel_types_store.c.",
-    "evidence": "Relation normalization preserves the legacy process-locale ctype behavior and "
-                "functional classification; only ctype and strcmp are imported. No ontology "
-                "enum/header, DB, event-bus, provider, platform, pgvector, DB3, allocation, I/O, "
-                "or logging dependency.",
+                  "audited in entity_edges.c, fact_ingest.c, fact_lifecycle.c, "
+                  "ontology_evolution.c, and rel_types_store.c.",
+    "evidence": "Relation normalization, functional classification, and seed endpoint-kind "
+                "matching preserve legacy behavior; only ctype and strcmp are imported. No DB, "
+                "event-bus, provider, platform, pgvector, DB3, allocation, I/O, or logging "
+                "dependency.",
 }, {
     "path": "src/modules/db2/support/runtime_config_primitives.c",
-    "source_sha256": "392a2271241a13046b61bc49a99f3e4efe22edbe8becf2290f13dcb3052400ed",
+    "source_sha256": "0d8fde1fcf7e6d9b04450d9740baae06e807a57dcc59e1e27a8f4b552a4013da",
     "header": "src/modules/db2/support/db2_runtime_config.h",
-    "header_sha256": "e8dd532f6729eb7ae42929168c1faa7abf423ea49da9632ae1a7977f0c48d2cc",
+    "header_sha256": "18a951e1a7d52db11ef9b1e733e098f8c9b6082e2cab0b5558206360632149a8",
     "defines": [
         "config_audit_worm_enabled", "config_cache_disabled",
         "config_code_cochange_git_enabled", "config_css_style_graph_enabled",
@@ -838,7 +895,7 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         "config_kb_curator_cross_repo_max_candidates",
         "config_kb_curator_cross_repo_p_pct",
         "config_kb_curator_cross_repo_review_queue_max", "config_kb_pdf_vector_enabled",
-        "config_kb_purge_fence_ttl_s", "config_present", "config_typed_facts_enabled",
+        "config_kb_purge_fence_ttl_s", "config_present",
         "db2_runtime_config_install",
     ],
     "resolves": [
@@ -852,7 +909,7 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         "config_kb_curator_cross_repo_max_candidates",
         "config_kb_curator_cross_repo_p_pct",
         "config_kb_curator_cross_repo_review_queue_max", "config_kb_pdf_vector_enabled",
-        "config_kb_purge_fence_ttl_s", "config_present", "config_typed_facts_enabled",
+        "config_kb_purge_fence_ttl_s", "config_present",
     ],
     "resolution_disposition": "injected-module-contract",
     "allowed_includes": ["db2_runtime_config.h", "string.h"],
@@ -891,14 +948,12 @@ SUPPORT_UNITS: list[dict[str, object]] = [{
         "config_kb_pdf_vector_enabled": ["src/modules/db2/c/kb_payload.c"],
         "config_kb_purge_fence_ttl_s": ["src/modules/db2/c/kb_runtime_state.c"],
         "config_present": ["src/modules/db2/c/canonical_index.c"],
-        "config_typed_facts_enabled": [
-            "src/modules/db2/c/css_migration.c", "src/modules/db2/c/fact_ingest.c",
-        ],
     },
     "provenance": "The complete DB2 config read set is captured once as a versioned immutable "
                   "startup snapshot; every legacy call site is pinned to the matching field.",
-    "evidence": "Nineteen exact exports replace eighteen live host getters with one bounded "
-                "install operation. Invalid ABI, NULL, and unterminated snapshots fail atomically; "
+    "evidence": "Eighteen exact exports replace seventeen live host getters with one bounded "
+                "install operation, and the standalone default keeps audit WORM enabled. Invalid "
+                "ABI, NULL, and unterminated snapshots fail atomically; "
                 "the implementation imports only memchr and contains no file, DB, bus, vector, "
                 "provider, allocation, or reload dependency.",
 }, {
@@ -1017,7 +1072,7 @@ SYSTEM_SYMBOLS = {
     "calloc", "clock_gettime", "close", "connect", "dlclose", "dlopen", "dlsym",
     "difftime", "exp", "fclose", "fcntl", "fflush", "fgets", "fopen", "fprintf", "fputc",
     "fputs", "fread",
-    "free", "fseek", "ftell", "fwrite", "getenv", "getpid", "gmtime", "gmtime_r",
+    "free", "fseek", "ftell", "fwrite", "getenv", "getpid", "getrandom", "gmtime", "gmtime_r",
     "htonl", "htons", "inet_ntop", "inet_pton", "listen", "log10", "malloc", "memchr", "memcmp",
     "memcpy", "memmove", "memset", "mktime", "nanosleep", "ntohl", "ntohs", "open",
     "poll", "pthread_cond_broadcast", "pthread_cond_destroy", "pthread_cond_init",
@@ -1151,6 +1206,13 @@ def _nm_undefined(output: str) -> set[str]:
         candidate = fields[0]
         if candidate.endswith(":") or not SYMBOL.fullmatch(candidate):
             fail("probe-nm", f"unexpected nm undefined-symbol row {line!r}")
+        if len(fields) == 2:
+            if fields[1] in {"v", "w"}:
+                continue
+            if fields[1] != "U":
+                fail("probe-nm", f"unexpected nm undefined-symbol row {line!r}")
+        elif len(fields) != 1:
+            fail("probe-nm", f"unexpected nm undefined-symbol row {line!r}")
         result.add(candidate)
     return result
 
@@ -1199,7 +1261,8 @@ def probe(
         tmp = Path(raw_tmp)
         targets = [str(tmp / "db2" / (PurePosixPath(item).stem + ".o")) for item in sources]
         command = [
-            "make", "-s", f"OBJDIR={tmp}", f"EXTRA_C_FLAGS={PROBE_FLAGS}", *targets,
+            "make", "-s", f"OBJDIR={tmp}", "HARDEN_C_FLAGS=",
+            f"EXTRA_C_FLAGS={PROBE_FLAGS}", *targets,
         ]
         _run(command, src_root)
         objects = [tmp / "db2" / (PurePosixPath(item).stem + ".o") for item in sources]
@@ -1558,8 +1621,11 @@ def _validate_support_units(
         )
         if not set(resolves) <= set(defines):
             fail("support-resolves", f"{path}: resolves must be a subset of global definitions")
-        if any("/" in item or "\\" in item for item in [*includes, *header_includes]):
-            fail("support-include", f"{path}: include names must not contain paths")
+        for include_name in [*includes, *header_includes]:
+            include_path = PurePosixPath(include_name)
+            if ("\\" in include_name or include_path.is_absolute() or
+                    any(part in {"", ".", ".."} for part in include_path.parts)):
+                fail("support-include", f"{path}: include name is not canonical: {include_name}")
         base_references = unit["base_references"]
         if not isinstance(base_references, dict) or sorted(base_references) != resolves:
             fail("support-provenance", f"{path}: base_references must cover every resolve")
@@ -1731,9 +1797,18 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
         root, previous, check_files=False
     )
     current_units, current_support, current_rows = validate_contract(root, current)
+    refresh_allowed = (
+        isinstance(previous, dict) and
+        previous.get("source_revision") in REVIEWED_REFRESH_BASE_REVISIONS
+    )
+    reviewed_additions = set(REVIEWED_SOURCE_ADDITIONS) if refresh_allowed else set()
+    reviewed_updates = set(REVIEWED_SOURCE_UPDATES) if refresh_allowed else set()
+    reviewed_support_updates = set(REVIEWED_SUPPORT_UPDATES) if refresh_allowed else set()
     added_units = sorted(set(current_units) - set(previous_units))
-    if added_units:
-        fail("previous-source-growth", f"new DB2 translation units are forbidden: {added_units}")
+    rejected_units = sorted(set(added_units) - reviewed_additions)
+    if rejected_units:
+        fail("previous-source-growth", f"new DB2 translation units are forbidden: {rejected_units}")
+    admitted_units = set(added_units)
     removed_units = sorted(set(previous_units) - set(current_units))
     unexpected_removals = sorted(set(removed_units) - set(HOST_ADAPTER_REHOMES))
     if unexpected_removals:
@@ -1751,27 +1826,34 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
     # provenance. HOST_ADAPTER_REHOMES is the explicit reviewed admission list;
     # a removed unit not named there already fails above. Preserve mapping and
     # list order while filtering those exact paths so reordering remains drift.
-    def without_rehomed_references(unit: dict[str, object]) -> dict[str, object]:
+    def without_moved_references(unit: dict[str, object]) -> dict[str, object]:
         normalized = copy.deepcopy(unit)
         references = normalized.get("base_references")
         if isinstance(references, dict):
             for symbol, paths in references.items():
                 if isinstance(paths, list):
                     references[symbol] = [
-                        path for path in paths if path not in HOST_ADAPTER_REHOMES
+                        path for path in paths
+                        if path not in HOST_ADAPTER_REHOMES and path not in admitted_units
                     ]
         return normalized
 
     changed_support = sorted(
         path for path in set(previous_support_by_path) & set(current_support_by_path)
-        if without_rehomed_references(previous_support_by_path[path]) !=
-        without_rehomed_references(current_support_by_path[path])
+        if without_moved_references(previous_support_by_path[path]) !=
+        without_moved_references(current_support_by_path[path])
     )
-    if changed_support:
-        fail("previous-support-change", f"reviewed support policy changed: {changed_support}")
+    rejected_support_changes = sorted(set(changed_support) - reviewed_support_updates)
+    if rejected_support_changes:
+        fail("previous-support-change",
+             f"reviewed support policy changed: {rejected_support_changes}")
     added_support = [
         current_support_by_path[path]
         for path in sorted(set(current_support_by_path) - set(previous_support_by_path))
+    ]
+    admitted_support = [
+        *added_support,
+        *(current_support_by_path[path] for path in changed_support),
     ]
     for unit in added_support:
         base_references = unit["base_references"]
@@ -1809,9 +1891,9 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
                 row["disposition"] == "system-link"):
             continue
         permitted_paths = {
-            str(unit["path"]) for unit in added_support
+            str(unit["path"]) for unit in admitted_support
             if symbol in unit["allowed_undefined"]
-        }
+        } | admitted_units | reviewed_updates
         if (row["disposition"] != "system-link" or
                 not references or not references <= permitted_paths):
             rejected_added.append(symbol)
@@ -1827,9 +1909,9 @@ def compare_contracts(root: Path, previous: object, current: object) -> None:
                 current_rows[symbol]["disposition"] == "system-link"):
             continue
         permitted_paths = {
-            str(unit["path"]) for unit in added_support
+            str(unit["path"]) for unit in admitted_support
             if symbol in unit["allowed_undefined"]
-        }
+        } | admitted_units | reviewed_updates
         if growth and not (
                 previous_rows[symbol]["disposition"] == "system-link" and
                 growth <= permitted_paths):

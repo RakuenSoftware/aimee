@@ -88,11 +88,46 @@
       "reason": "Affected-row inspection belongs to the private statement lifetime; a mutation operation maps it to bounded domain evidence before replying."
     },
     {
+      "symbol": "canonical_index_scan_abort",
+      "signature_sha256": "b963c5e476cbd4d5a4c54f9049b914a72fdc5202e5efd85a2b6b5b1db75fb6d7",
+      "disposition": "private-db2",
+      "family": "index",
+      "reason": "Aborting a staged scan mutates DB2-owned transaction state inside the KB owner process; the HTTP phase adapter exposes a bounded request and no scan handle crosses the event bus."
+    },
+    {
+      "symbol": "canonical_index_scan_begin",
+      "signature_sha256": "feef4e2256b0b5808fcf3743fb229522b2df5d4f6fc00102410ea41c80f1f28c",
+      "disposition": "private-db2",
+      "family": "index",
+      "reason": "Beginning a staged scan allocates DB2-owned transaction state inside the KB owner process; the HTTP phase adapter validates the bounded scan identity and returns only its revision."
+    },
+    {
+      "symbol": "canonical_index_scan_seal",
+      "signature_sha256": "60f4aa386d4dddf686d5b2a6437fa7cc6f1bfe1212121b59276ab51299fef855",
+      "disposition": "private-db2",
+      "family": "index",
+      "reason": "Sealing a staged scan atomically publishes DB2-owned index state inside the KB owner process; the HTTP phase adapter returns only the bounded reconciliation result."
+    },
+    {
+      "symbol": "canonical_index_scan_stage",
+      "signature_sha256": "d1c47456ebbcd7f9062bb22e9f479a4c008f458c582fe7bfec6301fcef8350b1",
+      "disposition": "private-db2",
+      "family": "index",
+      "reason": "Staging file bodies is DB2-owned scan transaction work inside the KB owner process; the HTTP phase adapter validates its bounded array and no file pointer crosses the event bus."
+    },
+    {
       "symbol": "canonical_index_set_exec_capture",
       "signature_sha256": "1e99a1701424fe709b6626d44151681f875541924a23045c4226c93dfe964cac",
       "disposition": "private-db2",
       "family": "index",
       "reason": "Installing the bounded fork/exec capture capability is private immutable process bootstrap; no callback pointer or command-execution surface crosses the event bus."
+    },
+    {
+      "symbol": "canonical_index_verify_project",
+      "signature_sha256": "8c22c995ed06b23080b276ca5de63ca8fe453b53e7b5e843795b09369c2be8be",
+      "disposition": "private-db2",
+      "family": "index",
+      "reason": "Project verification reads DB2-owned index and workspace state inside the KB owner process; the HTTP adapter serializes a bounded value result and no database handle crosses the event bus."
     },
     {
       "symbol": "db2_calibration_profile_read",

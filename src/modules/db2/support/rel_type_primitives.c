@@ -1,6 +1,9 @@
 #include <ctype.h>
+#include "db2_rel_seed.h"
 #include "db2_rel_type_helpers.h"
 #include <string.h>
+
+enum { DB2_NODE_OTHER = 99 };
 
 void rel_type_normalize(const char *in, char *out, size_t out_len)
 {
@@ -43,6 +46,18 @@ int rel_type_is_functional(const char *rel_type)
    };
    for (size_t i = 0; i < sizeof(functional) / sizeof(functional[0]); i++)
       if (strcmp(rel_type, functional[i]) == 0)
+         return 1;
+   return 0;
+}
+
+int rel_type_kind_allowed(const db2_rel_seed_def_t *def, int is_head, int kind)
+{
+   if (!def)
+      return 0;
+   const int *list = is_head ? def->head_kinds : def->tail_kinds;
+   int n = is_head ? def->head_kind_count : def->tail_kind_count;
+   for (int i = 0; i < n; i++)
+      if (list[i] == DB2_NODE_OTHER || list[i] == kind)
          return 1;
    return 0;
 }

@@ -5,7 +5,6 @@
     "audit",
     "module-runtime"
   ],
-  "enabled_by_default": true,
   "runtime_toggle": {
     "supported": false
   },
@@ -22,6 +21,7 @@
     "server-go/modules/egress/egress_test.go",
     "server-go/modules/egress/http_test.go",
     "server-go/modules/egress/secret_resolver_test.go",
+    "server-go/modules/egress/ssrf_test.go",
     "server-go/modules/egress/sse_test.go"
   ],
   "public_headers": [
