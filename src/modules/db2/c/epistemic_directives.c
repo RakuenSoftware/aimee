@@ -513,7 +513,11 @@ int db2_directive_match_by_lexical(const char *match_clause, memory_directive_t 
    char placeholder[8];
    for (int i = 0; i < n_tokens; i++)
    {
-      snprintf(like_bufs[i], sizeof(like_bufs[i]), "%%%s%%", tokens[i]);
+      size_t token_len = strlen(tokens[i]);
+      like_bufs[i][0] = '%';
+      memcpy(like_bufs[i] + 1, tokens[i], token_len);
+      like_bufs[i][token_len + 1] = '%';
+      like_bufs[i][token_len + 2] = '\0';
       snprintf(placeholder, sizeof(placeholder), "?%d", i + 1);
       aimee_pg_bind_text(st, placeholder, like_bufs[i]);
    }

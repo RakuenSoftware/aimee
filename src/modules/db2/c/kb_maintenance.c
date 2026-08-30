@@ -96,7 +96,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    /* ---- BEGIN transaction ---------------------------------------- */
    if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
    {
-      snprintf(out->error, sizeof(out->error), "BEGIN failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "BEGIN failed: %.200s", err);
       return -1;
    }
 
@@ -188,7 +188,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    aimee_pg_stmt_t *st_decay = aimee_pg_prepare(conn, decay_sql, err, sizeof(err));
    if (!st_decay)
    {
-      snprintf(out->error, sizeof(out->error), "decay prepare failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "decay prepare failed: %.200s", err);
       rc = -1;
       goto done;
    }
@@ -200,7 +200,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
 
    if (aimee_pg_step(st_decay, err, sizeof(err)) != AIMEE_PG_DONE)
    {
-      snprintf(out->error, sizeof(out->error), "decay step failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "decay step failed: %.200s", err);
       aimee_pg_finalize(st_decay);
       rc = -1;
       goto done;
@@ -262,7 +262,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    aimee_pg_stmt_t *st_orphan = aimee_pg_prepare(conn, orphan_sql, err, sizeof(err));
    if (!st_orphan)
    {
-      snprintf(out->error, sizeof(out->error), "orphan prepare failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "orphan prepare failed: %.200s", err);
       rc = -1;
       goto done;
    }
@@ -273,7 +273,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
 
    if (aimee_pg_step(st_orphan, err, sizeof(err)) != AIMEE_PG_DONE)
    {
-      snprintf(out->error, sizeof(out->error), "orphan step failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "orphan step failed: %.200s", err);
       aimee_pg_finalize(st_orphan);
       rc = -1;
       goto done;
@@ -301,7 +301,8 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
    if (!st_ins)
    {
       /* Non-fatal — results are still valid even if we can't record the run. */
-      snprintf(out->error, sizeof(out->error), "maintenance_runs insert prepare failed: %s", err);
+      snprintf(out->error, sizeof(out->error), "maintenance_runs insert prepare failed: %.200s",
+               err);
    }
    else
    {
@@ -315,7 +316,7 @@ int kb_maintenance_run(const kb_maintenance_config_t *cfg, kb_maintenance_result
       if (aimee_pg_step(st_ins, err, sizeof(err)) != AIMEE_PG_DONE)
       {
          /* Non-fatal. */
-         snprintf(out->error, sizeof(out->error), "maintenance_runs insert failed: %s", err);
+         snprintf(out->error, sizeof(out->error), "maintenance_runs insert failed: %.200s", err);
       }
       aimee_pg_finalize(st_ins);
    }
@@ -336,7 +337,7 @@ done:
    {
       if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
       {
-         snprintf(out->error, sizeof(out->error), "COMMIT failed: %s", err);
+         snprintf(out->error, sizeof(out->error), "COMMIT failed: %.200s", err);
          aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
          return -1;
       }

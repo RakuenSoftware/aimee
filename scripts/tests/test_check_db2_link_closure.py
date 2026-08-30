@@ -40,6 +40,12 @@ class LinkClosureTest(unittest.TestCase):
         checker.SUPPORT_UNITS = self.production_support
         self.temp.cleanup()
 
+    def test_nm_undefined_ignores_optional_weak_imports(self) -> None:
+        self.assertEqual(
+            checker._nm_undefined("optional w\nstrong U\nplain\n"),
+            {"plain", "strong"},
+        )
+
     def _contract(self) -> dict[str, object]:
         sources = ["src/modules/db2/c/a.c"]
         result: dict[str, object] = {
@@ -343,6 +349,17 @@ class LinkClosureTest(unittest.TestCase):
         with self.assertRaisesRegex(checker.ClosureError, "previous-source-growth"):
             checker.compare_contracts(self.root, previous, current)
 
+    def test_previous_contract_allows_explicitly_reviewed_translation_unit(self) -> None:
+        path = "src/modules/db2/c/b.c"
+        (self.root / path).write_text("int b;\n", encoding="utf-8")
+        previous = copy.deepcopy(self.contract)
+        current = copy.deepcopy(self.contract)
+        current["translation_units"] = ["src/modules/db2/c/a.c", path]
+        self._refresh_summary(current)
+        with mock.patch.object(checker, "REVIEWED_REFRESH_BASE_REVISIONS", {"a" * 40}), \
+             mock.patch.dict(checker.REVIEWED_SOURCE_ADDITIONS, {path: "Reviewed fixture."}):
+            checker.compare_contracts(self.root, previous, current)
+
     def test_previous_contract_rejects_removed_translation_unit(self) -> None:
         previous = copy.deepcopy(self.contract)
         previous["translation_units"] = [
@@ -430,6 +447,16 @@ class LinkClosureTest(unittest.TestCase):
         current["descriptor_support_units"][0]["evidence"] += " Changed."  # type: ignore[index]
         self._refresh_summary(current)
         with self.assertRaisesRegex(checker.ClosureError, "previous-support-change"):
+            checker.compare_contracts(self.root, previous, current)
+
+    def test_explicitly_reviewed_support_update_can_change_evidence(self) -> None:
+        _, previous = self._support_comparison()
+        current = copy.deepcopy(previous)
+        current["descriptor_support_units"][0]["evidence"] += " Changed."  # type: ignore[index]
+        self._refresh_summary(current)
+        path = current["descriptor_support_units"][0]["path"]  # type: ignore[index]
+        with mock.patch.object(checker, "REVIEWED_REFRESH_BASE_REVISIONS", {"a" * 40}), \
+             mock.patch.dict(checker.REVIEWED_SUPPORT_UPDATES, {path: "Reviewed fixture."}):
             checker.compare_contracts(self.root, previous, current)
 
     def test_support_path_escape_fails(self) -> None:
@@ -730,11 +757,11 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 139)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 140)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
-        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 139)
+        self.assertEqual(contract["summary"]["dispositions"]["system-link"], 140)
         self.assertEqual(
             contract["summary"]["dispositions"]["portable-core-promotion"], 0
         )

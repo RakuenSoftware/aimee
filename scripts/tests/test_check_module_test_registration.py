@@ -140,11 +140,11 @@ class RegistrationTests(unittest.TestCase):
             path = root / checker.CMAKE_TESTS
             path.write_text(
                 path.read_text(encoding="utf-8")
-                + "\nadd_executable(econ_bin test_config_economizer.c)\n"
-                + "add_test(NAME unrelated_case COMMAND econ_bin)\n",
+                + "\nadd_executable(audit_worm_bin test_audit_worm.c)\n"
+                + "add_test(NAME unrelated_case COMMAND audit_worm_bin)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer.c"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm.c"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -156,16 +156,16 @@ class RegistrationTests(unittest.TestCase):
             root = Path(tmp.name)
             path = root / checker.CMAKE_TESTS
             path.write_text(
-                path.read_text(encoding="utf-8") + "\nadd_executable(test_config_economizer test_config_economizer.c)\n",
+                path.read_text(encoding="utf-8") + "\nadd_executable(test_audit_worm test_audit_worm.c)\n",
                 encoding="utf-8",
             )
             checker.check(root)
             path.write_text(
                 path.read_text(encoding="utf-8")
-                + "add_test(NAME test_config_economizer COMMAND test_config_economizer)\n",
+                + "add_test(NAME test_audit_worm COMMAND test_audit_worm)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm"):
                 checker.check(root)
         finally:
             tmp.cleanup()
@@ -206,10 +206,10 @@ class RegistrationTests(unittest.TestCase):
             root = Path(tmp.name)
             path = root / checker.CMAKE_TESTS
             path.write_text(
-                path.read_text(encoding="utf-8") + "\naimee_add_test(test_config_economizer test_config_economizer.c)\n",
+                path.read_text(encoding="utf-8") + "\naimee_add_test(test_audit_worm test_audit_worm.c)\n",
                 encoding="utf-8",
             )
-            with self.assertRaisesRegex(checker.RegistrationError, "test_config_economizer"):
+            with self.assertRaisesRegex(checker.RegistrationError, "test_audit_worm"):
                 checker.check(root)
         finally:
             tmp.cleanup()

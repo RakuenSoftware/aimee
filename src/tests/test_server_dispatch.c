@@ -10,7 +10,7 @@
 #include "db1_client/db1.h"
 #include "db1_client/eval.h"
 #include "db1_client/server_sessions.h"
-#include "eval_synthesis.h" /* the regression-candidate surface stubbed below */
+#include "eval_synthesis_store.h" /* the regression-candidate surface stubbed below */
 #include "approach_store.h"
 #include <aimee/learning/attribution.h>
 #include "curiosity_resolve.h"

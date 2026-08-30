@@ -1120,7 +1120,7 @@ int db2_artifact_invalidate_citing(const char *source_kind, const char *source_i
          db2_artifact_gen_id(audit_id, sizeof(audit_id));
 
          char before_json[128];
-         snprintf(before_json, sizeof(before_json), "{\"state\":\"%s\"}", states[i]);
+         snprintf(before_json, sizeof(before_json), "{\"state\":\"%.31s\"}", states[i]);
 
          cJSON *after = cJSON_CreateObject();
          cJSON_AddStringToObject(after, "state", "stale");

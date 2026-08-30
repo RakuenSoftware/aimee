@@ -49,7 +49,8 @@ int pgvec_memory_vector_near_duplicate_pairs(const int64_t *ids, int n, double m
     * self-join used for code similarity, this is an exhaustive comparison within
     * a small explicit set, so it cannot drop one-directional pairs and needs no
     * C-side dedup. */
-   char sql[1024];
+   /* Two copies of the bounded 1536-byte id list plus the fixed query text. */
+   char sql[4096];
    snprintf(sql, sizeof(sql),
             "SELECT a.point_id, b.point_id, 1.0 - (a.embedding <=> b.embedding) AS cosine"
             " FROM %s a JOIN %s b ON a.point_id < b.point_id"

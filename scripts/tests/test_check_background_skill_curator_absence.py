@@ -25,7 +25,7 @@ class CuratorAbsenceTests(unittest.TestCase):
         (root / "src/server").mkdir(parents=True)
         files = set(checker.BUILD_FILES + (
             "src/modules/memory/memory_maintenance.c",
-            "src/modules/db1/maintenance.c",
+            "server-go/modules/aimee/families/runtime_state.go",
             "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "src/modules/kb-synthesis/kb_curator_queue.c",
             "src/modules/kb-synthesis/kb_curator_drain.c",

@@ -3,7 +3,7 @@
 #
 # Pins the no-silent-swallow contract through the full
 # aimee-client -> aimee-server -> aimee-kb path. A fake aimee-kb returns
-# canned responses on a per-test-isolated socket; the real aimee-client
+# canned HTTP responses on a per-test-isolated loopback port; the real aimee-client
 # and aimee-server binaries handle dispatch and rendering.
 #
 # Cases:
@@ -36,8 +36,10 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 AIMEE_CLIENT="$REPO_ROOT/aimee"
 AIMEE_SERVER_BIN="$REPO_ROOT/aimee-server"
+CONFIG_MODULE_BUILT="$REPO_ROOT/src/build/obj/aimee-module-config"
 
-if [ ! -x "$AIMEE_CLIENT" ] || [ ! -x "$AIMEE_SERVER_BIN" ]; then
+if [ ! -x "$AIMEE_CLIENT" ] || [ ! -x "$AIMEE_SERVER_BIN" ] ||
+   [ ! -x "$CONFIG_MODULE_BUILT" ]; then
     echo "test_index_scan_e2e: missing binaries (run \`make\` first)"
     exit 1
 fi
@@ -52,9 +54,10 @@ FAIL=0
 ACTIVE_TMPHOME=""
 ACTIVE_SERVER_PID=""
 ACTIVE_KB_PID=""
+ACTIVE_CONFIG_PID=""
 
 cleanup_active() {
-    # Reap both children before removing the home they write into. kill only
+    # Reap every child before removing the home they write into. kill only
     # requests exit, so without the waits a child can still be writing under
     # $ACTIVE_TMPHOME while rm -rf walks it, and rm fails with ENOTEMPTY when a
     # directory gains entries between unlinking its children and removing it.
@@ -66,6 +69,10 @@ cleanup_active() {
         kill "$ACTIVE_KB_PID" 2>/dev/null || true
         wait "$ACTIVE_KB_PID" 2>/dev/null || true
     fi
+    if [ -n "$ACTIVE_CONFIG_PID" ]; then
+        kill "$ACTIVE_CONFIG_PID" 2>/dev/null || true
+        wait "$ACTIVE_CONFIG_PID" 2>/dev/null || true
+    fi
     if [ -n "$ACTIVE_TMPHOME" ] && [ -d "$ACTIVE_TMPHOME" ]; then
         # `|| true` regardless: teardown of a temporary directory must never
         # decide the exit status. Even with the waits, anything else holding a
@@ -75,6 +82,7 @@ cleanup_active() {
     ACTIVE_TMPHOME=""
     ACTIVE_SERVER_PID=""
     ACTIVE_KB_PID=""
+    ACTIVE_CONFIG_PID=""
 }
 trap cleanup_active EXIT INT TERM
 
@@ -84,6 +92,17 @@ wait_for_socket() {
     local i
     for i in $(seq 1 100); do
         [ -S "$path" ] && return 0
+        sleep 0.05
+    done
+    return 1
+}
+
+# Wait up to ~5s for a non-empty readiness file to appear at $1.
+wait_for_file() {
+    local path="$1"
+    local i
+    for i in $(seq 1 100); do
+        [ -s "$path" ] && return 0
         sleep 0.05
     done
     return 1
@@ -100,70 +119,101 @@ run_case() {
     tmphome=$(mktemp -d /tmp/aimee-index-scan-e2e-XXXXXX)
     ACTIVE_TMPHOME="$tmphome"
     mkdir -p "$tmphome/.config/aimee"
+    local project_root="$tmphome/project"
+    mkdir -p "$project_root"
+    printf 'int main(void) { return 0; }\n' >"$project_root/main.c"
+    git -C "$project_root" init -q
+    git -C "$project_root" config user.email e2e@example.invalid
+    git -C "$project_root" config user.name "Aimee E2E"
+    git -C "$project_root" add main.c
+    git -C "$project_root" commit -qm initial
 
     cat > "$tmphome/.config/aimee/aimee.yaml" <<EOF
 guardrail_mode: approve
 provider: claude
 EOF
 
-    local kb_sock="$tmphome/.config/aimee/aimee-kb.sock"
     # aimee-server now serves only /v1; its UDS is aimee-http.sock.
     local server_sock="$tmphome/.config/aimee/aimee-http.sock"
     local scan_resp_file="$tmphome/scan-resp.json"
     local fake_kb_py="$tmphome/fake-kb.py"
+    local kb_ready="$tmphome/kb-port"
     local kb_log="$tmphome/kb.log"
     local server_log="$tmphome/server.log"
+    local server_file_log="$tmphome/.config/aimee/server.log"
+    local config_log="$tmphome/config.log"
+    local module_bus_sock="$tmphome/.config/aimee/server-module-bus.sock"
+    local module_policy_dir="$tmphome/.config/aimee/modules.d/server"
+    local config_module="$tmphome/.config/aimee/aimee-module-config"
+    local generated_grant="$REPO_ROOT/src/build/obj/module-bundle/grants/server/config.grant"
+
+    if [ ! -r "$generated_grant" ]; then
+        python3 "$REPO_ROOT/scripts/export_c_repositories.py" \
+            --runtime-bundle "$REPO_ROOT/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+    fi
+    if [ ! -r "$generated_grant" ]; then
+        echo "FAIL: $desc (generated config module grant is missing)"
+        cleanup_active
+        FAIL=$((FAIL + 1))
+        return
+    fi
+    cp "$CONFIG_MODULE_BUILT" "$config_module"
+    chmod 0755 "$config_module"
+    mkdir -p "$module_policy_dir"
+    sed "s|^executable=.*|executable=$config_module|" "$generated_grant" \
+        >"$module_policy_dir/config.grant"
 
     printf '%s\n' "$scan_resp_json" > "$scan_resp_file"
 
     cat > "$fake_kb_py" <<'PY'
-import socket, json, sys, os, threading
+import http.server, json, sys
 
-sock_path, scan_resp_path = sys.argv[1], sys.argv[2]
-try: os.unlink(sock_path)
-except FileNotFoundError: pass
+ready_path, scan_resp_path = sys.argv[1], sys.argv[2]
 
 with open(scan_resp_path) as f:
     SCAN_RESP = f.read().strip()
 
-srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-srv.bind(sock_path)
-os.chmod(sock_path, 0o600)
-srv.listen(8)
+class Handler(http.server.BaseHTTPRequestHandler):
+    def reply(self, body, status=200):
+        data = body.encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
-def serve(conn):
-    try:
-        buf = b""
-        while not buf.endswith(b"\n"):
-            chunk = conn.recv(65536)
-            if not chunk: return
-            buf += chunk
-        req = json.loads(buf.decode().strip())
-        method = req.get("method", "")
-        if method == "server.info":
-            resp = {"status":"ok","protocol_version":1,
-                    "server_version":"fake","service":"aimee-kb"}
-        elif method == "index.scan":
-            conn.sendall((SCAN_RESP + "\n").encode())
-            return
+    def do_GET(self):
+        self.reply('{"status":"ok","service":"aimee-kb"}')
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        raw = self.rfile.read(length)
+        if self.path == "/v1/code/scan":
+            request = json.loads(raw or b"{}")
+            response = json.loads(SCAN_RESP)
+            if response.get("status") == "error":
+                self.reply(SCAN_RESP)
+            elif request.get("phase") == "seal" or not request.get("phase"):
+                self.reply(SCAN_RESP)
+            else:
+                self.reply('{"status":"ok","phase":"%s","accepted":1}' %
+                           request.get("phase", "stage"))
         else:
-            resp = {"status":"error","message":"fake kb: unknown method " + method}
-        conn.sendall((json.dumps(resp) + "\n").encode())
-    finally:
-        conn.close()
+            self.reply('{"status":"error","message":"fake kb: unknown route"}', 404)
 
-while True:
-    try:
-        c, _ = srv.accept()
-    except OSError:
-        break
-    threading.Thread(target=serve, args=(c,), daemon=True).start()
+    def log_message(self, _format, *_args):
+        pass
+
+srv = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+with open(ready_path, "w") as f:
+    f.write(str(srv.server_address[1]))
+srv.serve_forever()
 PY
 
-    python3 "$fake_kb_py" "$kb_sock" "$scan_resp_file" >"$kb_log" 2>&1 &
+    python3 "$fake_kb_py" "$kb_ready" "$scan_resp_file" >"$kb_log" 2>&1 &
     ACTIVE_KB_PID=$!
 
-    if ! wait_for_socket "$kb_sock"; then
+    if ! wait_for_file "$kb_ready"; then
         echo "FAIL: $desc (fake kb failed to start)"
         echo "  fake kb log:"
         sed 's/^/    /' "$kb_log" 2>/dev/null || true
@@ -171,30 +221,51 @@ PY
         FAIL=$((FAIL + 1))
         return
     fi
+    local kb_port
+    kb_port=$(cat "$kb_ready")
 
     # `env -i` strips the surrounding shell environment so the spawned
     # server can never inherit a stray HOME / AIMEE_SOCK / AIMEE_*.
     env -i HOME="$tmphome" PATH="$PATH" \
+        AIMEE_KB_API_URL="http://127.0.0.1:$kb_port" \
         "$AIMEE_SERVER_BIN" --socket="$server_sock" --log-level=info \
         >"$server_log" 2>&1 &
     ACTIVE_SERVER_PID=$!
+
+    # Configuration is a required out-of-process module. The server creates
+    # the bus before waiting for its validated snapshot, so attach the module
+    # during that startup window rather than waiting for HTTP first.
+    if ! wait_for_socket "$module_bus_sock"; then
+        echo "FAIL: $desc (aimee-server module bus failed to start)"
+        echo "  server log:"
+        sed 's/^/    /' "$server_log" 2>/dev/null || true
+        sed 's/^/    /' "$server_file_log" 2>/dev/null || true
+        cleanup_active
+        FAIL=$((FAIL + 1))
+        return
+    fi
+    env -i HOME="$tmphome" PATH="$PATH" \
+        "$config_module" "$module_bus_sock" >"$config_log" 2>&1 &
+    ACTIVE_CONFIG_PID=$!
 
     if ! wait_for_socket "$server_sock"; then
         echo "FAIL: $desc (aimee-server failed to start)"
         echo "  server log:"
         sed 's/^/    /' "$server_log" 2>/dev/null || true
+        sed 's/^/    /' "$server_file_log" 2>/dev/null || true
+        echo "  config module log:"
+        sed 's/^/    /' "$config_log" 2>/dev/null || true
         cleanup_active
         FAIL=$((FAIL + 1))
         return
     fi
 
-    # AIMEE_SOCK pins the client to OUR server.
+    # The retired NDJSON socket is never probed. Pin the client to this
+    # process's /v1 HTTP UDS explicitly.
     local output rc
-    output=$(env -i HOME="$tmphome" PATH="$PATH" AIMEE_SOCK="$server_sock" \
-        "$AIMEE_CLIENT" index scan 2>&1)
+    output=$(env -i HOME="$tmphome" PATH="$PATH" AIMEE_API_ENDPOINT="unix:$server_sock" \
+        "$AIMEE_CLIENT" index scan e2e-project "$project_root" 2>&1)
     rc=$?
-
-    cleanup_active
 
     local case_failed=0
     if [ "$rc" -ne "$expected_rc" ]; then
@@ -219,8 +290,16 @@ PY
     if [ $case_failed -eq 0 ]; then
         PASS=$((PASS + 1))
     else
+        echo "  server log:"
+        sed 's/^/    /' "$server_log" 2>/dev/null || true
+        sed 's/^/    /' "$server_file_log" 2>/dev/null || true
+        echo "  config module log:"
+        sed 's/^/    /' "$config_log" 2>/dev/null || true
+        echo "  fake kb log:"
+        sed 's/^/    /' "$kb_log" 2>/dev/null || true
         FAIL=$((FAIL + 1))
     fi
+    cleanup_active
 }
 
 # --- Cases ------------------------------------------------------------

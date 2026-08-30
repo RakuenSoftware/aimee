@@ -485,7 +485,7 @@ own instructions is a different and much larger proposal.
 | Classifier, metrics, gate | `src/modules/learning/learning_endogeneity.c`; public API in `include/aimee/learning/learning.h` |
 | Synthesis policy (pure) | `src/modules/learning/learning_eval_synthesis.c`; public API in `include/aimee/learning/eval_synthesis.h` |
 | Candidate ledger | `eval_candidates` in `src/modules/db1/schema.sql`; `db1_eval_candidate_*` in `src/modules/db1/eval.c` |
-| Observation + admission | `src/eval_synthesis.c`, `src/headers/eval_synthesis.h` |
+| Observation + admission | `src/eval_synthesis.c`, `src/headers/eval_synthesis_store.h` |
 | Tests | `src/tests/test_learning_eval_synthesis.c` (pure policy), `src/tests/test_eval_candidates.c` (ledger + end-to-end admission) |
 
 **Operator surface.** `aimee eval candidates [--state S] [--limit N]` reads the

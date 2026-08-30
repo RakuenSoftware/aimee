@@ -2,7 +2,7 @@
  *
  * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
 
-#include "eval_synthesis.h"
+#include "eval_synthesis_store.h"
 
 #include "agent_jobs.h" /* db1_agent_job_list_recent */
 #include "eval.h"       /* db1_eval_candidate_* */

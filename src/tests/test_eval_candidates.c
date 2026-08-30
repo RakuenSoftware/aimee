@@ -20,7 +20,7 @@
 #include "cJSON.h"
 #include "db1.h"
 #include "eval.h"
-#include "eval_synthesis.h"
+#include "eval_synthesis_store.h"
 #include "support/store_module_fixture.h"
 #include "kb_client.h"
 #include "modules/db2/c/db2.h"

@@ -6,6 +6,7 @@ from __future__ import annotations
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import tempfile
 import unittest
 
@@ -251,6 +252,17 @@ class ModuleHeaderLayoutTests(unittest.TestCase):
             self.assertEqual(len(problems), 2)
             self.assertTrue(any("rule=source-symlink" in item for item in problems))
             self.assertTrue(any("rule=retired-header-include" in item for item in problems))
+
+    def test_gitignored_local_worktree_sources_are_not_repository_inputs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.fixture(root)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            (root / ".gitignore").write_text("/.shadow/\n", encoding="utf-8")
+            shadow = root / ".shadow/worktree/src/legacy.c"
+            shadow.parent.mkdir(parents=True)
+            shadow.write_text('#include "audit_action.h"\n', encoding="utf-8")
+            self.assertEqual(checker.violations(root), [])
 
     def test_shared_basename_reports_each_claim_without_interference(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

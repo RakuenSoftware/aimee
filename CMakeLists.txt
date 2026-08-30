@@ -485,7 +485,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_ingest.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_context.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_briefing.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_conflicts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/memory_export.c
@@ -546,6 +545,7 @@ set(DB2_SRCS
 
 set(DB2_HOST_ADAPTER_SRCS
     ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_agent.c
+    ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_context.c
     ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_export.c
     ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_memory.c
     ${AIMEE_SRC_DIR}/kb/db2_adapters/kb_service_backend_runtime.c

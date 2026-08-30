@@ -786,8 +786,6 @@ class ContractTests(unittest.TestCase):
              "operation-semantics"),
             (lambda value: value["operations"][0].__setitem__("results", ["retryable"]),
              "operation-results"),
-            (lambda value: value["operations"][0].__setitem__("db3_placement", "eligible"),
-             "db3-placement"),
             (lambda value: value["operations"][0].__setitem__("c_symbols", []),
              "operation-c-symbols"),
             (lambda value: value["operations"][0].__setitem__("extra", 1), "keys"),

@@ -1,4 +1,4 @@
-/* eval_synthesis.h: the storage half of failure -> regression eval task.
+/* eval_synthesis_store.h: the storage half of failure -> regression eval task.
  *
  * The policy (fingerprinting, task rendering, text admissibility, the
  * admission predicate) lives in modules/learning/include/aimee/learning/eval_synthesis.h and
@@ -11,8 +11,8 @@
  * supervised stage asks for it.
  *
  * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
-#ifndef DEC_EVAL_SYNTHESIS_H
-#define DEC_EVAL_SYNTHESIS_H 1
+#ifndef DEC_EVAL_SYNTHESIS_STORE_H
+#define DEC_EVAL_SYNTHESIS_STORE_H 1
 
 #include <aimee/learning/attribution.h>
 #include <aimee/learning/eval_synthesis.h>
@@ -109,4 +109,4 @@ extern "C"
 }
 #endif
 
-#endif /* DEC_EVAL_SYNTHESIS_H */
+#endif /* DEC_EVAL_SYNTHESIS_STORE_H */

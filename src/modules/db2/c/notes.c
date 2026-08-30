@@ -88,7 +88,15 @@ int db2_note_create(const char *title, const char *content, const char *tags, co
       aimee_pg_finalize(st);
 
       char merged[NOTE_MAX_CONTENT];
-      snprintf(merged, sizeof(merged), "%s\n\n%s", existing.content, content);
+      size_t merged_len = strnlen(existing.content, sizeof(merged) - 1);
+      memcpy(merged, existing.content, merged_len);
+      if (merged_len < sizeof(merged) - 1)
+         merged[merged_len++] = '\n';
+      if (merged_len < sizeof(merged) - 1)
+         merged[merged_len++] = '\n';
+      size_t content_len = strnlen(content, sizeof(merged) - 1 - merged_len);
+      memcpy(merged + merged_len, content, content_len);
+      merged[merged_len + content_len] = '\0';
       const char *final_tags = (tags && tags[0]) ? tags : existing.tags;
 
       aimee_pg_stmt_t *us = aimee_pg_prepare(conn,

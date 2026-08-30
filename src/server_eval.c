@@ -37,7 +37,7 @@
 #include "model_provider.h"
 #include "model_registry.h"
 #include "db1_client/db1.h"
-#include "eval_synthesis.h" /* synthesised regression candidates (S1) */
+#include "eval_synthesis_store.h" /* synthesised regression candidates (S1) */
 #include "approach_store.h"
 #include "kb_client.h"
 #include <aimee/learning/attribution.h>

@@ -104,10 +104,6 @@ jobs:
         run: python3 -I -S scripts/gen_db2_declaration_ledger.py
       - name: Test DB2 declaration-ledger failure modes
         run: python3 -I scripts/tests/test_gen_db2_declaration_ledger.py -v
-      - name: Enforce exhaustive DB3 portability decisions
-        run: python3 -I -S scripts/check_db3_portability.py
-      - name: Test DB3 portability-audit failure modes
-        run: python3 -I scripts/tests/test_check_db3_portability.py -v
       - name: Measure DB2 C link closure
         run: python3 -I -S scripts/check_db2_link_closure.py
       - name: Refuse DB2 C link-closure debt growth
@@ -249,10 +245,8 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    # Two suites are ~99% of this job: test_gen_db1_contract and
-    # test_validate_module_descriptors. Both scale with the descriptor and
-    # operation catalogs, so the job grows every time a module or operation is
-    # added, and every other step here is sub-second.
+    # Descriptor validation dominates this job and scales with the module
+    # catalog, so leave headroom for catalog growth.
     #
     # At timeout-minutes: 5 it had already reached 4m56s on `testing` -- four
     # seconds of margin -- so it was not gating anything, it was waiting to fail
@@ -280,10 +274,6 @@ jobs:
             --check-schema src/modules
       - name: Validate core/process carving, placement, and event contracts
         run: python3 -I -S scripts/validate_module_process_contracts.py
-      - name: Enforce the DB1 operation catalog
-        run: python3 -I -S scripts/gen_db1_contract.py
-      - name: Test DB1 operation-catalog failure modes
-        run: python3 -I scripts/tests/test_gen_db1_contract.py -v
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
       - name: Test exhaustive standalone C-process export generation

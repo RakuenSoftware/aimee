@@ -12,6 +12,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/memory/gw_stage_memory.c",
+    "src/modules/memory/memory_activation.c",
     "src/modules/memory/memory_advanced.c",
     "src/modules/memory/memory_assemble.c",
     "src/modules/memory/memory_candidate_fusion.c",
@@ -69,7 +70,9 @@
   ],
   "private_headers": [
     "src/modules/memory/gw_stage_memory.h",
+    "src/modules/memory/memory_activation.h",
     "src/modules/memory/memory_assemble_util.h",
+    "src/modules/memory/memory_candidate_fusion.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_extract_patterns.h",
     "src/modules/memory/memory_fact_gate.h",

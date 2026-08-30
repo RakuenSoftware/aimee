@@ -191,6 +191,8 @@ class SignModuleDocsTests(unittest.TestCase):
                 "optional": ["runtime-web"],
                 "principal_refs": {"config": 2, "runtime-web": 23},
                 "retired_principal_refs": [],
+                "plugin_principal_ref_band": {"first": 200, "limit": 456},
+                "retired_principal_ref_band": {"first": 456, "limit": 512},
             }, indent=2) + "\n", encoding="ascii")
             (repo / "evidence.txt").write_text("evidence\n", encoding="ascii")
             template = (

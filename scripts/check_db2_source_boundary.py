@@ -54,6 +54,8 @@ DEPENDENCY_CLASSES = {
 HOST_ADAPTER_REHOMES = {
     "src/modules/db2/c/kb_service_backend_agent.c":
         "src/kb/db2_adapters/kb_service_backend_agent.c",
+    "src/modules/db2/c/kb_service_backend_context.c":
+        "src/kb/db2_adapters/kb_service_backend_context.c",
     "src/modules/db2/c/kb_service_backend_export.c":
         "src/kb/db2_adapters/kb_service_backend_export.c",
     "src/modules/db2/c/kb_service_backend_export.h":
@@ -294,6 +296,8 @@ def _resolve_project_header(
     source: Path,
     target: str,
     index: dict[str, list[str]],
+    *,
+    quoted: bool,
 ) -> str | None:
     """Resolve an include to a repository header, or return None for system headers."""
     direct = source.parent.joinpath(*PurePosixPath(target).parts)
@@ -321,6 +325,13 @@ def _resolve_project_header(
         else:
             if support_resolved.is_file() and support_resolved.suffix == ".h":
                 return support_resolved.relative_to(root).as_posix()
+
+    # A bare angle include is a compiler/toolchain header. Do not let a
+    # same-named file buried in a vendored tree (for example its private
+    # string.h) turn it into a project dependency. Canonical public module
+    # includes retain their aimee/... path and are resolved below.
+    if not quoted and not target.startswith("aimee/"):
+        return None
 
     # Historical DB2 sources use ../headers and ../kb spellings. Project
     # include roots made these resolve before the directory relocation, so
@@ -381,7 +392,9 @@ def _outbound_dependencies(root: Path) -> list[dict[str, object]]:
             if not match:
                 continue
             delimiter, target = match.groups()
-            resolved = _resolve_project_header(root, path, target, index)
+            resolved = _resolve_project_header(
+                root, path, target, index, quoted=delimiter == '"'
+            )
             if resolved is None:
                 if delimiter == '"':
                     counts[(
