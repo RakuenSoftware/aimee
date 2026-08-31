@@ -84,6 +84,13 @@ grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$auto_release" ||
 require_job_permission "$auto_release" thin-clients id-token write
 require_job_permission "$auto_release" images id-token write
 
+for image_job in llm-images images; do
+    image_job_block=$(job_block "$auto_release" "$image_job")
+    printf '%s\n' "$image_job_block" |
+        grep -Fq 'needs: [version, tag, thin-clients]' ||
+        fail "$auto_release $image_job must wait for thin-client publication"
+done
+
 # The release artifact build must retain the platform crypto setup exercised by
 # CI. macOS needs a universal libcrypto archive for its arm64+x86_64 binary;
 # Windows needs the OpenSSL package matching the selected MSYS2 toolchain and
