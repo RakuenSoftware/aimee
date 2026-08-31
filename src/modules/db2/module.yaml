@@ -244,6 +244,7 @@
     "src/modules/db2/c/evidence_vectors.h",
     "src/modules/db2/c/fact_ingest.h",
     "src/modules/db2/c/fact_lifecycle.h",
+    "src/modules/db2/c/fact_mutation.h",
     "src/modules/db2/c/fact_recall.h",
     "src/modules/db2/c/failed_queries.h",
     "src/modules/db2/c/feature_rows.h",
@@ -403,6 +404,8 @@
       }
     ],
     "header_dependencies": [
+      "src/db1_client/checkpoints.h",
+      "src/db1_client/decisions.h",
       "src/headers/agent_types.h",
       "src/headers/aimee.h",
       "src/headers/aimee_features.h",
@@ -413,6 +416,7 @@
       "src/headers/code_match.h",
       "src/headers/collab_rules.h",
       "src/headers/config.h",
+      "src/headers/config_accessors.h",
       "src/headers/config_embedder_dims.h",
       "src/headers/context_discover.h",
       "src/headers/dstr.h",
@@ -430,6 +434,7 @@
       "src/headers/kb_verifier.h",
       "src/headers/management_read.h",
       "src/headers/memory.h",
+      "src/headers/memory_authority.h",
       "src/headers/platform.h",
       "src/headers/platform_random.h",
       "src/headers/prompts.h",
