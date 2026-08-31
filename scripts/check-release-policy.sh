@@ -32,6 +32,30 @@ require_reusable_only() {
     fi
 }
 
+job_block() {
+    local file=$1
+    local job=$2
+    awk -v header="  ${job}:" '
+        $0 == header { in_job = 1; print; next }
+        in_job && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }
+        in_job { print }
+    ' "$file"
+}
+
+require_job_permission() {
+    local file=$1
+    local job=$2
+    local permission=$3
+    local value=$4
+    local block
+    block=$(job_block "$file" "$job")
+
+    [ -n "$block" ] || fail "$file has no $job job"
+    printf '%s\n' "$block" |
+        grep -Eq "^      ${permission}:[[:space:]]+${value}[[:space:]]*$" ||
+        fail "$file $job job must grant ${permission}: ${value} to its reusable workflow"
+}
+
 auto_release="$repo_root/.github/workflows/auto-release.yml"
 main_approval="$repo_root/.github/workflows/main-merge-approval.yml"
 publish_images="$repo_root/.github/workflows/publish-images.yml"
@@ -53,6 +77,12 @@ grep -Fq 'uses: ./.github/workflows/publish-images.yml' "$auto_release" ||
     fail "$auto_release must call the guarded image publisher"
 grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$auto_release" ||
     fail "$auto_release must call the guarded thin-client publisher"
+
+# Both publishers create keyless signatures and request an OIDC token. GitHub
+# validates reusable-workflow permissions only when auto-release is triggered;
+# without these caller grants the release fails at startup before any job exists.
+require_job_permission "$auto_release" thin-clients id-token write
+require_job_permission "$auto_release" images id-token write
 
 approval_job=$(awk '
     /^  approval:[[:space:]]*$/ { in_approval = 1; print; next }
