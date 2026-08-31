@@ -68,9 +68,6 @@ jobs:
   # Build each image for each arch on a native runner; push by digest only.
   build:
     needs: [prep]
-    # `models` is skipped on a pull request, and a skipped dependency would
-    # otherwise skip this job too. Proceed as long as it did not FAIL.
-    if: ${{ !cancelled() && needs.prep.result == 'success' && needs.models.result != 'failure' }}
     strategy:
       fail-fast: false
       matrix:
