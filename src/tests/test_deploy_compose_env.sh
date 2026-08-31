@@ -53,6 +53,12 @@ grep -q -- 'aimee config deploy-env' "$entrypoint" \
     && r=yes || r=no
 check "entrypoint derives the env from config" "yes" "$r"
 
+# The container carries the remote-only thin client, whose lack of an implicit
+# local endpoint is deliberate.  The entrypoint has just waited for this Unix
+# socket, so it must name it when invoking the client.
+grep -q 'AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock"' "$entrypoint" && r=yes || r=no
+check "entrypoint points the thin client at the live Unix socket" "yes" "$r"
+
 grep -q 'DEPLOY_ENV_DIR' "$entrypoint" && r=yes || r=no
 check "entrypoint targets the compose project directory" "yes" "$r"
 

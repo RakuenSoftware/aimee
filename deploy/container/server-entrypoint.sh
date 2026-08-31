@@ -587,7 +587,12 @@ fi
 # the extracted config process.
 DEPLOY_ENV_DIR="${AIMEE_DEPLOY_COMPOSE_DIR:-/opt/aimee/deploy}"
 if [ -d "$DEPLOY_ENV_DIR" ]; then
-    if runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" aimee config deploy-env \
+    # The image ships the remote-only thin client.  It deliberately has no
+    # implicit co-located topology, so name the Unix socket the entrypoint just
+    # waited for instead of relying on the retired local default.
+    if runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
+        AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock" \
+        aimee config deploy-env \
         >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
         chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
         mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"

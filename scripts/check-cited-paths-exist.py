@@ -47,7 +47,24 @@ SCAN_SUFFIXES = {".go", ".c", ".h", ".py", ".sh", ".md", ".mk", ".sql"}
 # reader to follow.
 COMMENT = re.compile(r"^\s*(//|#|\*|/\*|--|>)")
 SCAN_NAMES = {"Makefile", "CONTRIBUTING.md", "README.md"}
-SKIP_DIRS = {".git", "build", "obj", "node_modules", ".ci-logs", "vendor", ".venv"}
+# Agent-managed worktree directories contain generated full-repository
+# checkouts. Walking them makes this gate scan every active and retained
+# worktree as though it were part of the checkout under test (hundreds of
+# copies on a busy host). Keep these paths exact so a tracked directory named
+# `worktrees` elsewhere remains in scope.
+SKIP_DIRS = {
+    ".git",
+    "build",
+    "obj",
+    "node_modules",
+    ".ci-logs",
+    "vendor",
+    ".venv",
+}
+SKIP_TREES = {
+    REPO_ROOT / ".aimee",
+    REPO_ROOT / ".claude" / "worktrees",
+}
 
 # A path with an extension, or a directory reference ending in a slash.
 CITATION = re.compile(
@@ -69,7 +86,11 @@ HISTORY = re.compile(
 def scan_files() -> list[Path]:
     out = []
     for root, dirs, files in os.walk(REPO_ROOT):
-        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+        dirs[:] = [
+            d
+            for d in dirs
+            if d not in SKIP_DIRS and Path(root, d) not in SKIP_TREES
+        ]
         for name in files:
             path = Path(root) / name
             if path.suffix in SCAN_SUFFIXES or name in SCAN_NAMES:

@@ -26,7 +26,9 @@
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/learning-loops)
 #   PGDB           the throwaway database                        (default aimee_shared)
 #   AIMEE_DB2_URL  libpq URL reaching that database
-#   AIMEE_STORE_URL PostgreSQL URL for the daemon store (defaults to AIMEE_DB2_URL)
+#   AIMEE_STORE_URL non-owner PostgreSQL URL for the daemon store (required)
+#   AIMEE_STORE_MIGRATION_URL owner URL used only for schema migration
+#                             (required and must name a different role)
 #   KB_PORT        TCP port for aimee-kb                         (default 18745)
 #
 # Every assertion prints PASS or FAIL; the script exits non-zero if any failed.
@@ -39,7 +41,14 @@ WORKDIR="${WORKDIR:-/tmp/learning-loops}"
 KB_PORT="${KB_PORT:-18745}"
 PGDB="${PGDB:-aimee_shared}"
 export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///$PGDB?host=/var/run/postgresql}"
-export AIMEE_STORE_URL="${AIMEE_STORE_URL:-$AIMEE_DB2_URL}"
+export AIMEE_STORE_URL="${AIMEE_STORE_URL:-}"
+export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
+[ -n "$AIMEE_STORE_URL" ] || {
+  echo "AIMEE_STORE_URL is required and must name the non-owner store role" >&2; exit 1;
+}
+[ -n "$AIMEE_STORE_MIGRATION_URL" ] || {
+  echo "AIMEE_STORE_MIGRATION_URL is required and must name the schema owner" >&2; exit 1;
+}
 OBJ="$AIMEE_SRC/build/obj"
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
@@ -93,6 +102,7 @@ attach() { # attach <name> <home> <bus> <tag>
     [ -x "$2/.config/aimee/aimee-module-$1" ] || return 1
     env HOME="$2" AIMEE_HOME="$2/.config/aimee" AIMEE_DB1_PATH="$2/.config/aimee/aimee.db" \
         AIMEE_DB2_URL="$AIMEE_DB2_URL" AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+        AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
         "$2/.config/aimee/aimee-module-$1" "$3" > "$WORKDIR/mod-$4-$1.log" 2>&1 &
     MOD_PIDS="$MOD_PIDS $!"
 }

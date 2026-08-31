@@ -30,8 +30,8 @@ a real maintenance cycle, so do not point it at anything you care about.
 # 1. inside the throwaway box, as root
 tests/e2e/provision-pg-env.sh
 
-# 2. build
-cd src && make -j$(nproc) server all
+# 2. build the daemons and their required config module
+cd src && make -j$(nproc) server all build/obj/aimee-module-config
 
 # 3. let aimee-kb apply the schema itself (see the warning below)
 ./aimee-kb --http-port=8911

@@ -17,6 +17,8 @@ set -euo pipefail
 PGDB="${PGDB:-aimee_test}"
 PGUSER="${PGUSER:-aimee}"
 PGPASS="${PGPASS:-aimee}"
+PGSTOREUSER="${PGSTOREUSER:-aimee_store_runtime}"
+PGSTOREPASS="${PGSTOREPASS:-aimee-store-runtime}"
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
@@ -35,13 +37,31 @@ sleep 3
 
 su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$PGUSER'\"" | grep -q 1 || \
   su - postgres -c "psql -c \"CREATE ROLE $PGUSER LOGIN PASSWORD '$PGPASS' SUPERUSER\""
+su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$PGSTOREUSER'\"" | grep -q 1 || \
+  su - postgres -c "psql -c \"CREATE ROLE $PGSTOREUSER LOGIN PASSWORD '$PGSTOREPASS' \
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS\""
 
 su - postgres -c "dropdb --if-exists $PGDB"
 su - postgres -c "createdb -O $PGUSER $PGDB"
 su - postgres -c "psql -d $PGDB -c 'CREATE EXTENSION IF NOT EXISTS vector'"
 
+# The Go daemon store enforces separate migration and runtime identities.  Its
+# migrations are owned by PGUSER; default privileges make every newly-created
+# object usable by the non-owner runtime without giving that role DDL rights.
+PGPASSWORD="$PGPASS" psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$PGUSER" -d "$PGDB" <<SQL
+GRANT CONNECT ON DATABASE $PGDB TO $PGSTOREUSER;
+GRANT USAGE ON SCHEMA public TO $PGSTOREUSER;
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $PGSTOREUSER;
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $PGSTOREUSER;
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO $PGSTOREUSER;
+SQL
+
 echo
 echo "provisioned: postgresql://$PGUSER:***@127.0.0.1:5432/$PGDB"
+echo "store runtime: postgresql://$PGSTOREUSER:***@127.0.0.1:5432/$PGDB"
 PGPASSWORD="$PGPASS" psql -h 127.0.0.1 -U "$PGUSER" -d "$PGDB" -tAc 'SELECT version()'
 echo
 echo "next:"
@@ -50,3 +70,7 @@ echo "  2. start kb ONCE so it applies the schema (it needs an explicit port,"
 echo "     and exits immediately without one):"
 echo "         ./aimee-kb --http-port=8911"
 echo "  3. run the suite:    tests/e2e/typed-facts-pg-e2e.sh"
+echo
+echo "for module-liveness-pg-e2e.sh or learning-loops-pg-e2e.sh, export:"
+echo "  AIMEE_STORE_URL=postgresql://$PGSTOREUSER:$PGSTOREPASS@127.0.0.1:5432/$PGDB"
+echo "  AIMEE_STORE_MIGRATION_URL=postgresql://$PGUSER:$PGPASS@127.0.0.1:5432/$PGDB"
