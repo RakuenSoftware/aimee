@@ -136,7 +136,8 @@ class EconomizerProbe:
 
 def build_probe(repo: Path, output: Path) -> None:
     subprocess.run(
-        ["go", "build", "-trimpath", "-o", str(output), "./cmd/aimee-economizer-probe"],
+        ["go", "build", "-trimpath", "-o", str(output),
+         "./modules/economizer/cmd/aimee-economizer-probe"],
         cwd=repo / "server-go", check=True,
     )
 

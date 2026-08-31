@@ -230,7 +230,10 @@ jobs:
               if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
                 case "$commit" in
                   9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
-                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc)
+                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc|\
+                  d978a2d05356b6f6d8821f4230da5f1de9fe71c0|59d5d9e419fd64326961c5ce8086c43abc09a797|\
+                  af58300e9fd16858ad3195748f4da50bbdcd0e3c|ef9c722bab2b149dadd0fd13c3d3478a4cfda5cf|\
+                  41fe8fbae98386cc9c2895810d284bcf902f8c8e)
                     continue
                     ;;
                 esac

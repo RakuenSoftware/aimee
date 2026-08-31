@@ -698,6 +698,10 @@
           "sha256": "0cc4b02829ae6259394aeebcc1827d13669c825814e0580f249e9e99360cdd4e"
         },
         {
+          "path": "src/headers/eval_synthesis_store.h",
+          "sha256": "7eb108fdac72803139a48930d88168803125fd0ba215584de156d0203a43ddd2"
+        },
+        {
           "path": "src/headers/events.h",
           "sha256": "ea8aae5ef5f63e26646913211f5745464288b17917f6ee56cc1df9200e706848"
         },
@@ -1876,7 +1880,7 @@
       ]
     },
     "public-symbols": {
-      "sha256": "75611d52daa7d9f76be835f998130fea8c90dbac8d288419b39d1617a405060e",
+      "sha256": "e74e400e32a59a8cc79d1c4dd4f20d70ef3e5a8c5830232e557a3bc4abc07028",
       "source": "complete normalized contents of public-headers"
     },
     "routes": {

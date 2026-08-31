@@ -1,4 +1,4 @@
-// aimee-economizer-probe exposes the production economizer handler as a
+// The aimee-economizer-probe command exposes the production economizer handler as a
 // newline-delimited stdin/stdout process for reproducible benchmark runs.
 //
 // It deliberately has no provider or network access. Each input line is the

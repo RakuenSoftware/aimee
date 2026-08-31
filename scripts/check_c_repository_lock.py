@@ -60,11 +60,19 @@ def main() -> int:
             classification = "required" if module_id in required else "optional"
             if item.get("classification") != classification:
                 return fail(f"{module_id}: classification mismatch")
+            contract = contracts[module_id]
+            descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
+            external_pin = exporter.external_module_pin(
+                module_id, classification, descriptor, contract
+            )
+            if external_pin is not None:
+                if item != external_pin:
+                    return fail(f"{module_id}: external repository pin is stale")
+                continue
             if item.get("repository") != f"{exporter.REMOTE_ROOT}/aimee-module-{module_id}.git":
                 return fail(f"{module_id}: unexpected repository")
             if item.get("version") != version or item.get("ref") != f"v{version}":
                 return fail(f"{module_id}: version is not pinned to v{version}")
-            contract = contracts[module_id]
             if item.get("execution") != contract["execution"] or item.get("placements") != contract["placements"]:
                 return fail(f"{module_id}: execution/placement mismatch")
             if contract["execution"] == "process":
@@ -78,7 +86,6 @@ def main() -> int:
                 return fail(f"{module_id}: core component has process identity")
             if not isinstance(item.get("commit"), str) or not COMMIT.fullmatch(item["commit"]):
                 return fail(f"{module_id}: commit is not an exact SHA-1")
-            descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
             repository_files = exporter.module_repository_files(module_id, descriptor)
             expected_digest = exporter.digest_files([ROOT / path for path in repository_files])
             if item.get("source_sha256") != expected_digest:

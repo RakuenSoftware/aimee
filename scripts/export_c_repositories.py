@@ -714,6 +714,43 @@ def go_dependency_version(module_path: str) -> str:
     return match.group(1)
 
 
+def external_module_pin(
+    module_id: str,
+    classification: str,
+    descriptor: dict[str, object],
+    contract: dict[str, object],
+) -> dict[str, object] | None:
+    """Return the canonical pin for an externally maintained module."""
+    external = descriptor.get("external_source")
+    if external is None:
+        return None
+    if not isinstance(external, dict):
+        raise ExportError(f"{module_id}: malformed external_source")
+    module_path = external.get("module")
+    repository_url = external.get("repository")
+    if not isinstance(module_path, str) or not isinstance(repository_url, str):
+        raise ExportError(f"{module_id}: malformed external_source")
+    dependency_version = go_dependency_version(module_path)
+    source_paths = [ROOT / item for item in module_owned_files(module_id, descriptor)]
+    pin: dict[str, object] = {
+        "id": module_id,
+        "classification": classification,
+        "repository": repository_url + ".git",
+        "ref": dependency_version,
+        "version": dependency_version,
+        "commit": dependency_version.rsplit("-", 1)[-1],
+        "execution": contract["execution"],
+        "placements": contract["placements"],
+        "source_sha256": digest_files(source_paths),
+    }
+    if contract["execution"] == "process":
+        pin["runtime"] = contract["runtime"]
+        pin["principal_class"] = PRINCIPAL_CLASS
+        pin["principal_ref"] = contract["principal_ref"]
+        pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+    return pin
+
+
 def go_module_requirements(module_id: str) -> tuple[list[str], list[str]]:
     """Return direct and indirect requirements for an isolated Go export."""
     direct = ["golang.org/x/sys"]
@@ -751,30 +788,8 @@ def export_module(
     descriptor = load_json(descriptor_path)
     if descriptor.get("id") != module_id:
         raise ExportError(f"{descriptor_path}: descriptor id mismatch")
-    external = descriptor.get("external_source")
-    if isinstance(external, dict):
-        module_path = external.get("module")
-        repository_url = external.get("repository")
-        if not isinstance(module_path, str) or not isinstance(repository_url, str):
-            raise ExportError(f"{module_id}: malformed external_source")
-        dependency_version = go_dependency_version(module_path)
-        source_paths = [ROOT / item for item in module_owned_files(module_id, descriptor)]
-        pin = {
-            "id": module_id,
-            "classification": classification,
-            "repository": repository_url + ".git",
-            "ref": dependency_version,
-            "version": dependency_version,
-            "commit": dependency_version.rsplit("-", 1)[-1],
-            "execution": contract["execution"],
-            "placements": contract["placements"],
-            "source_sha256": digest_files(source_paths),
-        }
-        if contract["execution"] == "process":
-            pin["runtime"] = contract["runtime"]
-            pin["principal_class"] = PRINCIPAL_CLASS
-            pin["principal_ref"] = contract["principal_ref"]
-            pin["serve"] = [stage["event_kind"] for stage in contract["stages"]]
+    pin = external_module_pin(module_id, classification, descriptor, contract)
+    if pin is not None:
         return pin
     owned = module_owned_files(module_id, descriptor)
     repository_files = module_repository_files(module_id, descriptor)
@@ -1164,11 +1179,33 @@ def refresh_lock_from_repositories(repository_root: Path) -> int:
     modules = lock.get("modules")
     if not isinstance(core, dict) or not isinstance(modules, list):
         raise ExportError(f"{LOCK}: invalid lock structure")
+    inventory = load_json(INVENTORY)
+    required = inventory.get("required")
+    optional = inventory.get("optional")
+    if not isinstance(required, list) or not isinstance(optional, list):
+        raise ExportError(f"{INVENTORY}: required/optional must be arrays")
+    required_ids = set(required)
+    known_ids = required_ids | set(optional)
+    contracts = process_contracts.validate()
     entries = [core, *modules]
     for entry in entries:
         repository_id = entry.get("id")
         if not isinstance(repository_id, str):
             raise ExportError(f"{LOCK}: repository entry has no id")
+        if repository_id != "aimee-core-c":
+            if repository_id not in known_ids:
+                raise ExportError(f"{LOCK}: unknown module repository {repository_id}")
+            descriptor = load_json(ROOT / f"src/modules/{repository_id}/module.yaml")
+            external_pin = external_module_pin(
+                repository_id,
+                "required" if repository_id in required_ids else "optional",
+                descriptor,
+                contracts[repository_id],
+            )
+            if external_pin is not None:
+                entry.clear()
+                entry.update(external_pin)
+                continue
         directory_name = repository_id if repository_id == "aimee-core-c" else f"aimee-module-{repository_id}"
         repository = repository_root / directory_name
         if not (repository / ".git").is_dir():
