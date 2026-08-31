@@ -142,6 +142,7 @@ jobs:
     uses: ./.github/workflows/release-thin-client.yml
     permissions:
       contents: write
+      id-token: write
     with:
       version: ${{ needs.version.outputs.version }}
 
@@ -162,6 +163,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     with:
       version: ${{ needs.version.outputs.version }}
 
