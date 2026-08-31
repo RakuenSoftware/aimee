@@ -226,7 +226,10 @@ int db2_directive_list(const char *state, const char *cause, memory_directive_t 
       return 0;
 
    int idx = 1;
-   char placeholder[8];
+   /* "?" + a signed decimal int + NUL. Keep this sized for the type rather
+    * than the small parameter numbers used by the current queries so strict
+    * format-truncation builds can prove the snprintf is safe. */
+   char placeholder[16];
    if (have_state)
    {
       snprintf(placeholder, sizeof(placeholder), "?%d", idx++);
@@ -510,7 +513,9 @@ int db2_directive_match_by_lexical(const char *match_clause, memory_directive_t 
 
    /* Bind each LIKE pattern as '%token%'. */
    char like_bufs[ED_LEXICAL_MAX_TOKENS][ED_LEXICAL_MAX_TOKEN_LEN + 4];
-   char placeholder[8];
+   /* snprintf's argument is an int; size for its full decimal range even
+    * though the lexical query currently binds at most 17 parameters. */
+   char placeholder[16];
    for (int i = 0; i < n_tokens; i++)
    {
       size_t token_len = strlen(tokens[i]);
