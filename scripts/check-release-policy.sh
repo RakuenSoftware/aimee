@@ -84,6 +84,24 @@ grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$auto_release" ||
 require_job_permission "$auto_release" thin-clients id-token write
 require_job_permission "$auto_release" images id-token write
 
+# The release artifact build must retain the platform crypto setup exercised by
+# CI. macOS needs a universal libcrypto archive for its arm64+x86_64 binary;
+# Windows needs the OpenSSL package matching the selected MSYS2 toolchain and
+# must expose that prefix to CMake. Losing any of these makes the gated release
+# fail only after it has created the version tag.
+grep -Fq 'Build universal OpenSSL crypto (macOS)' "$release_client" ||
+    fail "$release_client must build universal OpenSSL crypto for macOS"
+grep -Fq 'lipo -create \' "$release_client" ||
+    fail "$release_client must combine both macOS libcrypto architectures"
+grep -Fq -- '-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"' "$release_client" ||
+    fail "$release_client must pass its universal OpenSSL prefix to macOS CMake"
+grep -Fq 'mingw-w64-ucrt-x86_64-openssl' "$release_client" ||
+    fail "$release_client must install OpenSSL for the Windows UCRT toolchain"
+grep -Fq 'mingw-w64-x86_64-openssl' "$release_client" ||
+    fail "$release_client must install OpenSSL for the Windows MinGW toolchain"
+grep -Fq 'echo "OPENSSL_ROOT_DIR=$($prefix -replace' "$release_client" ||
+    fail "$release_client must pass its MinGW OpenSSL prefix to Windows CMake"
+
 approval_job=$(awk '
     /^  approval:[[:space:]]*$/ { in_approval = 1; print; next }
     in_approval && /^  [A-Za-z0-9_-]+:[[:space:]]*$/ { exit }

@@ -39,9 +39,9 @@ jobs:
             kind: linux
             asset: aimee-linux-arm64
           # macOS: one universal (arm64 + x86_64) binary, built on macos-latest.
-          # Avoids the scarce/deprecating Intel runner; TLS uses Secure Transport
-          # (system frameworks, already universal), so a fat build still needs no
-          # arch-specific brew libraries.
+          # Avoids the scarce/deprecating Intel runner. Secure Transport is
+          # universal, and artifact verification uses the pinned universal
+          # libcrypto built below.
           - os: macos-latest
             kind: macos
             asset: aimee-macos-universal
@@ -94,10 +94,48 @@ jobs:
         run: cp aimee "${{ matrix.asset }}"
 
       # --- macOS: CMake thin-client target, lean profile ---
+      # artifact_trust uses libcrypto. Homebrew on the arm64 runner provides
+      # only an arm64 bottle, so build the same pinned universal archive that
+      # the green macos-build CI job uses.
+      - name: Build universal OpenSSL crypto (macOS)
+        if: matrix.kind == 'macos'
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/openssl-3.6.3.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/openssl/openssl/releases/download/openssl-3.6.3/openssl-3.6.3.tar.gz
+          echo "243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1  $archive" \
+            | shasum -a 256 --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          source_dir="$RUNNER_TEMP/openssl-3.6.3"
+          for arch in arm64 x86_64; do
+            build_dir="$RUNNER_TEMP/openssl-$arch"
+            prefix="$RUNNER_TEMP/openssl-$arch-install"
+            cp -R "$source_dir" "$build_dir"
+            cd "$build_dir"
+            if [ "$arch" = arm64 ]; then
+              target=darwin64-arm64-cc
+            else
+              target=darwin64-x86_64-cc
+            fi
+            ./Configure "$target" no-shared no-tests --prefix="$prefix"
+            make --jobs 3 build_libs
+            make install_dev
+          done
+          universal="$RUNNER_TEMP/openssl-universal"
+          mkdir -p "$universal/lib"
+          cp -R "$RUNNER_TEMP/openssl-arm64-install/include" "$universal/include"
+          lipo -create \
+            "$RUNNER_TEMP/openssl-arm64-install/lib/libcrypto.a" \
+            "$RUNNER_TEMP/openssl-x86_64-install/lib/libcrypto.a" \
+            -output "$universal/lib/libcrypto.a"
+          echo "OPENSSL_ROOT_DIR=$universal" >> "$GITHUB_ENV"
+
       - name: Build (macOS, CMake -- universal arm64+x86_64)
         if: matrix.kind == 'macos'
         run: |
-          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
+          cmake -B build -DAIMEE_THIN_CLIENT=ON -DAIMEE_LEAN=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64" -DAIMEE_VERSION_STR="${{ steps.ver.outputs.version != '' && format('v{0}', steps.ver.outputs.version) || '' }}"
           cmake --build build --parallel 3 --target aimee
           # Fail the build unless the artifact is a true fat binary.
           echo "archs: $(lipo -archs build/aimee)"
@@ -112,30 +150,59 @@ jobs:
         if: matrix.kind == 'windows'
         shell: pwsh
         run: |
-          # Reliable MinGW setup — avoids the Chocolatey CDN flake AND the choco
-          # package's changing gcc path (v15.2.0 moved it). Prefer the MSYS2
-          # mingw64 toolchain pre-installed on the runner; else choco-install with
-          # retries and discover gcc.exe rather than hardcoding its directory.
+          # Match the green Windows CI setup: require a complete compiler/make
+          # pair, prefer the runner's MSYS2 toolchain, and install the matching
+          # OpenSSL package before falling back to Chocolatey.
           function Find-MingwBin {
-            if (Test-Path "C:\msys64\mingw64\bin\gcc.exe") { return "C:\msys64\mingw64\bin" }
+            foreach ($candidate in @("C:\msys64\ucrt64\bin", "C:\msys64\mingw64\bin")) {
+              if ((Test-Path "$candidate\gcc.exe") -and
+                  (Test-Path "$candidate\mingw32-make.exe")) { return $candidate }
+            }
             $g = Get-ChildItem -Path "C:\ProgramData\chocolatey\lib\mingw","C:\ProgramData\mingw64" `
                    -Recurse -Filter gcc.exe -ErrorAction SilentlyContinue |
                  Where-Object { $_.FullName -match 'mingw64' } | Select-Object -First 1
-            if ($g) { return (Split-Path $g.FullName) }
+            if ($g) {
+              $candidate = Split-Path $g.FullName
+              if (Test-Path "$candidate\mingw32-make.exe") { return $candidate }
+            }
             return $null
           }
           $bin = Find-MingwBin
-          if (-not $bin) {
+          $pacman = "C:\msys64\usr\bin\pacman.exe"
+          if (-not $bin -and (Test-Path $pacman)) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
-              choco install mingw -y --no-progress
-              if ($LASTEXITCODE -ne 0) { Start-Sleep 15 }
+              & $pacman -Sy --noconfirm --needed `
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
+                mingw-w64-ucrt-x86_64-openssl
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
           }
-          if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
+          if (-not $bin) {
+            for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
+              choco install mingw -y --no-progress
+              if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
+              $bin = Find-MingwBin
+            }
+          }
+          if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          $prefix = Split-Path $bin
+          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
+            $opensslPackage = if ($bin -like "*\ucrt64\*") {
+              "mingw-w64-ucrt-x86_64-openssl"
+            } else {
+              "mingw-w64-x86_64-openssl"
+            }
+            & $pacman -Sy --noconfirm --needed $opensslPackage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
+            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
+          }
           Write-Host "Using MinGW at $bin"
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Download SQLite amalgamation (Windows)
         if: matrix.kind == 'windows'
         shell: powershell
