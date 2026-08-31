@@ -25,6 +25,9 @@
 #   AIMEE_SRC      the source tree, for build/obj                (default $AIMEE_ROOT/src)
 #   WORKDIR        scratch for HOMEs and logs                    (default /tmp/module-liveness)
 #   AIMEE_DB2_URL  libpq URL for a throwaway database
+#   AIMEE_STORE_URL non-owner runtime URL for the daemon store (required)
+#   AIMEE_STORE_MIGRATION_URL owner URL used only for schema migration
+#                             (required and must name a different role)
 #   PGDB            optional psql read-back DSN (default $AIMEE_DB2_URL)
 #   KB_PORT        TCP port for aimee-kb                         (default 18744)
 #
@@ -37,6 +40,14 @@ AIMEE_SRC="${AIMEE_SRC:-$AIMEE_ROOT/src}"
 WORKDIR="${WORKDIR:-/tmp/module-liveness}"
 KB_PORT="${KB_PORT:-18744}"
 export AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgres:///aimee_shared?host=/var/run/postgresql}"
+export AIMEE_STORE_URL="${AIMEE_STORE_URL:-}"
+export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
+[ -n "$AIMEE_STORE_URL" ] || {
+    echo "AIMEE_STORE_URL is required and must name the non-owner store role" >&2; exit 1;
+}
+[ -n "$AIMEE_STORE_MIGRATION_URL" ] || {
+    echo "AIMEE_STORE_MIGRATION_URL is required and must name the schema owner" >&2; exit 1;
+}
 PGDB="${PGDB:-$AIMEE_DB2_URL}"
 OBJ="$AIMEE_SRC/build/obj"
 KBHOME="$WORKDIR/kbhome"
@@ -85,6 +96,8 @@ attach() { # attach <name> <home> <bus> <tag>
     [ -x "$home/.config/aimee/aimee-module-$name" ] || return 1
     env HOME="$home" AIMEE_HOME="$home/.config/aimee" \
         AIMEE_DB1_PATH="$home/.config/aimee/aimee.db" AIMEE_DB2_URL="$AIMEE_DB2_URL" \
+        AIMEE_STORE_URL="$AIMEE_STORE_URL" \
+        AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
         "$home/.config/aimee/aimee-module-$name" "$bus" > "$WORKDIR/mod-$tag-$name.log" 2>&1 &
     MOD_PIDS="$MOD_PIDS $!"
     return 0
@@ -135,7 +148,7 @@ check "health names the production capture failure" "open_failed" "${CAPTURE_REA
 GAP_ROWS=0
 for _ in $(seq 1 30); do
     GAP_ROWS=$(psql -d "$PGDB" -tA -c \
-        "SELECT count(*) FROM kb_audit_event WHERE action='bus.capture.gap' AND verdict='open_failed'" \
+        "SELECT count(*) FROM kb_audit_outbox WHERE action='bus.capture.gap' AND verdict='open_failed'" \
         2>/dev/null)
     [ "${GAP_ROWS:-0}" -gt 0 ] && break
     sleep 1
@@ -156,11 +169,31 @@ check "every KB module is still attached" "0" "$dead"
 printf '        %d attached\n' "$alive"
 
 section "1  aimee-server, with every module it is granted"
-SRV_MODULES="config db1 learning memory routing delegates tools workspace git skills
+SRV_MODULES="config postgres learning memory routing delegates tools workspace git skills
              response-composition execution-policy governance roundtable runtime-web sandbox economizer benchmarks aimee"
+SRV_MODULES="$SRV_MODULES egress"
 SRV_DEPLOYED=""
 for m in $SRV_MODULES; do
     deploy server "$m" "$SRVHOME" && SRV_DEPLOYED="$SRV_DEPLOYED $m"
+done
+# Several Go modules serve under one identity and make outbound calls under
+# narrower companion identities.  Every companion grant must point at the same
+# launched executable; launching companions would duplicate serving processes.
+deploy_companion() { # deploy_companion <grant> <serving-module>
+    local companion="$1" module="$2"
+    grant="$OBJ/module-bundle/grants/server/$companion.grant"
+    if [ -r "$grant" ] && [ -x "$SRVHOME/.config/aimee/aimee-module-$module" ]; then
+        sed "s|^executable=.*|executable=$SRVHOME/.config/aimee/aimee-module-$module|" "$grant" \
+            > "$SRVHOME/.config/aimee/modules.d/server/$companion.grant"
+    else
+        bad "companion grant '$companion' is not deployable"
+    fi
+}
+for spec in \
+    aimee-db1:aimee aimee-postgres:aimee economizer-db1:economizer \
+    git-egress:git memory-egress:memory roundtable-delegates:roundtable \
+    roundtable-egress:roundtable; do
+    deploy_companion "${spec%%:*}" "${spec#*:}"
 done
 printf '        deployed:%s\n' "$SRV_DEPLOYED"
 
@@ -176,9 +209,19 @@ for _ in $(seq 1 300); do [ -S "$SRVSOCK" ] && break; sleep 0.2; done
 if [ -S "$SRVSOCK" ]; then ok "aimee-server is serving on its socket"
 else bad "aimee-server never came up"; tail -15 "$WORKDIR/server.log"; fi
 
+# The socket can precede the store's schema migration.  Wait for the exact
+# surface below to become live and fail here with its module log if it does not.
 export HOME="$SRVHOME" AIMEE_HOME="$SRVHOME/.config/aimee"
 export AIMEE_API_ENDPOINT="unix:$SRVSOCK"
 A="$AIMEE_ROOT/aimee"
+store_up=0
+for _ in $(seq 1 120); do
+    STORE_PROBE=$("$A" eval candidates --limit 1 2>&1 | head -1)
+    printf '%s' "$STORE_PROBE" | grep -q 'could not read candidates' || { store_up=1; break; }
+    sleep 0.5
+done
+if [ "$store_up" = 1 ]; then ok "the daemon store is serving"
+else bad "the daemon store never attached"; tail -12 "$WORKDIR/mod-srv-aimee.log"; fi
 
 section "2  the surfaces answer"
 # Breadth is the point: the classifier gap was invisible because nothing drove
