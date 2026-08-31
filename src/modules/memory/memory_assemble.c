@@ -4,21 +4,22 @@
 #include "memory.h"
 #include "memory_assemble_util.h"
 #include "memory_context_internal.h"
+#include "memory_activation.h"
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
 #include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/anti_patterns.h"
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scope_query.h"
-#include "db2/rules.h"
-#endif
+#include "modules/db2/c/anti_patterns.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_vectors.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scope_query.h"
+#include "modules/db2/c/rules.h"
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -26,54 +27,10 @@
 #include <time.h>
 #include <unistd.h>
 
-#if defined(AIMEE_DB2_DISABLED)
-static char *memory_empty_context(void)
-{
-   const char *body = "# Memory Context";
-   char *buf = malloc(strlen(body) + 1);
-   if (!buf)
-      return NULL;
-   snprintf(buf, strlen(body) + 1, "%s", body);
-   return buf;
-}
-
-char *memory_assemble_context(const char *task_hint)
-{
-   (void)task_hint;
-   return memory_empty_context();
-}
-
-char *memory_assemble_context_ws(const char *task_hint, const char *workspace)
-{
-   (void)workspace;
-   return memory_assemble_context(task_hint);
-}
-
-char *memory_assemble_context_explain(const char *task_hint,
-                                      context_assemble_explain_entry_t *explain, int *explain_count,
-                                      int explain_max, context_budget_metrics_t *metrics)
-{
-   (void)explain;
-   (void)explain_max;
-   if (explain_count)
-      *explain_count = 0;
-   if (metrics)
-   {
-      metrics->budget_tokens = 0;
-      metrics->used_tokens = 0;
-      metrics->rejected_for_budget = 0;
-   }
-   return memory_assemble_context(task_hint);
-}
-
-char *cache_input_hash(char *buf, size_t buf_len)
-{
-   if (buf && buf_len > 0)
-      snprintf(buf, buf_len, "db2-disabled");
-   return buf;
-}
-
-#else
+/* Cosine at which two memories are treated as the same fact. High on purpose:
+ * wrongly suppressing a DISTINCT memory silently loses evidence, while admitting
+ * a redundant one merely spends budget. */
+#define ASSEMBLE_NEAR_DUPLICATE_COSINE 0.94
 
 /* xml_escape_text and context_xml_tag_for_header now live in
  * memory_assemble_util.h (static inline, unit-tested). */
@@ -105,6 +62,64 @@ static int context_split_tokens(const char *norm, char tokens[][64], int max_tok
    return count;
 }
 
+/* Does `text` restate something already emitted in this section?
+ *
+ * WHY THIS EXISTS HERE AND NOT ONLY IN THE EXPLAIN PATH. Read-time
+ * near-duplicate suppression was added to memory_assemble_context_explain(),
+ * whose header comment claims it "runs a candidate scoring pass (identical to
+ * memory_assemble_context)". That claim is false: they are two separate
+ * implementations, and the explain one has a single production caller -- the
+ * `memory improve` diagnostic. So the suppression never ran for `aimee memory
+ * read`, for the agent-runtime fallback context, or anywhere else real.
+ *
+ * Found by storing two memories that were pure word-order reorderings of each
+ * other and reading the context back: both appeared, though their token sets are
+ * identical and the lexical threshold is 0.85.
+ *
+ * Lexical only, deliberately, and for the reason the explain path already gives:
+ * this is the read path, where an embedder round-trip per candidate pair would
+ * add latency to every assembly. Token overlap catches the case that actually
+ * occurs -- the same fact stored twice in slightly different words.
+ *
+ * Scoped to ONE section. Two memories of different kinds are different sections
+ * and saying related things there is not restatement; suppressing across
+ * sections would be more aggressive than the evidence supports. The asymmetry
+ * governs everything here: admitting a redundant line wastes budget, wrongly
+ * dropping a distinct one silently loses evidence. */
+static int assemble_section_is_near_duplicate(const char *text, const char *const *emitted,
+                                              int emitted_n)
+{
+   if (!text || !text[0])
+      return 0;
+   for (int i = 0; i < emitted_n; i++)
+      if (assemble_texts_near_duplicate(text, emitted[i]))
+         return 1;
+   return 0;
+}
+
+/* Quotas are per emitted section in production. Explain uses this stable
+ * bucket rather than counting one session across unrelated kinds, which would
+ * report a fact as displaced merely because two episodes shared its origin. */
+static int context_candidate_section_bucket(const context_candidate_t *c)
+{
+   if (!c)
+      return -1;
+   if (strcmp(c->tier, "L4") == 0 &&
+       (strcmp(c->kind, "policy") == 0 || strcmp(c->kind, "workflow") == 0))
+      return 0;
+   if (strcmp(c->kind, "fact") == 0 || strcmp(c->kind, "preference") == 0)
+      return 1;
+   if (strcmp(c->kind, "decision") == 0 || strcmp(c->kind, "policy") == 0)
+      return 2;
+   if (strcmp(c->kind, "procedure") == 0)
+      return 3;
+   if (strcmp(c->kind, "task") == 0)
+      return 4;
+   if (strcmp(c->kind, "episode") == 0)
+      return 5;
+   return 6;
+}
+
 static int append_section(char *buf, int pos, int cap, const char *header,
                           const db2_memory_kv_row_t *rows, int row_count, int max_chars,
                           int max_items)
@@ -115,6 +130,12 @@ static int append_section(char *buf, int pos, int cap, const char *header,
    int items = 0;
    int section_len = 0;
 
+   /* Emitted texts, for read-time near-duplicate suppression (see
+    * assemble_section_is_near_duplicate). Points into `rows`, which outlives
+    * this loop. */
+   const char *emitted[MAX_CONTEXT_MEMS];
+   int emitted_n = 0;
+
    for (int i = 0; i < row_count && items < max_items; i++)
    {
       const char *key = rows[i].key;
@@ -123,6 +144,11 @@ static int append_section(char *buf, int pos, int cap, const char *header,
          continue;
 
       const char *text = content[0] ? content : key;
+
+      if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+         continue;
+      if (emitted_n < MAX_CONTEXT_MEMS)
+         emitted[emitted_n++] = text;
 
       char truncated[MAX_MEM_CONTENT_LEN + 8];
       if ((int)strlen(text) > MAX_MEM_CONTENT_LEN)
@@ -321,15 +347,19 @@ static int emit_candidate(char *buf, int pos, int cap, const context_candidate_t
    }
 
    char escaped[MAX_MEM_CONTENT_LEN * 2];
+   char origin_session[256];
    xml_escape_text(text, escaped, sizeof(escaped));
+   xml_escape_text(c->source_session, origin_session, sizeof(origin_session));
    int line_len = (int)strlen(escaped) + 96;
    if (*section_len + line_len > max_chars)
       return 0;
 
    int written = snprintf(buf + pos, cap - pos,
-                          "<%s tier=\"%s\" confidence=\"%.2f\" score=\"%.2f\">%s</%s>\n",
+                          "<%s tier=\"%s\" confidence=\"%.2f\" score=\"%.2f\""
+                          " origin_memory=\"%lld\" origin_session=\"%s\">%s</%s>\n",
                           xml_tag ? xml_tag : "memory_item", c->tier[0] ? c->tier : "?",
-                          c->confidence, c->score, escaped, xml_tag ? xml_tag : "memory_item");
+                          c->confidence, c->score, (long long)c->id, origin_session, escaped,
+                          xml_tag ? xml_tag : "memory_item");
    *section_len += line_len;
    return written;
 }
@@ -502,6 +532,16 @@ static double compute_term_overlap(char **query_terms, int term_count, const cha
    int matched = 0;
    for (int t = 0; t < term_count; t++)
    {
+      /* Substring, deliberately — do NOT convert this to the whole-word matcher the
+       * module's fixed keyword lists use. These are USER QUERY terms, and the prefix
+       * match is acting as a poor-man's stemmer: "cert" has to cover "certificate"
+       * and "auth" has to cover "authentication", or a query typed in abbreviations
+       * scores zero overlap against the very memories it is looking for
+       * (test_context_assembly.c:91 pins exactly that case). The cost is that an
+       * unrelated word sharing a prefix ("add" inside "address") also counts;
+       * removing that without losing the stemming needs a real stemmer, not a
+       * boundary check. A closed keyword list has no such tension, which is why
+       * those sites use memory_keyword_present() and this one does not. */
       if (strstr(lower, query_terms[t]))
          matched++;
    }
@@ -523,6 +563,38 @@ static double compute_graph_score(const boost_map_t *bmap, const char *key, cons
          boost += bmap->entries[b].score * 0.1;
    }
    return boost;
+}
+
+/* Age in days of a DB2 timestamp, or -1 when it is empty or unparseable
+ * (context_recency_from_age_days reads -1 as "unknown", not "stale").
+ *
+ * Via parse_utc_ts, which reads the separator as a character: these two columns
+ * genuinely disagree on spelling. last_used_at is stamped by pg_now_text() in
+ * canonical ISO ("...T..Z"), while memories.created_at defaults to
+ * to_char(CURRENT_TIMESTAMP, 'YYYY-MM-DD HH24:MI:SS') — a space. A parser that
+ * hard-codes one spelling silently drops the time-of-day on the other, which is
+ * the exact failure parse_utc_ts exists to prevent. It returns 0 for both empty
+ * and malformed input, and rejects years before 1970, so 0 is an unambiguous
+ * "no usable stamp" rather than a real instant. */
+static double context_stamp_age_days(const char *stamp)
+{
+   time_t at = parse_utc_ts(stamp);
+   if (at <= 0)
+      return -1.0;
+   double days = difftime(time(NULL), at) / 86400.0;
+   return days < 0.0 ? 0.0 : days;
+}
+
+/* Recency factor for a candidate, measured from last_used_at — which the recall
+ * path stamps whenever a memory is actually injected into a turn, so a fact that
+ * keeps proving useful stays fresh no matter when it was first learned.
+ * created_at is the fallback for rows that have never been recalled. */
+static double context_recency_factor(const char *last_used_at, const char *created_at)
+{
+   double days = context_stamp_age_days(last_used_at);
+   if (days < 0.0)
+      days = context_stamp_age_days(created_at);
+   return context_recency_from_age_days(days);
 }
 
 static int context_tier_priority(const char *tier)
@@ -618,6 +690,8 @@ static int append_untasked_context(char *buf, int pos, int cap)
 
       char *seed_keys[MAX_CONTEXT_MEMS];
       int seed_count = 0;
+      const char *emitted[MAX_CONTEXT_MEMS];
+      int emitted_n = 0;
 
       for (int i = 0; i < kf_n && items < MAX_CONTEXT_MEMS; i++)
       {
@@ -626,6 +700,13 @@ static int append_untasked_context(char *buf, int pos, int cap)
          const char *supersede_ts = kf_rows[i].supersede_date;
          const char *provenance = kf_rows[i].provenance;
          const char *text = content[0] ? content : (key[0] ? key : "");
+
+         /* Before seed_keys: a restatement would seed the graph with a key whose
+          * neighbours the original already contributes. */
+         if (assemble_section_is_near_duplicate(text, emitted, emitted_n))
+            continue;
+         if (emitted_n < MAX_CONTEXT_MEMS)
+            emitted[emitted_n++] = text;
 
          if (key[0])
             seed_keys[seed_count++] = strdup(key);
@@ -769,10 +850,29 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    if (term_count > 0)
       memory_graph_boost(query_terms, term_count, &bmap);
 
+   /* Classify intent and build the retrieval plan before scoring, not just
+    * before the section budgets: recency_weight is a scoring input, and
+    * retrieval_plan_for_intent reads nothing but task_hint. */
+   retrieval_plan_t rplan;
+   {
+      task_intent_t intent = classify_intent(task_hint);
+      retrieval_plan_for_intent(intent, &rplan);
+      if (temporal_query)
+         rplan.recency_weight = 0.85; /* contextual recency anchoring */
+   }
+
    /* 3. Load all L1/L2/L3/L5 candidates.  L3 = stable project/env facts,
     * L5 = synthesised cross-session patterns.  Both are eligible for dense
     * pgvector recall through the shared ranking path, weighted via
-    * confidence/use_count + graph signals. */
+    * confidence/use_count + recency + graph signals. */
+   /* One read per turn, not per candidate: this gate sits in front of the
+    * expensive path and has to cost far less than it. Read before scoring
+    * because sticky acts on the ranking, not on the final cut. Failing to load
+    * leaves every predicate answering "no opinion", so the pre-existing
+    * relevance decision stands unchanged. */
+   memory_activation_t activation;
+   memory_activation_load(&activation, session_id());
+
    context_candidate_t candidates[MAX_CANDIDATES];
    int cand_count = 0;
 
@@ -788,6 +888,11 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       snprintf(c->kind, sizeof(c->kind), "%s", cand_rows[ci].kind);
       c->confidence = cand_rows[ci].confidence;
       c->use_count = cand_rows[ci].use_count;
+      snprintf(c->source_session, sizeof(c->source_session), "%s", cand_rows[ci].source_session);
+      c->activation_sticky_turns = cand_rows[ci].activation_sticky_turns;
+      c->activation_cooldown_turns = cand_rows[ci].activation_cooldown_turns;
+      c->activation_delay_turns = cand_rows[ci].activation_delay_turns;
+      c->activation_suppressed = cand_rows[ci].activation_suppressed;
       context_candidate_fill_scope(c, workspace_label, project_label);
 
       double base = c->confidence * 0.3 + (c->use_count / 10.0) * 0.2;
@@ -807,7 +912,16 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
          c->score += 0.10;
 
       c->score += c->scope_rank * 0.05;
+      /* Sticky: a unit that fired in the last few turns stays eligible without
+       * having to match again, so a rephrase does not drop the thread. This is
+       * a ranking nudge, not a belief change -- it moves what is reachable, and
+       * never touches confidence, effectiveness or any reinforcement signal. */
+      if (memory_activation_is_sticky(&activation, c->id, c->activation_sticky_turns))
+         c->score += MEMORY_ACTIVATION_STICKY_BONUS;
       c->score += c->tier_priority * 0.03;
+      c->score = context_apply_recency(
+          c->score, context_recency_factor(cand_rows[ci].last_used_at, cand_rows[ci].created_at),
+          rplan.recency_weight);
 
       int key_len = (int)strlen(c->key);
       int content_len = (int)strlen(c->content);
@@ -874,13 +988,28 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
             snprintf(c->kind, sizeof(c->kind), "%s", fb_rows[fi].kind);
             c->confidence = fb_rows[fi].confidence;
             c->use_count = fb_rows[fi].use_count;
+            snprintf(c->source_session, sizeof(c->source_session), "%s",
+                     fb_rows[fi].source_session);
+            c->activation_sticky_turns = fb_rows[fi].activation_sticky_turns;
+            c->activation_cooldown_turns = fb_rows[fi].activation_cooldown_turns;
+            c->activation_delay_turns = fb_rows[fi].activation_delay_turns;
+            c->activation_suppressed = fb_rows[fi].activation_suppressed;
             context_candidate_fill_scope(c, workspace_label, project_label);
             double key_ov = compute_term_overlap(query_terms, term_count, c->key);
             double cnt_ov = compute_term_overlap(query_terms, term_count, c->content);
             c->score = c->confidence * 0.3 + (key_ov > cnt_ov ? key_ov : cnt_ov) * 0.3 +
                        (c->use_count / 10.0) * 0.2;
             c->score += c->scope_rank * 0.05;
+            /* Sticky: a unit that fired in the last few turns stays eligible without
+             * having to match again, so a rephrase does not drop the thread. This is
+             * a ranking nudge, not a belief change -- it moves what is reachable, and
+             * never touches confidence, effectiveness or any reinforcement signal. */
+            if (memory_activation_is_sticky(&activation, c->id, c->activation_sticky_turns))
+               c->score += MEMORY_ACTIVATION_STICKY_BONUS;
             c->score += c->tier_priority * 0.03;
+            c->score = context_apply_recency(
+                c->score, context_recency_factor(fb_rows[fi].last_used_at, fb_rows[fi].created_at),
+                rplan.recency_weight);
             c->estimated_tokens = ((int)strlen(c->key) + (int)strlen(c->content)) / 4 + 1;
             c->score_per_token = c->score / (double)c->estimated_tokens;
             new_count++;
@@ -927,15 +1056,6 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    if (answerability_withheld)
       cand_count = 0;
 
-   /* 5. Classify intent and build retrieval plan for dynamic budgets */
-   retrieval_plan_t rplan;
-   {
-      task_intent_t intent = classify_intent(task_hint);
-      retrieval_plan_for_intent(intent, &rplan);
-      if (temporal_query)
-         rplan.recency_weight = 0.85; /* contextual recency anchoring */
-   }
-
    /* Compute per-section char-budgets from plan (total = MAX_CONTEXT_TOTAL - overhead) */
    int section_budget = MAX_CONTEXT_TOTAL - 500; /* reserve for headers/structure */
 
@@ -965,6 +1085,15 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
    /* In budget mode track overall token usage across sections. */
    int tokens_used = 0;
 
+   /* Memories actually emitted into the context this turn. Recall bumps
+    * use_count / last_used_at for these once the sections are built: both feed
+    * scoring (use_count through the base term, last_used_at through the recency
+    * factor), so a memory that keeps earning its place in the context stays
+    * ranked for the next turn. Collected rather than touched inline so the whole
+    * turn costs one batched UPDATE instead of one per memory. */
+   int64_t touched[MAX_CANDIDATES];
+   int touched_count = 0;
+
    for (int s = 0; s < nsections; s++)
    {
       int section_start = pos;
@@ -976,28 +1105,115 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       int section_tokens = 0;
       const char *xml_tag = context_xml_tag_for_header(sections[s].header);
 
-      for (int i = 0; i < cand_count && items < MAX_CONTEXT_MEMS; i++)
+      /* Two passes over the same score-ordered candidates. Pass 0 admits the
+       * best item from each origin so no single source can fill the section;
+       * pass 1 spends the remaining budget in score order up to the total
+       * per-origin cap, so one additional item can supply useful local depth.
+       *
+       * Without the reserve the section is ordered by score alone, and because
+       * one record is deliberately split into many separately-embedded units
+       * that score near-identically against one query, the envelope filled with
+       * consecutive slices of a single source while displacing the one item
+       * from elsewhere that would have changed the answer. It looked full and
+       * well-ranked either way, which is why nothing surfaced it. */
+      int origin_displaced = 0;
+      int cooldown_held = 0;
+      for (int pass = 0; pass < 2 && items < MAX_CONTEXT_MEMS; pass++)
       {
-         context_candidate_t *c = &candidates[i];
-         if (c->id == 0)
-            continue; /* already consumed */
+         for (int i = 0; i < cand_count && items < MAX_CONTEXT_MEMS; i++)
+         {
+            context_candidate_t *c = &candidates[i];
+            if (c->id == 0)
+               continue; /* already consumed */
 
-         int match = (strcmp(c->kind, sections[s].kind) == 0);
-         if (!match && sections[s].kind2)
-            match = (strcmp(c->kind, sections[s].kind2) == 0);
-         if (match && sections[s].tier)
-            match = (strcmp(c->tier, sections[s].tier) == 0);
-         if (!match)
-            continue;
+            int match = (strcmp(c->kind, sections[s].kind) == 0);
+            if (!match && sections[s].kind2)
+               match = (strcmp(c->kind, sections[s].kind2) == 0);
+            if (match && sections[s].tier)
+               match = (strcmp(c->tier, sections[s].tier) == 0);
+            if (!match)
+               continue;
 
-         /* In budget mode: skip if remaining token budget is too small */
-         if (budget_mode && tokens_used + section_tokens + c->estimated_tokens > token_budget)
-            continue;
+            /* Already taken by pass 0. */
+            int taken = 0;
+            for (int s2 = 0; s2 < selected_count && !taken; s2++)
+               taken = (selected[s2] == i);
+            if (taken)
+               continue;
 
-         selected[selected_count++] = i;
-         section_tokens += c->estimated_tokens;
-         items++;
+            /* In budget mode: skip if remaining token budget is too small */
+            if (budget_mode && tokens_used + section_tokens + c->estimated_tokens > token_budget)
+               continue;
+
+            /* Gate order is relevance -> delay -> cooldown -> suppression.
+             * Relevance already selected this candidate above. Cooldown beats
+             * sticky deliberately: sticky answers "may this stay eligible
+             * without matching", cooldown answers "may this fire at all", and a
+             * unit inside its cooldown must not fire even while sticky -- or
+             * cooldown would never bind on exactly the units that keep
+             * matching, which are the ones that repeat. */
+            if (memory_activation_is_delayed(&activation, c->activation_delay_turns))
+               continue;
+            if (memory_activation_in_cooldown(&activation, c->id, c->activation_cooldown_turns))
+            {
+               cooldown_held++;
+               continue;
+            }
+            if (c->activation_suppressed)
+               continue;
+
+            {
+               /* An empty source_session is "no known origin": such rows are
+                * each their own origin rather than one pooled bucket, so a
+                * missing label never causes unrelated rows to crowd each other
+                * out. */
+               int from_origin = 0;
+               if (c->source_session[0])
+               {
+                  for (int s2 = 0; s2 < selected_count; s2++)
+                  {
+                     const context_candidate_t *sel = &candidates[selected[s2]];
+                     if (strcmp(sel->source_session, c->source_session) == 0)
+                        from_origin++;
+                  }
+               }
+               int origin_limit = pass == 0 ? 1 : CONTEXT_ORIGIN_RESERVE_CAP;
+               if (from_origin >= origin_limit)
+               {
+                  if (pass == 0)
+                     origin_displaced++;
+                  continue;
+               }
+            }
+
+            /* A restatement admitted here is evidence displaced: the budget is
+             * finite, so it pushes a genuinely different memory out of the
+             * block. */
+            {
+               const char *ctext = c->content[0] ? c->content : c->key;
+               int dup = 0;
+               for (int s2 = 0; s2 < selected_count && !dup; s2++)
+               {
+                  const context_candidate_t *sel = &candidates[selected[s2]];
+                  dup = assemble_texts_near_duplicate(ctext,
+                                                      sel->content[0] ? sel->content : sel->key);
+               }
+               if (dup)
+                  continue;
+            }
+
+            selected[selected_count++] = i;
+            section_tokens += c->estimated_tokens;
+            items++;
+         }
       }
+      if (cooldown_held > 0)
+         LOG_DEBUG("memory", "assemble: section '%s' cooldown held %d unit(s) from repeating",
+                   sections[s].header, cooldown_held);
+      if (origin_displaced > 0)
+         LOG_DEBUG("memory",
+                   "assemble: section '%s' origin reserve deferred %d candidate(s) to pass 2",
+                   sections[s].header, origin_displaced);
 
       if (selected_count == 0)
       {
@@ -1017,11 +1233,14 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
              emit_candidate(buf, pos, cap, c, xml_tag, &section_len, sections[s].max_chars);
          if (written == 0)
             continue;
-         {
-            const char *sid = session_id();
-            if (sid && sid[0] && db1_context_snapshot_insert)
-               (void)db1_context_snapshot_insert(sid, c->id, c->score);
-         }
+         /* Records the injection on the activation axis only. Being surfaced
+          * is not evidence that the surfaced thing was useful, so this must
+          * never feed effectiveness, utility, or any other reinforcement
+          * path -- otherwise hysteresis becomes a second place where exposure
+          * is mistaken for validation. */
+         memory_activation_record(&activation, session_id(), c->id, c->score);
+         if (touched_count < (int)(sizeof(touched) / sizeof(touched[0])))
+            touched[touched_count++] = c->id;
          pos += written;
          if (budget_mode)
             tokens_used += c->estimated_tokens;
@@ -1031,6 +1250,9 @@ static int append_task_aware_context(char *buf, int pos, int cap, const char *ta
       if (items == 0)
          pos = section_start;
    }
+
+   if (touched_count > 0)
+      (void)memory_touch_many(touched, touched_count);
 
    pos = append_negative_context_block(buf, pos, cap, task_hint, negative_candidates, cand_count);
 
@@ -1228,14 +1450,39 @@ static void check_artifact_staleness(void)
    }
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void assemble_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.assemble", "context assembly is unavailable: the relational store is "
+                               "unreachable, so the assembled context is empty rather than "
+                               "merely sparse");
+}
+
 char *memory_assemble_context(const char *task_hint)
 {
+   if (!db2_conn())
+   {
+      assemble_warn_store_unreachable();
+      return NULL;
+   }
    int cap = MAX_CONTEXT_TOTAL + 256;
    db2_memory_scope_context_t request_scope;
    db2_memory_scope_context_get(&request_scope);
 
+   /* A task-aware envelope is history-dependent once activation is available:
+    * even unchanged DB2 rows must advance the persisted conversation turn and
+    * cooldown can change the result. The DB-state cache cannot represent that
+    * axis, so using it here would make cached turns disappear. */
+   int activation_sensitive = task_hint && task_hint[0] && db1_context_snapshot_activation != NULL;
+
    /* Check context cache */
-   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
+   if (!activation_sensitive && !request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));
@@ -1265,7 +1512,7 @@ char *memory_assemble_context(const char *task_hint)
    buf[pos] = '\0';
 
    /* Store in context cache */
-   if (!request_scope.active && !getenv("AIMEE_NO_CACHE"))
+   if (!activation_sensitive && !request_scope.active && !getenv("AIMEE_NO_CACHE"))
    {
       char hash[32];
       cache_input_hash(hash, sizeof(hash));
@@ -1301,6 +1548,9 @@ char *memory_assemble_context_explain(const char *task_hint,
       metrics->budget_tokens = budget_mode ? token_budget : 0;
       metrics->used_tokens = 0;
       metrics->rejected_for_budget = 0;
+      metrics->suppressed_near_duplicates = 0;
+      metrics->deferred_for_origin_quota = 0;
+      metrics->held_for_activation = 0;
    }
 
    /* Run the normal assembly first */
@@ -1313,6 +1563,9 @@ char *memory_assemble_context_explain(const char *task_hint,
    /* Re-run candidate scoring to populate explain entries. */
    db2_memory_cand_row_t cand_rows[200];
    int cand_n = db2_memory_list_candidates(DB2_MEM_CAND_PRIMARY, cand_rows, 200);
+   memory_activation_t activation;
+   memset(&activation, 0, sizeof(activation));
+   (void)memory_activation_last_loaded(session_id(), &activation);
 
    char *qterms[64];
    int qterm_count = task_hint ? tokenize_for_search(task_hint, qterms, 64) : 0;
@@ -1320,6 +1573,16 @@ char *memory_assemble_context_explain(const char *task_hint,
    char project_label[MAX_PATH_LEN];
    memory_scope_labels_for_cwd(NULL, workspace_label, sizeof(workspace_label), project_label,
                                sizeof(project_label));
+   /* Mirror the assembly scorer's recency handling so the explain surface
+    * reports the score the real pass produced. */
+   retrieval_plan_t erplan;
+   {
+      task_intent_t intent = classify_intent(task_hint);
+      retrieval_plan_for_intent(intent, &erplan);
+      if (has_temporal_markers(task_hint))
+         erplan.recency_weight = 0.85;
+   }
+
    context_candidate_t scored[200];
    int scored_count = 0;
 
@@ -1335,6 +1598,11 @@ char *memory_assemble_context_explain(const char *task_hint,
       snprintf(c->kind, sizeof(c->kind), "%s", cand_rows[ci].kind);
       c->confidence = cand_rows[ci].confidence;
       c->use_count = cand_rows[ci].use_count;
+      snprintf(c->source_session, sizeof(c->source_session), "%s", cand_rows[ci].source_session);
+      c->activation_sticky_turns = cand_rows[ci].activation_sticky_turns;
+      c->activation_cooldown_turns = cand_rows[ci].activation_cooldown_turns;
+      c->activation_delay_turns = cand_rows[ci].activation_delay_turns;
+      c->activation_suppressed = cand_rows[ci].activation_suppressed;
       context_candidate_fill_scope(c, workspace_label, project_label);
 
       int klen = (int)strlen(c->key);
@@ -1353,6 +1621,11 @@ char *memory_assemble_context_explain(const char *task_hint,
       double overlap = (ko > co ? ko : co) * 0.3;
       double graph = compute_graph_score(&bmap, c->key, c->content) * 0.2;
       c->score = base + overlap + graph + c->scope_rank * 0.05 + c->tier_priority * 0.03;
+      if (memory_activation_is_sticky(&activation, c->id, c->activation_sticky_turns))
+         c->score += MEMORY_ACTIVATION_STICKY_BONUS;
+      c->score = context_apply_recency(
+          c->score, context_recency_factor(cand_rows[ci].last_used_at, cand_rows[ci].created_at),
+          erplan.recency_weight);
       c->score_per_token = c->score / (double)c->estimated_tokens;
       scored_count++;
    }
@@ -1363,10 +1636,163 @@ char *memory_assemble_context_explain(const char *task_hint,
 
    int ecount = 0;
    int tokens_used = 0;
-   for (int i = 0; i < scored_count && ecount < explain_max; i++)
+   /* Indices of candidates already admitted, for the near-duplicate check below.
+    * Comparing against the admitted set keeps the work bounded (at most this many
+    * comparisons per candidate) and means suppression is judged against what the
+    * model will actually see, not against every candidate considered. */
+#define ASSEMBLE_DEDUP_TRACKED 64
+   int selected_idx[ASSEMBLE_DEDUP_TRACKED];
+   int selected_n = 0;
+
+   /* Match the production two-pass reserve: candidates over the per-session
+    * breadth cap are considered only after every distinct known origin had a
+    * chance. Empty origins remain distinct by memory id. */
+   int explain_order[200];
+   int explain_order_n = 0;
+   int deferred[200] = {0};
+   for (int i = 0; i < scored_count; i++)
    {
+      int prior = 0;
+      if (scored[i].source_session[0])
+         for (int j = 0; j < i; j++)
+            if (context_candidate_section_bucket(&scored[j]) ==
+                    context_candidate_section_bucket(&scored[i]) &&
+                strcmp(scored[j].source_session, scored[i].source_session) == 0)
+               prior++;
+      if (prior >= 1)
+      {
+         deferred[i] = 1;
+         if (metrics)
+            metrics->deferred_for_origin_quota++;
+      }
+      else
+         explain_order[explain_order_n++] = i;
+   }
+   for (int i = 0; i < scored_count; i++)
+      if (deferred[i])
+         explain_order[explain_order_n++] = i;
+
+   /* Semantic near-duplicates, resolved once for the whole candidate set.
+    *
+    * Memories are embedded at write time, so the vectors already exist: this is a
+    * single query that lets pgvector compute the cosines where the vectors live,
+    * NOT an embedder call per pair. That distinction is what makes a semantic
+    * check affordable on the read path.
+    *
+    * Embeddings catch what token overlap cannot -- "deploy to staging first" and
+    * "ship through the pre-prod matrix" share no vocabulary and mean the same
+    * thing. The lexical check below remains as the fallback for rows that have no
+    * vector yet (written but not yet embedded), where the vector answer is
+    * "unknown" rather than "distinct". */
+   int64_t dup_a[ASSEMBLE_DEDUP_TRACKED * 4];
+   int64_t dup_b[ASSEMBLE_DEDUP_TRACKED * 4];
+   double dup_cos[ASSEMBLE_DEDUP_TRACKED * 4];
+   int dup_n = 0;
+   {
+      int64_t cand_ids[ASSEMBLE_DEDUP_TRACKED];
+      int cand_n = 0;
+      for (int i = 0; i < scored_count && cand_n < ASSEMBLE_DEDUP_TRACKED; i++)
+         if (scored[i].id > 0)
+            cand_ids[cand_n++] = scored[i].id;
+      if (cand_n > 1)
+      {
+         int rc = pgvec_memory_vector_near_duplicate_pairs(
+             cand_ids, cand_n, ASSEMBLE_NEAR_DUPLICATE_COSINE, dup_a, dup_b, dup_cos,
+             (int)(sizeof(dup_a) / sizeof(dup_a[0])));
+         dup_n = rc > 0 ? rc : 0; /* no collection / no pairs: fall back to lexical */
+      }
+   }
+   for (int oi = 0; oi < explain_order_n && ecount < explain_max; oi++)
+   {
+      int i = explain_order[oi];
       context_assemble_explain_entry_t *e = &explain[ecount];
       const context_candidate_t *c = &scored[i];
+
+      /* Explain the state used by the production pass. Reading activation
+       * again would advance the persisted conversation turn merely because an
+       * operator requested diagnostics. */
+      const char *activation_reason = NULL;
+      if (memory_activation_is_delayed(&activation, c->activation_delay_turns))
+         activation_reason = "activation_delayed";
+      else if (memory_activation_in_cooldown(&activation, c->id, c->activation_cooldown_turns))
+         activation_reason = "activation_cooldown";
+      else if (c->activation_suppressed)
+         activation_reason = "activation_suppressed";
+      if (activation_reason)
+      {
+         memset(e, 0, sizeof(*e));
+         e->id = c->id;
+         snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
+         snprintf(e->key, sizeof(e->key), "%.*s", (int)(sizeof(e->key) - 1), c->key);
+         snprintf(e->kind, sizeof(e->kind), "%s", c->kind);
+         snprintf(e->scope, sizeof(e->scope), "%s", c->scope[0] ? c->scope : "global");
+         e->tokens = c->estimated_tokens;
+         e->score = c->score;
+         e->score_per_token = c->score_per_token;
+         e->selected = 0;
+         snprintf(e->rejection_reason, sizeof(e->rejection_reason), "%s", activation_reason);
+         if (metrics)
+            metrics->held_for_activation++;
+         ecount++;
+         continue;
+      }
+
+      /* Read-time near-duplicate suppression.
+       *
+       * Candidates are deduplicated by memory id upstream, and a similarity floor
+       * drops weak hits -- but neither notices two DIFFERENT rows that say the
+       * same thing. The budget is finite, so a restatement admitted here is
+       * evidence displaced: rejected_for_budget then counts real context pushed
+       * out by a paraphrase of context already present. Dense, redundant
+       * injections also give a model concrete grounds to distrust the recall
+       * block as a whole.
+       *
+       * Lexical, not embedding-based, and deliberately so: this is the read path,
+       * where an embedder round-trip per candidate pair would add latency to
+       * every turn. Token overlap catches the case that actually occurs -- the
+       * same fact stored twice in slightly different words -- and costs a set
+       * comparison. The threshold is high on purpose: this suppresses
+       * restatements, not merely related memories, because wrongly dropping a
+       * distinct fact is far worse than admitting a redundant one. */
+      int duplicate_of = -1;
+      for (int s = 0; s < selected_n; s++)
+      {
+         const context_candidate_t *sel = &scored[selected_idx[s]];
+         /* Semantic first (it catches paraphrase), lexical as the fallback for
+          * rows the vector store does not know about yet. */
+         int same = 0;
+         for (int d = 0; d < dup_n && !same; d++)
+            if ((dup_a[d] == c->id && dup_b[d] == sel->id) ||
+                (dup_b[d] == c->id && dup_a[d] == sel->id))
+               same = 1;
+         if (!same)
+            same = assemble_texts_near_duplicate(c->content[0] ? c->content : c->key,
+                                                 sel->content[0] ? sel->content : sel->key);
+         if (same)
+         {
+            duplicate_of = selected_idx[s];
+            break;
+         }
+      }
+      if (duplicate_of >= 0)
+      {
+         memset(e, 0, sizeof(*e));
+         e->id = c->id;
+         snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
+         snprintf(e->key, sizeof(e->key), "%.*s", (int)(sizeof(e->key) - 1), c->key);
+         snprintf(e->kind, sizeof(e->kind), "%s", c->kind);
+         snprintf(e->scope, sizeof(e->scope), "%s", c->scope[0] ? c->scope : "global");
+         e->tokens = c->estimated_tokens;
+         e->score = c->score;
+         e->score_per_token = c->score_per_token;
+         e->selected = 0;
+         snprintf(e->rejection_reason, sizeof(e->rejection_reason), "near_duplicate of memory %lld",
+                  (long long)scored[duplicate_of].id);
+         if (metrics)
+            metrics->suppressed_near_duplicates++;
+         ecount++;
+         continue;
+      }
       memset(e, 0, sizeof(*e));
       e->id = c->id;
       snprintf(e->tier, sizeof(e->tier), "%s", c->tier);
@@ -1377,20 +1803,43 @@ char *memory_assemble_context_explain(const char *task_hint,
       e->score = c->score;
       e->score_per_token = c->score_per_token;
 
+      if (deferred[i] && c->source_session[0])
+      {
+         int selected_from_origin = 0;
+         for (int s = 0; s < selected_n; s++)
+            if (context_candidate_section_bucket(&scored[selected_idx[s]]) ==
+                    context_candidate_section_bucket(c) &&
+                strcmp(scored[selected_idx[s]].source_session, c->source_session) == 0)
+               selected_from_origin++;
+         if (selected_from_origin >= CONTEXT_ORIGIN_RESERVE_CAP)
+         {
+            e->selected = 0;
+            snprintf(e->rejection_reason, sizeof(e->rejection_reason), "origin_quota_cap");
+            ecount++;
+            continue;
+         }
+      }
+
       if (budget_mode)
       {
          if (tokens_used + e->tokens <= token_budget)
          {
             e->selected = 1;
             tokens_used += e->tokens;
+            if (selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+               selected_idx[selected_n++] = i;
             if (metrics)
                metrics->used_tokens = tokens_used;
          }
          else
          {
             e->selected = 0;
-            snprintf(e->rejection_reason, sizeof(e->rejection_reason),
-                     "budget_exhausted (used=%d budget=%d)", tokens_used, token_budget);
+            if (deferred[i])
+               snprintf(e->rejection_reason, sizeof(e->rejection_reason),
+                        "budget_exhausted_after_origin_quota");
+            else
+               snprintf(e->rejection_reason, sizeof(e->rejection_reason),
+                        "budget_exhausted (used=%d budget=%d)", tokens_used, token_budget);
             if (metrics)
                metrics->rejected_for_budget++;
          }
@@ -1398,6 +1847,8 @@ char *memory_assemble_context_explain(const char *task_hint,
       else
       {
          e->selected = (ecount < MAX_CONTEXT_MEMS) ? 1 : 0;
+         if (e->selected && selected_n < (int)(sizeof(selected_idx) / sizeof(selected_idx[0])))
+            selected_idx[selected_n++] = i;
          if (!e->selected)
             snprintf(e->rejection_reason, sizeof(e->rejection_reason), "count_cap (MAX=%d)",
                      MAX_CONTEXT_MEMS);
@@ -1527,8 +1978,6 @@ char *cache_input_hash(char *buf, size_t buf_len)
    snprintf(buf, buf_len, "%016lx", hash);
    return buf;
 }
-
-#endif
 
 /* memory_citation_gate_check: returns 1 if the answer string contains at
  * least one citation marker of the form [#<digits>], 0 otherwise.

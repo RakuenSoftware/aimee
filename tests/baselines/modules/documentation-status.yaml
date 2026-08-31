@@ -25,7 +25,14 @@
     "benchmarks",
     "control-web",
     "governance",
-    "runtime-web"
+    "runtime-web",
+    "sandbox",
+    "economizer",
+    "postgres",
+    "db2",
+    "aimee",
+    "egress",
+    "observability"
   ],
   "debt": []
 }

@@ -3,9 +3,9 @@
  */
 
 #include "kb_planner.h"
-#include "db2/artifacts.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "headers/platform_process.h"
 
 #include <cJSON.h>

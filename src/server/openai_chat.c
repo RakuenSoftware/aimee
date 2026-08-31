@@ -22,20 +22,23 @@
 #include "modules/memory/gw_stage_memory.h"     /* gw_stage_memory + gw_memory_system_prompt (P3) */
 #include "gw_stage_registry.h"                  /* Slice 7: config-driven stage catalog */
 #include "gw_stage_governance.h"                /* response seam Slice 2: togglable governance */
+#include "gw_stage_completion.h"                /* bounded incomplete-repair continuation */
 #include "dogfood.h"                            /* dogfood_autolabel_next_turn_live */
 #include "modules/learning/learning_implicit.h" /* learning_implicit_detect_turn */
 #include "retrieval_outcome_bridge.h"           /* retrieval_outcome_bridge_on_autolabel */
 #include "openai_responses_store.h"             /* previous_response_id continuation store */
 #include "openai_runs_store.h"                  /* GET /v1/runs/{id} record store */
 #include "aimee.h" /* EMBED_MAX_DIM, MAX_PATH_LEN (used by agent_types.h below) */
+#include "log.h"   /* LOG_WARN: name the provider's error instead of discarding it */
 #include "aimee_errors.h"
-#include "config.h" /* config_t, config_load */
+#include "config.h" /* legacy_config_record, legacy_config_read */
 #include "agent_config.h"
 #include "agent_exec.h"
 #include "agent_protocol.h"                  /* parsed_response_t, message_history_repair */
+#include "model_registry.h"                  /* configured/catalog context for model discovery */
 #include <aimee/delegates/delegate_driver.h> /* single provider step for the Codex proxy */
 #include "http_retry.h"
-#include "economizer_wire_snapshot.h"
+#include "wire_fence.h"
 #include "gateway_mutate_wire.h"
 #include "server_http_identity.h"
 #include "cJSON.h"
@@ -62,6 +65,19 @@
 /* Cap on the running /v1/responses transcript carried between turns via
  * previous_response_id. Bounds memory and the prompt we feed back to the agent. */
 #define OPENAI_RESP_TRANSCRIPT_MAX (32 * 1024)
+
+/* Responses API names this field `max_output_tokens`; `max_tokens` belongs to
+ * Chat Completions. Keep the old spelling as a compatibility fallback, but let
+ * the standard field win when both are present. */
+static int responses_request_max_tokens(const char *body)
+{
+   /* Omitted means "derive from the selected agent/model", not the legacy
+    * 2k Chat Completions default. Pinning every ordinary Responses client to
+    * 2048 made capable delegates truncate even when the client asked for no
+    * such limit. */
+   int legacy = openai_request_int(body, "max_tokens", 0, 32768);
+   return openai_request_int(body, "max_output_tokens", legacy, 32768);
+}
 
 /* Record a dedup cache hit as a non-billable usage_kind=avoided audit row: the
  * provider call was skipped, so the avoided estimated cost is logged separately
@@ -99,7 +115,8 @@ static void record_avoided_turn(const char *model, double avoided_cost)
  * on and the client supplied an explicit Idempotency-Key. The caller has already
  * rejected streaming, and this path runs no tools — both v1 requirements. The key
  * is built from the RESOLVED backend (ag), so it is computed after agent/config
- * resolution and two requests resolving to a different backend never collide. */
+ * resolution and two requests resolving to a different backend never collide.
+ * Returns -1 when the required response-composition module cannot produce a key. */
 static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const char *endpoint,
                           const char *body, const char *context, int *ttl_out)
 {
@@ -126,7 +143,8 @@ static int dedup_eligible(char *key, size_t key_cap, const agent_t *ag, const ch
        .context = context,
        .behavior_flags = flags,
    };
-   response_dedup_key(&in, key, key_cap);
+   if (response_dedup_key(&in, key, key_cap) != 0)
+      return -1;
    if (ttl_out)
       *ttl_out = config_dedup_window_seconds() > 0 ? config_dedup_window_seconds()
                                                    : RESPONSE_DEDUP_TTL_SECONDS;
@@ -142,6 +160,41 @@ static int openai_governance_enabled(void);
 
 /* Shared body for both endpoints. chat != 0 selects the chat.completion shape
  * (and chat-request parse); otherwise the legacy text_completion shape. */
+static int openai_request_has_assistant(const char *body)
+{
+   cJSON *root = body ? cJSON_Parse(body) : NULL;
+   cJSON *items = root ? cJSON_GetObjectItemCaseSensitive(root, "messages") : NULL;
+   if (!cJSON_IsArray(items))
+      items = root ? cJSON_GetObjectItemCaseSensitive(root, "input") : NULL;
+   int found = 0;
+   cJSON *item = NULL;
+   cJSON_ArrayForEach(item, items)
+   {
+      const char *role = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(item, "role"));
+      if (role && strcmp(role, "assistant") == 0)
+      {
+         found = 1;
+         break;
+      }
+   }
+   cJSON_Delete(root);
+   return found;
+}
+
+/* Persona for the LEGACY chat path only.
+ *
+ * When the IR path is live it owns persona placement (ir_stage_persona_instructions
+ * puts it on the first user message), and both share one per-session delivery
+ * claim -- so calling this unguarded would let the flat path win the claim and
+ * silently move placement off the IR on the DEFAULT path. Guarding keeps each
+ * mode delivering through its own seam, still exactly once. */
+static char *legacy_persona_text(const char *text, int conversation_established)
+{
+   if (aimee_ir_path_enabled())
+      return NULL;
+   return aimee_ir_prepend_active_persona_text(text, conversation_established);
+}
+
 static int run_completion(int chat, const char *body, char *resp, int cap)
 {
    char model[64] = "";
@@ -168,7 +221,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * so the §4 dedup key must hash it (a stale reply must not be replayed after
     * the injected memory/context changes). On a cache miss it is reused for the
     * provider call below; on a hit it is freed unused. */
+   int first_turn = !chat || !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
 
    /* Resolve the backend BEFORE dedup so the key carries the resolved
     * provider/model — two requests resolving to a different backend must not
@@ -176,36 +236,17 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
     * (or empty) means the default agent; any other value selects a configured
     * agent by name, and is rejected with model_not_found when it matches none
     * (never silently falls back to a different model). */
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
+   agent_t agbuf;
+   agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
+   if (!ag)
    {
       free(pi_env);
       free(prompt);
-      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
-                               AIMEE_ERR_NO_PRIMARY);
-      return 503;
-   }
-   agent_t *ag = NULL;
-   if (model[0] && strcmp(model, "aimee") != 0)
-   {
-      /* An explicitly requested model must match a configured agent — never
-       * silently fall back to the default (that would run a different model than
-       * the client asked for and echo the wrong name back). */
-      ag = agent_find(&acfg, model);
-      if (!ag)
+      if (model[0] && strcmp(model, "aimee") != 0)
       {
-         free(pi_env);
-         free(prompt);
          openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
          return 404;
       }
-   }
-   if (!ag)
-      ag = agent_default_primary(&acfg);
-   if (!ag)
-   {
-      free(pi_env);
-      free(prompt);
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
@@ -235,14 +276,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
              openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768),
              openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0), &parsed);
          free(instructions);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
          free(pi_env);
          free(prompt);
 
          if (trc != 0)
          {
             agent_free_parsed_response(&parsed);
+            cJSON_Delete(messages);
+            cJSON_Delete(tools);
             openai_format_error(resp, cap, "upstream_error", "completion failed");
             return 502;
          }
@@ -253,10 +294,14 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
 
+         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+            LOG_INFO("completion.gate", "continued incomplete OpenAI chat repair");
+
          /* Same response-side policing the streaming path runs, so a denied
           * subagent-spawning call cannot reach an external caller. */
-         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                             gateway_prevent_subagents_enabled());
 
          long tcreated = (long)time(NULL);
          char tid[48];
@@ -271,6 +316,8 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
                                                  tcreated, parsed.prompt_tokens,
                                                  parsed.completion_tokens, resp, cap);
          agent_free_parsed_response(&parsed);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
          if (tlen < 0)
          {
             openai_format_error(resp, cap, "server_error", "response did not fit the buffer");
@@ -293,6 +340,13 @@ static int run_completion(int chat, const char *body, char *resp, int cap)
    const char *endpoint = chat ? "/v1/chat/completions" : "/v1/completions";
    int dedup_on =
        dedup_eligible(dedup_key, sizeof(dedup_key), ag, endpoint, body, pi_env, &dedup_ttl);
+   if (dedup_on < 0)
+   {
+      free(pi_env);
+      free(prompt);
+      openai_format_error(resp, cap, "server_error", "response composition unavailable");
+      return 503;
+   }
    if (dedup_on)
    {
       char *cached = NULL;
@@ -477,7 +531,27 @@ static void codex_add_model(cJSON *models, const char *slug, const char *descrip
  * registered primary-agent models, alongside the OpenAI `{object,data}` list for
  * other clients. One `models` entry per agent (plus the default "aimee"); the
  * slug is the id Codex puts in the request `model` field to switch models. */
-#define CODEX_DEFAULT_CONTEXT_WINDOW 272000
+#define CODEX_FALLBACK_CONTEXT_WINDOW 32768
+
+/* Codex uses this advertised value to budget and truncate the ordinary API
+ * session.  It therefore has to describe the selected delegate, not Codex's own
+ * historical default.  Prefer the operator's per-agent override, then the model
+ * catalog, and finally a conservative compatibility fallback. */
+static int codex_agent_context_window(const agent_t *agent)
+{
+   if (agent && agent->middleware.context_window > 0)
+      return agent->middleware.context_window;
+   if (agent)
+   {
+      model_capability_t cap;
+      memset(&cap, 0, sizeof cap);
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap) &&
+          cap.context_window > 0)
+         return cap.context_window;
+   }
+   return CODEX_FALLBACK_CONTEXT_WINDOW;
+}
+
 static int codex_models_raw(char *resp, int cap)
 {
    agent_config_t acfg;
@@ -498,7 +572,8 @@ static int codex_models_raw(char *resp, int cap)
 
    /* Always advertise the default "aimee" model, then each named agent. */
    int seen_aimee = 0;
-   codex_add_model(models, "aimee", "Aimee primary agent.", CODEX_DEFAULT_CONTEXT_WINDOW);
+   agent_t *primary = agent_default_primary(&acfg);
+   codex_add_model(models, "aimee", "Aimee primary agent.", codex_agent_context_window(primary));
    cJSON *de = cJSON_CreateObject();
    cJSON_AddStringToObject(de, "id", "aimee");
    cJSON_AddStringToObject(de, "object", "model");
@@ -514,7 +589,8 @@ static int codex_models_raw(char *resp, int cap)
             seen_aimee = 1;
          continue;
       }
-      codex_add_model(models, nm, acfg.agents[i].model, CODEX_DEFAULT_CONTEXT_WINDOW);
+      codex_add_model(models, nm, acfg.agents[i].model,
+                      codex_agent_context_window(&acfg.agents[i]));
       cJSON *e = cJSON_CreateObject();
       cJSON_AddStringToObject(e, "id", nm);
       cJSON_AddStringToObject(e, "object", "model");
@@ -661,38 +737,23 @@ static int responses_handler(const char *body, char *resp, int cap)
       return 400;
    }
 
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
+   agent_t agbuf;
+   agent_t *ag = agent_registry_resolve_ingress_model(model, &agbuf) == 0 ? &agbuf : NULL;
+   if (!ag)
    {
       free(prompt);
-      openai_format_error_code(resp, cap, "server_error", "no agent configuration available",
-                               AIMEE_ERR_NO_PRIMARY);
-      return 503;
-   }
-   agent_t *ag = NULL;
-   if (model[0] && strcmp(model, "aimee") != 0)
-   {
-      /* Explicit model must match a configured agent — no silent fallback. */
-      ag = agent_find(&acfg, model);
-      if (!ag)
+      if (model[0] && strcmp(model, "aimee") != 0)
       {
-         free(prompt);
          openai_format_error(resp, cap, "model_not_found", "the requested model is not available");
          return 404;
       }
-   }
-   if (!ag)
-      ag = agent_default_primary(&acfg);
-   if (!ag)
-   {
-      free(prompt);
       openai_format_error_code(resp, cap, "server_error", "no agent configured",
                                AIMEE_ERR_NO_PRIMARY);
       return 503;
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    /* Continuation: if previous_response_id names a stored conversation, prepend
     * its transcript so this turn continues it. `full` points at either the bare
@@ -715,10 +776,17 @@ static int responses_handler(const char *body, char *resp, int cap)
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !prev_id[0] && !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(full);
-   int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, full, max_tokens, temperature,
-                                0 /* use_tools: plain chat completion */, &result);
+   /* `full` aliases `prompt` or `combined`, both freed on the exit paths below,
+    * so it must NOT be freed here. Pass the persona-prefixed copy when there is
+    * one and free only that. */
+   char *persona_txt = legacy_persona_text(full, !first_turn);
+   int erc =
+       agent_dispatch_one(ag, NULL, NULL, pi_env, persona_txt ? persona_txt : full, max_tokens,
+                          temperature, 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
+   free(persona_txt);
 
    if (erc != 0 || !result.response)
    {
@@ -743,7 +811,7 @@ static int responses_handler(const char *body, char *resp, int cap)
    free(combined);
 
    int len = openai_format_response(id, model, result.response, created, result.prompt_tokens,
-                                    result.completion_tokens, resp, cap);
+                                    result.completion_tokens, result.cache_read_tokens, resp, cap);
    free(result.response);
    if (len < 0)
    {
@@ -780,16 +848,14 @@ static void emit_text_chunk(server_http_sse_emit emit, void *ctx, const char *id
 
 /* Resolve the agent for `model` into *acfg (caller-owned, must outlive the
  * returned pointer — it indexes into acfg). Returns NULL when none configured. */
-static agent_t *stream_pick_agent(agent_config_t *acfg, const char *model)
+/* Fills `out` with the selected agent; returns 0 on success.
+ *
+ * Took an agent_config_t* and returned a pointer into it, which meant every
+ * caller put 350,968 bytes on the stack of a request thread to obtain one
+ * 16,720-byte agent. It now asks the registry for just that agent. */
+static int stream_pick_agent(agent_t *out, const char *model)
 {
-   if (agent_load_config(acfg) != 0)
-      return NULL;
-   /* An explicitly requested model must match a configured agent. Returning NULL
-    * (rather than falling back to the default) makes callers refuse instead of
-    * silently streaming a different model than the client asked for. */
-   if (model[0] && strcmp(model, "aimee") != 0)
-      return agent_find(acfg, model);
-   return agent_default_primary(acfg);
+   return agent_registry_resolve_ingress_model(model, out);
 }
 
 static int chat_stream_handler(const char *body, server_http_sse_emit emit, void *ctx)
@@ -809,8 +875,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       return 0;
    }
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       emit_chunk(emit, ctx, id, model, created, 1, "no agent configured", 0);
@@ -836,8 +902,6 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
          int trc = agent_execute_messages(ag, messages, tools, instructions, max_tokens,
                                           temperature, &parsed);
          free(instructions);
-         cJSON_Delete(messages);
-         cJSON_Delete(tools);
          free(prompt);
 
          emit_chunk(emit, ctx, id, model, created, 1, NULL, 0); /* role frame */
@@ -846,6 +910,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
             emit_chunk(emit, ctx, id, model, created, 0, "completion failed", 0);
             emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
             agent_free_parsed_response(&parsed);
+            cJSON_Delete(messages);
+            cJSON_Delete(tools);
             return 0;
          }
 
@@ -855,8 +921,12 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
                                       parsed.cache_write_tokens, parsed.cache_read_tokens,
                                       "openai-ingress", NULL);
 
-         if (parsed.is_tool_call && parsed.call_count > 0 && gateway_prevent_subagents_enabled())
-            (void)gw_response_run_governance(&parsed, openai_governance_enabled());
+         if (gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+            LOG_INFO("completion.gate", "continued incomplete streaming OpenAI chat repair");
+
+         if (parsed.is_tool_call && parsed.call_count > 0)
+            (void)gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                             gateway_prevent_subagents_enabled());
 
          if (parsed.is_tool_call && parsed.call_count > 0)
          {
@@ -877,6 +947,8 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
             emit_chunk(emit, ctx, id, model, created, 0, NULL, 1);
          }
          agent_free_parsed_response(&parsed);
+         cJSON_Delete(messages);
+         cJSON_Delete(tools);
          return 0;
       }
       free(instructions);
@@ -888,7 +960,14 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
    memset(&result, 0, sizeof(result));
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
+   int first_turn = !openai_request_has_assistant(body);
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, !first_turn);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
@@ -907,15 +986,17 @@ static int chat_stream_handler(const char *body, server_http_sse_emit emit, void
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       if (agent_ingress_accounting_enabled())
          agent_record_token_audit(&result, "", "openai-ingress");
+      text_sanitize_utf8(result.response);
       const char *txt = result.response;
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          emit_chunk(emit, ctx, id, model, created, 0, seg, 0);
+         off += take;
       }
    }
    emit_chunk(emit, ctx, id, model, created, 0, NULL, 1); /* finish frame */
@@ -942,8 +1023,8 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
       return 0;
    }
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       emit_text_chunk(emit, ctx, id, model, created, "no agent configured", 0);
@@ -960,6 +1041,12 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
    /* P1 pre-injection: prepend the <aimee-context> envelope as the system
     * prompt (config ingress_preinject_enabled; no-op when off/empty). */
    char *pi_env = gw_memory_system_prompt(prompt);
+   char *persona_txt = legacy_persona_text(prompt, 0);
+   if (persona_txt)
+   {
+      free(prompt);
+      prompt = persona_txt;
+   }
    int erc = agent_dispatch_one(ag, NULL, NULL, pi_env, prompt, max_tokens, temperature,
                                 0 /* use_tools: plain chat completion */, &result);
    free(pi_env);
@@ -976,15 +1063,17 @@ static int completion_stream_handler(const char *body, server_http_sse_emit emit
       snprintf(result.requested_model, sizeof(result.requested_model), "%s", model);
       if (agent_ingress_accounting_enabled())
          agent_record_token_audit(&result, "", "openai-ingress");
+      text_sanitize_utf8(result.response);
       const char *txt = result.response;
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          emit_text_chunk(emit, ctx, id, model, created, seg, 0);
+         off += take;
       }
    }
    emit_text_chunk(emit, ctx, id, model, created, "", 1); /* finish frame */
@@ -1033,8 +1122,8 @@ static char *openai_build_body(const agent_t *agent, const delegate_driver_t *dr
 {
    cJSON *req = NULL;
    if (aimee_ir_path_enabled())
-      req =
-          aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system, driver->name);
+      req = aimee_ir_build_from_chat(agent->model, eff_messages, eff_tools, eff_system,
+                                     driver->name, tok, temperature);
    if (!req)
       req = driver->build_request(agent, eff_messages, eff_tools, eff_system, tok, temperature);
    if (!req)
@@ -1042,6 +1131,43 @@ static char *openai_build_body(const agent_t *agent, const delegate_driver_t *dr
    char *body = cJSON_PrintUnformatted(req);
    cJSON_Delete(req);
    return body;
+}
+
+/* Drop tools the provider will reject, and say which.
+ *
+ * A single tool with an empty name invalidates the WHOLE request: the ChatGPT
+ * Responses backend answers 400 `Invalid 'tools[16].name': empty string`, so the
+ * turn dies and every other tool in the catalog dies with it. Measured with a real
+ * Codex client, which sends 17 tools; the legacy responses->chat translator filters
+ * non-function and nameless tools, and the IR path that runs ahead of it does not,
+ * so which translator handled the request decided whether the turn worked.
+ *
+ * Dropping one unusable entry is strictly better than failing the turn: a tool the
+ * provider will not accept cannot be called either way. Logged per tool so a
+ * silently-missing capability is diagnosable rather than mysterious. */
+static int strip_unusable_tools(cJSON *tools)
+{
+   if (!cJSON_IsArray(tools))
+      return 0;
+   int dropped = 0;
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *t = cJSON_GetArrayItem(tools, i);
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(t, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+      {
+         const cJSON *fn = cJSON_GetObjectItemCaseSensitive(t, "function");
+         name = fn ? cJSON_GetObjectItemCaseSensitive(fn, "name") : NULL;
+      }
+      if (cJSON_IsString(name) && name->valuestring[0])
+         continue;
+      const cJSON *type = cJSON_GetObjectItemCaseSensitive(t, "type");
+      LOG_WARN("openai.responses", "dropping tool[%d] with no usable name (type=%s)", i,
+               cJSON_IsString(type) ? type->valuestring : "?");
+      cJSON_DeleteItemFromArray(tools, i);
+      dropped++;
+   }
+   return dropped;
 }
 
 static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *tools,
@@ -1053,19 +1179,37 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    memset(out, 0, sizeof(*out));
    if (!agent || !messages)
       return -1;
+   strip_unusable_tools(tools);
 
+   /* Every bare `return -1` below reported the same generic failure to the client.
+    * Each now says which precondition failed: the difference between "no driver for
+    * this provider" and "this agent has no usable token" is the whole diagnosis, and
+    * the client message ("upstream model request failed") actively misdirects,
+    * because on three of these paths nothing upstream was ever contacted. */
    delegate_drivers_init();
    const delegate_driver_t *driver = delegate_driver_get(agent->provider);
    if (!driver || !driver->build_request || !driver->parse_response)
+   {
+      LOG_WARN("openai.responses", "no usable driver for provider=%s (agent=%s)",
+               agent->provider ? agent->provider : "?", agent->name ? agent->name : "?");
       return -1;
+   }
 
    char url[MAX_ENDPOINT_LEN + 64];
    if (delegate_build_url(driver, agent, url, sizeof(url)) != 0)
+   {
+      LOG_WARN("openai.responses", "build_url failed: driver=%s endpoint=%s", driver->name,
+               agent->endpoint ? agent->endpoint : "?");
       return -1;
+   }
 
    char auth_header[MAX_API_KEY_LEN + 32];
    if (agent_resolve_auth(agent, auth_header, sizeof(auth_header)) != 0)
+   {
+      LOG_WARN("openai.responses", "auth unresolved: agent=%s auth_type=%s",
+               agent->name ? agent->name : "?", agent->auth_type ? agent->auth_type : "?");
       return -1;
+   }
    char extra_headers[512];
    agent_build_extra_headers(agent, extra_headers, sizeof(extra_headers));
 
@@ -1078,7 +1222,19 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
     * original array unless the policy emptied + dropped it (then omit — never
     * forward `tools: []`). */
    cJSON *gw_raw = cJSON_CreateObject();
-   cJSON_AddStringToObject(gw_raw, "instructions", system_prompt ? system_prompt : "");
+   char *tool_system = gw_request_tool_system_prompt(tools, system_prompt);
+   if (tool_system)
+      LOG_INFO("aimee.tools", "applied CLI-first policy to OpenAI ingress turn");
+   char *completion_system =
+       gw_request_completion_system_prompt(messages, tool_system ? tool_system : system_prompt);
+   cJSON_AddStringToObject(
+       gw_raw, "instructions",
+       completion_system ? completion_system
+                         : (tool_system ? tool_system : (system_prompt ? system_prompt : "")));
+   if (completion_system)
+      LOG_INFO("completion.gate", "applied continuation policy to OpenAI ingress turn");
+   free(completion_system);
+   free(tool_system);
    if (cJSON_IsArray(tools))
       cJSON_AddItemReferenceToObject(gw_raw, "tools", tools);
    gw_request_t gr = {
@@ -1104,6 +1260,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    {
       /* Misconfigured stage catalog: fail closed (like the anthropic ingress) rather
        * than run a partial/empty pipeline that skips tool policing + routing. */
+      LOG_WARN("openai.responses", "stage catalog build failed; refusing a partial pipeline");
       cJSON_Delete(gw_raw);
       return -1;
    }
@@ -1115,9 +1272,10 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int tok = agent_request_max_tokens(agent, max_tokens);
 
-   /* AGGRESSIVE may apply the existing lossy reducer to OpenAI-family request
-    * history. SAFE never enters this path. Anthropic-backed routes remain
-    * untouched to preserve their cache prefix. */
+   /* AGGRESSIVE may apply the existing lossy reducer to request history. SAFE
+    * never enters this path. Anthropic-backed routes are no longer excluded: the
+    * gateway's per-session freeze keeps a folded prefix byte-identical, which is
+    * what their cache prefix actually requires. */
    gw_mutate_ctx_t gwmc;
    gw_mutate_ctx_init(&gwmc);
    cJSON *mbox = NULL;
@@ -1142,6 +1300,8 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
        openai_build_body(agent, driver, econ_messages, eff_tools, eff_system, tok, temperature);
    if (!body)
    {
+      LOG_WARN("openai.responses", "openai_build_body returned nothing: driver=%s model=%s",
+               driver->name, agent->model ? agent->model : "?");
       cJSON_Delete(mbox);
       gw_mutate_ctx_free(&gwmc);
       cJSON_Delete(gw_raw);
@@ -1150,13 +1310,13 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    int economizer_active = econ_mode_current() != ECON_MODE_OFF;
    int wire_anthropic = driver && driver->name && strcmp(driver->name, "anthropic") == 0;
-   econ_wire_route_t wire_route = wire_anthropic              ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                  : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
-                                                              : ECON_WIRE_OPENAI_CHAT;
-   econ_wire_snapshot_t *wire_snapshot = NULL;
-   econ_wire_bytes_t wire_body;
-   if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                        &wire_body) != 0)
+   wire_fence_route_t wire_route = wire_anthropic              ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                   : strstr(url, "/responses") ? WIRE_FENCE_OPENAI_RESPONSES
+                                                               : WIRE_FENCE_OPENAI_CHAT;
+   wire_fence_t *wire_snapshot = NULL;
+   wire_fence_bytes_t wire_body;
+   if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                         &wire_body) != 0)
    {
       free(body);
       cJSON_Delete(mbox);
@@ -1172,8 +1332,19 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
    int http_status = http_retry_post_context_bytes(url, auth_header, wire_body.data, wire_body.len,
                                                    &response_body, agent->timeout_ms, extra_headers,
                                                    ra, rb, rm, agent->provider, agent->model, NULL);
+   /* The gateway safety net, before mbox is released: it holds the array the
+    * restore writes back into. The module decides and trips its breaker, so a
+    * reduction the provider rejects stops repeating on later turns. The single
+    * resend of THIS turn is not wired here either -- same reason as the Anthropic
+    * buffered path: the wire body is built once above. */
+   if (gw_buffered_after_status(mbox, "input", http_status, &gwmc) == GW_POST_RESEND)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway upstream=%d restored to pristine and breaker tripped; the "
+                "single resend of this turn is not wired yet",
+                http_status);
+
    free(body);
-   econ_wire_snapshot_destroy(wire_snapshot);
+   wire_fence_destroy(wire_snapshot);
 
    cJSON_Delete(mbox);
    gw_mutate_ctx_free(&gwmc);
@@ -1181,6 +1352,18 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
 
    if (http_status != 200 || !response_body)
    {
+      /* Say WHAT the provider said. This path reports a single generic
+       * "upstream model request failed" to the client, which is all a Codex user
+       * ever sees -- and the buffered /v1/responses handler on the SAME agent and
+       * the SAME url succeeds, so "the provider is down" is not the explanation
+       * and the difference is in this request. Discarding the body here meant the
+       * only way to find out was to read the source and guess.
+       *
+       * Truncated because a provider error can carry an HTML error page. */
+      LOG_WARN("openai.responses",
+               "streaming upstream failed: status=%d provider=%s model=%s url=%s body=%.400s",
+               http_status, agent->provider ? agent->provider : "?",
+               agent->model ? agent->model : "?", url, response_body ? response_body : "(none)");
       free(response_body);
       return -1;
    }
@@ -1203,7 +1386,7 @@ static int agent_execute_messages(const agent_t *agent, cJSON *messages, cJSON *
  * parser requires output_item.added before any delta, so every turn is framed
  * created -> item.added -> delta(s) -> item.done -> completed. Compute-then-chunk. */
 /* Resolve the governance response toggle: config-store `modules.governance` (canonical) ->
- * deprecated env default. Cached config_load; keeps gw_stage_governance config-free. */
+ * deprecated env default. Cached legacy_config_read; keeps gw_stage_governance config-free. */
 static int openai_governance_enabled(void)
 {
    int tri = config_present() ? config_module_governance() : -1;
@@ -1237,7 +1420,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
       if (openai_format_responses_completed(id, model, "invalid responses request", created, 0, 0,
-                                            frame, sizeof(frame)) > 0)
+                                            0, frame, sizeof(frame)) > 0)
          emit(ctx, "response.completed", frame);
       free(instructions);
       cJSON_Delete(messages);
@@ -1246,15 +1429,18 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    }
    (void)stream; /* this handler is the streaming path; flag is informational */
 
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       if (openai_format_responses_created(id, model, created, frame, sizeof(frame)) > 0)
          emit(ctx, "response.created", frame);
-      if (openai_format_responses_completed(id, model, "no agent configured", created, 0, 0, frame,
-                                            sizeof(frame)) > 0)
-         emit(ctx, "response.completed", frame);
+      const int explicit_model = model[0] && strcmp(model, "aimee") != 0;
+      if (openai_format_responses_failed(
+              id, model, created, explicit_model ? "model_not_found" : "server_error",
+              explicit_model ? "the requested model is not available" : "no agent configured",
+              frame, sizeof(frame)) > 0)
+         emit(ctx, "response.failed", frame);
       free(instructions);
       cJSON_Delete(messages);
       cJSON_Delete(tools);
@@ -1262,7 +1448,7 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    /* Heal orphaned tool calls/results — each Codex turn is stateless full-history. */
    message_history_repair(messages);
@@ -1350,30 +1536,46 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                                    parsed.prompt_tokens, parsed.completion_tokens,
                                    parsed.cache_write_tokens, parsed.cache_read_tokens,
                                    "openai-ingress", NULL);
+
+      if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+         LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
    }
+
+   if (erc == 0 && gw_response_run_completion(&parsed, messages, tools, "tool_calls"))
+      LOG_INFO("completion.gate", "continued incomplete OpenAI Responses repair");
 
    if (erc == 0 && parsed.is_tool_call && parsed.call_count > 0)
    {
       /* P2c streaming: when gateway_prevent_subagents is ON, run the police
-       * function on the parsed struct first (drops denied subagent tool_call
+       * event-bus governance module first (drops denied subagent tool_call
        * entries in place; preserves upstream stop_reason in partial-drop,
-       * rewrites to "end_turn" on all-dropped). When OFF, this is a no-op
-       * and the dispatch below runs byte-for-byte identical to today's loop.
+       * rewrites to "end_turn" on all-dropped). The module receives the
+       * already-resolved policy gate; it remains the sole decision path.
        * Police contract is finalized in PR #677 (buffered) and PR #679
        * (streaming Anthropic). */
       int police_drops = 0;
-      if (gateway_prevent_subagents_enabled())
-         police_drops = gw_response_run_governance(&parsed, openai_governance_enabled());
+      police_drops = gw_response_run_governance(&parsed, openai_governance_enabled(),
+                                                gateway_prevent_subagents_enabled());
       (void)police_drops; /* drop count plumbed through the pipeline total
                              for the future P2b audit pass; today the only
                              visible effect is the parsed.calls[] mutation. */
 
+      /* Name every call handed back to the client. A Codex client sends its MCP
+       * servers as `namespace` groups and can only route a call whose name is
+       * namespace-qualified; a bare nested name comes back as
+       * "unsupported call: <name>" and the turn is wasted. Logging the names is the
+       * only way to tell "the provider emitted it bare" from "we stripped it". */
+      for (int ci = 0; ci < parsed.call_count; ci++)
+         LOG_INFO("openai.responses", "returning tool call name=%s",
+                  parsed.calls[ci].name[0] ? parsed.calls[ci].name : "(empty)");
       openai_responses_emit_policed(&parsed, id, model, created, emit, ctx);
    }
    else
 
    {
       /* Text turn: a single assistant message item carrying the content. */
+      if (erc == 0 && parsed.content)
+         text_sanitize_utf8(parsed.content);
       const char *txt =
           (erc == 0 && parsed.content) ? parsed.content : "the model returned no content";
       char item_id[72];
@@ -1383,15 +1585,16 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
          emit(ctx, "response.output_item.added", frame);
 
       size_t n = strlen(txt);
-      for (size_t off = 0; off < n; off += OPENAI_STREAM_CHUNK)
+      for (size_t off = 0; off < n;)
       {
          char seg[OPENAI_STREAM_CHUNK + 1];
-         size_t take = (n - off < OPENAI_STREAM_CHUNK) ? (n - off) : OPENAI_STREAM_CHUNK;
+         size_t take = text_utf8_chunk_len(txt + off, n - off, OPENAI_STREAM_CHUNK);
          memcpy(seg, txt + off, take);
          seg[take] = '\0';
          char dframe[OPENAI_STREAM_CHUNK * 6 + 256];
          if (openai_format_responses_delta(item_id, seg, dframe, sizeof(dframe)) > 0)
             emit(ctx, "response.output_text.delta", dframe);
+         off += take;
       }
 
       size_t icap = n * 6 + 512;
@@ -1419,7 +1622,8 @@ static int responses_stream_handler(const char *body, server_http_sse_event_emit
                emit(ctx, "response.incomplete", cf);
          }
          else if (openai_format_responses_completed(id, model, txt, created, parsed.prompt_tokens,
-                                                    parsed.completion_tokens, cf, (int)ccap) > 0)
+                                                    parsed.completion_tokens,
+                                                    parsed.cache_read_tokens, cf, (int)ccap) > 0)
             emit(ctx, "response.completed", cf);
          free(cf);
       }
@@ -1462,8 +1666,9 @@ typedef struct
  * the pointer (buf) on success or "{}" if it does not fit. */
 static const char *run_status_json(const run_job_t *j, const char *status, char *buf, int cap)
 {
-   return openai_format_run(j->run_id, j->model, "", j->created, 0, 0, status, buf, cap) > 0 ? buf
-                                                                                             : "{}";
+   return openai_format_run(j->run_id, j->model, "", j->created, 0, 0, 0, status, buf, cap) > 0
+              ? buf
+              : "{}";
 }
 
 /* Tool-event hook for /v1/runs: append a `tool_call.started` /
@@ -1513,7 +1718,8 @@ static void *run_job_worker(void *arg)
                                   run_status_json(j, "in_progress", buf, RUN_JSON_CAP));
 
    agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, j->model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, j->model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       openai_runs_store_append_event(j->run_id, "error", "{\"error\":\"no agent configured\"}");
@@ -1605,7 +1811,8 @@ static void *run_job_worker(void *arg)
       cJSON_Delete(mc);
    }
    if (openai_format_run(j->run_id, j->model, result.response, j->created, result.prompt_tokens,
-                         result.completion_tokens, "completed", buf, RUN_JSON_CAP) > 0)
+                         result.completion_tokens, result.cache_read_tokens, "completed", buf,
+                         RUN_JSON_CAP) > 0)
    {
       openai_runs_store_append_event(j->run_id, "response.completed", buf);
       openai_runs_store_finalize(j->run_id, OPENAI_RUN_COMPLETED, buf);
@@ -1643,8 +1850,8 @@ static int runs_handler(const char *body, char *resp, int cap)
    }
 
    /* Validate an agent is configured synchronously so callers still get 503 fast. */
-   agent_config_t acfg;
-   agent_t *ag = stream_pick_agent(&acfg, model);
+   agent_t agbuf;
+   agent_t *ag = stream_pick_agent(&agbuf, model) == 0 ? &agbuf : NULL;
    if (!ag)
    {
       free(prompt);
@@ -1654,7 +1861,7 @@ static int runs_handler(const char *body, char *resp, int cap)
    }
 
    double temperature = openai_request_double(body, "temperature", OPENAI_CHAT_TEMPERATURE, 2.0);
-   int max_tokens = openai_request_int(body, "max_tokens", OPENAI_CHAT_MAX_TOKENS, 32768);
+   int max_tokens = responses_request_max_tokens(body);
 
    long created = (long)time(NULL);
    static atomic_ulong g_run_seq = 0; /* connections run concurrently; atomic */
@@ -1662,7 +1869,7 @@ static int runs_handler(const char *body, char *resp, int cap)
    snprintf(id, sizeof(id), "run_%ld_%lu", created, atomic_fetch_add(&g_run_seq, 1) + 1);
 
    /* Queued snapshot returned to the caller and stored for GET /v1/runs/{id}. */
-   int len = openai_format_run(id, model, "", created, 0, 0, "queued", resp, cap);
+   int len = openai_format_run(id, model, "", created, 0, 0, 0, "queued", resp, cap);
    if (len < 0)
    {
       free(prompt);

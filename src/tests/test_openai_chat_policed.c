@@ -10,10 +10,10 @@
  * contract — emitting created here too would double it on the wire.
  *
  * Scope: these tests exercise the helper's consumption of an already
- * post-police parsed_response_t (calls[] front-packed, call_count lowered).
- * The police function itself (gateway_policy_police_parsed_response) is
- * tested separately in test_anthropic_http.c; seeding the post-police shape
- * directly here keeps this test free of the config/guardrails link. */
+ * governed parsed_response_t (calls[] front-packed, call_count lowered).
+ * The event-bus decision seam is tested separately in
+ * test_response_governance_stage.c; seeding the governed shape directly here
+ * keeps this test focused on wire rendering. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -132,6 +132,60 @@ static void test_emit_surviving_tool_call(void)
    assert(strstr(cap.data[4], "\"output\":[") != NULL);
    free_parsed(&p);
    PASS("emit_surviving_tool_call");
+}
+
+/* A namespaced call keeps its group on EVERY frame the client reads.
+ *
+ * A Codex client offers its MCP tools inside a `namespace` group, and the provider
+ * answers with the nested name BARE and the group beside it. The client routes on
+ * the pair, so a frame that carries the name without the group is unroutable -- it
+ * answers "unsupported call: git". `added` matters as much as `done`, because the
+ * client learns the name there, before the arguments stream.
+ *
+ * `completed` matters too: it replays the output items, and the turn loop feeds
+ * those back as the next request's history. Losing the group there would strand
+ * the call on the following turn even after the first one routed. */
+static void test_emit_namespaced_tool_call(void)
+{
+   cap_t cap = {0};
+   const char *names[] = {"git"};
+   const char *ids[] = {"call_7"};
+   const char *args[] = {"{\"command\":\"status\"}"};
+   parsed_response_t p;
+   seed_parsed(&p, 1, names, ids, args, "tool_calls");
+   snprintf(p.calls[0].tool_namespace, sizeof(p.calls[0].tool_namespace), "%s", "mcp__aimee");
+
+   openai_responses_emit_policed(&p, "resp_1", "claude-test", 12345L, cap_emit, &cap);
+
+   assert(cap.count == 5);
+   /* added, done, and the replayed item inside completed */
+   assert(strcmp(cap.events[0], "response.output_item.added") == 0);
+   assert(strstr(cap.data[0], "\"name\":\"git\"") != NULL);
+   assert(strstr(cap.data[0], "\"namespace\":\"mcp__aimee\"") != NULL);
+   assert(strcmp(cap.events[3], "response.output_item.done") == 0);
+   assert(strstr(cap.data[3], "\"namespace\":\"mcp__aimee\"") != NULL);
+   assert(strcmp(cap.events[4], "response.completed") == 0);
+   assert(strstr(cap.data[4], "\"namespace\":\"mcp__aimee\"") != NULL);
+   free_parsed(&p);
+   PASS("emit_namespaced_tool_call");
+}
+
+/* The same path with no group emits no `namespace` key at all -- an empty one
+ * would claim a group that does not exist, and every non-Codex client sends
+ * ungrouped tools. */
+static void test_emit_plain_tool_call_has_no_namespace(void)
+{
+   cap_t cap = {0};
+   const char *names[] = {"web_search"};
+   const char *ids[] = {"call_1"};
+   const char *args[] = {"{\"query\":\"aimee\"}"};
+   parsed_response_t p;
+   seed_parsed(&p, 1, names, ids, args, "tool_calls");
+   openai_responses_emit_policed(&p, "resp_1", "claude-test", 12345L, cap_emit, &cap);
+   for (int i = 0; i < cap.count; i++)
+      assert(strstr(cap.data[i], "\"namespace\"") == NULL);
+   free_parsed(&p);
+   PASS("emit_plain_tool_call_has_no_namespace");
 }
 
 /* Two surviving tool_calls: indices in `output[]` are 0 and 1. */
@@ -339,6 +393,8 @@ int main(void)
    printf("test_openai_chat_policed:\n");
    test_emit_omits_created_envelope();
    test_emit_surviving_tool_call();
+   test_emit_namespaced_tool_call();
+   test_emit_plain_tool_call_has_no_namespace();
    test_emit_multiple_surviving_tool_calls();
    test_emit_all_dropped_empty_output();
    test_emit_null_arguments_fallback();

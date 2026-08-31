@@ -1,5 +1,9 @@
 # Implementation plan: roundtable panel composition
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Companion to `roundtable-panel-composition.md` (State: READY). This plan is the
 concrete change list. Scope = panel *composition* on the existing engine; no new
 pipeline, no routing-layer rework. `ENSEMBLE_MAX_REFS = 8` is unchanged.
@@ -8,12 +12,12 @@ pipeline, no routing-layer rework. `ENSEMBLE_MAX_REFS = 8` is unchanged.
 
 Make each roundtable **review** panelist run under a distinct **persona** (its
 system prompt), defaulting to a diverse lineup, drawn from the persona registry
-(built-in + custom), assignable per-model via config — without changing the
+(built-in + custom), assignable per-model via config, without changing the
 default panel size or the draft/aggregate paths.
 
 ## Work packets
 
-### WP-1 — New built-in persona `reviewer-constructive`
+### WP-1: New built-in persona `reviewer-constructive`
 The constructive counterpart to the contrarian `reviewer`. All additive switch
 cases; existing enum values are untouched.
 
@@ -24,11 +28,11 @@ cases; existing enum values are untouched.
     `AIMEE_MODE_REVIEWER_CONSTRUCTIVE`.
   - `prompt_principles_text` (~line 532): add the new mode to the reviewer-family
     case (shares the reviewer principles).
-  - `prompt_persona_text` (~line 550): add a case returning new prose — a
+  - `prompt_persona_text` (~line 550): add a case returning new prose. A
     *constructive* reviewer identity: "You are a senior constructive code
     reviewer. Assess the change as written: confirm what is correct and complete,
     name what is missing or risky, and judge whether it meets its stated goal.
-    You are the counterpart to the contrarian reviewer — not adversarial, but
+    You are the counterpart to the contrarian reviewer, not adversarial, but
     not a rubber stamp."
   - reviewer-family predicate (~line 651): add the new mode alongside QA /
     SECURITY / REVIEWER / ARCHITECT.
@@ -42,28 +46,28 @@ cases; existing enum values are untouched.
   - `builtin_brief` (~line 161): return a CONSTRUCTIVE_REVIEWER_BRIEF for the new
     mode (mirror REVIEWER_BRIEF, framed as assess-as-written).
 
-### WP-2 — Config: per-participant persona array
+### WP-2: Config: per-participant persona array
 - `src/headers/config.h` (near `ensemble_reference_models`, ~line 1291): add
   `char ensemble_reference_personas[8][PERSONA_NAME_MAX];` and
-  `int ensemble_reference_persona_count;`. (`PERSONA_NAME_MAX` from persona.h —
-  include it or use a local constant equal to it.)
+  `int ensemble_reference_persona_count;`. (`PERSONA_NAME_MAX` from persona.h,
+include it or use a local constant equal to it.)
 - `src/config_sections.c` `config_parse_ensemble_section` (~line 1162): parse a
   `reference_personas` string array exactly like `reference_models` (same `< 8`
   guard).
 - `src/config_save.c` (~line 64–79): round-trip `reference_personas` when present.
 
-### WP-3 — Engine: compose & assign personas (the core)
+### WP-3: Engine: compose & assign personas (the core)
 File: `src/server/delegate_ensemble.c` (add `#include "persona.h"`).
 
 - New static helper:
-  `static const char *panel_persona_name(const config_t *cfg, roundtable_mode_t
+  `static const char *panel_persona_name(const legacy_config_record *cfg, roundtable_mode_t
   mode, int model_index)`:
   - returns `NULL` unless `mode == ROUNDTABLE_REVIEW` (draft/MoA unchanged);
   - if `cfg->ensemble_reference_personas[model_index][0]` set → return it;
   - else round-robin a file-static default lineup
     `{"security","architect","qa","reviewer","reviewer-constructive"}` indexed by
     `model_index % 5`. **Keyed on `model_index` (the participant's position in the
-    configured `reference_models` list), NOT the shuffled slot** — so the pairing
+    configured `reference_models` list), NOT the shuffled slot**, so the pairing
     is stable run-to-run.
 - New static helper to compose+own the system prompt:
   `persona_compose_delegate_prompt(name, NULL, NULL)` → heap string; NULL name →
@@ -76,12 +80,12 @@ File: `src/server/delegate_ensemble.c` (add `#include "persona.h"`).
   index → compose `panel_persona_name(cfg, mode, i)`, pass as the 4th arg to
   `agent_run_named` instead of `NULL`, free after the call.
 - `delegate_ensemble_run` (~line 1125, MoA aggregation) and `repair_review_json`
-  (~line 1008, JSON repair): leave `system_prompt = NULL` — not review lenses.
+  (~line 1008, JSON repair): leave `system_prompt = NULL`, not review lenses.
 - Logging: include the persona name in the per-panelist log/label so the panel
   composition is visible (and cost stays attributed per model via the existing
   `ensemble_fold_cost`).
 
-### WP-4 — No-tools review + small-context skip (safety)
+### WP-4: No-tools review + small-context skip (safety)
 - Verify the engine fan-out (`agent_run_named` / `agent_run_parallel`) does NOT
   enable file tools for review panelists (a doc/diff review needs none; the live
   panel proved tools-on wastes turns + trips rate limits). If tools are on by

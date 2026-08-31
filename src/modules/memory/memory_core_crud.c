@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -12,27 +9,29 @@
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
+#include <stdlib.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/lifecycle.h" /* db2_embedding_dim — runtime embedding dimension */
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/lifecycle.h" /* db2_embedding_dim — runtime embedding dimension */
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
+#include "integrity.h"
 #include "util.h"       /* util_now_ms — memory.search stage timing */
 #include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
@@ -54,13 +53,19 @@ void memory_set_audit_hook(memory_audit_hook_fn fn)
 
 /* Fire the audit hook (if installed) with the mutation's NON-CONTENT identity.
  * Never receives memory content; the key/kind are fingerprinted downstream. */
-static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
-                      const char *key, double confidence, const char *session_id)
+void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
+                       const char *key, double confidence, const char *session_id)
 {
    memory_audit_hook_fn h = g_mem_audit_hook;
    if (h)
       h(op, id, tier ? tier : "", kind ? kind : "", key ? key : "", confidence,
         session_id ? session_id : "");
+}
+
+static void mem_audit(const char *op, int64_t id, const char *tier, const char *kind,
+                      const char *key, double confidence, const char *session_id)
+{
+   memory_audit_emit(op, id, tier, kind, key, confidence, session_id);
 }
 
 /* gate_check_sensitive, gate_check_ephemeral, and gate_has_evidence_markers
@@ -81,6 +86,18 @@ int memory_gate_check(const char *tier, const char *kind, const char *key, const
 
    if (!content || !content[0])
       return 0; /* L0 scratch allows empty content */
+
+   /* Durable memory becomes future prompt context, so treat it as agent-message
+    * authority unless a future typed ingress carries an authenticated user
+    * provenance. Ambiguous provenance fails closed. */
+   integrity_result_t integrity;
+   if (integrity_ingress_decide(content, INTEGRITY_SOURCE_AGENT_MESSAGE, "memory", 1, &integrity))
+   {
+      verdict->result = GATE_REJECT;
+      snprintf(verdict->reason, sizeof(verdict->reason), "integrity: %s (%s)",
+               integrity_verdict_name(integrity.verdict), integrity.match_category);
+      return 0;
+   }
 
    /* Gate 1: Sensitivity check (secrets, PII) */
    int sens =
@@ -229,11 +246,19 @@ static int memory_keys_have_different_numeric_tokens(const char *a, const char *
    return (n_a != n_b) || (n_a > 0 && strcmp(sig_a, sig_b) != 0);
 }
 
-int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
-                     const char *use_cases, double confidence, const char *session_id,
-                     memory_t *out)
+int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *epistemic_kind,
+                               const char *key, const char *content, const char *use_cases,
+                               double confidence, const char *session_id,
+                               memory_authority_t authority, memory_t *out)
 {
-   if (!tier || !kind || !key)
+   static const char *const epistemic_kinds[] = {"world_fact",   "episode",    "experience",
+                                                 "mental_model", "preference", "instruction",
+                                                 "policy",       "hypothesis", NULL};
+   int epistemic_ok = 0;
+   for (int i = 0; epistemic_kinds[i]; i++)
+      if (epistemic_kind && strcmp(epistemic_kind, epistemic_kinds[i]) == 0)
+         epistemic_ok = 1;
+   if (!tier || !kind || !key || !epistemic_ok)
       return -1;
 
    /* Eval scratch stores are throwaway. Skip cross-cutting write-side work
@@ -267,13 +292,40 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    (void)0; /* source gate logs reason but does not modify confidence at insert time;
              * promotion/lifecycle will validate confidence changes separately */
 
-   /* Content safety scan */
-   char safe_content[2048];
+   /* Content safety scan.
+    *
+    * The scan needs a WRITABLE copy because memory_scan_content redacts in
+    * place, and the copy is what gets stored. It used to be a fixed
+    * `char safe_content[2048]` filled with snprintf, which silently clipped the
+    * caller's content to 2047 bytes: a 3000- and a 5000-byte value both landed
+    * in DB2 as content_len=2047, with nothing logged and success returned.
+    *
+    * The stored sensitivity label was wrong for the same reason:
+    * memory_scan_content only ever saw the first 2047 bytes, so it classified a
+    * long note from a fragment. That is not a leak, since the bytes it never
+    * read were not stored either, but it does mean the label describes less
+    * than the caller asked us to keep. Sizing the copy to the content fixes the
+    * data loss and the label together.
+    *
+    * Thread-local and grown in place, matching the per-thread buffers this
+    * module already uses, so the many return paths below need no cleanup and two
+    * threads inserting at once cannot share the buffer. */
+   static _Thread_local char *safe_content = NULL;
+   static _Thread_local size_t safe_content_cap = 0;
    const char *sensitivity = "normal";
    if (content && content[0])
    {
-      snprintf(safe_content, sizeof(safe_content), "%s", content);
-      sensitivity = memory_scan_content(safe_content, strlen(safe_content));
+      const size_t need = strlen(content) + 1;
+      if (need > safe_content_cap)
+      {
+         char *grown = realloc(safe_content, need);
+         if (!grown)
+            return -1;
+         safe_content = grown;
+         safe_content_cap = need;
+      }
+      memcpy(safe_content, content, need);
+      sensitivity = memory_scan_content(safe_content, need - 1);
       if (!sensitivity) /* blocked */
          return -1;
       content = safe_content;
@@ -282,6 +334,11 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    /* Normalize key */
    char norm_key[512];
    normalize_key(key, norm_key, sizeof(norm_key));
+
+   /* A human rejection is a durable refusal, including against exact-key
+    * merge paths that never reach the physical INSERT backstop. */
+   if (db2_memory_rejection_blocks(norm_key, content) != 0)
+      return -1;
 
    char ts[32];
    now_utc(ts, sizeof(ts));
@@ -333,15 +390,18 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    /* Check for exact key match */
    {
       int64_t existing_id = 0;
-      char preserved_content[2048] = "";
+      /* Owned by us on a hit and freed on every exit from the block below.
+       * It holds the row's whole content on purpose: `merged_content` can point
+       * at it and be written straight back, so a fixed buffer would shorten a
+       * long memory each time it was re-stored under the same key. */
+      char *preserved_content = NULL;
       double old_conf = 0.0;
       int old_use = 0;
       double old_surprise = 0.0;
       int old_obs = 0;
       double old_evidence = 0.0;
-      if (db2_memory_lookup_merge_fields(norm_key, &existing_id, preserved_content,
-                                         sizeof(preserved_content), &old_conf, &old_use,
-                                         &old_surprise, &old_obs, &old_evidence))
+      if (db2_memory_lookup_merge_fields(norm_key, &existing_id, &preserved_content, &old_conf,
+                                         &old_use, &old_surprise, &old_obs, &old_evidence))
       {
          /* Merge: keep higher confidence, increment use_count */
          int semantic_profile = (strcmp(tier, TIER_L2) == 0 && memory_is_semantic_profile_key(key));
@@ -370,18 +430,17 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          if (db2_memory_merge_update_ex(existing_id, merged_content ? merged_content : content,
                                         use_cases, new_conf, new_use, new_obs, new_evidence,
                                         memory_content_salience(content), new_surprise, ts) != 0)
+         {
+            free(preserved_content);
             return -1;
+         }
 
          memory_refresh_derived_metadata(
              existing_id, norm_key, merged_content ? merged_content : (content ? content : ""));
          add_provenance(existing_id, session_id, "merge",
                         same_semantic_value ? "semantic profile dedupe" : "exact key match");
 
-         {
-            platform_memory_background_embed(existing_id, config_embedder_command_field()[0]
-                                                              ? config_embedder_command_field()
-                                                              : "builtin");
-         }
+         platform_memory_background_embed(existing_id, config_embedder_command_current(NULL));
 
          if (out)
             memory_get(existing_id, out);
@@ -392,8 +451,10 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
          /* An existing memory's content was overwritten by an exact-key merge —
           * a real mutation, audited (distinct op so merges stay filterable). */
          mem_audit("memory.merge", existing_id, tier, kind, norm_key, new_conf, session_id);
+         free(preserved_content);
          return 0;
       }
+      free(preserved_content);
    }
 
    /* Check trigram near-duplicate against same-kind memories. Skipped for
@@ -471,10 +532,11 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
 
    /* Truly new: INSERT */
    {
-      int64_t new_id = db2_memory_row_insert_ex(
-          tier, kind, norm_key, content, use_cases, confidence, session_id, ts, sensitivity,
-          memory_base_evidence_strength(norm_key, content, confidence),
-          memory_content_salience(content), memory_content_surprise(session_id, content));
+      int64_t new_id = db2_memory_row_insert_epistemic_ex(
+          tier, kind, epistemic_kind, norm_key, content, use_cases, confidence, session_id, ts,
+          sensitivity, memory_base_evidence_strength(norm_key, content, confidence),
+          memory_content_salience(content), memory_content_surprise(session_id, content),
+          MEMORY_PROVENANCE_FOR(authority));
       if (new_id < 0)
       {
          aimee_log(LOG_ERROR, "memory", "memory insert failed");
@@ -503,10 +565,19 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
    }
 }
 
+int memory_insert_ex(const char *tier, const char *kind, const char *key, const char *content,
+                     const char *use_cases, double confidence, const char *session_id,
+                     memory_authority_t authority, memory_t *out)
+{
+   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases, confidence,
+                                     session_id, authority, out);
+}
+
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
                   double confidence, const char *session_id, memory_t *out)
 {
-   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id, out);
+   return memory_insert_ex(tier, kind, key, content, "", confidence, session_id,
+                           MEMORY_AUTHORITY_MODEL, out);
 }
 
 int memory_get(int64_t id, memory_t *out)
@@ -519,15 +590,65 @@ int memory_touch(int64_t id)
    return db2_memory_touch(id);
 }
 
-int memory_update_content(int64_t id, const char *content)
+int memory_touch_many(const int64_t *ids, int n)
 {
+   return db2_memory_touch_many(ids, n);
+}
+
+int memory_update_content_as(int64_t id, const char *content, memory_authority_t authority,
+                             int64_t *new_id_out)
+{
+   if (new_id_out)
+      *new_id_out = 0;
    if (id <= 0 || !content || !content[0])
       return -1;
+   integrity_result_t integrity;
+   integrity_source_t integrity_source = authority == MEMORY_AUTHORITY_USER
+                                             ? INTEGRITY_SOURCE_USER_STATED
+                                             : INTEGRITY_SOURCE_AGENT_MESSAGE;
+   if (integrity_ingress_decide(content, integrity_source, "memory",
+                                authority != MEMORY_AUTHORITY_USER, &integrity))
+      return -4;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2;
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3;
+
+   /* A model correction versions the old value instead of overwriting it. The
+    * store's own write path already makes this choice — memory_store() routes a
+    * materially-different L2 write to memory_supersede() rather than merging
+    * over the existing value — and the update verb has to make the same one, or
+    * it simply becomes the way around it. */
+   if (authority != MEMORY_AUTHORITY_USER)
+   {
+      memory_t old_mem;
+      double confidence = (memory_get(id, &old_mem) == 0) ? old_mem.confidence : 1.0;
+      memory_t sup;
+      memset(&sup, 0, sizeof(sup));
+      int supersede_rc = memory_supersede(id, content, confidence, NULL, &sup);
+      if (supersede_rc != 0)
+         return supersede_rc;
+      if (new_id_out)
+         *new_id_out = sup.id;
+      return 0;
+   }
+
    int changes = db2_memory_update_content(id, content);
    int rc = changes > 0 ? 0 : -1;
    if (rc == 0)
+   {
+      if (new_id_out)
+         *new_id_out = id;
       mem_audit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
+   }
    return rc;
+}
+
+int memory_update_content(int64_t id, const char *content)
+{
+   return memory_update_content_as(id, content, MEMORY_AUTHORITY_USER, NULL);
 }
 
 int memory_reject(int64_t id, const char *reason)
@@ -550,25 +671,31 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    return db2_memory_list(tier, kind, hide_archived, limit, out, max);
 }
 
+int memory_delete_as(int64_t id, memory_authority_t authority)
+{
+   /* Model-initiated forgetting is a retirement, not a destruction: the content
+    * stops answering recall under its key but stays recoverable. Only a
+    * user/operator — who must clear the separate CAP_MEMORY_ADMIN gate to reach
+    * this at all — gets the irreversible path below. */
+   if (authority != MEMORY_AUTHORITY_USER)
+      return memory_retire(id, NULL);
+   return memory_delete(id);
+}
+
 int memory_delete(int64_t id)
 {
    /* Wipe provenance first; CASCADE should handle this, but existing stores
     * may predate the FK. */
    db2_memory_provenance_delete(id);
 
-   /* Drop any unit-scoped pgvector points for this memory. */
-   int64_t unit_ids[64];
-   int unit_count =
-       db2_memory_unit_list_ids(id, unit_ids, (int)(sizeof(unit_ids) / sizeof(unit_ids[0])));
-   for (int i = 0; i < unit_count; i++)
-   {
-      int64_t pt = PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET + unit_ids[i];
-      pgvec_memory_vector_delete_point(pt);
-      db2_vector_index_op_remove(pt);
-   }
-
-   pgvec_memory_vector_delete_point(id);
-   db2_vector_index_op_remove(id);
+   /* Drop the record's own pgvector point and every unit-scoped point. Both
+    * statements derive the unit points in SQL: enumerating them into a fixed
+    * buffer bounded reclamation at the buffer size, and memory_embeddings has no
+    * foreign key back to memories, so anything left behind stayed live in the
+    * ANN index with its payload. Runs before the row delete, while memory_units
+    * still exists. */
+   (void)pgvec_memory_vector_delete_points_for_memory(id, 1);
+   db2_vector_index_ops_remove_for_memory(id, PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, 1);
 
    int changes = db2_memory_delete_row(id);
    if (changes > 0 && db1_context_cache_invalidate)

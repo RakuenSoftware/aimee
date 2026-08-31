@@ -33,10 +33,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "db2_test_shim.h"
-#include "../db2/db_postgres.h"
-#include "../db2/db2_internal.h"
-#include "../db2/artifacts.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/artifacts.h"
 #include "feature_rows.h"
 #include "../kb_ranker.h"
 #include "../kb_ranker_fit.h"
@@ -72,6 +72,27 @@ static void insert_feat(long long doc, double dense, double lex, double rec)
             lex, dense, rec);
    int rc = db2_feature_row_upsert(subj, "kb_document", "", "", "v1", f, NULL);
    assert(rc == 0);
+}
+
+static void insert_work_outcome(const char *outcome_id, const char *event_id,
+                                const char *subject_kind, const char *subject_id,
+                                const char *outcome)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       db2_conn(),
+       "INSERT INTO work_outcomes(outcome_id,retrieval_event_id,subject_kind,subject_id,"
+       " authenticated_evaluator,outcome,occurred_at)"
+       " VALUES(?1,?2,?3,?4,'test',?5,'2026-01-01 00:00:00')",
+       err, sizeof(err));
+   assert(st);
+   aimee_pg_bind_text(st, "?1", outcome_id);
+   aimee_pg_bind_text(st, "?2", event_id);
+   aimee_pg_bind_text(st, "?3", subject_kind);
+   aimee_pg_bind_text(st, "?4", subject_id);
+   aimee_pg_bind_text(st, "?5", outcome);
+   assert(aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_DONE);
+   aimee_pg_finalize(st);
 }
 
 static void write_exec(const char *path, const char *content)
@@ -118,6 +139,16 @@ static double snum(cJSON *o, const char *k)
 {
    cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
    return cJSON_IsNumber(v) ? v->valuedouble : -12345.0;
+}
+
+static void configure_fit(int enabled, int min_groups, int bench_k, const char *command,
+                          const char *benchmark)
+{
+   assert(config_set_kb_ranker_fit_enabled(enabled) == 0);
+   assert(config_set_kb_ranker_fit_min_groups(min_groups) == 0);
+   assert(config_set_kb_ranker_fit_bench_k(bench_k) == 0);
+   assert(config_set_kb_ranker_fit_command(command ? command : "") == 0);
+   assert(config_set_kb_ranker_fit_benchmark(benchmark ? benchmark : "") == 0);
 }
 
 /* ---- 1. empty view diagnostic ---- */
@@ -192,13 +223,33 @@ static void test_closed_loop_capture(void)
    printf("  closed_loop_capture: ok\n");
 }
 
+/* ---- 2c. canonical P5 work outcomes feed the ranker training view ---- */
+static void test_work_outcome_capture(void)
+{
+   open_db();
+   insert_feat(100, 0.9, 0.8, 0.9);
+   insert_feat(101, 0.2, 0.1, 0.3);
+   insert_work_outcome("wo-1", "work-e1", "document", "100", "useful");
+   insert_work_outcome("wo-2", "work-e1", "document", "101", "dead_end");
+   /* Same id, different subject space: must not contaminate document fitting. */
+   insert_work_outcome("wo-3", "work-e1", "assertion", "100", "useful");
+
+   cJSON *rows = NULL;
+   int ng = 0, nr = 0, np = 0;
+   assert(kb_ranker_training_view("kb_document", "v1", &rows, &ng, &nr, &np) == 0);
+   assert(nr == 2);
+   assert(np == 1);
+   assert(ng == 1);
+   cJSON_Delete(rows);
+   close_db();
+   printf("  work_outcome_capture: ok\n");
+}
+
 /* ---- 3. fit disabled ---- */
 static void test_fit_disabled(void)
 {
    open_db();
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_snapshot_init(&cfg);
+   configure_fit(0, 8, 5, "", "");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
@@ -220,13 +271,7 @@ static void test_fit_below_floor(void)
    insert_attr("e1", 100, "accepted");
    insert_attr("e1", 101, "contradicted");
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 8;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/bin/true");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 8, 5, "/bin/true", "");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    assert(rc == 1);
@@ -350,15 +395,7 @@ static void test_gate_commit_on_lift(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 2;
-   cfg.kb_ranker_fit_bench_k = 5;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
-   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 2, 5, "/tmp/rf_stub_win.sh", "/tmp/rf_fix.json");
    char id[64] = "";
    char *rep = NULL;
    int rc = kb_ranker_fit_run(id, sizeof(id), &rep);
@@ -398,14 +435,7 @@ static void test_gate_hold_on_no_lift(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 2;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_lose.sh");
-   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 2, 5, "/tmp/rf_stub_lose.sh", "/tmp/rf_fix.json");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
@@ -434,15 +464,7 @@ static void test_gate_refuses_underpowered_benchmark(void)
                     "\"sketch.frequency_kind_scope\":0.0,\"sketch.distinct_sources_hll\":0.0}"));
    write_file("/tmp/rf_fix.json", FIXTURE_UNDERPOWERED);
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 2;
-   cfg.kb_ranker_fit_bench_k = 5;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
-   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 2, 5, "/tmp/rf_stub_win.sh", "/tmp/rf_fix.json");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
@@ -477,15 +499,7 @@ static void test_gate_refuses_minority_gain(void)
    write_file("/tmp/rf_fix.json", fix);
    free(fix);
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 2;
-   cfg.kb_ranker_fit_bench_k = 5;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_win.sh");
-   snprintf(cfg.kb_ranker_fit_benchmark, sizeof(cfg.kb_ranker_fit_benchmark), "/tmp/rf_fix.json");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 2, 5, "/tmp/rf_stub_win.sh", "/tmp/rf_fix.json");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
@@ -514,13 +528,7 @@ static void test_sidecar_refusal(void)
               "#!/bin/sh\ncat >/dev/null\nprintf '%s' "
               "'{\"status\":\"refused\",\"reason\":\"version_mismatch\"}'\n");
 
-   static config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.kb_ranker_fit_enabled = 1;
-   cfg.kb_ranker_fit_min_groups = 2;
-   snprintf(cfg.kb_ranker_fit_command, sizeof(cfg.kb_ranker_fit_command), "/tmp/rf_stub_refuse.sh");
-
-   config_snapshot_init(&cfg);
+   configure_fit(1, 2, 5, "/tmp/rf_stub_refuse.sh", "");
    char *rep = NULL;
    int rc = kb_ranker_fit_run(NULL, 0, &rep);
    cJSON *o = cJSON_Parse(rep);
@@ -663,6 +671,7 @@ int main(void)
    test_empty_view_diagnostic();
    test_training_view_join();
    test_closed_loop_capture();
+   test_work_outcome_capture();
    test_fit_disabled();
    test_fit_below_floor();
    test_gate_commit_on_lift();

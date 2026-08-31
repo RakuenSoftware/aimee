@@ -40,6 +40,7 @@ echo "== bus-arena TSan lane: building bus sources + race harness under -fsaniti
   "$SRC/core/event_bus/bus_host.c" \
   "$SRC/core/event_bus/bus_route.c" \
   "$SRC/core/event_bus/bus_region.c" \
+  "$SRC/core/event_bus/bus_region_host.c" \
   "$SRC/core/event_bus/bus_ring.c" \
   "$SRC/core/event_bus/bus_wire.c" \
   "$SRC/core/event_bus/bus_client.c" \

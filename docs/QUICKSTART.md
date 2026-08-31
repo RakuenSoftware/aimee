@@ -2,6 +2,11 @@
 
 Run the services on one machine. Install only the thin client where you write code.
 
+Using a hosted knowledge base such as aimee cloud? The path is the same, with two differences: start
+from `compose.server-standalone.yaml` instead of the managed profile in Section 1, and at
+[Step 3](#step-3-choose-the-knowledge-base) paste your setup code instead of deploying a local
+knowledge base. Sections 2 and 3, installing and enrolling the client, are unchanged.
+
 ## 1. Start the managed server
 
 You need Docker with Compose v2. The managed server mounts the Docker socket so its browser wizard
@@ -10,9 +15,27 @@ can start the KB container.
 ```bash
 git clone https://github.com/RakuenSoftware/aimee.git
 cd aimee
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
 docker compose -f compose.server-managed.yaml up -d
 docker compose -f compose.server-managed.yaml logs aimee-server
 ```
+
+The store runs three separate PostgreSQL roles (an admin, a migrator and a runtime), and every
+Compose profile that starts `aimee-store-db` requires a password for each. There is deliberately no
+default, so no deployment can inherit a password that ships in the repository; without them Compose
+stops before it creates anything:
+
+```text
+error while interpolating services.aimee-store-db.environment.POSTGRES_PASSWORD:
+required variable AIMEE_STORE_ADMIN_PASSWORD is missing a value
+```
+
+Compose reads `.env` on its own, so generating them once as above is all that is needed. Keep the
+file: those are the credentials for the data directory that now exists, and changing one later does
+not re-run `initdb`.
 
 When you do not supply a dashboard login, the server generates one on first boot and prints it once
 in that log. The values below show the format. Your values will be different:
@@ -85,9 +108,9 @@ The generated login is temporary. This step creates the account you will keep, a
 account, and removes the plaintext of the temporary one. A deployment that sealed its own
 `AIMEE_WEBCHAT_USER` pair before first boot skips this step.
 
-Pick a username that is not already a group on the host. The image ships the usual Unix groups, so
-names such as `operator`, `backup`, `staff`, `users`, `news`, `mail`, `proxy`, `adm`, and `aimee`
-are unavailable. The wizard names the collision and asks you to choose another username.
+The replacement account uses Aimee's managed login group as its primary group, so common names such
+as `operator`, `backup`, or `staff` remain valid even when a same-named system group already exists.
+The account is still scoped to the managed group and cannot expose unrelated host users.
 
 ### Step 2: choose the primary provider
 
@@ -101,8 +124,24 @@ You can change the primary later on the Agents tab.
 
 ![Step 3 of the setup wizard, knowledge base](images/wizard-3-knowledge-base.png)
 
-Deploy one locally, or point at an existing `aimee-kb`. A local knowledge base is the default and
-needs nothing else installed.
+Three choices:
+
+- **Deploy a local knowledge base.** The default, and it needs nothing else installed.
+- **Paste a setup code** from a hosted `aimee-kb`, such as aimee cloud. The code is exchanged for
+  that knowledge base's address and key, so this is the third option with the typing removed.
+- **Connect to an existing `aimee-kb` by hand**, with its URL and bearer token.
+
+The last two both save `kb_mode=remote` and deploy nothing here, so the deploy-topology and
+shared-store steps are skipped for either.
+
+A setup code is single-use and short-lived, so the wizard only redeems it when you press the button,
+never as you type. If it is refused the code stays in the box, because the usual cause is a typo
+rather than a dead code, and re-typing should not cost you a fresh one. Nothing is written until an
+exchange succeeds.
+
+If you are attaching to a hosted knowledge base, start from `compose.server-standalone.yaml` rather
+than the managed profile in [Section 1](#1-start-the-managed-server): it runs `aimee-server` with no
+`aimee-kb` and no PostgreSQL, which is what you want when the knowledge base is somewhere else.
 
 For a local KB, the remaining steps place its embedder and optional synthesizer, choose the bundled
 or external shared store, connect an optional Git host, and add workspaces. The embedder runs inside
@@ -241,16 +280,17 @@ because the current reset command deliberately no-ops when the dimensions match.
 
 ### Local synthesis
 
-Synthesis writes curation and summaries. Unlike the embedder it is not inside the KB container: it is
-its own image, `aimee-llm-e2b` or `aimee-llm-e4b`, deployed beside the KB when the wizard selects a
-local model. Which model it carries is a property of the tag, because the weights are baked in.
+Synthesis writes curation and summaries from its own image, `aimee-llm-e2b` or
+`aimee-llm-e4b`. The wizard deploys it beside the KB when the user selects a local model. Which
+model it carries is a property of the tag because the weights are baked in.
 
 | image | model | weights |
 | --- | --- | --- |
-| `aimee-llm-e2b` | gemma-4-E2B-it | 2.97 GB (UD-Q4_K_XL) |
+| `aimee-llm-e2b` | gemma-4-E2B-it | 2.62 GB (qat-UD-Q4_K_XL) |
 | `aimee-llm-e4b` | gemma-4-E4B-it | 7.46 GB (UD-Q6_K_XL) |
 
-E4B is the better model; E2B is roughly half the resident memory and about twice the CPU speed. See
+E4B has the higher measured extraction score; E2B uses roughly half the resident memory and runs
+about twice as fast on the measured CPU lane. See
 [Choosing a synthesis model](SYNTHESIS_MODELS.md) for the measurements behind that.
 
 Three states are all supported, and `off` is not an error: embedding, search, recall and indexing
@@ -284,7 +324,8 @@ deploy instead of quietly at the first curation call.
 ### Choosing an image channel
 
 The stack runs the released `:latest` images by default. To run a tested-but-unreleased build, set
-`AIMEE_IMAGE_TAG` once. It moves the server and the KB together:
+`AIMEE_IMAGE_TAG` once. It moves every image in the topology together, including the server, KB,
+and browser console:
 
 ```bash
 AIMEE_IMAGE_TAG=testing docker compose -f compose.server-managed.yaml up -d
@@ -309,8 +350,19 @@ docker compose -f compose.server-managed.yaml logs --tail=100 aimee-server
 If the server must not control Docker, use the split stack instead:
 
 ```bash
-docker compose -f deploy/compose/aimee.yaml up -d
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
+export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
+unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
+docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
+
+This profile installs a dedicated server-to-KB client certificate and uses mTLS; it does not expose
+the KB's plain HTTP listener. See [Deployment](DEPLOYMENT.md#split-stack) for the trust boundaries.
 
 The old combined image is gone.
 
@@ -476,6 +528,7 @@ sudo install -d -o root -g root -m 0755 server-management
 sudo install -o root -g root -m 0644 /path/from/authority/jwks-trust-bundle.json \
   server-management/jwks-trust-bundle.json
 
+cp -n .env.example .env
 cat >>.env <<'EOF'
 AIMEE_SERVER_ID=YOUR_ENROLLED_SERVER_ID
 AIMEE_SERVER_TEAM_ID=YOUR_NUMERIC_TEAM_ID
@@ -492,12 +545,16 @@ non-root owner are rejected. On successful enrollment the certificate and key ar
 at `$AIMEE_HOME/kb-client-identity.json` with mode `0600`. The one-time token is never saved, and the
 identity is revalidated against its CA pin after every process restart.
 
-Grant administration is local-socket only. Run it on the server, using the exact subject returned by
-the user's PAM or OIDC login:
+Grant administration happens **on aimee-kb**, using the exact subject returned by the user's PAM or
+OIDC login. The server holds no administrative KB identity and does not proxy this operation.
+Server-side dispatch for `aimee kb grant …` is removed. Its legacy grammar may still appear in
+client help, but those subcommands do not dispatch.
 
 ```bash
-aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
-aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
+# on aimee-kb, as a principal with admin or team-lead authority IN the target team
+POST /v1/write-tier-grants/set  {"server_id": "<server-id>", "team_id": <team-id>,
+                                 "subject": "<subject>", "tier": "data"}
+GET  /v1/write-tier-grants?server_id=<server-id>&team_id=<team-id>&subject=<subject>
 ```
 
 Use `data` for memory, document, and index writes. Use `full` only for users who also need agent,

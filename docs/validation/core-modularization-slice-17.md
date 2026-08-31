@@ -18,7 +18,7 @@ consolidation, optional profile completion, or dynamic liveness proof.
 
 `src/modules/config/module.yaml` declares only `module-runtime` and no runtime toggle. Owned physical
 source is `src/modules/config/*`; distributed consumers include server startup/loop, CLI, deployment,
-modules, webchat, and frontend settings. `config_load` selects the published snapshot after server
+modules, webchat, and frontend settings. `legacy_config_read` selects the published snapshot after server
 startup and otherwise reads disk (`config.c:1077`); `config_load_file` applies defaults, validates, and
 uses file identity for its cache (`config.c:1084`). Server startup seeds the snapshot
 (`server/server_main.c:185`). `handle_config_set` reads disk, saves, reloads immediately, and returns a
@@ -32,7 +32,7 @@ by default but does not filter by live module/provider consumption. `webchat/set
 static settings allowlist. Therefore the approved GUI truthfulness sentence in `config.md` is normative:
 dynamic consumer filtering is `not present`; no behavior is changed in this documentation-only slice.
 
-The monolithic flat `config_t`, hand-maintained field metadata, distributed section parsers/savers, and
+The monolithic flat `legacy_config_record`, hand-maintained field metadata, distributed section parsers/savers, and
 separate GUI lists are future consolidation/liveness subjects. A field with only parser, serializer,
 default, schema, or self-test evidence is a `configuration-only` candidate, not confirmed dead; proving
 removal requires non-test references, dynamic registration, API/GUI exposure, environment readers,
@@ -43,7 +43,7 @@ round-trip compatibility, and supported-journey evidence.
 `src/modules/audit/module.yaml` declares `config`, `module-runtime`, and `vault` with no runtime toggle.
 Physical source comprises action hashing/preview, the legacy ledger reader, SQLite WORM storage, and the
 shared WORM chain. Consumers include guardrails, server management/state, trajectory export, KB vault
-operations, and `src/db2/kb_audit_worm.c`.
+operations, and `src/modules/db2/c/kb_audit_worm.c`.
 
 | Property | Current evidence | Limit |
 |---|---|---|
@@ -65,7 +65,7 @@ failure does not change the tool verdict (`modules/guardrails/guardrails_action_
 | Area | Classification | Disposition |
 |---|---|---|
 | `config_fields` metadata and frontend/webchat lists | `duplicated-by-adjacent-module` candidate, not confirmed | derive truthful GUI projections from live module/provider consumers in a later source slice |
-| Config parse/save pairs and flat `config_t` | boundary overlap | audit field consumers and round-trip behavior before moving ownership into module source |
+| Config parse/save pairs and flat `legacy_config_record` | boundary overlap | audit field consumers and round-trip behavior before moving ownership into module source |
 | Legacy action log and SQLite WORM | dual-write overlap, not dead code | retain until authority, migration, reader parity, and failure policy are explicit |
 | Server SQLite and KB PostgreSQL WORM | storage providers sharing canonical primitives | retain independent stores; add byte-identical end-to-end parity evidence |
 | General `audit_log` and governed `audit_action_log` | distinct producer/evidence contracts | retain; compare caller coverage before any consolidation |

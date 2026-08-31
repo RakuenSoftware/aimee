@@ -5,15 +5,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_service_backend.h"
 #include "memory.h"
-#include "../db2/curiosity.h"
-#include "../db2/db_postgres.h"
-#include "../db2/db2_internal.h"
+#include "../modules/db2/c/curiosity.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "support/store_module_fixture.h"
 
 /* Each test block needs the curiosity_items, memories, memory_directives,
  * failed_queries tables on the *same* DB2 connection so the cross-tier
@@ -25,7 +25,7 @@ static void setup(void)
 }
 
 /* Point config at a temp dir this test owns and write the keys the case needs.
- * memory_maintenance_maybe_run reads live config rather than taking a config_t,
+ * memory_maintenance_maybe_run reads live config rather than taking a legacy_config_record,
  * so a case that does not write its own precondition would silently inherit the
  * developer's real aimee.yaml and stop testing what it names. Uses a per-pid
  * path rather than mkdtemp() on a static buffer — mkdtemp rewrites its XXXXXX
@@ -46,11 +46,16 @@ static void write_test_config(const char *yaml)
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    printf("curiosity: ");
 
    /* DB1 is still required by the maintenance cycle (maintenance_state). */
-   assert(db1_init(":memory:") == 0);
-
    /* --- canonicality + state validity --- */
    {
       assert(db2_curiosity_gap_type_is_canonical(CURIOSITY_GAP_MISSING_FACT));
@@ -437,7 +442,6 @@ int main(void)
       assert(second.rescored == 0);
    }
 
-   db1_shutdown();
    printf("all tests passed\n");
    return 0;
 }

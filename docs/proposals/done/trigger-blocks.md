@@ -1,11 +1,17 @@
-# Triggers as workflow blocks — graph-native run starts
+# Triggers as workflow blocks: graph-native run starts
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Archived after graph-native workflow triggers shipped.
 
 ## Why
 
 Triggers today live *outside* the workflow system: a `trigger_rules` list in
 `aimee.yaml` names a source (`watch-dir`/`proposals`, `cron`) and points it at a
-saved workflow. That works — the proposals pipeline files and completes runs
-hands-off — but it splits one design across two authoring surfaces. The
+saved workflow. That works. The proposals pipeline files and completes runs
+hands-off, but it splits one design across two authoring surfaces. The
 workflow graph declares everything about a run *except* what starts it; the
 thing that starts it is a config stanza the composer never sees, validated by
 different code, with its own field vocabulary (`event`, `schedule`,
@@ -13,15 +19,15 @@ different code, with its own field vocabulary (`event`, `schedule`,
 
 The trigger-source registry (`{name, due, fire}` in
 `src/server/trigger_scheduler.c`) already made sources pluggable. This proposal
-finishes the thought: a trigger becomes a **block** — the entry node of the
-workflow that wants it — so "what starts this workflow" is composed, validated,
+finishes the thought: a trigger becomes a **block**. The entry node of the
+workflow that wants it, so "what starts this workflow" is composed, validated,
 versioned, and displayed exactly like every other step.
 
 ## What
 
 1. **A `trigger.*` block kind** in the catalog (`wfe_def.c`), starting with one
    concrete block:
-   - `trigger.watch-dir` — params `{dir, ref, suffix}` (defaults
+   - `trigger.watch-dir`: params `{dir, ref, suffix}` (defaults
      `docs/proposals/pending`, auto-detected origin HEAD, `.md`). Produces a
      `proposal` artifact: the materialized content of each new file seen in the
      watched directory, exactly what the `watch-dir` source materializes today.
@@ -37,15 +43,15 @@ versioned, and displayed exactly like every other step.
    *armed* workflow. The trigger scheduler's tick enumerates armed workflows
    (same registry, same per-rule rate limit, same global
    `trigger.max_concurrent`, same per-run USD ceiling policy) and instantiates
-   one work item per event through the existing `trigger_file_run` back half —
-   the run starts at the node *after* the trigger block, with the trigger's
+   one work item per event through the existing `trigger_file_run` back half.
+The run starts at the node *after* the trigger block, with the trigger's
    artifact bound.
 4. **Workspace binding**: the armed workflow carries its repo binding
    (`params.workspace` on the trigger block, or the project the workflow was
    saved under in the webchat). Executors already honor the work item's own
    repo (`wfe_repo_local`), so this closes the loop: one YAML file states
    *watch this dir, in this repo, and run this graph*.
-5. **Compatibility**: `trigger_rules` keeps working unchanged — it is the
+5. **Compatibility**: `trigger_rules` keeps working unchanged. It is the
    "arm someone else's workflow without editing it" form, and its sources and
    the trigger blocks share one implementation. The webchat composer gains the
    trigger blocks in the rail like any other block.

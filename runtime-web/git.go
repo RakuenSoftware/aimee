@@ -490,9 +490,9 @@ func (s *server) handleGitClone(w http.ResponseWriter, r *http.Request) {
 	s.gitRelay(w, st, data, err)
 }
 
-// gitDeleteRelay passes through the project-delete outcome ({ok, ref,
-// kb_status, purge_id, kb}). Typed passthrough, never the raw upstream body;
-// `kb` is the server's per-store purge detail (already credential-free).
+// gitDeleteRelay passes through the local project-delete outcome ({ok, ref}).
+// Keep this typed rather than forwarding the raw upstream body: deleting a
+// checkout deliberately does not claim that shared KB data was purged.
 func (s *server) gitDeleteRelay(w http.ResponseWriter, st int, data []byte, err error) {
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
@@ -504,17 +504,11 @@ func (s *server) gitDeleteRelay(w http.ResponseWriter, st int, data []byte, err 
 		return
 	}
 	var up struct {
-		OK       bool            `json:"ok"`
-		Ref      string          `json:"ref"`
-		KBStatus string          `json:"kb_status"`
-		PurgeID  string          `json:"purge_id"`
-		KB       json.RawMessage `json:"kb"`
+		OK  bool   `json:"ok"`
+		Ref string `json:"ref"`
 	}
 	_ = json.Unmarshal(data, &up)
-	m := map[string]any{"ok": up.OK, "ref": up.Ref, "kb_status": up.KBStatus, "purge_id": up.PurgeID}
-	if len(up.KB) > 0 {
-		m["kb"] = up.KB
-	}
+	m := map[string]any{"ok": up.OK, "ref": up.Ref}
 	out, _ := json.Marshal(m)
 	w.Write(out)
 }
@@ -534,9 +528,9 @@ func validProjectRef(ref string) bool {
 	return true
 }
 
-// POST /api/git/projects/delete {ref, force?} — delete a cloned project (and,
-// for its last holder, its indexed knowledge). Relay contract (webchat project
-// lifecycle, slice 2): the accepted body fields are EXACTLY ref and force —
+// POST /api/git/projects/delete {ref, force?} — delete a local cloned project.
+// Shared KB knowledge is intentionally retained. The accepted body fields are
+// EXACTLY ref and force —
 // unknown fields are rejected so nothing can be smuggled to the server route —
 // and the principal is bound exclusively from the authenticated session (the
 // v1RequestWebuser channel), never from inbound headers or the body.
@@ -559,8 +553,8 @@ func (s *server) handleGitProjectDelete(w http.ResponseWriter, r *http.Request) 
 		writeJSONError(w, http.StatusBadRequest, "invalid project ref")
 		return
 	}
-	// The purge + filesystem walk of a large clone outlives a normal socket
-	// call; give it the clone deadline.
+	// The filesystem walk of a large clone can outlive a normal socket call; give
+	// it the clone deadline.
 	ctx, cancel := context.WithTimeout(r.Context(), cloneTimeout)
 	defer cancel()
 	body, _ := json.Marshal(map[string]any{"ref": req.Ref, "force": req.Force})

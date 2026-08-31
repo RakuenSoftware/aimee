@@ -2,11 +2,11 @@
  * working_profile_*_local subsystem. Observations accumulate until a
  * value has repeated enough to clear the commit threshold, at which
  * point that value becomes the committed entry for the field. Pair
- * with the operator-authored charter in `config_t`. */
+ * with the operator-authored charter in `legacy_config_record`. */
 
 #include "aimee.h"
 #include "working_profile.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>

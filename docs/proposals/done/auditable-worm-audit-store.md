@@ -1,5 +1,9 @@
 # Proposal: Per-service auditable, verifiable WORM metrics-and-logs store
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 
 ## Thesis
@@ -10,8 +14,8 @@ re-parsed in full on every read with a 20k in-memory cap (band-aided in #1092),
 metrics/analytics live in **mutable** operational tables (`agent_log`,
 `token_audit`, `guardrail_events`), and nothing is cryptographically
 tamper-evident. Replace this with a dedicated, append-only (**WORM**),
-hash-chained + MAC-checkpointed audit store **per service** — one for aimee-server,
-one for aimee-kb — that is the single record of what happened and can be **proven**
+hash-chained + MAC-checkpointed audit store **per service**. One for aimee-server,
+one for aimee-kb. That is the single record of what happened and can be **proven**
 intact or shown, at a named row, to have been altered.
 
 ## Goal
@@ -48,13 +52,13 @@ For **each** service independently:
   it is hardening, not the guarantee. **Absolute prevention against a fully
   compromised host is out of scope; tamper-evidence is not.** Tamper-evidence holds
   only while the **verify key stays secret** and an **out-of-band trust anchor**
-  (§7) survives host compromise — both are explicit design elements, not
+  (§7) survives host compromise. Both are explicit design elements, not
   assumptions.
 
 ## §0.1 What already exists (reuse, don't rebuild)
 
 - **HMAC-SHA256 primitive + key loading**: `src/audit_action.c` (`hmac_sha256`,
-  `audit_load_key`, `AUDIT_KEY_LEN`) — reuse the *primitive*, with a **separate
+  `audit_load_key`, `AUDIT_KEY_LEN`), reuse the *primitive*, with a **separate
   chain key** (§2).
 - **SHA-256 raw**: `wfe_sha256_raw` for the chain hash.
 - **The action seam already fires on every governed call**:
@@ -70,9 +74,9 @@ Append-only table `audit_event`:
 | column      | meaning |
 |-------------|---------|
 | `seq`       | monotonic 1..N, **gap-free** (the ordering + chain index; §2) |
-| `ts`        | RFC3339-UTC, writer clock — **advisory only**, NOT in `row_hash`, NOT an ordering authority (§2) |
-| `actor`     | **structured** `{role, principal_id}` (R2-10) — `role` ∈ closed set `primary`\|`delegate`\|`operator`\|`system`\|`curator`; `principal_id` is the authenticated identity (SSO sub / deployer JWT / machine id / delegate name), so "operator" isn't collapsed across humans/CI/monitoring. Names are `[a-z0-9._-]+`, NFKC-lowercased at write (R2-11). |
-| `action`    | dotted verb from a closed registry — `tool.<name>`, `agent.set`, `delegate.dispatch`, `gate.approve`, `chain.checkpoint`, `kb.query`, `kb.ingest`, `kb.curator.promote`, `metric.snapshot`, … |
+| `ts`        | RFC3339-UTC, writer clock: **advisory only**, NOT in `row_hash`, NOT an ordering authority (§2) |
+| `actor`     | **structured** `{role, principal_id}` (R2-10): `role` ∈ closed set `primary`\|`delegate`\|`operator`\|`system`\|`curator`; `principal_id` is the authenticated identity (SSO sub / deployer JWT / machine id / delegate name), so "operator" isn't collapsed across humans/CI/monitoring. Names are `[a-z0-9._-]+`, NFKC-lowercased at write (R2-11). |
+| `action`    | dotted verb from a closed registry: `tool.<name>`, `agent.set`, `delegate.dispatch`, `gate.approve`, `chain.checkpoint`, `kb.query`, `kb.ingest`, `kb.curator.promote`, `metric.snapshot`, … |
 | `subject`   | the thing acted on (tool args-hash, agent name, work-item id, doc id); sensitive subjects are **HMAC-hashed** (R2-12), never plain SHA-256 |
 | `verdict`   | closed enum: `allow`\|`block`\|`rewrite`\|`approval_required`\|`ok`\|`error`\|`na` (forward-compat is via `version`/`algo`, not a `reserved` slot; R2-22) |
 | `detail`    | JSON per a **per-action allowlisted schema** (§6); ≤ **16 KB**; money as integer minor-units, no binary floats (R2-18); oversized/blob fields spilled by hash reference (§6) |
@@ -91,14 +95,14 @@ and both the SQLite and Postgres writers/verifiers must reproduce them, so a has
 computed on one engine verifies on the other.
 
 **Metric snapshots** are ordinary rows (`action="metric.snapshot"`, `detail =
-{tokens, cost_usd, verdict_counts, agent_stats,…}`) appended on a timer (§5) — a
+{tokens, cost_usd, verdict_counts, agent_stats,…}`) appended on a timer (§5). A
 verifiable metrics-over-time history; live/rollup metrics still come from the
 operational tables for speed.
 
-## §2 Verifiability — hash-chain + MAC checkpoints (+ keys)
+## §2 Verifiability: hash-chain + MAC checkpoints (+ keys)
 
 - **Chain + gap-free seq (R1-5 / R2-7).** `seq = head.seq + 1` is allocated
-  **inside the same serialized transaction** as the insert — SQLite: a process
+  **inside the same serialized transaction** as the insert. SQLite: a process
   mutex + a single-row `head` table (`PRAGMA synchronous=FULL`); Postgres:
   **`pg_advisory_xact_lock`** (transaction-scoped, auto-released on session death)
   + `head` row update, allocation + insert in one transaction at `SERIALIZABLE`,
@@ -109,12 +113,12 @@ operational tables for speed.
   `audit_event` (`action="chain.checkpoint"`, `detail={head_hash, mac}`) written by
   a **single timer-driven path** (not "N events OR T seconds" racing) so it is
   seq-ordered, unique, and gap-detectable like any other row. `mac =
-  HMAC-SHA256(chain_key[key_id], domain_tag ‖ head_hash ‖ seq ‖ key_id)` — binds
+  HMAC-SHA256(chain_key[key_id], domain_tag ‖ head_hash ‖ seq ‖ key_id)`, binds
   `head_hash`+`seq`+`key_id` (no `ts`; R1-10). Committing to a `seq` makes
   **truncation/rollback detectable**.
 - **The uncheckpointed tail is provisional, and verify says so (R2-1, was
   BLOCKING).** Rows after the newest checkpoint are chained but **not yet
-  MAC-attested** — an actor with live-file write access (but no chain key) could
+  MAC-attested**, an actor with live-file write access (but no chain key) could
   rewrite that tail and still satisfy the hash-chain. Therefore: (a) `verify`
   reports "**trusted through checkpoint C (seq S); K uncheckpointed rows are chained-
   but-unattested**" and exits **non-green (amber)** whenever head is beyond the
@@ -128,15 +132,14 @@ operational tables for speed.
   **cross-signed** by old+new so pre-rotation history stays verifiable. Key custody:
   a `0600` key file under `AIMEE_HOME` (or a KMS/HSM handle) owned by the service,
   documented, generated from a CSPRNG. **Honest naming:** the checkpoint is a
-  **MAC**, not a signature — a verifier who can check it can also forge it; for
+  **MAC**, not a signature, a verifier who can check it can also forge it; for
   independently-provable checkpoints (auditor/support who must verify but not
   forge), an **asymmetric-signature / HSM public-verify mode** is a documented
   upgrade (a public key verifies; the private signer stays server-side/HSM).
 - **`aimee audit verify` (R1-9 / R2-13).** Runs against a **consistent snapshot**
   (SQLite: a deferred read txn; Postgres: `REPEATABLE READ`) so it never races the
   writer; "max trusted checkpoint" is bounded by that snapshot's head. Default: walk
-  from the **last known-good checkpoint** (the signed off-host anchor, §7) to head —
-  O(recent) — recompute each `row_hash`, assert `prev_hash` linkage + gap-free
+  from the **last known-good checkpoint** (the signed off-host anchor, §7) to head (O(recent)) recompute each `row_hash`, assert `prev_hash` linkage + gap-free
   `seq`, verify each checkpoint MAC, and **validate the anchor** (present, signature
   valid, not stale). `--report-all` does the full O(N) forensic pass and reports
   every divergence. Exit codes: **green** (verified to a fresh anchor), **amber**
@@ -144,15 +147,15 @@ operational tables for speed.
   **red** (a break, with the first/all offending `seq`). Usable as a monitoring
   probe and a release gate.
 
-## §3 WORM enforcement — layered, with honest guarantees
+## §3 WORM enforcement: layered, with honest guarantees
 
 1. **Application:** the store exposes only `append()` + `read`/`verify`. No update
    or delete code path exists anywhere.
 2. **Database (accidental-write protection, NOT adversarial WORM; R1-7).**
    - SQLite: `BEFORE UPDATE/DELETE … RAISE(ABORT,'WORM')` triggers on both tables.
      Stated plainly: a process with **write access to the live DB file** can drop
-     these triggers, so DB-level WORM stops bugs/casual edits, **not** an adversary
-     — the adversarial guarantee is the crypto chain (§2) + OS immutability (below).
+     these triggers, so DB-level WORM stops bugs/casual edits, **not** an adversary.
+The adversarial guarantee is the crypto chain (§2) + OS immutability (below).
    - Postgres: a writer role granted `INSERT, SELECT` only, `REVOKE UPDATE, DELETE`,
      with row-level `BEFORE UPDATE/DELETE` triggers as defense-in-depth; DDL owned
      by a separate admin role the app never uses.
@@ -177,7 +180,7 @@ operational tables for speed.
    - Verification spans sealed (immutable) segments + the live tail; the chain
      stitches across boundaries via each seal's `prev_hash`.
 
-## §4 Capture — completeness is enforced, not conventional (R1-4)
+## §4 Capture: completeness is enforced, not conventional (R1-4)
 
 - One writer API: `audit_event(actor, action, subject, verdict, detail)`. Capture
   at the **narrowest governed-state mutation boundary**, not scattered UI/API sites.
@@ -190,12 +193,12 @@ operational tables for speed.
 - **Tests mutate every audited domain object and assert a corresponding WORM row**,
   so a new bypassing call site fails CI rather than silently escaping the record.
 
-## §5 Reads — Logs page + Guardrail pane query the store
+## §5 Reads: Logs page + Guardrail pane query the store
 
 `dashboard.audit` (and a kb equivalent) query `audit_event` directly:
 `… WHERE (filters) ORDER BY seq DESC LIMIT ? OFFSET ?` (keyset by `seq` for deep
-pages) — real server-side pagination + **server-side filtering** (verdict/actor/
-tool, today client-side) — and the Guardrail mix becomes `GROUP BY verdict`.
+pages), real server-side pagination + **server-side filtering** (verdict/actor/
+tool, today client-side), and the Guardrail mix becomes `GROUP BY verdict`.
 Indexes on `(seq)`, `(verdict)`, `(actor)`, `(action)`, `(ts)`. This retires the
 #1092 file reader to a migration fallback only.
 
@@ -203,14 +206,14 @@ Indexes on `(seq)`, `(verdict)`, `(actor)`, `(action)`, `(ts)`. This retires the
 
 Because rows are immutable **forever**, `detail` is not a free-form blob:
 
-- **Per-action allowlisted schemas** — each `action` declares the exact fields it
+- **Per-action allowlisted schemas**: each `action` declares the exact fields it
   may record; anything else is dropped before write.
-- **Hard 16 KB cap**; oversized or sensitive-by-type fields are **content-addressed**
-  — `detail` stores `sha256:<hex>` and the payload goes to a separate,
+- **Hard 16 KB cap**; oversized or sensitive-by-type fields are **content-addressed**,
+`detail` stores `sha256:<hex>` and the payload goes to a separate,
   *non-WORM*, deletable blob store. This keeps the chain intact while allowing
   **crypto-shred deletion** (drop the blob; the hash reference and chain survive) to
   satisfy privacy/legal deletion requests.
-- **Secret scanning + subject hashing** — credentials/tokens/PII are redacted or
+- **Secret scanning + subject hashing**: credentials/tokens/PII are redacted or
   hashed at the seam; the audited `subject` for sensitive inputs is a hash, not the
   raw value.
 
@@ -225,7 +228,7 @@ Because rows are immutable **forever**, `detail` is not a free-form blob:
   is moved/copied to **object storage with object-lock** (or `+i` media); `verify`
   spans the archive; the schedule (post-seal move vs. nightly batch), archive
   target, and who runs it are configured, not left implicit.
-- **Migration — authoritative WORM, fail-closed (R1-6).** The **WORM store is
+- **Migration, authoritative WORM, fail-closed (R1-6).** The **WORM store is
   authoritative**. A one-shot **legacy→genesis import** builds a synthetic chain
   over existing `audit.log` so history is continuous, then new writes go WORM-first
   with the file write best-effort/derived during the window, guarded by an
@@ -248,28 +251,28 @@ one SHA-256 per row and the bounded `detail`; the **latency budget and lock
 contention are benchmarked, not assumed**. A bounded group-commit is a *possible
 later optimization* only if benchmarked and only with the invariant that every
 member of a commit group is fsync-durable and seq-ordered before any of them
-returns success — out of scope for v1.
+returns success, out of scope for v1.
 
 ## Phasing (each independently shippable; behavioural steps default-off)
 
-- **S0** — record model + canonicalization spec + shared test vectors +
+- **S0**: record model + canonicalization spec + shared test vectors +
   hash-chain single-writer (transaction-scoped gap-free `seq`) + SQLite store +
   WORM triggers + **synchronous fail-closed writer**, behind `audit.worm.enabled`
   (default-off), dual-writing the file. **A minimal kb chain + triggers lands in
   parallel** so the two engines share the record/canonicalization code from day one
   (R1-13).
-- **S1** — dedicated chain key + MAC checkpoints + rotation + `aimee audit verify`
+- **S1**: dedicated chain key + MAC checkpoints + rotation + `aimee audit verify`
   (incremental + `--report-all`) + out-of-band anchor + a `doctor` health check.
-- **S2** — segment rotation + sealing + OS immutability (chattr precondition,
+- **S2**: segment rotation + sealing + OS immutability (chattr precondition,
   FS-support check + crypto-only degrade) + cross-segment chain stitching.
-- **S3** — full capture (inventory + lint guard + per-domain tests); `dashboard.audit`
+- **S3**: full capture (inventory + lint guard + per-domain tests); `dashboard.audit`
   reads/filters/paginates from the store; retire the #1092 reader to fallback.
-- **S4** — data-classification schemas + redaction/content-addressed spill +
+- **S4**: data-classification schemas + redaction/content-addressed spill +
   metric snapshots on a timer.
-- **S5** — aimee-kb WORM store completed: Postgres role/schema, revoke UPDATE/DELETE,
+- **S5**: aimee-kb WORM store completed: Postgres role/schema, revoke UPDATE/DELETE,
   triggers, chain, checkpoints, `verify`, snapshot-to-object-lock sealing.
-- **S6** — kb capture (query/ingest/curation/governance) + kb Logs/metrics surface.
-- **Close-out** — full kb WORM is a **release gate** for advertising "verifiable";
+- **S6**: kb capture (query/ingest/curation/governance) + kb Logs/metrics surface.
+- **Close-out**: full kb WORM is a **release gate** for advertising "verifiable";
   flip defaults on after live verify; retention archive wired; file to done/.
 
 ## Non-goals
@@ -285,7 +288,7 @@ returns success — out of scope for v1.
 - **Hot-path cost**: synchronous fsync per audited action; benchmarked, with
   group-commit as the fallback shape (never async/best-effort).
 - **Key/anchor custody is the crux**: tamper-evidence holds only while the chain key
-  is secret and the out-of-band anchor survives host compromise — both are explicit
+  is secret and the out-of-band anchor survives host compromise. Both are explicit
   (§2/§7), with HSM/asymmetric as the stronger upgrade.
 - **OS immutability needs privilege + supporting FS**: documented capability model;
   degrades to crypto-only with a loud warning where unavailable.
@@ -314,7 +317,7 @@ returns success — out of scope for v1.
   crypto-shredding a blob leaves `verify` still passing.
 - Hot-path throughput benchmark (append+fsync+hash) vs. the current file append.
 
-## R2 — additional design decisions (roundtabled; precise specs)
+## R2: additional design decisions (roundtabled; precise specs)
 
 Body sections above already carry the design-level R2 fixes (durability drops
 group-commit; checkpoints are first-class rows; the uncheckpointed tail is
@@ -338,7 +341,7 @@ implementation slices:
 - **R2-8 The off-host anchor is a signed artifact with a custody protocol.** The
   newest-trusted-checkpoint anchor is `sign(ed25519, {seq, head_hash, key_id, mac})`
   with the signing key held **off-host / in a separate administrative domain**
-  (write-only API or a second host — a compromised audited host cannot silently
+  (write-only API or a second host; A compromised audited host cannot silently
   update it). Update cadence = per-checkpoint (or per-N with the gap stated);
   `verify` validates the signature + freshness and an auditor can verify offline.
 - **R2-9 Fail-closed needs a call-site audit + lint.** Making the writer synchronous
@@ -357,7 +360,7 @@ implementation slices:
 - **R2-17 Chain-key lifecycle.** Old `key_id`s are **retained for the full audit
   retention** (or bridged into the asymmetric public-verify format before
   retirement); backup/escrow via KMS/HSM versioning; a documented compromise
-  response (what `verify` can still trust after a key leak — the pre-leak,
+  response (what `verify` can still trust after a key leak, the pre-leak,
   anchored prefix).
 - **R2-20 Blob integrity for content-addressed spill.** The blob's `sha256` lives in
   the (immutable) WORM row; `verify`/read checks the blob against it; the blob store
@@ -402,7 +405,7 @@ implementation slices:
   integrity; keyset pagination + composite indexes; numeric determinism; independent
   canonicalization vectors; `metric.snapshot` spec; dedicated deletable CAS.
 - **R3** (security + engineer persona reviews, used as the panel substitute because
-  the fan-out panel truncated on the grown proposal — the bug fixed in aimee PR
+  the fan-out panel truncated on the grown proposal, the bug fixed in aimee PR
   #1094): both reviewed the full document and found **no new blocking issues**; the
   security persona's verdict was repeatedly "sound design for detection" / "very
   high quality," and the only "blocking"-tagged mentions were re-confirmations that
@@ -414,12 +417,12 @@ implementation slices:
 
 All slices merged to `testing`, each default-off behind `audit_worm_enabled`:
 
-- **S0** #1099 — SQLite `audit_event` store: hash-chain, gap-free seq, WORM triggers, synchronous fsync-durable single-writer, dual-write from the governed-action seam.
-- **S1** #1100 — dedicated chain key + first-class MAC checkpoints + `aimee audit verify` (green/amber/red).
-- **S2** #1101 — immutable sealed snapshots (`aimee audit seal`), `chattr +i` with degrade-to-crypto (R2-7); `verify_file`.
-- **S3** #1102 — dashboard/Logs read from the WORM store (`source:"worm"`), retiring the #1092 file band-aid.
-- **S4** #1103 — hash-chained metric snapshots (`aimee audit snapshot`) + 16 KB bounded detail (R2-8).
-- **S5** #1104 — the second per-service store: aimee-kb Postgres `kb_audit_event` (db2) with shared `audit_worm_chain` (byte-identical, pinned cross-engine vector), plpgsql WORM triggers. **Validated on real Postgres 17** (triggers block UPDATE/DELETE/TRUNCATE even for the superuser).
-- **S6** — kb capture: `db2_audit_event_write` dual-writes into the kb WORM store when enabled.
+- **S0** #1099. SQLite `audit_event` store: hash-chain, gap-free seq, WORM triggers, synchronous fsync-durable single-writer, dual-write from the governed-action seam.
+- **S1** #1100, dedicated chain key + first-class MAC checkpoints + `aimee audit verify` (green/amber/red).
+- **S2** #1101, immutable sealed snapshots (`aimee audit seal`), `chattr +i` with degrade-to-crypto (R2-7); `verify_file`.
+- **S3** #1102, dashboard/Logs read from the WORM store (`source:"worm"`), retiring the #1092 file band-aid.
+- **S4** #1103, hash-chained metric snapshots (`aimee audit snapshot`) + 16 KB bounded detail (R2-8).
+- **S5** #1104, the second per-service store: aimee-kb Postgres `kb_audit_event` (db2) with shared `audit_worm_chain` (byte-identical, pinned cross-engine vector), plpgsql WORM triggers. **Validated on real Postgres 17** (triggers block UPDATE/DELETE/TRUNCATE even for the superuser).
+- **S6**: kb capture: `db2_audit_event_write` dual-writes into the kb WORM store when enabled.
 
 **Carried follow-ups** (each noted in its PR): the privileged sealer sidecar (R2-5) + auto rotation/pruning that bounds the live store; signed out-of-band anchor (ed25519, R2-8) + multi-key rotation cross-signing; automatic checkpoint/snapshot timer; per-action allowlisted `detail` schemas + secret scanning + subject hashing; the full capture-completeness inventory + lint guard beyond the tool-action + kb-audit seams; a kb verify/Logs CLI surface + writer-role provisioning; and flipping defaults on after a deploy-tier live-verify.

@@ -5,26 +5,30 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
+#include "config_database.h" /* config_synth_chat_endpoint_current */
 #include "kb_curator_queue.h"
 #include "kb_curator_provider.h"
 #include "json_fluent.h"
-#include "db2/canonical_index.h"
-#include "db2/kb_maintenance.h"
-#include "db2/kb_payload.h"
-#include "db2/kb_service_backend.h"
-#include "db2/kb_service_backend_export.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/lifecycle.h"
-#include "db2/vector_index_ops.h"
-#include "db2/pgvec_kb_service.h"
-#include "db2/kb_vectors.h"
-#include "db2/vector_status.h"
+#include "modules/db2/c/canonical_index.h"
+#include "modules/db2/c/kb_audit_worm.h"
+#include "modules/db2/c/kb_maintenance.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "kb/db2_adapters/kb_service_backend_export.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/lifecycle.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/db2/c/kb_vectors.h"
+#include "modules/db2/c/vector_status.h"
 #include "kb.h"
 #include "kb_bandit.h"
 #include "kb_http.h"
 #include "kb_service.h"
+#include "kb_module_stage_adapters.h"
 #include "kb_service_kb.h"
 #include "log.h"
+#include <aimee/audit/obs_bus.h>
 #include <aimee/workspace/workspace.h>
 
 #include <stdio.h>
@@ -37,6 +41,40 @@ int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
 extern kb_service_ctx_t *g_kb_ctx;
+
+#define KB_WORM_MAX_PENDING_AGE_SECONDS 60
+
+/* Append the typed-fact backlog warning to `warnings`, if it applies.
+ *
+ * SHARED BY BOTH STATUS SURFACES ON PURPOSE. This warning was written for
+ * kb_service_health_object() and its own comment names the symptom on the OTHER
+ * surface -- "`aimee kb status` printed '4 pending' with no hint that pending
+ * here means forever". kb_service_status_json() is a separate builder, so the
+ * command an operator actually runs never grew the hint that was written for it.
+ *
+ * Reproduced on a live deployment: 65 memory_facts jobs, oldest 34 hours old,
+ * attempts 0, while `aimee kb status` printed "Queue: 65 pending, 0 running, 0
+ * failed" under "status: ok" and said nothing about why pending never moves.
+ *
+ * One helper, both callers, so the two cannot drift apart again. */
+static void kb_status_add_typed_facts_warning(cJSON *warnings)
+{
+   if (!warnings)
+      return;
+   int facts_pending = db2_kb_async_count_kind_pending("memory_facts");
+   char synth_endpoint[512];
+   if (facts_pending <= 0 ||
+       config_synth_chat_endpoint_current(synth_endpoint, sizeof(synth_endpoint)))
+      return;
+   char msg[320];
+   snprintf(msg, sizeof(msg),
+            "typed-fact extraction: %d job(s) queued with nothing to drain them - no "
+            "synthesis endpoint is configured, so the curator LLM lane is not running. "
+            "Memories are stored and searchable but contribute no typed facts. The "
+            "backlog is not lost: configuring a synthesis provider drains it.",
+            facts_pending);
+   cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+}
 
 char *kb_service_status_json(const char *project)
 {
@@ -66,6 +104,17 @@ char *kb_service_status_json(const char *project)
    cJSON_AddNumberToObject(queue, "done", stats.queue.done);
    cJSON_AddNumberToObject(queue, "failed", stats.queue.failed);
    cJSON_AddNumberToObject(queue, "total", stats.queue.total);
+
+   /* The pending count above is meaningless without this: an undrainable queue
+    * and a busy one print the same number. */
+   {
+      cJSON *warnings = cJSON_CreateArray();
+      kb_status_add_typed_facts_warning(warnings);
+      if (cJSON_GetArraySize(warnings) > 0)
+         cJSON_AddItemToObject(obj, "warnings", warnings);
+      else
+         cJSON_Delete(warnings);
+   }
 
    cJSON *vector_status = pgvec_vector_status_json();
    if (vector_status)
@@ -301,17 +350,53 @@ static void kb_health_add_curator(cJSON *resp, kb_curator_queue_counts_t *out_co
    }
 }
 
+/* THE ONE PLACE a capability verdict is computed. Add a blocker at the site that
+ * discovers the evidence and the summary follows automatically — that is the whole
+ * point of this function existing.
+ *
+ * `status` used to be the literal string "ok", written as the first statement of
+ * kb_service_health_object and never revised. Every finding below it -- db2_ok,
+ * pgvec_ok, embed_ok, the dimension-refusal counter -- was published as a SIBLING
+ * field that nothing aggregated, so the response could say "ok" while carrying the
+ * proof it was not. That is not a bug in any one check; it is the absence of a
+ * place where the checks add up, and it reproduced three times (here, in
+ * server_health_add_kb, and in the transport-breaker patch that answered it by
+ * adding yet another sibling for the CLI to special-case).
+ *
+ * A blocker means CANNOT WORK, not "worth mentioning". Advisory findings stay in
+ * `warnings` and leave the verdict at ok: a stale ingest, a disabled synthesis
+ * tier, or zero vectors on a fresh install are all supported states, and
+ * degrading on them would dilute the signal in exactly the direction this
+ * function exists to correct. */
+static const char *kb_health_verdict(cJSON *blockers)
+{
+   return (cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) > 0) ? "degraded" : "ok";
+}
+
 static cJSON *kb_service_health_object(void)
 {
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
       return NULL;
-   cJSON_AddStringToObject(resp, "status", "ok");
+   /* No `status` here. It is derived from the blockers array at the bottom of this
+    * function, once the evidence it summarises actually exists. */
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
 
    /* DB2: generic schema + KB-specific tables */
    int schema_ok = 0, have_pg_trgm = 0, kb_tables_ok = 0;
-   int db2_ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok);
-   (void)db2_kb_health_probe(&kb_tables_ok);
+   /* DB2 still runs in-process in the KB owner. The generic PostgreSQL process
+    * module reads AIMEE_STORE_URL (the server-store DSN), while the staged DB2
+    * bus adapter is not attached until that ownership migration completes.
+    * Probing either one here returns capability_absent on a healthy managed KB.
+    * Use the same thread-safe DB2 probes as startup readiness. */
+   int db2_ok = (db2_health_probe(&schema_ok, &have_pg_trgm) == 0 && schema_ok && have_pg_trgm);
+   if (db2_kb_health_probe(&kb_tables_ok) != 0)
+      kb_tables_ok = 0;
    cJSON_AddBoolToObject(resp, "db2_ok", db2_ok);
    cJSON_AddBoolToObject(resp, "db2_kb_tables_ok", kb_tables_ok);
 
@@ -380,20 +465,16 @@ static cJSON *kb_service_health_object(void)
    if (db2_kb_runtime_state_get("last_ingest_at", last_ingest_at, sizeof(last_ingest_at)) == 0 &&
        last_ingest_at[0])
    {
-      /* Parse ISO8601 prefix YYYY-MM-DD HH:MM:SS to compute days elapsed */
-      struct tm t;
-      memset(&t, 0, sizeof(t));
-      if (sscanf(last_ingest_at, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday, &t.tm_hour,
-                 &t.tm_min, &t.tm_sec) >= 3)
+      /* Days elapsed. Shared parser: this read only the space form, and mktime()
+       * treated a UTC stamp as local time, skewing freshness by the host offset.
+       * An unparseable stamp must leave freshness_days at its -1 "unknown", not
+       * fall through to 0 -- "we cannot tell how old this is" and "it is current"
+       * are different answers. */
+      time_t then = parse_utc_ts(last_ingest_at);
+      if (then > 0)
       {
-         t.tm_year -= 1900;
-         t.tm_mon -= 1;
-         time_t then = mktime(&t);
          time_t now = time(NULL);
-         if (then > 0 && now > then)
-            freshness_days = (int)((now - then) / 86400);
-         else
-            freshness_days = 0;
+         freshness_days = (now > then) ? (int)((now - then) / 86400) : 0;
       }
    }
    cJSON_AddStringToObject(resp, "last_ingest_at", last_ingest_at);
@@ -406,14 +487,76 @@ static cJSON *kb_service_health_object(void)
    cJSON_AddNumberToObject(resp, "chunk_count", stats.chunks);
    cJSON_AddNumberToObject(resp, "embedding_count", stats.embeddings);
 
-   /* Warning accumulation */
+   /* Warning accumulation.
+    *
+    * Two arrays, two meanings, kept deliberately distinct: `warnings` is
+    * everything worth saying, `blockers` is the subset that means the kb cannot
+    * do its job. Only the latter moves `status`. A blocker names its remedy —
+    * the operator reading it is by definition looking at something broken, and
+    * "vector store unavailable" without "reinstall the extension" costs them the
+    * search that follows. */
    cJSON *warnings = cJSON_AddArrayToObject(resp, "warnings");
+   cJSON *blockers = cJSON_AddArrayToObject(resp, "blockers");
    if (!db2_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("DB2 schema not ready"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("store unavailable: the KB database schema is not "
+                                              "ready, so nothing can be stored or retrieved"));
+   }
    if (!pgvec_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("pgvector extension not loaded in DB2"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("vector store unavailable: the pgvector extension is "
+                                              "not loaded, so dense retrieval cannot run"));
+   }
    if (!pgvec_collection_ok)
+   {
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB vector table missing"));
+      cJSON_AddItemToArray(blockers, cJSON_CreateString("vector table missing: the KB chunk vector "
+                                                        "table is absent, so search returns "
+                                                        "nothing"));
+   }
+   /* Audit is an independent service, so liveness has to be visible from the
+    * process producing intents. A recent non-empty queue is normal; an intent
+    * older than one minute means the observer has stopped keeping up and is a
+    * blocker, even though application writes remain durable in the outbox. */
+   long long worm_pending = 0, worm_oldest_age = 0;
+   int worm_status = db2_ok ? db2_kb_audit_pending(&worm_pending, &worm_oldest_age) : -1;
+   cJSON *worm = cJSON_AddObjectToObject(resp, "worm_audit");
+   if (worm)
+   {
+      cJSON_AddBoolToObject(worm, "reachable", worm_status == 0);
+      cJSON_AddNumberToObject(worm, "pending", (double)worm_pending);
+      cJSON_AddNumberToObject(worm, "oldest_age_seconds", (double)worm_oldest_age);
+   }
+   if (db2_ok && worm_status != 0)
+   {
+      cJSON_AddItemToArray(warnings,
+                           cJSON_CreateString("WORM audit backlog status is unavailable"));
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("WORM audit observer status unavailable: apply the "
+                                              "audit outbox migration and grants"));
+   }
+   else if (worm_pending > 0 && worm_oldest_age > KB_WORM_MAX_PENDING_AGE_SECONDS)
+   {
+      char msg[320];
+      snprintf(msg, sizeof(msg),
+               "WORM audit observer stalled: %lld intent(s) pending, oldest %lld seconds; "
+               "restore the separately credentialed aimee-kb-worm service",
+               worm_pending, worm_oldest_age);
+      cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+      cJSON_AddItemToArray(blockers, cJSON_CreateString(msg));
+   }
+   /* An unconfigured embedder is the single most common way this install reaches
+    * "accepted, reports healthy, cannot work": deploy succeeds, the container goes
+    * healthy, and the first `aimee memory store` fails with no mention of an
+    * embedder anywhere. */
+   if (!embed_ok)
+      cJSON_AddItemToArray(blockers,
+                           cJSON_CreateString("no embedder configured: set embedder_model (or "
+                                              "EMBEDDER_URL) — memory and KB search cannot embed"));
    /* A curator that fails every job used to leave the kb reporting a clean
     * bill of health. The counters said pending=41485 done=0 — indistinguishable
     * from "queued, not started yet" — and nothing in warnings mentioned that
@@ -434,6 +577,28 @@ static cJSON *kb_service_health_object(void)
          snprintf(msg, sizeof(msg), "curator: %d job(s) failing", n);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
    }
+   /* TWO GATES THAT DO NOT AGREE.
+    *
+    * memory.store enqueues a "memory_facts" job unconditionally,
+    * which is the DEFAULT. The only consumer of those jobs is kb_memory_facts_drain,
+    * which runs on the curator LLM lane -- and that lane deliberately does not start
+    * without a synthesis endpoint ("NO SYNTHESIS PROVIDER => NO LLM LANE"). Both
+    * decisions are individually right. Together they mean an install with no synth
+    * provider, which is a supported configuration, enqueues one row per stored
+    * memory that nothing will ever claim.
+    *
+    * Measured on the e2e VM: 4 memory_facts jobs pending for 11.5 hours with
+    * attempts=0, while /v1/health reported status ok and an empty warnings array,
+    * and `aimee kb status` printed "4 pending" with no hint that pending here means
+    * forever. It grows without bound for the life of the install.
+    *
+    * NOT a blocker. Running without a synthesis provider is explicitly supported,
+    * and memory store and search work perfectly; only typed-fact enrichment is
+    * deferred. Degrading the verdict for a supported configuration is exactly the
+    * dilution this file's status derivation exists to avoid. It is a warning, and
+    * it says the backlog is not lost -- configuring a provider drains it. */
+   kb_status_add_typed_facts_warning(warnings);
+
    if (freshness_days > 30)
       cJSON_AddItemToArray(warnings, cJSON_CreateString("KB not ingested in over 30 days"));
    else if (freshness_days > 7)
@@ -496,7 +661,14 @@ static cJSON *kb_service_health_object(void)
                "(`aimee kb reembed`).",
                dim_refused, db2_embedding_dim_last_offered(), active_dim);
       cJSON_AddItemToArray(warnings, cJSON_CreateString(msg));
+      /* The comment above says this state means "dense retrieval is dead". It said
+       * so while the response reported status ok, because saying it in a warning
+       * was the end of the sentence. It is a blocker. */
+      cJSON_AddItemToArray(blockers, cJSON_CreateString(msg));
    }
+
+   /* Derived last, from the evidence above, and never written anywhere else. */
+   cJSON_AddStringToObject(resp, "status", kb_health_verdict(blockers));
 
    /* Maintenance stats */
    char last_maintenance_at[64] = "";
@@ -517,8 +689,10 @@ static cJSON *kb_service_health_object(void)
 
    /* Typed-facts capability (proposal §8): the KB advertises its own typed-facts
     * state so aimee-server can gate per-turn fact injection on it WITHOUT owning
-    * the config. The server never reads typed_facts_enabled itself. */
-   cJSON_AddBoolToObject(resp, "typed_facts_enabled", config_typed_facts_enabled() ? 1 : 0);
+    * the config. The field stays in the payload -- an older server reads it and
+    * would treat its absence as "off" -- but the layer is unconditional now, so
+    * the answer is always true. */
+   cJSON_AddBoolToObject(resp, "typed_facts_enabled", 1);
 
    return resp;
 }

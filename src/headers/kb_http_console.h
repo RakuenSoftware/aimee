@@ -1,6 +1,7 @@
 /* kb_http_console.h — kb HTTP routes serving the aimee-kb web console.
  *
- * The console reaches these with its scope:console-admin bearer (see
+ * The console reaches these with its scope:console-admin bearer after the
+ * event-bus control-web module authorizes the method/path pair (see
  * kb_route_acl.h). S0 registers the /v1/console/overview stub; S1 fills it with
  * an in-process telemetry fan-in. */
 #ifndef KB_HTTP_CONSOLE_H

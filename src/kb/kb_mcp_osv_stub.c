@@ -22,7 +22,7 @@
  *                    Phase-1 kb audit increment (obs_bus outcome reuse). */
 
 #include "mcp_osv_cache.h"
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 
 int db1_mcp_osv_cache_get(const char *ecosystem, const char *name, const char *version,
                           int ttl_hours, db1_mcp_osv_cache_row_t *out)
@@ -64,11 +64,11 @@ int db1_mcp_osv_audit(const char *client_name, const char *ecosystem, const char
  * events as DB1 interaction events. aimee-kb has no DB1 interaction-events table;
  * drop them here rather than link DB1. Failover still functions — only the
  * telemetry row is elided. */
-int ie_record(const char *session_id, ie_event_type_t type, const char *actor,
-              const char *payload_json, const char *outcome)
+int db1_interaction_event_record(const char *session_id, const char *type_name, const char *actor,
+                                 const char *payload_json, const char *outcome)
 {
    (void)session_id;
-   (void)type;
+   (void)type_name;
    (void)actor;
    (void)payload_json;
    (void)outcome;

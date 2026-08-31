@@ -7,6 +7,7 @@
     "execution-policy",
     "ir",
     "module-runtime",
+    "sandbox",
     "vault",
     "workspace"
   ],
@@ -19,7 +20,14 @@
     "src/modules/tools/agent_tools_anchored.c",
     "src/modules/tools/agent_tools_completion.c",
     "src/modules/tools/agent_tools_dispatch.c",
+    "src/modules/tools/agent_tools_effect_contract.c",
     "src/modules/tools/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/tools/tools.go"
+  ],
+  "go_tests": [
+    "server-go/modules/tools/tools_test.go"
   ],
   "public_headers": [
     "src/modules/tools/include/aimee/tools/agent_tools.h",

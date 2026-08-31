@@ -1,7 +1,7 @@
 /* test_db2_pool.c: bounded DB2 connection pool — lease/return/timeout/
  * concurrency/poison/reaper. Uses the db2_pool test seam (mock connection ops)
  * so no Postgres is required. */
-#include "db2/db2_pool.h"
+#include "modules/db2/c/db2_pool.h"
 
 #include <assert.h>
 #include <pthread.h>

@@ -3,7 +3,7 @@
   "feature": "background-skill-curator",
   "owner": "skills",
   "decision": "remove",
-  "source_proposal": "docs/proposals/pending/feature-liveness-and-background-curator-removal.md",
+  "source_proposal": "docs/proposals/done/feature-liveness-and-background-curator-removal.md",
   "reason": "The scheduler, configuration, implementation, and tests formed a self-contained feature island. No independent product path consumed its consolidation plans or metrics.",
   "removed_files": [
     "src/modules/skill/skill_curator.c",
@@ -29,7 +29,7 @@
     "generic_memory_maintenance": "src/modules/memory/memory_maintenance.c",
     "generic_maintenance_state": "src/db1/maintenance.c",
     "kb_synthesis_curator": "src/modules/kb-synthesis/kb_curator_pipeline.c",
-    "kb_curator_config": "src/modules/config/config_kb_curator.c"
+    "kb_curator_config": "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
   },
   "roundtable": {
     "run_id": "oprun_g6a5f2d161a3aecef_1784623013_6",

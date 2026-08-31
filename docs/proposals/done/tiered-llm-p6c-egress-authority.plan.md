@@ -1,4 +1,8 @@
-# P6c-egress authority slice — catalog target resolution and policy region semantics
+# P6c-egress authority slice: catalog target resolution and policy region semantics
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 **State:** delivered and validated on PostgreSQL 17 (focused units, ASAN/UBSAN,
 server/kb builds, static gates, and the full tenant/RLS gate).
@@ -54,7 +58,7 @@ region. Signing or dispatch cannot safely build on that ambiguity.
 
 ## Implementation
 
-- `src/db2/schema.sql`
+- `src/modules/db2/c/schema.sql`
   - add nullable migration column `aws_invoke_region` plus coarse scalar checks;
   - replace `org_catalog_bedrock_upsert` with a signature that requires invocation region,
     rejects nonempty endpoint, enforces array rank/cardinality/NULL-element rules, and
@@ -64,10 +68,10 @@ region. Signing or dispatch cannot safely build on that ambiguity.
   - define the new definer with `search_path=pg_catalog,public,pg_temp`, schema-qualify its
     objects/helper calls, and let schema ownership remain with the provisioned DB owner;
   - revoke/drop the obsolete overload; revoke every new signature from PUBLIC before grants.
-- `src/db2/schema_grants.sql`
+- `src/modules/db2/c/schema_grants.sql`
   - grant only the new upsert and resolver signatures to `aimee_kb_runtime`; retain no direct
     catalog read.
-- `src/db2/org_model_catalog.[ch]`
+- `src/modules/db2/c/org_model_catalog.[ch]`
   - add an owned `db2_bedrock_target_t` with 64-entry arrays and explicit caps;
   - add `db2_model_bedrock_target_resolve(team_id, model_id, out)` with a public enum:
     `OK`, `UNAVAILABLE` (one indistinguishable result for missing, wrong-team, unentitled,

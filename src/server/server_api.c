@@ -8,7 +8,8 @@
  * First native resource: GET /v1/rules — the active collaboration rules,
  * proxied from aimee-kb via kb_client. */
 #include "server_http.h"
-#include "server.h" /* server_active_project_from_cwd */
+#include "server_http_internal.h" /* request capability context */
+#include "server.h"               /* server_active_project_from_cwd */
 #include "kb_client.h"
 #include "config.h"
 #include "working_profile.h" /* working_profile_autoobserve_from_feedback */
@@ -16,9 +17,11 @@
 #include "agent_types.h"
 #include <aimee/workspace/workspace.h>
 #include "cJSON.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* GET /v1/rules provider: the active collab rules as a heap JSON object
  * ({"epoch":N,"rules":[...]}) or NULL when aimee-kb is unreachable. The route
@@ -45,6 +48,13 @@ static char *dashboard_reminders_provider(void)
 static char *kb_status_provider(void)
 {
    return kb_client_status_json();
+}
+
+/* The runtime is the thin client's sole discovery endpoint. Fold the KB's
+ * independently registered one-surface modules into that projection. */
+static char *kb_agent_surfaces_provider(void)
+{
+   return kb_client_agent_surfaces_json();
 }
 
 /* GET /v1/kb/curator provider: the curator observability block (§4). */
@@ -74,12 +84,30 @@ static char *notes_list_provider(void)
 /* GET /v1/agents provider: the configured agents + default, built server-side
  * from agent config (not a kb proxy). Shape:
  *   {"default":"<name>","agents":[{"name","provider","model","enabled","roles":[...]}]}
- * Returns NULL (→ 502) when the agent config can't be loaded. */
+ * A missing file is a first-run 404, while an existing config that cannot be
+ * loaded is a 503. Neither is an upstream gateway failure. */
 static char *agents_provider(void)
 {
    agent_config_t acfg;
    if (agent_load_config(&acfg) != 0)
-      return NULL;
+   {
+      const char *path = agent_config_path();
+      errno = 0;
+      int missing = path && access(path, F_OK) != 0 && errno == ENOENT;
+      cJSON *err = cJSON_CreateObject();
+      if (!err)
+         return NULL;
+      cJSON_AddStringToObject(err, "status", "error");
+      cJSON_AddStringToObject(
+          err, "message",
+          missing ? "no agents are configured yet: choose a provider in the setup wizard"
+                  : "agent configuration exists but could not be loaded");
+      cJSON_AddStringToObject(err, "kind", missing ? "not_found" : "unavailable");
+      cJSON_AddNumberToObject(err, "http_status", missing ? 404 : 503);
+      char *s = cJSON_PrintUnformatted(err);
+      cJSON_Delete(err);
+      return s;
+   }
    cJSON *root = cJSON_CreateObject();
    if (!root)
       return NULL;
@@ -142,6 +170,14 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    }
    if (all_projects)
    {
+      if ((g_rpc_conn_caps & CAP_CROSS_SCOPE_READ) == 0)
+      {
+         cJSON_Delete(req);
+         snprintf(resp, (size_t)cap,
+                  "{\"error\":{\"message\":\"scope=all requires operator authority\","
+                  "\"type\":\"forbidden\"}}");
+         return 403;
+      }
       if (!project && cJSON_IsString(jc) && jc->valuestring[0] &&
           server_active_project_from_cwd(jc->valuestring, resolved_project,
                                          sizeof(resolved_project)) == 0)
@@ -240,6 +276,14 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    const cJSON *jc = cJSON_GetObjectItemCaseSensitive(req, "cwd");
    const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(req, "scope");
    int include_all = cJSON_IsString(jscope) && strcmp(jscope->valuestring, "all") == 0;
+   if (include_all && (g_rpc_conn_caps & CAP_CROSS_SCOPE_READ) == 0)
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"scope=all requires operator authority\","
+               "\"type\":\"forbidden\"}}");
+      return 403;
+   }
    if (cJSON_IsString(jp))
       snprintf(project, sizeof(project), "%s", jp->valuestring);
    if (cJSON_IsString(jw))
@@ -256,6 +300,14 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
          if (!workspace[0])
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
       }
+   }
+   if (!include_all && !project[0] && !workspace[0])
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"an authorized project or workspace is required\","
+               "\"type\":\"scope_required\"}}");
+      return 409;
    }
    kb_client_memory_scope_context_set(workspace, project, include_all);
    char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");
@@ -308,6 +360,7 @@ static int notes_search_handler(const char *body, char *resp, int cap)
 
 void server_native_register(void)
 {
+   server_http_set_kb_agent_surfaces_provider(kb_agent_surfaces_provider);
    server_http_set_rules_provider(rules_provider);
    server_http_set_dashboard_memory_provider(dashboard_memory_provider);
    server_http_set_dashboard_reminders_provider(dashboard_reminders_provider);

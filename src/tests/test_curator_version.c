@@ -6,7 +6,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_version.h"
 
 static sqlite3 *open_db(void)
@@ -61,6 +61,9 @@ static void clear_extract_jobs(sqlite3 *db)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_version"))
+      return 0;
+
    /* 1. first observation records baselines, no replay. */
    sqlite3 *db = open_db();
    seed_corpus(db);

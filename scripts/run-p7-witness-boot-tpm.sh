@@ -75,7 +75,7 @@ log "provisioning scratch Postgres ..."
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $DB" >/dev/null
 psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$SRC_DIR/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$SRC_DIR/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
 
 log "running the boot-refusal harness under the real anchor ..."
 AIMEE_HOME="$WORK/home" AIMEE_TEST_PG_URL="$DB_URL" "$BOOT_HARNESS" "$SECRET"

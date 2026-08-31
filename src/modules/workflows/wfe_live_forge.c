@@ -5,7 +5,7 @@
  * (mcp_git_run, which injects the forge token via git_cred_inject) and the autonomous
  * merge-target rail (wfe_autonomous_base / _target_ok).
  *
- * SECURITY: registered unless the operator has set wfe_live_forge_enabled=false
+ * SECURITY: registered only when the operator sets wfe_live_forge_enabled=true
  * (default ON — operator ruling 2026-07-13, restoring the plan's default; see
  * config.h). Registered or not, EVERY op re-checks the flag AND the merge-target
  * rail via forge_allowed() and fails closed if either is off — including
@@ -141,7 +141,7 @@ static int forge_push_branch(const char *dir, const char *branch, const char *wh
 }
 
 /* The master switch: the live forge does nothing unless the operator enabled it.
- * A config_load failure reads as DISABLED (fail closed). */
+ * A legacy_config_read failure reads as DISABLED (fail closed). */
 static int forge_on(void)
 {
    return config_wfe_live_forge_enabled();

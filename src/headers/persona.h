@@ -91,6 +91,11 @@ extern "C"
     * persona_compose_delegate_prompt). */
    char *persona_identity_prose(const persona_t *p, const char *cwd);
 
+   /* Compose the complete editable primary-persona payload for first-message
+    * delivery: principles, identity, and optional brief. The returned text is
+    * wrapped in an idempotence marker and is heap-owned. */
+   char *persona_compose_primary_instructions(const char *name, const char *cwd);
+
    /* Resolve persona `name`. Lookup: project file -> user file -> built-in.
     * Unknown name with no file falls back to the engineer built-in and still
     * returns 0 (callers always get a usable persona). Fills *out; heap fields
@@ -133,7 +138,7 @@ extern "C"
    int persona_delete(const char *name);
 
    /* 1 if name is a built-in persona (engineer/novel/songwriter/qa/security/
-    * reviewer/architect). */
+    * reviewer/chairman/architect and the other bundled review lenses). */
    int persona_is_builtin(const char *name);
 
    /* 1 if `name` resolves to a real persona: a built-in, or a project/user file.

@@ -15,8 +15,8 @@
 #include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
 #include "platform_test_util.h"
-#include "db2_test_shim.h"
-#include "db2/kb_payload.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/kb_payload.h"
 #include "../kb_curator_queue.h"
 #include "../kb_curator_extract.h"
 #include "../kb/kb_memory_facts.h"
@@ -72,6 +72,24 @@ static void test_provider_unavailable_is_not_a_job_failure(void)
    printf("  PASS: provider-unavailable is classified apart from job failure\n");
 }
 
+static void test_memory_fact_evidence_spans(void)
+{
+   const char *content = "prefix exact support suffix";
+   char span[64], hash1[65], hash2[65];
+   assert(kb_memory_fact_evidence_span(content, 7, 20, span, sizeof(span), hash1, sizeof(hash1)) ==
+          0);
+   assert(strcmp(span, "bytes:7-20") == 0 && strlen(hash1) == 64);
+   assert(kb_memory_fact_evidence_span("exact support", 0, 13, span, sizeof(span), hash2,
+                                       sizeof(hash2)) == 0);
+   assert(strcmp(hash1, hash2) == 0); /* region hash, independent of surrounding note */
+   assert(kb_memory_fact_evidence_span(content, -1, 5, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 20, 7, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+   assert(kb_memory_fact_evidence_span(content, 0, 999, span, sizeof(span), hash1, sizeof(hash1)) ==
+          -1);
+}
+
 static void test_provider_outage_arms_global_backoff(void)
 {
    kb_curator_provider_backoff_recovered();
@@ -125,6 +143,43 @@ static void test_polymorphic_async_subject(sqlite3 *db)
    sqlite3_finalize(st);
    seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts' AND document_id=777777");
    printf("  PASS: polymorphic async subject accepts a memory id without a document row\n");
+}
+
+/* A backlog nothing will drain has to be countable, and countable SEPARATELY from
+ * work already finished.
+ *
+ * memory.store enqueues a memory_facts job whenever typed_facts is on (the
+ * default); the only consumer runs on the curator LLM lane, which does not start
+ * without a synthesis endpoint. On an install with no synth provider -- a
+ * supported configuration -- that queue grows by one row per stored memory and is
+ * never claimed. Observed on the e2e VM: 4 pending for 11.5 hours, attempts=0,
+ * while health reported ok with an empty warnings array.
+ *
+ * The health surface reports it, and to do that it needs PENDING, not total:
+ * total cannot tell a queue that is draining from one that never will. */
+static void test_pending_count_excludes_finished(sqlite3 *db)
+{
+   seed(db, "DELETE FROM kb_async_jobs WHERE kind='memory_facts'");
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 0);
+
+   assert(db2_kb_async_enqueue("memory_facts", 881001, "memory") == 0);
+   assert(db2_kb_async_enqueue("memory_facts", 881002, "memory") == 0);
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 2);
+   assert(db2_kb_async_count_kind("memory_facts") == 2);
+
+   /* One finishes. The backlog is 1, even though two rows exist -- reporting 2
+    * here would keep warning about work that already completed. */
+   seed(db, "UPDATE kb_async_jobs SET status='done' WHERE kind='memory_facts'"
+            " AND document_id=881001");
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
+   assert(db2_kb_async_count_kind("memory_facts") == 2);
+
+   /* Other kinds are not counted into this backlog: kb_async_jobs is shared. */
+   assert(db2_kb_async_enqueue("extract_doc", 881003, "p") == 0);
+   assert(db2_kb_async_count_kind_pending("memory_facts") == 1);
+
+   seed(db, "DELETE FROM kb_async_jobs WHERE document_id IN (881001,881002,881003)");
+   printf("  PASS: pending count is the backlog, not the row total\n");
 }
 
 static const char *job_status(sqlite3 *db, int64_t id)
@@ -218,9 +273,6 @@ static void test_reclaim_stale_running_memory_facts(sqlite3 *db)
 {
    assert(strcmp(job_status(db, 9003), "running") == 0); /* still stale from above */
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.typed_facts_enabled = 1;
    (void)kb_memory_facts_drain(8);
 
    assert(strcmp(job_status(db, 9003), "failed") == 0);  /* orphan reclaimed */
@@ -344,11 +396,16 @@ static void test_only_current_document_generation_queues(sqlite3 *db)
 
 int main(void)
 {
-   /* Deterministic config: HOME with no aimee.yaml -> config_load (called inside
-    * the queue) returns built-in defaults (extract_docs default-ON). */
+   if (db2_test_shim_skip_on_postgres("curator_queue"))
+      return 0;
+
+   /* The queue reads through the config module. Set the gate explicitly so this
+    * test does not depend on a legacy file default that the production caller no
+    * longer reads. */
    platform_setenv("HOME", "/tmp");
    platform_unsetenv("AIMEE_HOME");
    platform_setenv("AIMEE_NO_CACHE", "1");
+   assert(config_set_kb_curator_extract_docs_enabled(1) == 0);
 
    printf("test_curator_queue:\n");
    sqlite3 *db = open_db();
@@ -359,6 +416,7 @@ int main(void)
             " VALUES ('p','/p','2026-01-01 00:00:00')");
 
    test_polymorphic_async_subject(db);
+   test_pending_count_excludes_finished(db);
 
    /* Contract: every non-pdf doc gets one extract_doc job; PDFs are excluded;
     * re-running enqueues nothing. Guard for "docs present but zero jobs". */
@@ -393,10 +451,12 @@ int main(void)
    test_retry_backoff_defers_reclaim(db);
    test_retry_backoff_ignores_fresh_jobs(db);
    test_provider_unavailable_is_not_a_job_failure();
+   test_memory_fact_evidence_spans();
    test_provider_outage_arms_global_backoff();
    test_provider_outage_requeues(db);
    test_only_current_document_generation_queues(db);
 
+   assert(config_set_kb_curator_extract_docs_enabled(0) == 0);
    printf("test_curator_queue: all tests passed\n");
    return 0;
 }

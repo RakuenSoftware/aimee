@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parent.parent
 POLICY = Path("tests/baselines/modules/governance-ownership.yaml")
 INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
 DESCRIPTORS = Path("src/modules")
-PROPOSAL = Path("docs/proposals/pending/module-runtime-source-ownership-and-build.md")
+PROPOSAL = Path("docs/proposals/done/module-runtime-source-ownership-and-build.md")
 PROPOSAL_MARKER = "The following is the normative semantic content of that future artifact"
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 CONTRACT_KEY = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
@@ -168,10 +168,23 @@ def parse_proposal_contract(path: Path) -> dict[str, object]:
 def inventory(root: Path) -> tuple[set[str], set[str]]:
     path = root_path(root, INVENTORY)
     value = load_json(path)
-    if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "required",
+        "optional",
+        "principal_refs",
+        "retired_principal_refs",
+        # Bands of refs reserved for DYNAMICALLY provisioned processes. Kinds are
+        # carved from a ref as 4096 + ref*256 + stage, so a band keeps a future
+        # module from being handed a ref whose kinds a deployed instance already
+        # serves. check_module_inventory.py enforces the rule; this only has to
+        # accept the keys.
+        "plugin_principal_ref_band",
+        "retired_principal_ref_band",
+    }:
         fail("inventory-structure", "canonical inventory has an invalid envelope", path)
-    if type(value["schema_version"]) is not int or value["schema_version"] != 1:
-        fail("inventory-version", "canonical inventory version must be 1", path)
+    if type(value["schema_version"]) is not int or value["schema_version"] != 2:
+        fail("inventory-version", "canonical inventory version must be 2", path)
     required = string_list(value["required"], "required", path)
     optional = string_list(value["optional"], "optional", path)
     for identifier in required + optional:

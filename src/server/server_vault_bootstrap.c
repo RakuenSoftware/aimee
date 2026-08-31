@@ -29,6 +29,7 @@
 #include "config.h"
 #include "vault_service.h"
 #include "vault_store.h"
+#include "vault_capability.h" /* the local root operator's standing grant */
 #include "log.h"
 #include <openssl/crypto.h>
 #include <ctype.h>
@@ -350,8 +351,34 @@ static void migrate_legacy_oauth(prov_counts_t *c)
    migrate_legacy_db1_oauth(c);
 }
 
+/* The local root operator holds vault:write:server from first boot.
+ *
+ * A kernel-attested UDS peer running as root is the machine's owner: it already
+ * owns .vault/.server-master.key and can decrypt the whole store offline, so the
+ * grant confers nothing it lacked. Without it `aimee vault set-server` refuses
+ * every root caller -- the ordinary case inside the server container -- and the
+ * operator must discover and run a capability grant before storing a single
+ * credential. That is the manual step this removes.
+ *
+ * Recorded rather than special-cased in the gate so it is VISIBLE in `aimee vault
+ * capability list` and revocable by an operator who wants it gone. Idempotent, so
+ * every boot converges and a deliberate revoke is not silently undone within the
+ * same run. */
+static void grant_local_root_operator(void)
+{
+   if (vault_capability_has("uid:0"))
+      return;
+   if (vault_capability_grant("uid:0") != 0)
+      LOG_WARN("vault.bootstrap",
+               "could not grant vault:write:server to uid:0 (local root operator); "
+               "`aimee vault set-server` will refuse root until it is granted by hand");
+   else
+      LOG_INFO("vault.bootstrap", "granted vault:write:server to uid:0 (local root operator)");
+}
+
 int server_vault_bootstrap(void)
 {
+   grant_local_root_operator();
    const char *forge_token = getenv(VAULT_BOOTSTRAP_FORGE_TOKEN_ENV);
    int have_forge_token = forge_token && forge_token[0];
    int have_env = 0;

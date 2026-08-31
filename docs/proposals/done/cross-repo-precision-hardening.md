@@ -1,15 +1,19 @@
-# Proposal: Cross-repo dependency graph — precision hardening (structural edges, IDF distinctiveness, FFI-aware)
+# Proposal: Cross-repo dependency graph: precision hardening (structural edges, IDF distinctiveness, FFI-aware)
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 - **State:** IMPLEMENTED (13 PRs merged) + precision live-validated, but the FORMAL §9 acceptance is
   **NOT met** (recall). The formal Wilson-CI measurement (2026-06-28; docs/validation/
   cross-repo-precision-h4-runbook.md §"FORMAL §9 MEASUREMENT") shows the emitted edge set COLLAPSED to
   **4 HIGH edges corpus-wide**: §4 precision can't be sampled at the gate's N≥100 (observed 3/4 true),
   and §5 recall is **~18%** vs the gates (HIGH ≥70% / HIGH+MED ≥85%). The hardening eliminated P1's
-  false-positive flood (good) but over-corrected — FetchContent/vendored deps, build/link-only deps
+  false-positive flood (good) but over-corrected. FetchContent/vendored deps, build/link-only deps
   (`target_link_libraries` with no source `#include`, not modelled by H0d), and a sparse repo-identity
   layer (no CMake identities) mean most real intra-corpus deps emit no edge. A **recall-recovery
   follow-up** is required before §9 passes (exclude `.aimee/worktrees` from indexing; build-link route
-  extraction; CMake-identity population; FetchContent→canonical mapping — see the runbook). The
+  extraction; CMake-identity population; FetchContent→canonical mapping. See the runbook). The
   precision MECHANISMS (§1–§6) are done + validated; the proposal's end goal (a precise AND *useful*
   graph) is not yet achieved at ~18% recall.
 - **Implementation:** merged to `testing`, precision spot-check live-validated on `.254` (2026-06-28).
@@ -17,11 +21,11 @@
   repo-identity, route index), H1 (#830 structural-edge gate + index-time rebuild), H2 (#831 vendor
   canonical-preference), H3a (#832 §5 kind eligibility + §4 vendored ceiling), H3b (#835 §2 header
   IDF; §2 angle-bracket + symbol-IDF found already-enforced), H5 (#838 prefer-local + generated-header
-  reject), H6 (#840 angle-include capture + `is_system` — recall fix), H7 (#842 shared system-header
+  reject), H6 (#840 angle-include capture + `is_system`, recall fix), H7 (#842 shared system-header
   list incl. Windows). Each slice roundtable-reviewed to convergence before merge.
   **Live re-validation (.254, full corpus re-scan, see docs/validation/cross-repo-precision-h4-runbook.md):**
-  every known false positive collapsed — `moonlight-qt`/`wolf`/`aimee` → Sunshine (DEFINE_GUID,
-  buffer_descriptor_t, process.h) all GONE (0 routes into Sunshine) — and the recall loss recovered:
+  every known false positive collapsed, `moonlight-qt`/`wolf`/`aimee` → Sunshine (DEFINE_GUID,
+  buffer_descriptor_t, process.h) all GONE (0 routes into Sunshine), and the recall loss recovered:
   `moonlight-qt → moonlight-common-c` HIGH (via `<Limelight.h>`, previously dropped by the
   angle-bracket gap); true deps intact (`wolf → inputtino`). All of §1–§6 implemented or
   verified-already-satisfied. The formal Wilson-CI N≥100 precision/recall gate (§9) is left as a
@@ -38,9 +42,9 @@
   primitive is wrong: **a unique-name match is not a dependency.** On a heterogeneous real corpus,
   generic identifiers, vendored third-party SDK headers, and cross-language name collisions all
   satisfy "defined in exactly one repo" and produce confident HIGH edges that are not real. The fix
-  is to make the primitive a **structural dependency edge** — the caller repo must contain an
+  is to make the primitive a **structural dependency edge**. The caller repo must contain an
   import/include/link/build route that *resolves into a file of* the definer repo, and the symbol's
-  definition must live there — with name resolution only *disambiguating within* a proven structural
+  definition must live there, with name resolution only *disambiguating within* a proven structural
   edge. Distinctiveness becomes **data-driven (corpus IDF)**, cross-language is handled by **FFI
   bridge detection** (not blanket exclusion), and vendored trees by **canonical-preference** (not
   blanket exclusion).
@@ -48,8 +52,8 @@
 ## Charter roles
 Same as the parent: Recall + Rank-Fuse (graph layer) + the cross-repo **resolution** pass. This
 proposal modifies the resolution/classification stage
-(`src/db2/cross_repo_resolver.c`, `src/db2/cross_repo_classify.c`,
-`src/db2/cross_repo_stats.c`, `src/db2/cross_repo_deps.c`), adds index-time metadata to the kb
+(`src/modules/db2/c/cross_repo_resolver.c`, `src/modules/db2/c/cross_repo_classify.c`,
+`src/modules/db2/c/cross_repo_stats.c`, `src/modules/db2/c/cross_repo_deps.c`), adds index-time metadata to the kb
 ingest/projection path, and replaces the frequency-only `blocked_symbols` model with corpus IDF; the
 schema gains metadata columns + an inter-repo import-route index but the HTTP/CLI surface (S5–S7) and
 review queue are unchanged.
@@ -59,12 +63,12 @@ Raise live HIGH-tier precision on the reference 40-repo corpus to a **95 % CI lo
 (N ≥ 100, manual adjudication)** with **zero corroboration-audit failures**, **without** regressing
 genuine positives below the parent's recall floor (HIGH ≥70 %, HIGH+MEDIUM ≥85 %) measured against a
 **build-system-derived** ground-truth set. Re-run the checked-in acceptance harness
-([`src/tests/test_cross_repo_acceptance.c`](../../src/tests/test_cross_repo_acceptance.c), extended by
+([`src/tests/test_cross_repo_acceptance.c`](../../../src/tests/test_cross_repo_acceptance.c), extended by
 S8) and the live runbook
-([cross-repo-deps-acceptance](../../docs/validation/cross-repo-deps-acceptance.md)). This proposal
+([cross-repo-deps-acceptance](../../validation/cross-repo-deps-acceptance.md)). This proposal
 **gates** the parent's #5/#6 and P3.
 
-## §0 Evidence — measured live failure modes (2026-06-28, `.254`, `:testing`)
+## §0 Evidence: measured live failure modes (2026-06-28, `.254`, `:testing`)
 Sampled HIGH edges via `aimee index deps <project> --tier high`. Of 9 HIGH edges, ~7 are false:
 
 | edge | example symbol | failure class |
@@ -90,7 +94,7 @@ from default output), full stop. Structural-edge sources, in strength order:
 - **Source includes/imports** resolved to a file path under B (C/C++ `#include` resolved via include
   dirs; Rust `use`/`mod`+`Cargo.toml` path/git dep; Go import path↔`go.mod`; TS/JS module
   specifier↔`package.json`; Python import↔package). **Transitive** for source `#include` chains,
-  umbrella headers (A.h→public/B.h→detail/C.h) and Python `__init__` re-exports — depth is
+  umbrella headers (A.h→public/B.h→detail/C.h) and Python `__init__` re-exports, depth is
   config-driven (`kb.curator.cross_repo_graph.route_depth`, default 3), since a fixed shallow cap
   drops umbrella/nested-package edges.
 - **Build/link routes:** CMake `find_package`/`target_link_libraries`/`FetchContent`, `Cargo.toml`
@@ -141,7 +145,7 @@ cheap structural signals that catch SDK identifiers regardless of corpus rarity:
   toolchain-default include is an SDK identifier, not a first-party dependency (kills `DEFINE_GUID`,
   `EGL*` even when they appear in one repo).
 - A **tiny seed blocklist** (a dozen unavoidable bare words like `main`/`init`/`type`) is permitted
-  only as an IDF cold-start fallback, regenerated from a checked-in source — not the primary
+  only as an IDF cold-start fallback, regenerated from a checked-in source, not the primary
   mechanism.
 
 ## §3 Cross-language: FFI-bridge detection, not blanket downgrade (blocking)
@@ -154,7 +158,7 @@ Detect a **binding bridge** and let bridged cross-language edges reach MEDIUM/HI
 - **Tier 3 (runtime dynamic loaders):** `dlopen`/`dlsym`, `LoadLibrary`/`GetProcAddress`,
   `g_module_open`, `NSCreateObjectFileImageFromMemory`, etc. The literal library/symbol-name argument
   is joined against the §1.5 repo-identity layer (and any plugin-manifest metadata); a resolved
-  dynamic load is a real (often plugin) dependency → **MEDIUM-with-evidence** (not HIGH — the binding
+  dynamic load is a real (often plugin) dependency → **MEDIUM-with-evidence** (not HIGH; the binding
   is runtime, not statically verifiable).
 
 Absent any bridge, a cross-language same-name pair is LOW (collision, e.g. C++ `motion` vs Rust
@@ -172,7 +176,7 @@ A symbol may be **legitimately** vendored (CMake `FetchContent`→`subprojects/`
   *only* candidate and the caller has a structural include/build route to it.
 
 ## §5 Symbol-kind: SDK-style vs project-defined (blocking)
-Carry accurate `terms.kind` (re-extracted in H0 — the live `DEFINE_GUID` mis-tag shows the current
+Carry accurate `terms.kind` (re-extracted in H0; the live `DEFINE_GUID` mis-tag shows the current
 kind data is unreliable). Macros/typedefs/vars are **not** auto-excluded (that drops opaque-handle
 typedefs and function-like-macro public API). Instead: an SDK-style macro/typedef (caught by §2's
 IDF + angle-bracket signal) is ineligible for HIGH; a **project-defined** typedef/macro/const reaches
@@ -202,22 +206,22 @@ assignment with §6 export booster. All inputs precomputed at index time (§11).
 ```
 
 ## §10 Slices
-- **H0 — metadata re-index + repo-identity + route index (blocking prerequisite).** Extend kb
+- **H0, metadata re-index + repo-identity + route index (blocking prerequisite).** Extend kb
   ingest/projection: accurate tree-sitter `kind` for macros/typedefs/vars; per-file vendored-path
   classification; per-file language; `file_exports` coverage; the **repo-identity layer** (§1.5);
   declared **generated-output** attribution (§1.6); Tier-1/2/3 FFI markers (§3); **and the inter-repo
   import-route index** (per ordered repo pair A→B: the strongest structural route + its confidence).
   **Storage:** db2/Postgres tables (consistent with the existing schema), populated at ingest/
-  projection time — never per query. **Invalidation:** each repo carries a route-fingerprint =
+  projection time, never per query. **Invalidation:** each repo carries a route-fingerprint =
   hash of (provided identities ∪ public-header set ∪ manifest contents ∪ INTERFACE include set);
   the route index for any pair touching a repo is rebuilt when that repo's fingerprint changes
   (same drift-guard pattern as `repo_set_hash`). Acceptance #3 verifies non-null on the hot path.
   This is the crux slice; it must land and be measured before H1's gate is meaningful.
-- **H1 — structural-edge gate (§1) + Tier-1 FFI bridges (§3).** The primitive flip: no structural
+- **H1, structural-edge gate (§1) + Tier-1 FFI bridges (§3).** The primitive flip: no structural
   edge ⇒ LOW-unresolved. **Measure precision after H1** before proceeding.
-- **H2 — vendor canonical-preference (§4) + kind eligibility (§5) + AMBIGUOUS canonical pass.**
-- **H3 — IDF/system-include distinctiveness (§2) + export-booster tiering (§6).**
-- **H4 — live re-validation (§4 of acceptance) on `.254`.** Recompute metadata, run the runbook,
+- **H2, vendor canonical-preference (§4) + kind eligibility (§5) + AMBIGUOUS canonical pass.**
+- **H3, IDF/system-include distinctiveness (§2) + export-booster tiering (§6).**
+- **H4, live re-validation (§4 of acceptance) on `.254`.** Recompute metadata, run the runbook,
   measure precision (Wilson CI) + recall (build-system ground truth), record numbers. On pass,
   unblocks the parent's #5/#6 and P3.
 
@@ -227,7 +231,7 @@ clang-format-19, no co-author trailers; PR → `testing`.
 ## §11 Performance
 All new predicates (vendored class, language, kind, IDF/block status, `file_exports` set, and the
 inter-repo import-route adjacency) are **precomputed at index time** and stored on the symbol/file
-record or the route index — not evaluated per query — so the parent's p50≤200/p95≤2000 ms budget
+record or the route index (not evaluated per query) so the parent's p50≤200/p95≤2000 ms budget
 holds. H4 captures `EXPLAIN (ANALYZE, BUFFERS)` to confirm. The route-index *precompute* itself
 (transitive `#include` expansion on large C/C++ repos across the N² repo-pair space) is the cost to
 watch; it runs off the query path during ingest/projection, is bounded by the per-repo
@@ -242,7 +246,7 @@ exemption instead of blanket exclusion (§4); SDK-vs-project kind instead of bla
 (§5); `file_exports` as a HIGH booster not a MEDIUM gate (§6); explicit pipeline order (§7); H0
 metadata re-index as a blocking prerequisite (§10); Wilson-CI precision (N≥100) + build-system recall
 + AMBIGUOUS-in-denominator + negatives across HIGH&MEDIUM (§9); index-time precompute (§11).
-**Round 2 (6 blocking, panel healthy/non-degraded — design accepted, specification deepened):**
+**Round 2 (6 blocking, panel healthy/non-degraded, design accepted, specification deepened):**
 repo-identity layer + per-ecosystem resolver with confidence bands (§1.5); build-time generated-output
 attribution (§1.6); Tier-3 dynamic-loader FFI (§3); H0 index storage + route-fingerprint invalidation
 (§10); recall ground-truth join via the repo-identity layer (§9 #5); configurable route depth for

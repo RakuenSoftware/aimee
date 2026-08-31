@@ -3,15 +3,62 @@
 #include "aimee.h"
 #include "gateway_mutate_wire.h"
 
+#include "economizer_module_client.h"
+
 #include <string.h>
 
 #include "agent_protocol.h" /* message_history_repair */
 #include "config.h"
 #include "gateway_mutate.h"
-#include "gw_mutate_stats.h"
+#include <aimee/audit/obs_bus.h> /* obs_bus_module_available */
+#include "log.h"
+#include "token_tracker.h" /* token_estimate_cost_ex, for the freeze guardrail */
+
+/* The gateway's reducer state is keyed by session key AND a conversation
+ * fingerprint, in its own namespace.
+ *
+ * The namespace prefix keeps it clear of the delegate seam, which keys state by
+ * conversation id: without it a gateway key that happened to equal a conversation
+ * id would load and overwrite that conversation's freeze boundary.
+ *
+ * The fingerprint is the part that matters for correctness. msg_session_key_resolve
+ * is deliberately per-IDENTITY -- "to group one identity's sessions under a stable
+ * key" -- so one user with two concurrent conversations resolves to ONE key. Keyed
+ * on that alone, the two would share a freeze boundary and thrash: each turn would
+ * find the other's prefix digest, fail the match, and re-epoch, so the freeze would
+ * never hold and folding would cost cache reads instead of saving them. Hashing the
+ * first message separates conversations, and it is stable across their turns because
+ * a conversation's opening message does not change. If a client rewrites its history
+ * the fingerprint moves, which correctly reads as a different conversation. */
+static uint64_t gw_fnv1a(const char *s)
+{
+   uint64_t h = 1469598103934665603ull;
+   for (; s && *s; s++)
+   {
+      h ^= (unsigned char)*s;
+      h *= 1099511628211ull;
+   }
+   return h;
+}
+
+static void gw_state_key(const char *skey, cJSON *msgs, char *out, size_t out_sz)
+{
+   uint64_t fp = 0;
+   cJSON *first = msgs ? cJSON_GetArrayItem(msgs, 0) : NULL;
+   if (first)
+   {
+      char *txt = cJSON_PrintUnformatted(first);
+      if (txt)
+      {
+         fp = gw_fnv1a(txt);
+         free(txt);
+      }
+   }
+   snprintf(out, out_sz, "gw:%s:%016llx", skey ? skey : "", (unsigned long long)fp);
+}
 
 int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                          int retained_msgs, reduce_result_t *out)
+                          int retained_msgs, gw_reduce_report_t *out)
 {
    if (!out)
       return 1;
@@ -19,13 +66,29 @@ int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char
    if (!cJSON_IsArray(messages))
       return 1; /* nothing to measure; out is zeroed so the caller's free is safe */
 
-   reduce_config_t rcfg;
-   memset(&rcfg, 0, sizeof(rcfg));
-   rcfg.gateway_seam = 1;
-   rcfg.measure_only = 1; /* shadow mode: never mutates the request */
-   rcfg.fold.retained_msgs = retained_msgs;
-   return context_reduce(messages, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rcfg, NULL,
-                         out);
+   /* Shadow mode: the module measures and never mutates. Only the ledger fields
+    * the callers read are populated; a failed call leaves them zero, which reads
+    * as "no opportunity" rather than a fabricated one. */
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.measure_only = 1;
+   mreq.retained_msgs = retained_msgs;
+
+   cJSON *ignored = NULL;
+   econ_module_result_t mres;
+   int rc = econ_module_reduce(messages, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &ignored,
+                               &mres);
+   cJSON_Delete(ignored); /* measure_only never returns an array; defensive */
+   if (rc == 0)
+   {
+      out->baseline_tokens = mres.baseline_tokens;
+      out->reduced_tokens = mres.reduced_tokens;
+      out->removed_tokens = mres.removed_tokens;
+      out->foldable_tokens = mres.foldable_tokens;
+      out->reason = GW_REDUCE_REASON_MEASURED;
+   }
+   econ_module_result_free(&mres);
+   return rc;
 }
 
 void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx)
@@ -38,10 +101,12 @@ void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx)
 {
    if (!ctx)
       return;
-   if (ctx->pristine)
+   if (ctx->original)
    {
-      cJSON_Delete(ctx->pristine);
-      ctx->pristine = NULL;
+      /* The swap stood: the container owns the reduced array and this is the
+       * original we set aside. Nothing put it back, so free it here. */
+      cJSON_Delete(ctx->original);
+      ctx->original = NULL;
    }
 }
 
@@ -53,14 +118,29 @@ int gw_mutate_is_enabled(void)
 
 int gw_mutate_upstream_ok(int upstream_is_anthropic)
 {
-   /* Gateway wire-mutation is OpenAI-only by policy. An Anthropic upstream serves a
-    * byte-verbatim, prompt-cached passthrough (build_anthropic_parity_headers); mutating
-    * the wire there would bust the cached prefix AND force the request off the parity
-    * passthrough. Reducing that upstream cache-coherently is the pre-economize seam's job
-    * (delegate seam / tool_condense), not the gateway's. So the live mutator engages only
-    * when the serving upstream is NOT Anthropic. `upstream_is_anthropic` is the caller's
-    * driver_is_anthropic()/parity signal. */
-   return !upstream_is_anthropic && gw_mutate_is_enabled();
+   /* ANTHROPIC MUTATES TOO, now that the gateway holds a freeze boundary.
+    *
+    * The old policy was OpenAI-only, because mutating an Anthropic wire "would bust
+    * the cached prefix". That was true of a gateway with no state: every turn
+    * re-folded from cold, so every turn moved the prefix and every turn missed the
+    * cache. It is not true of one that persists a freeze per session. The fold moves
+    * the prefix ONCE, when it first engages; from the next turn the frozen prefix is
+    * byte-identical and the cache reads resume. One miss, bounded, in exchange for
+    * every later turn carrying a folded history.
+    *
+    * Deferring to "the pre-economize seam" was not a real alternative either: that
+    * seam is the delegate loop, which a proxied client never enters. An Anthropic
+    * client through the gateway had NO reduction path at all.
+    *
+    * On the provider's cache breakpoints: the economizer still neither adds, removes,
+    * nor moves one, and the live-surface guard greps this file to keep it that way --
+    * strictly enough that naming the field here in prose trips it, which is the right
+    * trade. Folding can retire a message that happened to carry a breakpoint, leaving
+    * FEWER of them, and fewer is legal (Anthropic caps them at four rather than
+    * requiring them). What it must never do is leave one attached to content that
+    * moved, which is exactly what the freeze prevents. */
+   (void)upstream_is_anthropic;
+   return gw_mutate_is_enabled();
 }
 
 void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
@@ -77,6 +157,20 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return; /* dark unless the economizer tier is aggressive (OpenAI-family egress only) */
    econ_preset_t ep;
    econ_preset_current(&ep);
+   /* NOBODY HOME, NOTHING TO DO. If no process is serving the reduce stage the
+    * answer is already known -- the IR goes as it is -- so ask before paying for
+    * a question that cannot be answered. Everything between here and the call is
+    * work spent on that request: a SHA-256 key derivation, a print of the first
+    * message to fingerprint the conversation, a DB1 read for the reducer state,
+    * and a dozen config lookups. Cheap once; per request, on a deployment with
+    * the economizer detached, it is all waste.
+    *
+    * Availability is a local registration check with no I/O of its own, and it
+    * is only an optimisation: the call underneath still refuses when the module
+    * disappears between this check and it. */
+   if (!obs_bus_module_available(AIMEE_ECONOMIZER_EVENT_REDUCE))
+      return;
+
    ctx->mutate_on = 1;
    ctx->ttl_ms = ep.gateway_session_disable_ttl_ms;
 
@@ -88,65 +182,137 @@ void gw_buffered_mutate(cJSON *container, const char *key, const char *model,
       return;
    ctx->have_key = 1;
 
-   /* Honor the circuit breaker: a disabled session is a pristine passthrough. */
-   if (msg_session_is_disabled(ctx->skey))
-   {
-      gw_stat_inc(GW_STAT_SESSION_DISABLED_BLOCKS);
-      return;
-   }
+   /* The circuit breaker is the module's, and it is consulted as part of the
+    * reduce call rather than read here: a breaker written on one side of the bus
+    * and read on the other would never fire, which is exactly how this seam's
+    * safety net came to be inert. A disabled session comes back as the
+    * session_disabled bypass below and is forwarded pristine. */
 
    cJSON *msgs = cJSON_GetObjectItemCaseSensitive(container, key);
    if (!cJSON_IsArray(msgs))
       return;
 
-   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
+   /* The reduction itself lives in the Go economizer module now; this seam
+    * resolves config and owns the pristine/restore contract.
+    *
+    * THE GATEWAY FOLDS. It used to be compress-only, for the stated reason that
+    * "there is no per-conversation state here to hold a freeze boundary" -- true
+    * of the seam, but not of the deployment: the per-identity session key resolved
+    * above is exactly such a handle, and the reducer state keyed by it survives
+    * between requests in the same place the delegate seam keeps its own. Without
+    * this the gateway could never fold for ANY provider, so the biggest context
+    * consumer aimee has was reachable only through its own agent loop. */
+   char skey_ns[MSG_SESSION_KEY_LEN + 24];
+   gw_state_key(ctx->skey, msgs, skey_ns, sizeof skey_ns);
 
-   /* Snapshot FIRST: never send a reduced payload we cannot restore. */
-   ctx->pristine = gw_snapshot_messages(msgs);
-   if (!ctx->pristine)
+   econ_module_request_t mreq;
+   memset(&mreq, 0, sizeof mreq);
+   mreq.compress = 1;
+   mreq.history_fold = 1;
+   mreq.retained_msgs = config_fold_retained_msgs();
+   mreq.min_fold_msgs = config_fold_min_fold_msgs();
+   mreq.excerpt_bytes = config_fold_excerpt_bytes();
+   mreq.compact_head_bytes = config_compact_head_bytes();
+   mreq.compact_tail_bytes = config_compact_tail_bytes();
+   mreq.register_enabled = config_fold_register_enabled();
+   mreq.closet_enabled = config_coord_closet_enabled();
+   mreq.closet_budget_bytes = config_coord_closet_budget_bytes();
+   mreq.closet_max_ratio_pct = config_coord_closet_max_ratio_pct();
+   mreq.recall_enabled = config_fold_recall_enabled();
+   mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
+   mreq.recall_inject = config_fold_recall_inject();
+   mreq.state_key = skey_ns;     /* the module keeps its reducer state under this */
+   mreq.session_key = ctx->skey; /* the module reads its breaker off this */
+
+   char closet_denylist[CONFIG_COPY_MAX];
+   config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
+   mreq.closet_denylist = closet_denylist[0] ? closet_denylist : NULL;
+
+   /* The freeze is what makes folding safe for a prefix-cached upstream, so it is
+    * not optional here the way it is a tunable on the delegate seam. The module
+    * does the arithmetic; this side supplies the per-tier rates. */
+   mreq.freeze_guard_enabled = 1;
+   mreq.freeze_guard_horizon = ep.freeze_guard_horizon;
    {
-      gw_stat_inc_reason("hard_bypass", "snapshot_oom");
-      return;
+      token_usage_t w = {0}, in = {0}, rd = {0};
+      w.cache_write_tokens = 1000;
+      in.input_tokens = 1000;
+      rd.cache_read_tokens = 1000;
+      int priced = 0;
+      double wc = token_estimate_cost_ex(model, &w, &priced);
+      if (priced)
+      {
+         mreq.priced = 1;
+         mreq.write_cost = wc;
+         mreq.input_cost = token_estimate_cost_ex(model, &in, NULL);
+         mreq.read_cost = token_estimate_cost_ex(model, &rd, NULL);
+      }
    }
 
-   reduce_config_t rc;
-   memset(&rc, 0, sizeof(rc));
-   rc.gateway_seam = 1;
-   rc.compress = 1; /* D3: compress-only at the gateway in v1 (fold deferred) */
-   rc.measure_only = 0;
-   rc.fold.retained_msgs = config_fold_retained_msgs();
+   cJSON *reduced = NULL;
+   econ_module_result_t mres;
+   int rrc =
+       econ_module_reduce(msgs, system_prompt, ECON_MODULE_SEAM_GATEWAY, &mreq, &reduced, &mres);
 
-   reduce_result_t res;
-   memset(&res, 0, sizeof(res));
-   int rrc = context_reduce(msgs, system_prompt, model, NULL, REDUCE_SEAM_GATEWAY, &rc, NULL, &res);
+   /* One line per gateway reduction, because until now this seam was invisible:
+    * its telemetry goes to the obs bus, nothing reached server.log, and proving
+    * whether it had run at all meant inferring from token deltas. reused=1 is the
+    * signal that actually matters -- it means the freeze held and the folded prefix
+    * was byte-identical to last turn, which is the difference between folding that
+    * pays for itself and folding that burns a cache read every turn. */
+   if (rrc != 0)
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway UNREACHED call_result=%d (1=capability_absent: nothing is "
+                "serving the reduce stage) -- request dispatched pristine",
+                mres.call_result);
+   else
+      aimee_log(LOG_INFO, "economizer.gateway",
+                "seam=gateway mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
+                "folded=%d retained=%d reused=%d",
+                mres.mutated, mres.reason[0] ? mres.reason : "none", mres.baseline_tokens,
+                mres.reduced_tokens, mres.removed_tokens, mres.folded_msgs, mres.retained_msgs,
+                mres.reused_boundary);
 
-   gw_bypass_reason_t bypass = gw_should_apply(rrc, &res);
-   if (bypass != GW_BYPASS_NONE)
+   /* The verdict is the module's: it holds the reduced array in-process, so it
+    * is the only place the structural check can run without shipping that array
+    * back across the bus to ask about it. The labels are the same ones
+    * gw_bypass_reason_str emits, so the string goes straight to telemetry.
+    *
+    * A module that was not reached returns no verdict, and an absent verdict is
+    * never read as consent: that is the reduce_internal_assertion path. The
+    * request is pristine either way, so forwarding it is correct. */
+   const char *bypass = gw_module_bypass(rrc, mres.bypass);
+   if (strcmp(bypass, gw_bypass_reason_str(GW_BYPASS_NONE)) != 0)
    {
-      gw_stat_inc_reason("hard_bypass", gw_bypass_reason_str(bypass));
+      /* Unusable answer: the request goes as it already is. Nothing was taken
+       * apart, so there is nothing to put back. */
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res);
-      /* keep pristine: not mutated, but harmless; freed in ctx_free */
+      cJSON_Delete(reduced);
+      econ_module_result_free(&mres);
       return;
    }
+   econ_module_result_free(&mres);
 
-   /* Apply: install the reduced array (ownership transfers on success). */
-   if (gw_replace_messages(container, key, res.messages) != 0)
+   /* DETACH, don't copy. The original array leaves the container intact and
+    * stays owned here, so swapping it back is a pointer move rather than a
+    * restore -- and the deep copy this seam used to take on EVERY request,
+    * only to free it unused, is gone. Detaching cannot fail, so neither can
+    * this. */
+   cJSON *original = cJSON_DetachItemFromObjectCaseSensitive(container, key);
+   if (!cJSON_AddItemToObject(container, key, reduced))
    {
-      gw_stat_inc_reason("hard_bypass", "replace_failed");
+      /* Install failed: put the original straight back. The request is exactly
+       * what it was before this function ran. */
+      cJSON_Delete(reduced);
+      if (original)
+         cJSON_AddItemToObject(container, key, original);
       gw_provenance_clear(&ctx->st);
-      context_reduce_result_free(&res); /* res.messages still owned by res -> freed here */
       return;
    }
-   res.messages = NULL;                    /* ownership moved into container */
-   int baseline_tok = res.baseline_tokens; /* capture the token counts before freeing res */
-   int reduced_tok = res.reduced_tokens;
-   context_reduce_result_free(&res);
+   ctx->original = original;
 
-   gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after replace succeeds */
+   gw_provenance_mark_reduced(&ctx->st); /* mark ONLY after the swap succeeds */
    ctx->mutated = 1;
-   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
-   gw_stat_record_token_delta(baseline_tok, reduced_tok); /* sampled §4 */
 }
 
 gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int http_status,
@@ -155,46 +321,44 @@ gw_post_action_t gw_buffered_after_status(cJSON *container, const char *key, int
    if (!ctx || !ctx->mutated || !container || !key)
       return GW_POST_NONE;
 
-   int cls = http_status / 100;
-   if (cls == 4)
-   {
-      /* Restore the pristine original, repair defensively, disable the session for
-       * subsequent turns, clear provenance, and signal a single resend. */
-      if (ctx->pristine)
-      {
-         if (gw_replace_messages(container, key, ctx->pristine) == 0)
-         {
-            ctx->pristine = NULL; /* ownership moved back into container */
-            cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
-            if (restored)
-               message_history_repair(restored);
-         }
-      }
-      msg_session_disable(ctx->skey, ctx->ttl_ms, "4xx");
-      gw_provenance_clear(&ctx->st);
-      gw_stat_inc(GW_STAT_4XX_RESTORE_RESEND);
-      ctx->mutated = 0; /* the request is now pristine; no double handling */
-      return GW_POST_RESEND;
-   }
-   if (cls == 5)
-   {
-      /* Provider state is uncertain after a 5xx: disable, do NOT resend. */
-      msg_session_disable(ctx->skey, ctx->ttl_ms, "5xx");
-      gw_provenance_clear(&ctx->st);
-      gw_stat_inc(GW_STAT_5XX_DISABLE);
-      ctx->mutated = 0;
+   /* The decision and the breaker are the module's; what is left here is the
+    * request body and the socket. An unreachable module owes nothing, so the
+    * turn is left exactly as dispatched rather than half-handled. */
+   econ_module_post_status_t d;
+   if (econ_module_post_status(ctx->skey, http_status, ctx->mutated, ctx->have_key, ctx->ttl_ms,
+                               NULL, &d) != 0)
       return GW_POST_NONE;
+   if (!d.resend && !d.restore && !d.disabled && !d.counter[0])
+      return GW_POST_NONE; /* nothing owed: a 2xx, or a turn we never mutated */
+
+   if (d.restore && ctx->original)
+   {
+      /* Swap the original back in. gw_replace_messages frees the reduced array
+       * the container currently holds and installs this one. */
+      if (gw_replace_messages(container, key, ctx->original) == 0)
+      {
+         ctx->original = NULL; /* ownership moved back into the container */
+         cJSON *restored = cJSON_GetObjectItemCaseSensitive(container, key);
+         if (restored)
+            message_history_repair(restored);
+      }
    }
-   return GW_POST_NONE;
+   gw_provenance_clear(&ctx->st);
+   ctx->mutated = 0; /* handled; never twice */
+   return d.resend ? GW_POST_RESEND : GW_POST_NONE;
 }
 
 void gw_stream_disable(gw_mutate_ctx_t *ctx, const char *reason)
 {
-   if (!ctx || !ctx->mutated || !ctx->have_key)
+   if (!ctx)
       return;
-   msg_session_disable(ctx->skey, ctx->ttl_ms, reason ? reason : "stream");
+   econ_module_post_status_t d;
+   if (econ_module_post_status(ctx->skey, 0, ctx->mutated, ctx->have_key, ctx->ttl_ms,
+                               reason ? reason : "stream", &d) != 0)
+      return;
+   if (!d.disabled && !d.counter[0])
+      return;
    gw_provenance_clear(&ctx->st);
-   gw_stat_inc(GW_STAT_STREAM_ERROR_DISABLE);
    ctx->mutated = 0; /* one disable per turn; a later frame no-ops */
 }
 

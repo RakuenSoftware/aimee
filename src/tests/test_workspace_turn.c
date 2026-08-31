@@ -1,7 +1,7 @@
 /* test_workspace_turn.c: a turn whose cwd is inside a registered `detached`
  * workspace binds the active provider to a detached provider; shared workspaces
- * and unregistered cwds stay on the shared provider. Config-backed (the binder
- * reads the registered providers via config_load). */
+ * and unregistered cwds stay on the shared provider. The binder reads the
+ * registered providers through the configuration module contract. */
 #include "modules/workspace/workspace_turn.h"
 #include "modules/workspace/workspace_provider.h"
 #include "config.h"
@@ -11,11 +11,54 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
+#include <aimee/workspace/module_api.h>
+#include <stdint.h>
+
+static const char test_shared_workspace[] = "/tmp/ws-shared";
 
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* ── fake workspace module ────────────────────────────────────────────────────
+ *
+ * Which client is serving which tree is the module's answer now, so a turn that
+ * binds a detached provider has to ask for it. There is no bus in a unit test,
+ * so this stands in for the module and reports that every tree asked about is
+ * being served by itself. */
+
+typedef int (*ws_test_module_responder_fn)(uint32_t, uint32_t, const void *, uint32_t, void *,
+                                           uint32_t, uint32_t *);
+void ws_test_set_module_responder(ws_test_module_responder_fn fn);
+
+static int fake_module(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len)
+{
+   (void)stage_id;
+   (void)request_len;
+   if (event_kind != AIMEE_WORKSPACE_EVENT_RUNNER ||
+       response_capacity < AIMEE_WS_RUNNER_RESPONSE_LEN)
+      return -1;
+   const uint8_t *in = (const uint8_t *)request;
+   uint8_t *out = (uint8_t *)response;
+   memset(out, 0, AIMEE_WS_RUNNER_RESPONSE_LEN);
+   aimee_workspace_put_u32(out, AIMEE_WS_RUNNER_RESPONSE_MAGIC);
+   /* Register and forget only need to succeed; resolve answers with the tree
+    * that was asked about, which is what a client serving it would look like. */
+   if (in[5] == AIMEE_WS_RUNNER_OP_RESOLVE)
+   {
+      uint16_t len = aimee_workspace_get_u16(in + 6);
+      if (len > AIMEE_WS_RUNNER_ID_MAX)
+         len = AIMEE_WS_RUNNER_ID_MAX;
+      aimee_workspace_put_u32(out + 4, len);
+      memcpy(out + 8, in + 8, len);
+   }
+   if (response_len)
+      *response_len = AIMEE_WS_RUNNER_RESPONSE_LEN;
+   return 0;
+}
 
 /* ── fake docker backend for the delegate-sandbox cases ───────────────────── */
 
@@ -72,9 +115,19 @@ static delegate_backend_t g_fake_docker = {.name = "docker",
                                            .get_cwd = NULL,
                                            .set_cwd = NULL};
 
+static void register_standard_workspaces(void)
+{
+   (void)config_workspace_remove("/");
+   (void)config_workspace_remove("/tmp/ws-mirror-unresolvable");
+   (void)config_workspace_remove("/tmp/ws-detached");
+   (void)config_workspace_remove(test_shared_workspace);
+   assert(config_workspace_add("/tmp/ws-detached", "detached", NULL, NULL) == 0);
+   assert(config_workspace_add("/tmp/ws-shared", "shared", NULL, NULL) == 0);
+}
+
 int main(void)
 {
-   /* Isolated temp HOME so config_save/load never touch the real config. */
+   /* Isolated temp HOME for the module caller's process-level helpers. */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-wsturn-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmpdir) != NULL);
@@ -83,15 +136,9 @@ int main(void)
    platform_setenv("AIMEE_NO_CACHE", "1");
 
    /* Register two workspaces: one detached, one shared (default). */
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_load(&cfg);
-   cfg.workspace_count = 2;
-   snprintf(cfg.workspaces[0], MAX_PATH_LEN, "/tmp/ws-detached");
-   snprintf(cfg.workspace_providers[0], sizeof(cfg.workspace_providers[0]), "detached");
-   snprintf(cfg.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
-   cfg.workspace_providers[1][0] = '\0';
-   assert(config_save(&cfg) == 0);
+   register_standard_workspaces();
+
+   ws_test_set_module_responder(fake_module);
 
    const workspace_provider_t *shared = workspace_provider_shared();
 
@@ -133,6 +180,14 @@ int main(void)
    assert(workspace_turn_bind_active(NULL) == 0);
    assert(workspace_turn_bind_active("") == 0);
    assert(workspace_provider_active() == shared);
+
+   /* Git repository identity: explicit path beats cwd, except clone path is a
+    * not-yet-existing destination and therefore cannot select a repository. */
+   assert(strcmp(workspace_turn_git_target("git_status", "/explicit/repo", "/caller/repo"),
+                 "/explicit/repo") == 0);
+   assert(strcmp(workspace_turn_git_target("git_clone", "/new/destination", "/caller/repo"),
+                 "/caller/repo") == 0);
+   assert(workspace_turn_git_target("git_status", NULL, NULL) == NULL);
 
    /* AC #6 — foreign-cwd trust gate (pure decision). A remote peer (not
     * trusted-local) supplying a raw absolute path that did NOT bind a detached
@@ -181,32 +236,15 @@ int main(void)
       delegate_backend_reset_for_test();
       assert(delegate_backend_register(&g_fake_docker) == 0);
 
-      /* Dial OFF (the default): no container, no acquire, and the active provider
-       * is untouched — the turn runs in-process exactly as it does today. */
+      /* Acquires a container and binds a CONTAINER provider — not shared. If this
+       * ever resolved to `shared` the delegate would be on the host while the
+       * operator believed it was sandboxed. There is no dial to turn this off:
+       * a delegate runs in its own container or not at all. */
       {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.delegate_sandbox = 0;
-         assert(config_save(&c) == 0);
          g_acquires = g_releases = 0;
-         assert(workspace_turn_bind_container("deleg-1", NULL, NULL, 0) == 0);
-         assert(g_acquires == 0); /* must not even try to take a container */
-         assert(workspace_provider_active() == shared);
-      }
-
-      /* Dial ON: acquires a container and binds a CONTAINER provider — not shared.
-       * If this ever resolved to `shared` the delegate would be on the host while
-       * the operator believed it was sandboxed. */
-      {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.delegate_sandbox = 1;
-         assert(config_save(&c) == 0);
-         g_acquires = g_releases = 0;
+         mkdir(test_shared_workspace, 0700);
          assert(workspace_turn_container_bound() == 0); /* nothing bound yet */
-         assert(workspace_turn_bind_container("deleg-2", NULL, NULL, 0) == 1);
+         assert(workspace_turn_bind_container("deleg-2", NULL, test_shared_workspace, 0) == 1);
          assert(g_acquires == 1);
          const workspace_provider_t *p = workspace_provider_active();
          assert(p != shared);
@@ -225,9 +263,7 @@ int main(void)
          assert(workspace_turn_container_bound() == 0); /* cleared on unbind */
       }
 
-      /* The tree reaches the backend. Without this the backend mints an EMPTY
-       * scratch dir and mounts that — the delegate opens the file named in its
-       * task and finds nothing, then reasons about code it cannot see. */
+      /* The complete tree reaches the backend. */
       {
          g_acquires = g_releases = 0;
          g_last_workspace[0] = '\0';
@@ -240,21 +276,17 @@ int main(void)
          assert(g_releases == 1);
       }
 
-      /* No tree given: the backend keeps its historical empty scratch dir. Passed
-       * as NULL rather than "" so the backend can tell "use your default" from a
-       * caller that meant a path and computed an empty string. */
+      /* No tree given is a hard refusal before backend acquisition. */
       {
          g_acquires = 0;
          g_last_workspace[0] = 'x';
-         assert(workspace_turn_bind_container("deleg-6", NULL, NULL, 0) == 1);
-         assert(g_last_workspace[0] == '\0');
-         workspace_turn_unbind_active();
+         assert(workspace_turn_bind_container("deleg-6", NULL, NULL, 0) == -1);
+         assert(g_acquires == 0);
       }
       {
          g_last_workspace[0] = 'x';
-         assert(workspace_turn_bind_container("deleg-7", NULL, "", 0) == 1);
-         assert(g_last_workspace[0] == '\0'); /* "" is not a path: same as NULL */
-         workspace_turn_unbind_active();
+         assert(workspace_turn_bind_container("deleg-7", NULL, "", 0) == -1);
+         assert(g_acquires == 0);
       }
 
       /* The read-only MODE must reach the backend. A delegate's changes must not
@@ -301,32 +333,69 @@ int main(void)
       /* A registered root of "/" must NOT authorize the whole host: that is not a
        * workspace registration, it is the absence of one. */
       {
-         config_t c;
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.workspace_count = 1;
-         snprintf(c.workspaces[0], MAX_PATH_LEN, "/");
-         c.workspace_providers[0][0] = '\0';
-         c.delegate_sandbox = 1;
-         assert(config_save(&c) == 0);
+         assert(config_workspace_remove("/tmp/ws-detached") == 0);
+         assert(config_workspace_remove("/tmp/ws-shared") == 0);
+         assert(config_workspace_add("/", "shared", NULL, NULL) == 0);
 
          g_acquires = 0;
          mkdir("/tmp/aimee-root-authorized", 0700);
          assert(workspace_turn_bind_container("deleg-9", NULL, "/tmp/aimee-root-authorized", 1) ==
-                0);
+                -1);
          assert(g_acquires == 0);
          rmdir("/tmp/aimee-root-authorized");
 
+         /* A mirror workspace that cannot be resolved must SAY SO.
+          *
+          * Every failure path in mirror_reconstruct_cwd used to return 0 in silence.
+          * The caller then left the client-side path in place, the request fell
+          * through to the workspace runner, waited out WS_RUNNER_OP_MS (600s) and
+          * failed with "unavailable through the registered workspace runner" -- an
+          * error naming a subsystem that was never the problem, with nothing in the
+          * log to contradict it. Diagnosing that took hours and produced three wrong
+          * theories. A diagnostic nobody can see is the defect, so assert the line is
+          * actually emitted rather than trusting that it was added. */
+         {
+            assert(config_workspace_remove("/") == 0);
+            assert(config_workspace_add("/tmp/ws-mirror-unresolvable", "mirror",
+                                        "https://example.invalid/r.git", "") == 0);
+
+            char capture[512];
+            snprintf(capture, sizeof(capture), "%s/wsturn-log-XXXXXX", platform_tmpdir());
+            int cap_fd = mkstemp(capture);
+            assert(cap_fd >= 0);
+            fflush(stderr);
+            int saved = dup(STDERR_FILENO);
+            assert(saved >= 0);
+            assert(dup2(cap_fd, STDERR_FILENO) >= 0);
+
+            char out[MAX_PATH_LEN] = "sentinel";
+            int rc = workspace_turn_resolve_mirror_cwd("/tmp/ws-mirror-unresolvable/src", out,
+                                                       sizeof(out));
+
+            fflush(stderr);
+            assert(dup2(saved, STDERR_FILENO) >= 0);
+            close(saved);
+
+            assert(rc == 0); /* behaviour unchanged: still refuses to resolve */
+            assert(!out[0]); /* and still clears the output */
+
+            FILE *f = fopen(capture, "r");
+            assert(f);
+            char logged[4096] = "";
+            size_t n = fread(logged, 1, sizeof(logged) - 1, f);
+            logged[n] = '\0';
+            fclose(f);
+            unlink(capture);
+            close(cap_fd);
+
+            /* The point of the change: it is no longer silent. */
+            assert(strstr(logged, "mirror resolve") != NULL);
+            assert(strstr(logged, "/tmp/ws-mirror-unresolvable") != NULL);
+            printf("  unresolvable mirror is reported, not silent: ok\n");
+         }
+
          /* restore the real roots for the cases below */
-         memset(&c, 0, sizeof(c));
-         config_load(&c);
-         c.workspace_count = 2;
-         snprintf(c.workspaces[0], MAX_PATH_LEN, "/tmp/ws-detached");
-         snprintf(c.workspace_providers[0], sizeof(c.workspace_providers[0]), "detached");
-         snprintf(c.workspaces[1], MAX_PATH_LEN, "/tmp/ws-shared");
-         c.workspace_providers[1][0] = '\0';
-         c.delegate_sandbox = 1;
-         assert(config_save(&c) == 0);
+         register_standard_workspaces();
       }
 
       /* A tree OUTSIDE every registered workspace root must be refused. Repository-
@@ -338,19 +407,19 @@ int main(void)
          g_acquires = 0;
          mkdir("/tmp/aimee-unregistered-tree", 0700);
          assert(workspace_turn_bind_container("deleg-8", NULL, "/tmp/aimee-unregistered-tree", 0) ==
-                0);
+                -1);
          assert(g_acquires == 0); /* refused BEFORE taking a container */
          assert(workspace_provider_active() == shared);
          rmdir("/tmp/aimee-unregistered-tree");
       }
 
       /* Acquire failure must NOT bind: falling through with a half-bound provider
-       * would send every op to the host. It returns 0, so the caller runs
-       * in-process (and the seam logs at ERROR). */
+       * would send every op to the host. It refuses (-1) — there is no in-process
+       * path left to fall back to, so the delegation aborts. */
       {
          g_acquires = g_releases = 0;
          g_acquire_fails = 1;
-         assert(workspace_turn_bind_container("deleg-3", NULL, NULL, 0) == 0);
+         assert(workspace_turn_bind_container("deleg-3", NULL, test_shared_workspace, 0) == -1);
          assert(g_acquires == 1);
          assert(g_releases == 0); /* nothing to release: it never took one */
          assert(workspace_provider_active() == shared);
@@ -365,12 +434,12 @@ int main(void)
          assert(g_acquires == 0);
       }
 
-      /* No docker backend registered at all: the dial is on but there is nothing
-       * to bind to. Must refuse rather than silently run on the host. */
+      /* No docker backend registered at all: there is nothing to bind to. Must
+       * refuse rather than silently run on the host. */
       {
          delegate_backend_reset_for_test();
          g_acquires = 0;
-         assert(workspace_turn_bind_container("deleg-4", NULL, NULL, 0) == 0);
+         assert(workspace_turn_bind_container("deleg-4", NULL, test_shared_workspace, 0) == -1);
          assert(workspace_provider_active() == shared);
       }
       delegate_backend_reset_for_test();

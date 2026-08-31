@@ -25,6 +25,7 @@
 #include "vault_crypto.h" /* VAULT_ROOT_KEY_LEN */
 #include "vault_kek_cache.h"
 #include "vault_service.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const long T0 = 100000;
 
@@ -68,7 +69,8 @@ int main(void)
 {
    printf("test_bus_vault_audit:\n");
 
-   char home[] = "/tmp/aimee-busvault-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busvault-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");
@@ -96,6 +98,20 @@ int main(void)
    assert(strcmp(out, sc) == 0); /* caller really receives the plaintext... */
    assert(vault_service_delete(p, "claude", "api_key") == VAULT_OK);
    assert(vault_service_unlock(p, ATTEST_TCP_BEARER, rk, sizeof rk, T0) == VAULT_ERR_TRANSPORT);
+
+   /* The server-principal WRITE (POST /v1/vault/set_server, agent API-key writes).
+    * It is driven from the HTTP layer and does NOT pass through vault_service's
+    * access hook, so it needs its own bridge call — before that existed this row
+    * reached only the local audit_log file and never the bus, leaving the
+    * highest-privilege vault op the one op absent from the replayable trail.
+    * Only the non-secret fingerprint crosses; `so` stays out of scope entirely. */
+   vault_audit_bridge_server_write(p, "openai", "api_key", "a1b2c3d4", "webchat");
+
+   /* The other two shared-vault ops whose vault_service row is attributed to
+    * VAULT_SERVER_PRINCIPAL, and so cannot say WHO acted: delete and enumerate.
+    * Both publish the human principal separately. */
+   vault_audit_bridge_server_delete(p, "openai", "api_key");
+   vault_audit_bridge_server_list(p, 3);
 
    obs_bus_stop(); /* drains every in-flight row into the ledger */
 
@@ -130,6 +146,30 @@ int main(void)
    assert(unlock_deny);
    assert(strcmp(sval(unlock_deny, "verdict"), "deny") == 0);
    assert(strcmp(sval(unlock_deny, "reason_code"), "transport_not_allowed") == 0);
+
+   /* The server-principal write lands on the SAME bus -> ledger stream as every
+    * access row above: same actor, correlated by the same command identity, with
+    * the attesting transport as mode and the key fingerprint (never the key) as
+    * the reason. This is the row that previously existed only in a local file. */
+   cJSON *set_server = find_row(rows, "vault.set_server", "openai/api_key");
+   assert(set_server);
+   assert(strcmp(sval(set_server, "actor"), p) == 0);
+   assert(strcmp(sval(set_server, "verdict"), "allow") == 0);
+   assert(strcmp(sval(set_server, "mode"), "webchat") == 0);
+   assert(strcmp(sval(set_server, "reason_code"), "fp=a1b2c3d4") == 0);
+
+   /* Shared-credential DELETE carries the HUMAN principal as actor — the whole
+    * point, since vault_service's own row names the server vault instead. */
+   cJSON *del_server = find_row(rows, "vault.delete_server", "openai/api_key");
+   assert(del_server);
+   assert(strcmp(sval(del_server, "actor"), p) == 0);
+   assert(strcmp(sval(del_server, "verdict"), "allow") == 0);
+
+   /* Enumeration: attributed, counted, and it must NOT name any credential. */
+   cJSON *list_server = find_row(rows, "vault.list_server", "");
+   assert(list_server);
+   assert(strcmp(sval(list_server, "actor"), p) == 0);
+   assert(strcmp(sval(list_server, "reason_code"), "count=3") == 0);
 
    /* THE invariant: no secret plaintext leaked into ANY field of ANY row. */
    char *dump = cJSON_PrintUnformatted(rows);

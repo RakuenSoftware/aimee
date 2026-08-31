@@ -45,17 +45,21 @@ static unsigned long long now_ns(void)
    return (unsigned long long)ts.tv_sec * 1000000000ULL + (unsigned long long)ts.tv_nsec;
 }
 
-static void gen_hex_id(char *buf, size_t bytes)
+static int gen_hex_id(char *buf, size_t bytes)
 {
    /* bytes random bytes → 2*bytes hex chars + NUL */
    unsigned char raw[16];
    if (bytes > sizeof(raw))
       bytes = sizeof(raw);
    if (platform_random_bytes(raw, bytes) != 0)
-      memset(raw, 0, bytes);
+   {
+      buf[0] = '\0';
+      return -1;
+   }
    for (size_t i = 0; i < bytes; i++)
       snprintf(buf + 2 * i, 3, "%02x", raw[i]);
    buf[2 * bytes] = '\0';
+   return 0;
 }
 
 /* ------------------------------------------------------------------ init */
@@ -88,7 +92,8 @@ void otel_init(const char *endpoint, const char *service_name, const char *sessi
       }
       else
       {
-         gen_hex_id(g_trace_id, 16);
+         if (gen_hex_id(g_trace_id, 16) != 0)
+            g_endpoint[0] = '\0';
       }
    }
    else
@@ -115,7 +120,8 @@ void otel_span_start(otel_span_t *span, const char *name, const char *parent_spa
    snprintf(span->trace_id, sizeof(span->trace_id), "%s", g_trace_id);
    pthread_mutex_unlock(&g_mu);
 
-   gen_hex_id(span->span_id, 8);
+   if (gen_hex_id(span->span_id, 8) != 0)
+      return;
 
    if (parent_span_id && parent_span_id[0])
       snprintf(span->parent_span_id, sizeof(span->parent_span_id), "%s", parent_span_id);

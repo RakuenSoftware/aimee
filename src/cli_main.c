@@ -4,6 +4,7 @@
 #include "cli_remote.h"
 #include "cli_kb_smoke.h"
 #include "cli_client.h"
+#include "cli_command_defs.h" /* aimee_cmd_tier_t: shared with the served catalogue */
 #include "cli_agent_keys.h"
 #include "cli_session_start.h"
 #include "cmd_self_update.h"
@@ -20,6 +21,7 @@
 #include "code_collect.h"          /* code_index_install_branch_hook (index watch) */
 #include "harness_memory_audit.h"  /* hmem_audit (diagnostic when project unresolved) */
 #include "harness_memory_common.h" /* hmem_resolve_project (client-side project key) */
+#include "hook_session_token.h"
 #include <aimee/delegates/delegate_plan.h>
 #include "cli_chat_stream.h"
 #include "platform.h"
@@ -53,13 +55,15 @@ int client_hook_payload_session_id(const cJSON *hook_json, char *out, size_t out
       return 0;
    out[0] = '\0';
 
-   const char *sid = NULL;
+   /* The universal launcher establishes the session before the client starts;
+    * its inherited id outranks a client-local thread id from the hook payload.
+    * Without a launcher, the payload remains the authoritative fallback. */
+   const char *sid = getenv("AIMEE_SESSION_ID");
    const cJSON *jsid = hook_json ? cJSON_GetObjectItemCaseSensitive(hook_json, "session_id") : NULL;
-   if (cJSON_IsString(jsid) && jsid->valuestring[0])
+   if ((!sid || !sid[0]) && cJSON_IsString(jsid) && jsid->valuestring[0])
       sid = jsid->valuestring;
 
-   static const char *env_keys[] = {"AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID",
-                                    NULL};
+   static const char *env_keys[] = {"CLAUDE_SESSION_ID", "CODEX_THREAD_ID", NULL};
    for (int i = 0; (!sid || !sid[0]) && env_keys[i]; i++)
       sid = getenv(env_keys[i]);
 
@@ -93,30 +97,43 @@ static void print_server_unavailable(void)
       return;
    }
 
-   fprintf(stderr, "aimee: server unavailable (client version %s)\n", AIMEE_VERSION);
+   /* Remediation points at the REMOTE endpoint, never at starting a server here.
+    *
+    * This used to say "systemctl --user start aimee-server" (and `aimee server
+    * start`). aimee is a thin client whose server runs in its own container on
+    * another host, so that advice was wrong every time it was printed — and it
+    * was printed exactly when someone was stuck and looking for something to
+    * try. Following it produced a stray local aimee-server that then satisfied
+    * the client's liveness probe, so the tooling came back to life while
+    * silently answering from the wrong machine. The message taught the failure
+    * mode it appeared to solve. */
+   char *configured = cli_v1_client_endpoint();
+   fprintf(stderr, "aimee: aimee-server unavailable (client version %s)\n", AIMEE_VERSION);
+   if (configured)
+   {
+      fprintf(stderr, "  endpoint   : %s (configured, not answering)\n", configured);
+      fprintf(stderr, "  remediation: start/repair aimee-server on that host, or repoint with\n");
+      fprintf(stderr, "               aimee remote set https://<host>:8743\n");
+      free(configured);
+   }
+   else
+   {
+      fprintf(stderr, "  endpoint   : none configured\n");
+      fprintf(stderr, "  remediation: aimee remote set https://<host>:8743\n");
+   }
+   fprintf(stderr, "  note       : aimee is a thin client. Do NOT start a local aimee-server —\n");
+   fprintf(stderr, "               there is no co-located topology, and a local one would\n");
+   fprintf(stderr, "               answer for the wrong host.\n");
    fprintf(stderr, "  server log : %s\n", log_path);
-#if defined(__linux__)
-   fprintf(stderr, "  remediation: systemctl --user start aimee-server\n");
-   fprintf(stderr, "               or `aimee server start` if not using systemd\n");
-#elif defined(__APPLE__)
-   fprintf(stderr, "  remediation: launchctl bootstrap gui/$(id -u) "
-                   "~/Library/LaunchAgents/com.aimee.server.plist\n");
-   fprintf(stderr, "               or `aimee server start` if not using launchd\n");
-#elif defined(_WIN32) || defined(_WIN64)
-   fprintf(stderr, "  remediation: net start aimee-server\n");
-   fprintf(stderr, "               or `aimee server start` if the\n"
-                   "               service is not registered (portable install)\n");
-#else
-   fprintf(stderr, "  remediation: aimee server start\n");
-#endif
 }
 
-typedef enum
-{
-   CLIENT_TIER_CORE = 0,
-   CLIENT_TIER_ADVANCED = 1,
-   CLIENT_TIER_ADMIN = 2,
-} client_cmd_tier_t;
+/* The tier enum lives with the catalogue (headers/cli_command_defs.h) so the same
+ * rows compile here as a last-resort fallback and on the server as the served
+ * answer. Aliased to the historical spelling to keep the call sites below. */
+typedef aimee_cmd_tier_t client_cmd_tier_t;
+#define CLIENT_TIER_CORE     AIMEE_CMD_TIER_CORE
+#define CLIENT_TIER_ADVANCED AIMEE_CMD_TIER_ADVANCED
+#define CLIENT_TIER_ADMIN    AIMEE_CMD_TIER_ADMIN
 
 typedef struct
 {
@@ -127,11 +144,59 @@ typedef struct
    const char *subcommands;
 } client_help_t;
 
-static const client_help_t client_help[] = {
-/* Table entries live in cli_help_data.h to keep this file under the source
- * line-count limit (same pattern as agent_help_data.h). */
-#include "cli_help_data.h"
+/* The commands that must work with NO server, and only those.
+ *
+ * The catalogue itself now comes from the server (GET /v1/cli/manifest ->
+ * `commands`); it used to be compiled in here, which made the client the source
+ * of truth for what the server can do and meant a rebuild to learn a new
+ * command. What cannot come from the server is the handful of commands you need
+ * BEFORE you can reach one -- pointing the client at a server, and asking what
+ * it is. Every entry here is a thing that can rot, so the list stays this short
+ * on purpose. */
+static const client_help_t client_bootstrap_help[] = {
+    {"remote", "Point the thin client at a remote aimee-server", CLIENT_TIER_CORE, 0,
+     "  set <url> [token]  Persist a remote server target\n"
+     "  enroll            Rotate the bearer and enroll this client certificate\n"
+     "  trust             Pin the configured server certificate again\n"
+     "  status            Show the configured target and reachability\n"
+     "  clear             Forget the configured target\n"},
+    {"version", "Print the client version", CLIENT_TIER_CORE, 0, NULL},
+    {"help", "Show commands, or details for one command", CLIENT_TIER_CORE, 0, NULL},
+    {NULL, NULL, CLIENT_TIER_CORE, 0, NULL},
 };
+
+/* The catalogue as it stood when this client was BUILT.
+ *
+ * Consulted last: after the bootstrap list and after whatever the server sent
+ * (live, or the cached copy of a live answer). It exists for one reason -- `aimee
+ * <cmd> --help` has to answer on a machine that has never reached a server, which
+ * build-integrity asserts and which a fresh install cannot satisfy from a cache.
+ *
+ * This is NOT a second source of truth. It is generated from the same file the
+ * server serves (server/cli_command_defs_data.h), the server's answer always
+ * wins, and being out of date here costs a stale description -- never an
+ * unreachable command, because ROUTING never consults it. */
+static const client_help_t client_builtin_help[] = {
+#include "server/cli_command_defs_data.h"
+    {NULL, NULL, AIMEE_CMD_TIER_CORE, 0, NULL},
+};
+
+/* Render one row, whatever it came from. */
+static void print_help_row(FILE *out, const char *name, const char *summary)
+{
+   fprintf(out, "  %-16s %s\n", name, summary ? summary : "");
+}
+
+/* Tier a served row belongs to; unknown spellings fall to CORE so a command is
+ * shown rather than silently dropped from every listing. */
+static client_cmd_tier_t tier_from_name(const char *t)
+{
+   if (t && strcmp(t, "advanced") == 0)
+      return CLIENT_TIER_ADVANCED;
+   if (t && strcmp(t, "admin") == 0)
+      return CLIENT_TIER_ADMIN;
+   return CLIENT_TIER_CORE;
+}
 
 /* Commands the Windows thin client does not carry: they reach the server over the
  * Unix-domain /v1 socket, which it does not build (see the _WIN32 guard in the
@@ -167,13 +232,50 @@ static client_cmd_tier_t client_cmd_tier(const client_help_t *entry)
 
 static void print_client_commands(FILE *out, client_cmd_tier_t tier)
 {
-   for (int i = 0; client_help[i].name; i++)
+   /* The served catalogue is authoritative when there is one: it already
+    * contains the bootstrap commands, so listing those first shadowed the
+    * server's own wording with this build's and would double-list any command
+    * present in both. Bootstrap is a FALLBACK, not an override. */
+   const cJSON *cmds = cli_v1_manifest_commands();
+   if (!cmds)
    {
-      if (client_cmd_tier(&client_help[i]) != tier || client_help[i].hidden_default)
+      for (int i = 0; client_bootstrap_help[i].name; i++)
+      {
+         if (client_cmd_tier(&client_bootstrap_help[i]) != tier ||
+             client_bootstrap_help[i].hidden_default)
+            continue;
+         if (!client_cmd_available(client_bootstrap_help[i].name))
+            continue;
+         print_help_row(out, client_bootstrap_help[i].name, client_bootstrap_help[i].help);
+      }
+      /* No server and no cache: show what this build knows, so `aimee` still
+       * lists commands instead of printing three and a diagnostic. */
+      for (int i = 0; client_builtin_help[i].name; i++)
+      {
+         if (client_cmd_tier(&client_builtin_help[i]) != tier ||
+             client_builtin_help[i].hidden_default)
+            continue;
+         if (!client_cmd_available(client_builtin_help[i].name))
+            continue;
+         print_help_row(out, client_builtin_help[i].name, client_builtin_help[i].help);
+      }
+      return;
+   }
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cmds)
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name))
          continue;
-      if (!client_cmd_available(client_help[i].name))
+      if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(row, "hidden_default")))
          continue;
-      fprintf(out, "  %-16s %s\n", client_help[i].name, client_help[i].help);
+      const cJSON *t = cJSON_GetObjectItemCaseSensitive(row, "tier");
+      if (tier_from_name(cJSON_IsString(t) ? t->valuestring : NULL) != tier)
+         continue;
+      if (!client_cmd_available(name->valuestring))
+         continue;
+      const cJSON *sum = cJSON_GetObjectItemCaseSensitive(row, "summary");
+      print_help_row(out, name->valuestring, cJSON_IsString(sum) ? sum->valuestring : "");
    }
 }
 
@@ -220,13 +322,41 @@ static int client_help_command(int argc, char **argv)
 
    const char *target = argv[0];
 
-   for (int i = 0; client_help[i].name; i++)
+   /* Served text wins, for the same reason as the listing above. */
+   const cJSON *cmds = cli_v1_manifest_commands();
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cmds)
    {
-      if (strcmp(target, client_help[i].name) != 0)
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name) || strcmp(target, name->valuestring) != 0)
          continue;
-      fprintf(stderr, "aimee %s: %s\n", client_help[i].name, client_help[i].help);
-      if (client_help[i].subcommands)
-         fprintf(stderr, "\nSubcommands:\n%s", client_help[i].subcommands);
+      const cJSON *sum = cJSON_GetObjectItemCaseSensitive(row, "summary");
+      fprintf(stderr, "aimee %s: %s\n", name->valuestring,
+              cJSON_IsString(sum) ? sum->valuestring : "");
+      const cJSON *subs = cJSON_GetObjectItemCaseSensitive(row, "subcommands");
+      if (cJSON_IsString(subs) && subs->valuestring[0])
+         fprintf(stderr, "\nSubcommands:\n%s", subs->valuestring);
+      return 0;
+   }
+
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+   {
+      if (strcmp(target, client_bootstrap_help[i].name) != 0)
+         continue;
+      fprintf(stderr, "aimee %s: %s\n", client_bootstrap_help[i].name,
+              client_bootstrap_help[i].help);
+      if (client_bootstrap_help[i].subcommands)
+         fprintf(stderr, "\nSubcommands:\n%s", client_bootstrap_help[i].subcommands);
+      return 0;
+   }
+
+   for (int i = 0; client_builtin_help[i].name; i++)
+   {
+      if (strcmp(target, client_builtin_help[i].name) != 0)
+         continue;
+      fprintf(stderr, "aimee %s: %s\n", client_builtin_help[i].name, client_builtin_help[i].help);
+      if (client_builtin_help[i].subcommands)
+         fprintf(stderr, "\nSubcommands:\n%s", client_builtin_help[i].subcommands);
       return 0;
    }
 
@@ -267,7 +397,9 @@ static void client_delegate_usage(void)
            "  --max-tokens N     Limit response tokens\n"
            "  --max-turns N      Override the delegate turn limit\n"
            "  --timeout N        Timeout in milliseconds\n"
-           "  --handoff-json     Require delegate_result_v1 JSON handoff output\n"
+           "  --handoff-json     Require delegate_result_v1 JSON handoff output (automatic for\n"
+           "                     write roles)\n"
+           "  --no-handoff-json  Disable automatic handoff validation for a write role\n"
            "  --worktree BRANCH  Check out BRANCH in the session worktree\n"
            "  --via AGENT        Route to a specific agent by name\n"
            "  --acp CMD          Route via an inline ACP agent (e.g. --acp claude)\n"
@@ -276,7 +408,7 @@ static void client_delegate_usage(void)
            "  --model NAME       Override provider model\n"
            "  --tier N           Route to the best agent at cost tier N\n"
            "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
-           "                     lower max_scope are excluded (default whole_task)\n"
+           "                     lower max_scope are excluded (default bounded)\n"
            "\n"
            "Subcommands:\n"
            "  aimee delegate plan <proposal.md>        Generate read-only work packets\n"
@@ -506,9 +638,18 @@ static int client_command_has_subcommands(const char *cmd)
 {
    if (!cmd)
       return 0;
-   for (int i = 0; client_help[i].name; i++)
-      if (strcmp(cmd, client_help[i].name) == 0)
-         return client_help[i].subcommands != NULL;
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+      if (strcmp(cmd, client_bootstrap_help[i].name) == 0)
+         return client_bootstrap_help[i].subcommands != NULL;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cli_v1_manifest_commands())
+   {
+      const cJSON *name = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (!cJSON_IsString(name) || strcmp(cmd, name->valuestring) != 0)
+         continue;
+      const cJSON *subs = cJSON_GetObjectItemCaseSensitive(row, "subcommands");
+      return cJSON_IsString(subs) && subs->valuestring[0] ? 1 : 0;
+   }
    return 0;
 }
 
@@ -520,6 +661,15 @@ static int wants_subcommand_help(int sub_argc, char **sub_argv)
       return 0;
    return strcmp(sub_argv[0], "--help") == 0 || strcmp(sub_argv[0], "-h") == 0 ||
           strcmp(sub_argv[0], "help") == 0;
+}
+
+/* These command families document arguments/options in the manifest's
+ * "subcommands" text, but they also have a useful default action with no
+ * arguments.  Do not let the generic family-help shortcut make those default
+ * routes unreachable. */
+static int client_command_has_default_action(const char *cmd)
+{
+   return cmd && (strcmp(cmd, "presence") == 0 || strcmp(cmd, "primary") == 0);
 }
 
 static int is_help_arg(const char *arg)
@@ -593,20 +743,63 @@ static void ensemble_usage(void)
            "  See docs/ENSEMBLE.md. `aimee delegate aggregate|roundtable` remain as aliases.\n");
 }
 
-/* Report a command that could not be routed. Two very different causes share this
- * path: the command family genuinely has no /v1 route, or it has routes and the
- * SUBCOMMAND was wrong. Blaming the command for the latter sends users (and
- * maintainers) hunting for a missing route that already exists -- e.g. `aimee
- * economizer status` reported "command 'economizer' has no /v1 route" when the
- * registered subcommand is `stats`. So name the subcommand and list the real ones
- * whenever the family has any. */
+/* Is `name` a command this client advertises at all? Same source `aimee help
+ * --all` prints from, so this answers "would the user have seen this listed"
+ * rather than "is it routable".
+ *
+ * That source is now the server's catalogue plus the bootstrap list. With no
+ * catalogue this reports only the bootstrap commands as known -- correct, since
+ * the client genuinely cannot say what else exists, and the caller's message
+ * distinguishes that from a typo. */
+static int client_cmd_known(const char *name)
+{
+   for (int i = 0; client_bootstrap_help[i].name; i++)
+      if (strcmp(name, client_bootstrap_help[i].name) == 0)
+         return 1;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, cli_v1_manifest_commands())
+   {
+      const cJSON *n = cJSON_GetObjectItemCaseSensitive(row, "name");
+      if (cJSON_IsString(n) && strcmp(name, n->valuestring) == 0)
+         return 1;
+   }
+   return 0;
+}
+
+/* Report a command that could not be routed. Several very different causes share
+ * this path: the word is not a command at all, or the command family genuinely
+ * has no /v1 route, or it has routes and the SUBCOMMAND was wrong. Blaming the
+ * command for the latter sends users (and maintainers) hunting for a missing
+ * route that already exists -- e.g. `aimee economizer status` reported "command
+ * 'economizer' has no /v1 route" when the registered subcommand is `stats`. So
+ * name the subcommand and list the real ones whenever the family has any.
+ *
+ * A plain typo took that same fallback, so `aimee foobarbaz` answered "command
+ * 'foobarbaz' has no /v1 route" -- reporting a routing-table gap for a word that
+ * was never a command, which is exactly the wrong place to send someone. Check
+ * the help table first and say so plainly. */
 static int unsupported_client_command(const char *cmd, const char *subcmd, int json_output)
 {
    const char *name = (cmd && cmd[0]) ? cmd : "launch";
    char subs[512];
    int have_subs = cli_v1_subcommands(name, subs, sizeof(subs));
    char msg[768];
-   if (!client_cmd_available(name))
+   /* Only when the user actually typed a word: an empty cmd defaults `name` to
+    * "launch", which is a real dispatch target that client_help[] does not list. */
+   /* "Unknown" requires knowing what IS known. The catalogue comes from the
+    * server now, so with no catalogue the client cannot tell a typo from a real
+    * command it simply could not ask about — and calling a real command unknown
+    * sends the reader to fix their spelling instead of their connection, which
+    * is the mistake this whole function exists to avoid. */
+   if (cmd && cmd[0] && !cli_v1_manifest_commands())
+      snprintf(msg, sizeof(msg),
+               "cannot tell whether '%s' exists: no command catalogue from the server. "
+               "Check the server is reachable, then retry",
+               name);
+   else if (cmd && cmd[0] && !client_cmd_known(name))
+      snprintf(msg, sizeof(msg), "unknown command '%s'; run 'aimee help --all' to list commands",
+               name);
+   else if (!client_cmd_available(name))
       snprintf(msg, sizeof(msg),
                "'%s' is not available on the Windows thin client; it needs the local "
                "Unix socket, so run it on the server host",
@@ -653,8 +846,9 @@ static int cli_hook_client_supports_updated_input(void)
 {
    const char *client = getenv("AIMEE_HOOK_CLIENT");
    if (client)
-      return strcmp(client, "claude") == 0;
-   return getenv("CLAUDE_SESSION_ID") != NULL;
+      return strcmp(client, "claude") == 0 || strcmp(client, "codex") == 0;
+   return getenv("CLAUDE_SESSION_ID") != NULL || getenv("CODEX_THREAD_ID") != NULL ||
+          getenv("CODEX_HOME") != NULL;
 }
 
 static void emit_pretool_deny_json(const char *reason)
@@ -671,6 +865,22 @@ static void emit_pretool_deny_json(const char *reason)
    {
       fputs(s, stdout);
       fputc('\n', stdout);
+      free(s);
+   }
+   cJSON_Delete(out);
+}
+
+static void emit_pretool_updated_json(const cJSON *updated)
+{
+   cJSON *out = cJSON_CreateObject();
+   cJSON *hook_out = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+   cJSON_AddStringToObject(hook_out, "hookEventName", "PreToolUse");
+   cJSON_AddStringToObject(hook_out, "permissionDecision", "allow");
+   cJSON_AddItemToObject(hook_out, "updatedInput", cJSON_Duplicate(updated, 1));
+   char *s = cJSON_PrintUnformatted(out);
+   if (s)
+   {
+      puts(s);
       free(s);
    }
    cJSON_Delete(out);
@@ -777,7 +987,7 @@ static int cli_delegate_probe(void)
    cJSON *req = cJSON_CreateObject();
    if (!req)
       return -1;
-   cJSON_AddStringToObject(req, "method", "agent.list");
+   cJSON_AddStringToObject(req, "method", "model.list");
    /* Transport selection is exclusive: a configured remote must receive the
     * probe instead of probing the co-located UDS before the real command is
     * forwarded remotely.  Otherwise every ordinary thin-client invocation
@@ -792,49 +1002,6 @@ static int cli_delegate_probe(void)
       avail = cJSON_IsTrue(a) ? 1 : 0;
    cJSON_Delete(resp);
    return avail;
-}
-
-/* Worktree isolation (client-side, server-independent — mirrors the sub-agent
- * guard above). aimee isolates its OWN work in worktrees, but the primary
- * session's harness Edit/Write never reach aimee's gateway, so the shared main
- * clone was editable directly — how concurrent sessions entangle uncommitted
- * work on one branch. Enforce it here so it holds even when aimee-server is
- * down. A main clone's .git is a directory; a worktree's is a file. Returns the
- * process exit code, or -1 when not applicable (caller proceeds). */
-static int client_failopen_worktree_deny(const char *phase, const char *tool_name,
-                                         const char *file_path, const char *payload_cwd)
-{
-   if (!phase || strcmp(phase, "pre") != 0 || !tool_name)
-      return -1;
-   if (!(strcmp(tool_name, "Write") == 0 || strcmp(tool_name, "Edit") == 0 ||
-         strcmp(tool_name, "MultiEdit") == 0 || strcmp(tool_name, "NotebookEdit") == 0))
-      return -1;
-   /* Prefer the session cwd from the hook payload (authoritative); fall back to
-    * this process's cwd (the hook usually inherits the session's dir). */
-   char cwd[MAX_PATH_LEN];
-   if (payload_cwd && payload_cwd[0])
-      snprintf(cwd, sizeof(cwd), "%s", payload_cwd);
-   else if (!getcwd(cwd, sizeof(cwd)))
-      return -1;
-   /* Key on the file being edited (resolved against cwd), not just the cwd — an
-    * absolute Edit into the main clone from a worktree session must still be caught. */
-   if (!aimee_edit_target_in_main_clone(file_path, cwd) || aimee_main_clone_edits_allowed(cwd))
-      return -1;
-   char reason[1024];
-   snprintf(reason, sizeof(reason),
-            "BLOCKED: %s edits the SHARED MAIN CLONE (%s), not a git worktree — concurrent "
-            "sessions entangle uncommitted work this way. Isolate the task in its own worktree:\n"
-            "  git -C %s worktree add ../<name>-<task> -b <branch> origin/testing\n"
-            "then work there. (Branch-owner override: AIMEE_ALLOW_MAIN_CHECKOUT=1 or "
-            "touch %s/.git/aimee-allow-main-edits.)",
-            tool_name, cwd, cwd, cwd);
-   if (cli_hook_client_uses_pretool_json())
-   {
-      emit_pretool_deny_json(reason);
-      return 0;
-   }
-   fprintf(stderr, "aimee: %s\n", reason);
-   return 2;
 }
 
 /* Handle hooks specially -- use dedicated server methods for lower latency */
@@ -873,32 +1040,80 @@ static int handle_hooks(int argc, char **argv, int json_output)
       }
    }
 
-   /* Worktree isolation — pure filesystem check, before we even try the server,
-    * so it holds regardless of aimee-server reachability. */
+   char hook_sid[64] = "";
+   const char *sid =
+       client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
+   const char *discovery_command = NULL;
+   cJSON *discovery_input = cJSON_Parse(tool_input);
+   if (cJSON_IsObject(discovery_input))
+      discovery_command =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(discovery_input, "command"));
+   char discovery_reason[1024];
+   int discovery_deny = attn_discovery_gate(tool_name, discovery_command, sid, discovery_reason,
+                                            sizeof(discovery_reason));
+   cJSON_Delete(discovery_input);
+   if (discovery_deny)
+   {
+      if (cli_hook_client_uses_pretool_json())
+      {
+         emit_pretool_deny_json(discovery_reason);
+         discovery_deny = 0; /* denial is carried by the hook JSON contract */
+      }
+      else
+         fprintf(stderr, "aimee: %s\n", discovery_reason);
+      free(stdin_data);
+      cJSON_Delete(json);
+      free(tool_input_heap);
+      return discovery_deny;
+   }
+
+   /* Worktree routing must happen on the client: a remote Aimee server cannot
+    * see or create a worktree in this machine's repository. */
    const char *hook_cwd = NULL;
-   const char *hook_file_path = NULL;
+   cJSON *hook_input = NULL;
    if (json)
    {
       cJSON *cj = cJSON_GetObjectItemCaseSensitive(json, "cwd");
       if (cJSON_IsString(cj))
          hook_cwd = cj->valuestring;
-      cJSON *ti = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
-      if (cJSON_IsObject(ti))
-      {
-         cJSON *fp = cJSON_GetObjectItemCaseSensitive(ti, "file_path");
-         if (!cJSON_IsString(fp))
-            fp = cJSON_GetObjectItemCaseSensitive(ti, "notebook_path");
-         if (cJSON_IsString(fp))
-            hook_file_path = fp->valuestring;
-      }
+      hook_input = cJSON_GetObjectItemCaseSensitive(json, "tool_input");
    }
-   int wt_deny = client_failopen_worktree_deny(phase, tool_name, hook_file_path, hook_cwd);
-   if (wt_deny >= 0)
+   char route_cwd[MAX_PATH_LEN];
+   if (!hook_cwd || !hook_cwd[0])
    {
-      free(stdin_data);
-      cJSON_Delete(json);
-      free(tool_input_heap);
-      return wt_deny;
+      if (getcwd(route_cwd, sizeof route_cwd))
+         hook_cwd = route_cwd;
+      else
+         hook_cwd = "";
+   }
+   cJSON *local_updated = NULL;
+   if (strcmp(phase, "pre") == 0)
+   {
+      int route = attn_route_tool_input(sid, hook_cwd, tool_name, hook_input, &local_updated);
+      if (route == -2 || route == -3)
+      {
+         const char *reason = "Internal session workspace isolation failed; tool call blocked.";
+         if (cli_hook_client_uses_pretool_json())
+            emit_pretool_deny_json(reason);
+         else
+            fprintf(stderr, "aimee: %s\n", reason);
+         free(stdin_data);
+         cJSON_Delete(json);
+         free(tool_input_heap);
+         return cli_hook_client_uses_pretool_json() ? 0 : 2;
+      }
+      if (local_updated)
+      {
+         free(tool_input_heap);
+         tool_input_heap = cJSON_PrintUnformatted(local_updated);
+         if (tool_input_heap)
+            tool_input = tool_input_heap;
+         else
+         {
+            cJSON_Delete(local_updated);
+            local_updated = NULL;
+         }
+      }
    }
 
    /* Exclusive transport: with a remote configured, the whole pre_tool_check
@@ -910,10 +1125,16 @@ static int handle_hooks(int argc, char **argv, int json_output)
    if (!use_remote && !sock)
    {
       int deny = client_failopen_subagent_deny(phase, tool_name);
-      if (deny < 0)
+      /* A successful local rewrite is the complete worktree decision. Do not
+       * turn an otherwise invisible routing success into hook-warning noise
+       * just because the optional server-side policy plane is offline. */
+      if (deny < 0 && !local_updated)
          fprintf(stderr, "aimee: hooks %s: server unavailable — tool call allowed\n", phase);
+      if (deny < 0 && local_updated && cli_hook_client_supports_updated_input())
+         emit_pretool_updated_json(local_updated);
       free(stdin_data);
       cJSON_Delete(json);
+      cJSON_Delete(local_updated);
       free(tool_input_heap);
       return deny < 0 ? 0 : deny;
    }
@@ -935,10 +1156,6 @@ static int handle_hooks(int argc, char **argv, int json_output)
       }
    }
 
-   char hook_sid[64] = "";
-   const char *sid =
-       client_hook_payload_session_id(json, hook_sid, sizeof(hook_sid)) ? hook_sid : NULL;
-
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", method);
    cJSON_AddStringToObject(req, "tool_name", tool_name);
@@ -952,7 +1169,15 @@ static int handle_hooks(int argc, char **argv, int json_output)
     * AIMEE_HOOK_CLIENT when many agents hook into one server. */
    const char *hook_client = getenv("AIMEE_HOOK_CLIENT");
    if (hook_client && hook_client[0])
+   {
       cJSON_AddStringToObject(req, "harness_client", hook_client);
+      char hook_token[HOOK_SESSION_TOKEN_CAP];
+      if (sid && sid[0] && hook_session_token_load(aimee_home(), sid, hook_client, hook_token) == 0)
+      {
+         cJSON_AddStringToObject(req, "hook_token", hook_token);
+         memset(hook_token, 0, sizeof(hook_token));
+      }
+   }
 
    /* Resolve the harness-memory project key HERE, on the client, against the real
     * cwd / git repo / AIMEE_PROJECT_ID, and forward it: a remote server's
@@ -982,6 +1207,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
       if (deny >= 0)
       {
          cJSON_Delete(json);
+         cJSON_Delete(local_updated);
          free(tool_input_heap);
          return deny;
       }
@@ -1007,6 +1233,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
             emit_pretool_rewrite_unsupported_json(exit_code, msg_str);
             cJSON_Delete(resp);
             cJSON_Delete(json);
+            cJSON_Delete(local_updated);
             free(tool_input_heap);
             return 0;
          }
@@ -1043,6 +1270,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
             cJSON_Delete(out);
             cJSON_Delete(resp);
             cJSON_Delete(json);
+            cJSON_Delete(local_updated);
             free(tool_input_heap);
             return 0;
          }
@@ -1054,6 +1282,7 @@ static int handle_hooks(int argc, char **argv, int json_output)
          emit_pretool_deny_json(msg_str);
          cJSON_Delete(resp);
          cJSON_Delete(json);
+         cJSON_Delete(local_updated);
          free(tool_input_heap);
          return 0;
       }
@@ -1079,7 +1308,11 @@ static int handle_hooks(int argc, char **argv, int json_output)
       cJSON_Delete(resp);
    }
 
+   if (exit_code == 0 && local_updated && cli_hook_client_supports_updated_input())
+      emit_pretool_updated_json(local_updated);
+
    cJSON_Delete(json);
+   cJSON_Delete(local_updated);
    free(tool_input_heap);
    return exit_code;
 }
@@ -1247,13 +1480,14 @@ static int cli_clean(int argc, char **argv)
 
    /* Clean hooks and MCP entries from tool settings files */
    static const char *settings_files[] = {
-       "%s/.claude/settings.json",  "%s/.gemini/settings.json", "%s/.codex/hooks.json",
-       "%s/.codex/mcp-config.json", "%s/.copilot/config.json",  "%s/.copilot/mcp-config.json",
+       ".claude/settings.json",  ".gemini/settings.json", ".codex/hooks.json",
+       ".codex/mcp-config.json", ".copilot/config.json",  ".copilot/mcp-config.json",
    };
    char path[MAX_PATH_LEN];
    for (size_t i = 0; i < sizeof(settings_files) / sizeof(settings_files[0]); i++)
    {
-      snprintf(path, sizeof(path), settings_files[i], home);
+      if (snprintf(path, sizeof(path), "%s/%s", home, settings_files[i]) >= (int)sizeof(path))
+         continue;
       clean_settings_file(path);
    }
 
@@ -1694,6 +1928,16 @@ int main(int argc, char **argv)
    /* Fall back to <aimee_home>/remote.conf when no flag/env override. */
    cli_remote_load_persisted();
 
+   /* Installer/update seam: materialize detected client adapters without
+    * starting a server, probing delegates, or dispatching a user command. */
+   const char *integrations_only = getenv("AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY");
+   if (integrations_only && integrations_only[0] && strcmp(integrations_only, "0") != 0 &&
+       strcmp(integrations_only, "false") != 0)
+   {
+      ensure_client_integrations();
+      return 0;
+   }
+
    /* Keep local client registrations pointed at the thin client binary the
     * user actually invoked, even when the command itself forwards to a
     * long-lived server process. */
@@ -1709,10 +1953,13 @@ int main(int argc, char **argv)
       const char *c = argv[cmd_start];
       int hook_callback = strcmp(c, "attention-guard") == 0 || strcmp(c, "subagent-guard") == 0 ||
                           strcmp(c, "hooks") == 0 || strcmp(c, "user-prompt-submit") == 0 ||
-                          strcmp(c, "pre-compact") == 0;
+                          strcmp(c, "pre-compact") == 0 || strcmp(c, "session-start") == 0;
+      hook_callback = hook_callback || strcmp(c, "session-end") == 0;
       if (!hook_callback)
+      {
          client_integrations_set_delegate_probe(cli_delegate_probe);
-      ensure_client_integrations();
+         ensure_client_integrations();
+      }
    }
 
    if (cmd_start >= argc)
@@ -1775,7 +2022,7 @@ int main(int argc, char **argv)
    if (strcmp(cmd, "clean") == 0)
       return cli_clean(sub_argc, sub_argv);
    if (strcmp(cmd, "profile") == 0)
-      return cmd_profile_run(sub_argc, sub_argv);
+      return cmd_profile_run(sub_argc, sub_argv, json_output);
    if (strcmp(cmd, "claude-proxy") == 0)
       return cli_claude_proxy(sub_argc, sub_argv);
    /* optimize: dispatches optimize.export to its first-class /v1 route, then
@@ -1923,6 +2170,13 @@ int main(int argc, char **argv)
    /* SessionStart hook (settings.json wires it as `aimee session-start`). */
    if (strcmp(cmd, "session-start") == 0)
       return handle_session_start(json_output);
+   if (strcmp(cmd, "session-end") == 0)
+      return handle_session_end(json_output);
+
+   /* Client-neutral process boundary: allocate and bind the session before any
+    * host (Codex, Claude, OpenCode, or another executable) starts. */
+   if (strcmp(cmd, "launch") == 0)
+      return client_launch_exec(sub_argc, sub_argv);
 
    /* UserPromptSubmit hook (P1 per-turn context pre-injection for Claude Code;
     * settings.json wires it as `aimee user-prompt-submit`). */
@@ -1985,7 +2239,8 @@ int main(int argc, char **argv)
       return 0;
    }
 
-   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv))
+   if (client_command_has_subcommands(cmd) && wants_subcommand_help(sub_argc, sub_argv) &&
+       !(sub_argc == 0 && client_command_has_default_action(cmd)))
    {
       char *help_arg[] = {(char *)cmd};
       (void)json_output;
@@ -2034,8 +2289,10 @@ int main(int argc, char **argv)
     * server would try to realpath against its own filesystem and reject). */
    if (cli_v1_remote_endpoint_is_network())
    {
-      if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "add") == 0)
-         return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL);
+      if (strcmp(cmd, "workspace") == 0 && sub_argc >= 1 &&
+          (strcmp(sub_argv[0], "add") == 0 || strcmp(sub_argv[0], "prepare") == 0))
+         return cli_workspace_add_remote(sub_argc >= 2 ? sub_argv[1] : NULL,
+                                         strcmp(sub_argv[0], "prepare") == 0, json_output);
       if (strcmp(cmd, "index") == 0 && sub_argc >= 1 && strcmp(sub_argv[0], "scan") == 0)
          return cli_index_scan_remote(sub_argc - 1, sub_argv + 1);
       /* `agent add ... --key K` is forwarded verbatim: the server vaults the key

@@ -15,6 +15,7 @@ from benchmarks.common.llm_eval import (
     judge_majority,
     llm_cost_breakdown,
 )
+from benchmarks.common.result_schema import make_coverage
 from benchmarks.common.runner import build_summary, print_summary, write_result_file
 from benchmarks.locomo.common.dataset import load_cases
 
@@ -31,7 +32,9 @@ def main() -> int:
     harness = AimeeHarness()
     results = []
 
+    samples_run = 0
     for sample in load_cases(args.dataset, args.max_samples):
+        samples_run += 1
         tmp, home = harness.prepare_home()
         try:
             store_conversation(harness, home, sample)
@@ -91,6 +94,14 @@ def main() -> int:
         "agent_model": harness.current_model,
         "judge_runs": 3,
         "vector_runtime": collect_vector_runtime_metadata(),
+        # Records whether this run was capped, so a subsample cannot later be
+        # compared against a full-run baseline without the difference showing.
+        # See require_complete_run in benchmarks/common/result_schema.py.
+        "coverage": make_coverage(
+            max_samples=args.max_samples,
+            samples_run=samples_run,
+            questions_run=len(results),
+        ),
         "results": results,
         "summary": summary,
     }

@@ -8,12 +8,14 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "command_registry.h"
 #include <aimee/core/connection/auth.h>
 #include "server_http.h"
-#include "sandbox_pkg_proxy.h" /* delegate-sandbox package forward proxy (UDS demux) */
+#include "delegate_egress_adapter.h" /* fd handoff to the Go sole-egress module */
 #include "kb_identity_token.h"
 #include "server_write_tier.h"
 #include "server_write_tier_db1.h"
+#include "db1_client/db1.h" /* db1_store_probe — the mTLS ramp needs a live store */
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
@@ -21,7 +23,6 @@
 #include "server_mgmt_checkpoint_client.h"
 #include "pki.h" /* P8a per-request durable cert revocation/expiry re-check */
 #include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -60,9 +61,9 @@
 #include <unistd.h>
 #include <stdatomic.h>
 
-#define SHTTP_MAX_BODY            (4 * 1024 * 1024)
-#define SHTTP_MAX_ROUNDTABLE_BODY (128 * 1024 * 1024)
-#define SHTTP_BACKLOG             16
+/* SHTTP_MAX_BODY / SHTTP_MAX_ROUNDTABLE_BODY now live in headers/server.h so
+ * clients can honour the same cap. */
+#define SHTTP_BACKLOG 16
 /* ── per-session persona store ──────────────────────────────────────────── */
 
 #define SHTTP_MAX_SESSIONS 256
@@ -261,9 +262,8 @@ int server_http_authorize(int is_tcp, const char *bearer_cfg, const char *auth_h
    /* TCP requires a configured bearer and a matching Authorization header. */
    if (!have_bearer)
       return 503;
-   authorized = server_ct_equal(aimee_core_bearer_token(auth_header), bearer_cfg);
-   if (api_key_header && api_key_header[0])
-      authorized |= server_ct_equal(api_key_header, bearer_cfg);
+   authorized = server_http_bearer_matches(aimee_core_bearer_token(auth_header), bearer_cfg);
+   authorized |= server_http_bearer_matches(api_key_header, bearer_cfg);
    if (!authorized)
       return 401;
    return 0;
@@ -420,8 +420,8 @@ int route_session_primary_set(const char *session_id, const char *body, char *re
    cJSON_Delete(req);
 
    /* Validate the agent exists in the pool before pinning it. */
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, name))
+   agent_t agbuf;
+   if (agent_registry_find(name, &agbuf) != 0)
       return err_json(resp, cap, 404, "no such agent");
 
    session_primary_set(session_id, name);
@@ -534,18 +534,6 @@ int route_health(char *resp, int cap)
 int route_version(char *resp, int cap)
 {
    snprintf(resp, (size_t)cap, "{\"version\":\"%s\",\"service\":\"aimee-server\"}", AIMEE_VERSION);
-   return 200;
-}
-
-int route_capabilities(char *resp, int cap)
-{
-   /* The resources this HTTP surface currently serves; grows with the API. */
-   snprintf(resp, (size_t)cap,
-            "{\"capabilities\":[\"personas\",\"sessions\",\"models\",\"chat\",\"embeddings\","
-            "\"responses\",\"rules\",\"kb\",\"memory\",\"notes\",\"dashboard\",\"agents\","
-            "\"roadmap\",\"curiosity\",\"runs\",\"openapi\"],"
-            "\"version\":\"%s\",\"service\":\"aimee-server\"}",
-            AIMEE_VERSION);
    return 200;
 }
 
@@ -858,9 +846,8 @@ int route_native_post(server_http_completion_fn fn, const char *body, char *resp
    return fn(body ? body : "", resp, cap);
 }
 
-/* GET a native resource whose provider returns a heap JSON body (emitted +
- * freed here). 503 when unwired, 502 when the backend (aimee-kb) is
- * unreachable. `what` names the resource for the error messages. */
+/* GET a native resource whose provider returns heap JSON. Typed errors may
+ * declare `http_status`; otherwise 503 means unwired and NULL means 502. */
 int route_json_provider(server_http_json_provider fn, char *resp, int cap, const char *what)
 {
    if (!fn)
@@ -876,9 +863,12 @@ int route_json_provider(server_http_json_provider fn, char *resp, int cap, const
       snprintf(msg, sizeof(msg), "%s backend unavailable", what);
       return err_json(resp, cap, 502, msg);
    }
+   int status = server_http_declared_status(j);
+   if (!status)
+      status = 200;
    snprintf(resp, (size_t)cap, "%s", j);
    free(j);
-   return 200;
+   return status;
 }
 
 /* Dispatch a POST /v1/{chat/completions,completions} body to the registered
@@ -972,11 +962,10 @@ int loopback_rpc(const char *body, int body_len, char *resp, int resp_cap, uint3
       resp[--total] = '\0';
    if (total == 0)
       return err_json(resp, resp_cap, 502, "rpc produced no response");
-   cJSON *chk = cJSON_Parse(resp);
-   if (!chk)
+   int status = server_http_declared_status(resp);
+   if (!status)
       return err_json(resp, resp_cap, 502, "rpc response too large or malformed");
-   cJSON_Delete(chk);
-   return 200;
+   return status;
 }
 
 int server_http_route(const char *method, const char *path, const char *body, int body_len,
@@ -1161,31 +1150,13 @@ int server_http_sse_event_format(const char *event, const char *data_json, char 
    return (int)pos;
 }
 
-/* Typed-event emit for the Responses API: `event: <name>\ndata: <json>\n\n`. */
-static void sse_event_emit(void *ctx, const char *event, const char *data_json)
-{
-   int fd = *(int *)ctx;
-   int need;
-   char *frame;
-
-   if (!data_json)
-      return;
-   need = server_http_sse_event_format(event, data_json, NULL, 0);
-   frame = malloc((size_t)need + 1);
-   if (!frame)
-      return;
-   server_http_sse_event_format(event, data_json, frame, (size_t)need + 1);
-   write_all_fd(fd, frame, need);
-   free(frame);
-}
-
 /* Run a streaming /v1/responses request: write event-stream headers, let the
  * handler emit typed events; the Responses protocol has no `data: [DONE]`
  * terminator (it ends with the handler's `response.completed`). */
 static void handle_responses_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_responses_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_responses_stream_handler);
 }
 
 /* SSE for POST /v1/messages (Anthropic Messages API, stream:true). Emits the
@@ -1195,7 +1166,7 @@ static void handle_responses_stream(int fd, const char *body, const char *reques
 static void handle_messages_stream(int fd, const char *body, const char *request_id)
 {
    write_sse_headers(fd, request_id);
-   g_messages_stream_handler(body ? body : "", sse_event_emit, &fd);
+   server_http_sse_live_run(fd, body, g_messages_stream_handler);
 }
 
 static void handle_cli_session_stream(int fd, const char *id, const char *request_id)
@@ -1443,11 +1414,11 @@ void handle_conn(int fd, int is_tcp, int is_management)
    {
       /* Defense in depth beyond !is_tcp: confirm the socket really is AF_UNIX before
        * exposing the forward proxy, so a future is_tcp regression cannot open egress on
-       * the public TCP/TLS listener. sandbox_pkg_proxy_serve also refuses if !is_uds. */
+       * the public TCP/TLS listener. The adapter also refuses if !is_uds. */
       struct sockaddr_storage ss;
       socklen_t sl = sizeof(ss);
       int is_uds = getsockname(fd, (struct sockaddr *)&ss, &sl) == 0 && ss.ss_family == AF_UNIX;
-      sandbox_pkg_proxy_serve(fd, is_uds, buf, NULL, "sandbox");
+      delegate_egress_adapter_serve(fd, is_uds, buf, total, "sandbox");
       return;
    }
 
@@ -1497,10 +1468,8 @@ void handle_conn(int fd, int is_tcp, int is_management)
       return;
    }
 
-   /* A verified mTLS leaf is a first-class TCP authenticator. Re-check its
-    * durable roster row before the bearer gate so required-mode clients do not
-    * still depend on the shared bearer. This remains authentication only: the
-    * normal route/capability gates below still deny remote-write surfaces. */
+   /* mTLS is the transport layer, not a bearer substitute. Re-check its durable
+    * roster row; the independently rotating request bearer remains required. */
    int mtls_authenticated = 0;
    int management_authenticated = 0;
    int mtls_mode = server_tls_mtls_mode();
@@ -1622,16 +1591,23 @@ void handle_conn(int fd, int is_tcp, int is_management)
    effective_caps =
        server_http_enrollment_caps(effective_caps, is_tcp, mtls_authenticated,
                                    server_conn_io_has_ssl(fd), request_bearer, method, path);
-   /* Establish the per-request context (#3) only after authenticating the
-    * durable certificate, so downstream dispatch sees the same effective caps
-    * as the outer route gate. */
+   /* Capture context only after the certificate and effective caps are known. */
    server_http_populate_request_context(fd, is_tcp, buf, request_id, method, path, effective_caps);
-   if (first_user_principal[0])
-      request_context_override_principal(first_user_principal);
-   /* Authorize before reading the body: TCP requires either the durably valid
-    * client certificate above or a valid bearer; UDS relies on permissions. */
+   if (server_http_apply_caller_context(is_tcp, buf, first_user_principal, identity_present,
+                                        identity_claims.subject) != 0)
    {
-      char auth[512] = "";
+      send_response(fd, 403,
+                    "{\"error\":{\"message\":\"local peer uid does not resolve to a host "
+                    "account\",\"type\":\"authentication_error\"}}",
+                    request_id);
+      LOG_INFO("server.http", "%s %s -> 403 (unresolved UDS host account) req_id=%s", method, path,
+               request_id);
+      return;
+   }
+   /* Every ordinary TCP request needs a rotating bearer after mTLS. If
+    * Authorization carries caller proof, x-api-key carries that bearer. */
+   {
+      char auth[KB_IDENTITY_TOKEN_WIRE_MAX + 8] = "";
       char api_key[512] = "";
       char skey[256] = "";
       int has_auth = http_header(buf, "Authorization", auth, sizeof(auth));
@@ -1649,7 +1625,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * fresh one below when evidence emission is on. */
       ingress_preinject_set_turn_id("");
       anthropic_http_capture_request_headers(buf); /* parity: per-request anthropic-* hdrs */
-      int az = transport_authenticated
+      int az = management_authenticated
                    ? 0
                    : server_http_authorize_enrolled(is_tcp, g_bearer, has_auth ? auth : NULL,
                                                     has_api_key ? api_key : NULL, has_skey);
@@ -1702,12 +1678,22 @@ void handle_conn(int fd, int is_tcp, int is_management)
        * caller with nowhere to go: following QUICKSTART end to end now lands here
        * on the first kb write, and nothing on screen says a write-tier grant is
        * what is missing or who issues it. The mechanism is already public
-       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing. */
+       * (QUICKSTART 1.4, docs/UPGRADING.md), so pointing at it leaks nothing.
+       *
+       * It named `aimee kb grant set`, which does not dispatch: the server-side
+       * proxy for grant administration was removed deliberately (see
+       * v1_route_requires_uds -- proxying it meant aimee-server holding an
+       * administrative identity on aimee-kb), but this message was left pointing
+       * at it. An operator who hit this 403 followed it to a command that does
+       * not exist. Grants are administered against aimee-kb itself, by a
+       * principal with admin or team-lead authority in the target team. */
       send_response(fd, 403,
                     "{\"error\":{\"message\":\"this endpoint requires capabilities beyond the "
                     "presented token's scope. Over the network a bearer is read/query only "
-                    "until your subject holds a write-tier grant on this server; an operator "
-                    "issues one with `aimee kb grant set` (see docs/UPGRADING.md).\","
+                    "until your subject holds a write-tier grant on this server. Grants are "
+                    "administered on aimee-kb (POST /v1/write-tier-grants/set) by a principal "
+                    "with admin or team-lead authority in that team; aimee-server does not "
+                    "issue them. See docs/UPGRADING.md.\","
                     "\"type\":\"permission_error\"}}",
                     request_id);
       /* Count the requests the retired global would formerly have allowed, so an
@@ -1886,31 +1872,25 @@ void handle_conn(int fd, int is_tcp, int is_management)
          return;
       }
       body_len = (int)declared;
-      body = malloc((size_t)body_len + 1);
+      /* Allocate against bytes RECEIVED, not bytes claimed -- http_read_body
+       * grows as data arrives, with `body_len` (already validated against the
+       * route limit above) as the ceiling. */
+      const char *bs = strstr(buf, "\r\n\r\n");
+      int prefix_len = 0;
+      if (bs)
+      {
+         bs += 4;
+         prefix_len = (int)(buf + total - bs);
+         if (prefix_len < 0)
+            prefix_len = 0;
+         if (prefix_len > body_len)
+            prefix_len = body_len;
+      }
+      int already = 0;
+      body = http_read_body(fd, bs, prefix_len, body_len, &already);
       if (body)
       {
          int declared_body_len = body_len;
-         int already = 0;
-         const char *bs = strstr(buf, "\r\n\r\n");
-         if (bs)
-         {
-            bs += 4;
-            already = (int)(buf + total - bs);
-            if (already < 0)
-               already = 0;
-            if (already > body_len)
-               already = body_len;
-            if (already > 0)
-               memcpy(body, bs, (size_t)already);
-         }
-         while (already < body_len)
-         {
-            int n = server_conn_io_read(fd, body + already, (int)(body_len - already));
-            if (n <= 0)
-               break;
-            already += n;
-         }
-         body[already] = '\0';
          if (server_http_keepalive_peek() && already != declared_body_len)
          {
             server_http_keepalive_set(0);
@@ -1962,13 +1942,16 @@ void handle_conn(int fd, int is_tcp, int is_management)
       }
    }
 
-   /* Shadow-traffic mirror: fire-and-forget a copy of every completion request to
-    * a configured peer aimee before we serve it, so a build under test can be
-    * validated against live traffic without being deployed here. No-op unless a
-    * peer is configured. The X-Aimee-Shadow header on an INBOUND request means we
-    * are the peer receiving a mirror -- do not re-mirror (loop guard). Placed
-    * after the body is read and before dispatch so it covers both the streaming
-    * and buffered completion paths, and it never blocks or alters the real turn. */
+   /* Reject invalid JSON before streaming dispatch or completion mirroring. */
+   if (strcmp(method, "POST") == 0 &&
+       (shadow_mirror_is_mirrorable_path(path) || strcmp(path, "/v1/chat/stream") == 0) &&
+       !server_http_json_body_is_single_value(body, body_len))
+   {
+      send_response(fd, 400, "{\"error\":\"invalid JSON body\"}", request_id);
+      free(body);
+      return;
+   }
+   /* Mirror completion traffic; the inbound shadow header prevents loops. */
    if (strcmp(method, "POST") == 0 && shadow_mirror_is_mirrorable_path(path))
    {
       char shadow_hdr[8] = "";
@@ -2004,7 +1987,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
     * reused by ingress_preinject_build for the emitted retrieval_event. Gated
     * on the endpoint + flag so flag-off / non-ingress requests are byte-
     * identical on the wire (config is read only for these three paths, which
-    * already pay a config_load inside the ingress builder). */
+    * already pay a legacy_config_read inside the ingress builder). */
    if (strcmp(method, "POST") == 0 &&
        (strcmp(path, "/v1/chat/completions") == 0 || strcmp(path, "/v1/completions") == 0 ||
         strcmp(path, "/v1/responses") == 0))
@@ -2012,7 +1995,15 @@ void handle_conn(int fd, int is_tcp, int is_management)
       if (config_kb_evidence_emit_enabled())
       {
          char tid[40];
-         ingress_preinject_mint_turn_id(tid, sizeof(tid));
+         if (ingress_preinject_mint_turn_id(tid, sizeof(tid)) != 0)
+         {
+            send_response(fd, 503,
+                          "{\"error\":{\"message\":\"secure entropy is unavailable\","
+                          "\"type\":\"service_unavailable\"}}",
+                          request_id);
+            free(body);
+            return;
+         }
          ingress_preinject_set_turn_id(tid);
       }
    }
@@ -2081,7 +2072,7 @@ void handle_conn(int fd, int is_tcp, int is_management)
    g_rpc_conn_caps = CAPS_READ_ONLY;
    server_http_identity_clear();
    send_response(fd, status, resp, request_id);
-   LOG_INFO("server.http", "%s %s -> %d req_id=%s", method, path, status, request_id);
+   server_http_log_access(method, path, status, request_id);
    free(resp);
    free(body);
 }
@@ -2154,7 +2145,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[uds_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 0, 0, 0))
          {
-            handle_conn(fd, 0, 0);
+            handle_conn_inline(fd, 0);
             close(fd);
          }
       }
@@ -2163,7 +2154,7 @@ static void *listener_thread(void *arg)
          int fd = server_conn_accept(pfds[tcp_idx].fd);
          if (fd >= 0 && !conn_offload(fd, 1, 0, 0))
          {
-            handle_conn(fd, 1, 0);
+            handle_conn_inline(fd, 1);
             close(fd);
          }
       }
@@ -2376,13 +2367,18 @@ int server_http_start(const char *uds_path, int tcp_port, int tls_port, const ch
     * vault's attested write path. */
    if (tls_port > 0)
    {
-      if (server_tls_init_default() == 0)
+      int tls_rc = server_tls_wait_for_store(db1_store_probe) ? server_tls_init_default()
+                                                              : SERVER_TLS_INIT_ERR_MTLS_RAMP;
+      if (tls_rc == SERVER_TLS_INIT_OK)
          g_tls_fd = tcp_listen(tls_port, bearer_token, 1 /* TLS: may bind 0.0.0.0 */);
       else
-         /* This is the vault's attested write path — make a misconfigured cert/key
-          * loud (the UDS listener still comes up; the operator must fix the cert). */
-         LOG_ERROR("server.http", "tls_port=%d set but TLS cert/key not loadable; TLS DISABLED",
-                   tls_port);
+         /* This is the vault's attested write path, so the failure is loud (the UDS
+          * listener still comes up). It now names WHICH failure: this line said
+          * "cert/key not loadable" for all three, including a ramp self-test that
+          * could not reach DB1, sending the operator to inspect a certificate that
+          * was never the problem. */
+         LOG_ERROR("server.http", "tls_port=%d set but TLS could not start: %s; TLS DISABLED",
+                   tls_port, server_tls_init_result_str(tls_rc));
    }
 
    if (management.enabled)

@@ -75,6 +75,56 @@ extern "C"
     * bad args. */
    int memory_extract_patterns(const char *text, pattern_triple_t *out, int max);
 
+   /* Triple provider: returns 0 and writes the count to *count, or non-zero if
+    * it could not produce an answer at all. */
+   typedef int (*memory_pattern_extractor_fn)(const char *text, pattern_triple_t *out, int max,
+                                              int *count);
+
+/* Bound on the attribute a retraction names, matching the buffer the production
+ * caller (db2_typed_fact_ingress) gives memory_pattern_possessive_attr. The
+ * attribute is truncated to it there, and a truncated attribute normalizes to a
+ * different relation name, so the module has to truncate at the same place. */
+#define MEMORY_PATTERN_ATTR_MAX 128
+
+   /* What the cheap pre-model scan learns about one turn. */
+   typedef struct
+   {
+      int is_retraction;                     /* a retraction cue is present */
+      int has_attr;                          /* a "my <attr>" possessive is present */
+      char attr[MEMORY_PATTERN_ATTR_MAX];    /* the attribute, when has_attr */
+   } memory_pattern_turn_t;
+
+   /* Scan a turn for a retraction cue and the attribute it names, in one pass.
+    * Returns 0 and fills `out`, or -1 if no answer could be produced.
+    *
+    * The two questions are asked together because their only caller asks them
+    * together, once per turn, and a module answering them separately would cost
+    * two round trips for one turn. With no scanner registered this is exactly
+    * memory_pattern_is_retraction plus memory_pattern_possessive_attr. */
+   int memory_pattern_scan_turn(const char *text, memory_pattern_turn_t *out);
+
+   /* Turn scanner: returns 0 and fills `out`, or non-zero if it could not
+    * answer. */
+   typedef int (*memory_pattern_turn_scanner_fn)(const char *text, memory_pattern_turn_t *out);
+
+   /* Route the turn scan through `scanner` (the memory module over the bus).
+    * Pass NULL to go back to the local scan.
+    *
+    * Authoritative, and its failure is reported rather than guessed at. The
+    * caller must not retract on a -1: this scan drives deletion, and the safe
+    * side of a broken module is leaving a fact the user asked to forget (they
+    * can ask again) rather than deleting one they did not. */
+   void memory_extract_register_turn_scanner(memory_pattern_turn_scanner_fn scanner);
+
+   /* Route extraction through `extractor` (the memory module over the bus)
+    * instead of running it in-process. Pass NULL to go back to local extraction.
+    *
+    * A registered extractor is authoritative: when it fails, memory_extract_patterns
+    * returns -1 rather than falling back or reporting zero triples. Zero means the
+    * text held no facts; a broken module must not be able to say that. -1 is the
+    * function's existing bad-arg code, and the caller already distinguishes it. */
+   void memory_extract_register_extractor(memory_pattern_extractor_fn extractor);
+
 #ifdef __cplusplus
 }
 #endif

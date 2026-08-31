@@ -10,6 +10,8 @@
 
 #include <stddef.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 char **git_cred_inject_build_env_for_repo(const char *principal, const char *remote_url,
                                           const char *repo_dir, const char *preferred_token,
@@ -76,7 +78,20 @@ int git_identity_resolve_with(const char *principal,
                               char *name_out, size_t name_len, char *email_out, size_t email_len)
 {
    (void)principal;
+   if (getenv("AIMEE_TEST_GIT_IDENTITY_FROM_CONFIG"))
+   {
+      if (!read_cfg || !read_cfg("user.name", name_out, name_len, ud) ||
+          !read_cfg("user.email", email_out, email_len, ud))
+      {
+         if (name_out && name_len)
+            name_out[0] = '\0';
+         if (email_out && email_len)
+            email_out[0] = '\0';
+         return 0;
+      }
+      return 1;
+   }
    (void)read_cfg;
-   (void)ud; /* the stub always has a sealed identity, so no fallback runs */
+   (void)ud; /* normally the stub always has a sealed identity */
    return git_identity_get(name_out, name_len, email_out, email_len);
 }

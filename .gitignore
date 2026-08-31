@@ -4,9 +4,16 @@
 /aimee-server
 aimee-forwarder
 /aimee-mcp
+/aimee-webchat
 /aimee-kb
+/aimee-kb-worm
 /aimee-witness-verify
 /aimee-kb-resolver
+# `make all` builds this beside the six above and it was the one left out, so a
+# built tree always showed one untracked binary -- the same shape as the note
+# below, which records that a `git add -A` over exactly this gap committed
+# artifacts once already.
+/aimee-delegate-egress
 # Provisioning and authority binaries. These were absent, so a `git add -A` after
 # building them committed the artifacts — which is exactly what happened once.
 /aimee-kb-jwks-publish
@@ -23,6 +30,12 @@ aimee-forwarder
 /aimee-negation-eval
 /aimee-blast-radius-eval
 /aimee-runtime-web
+# The Go binaries, under the names they are deployed as: server-go/cmd/aimee-server
+# builds to aimee-wfe and cmd/aimee-module to aimee-module. Their C siblings are
+# ignored above; these two were not, so a build left them as untracked noise in
+# every `git status` (and `gh pr create` warned about them).
+/aimee-wfe
+/aimee-module
 # `go build ./...` inside runtime-web/ drops the binary next to its source; it was
 # tracked for a while and rode along in unrelated commits.
 runtime-web/runtime-web
@@ -31,6 +44,7 @@ src/build/
 src/*.a
 src/server.log
 src/tests/unit-test-*
+src/tests/bench-perf
 src/tests/fuzz_kb_mgmt_token_authority_ipc
 src/tests/fuzz_server_mgmt_read_config
 /build/
@@ -48,10 +62,14 @@ src/tests/fuzz_server_mgmt_read_config
 # Session state
 session-state.json
 
-# Per-project aimee state (local/environment-specific, never committed)
-.aimee/
-!.aimee/project.yaml  # aimee's own committed delegate-sandbox toolchain declaration
+# Per-project aimee state (local/environment-specific, never committed).
+# Keep aimee's own delegate-sandbox toolchain declaration visible to Git.
+/.aimee/*
+!/.aimee/project.yaml
 .aimee-rules
+
+# Local Compose overrides can contain enrollment material and credentials.
+/.env
 
 # IDE
 .idea/
@@ -198,14 +216,46 @@ scratchpad/
 .stack-smoke.sh
 .modelcache-test.sh
 .hashcmp.sh
+.hashcheck.sh
 .ocicheck.sh
 .health-probe.sh
 .prefix-test.sh
 .matrix-test.sh
 .verify-ghcr.sh
+.finish-move.sh
+.move-containerd.sh
+.restart-matrix.sh
+.run-remote.sh
+.unit.log
+.upgrade-rehearsal/
 .review-guide.md
 .upgrade-*.sh
 .start-*.sh
 .ship.sh
 .mt.tgz
 .mt.b64
+
+# Transient CI diagnostics, editor backups, and one-off remote deployment
+# handoffs. These are local debugging products, not source or durable evidence.
+/.ci-logs/
+*.bak
+/shipnow*.txt
+/installcmd*.txt
+/ic-*.txt
+/COST-FINDINGS.md
+/*.tgz
+
+# Benchmark scratch: analysis scripts and deploy helpers for the ponytail codex
+# comparison. These are working files for one investigation, not product code —
+# they were committed by mistake and belong with the bench notes, not the repo.
+/.deploytmp/
+/*.py
+/*.sh
+
+# Transient deploy/sync bundles for the test container.
+.synctmp/
+src/.testlogs/
+benchmarks/compaction-quality/.cache-ab/
+
+# transient build/test logs written by local verification runs
+.*.log

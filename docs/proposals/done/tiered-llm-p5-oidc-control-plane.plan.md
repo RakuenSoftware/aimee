@@ -1,9 +1,13 @@
-# P5 implementation plan — security-closed control-plane slices
+# P5 implementation plan: security-closed control-plane slices
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   complete; P5-B composition is the next implementation slice.
 - **Proposal:** `tiered-llm-p5-oidc-control-plane.md`.
 - **Existing substrate:** P1 composite identity/OIDC/JWKS verification, P7 custody and
@@ -20,19 +24,19 @@ rejection, propagated actor identity, and the authoritative kb WORM intent all e
 P5 therefore lands as four ordered, independently security-closed slices. No slice
 before P5-C exposes a management write.
 
-1. **P5-A — authoritative registry and role-separated certificate topology.** Build
+1. **P5-A, authoritative registry and role-separated certificate topology.** Build
    the primary-backed enrollment/heartbeat/lookup substrate and prove two nodes use
    distinct `clientAuth` and `serverAuth` leaves. The management action route remains
    fail-closed.
-2. **P5-B — pinned reverse mTLS and nonce-bound revocation status.** Add connect-time
+2. **P5-B, pinned reverse mTLS and nonce-bound revocation status.** Add connect-time
    address revalidation/IP pinning, enrolled server-certificate pinning, a dedicated
    status-authority credential, and the server challenge/staple protocol. Enable only
    a read-only health probe.
-3. **P5-C — operator authorization and audited single-server actions.** Add kb token
+3. **P5-C, operator authorization and audited single-server actions.** Add kb token
    minting, authenticated generation-bearing JWKS lifecycle, durable server-local
    `jti` consumption, primary kb WORM intent/outcome, and the real `remote_writes` /
    capability-gated server action. This is the first slice allowed to mutate.
-4. **P5-D — console/OIDC propagation and fleet UX.** Preserve the composite OIDC or
+4. **P5-D, console/OIDC propagation and fleet UX.** Preserve the composite OIDC or
    break-glass actor through console→kb, add the server-scoped console allowlist and
    fleet drill-down, and finish OpenAPI/route coverage. Bulk orchestration remains a
    later proposal.
@@ -41,7 +45,7 @@ P7 supplies custody, key-use admission, anti-rollback building blocks, and the W
 ledger. P5 owns the revocation-generation schema, online status protocol, management
 token/JWKS contract, durable `jti` store, and management audit state machine.
 
-## P5-A — exact next slice
+## P5-A: exact next slice
 
 **Delivery:** complete. The primary-backed pending/finalize/list/snapshot/heartbeat
 state machine, role-separated two-key issuance, server heartbeat worker, hard-disabled
@@ -131,7 +135,7 @@ an application header.
 - A heartbeat failure never changes registry authority fields. A zero-row update is
   a denial, not success.
 
-## P5-B — pinned reverse mTLS and nonce-bound status
+## P5-B: pinned reverse mTLS and nonce-bound status
 
 **Delivery:** foundation complete. The primary status authority, strict signed
 status protocol, endpoint/TLS pinning substrate, server nonce/high-water verifier,

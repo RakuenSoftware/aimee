@@ -1,4 +1,8 @@
-# Proposal: Central agent-memory interception — redirect any agent's local memory into the aimee-server store
+# Proposal: Central agent-memory interception: redirect any agent's local memory into the aimee-server store
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 - **State:** done
 - **Completed:** 2026-06-28
@@ -10,12 +14,12 @@
   project key, real-time inotify backstop) and two e2e-found fixes (#817 startup segfault,
   #819 split-server wiring). The approved test plan was executed (9/9 unit suites + a full
   dev split-server e2e) and surfaced one further fix (#829 per-client scoping on a
-  shared server). **"Done" = the v1 feature is built, merged, and dev-validated — it does
+  shared server). **"Done" = the v1 feature is built, merged, and dev-validated. It does
   NOT mean production-ready/GA or safe for untrusted/remote/multi-tenant use**; the
   security-relevant GA gates (prompt-injection provenance, RM3/4/8 remote auth, the
   cross-client trust boundary, the non-Linux platform window) are recorded in
   "Implementation status → Close-out scope". Design history: roundtable reviews R1 (design, 28 items),
-  R2 (degraded), R3/R4 (clean) — see the "Review revisions" sections.
+  R2 (degraded), R3/R4 (clean). See the "Review revisions" sections.
 - **Thesis:** An agent's *local, self-owned* memory (today: the Claude Code harness
   file-memory at `~/.claude/projects/<proj>/memory/*.md` + `MEMORY.md`, written via the
   `Write`/`Edit` tools) should not be owned by the agent. aimee already hooks every
@@ -29,37 +33,37 @@
 Intercept **any** agent writing to its own local memory and redirect the write to a
 single central store, **without** the agent being able to keep a private copy:
 
-1. **Capture** — agent memory writes are detected at the existing cross-client hook seam
+1. **Capture**: agent memory writes are detected at the existing cross-client hook seam
    and persisted to the aimee-server store.
-2. **Block** — the agent's own write is denied; the agent never owns the bytes on disk.
-3. **Re-materialize** — aimee (not the agent) writes the authoritative file back, so
+2. **Block**: the agent's own write is denied; the agent never owns the bytes on disk.
+3. **Re-materialize**: aimee (not the agent) writes the authoritative file back, so
    native reads (`Read`/`Glob`/`Grep`) and the harness's automatic recall keep working.
-4. **Share** — memory is keyed per-project and shared across every agent/session/client
+4. **Share**: memory is keyed per-project and shared across every agent/session/client
    working that project on the host.
 
-Destination is **DB1** — aimee-server's own SQLite database
+Destination is **DB1**, aimee-server's own SQLite database
 (`~/.config/aimee/aimee.db`, `src/db1/`), opened by the server at
 `src/server/server.c:1616` via `db1_init` (`src/db1/db1_init.c:54`). **Explicitly not**
 the kb's db2/Postgres, where the existing `memory.store` RPC lands
-(`src/kb/kb_service_memory.c:1418` → `src/db2/kb_service_backend_memory.c:1171`). This is
+(`src/kb/kb_service_memory.c:1418` → `src/modules/db2/c/kb_service_backend_memory.c:1171`). This is
 a new, parallel store; the kb memory path is untouched.
 
 ## §0 What already exists (so we don't rebuild it)
 
-- **Cross-client hook seam — LIVE.** `configure-hooks.sh` installs a `PreToolUse` hook on
+- **Cross-client hook seam, LIVE.** `configure-hooks.sh` installs a `PreToolUse` hook on
   `Edit|Write|MultiEdit|Bash|Read|Glob|Grep|Task` → `aimee hooks pre` for Claude Code,
   Gemini CLI, Codex CLI, and GitHub Copilot, each with `AIMEE_HOOK_CLIENT=<client>`.
   Handler: `src/cmd_hooks.c` (`cmd_hooks`, line 116) → `pre_tool_check`
   (`src/guardrails_orchestrator.c:1196`).
-- **Tool-name normalization — LIVE.** `guardrails_canonical_tool_name`
+- **Tool-name normalization, LIVE.** `guardrails_canonical_tool_name`
   (`src/guardrails_orchestrator.c:121`) maps per-client tool names to one vocabulary
   (`write_file`→`Write`, etc.), so detection logic is written once.
-- **Block + feedback mechanism — LIVE.** The pre handler can deny a tool (exit 2 /
-  PreToolUse JSON, `src/cmd_hooks.c:402`) and feed text back to the model — the same
+- **Block + feedback mechanism, LIVE.** The pre handler can deny a tool (exit 2 /
+  PreToolUse JSON, `src/cmd_hooks.c:402`) and feed text back to the model. The same
   mechanism `scripts/hooks/redirect_grep.py` uses to redirect `grep`.
-- **DB1 store — LIVE.** Server-owned SQLite with a per-session key/value table
+- **DB1 store, LIVE.** Server-owned SQLite with a per-session key/value table
   `working_memory` (`src/db1/wm.c`, `src/db1/schema.sql`). New accessors model on it.
-- **Session-start hook — LIVE.** `aimee session-start` (`src/cli_session_start.c`) already
+- **Session-start hook, LIVE.** `aimee session-start` (`src/cli_session_start.c`) already
   runs at startup/resume/compact and POSTs to the server; the natural place to hydrate.
 - aimee does **not** today reference the Claude memory dir or `MEMORY.md` anywhere (the
   only `~/.claude/projects` touchpoint is reading transcripts at `src/config_save.c:1192`).
@@ -67,14 +71,14 @@ a new, parallel store; the kb memory path is untouched.
 ## §1 Source of truth: DB1 is authoritative; the file is an aimee-owned projection
 
 The single most important invariant (R1 #1). DB1 holds the canonical memory. The on-disk
-`memory/*.md` files are a rendered cache that aimee rebuilds — DB1 wins on any conflict.
+`memory/*.md` files are a rendered cache that aimee rebuilds. DB1 wins on any conflict.
 
-**Threat model — be honest about what is and isn't intercepted (R3 #2).** We do **not**
+**Threat model, be honest about what is and isn't intercepted (R3 #2).** We do **not**
 claim "every mutation path is intercepted." We intercept exactly **agent-tool-mediated**
-writes/deletes (the seam fires only on tool calls — §0). Writes that bypass the tool layer
-entirely — a human in `vim`, IDE autosave, a sync client (Dropbox/Syncthing), a container
+writes/deletes (the seam fires only on tool calls, §0). Writes that bypass the tool layer
+entirely, a human in `vim`, IDE autosave, a sync client (Dropbox/Syncthing), a container
 volume mount, `python -c 'open(...).write()'` via `Bash`, or an agent **not** installed
-with an `AIMEE_HOOK_CLIENT` hook — are **not** captured at write time. They are caught by a
+with an `AIMEE_HOOK_CLIENT` hook, are **not** captured at write time. They are caught by a
 **session-start content-hash audit** (§5) that compares every on-disk file against its DB1
 row and, per the deterministic reconcile policy, makes disk match DB1 (or imports
 disk-only files). So the precise invariant is:
@@ -91,7 +95,7 @@ disk-only files). So the precise invariant is:
   hook installed to prove it.
 
 Accepted scope: **single host.** DB1 is local SQLite, so "shared across all agents/
-sessions" means *on this machine*. Cross-machine sharing (CI, remote boxes, teammates) is
+sessions" means *on this machine*; Cross-machine sharing (CI, remote boxes, teammates) is
 a **non-goal** here and a documented future path (sync DB1→db2, or write-through to db2),
 chosen deliberately per the "server DB, not kb DB" requirement (R1 #10).
 
@@ -126,7 +130,7 @@ CREATE TABLE IF NOT EXISTS harness_memory (
 ```
 
 Accessors: `harness_memory_upsert`, `_get`, `_list(project)`, `_search(project, query)`,
-`_tombstone(project, name)`, `_tombstone_prefix(project, dir)` (bulk/dir delete — §3),
+`_tombstone(project, name)`, `_tombstone_prefix(project, dir)` (bulk/dir delete, §3),
 `_render(project, name, client)`, `_render_index(project, client)`. By default `_list`/
 `_get`/`_search` return only live rows (`deleted_at IS NULL`); tombstoned rows require an
 explicit `include_deleted` flag (R3 #24).
@@ -138,19 +142,19 @@ explicit `include_deleted` flag (R3 #24).
   (§4). This resolves the earlier contradiction (raw per-client bytes under a single
   `(project,name)` key would let two clients silently clobber each other, and hydrating
   client A's bytes to client B was wrong). `last_client` is provenance only. **Trade-off:**
-  canonicalization is deliberately *not* byte-exact round-trip — a client re-reading its own
+  canonicalization is deliberately *not* byte-exact round-trip. A client re-reading its own
   write sees the canonically-rendered, semantically-equivalent form (R3 #21, see Risks).
 - **Nested names (R3 #15).** `name` is the relative path under the memory dir, so
   `memory/topics/auth.md` ↔ `name='topics/auth'`. Slashes are allowed *between* validated
   components; the per-component charset still forbids `..` and leading/trailing dots. (Dots
-  *within* a component — `foo.bar` — are allowed; only `..` and edge dots are rejected,
+  *within* a component (`foo.bar`) are allowed; only `..` and edge dots are rejected,
   resolving the earlier regex-vs-prose ambiguity.)
 - **`content_hash` = SHA-256** over the canonical tuple (R3 #13); hook and server share one
   implementation. Used for retry-after-deny idempotency *and* as the reconcile compare key.
 - **Tombstone semantics** (R2 #6): `_tombstone` sets `deleted_at` on the live
   `(project,name)` row; hydration removes the file. A later write to the same
   `(project,name)` **intentionally** revives it (clears `deleted_at`, replaces content).
-  `content_hash` is not the delete/resurrection key — the `UNIQUE(project,name)` row is — so
+  `content_hash` is not the delete/resurrection key (the `UNIQUE(project,name)` row is) so
   a same-name re-create is a normal revive.
 - **Encoding** (R2 #8): bodies are UTF-8 text; non-UTF-8 / binary payloads are rejected at
   capture (memory files are markdown).
@@ -178,7 +182,7 @@ memory mutation if it is
   **or**
 - a `Bash` command whose write target (`>`, `>>`, `tee`, `sed -i`, heredoc) resolves under
   a registered memory dir (best-effort; process substitution, subshells, eval-indirection
-  and symlink targets can evade it — see Risks for the honest limit) (R1 #3, R2 #4); **or**
+  and symlink targets can evade it. See Risks for the honest limit) (R1 #3, R2 #4); **or**
 - a **per-file delete** (`Bash` `rm`/`unlink`, or a client delete tool) targeting a
   registered memory file → tombstone that row; **or**
 - a **bulk/directory destructive op** (`rm -rf <memorydir>`, `mv`/`rsync --delete`/
@@ -194,16 +198,16 @@ memory mutation if it is
    the relpath, `type=fact`, `description` NULL (R1 #17).
 2. **Resolve + validate the path (R2 #2, R3 #9).** `realpath`-resolve the target, *chasing
    all symlinks first*, then assert `realpath(dirname(target))` is a prefix of
-   `realpath(project_memory_dir)` — rejecting any path that escapes the memory dir via a
+   `realpath(project_memory_dir)`, rejecting any path that escapes the memory dir via a
    symlink/bind-mount into `/etc`, a sibling project, or elsewhere (R4 #3). Validate each
    `name` component against `^[A-Za-z0-9._-]{1,64}$` and reject any `..`, leading/trailing
    `.`, abs path, or null byte. Enforced **both** in the hook and server-side.
 3. **POST to the running server** `/v1/harness_memory/upsert` (new route). **The server is
-   the sole DB1 writer — the hook NEVER writes DB1 directly** (R1 #4, #11; R2 #1). No
+   the sole DB1 writer. The hook NEVER writes DB1 directly** (R1 #4, #11; R2 #1). No
    direct-SQLite fallback races it. If `content_hash` matches the live row, it is a no-op
    (R1 #26).
 4. **The server holds the per-`(project,name)` mutex across the WHOLE
-   upsert→rematerialize sequence (R4 #2)** — not just the DB write — so the DB1 row and its
+   upsert→rematerialize sequence (R4 #2)** (not just the DB write) so the DB1 row and its
    on-disk file are updated atomically as a unit. Without this, two concurrent writes to the
    same name could interleave (A upserts, B upserts, A rematerializes) and leave disk
    showing A while DB1 holds B. Under the lock: upsert the canonical row, then re-materialize
@@ -212,37 +216,37 @@ memory mutation if it is
    If the target dir is on a different filesystem (EXDEV would force a non-atomic copy), it
    **refuses to materialize and spills instead** (R3 #9/#22). Atomic same-fs `rename` means a
    concurrent reader sees the old or new file, never a partial one, and there's no empty-read
-   window (R1 #7; R2 #3 — advisory locks unnecessary). A `_tombstone_prefix` bulk delete is
+   window (R1 #7; R2 #3, advisory locks unnecessary). A `_tombstone_prefix` bulk delete is
    likewise one all-or-nothing DB1 transaction, with every per-row outcome audited (R4 #4).
 5. Hook returns a **deny-with-redirect** worded as success, e.g. *"Saved to aimee memory
-   (id=N); the on-disk file now reflects your content — do not re-write it."* (R1 #14).
+   (id=N); the on-disk file now reflects your content. Do not re-write it."* (R1 #14).
 
-**Two deny kinds — disambiguated (R4 #6).** "Deny" is overloaded; the design uses two
+**Two deny kinds, disambiguated (R4 #6).** "Deny" is overloaded; the design uses two
 distinct verdicts, and reconcile must respect the difference:
 - **Redirect-deny** (normal write; per-file & bulk delete): deny the agent's *raw tool call*
-  but **aimee performs the operation itself** — upsert/tombstone in DB1 + re-materialize. The
+  but **aimee performs the operation itself**, upsert/tombstone in DB1 + re-materialize. The
   intent IS effected, just through aimee, never the agent's raw bytes.
 - **Reject-deny** (MEMORY.md write/delete; unsupported/invalid ops): deny **and change no
-  state** — no upsert, no tombstone, no file mutation. A reject-deny must be incapable of
+  state**, no upsert, no tombstone, no file mutation. A reject-deny must be incapable of
   causing a later reconcile to alter on-disk state. In particular, a denied delete of
   `MEMORY.md` produces **no tombstone**; the index is simply re-rendered.
 
-**Deny / liveness contract (R3 #4) — one delivery mechanism, applied uniformly.** Both deny
+**Deny / liveness contract (R3 #4). One delivery mechanism, applied uniformly.** Both deny
 kinds are delivered as a *deny-with-message that does not error the agent*. The mechanism is
 per-client and must be specified, not assumed:
 - **Claude Code:** exit 0 with stdout JSON
   `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny",
   "permissionDecisionReason":"<msg>"}}`. (A *non-zero* exit is the harder "block with
-  stderr" — we do **not** use it for the success/redirect path; the earlier "non-zero exit"
+  stderr". We do **not** use it for the success/redirect path; the earlier "non-zero exit"
   wording was wrong.)
 - **Gemini / Codex / Copilot:** use each client's documented deny-with-feedback equivalent.
   Any client **without** a deny-with-message hook protocol is **out of v1 scope** and listed
   as unsupported (R3 #4, #10) rather than silently mis-handled.
 
-**Failure policy — liveness-wins, spill-always (R1 #6; R2 #1; R3 #3/#4/#8).** A successful
+**Failure policy, liveness-wins, spill-always (R1 #6; R2 #1; R3 #3/#4/#8).** A successful
 capture **always** writes a spill record too, so a server/DB crash between upsert and
 materialize still reconciles. If the server is unreachable: write the spill, **ALLOW** the
-original tool (the agent writes its own file this once — caught and canonicalized at the
+original tool (the agent writes its own file this once, caught and canonicalized at the
 next session-start audit), and log a `server-unreachable` interception event (§7). We never
 deny-without-persisting (no silent drop) and never block the agent on our own outage.
 
@@ -255,11 +259,11 @@ deny-without-persisting (no silent drop) and never block the agent on our own ou
 - **Durability:** `fsync` the spill (and its dir) before the hook exits.
 - **Retention:** consumed by session-start reconcile then deleted; a max-age cap prevents
   unbounded growth.
-- **Recovery:** the reconcile parser treats a truncated/partial spill as opaque — logs it
+- **Recovery:** the reconcile parser treats a truncated/partial spill as opaque. Logs it
   and does **not** auto-replay (documented as the one place data *can* be lost: a hook crash
   mid-spill-write). Everything else round-trips.
 - **Spill-write failure (R4 #8):** if the spill itself can't be written/fsync'd (disk full,
-  bad perms, corrupt `AIMEE_HOME`) this is the irreducible failure — emit a loud stderr
+  bad perms, corrupt `AIMEE_HOME`) this is the irreducible failure. Emit a loud stderr
   error and the audit event (§7), still **ALLOW** the tool (no block), and do not pretend it
   persisted. This is the only "data may be lost" path and it is surfaced, never silent.
 
@@ -268,10 +272,10 @@ deny-without-persisting (no silent drop) and never block the agent on our own ou
 - **Per-client rendering:** the server renders each canonical row (§2) back into the target
   client's frontmatter/body format and `_render_index` produces that client's index file.
 - **MEMORY.md is a server-rendered index** (`type='index'`), regenerated from the project's
-  live rows. An agent `Write`/`Edit` to `MEMORY.md` is **denied with a guiding message** —
-  *not* silently discarded (which would cause an endless re-write loop). The deny reason
+  live rows. An agent `Write`/`Edit` to `MEMORY.md` is **denied with a guiding message**,
+*not* silently discarded (which would cause an endless re-write loop). The deny reason
   tells the agent the correct affordance: *"MEMORY.md is auto-rendered from your memory
-  entries; to add or change one, Write a file under `memory/<name>.md`."* (R3 #6). Discarded/
+  entries; to add or change one, Write a file under `memory/<name>.md`."* (R3 #6); Discarded/
   denied MEMORY.md writes are logged (§7).
 - Writes are atomic (`mkstemp` in the target dir → `fsync` → `rename`, §3 step 4) with a
   documented file mode.
@@ -286,18 +290,18 @@ session without waiting for the next session-start (R4 #1).
 at session-start regardless, so on-disk state is always pulled into DB1 even if no hook is
 installed. Session-start additionally **verifies the memory hook is installed** and, if it
 is missing or mis-wired, emits a loud warning to the user (and an audit event, §7) that
-**at-write interception is OFF for this session — memory is import-only until the hook is
+**at-write interception is OFF for this session, memory is import-only until the hook is
 restored**. So a missing hook degrades to "session-start import" (no data loss), never to
 silent escape. **Durability boundary:** only on-disk state present *at a reconcile* is
 captured; an external edit made and then reverted entirely within one session, between
-reconciles, is not observed (R4 #1) — documented, with the manual trigger as the mitigation.
+reconciles, is not observed (R4 #1), documented, with the manual trigger as the mitigation.
 
 1. **Consume spills** first (§3): replay each well-formed spill envelope through the normal
    server upsert/tombstone path, then delete it; partial spills are logged and skipped.
 2. **Deterministic, bidirectional reconcile (R3 #3/#5).** Compute each on-disk file's
    canonical `content_hash` and compare to DB1, applying a single precedence rule:
    - **DB1 row present, no file** → re-materialize from DB1 (covers a `rm`/bulk-delete the
-     hook missed; DB1 wins, so an un-intercepted delete is *restored*, not honored — the
+     hook missed; DB1 wins, so an un-intercepted delete is *restored*, not honored. The
      supported way to delete is the intercepted path, §3).
    - **File present, no DB1 row** → import it (one-time/orphan case, R1 #13/#27): canonicalize
      and upsert, then re-materialize canonical.
@@ -318,22 +322,22 @@ entries ship for known clients (Claude Code's `memory/` dir today; others as ide
 New agents are added **declaratively, no code change** (R1 #20, #27). Clients with no
 registered surface emit a startup warning rather than silently doing nothing (R1 #20).
 
-**`project_id` derivation (R3 #14)** — deterministic precedence: (1) `$AIMEE_PROJECT_ID`
+**`project_id` derivation (R3 #14)**, deterministic precedence: (1) `$AIMEE_PROJECT_ID`
 if set; else (2) the **enclosing git worktree root** via `git -C <cwd> rev-parse
---show-toplevel` (honoring the cwd) — each worktree has its own toplevel, so **worktrees do
+--show-toplevel` (honoring the cwd). Each worktree has its own toplevel, so **worktrees do
 NOT share memory** with the main checkout by default (intentional; they're different working
 trees); else (3) `realpath(cwd)`. The result is hashed to a stable `project_id`. Symlinked/
 case-only path differences are normalized via `realpath` before hashing. **Trust boundary
-(R4 #9):** `$AIMEE_PROJECT_ID` is honored only as a local convenience — any process that can
+(R4 #9):** `$AIMEE_PROJECT_ID` is honored only as a local convenience, any process that can
 set the env can address any project's memory, so it is **not** a security boundary; the
 store is single-host/single-user (§1) and `project_id` is namespacing, not access control.
 The **memory dir is created by aimee** (mode `0700`, owned by the user) if absent, so
 `realpath` confinement always has a concrete root (R4 #14).
 
-**Scope of "memory" (R3 #16)** — v1 captures **only** the registered per-client memory
+**Scope of "memory" (R3 #16)**, v1 captures **only** the registered per-client memory
 surfaces (Claude's `memory/*.md` + `MEMORY.md`). Durable-context files that are *not* the
-agent's scratch memory — `AGENTS.md`, `CLAUDE.md`, `.cursorrules`,
-`.github/copilot-instructions.md` — are **explicitly out of v1 scope** (they're
+agent's scratch memory, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`,
+`.github/copilot-instructions.md`, are **explicitly out of v1 scope** (they're
 human-authored project config, often version-controlled). Adding any of them is a one-line
 registry entry later if desired.
 
@@ -354,17 +358,17 @@ registry entry later if desired.
 
 ## Phasing (each independently shippable, roundtable-reviewed before its PR)
 
-- **P1** — DB1 `harness_memory` table (canonical fields, SHA-256 hash, NOT NULL, tombstone)
+- **P1**: DB1 `harness_memory` table (canonical fields, SHA-256 hash, NOT NULL, tombstone)
   + accessors (incl. `_tombstone_prefix`, `_render*`) + migration (§2). Unit tests.
-- **P2** — `/v1/harness_memory/*` server routes (upsert/get/list/search/tombstone/
+- **P2**: `/v1/harness_memory/*` server routes (upsert/get/list/search/tombstone/
   bulk-tombstone/render/render-index) with the per-`(project,name)` mutex + canonicalize↔
   render codec + `aimee harness-memory` CLI over the same handlers (§2–§4).
-- **P3** — `src/memory_redirect.c` + dispatch stage in `pre_tool_check` (§7 ordering):
+- **P3**: `src/memory_redirect.c` + dispatch stage in `pre_tool_check` (§7 ordering):
   detection registry, write + per-file + bulk/dir delete capture, symlink-safe path
   validation, the per-client deny-with-redirect contract, spill-always + liveness-wins
   failure path, and the interception audit log (§3, §7). Cross-client interception test +
   loop-bypass test.
-- **P4** — session-start spill-consume → deterministic reconcile → incremental hydrate (§5)
+- **P4**: session-start spill-consume → deterministic reconcile → incremental hydrate (§5)
   + `configure-hooks.sh` hook-before-reconcile ordering and default registry entries (§6).
   End-to-end test.
 
@@ -377,18 +381,18 @@ fixes. Modules: `src/db1/harness_memory.{c,h}`, `src/harness_memory_common.{c,h}
 `src/harness_memory_hydrate.{c,h}`, `src/harness_memory_watch.{c,h}`.
 
 **Core phases:**
-- **P1 (#794)** — DB1 `harness_memory` table + accessors + `harness_memory_common` (vendored
+- **P1 (#794)**: DB1 `harness_memory` table + accessors + `harness_memory_common` (vendored
   SHA-256 `content_hash`, project resolver). Timestamps are TEXT-ISO `datetime('now')` /
   `deleted_at TEXT` per DB1 house style (the §2 sketch's `INTEGER` was an erratum, same
   semantics).
-- **P2 (#795)** — `/v1/harness_memory/*` routes (upsert/get/list/search/tombstone/
+- **P2 (#795)**: `/v1/harness_memory/*` routes (upsert/get/list/search/tombstone/
   bulk-tombstone/render) + `aimee harness-memory` CLI over the same handlers; server is the
   **sole DB1 writer**.
-- **P3 (#798)** — `memory_redirect` interception stage in `pre_tool_check`: detect a
+- **P3 (#798)**: `memory_redirect` interception stage in `pre_tool_check`: detect a
   `Write`/`Edit` to a registered memory surface → **redirect-deny** → central store; aimee
   re-materializes the file via a direct syscall (structural loop-bypass). `MEMORY.md` →
   reject-deny with guidance.
-- **P4 (#802)** — session-start hydration DB1→disk with name-slug + write-confinement under
+- **P4 (#802)**: session-start hydration DB1→disk with name-slug + write-confinement under
   the project memdir.
 
 **v1.1 (#804/#806/#808):** config-driven **multi-client scope registry** (`harness_memory_scope`;
@@ -404,48 +408,48 @@ project key** (thin client resolves + forwards `harness_project`, server validat
 Linux-only, no-op elsewhere) closing the at-write gap for non-tool edits.
 
 **e2e + test-plan fixes:**
-- **#817** — plugin-loader startup segfault (large `plugin_t` arrays were stack-allocated,
+- **#817**: plugin-loader startup segfault (large `plugin_t` arrays were stack-allocated,
   overflowing the main-thread stack on a plain non-container deploy; CI's Docker masked it) →
   heap-allocated.
-- **#819** — interception was never wired into the **split** server: `handle_hooks_pre` in
+- **#819**: interception was never wired into the **split** server: `handle_hooks_pre` in
   `server/server.c` called the guardrails directly and never ran `memory_redirect`, and
   `memory_redirect.o` wasn't linked into `aimee-server`. Fixed: `server_memory_intercept()`
   runs before the guardrails, writes DB1 directly (`hmem_upsert`), mirrors to disk
   (`memory_redirect_rematerialize`, confined under `projects_root`); module linked into the
   server.
-- **#829** (found by executing the approved test plan) — a shared split server mis-scoped
+- **#829** (found by executing the approved test plan), a shared split server mis-scoped
   every agent to one client because it read the server's own `AIMEE_HOOK_CLIENT`; the thin
   client now forwards `AIMEE_HOOK_CLIENT` as `harness_client` and the server reads it
   per-request (env fallback only for the local/combined path).
 
 **Validation.** The approved test plan was executed: 9/9 unit suites pass; a dev
 split-server e2e covered functional (F1–F10), reconcile (RC1–RC9), fail-open, concurrency,
-security (traversal/symlink/cross-project), Bash TP/FP vectors, and the watcher — all PASS.
+security (traversal/symlink/cross-project), Bash TP/FP vectors, and the watcher. All PASS.
 
-**Deferred — pre-GA hardening / validation (explicit future-work, not v1-correctness):**
-- **Divergence audit counters** — `overwrite-divergent` / `removed_hash` audit metrics over
+**Deferred, pre-GA hardening / validation (explicit future-work, not v1-correctness):**
+- **Divergence audit counters**: `overwrite-divergent` / `removed_hash` audit metrics over
   the reconcile path (the reconcile *behavior* is shipped + tested; this is observability).
-- **`AIMEE_FAULT` fault-injection seam** — a deterministic fault hook to exercise the
+- **`AIMEE_FAULT` fault-injection seam**: a deterministic fault hook to exercise the
   spill/fail-open paths under test without a real outage.
-- **Remote auth/replay hardening (RM3/RM4/RM8 — the test plan's remote-transport risk
+- **Remote auth/replay hardening (RM3/RM4/RM8, the test plan's remote-transport risk
   items: caller authentication, request integrity, and replay resistance for untrusted
   remote callers).** The remote-server project-key path ships; this hardening layer is the
   next step and is GA-blocking for remote exposure (see Close-out scope).
-- **E-PROD deploy** — promotion + soak on a production deployment (validated on a dev split
+- **E-PROD deploy**: promotion + soak on a production deployment (validated on a dev split
   server; not yet GA-deployed).
-- **Honest limits carried from Risks** — canonicalization is semantically-equivalent, not
+- **Honest limits carried from Risks**: canonicalization is semantically-equivalent, not
   byte-exact (deliberate cost of one `(project,name)` key shared across clients; round-trip
   fidelity is audited + logged); shared memory bodies are untrusted (prompt-injection
-  surface — size-capped, no auto-exec; deeper tagging/review is a follow-up).
+  surface, size-capped, no auto-exec; deeper tagging/review is a follow-up).
 
 ### Close-out scope: what "done" does and does not mean (R5)
 
 A close-out roundtable (6 panelists, 0 failed, not degraded) agreed the feature is shipped
 and validated and that the proposal may be filed to `done/`, **conditioned on the done
 record stating the accepted residual risk and GA gates explicitly** (the panel's blocking
-item offered exactly this — a recorded threat model — as the alternative to building the
+item offered exactly this (a recorded threat model) as the alternative to building the
 deferred mitigations first). "Done" here means **the v1 feature is built, merged, and
-validated on a dev split server** — it does **not** mean production-ready, GA, or safe to
+validated on a dev split server**. It does **not** mean production-ready, GA, or safe to
 expose to untrusted/remote/multi-tenant callers. The following are recorded as
 **GA-blocking gates**, reclassified from generic future-work:
 
@@ -476,21 +480,21 @@ expose to untrusted/remote/multi-tenant callers. The following are recorded as
   at-write guarantee is Linux-only and the rest is session-start reconcile.
 - **Drift observability.** The deferred `overwrite-divergent` / `removed_hash` audit
   counters are the **primary signal** that the backstop, reconcile, and canonicalization
-  layers are silently disagreeing in production — prioritized first among the pre-GA items.
+  layers are silently disagreeing in production, prioritized first among the pre-GA items.
 - **Hash domain (documented).** The SHA-256 `content_hash` is computed over the
-  **canonicalized** body, not the raw on-disk bytes — an integrity check over the normalized
+  **canonicalized** body, not the raw on-disk bytes, an integrity check over the normalized
   representation, consistent with byte-non-exact rendering.
 
 ## Non-goals
 
-- **Cross-machine sharing** (DB1 is single-host; future db2 sync — §1).
+- **Cross-machine sharing** (DB1 is single-host; future db2 sync, §1).
 - Touching or migrating the existing kb `memory.*` path (db2). Untouched.
 - Forcing agents to call a memory tool. Interception is enforcement; a voluntary tool is
   rejected as the primary mechanism (see Alternatives).
 
 ## Alternatives rejected (R1 #25)
 
-- **A voluntary `aimee_store_memory` tool.** Cannot be *enforced* — agents won't reliably
+- **A voluntary `aimee_store_memory` tool.** Cannot be *enforced*, agents won't reliably
   call it, and the whole point is to remove the agent's private store. Useful only as an
   optional extra surface.
 - **Symlink/bind-mount the memory dir to a shared folder.** Gives shared files but no DB
@@ -502,15 +506,15 @@ expose to untrusted/remote/multi-tenant callers. The following are recorded as
 ## Risks / honest limits
 
 - **Only agent-tool writes are intercepted at write time (R3 #2).** Non-tool/external
-  changes — `vim`, IDE autosave, sync clients, container mounts, `python -c` via `Bash`,
+  changes, `vim`, IDE autosave, sync clients, container mounts, `python -c` via `Bash`,
   un-hooked agents, and exotic shell constructs (process substitution, subshells,
-  `eval`/indirection) — are **not** prevented; they are reconciled to DB1 (DB1 wins) at the
+  `eval`/indirection), are **not** prevented; they are reconciled to DB1 (DB1 wins) at the
   next session-start audit (§5) and logged (§7). The dominant `Write`/`Edit` path is covered
   exactly; an inotify/fanotify watcher that closes the at-write gap is a **follow-up, not a
   v1-correctness requirement** (R1 #3, R2 #4, R3 #2). This is stated, not hidden.
 - **Canonicalization is not byte-exact (R3 #1/#21).** We store a client-neutral
   normalization and render per client, so a client re-reading its own write sees a
-  semantically-equivalent — not byte-identical — file. The render codec is audited for
+  semantically-equivalent (not byte-identical) file. The render codec is audited for
   round-trip fidelity (write→render→write→hash compare) and mismatches are logged; this is
   the deliberate cost of cross-client sharing under one `(project,name)` key.
 - **Per-client deny contract is required (R3 #4/#10).** The deny-with-redirect is validated
@@ -519,7 +523,7 @@ expose to untrusted/remote/multi-tenant callers. The following are recorded as
 - **DENY-as-success wording** depends on the model interpreting the reason correctly;
   mitigated by live-run validation (R1 #14) but behavioral, not structural.
 - **Shared-memory content is untrusted.** Agent-authored bodies are stored and re-read by
-  other agents — a prompt-injection surface. Mitigations: body size cap, no auto-execution,
+  other agents, a prompt-injection surface. Mitigations: body size cap, no auto-execution,
   documented file perms; deeper review/tagging is a follow-up (R1 #22).
 
 ## Tests
@@ -537,7 +541,7 @@ expose to untrusted/remote/multi-tenant callers. The following are recorded as
 - Loop-bypass (`test_memory_redirect_no_loop`): aimee's re-materialize write with the hook
   installed does **not** re-enter; asserts the hook fires exactly once per agent write.
 - Concurrency: two concurrent writes to the same `(project,name)` serialize under the mutex
-  so DB1 row and on-disk file always agree (no upsert/rematerialize interleave — R4 #2).
+  so DB1 row and on-disk file always agree (no upsert/rematerialize interleave; R4 #2).
 - Reject-deny invariant: a denied MEMORY.md write/delete produces **no** tombstone and no
   reconcile-driven file change (R4 #6).
 - Hook-absent: session-start with the hook uninstalled still reconciles on-disk → DB1 and
@@ -549,7 +553,7 @@ expose to untrusted/remote/multi-tenant callers. The following are recorded as
 
 ## Review revisions (R1)
 
-Roundtable design review (review mode, 2 rounds, degraded — one provider stalled, full
+Roundtable design review (review mode, 2 rounds, degraded, one provider stalled, full
 coverage). 28 items (8 blocking). All 8 blocking resolved in-design: dual-source-of-truth
 → DB1-authoritative + total interception + reconcile (§1); loop bypass → structural
 syscall path + test (§1); Bash bypass → best-effort detection + documented limit (§3,
@@ -562,47 +566,47 @@ scope documented (§1), alternatives section, untrusted-content risk.
 
 ## Review revisions (R2)
 
-Roundtable review of this proposal (review mode, **heavily degraded** — 2 of 4 panelists
+Roundtable review of this proposal (review mode, **heavily degraded**, 2 of 4 panelists
 stalled upstream, 1 round completed; full coverage, no truncation). 8 items (4 "blocking").
-Actioned: **R2 #1** — dropped the direct-SQLite fallback entirely; the **server is the sole
-DB1 writer**, server-down → spill (§3), removing the last dual-writer race. **R2 #2** —
+Actioned: **R2 #1**, dropped the direct-SQLite fallback entirely; the **server is the sole
+DB1 writer**, server-down → spill (§3), removing the last dual-writer race. **R2 #2**,
 `name` validation now explicitly rejects `..` substrings + leading/trailing dots in addition
-to the regex + realpath confine (§3 step 2). **R2 #4** — Bash-detection evasions (process
+to the regex + realpath confine (§3 step 2). **R2 #4**. Bash-detection evasions (process
 substitution, subshells, eval-indirection, symlinks) named explicitly as a documented v1
 limit, inotify backstop is a follow-up not a v1-correctness requirement (§3 detection,
-Risks). **R2 #5/#8** — schema_version migration strategy + UTF-8/binary handling specified
-(§2). Clarified (panel misreads, no re-architecture): **R2 #3** — POSIX atomic `rename` +
+Risks). **R2 #5/#8**, schema_version migration strategy + UTF-8/binary handling specified
+(§2). Clarified (panel misreads, no re-architecture): **R2 #3**, POSIX atomic `rename` +
 write-before-deny means no partial/empty read window; advisory locks unnecessary, `fsync`
-added for durability (§3 step 4). **R2 #6** — a write to a tombstoned `(project,name)` is an
+added for durability (§3 step 4). **R2 #6**, a write to a tombstoned `(project,name)` is an
 intentional revive, not a `content_hash` resurrection (§2 tombstone semantics). Noted:
-**R2 #7** — registry auto-discovery is a future enhancement; v1 ships a default registry +
+**R2 #7**, registry auto-discovery is a future enhancement; v1 ships a default registry +
 unregistered-client warning (§6).
 
 ## Review revisions (R3)
 
-Roundtable review of this proposal on the live **.254** deploy (review mode, **clean** —
+Roundtable review of this proposal on the live **.254** deploy (review mode, **clean**,
 `degraded:false`, 5/6 panelists, full coverage; the earlier R1/R2 runs were degraded only
 because they hit a stale local server). 24 items (9 "blocking"). One blocking item was a
 **false positive from a stale brief** I sent (R3 #3 reviewed the pre-R2 direct-SQLite
 fallback the doc had already removed; the panel independently *recommended* the server-sole-
 writer design, validating R2 #1). The other eight blocking items are folded in:
 
-- **R3 #1 schema contradiction** — replaced "raw client bytes" with a **canonical,
+- **R3 #1 schema contradiction**: replaced "raw client bytes" with a **canonical,
   client-neutral** representation (`type`/`description`/`body`/`meta_json`) under one
   `(project,name)` row, rendered per client; resolves silent cross-client clobber (§2, §4).
-- **R3 #2 "every mutation intercepted" too strong** — reframed to an explicit threat model:
+- **R3 #2 "every mutation intercepted" too strong**: reframed to an explicit threat model:
   only agent-tool writes are intercepted; external changes reconciled to DB1 at session-start
   (§1, §5, Risks).
-- **R3 #3 reconcile precedence undefined** — added a deterministic bidirectional policy,
+- **R3 #3 reconcile precedence undefined**: added a deterministic bidirectional policy,
   DB1-wins on hash mismatch (§5).
-- **R3 #4 deny/liveness contradiction + per-client contract** — fixed the wrong "non-zero
+- **R3 #4 deny/liveness contradiction + per-client contract**: fixed the wrong "non-zero
   exit" wording, specified the per-client deny-with-message protocol (Claude exit-0 JSON;
   others or out-of-scope), chose liveness-wins + spill-always (§3).
-- **R3 #5 bulk/dir deletes** — added a distinct destructive-op handler + `_tombstone_prefix`
+- **R3 #5 bulk/dir deletes**: added a distinct destructive-op handler + `_tombstone_prefix`
   (§3).
-- **R3 #6 MEMORY.md** — deny-with-guidance, never silent-discard (§4).
-- **R3 #8 spill contract** — location/format/fsync/retention/partial-recovery specified (§3).
-- **R3 #9 symlink + cross-fs rename** — realpath-chase before confine; `mkstemp` in the
+- **R3 #6 MEMORY.md**: deny-with-guidance, never silent-discard (§4).
+- **R3 #8 spill contract**: location/format/fsync/retention/partial-recovery specified (§3).
+- **R3 #9 symlink + cross-fs rename**: realpath-chase before confine; `mkstemp` in the
   target dir; refuse-cross-fs→spill (§3).
 
 Adopted suggestions: SHA-256 `content_hash` (#13), `project_id` worktree derivation (#14),
@@ -616,37 +620,37 @@ stale text again.
 ## Review revisions (R4)
 
 Convergence round on **.254** with a brief regenerated from the R3 doc (clean,
-`degraded:false`, 4/6 panelists; the process fix worked — no stale-text false positives this
+`degraded:false`, 4/6 panelists; the process fix worked, no stale-text false positives this
 time). 15 items, blocking **down 9→6** and all of the six are correctness tightenings, not
 architecture changes. Folded:
 
-- **R4 #2 (genuine)** — the per-`(project,name)` mutex now spans the **whole
+- **R4 #2 (genuine)**: the per-`(project,name)` mutex now spans the **whole
   upsert→rematerialize** sequence, so the DB1 row and its file update atomically; closes the
   TOCTOU where concurrent same-name writes could leave disk and DB1 disagreeing (§3 step 4).
-- **R4 #6 (genuine)** — disambiguated **redirect-deny** (aimee performs the op) from
+- **R4 #6 (genuine)**: disambiguated **redirect-deny** (aimee performs the op) from
   **reject-deny** (deny + zero state change); a reject-deny (e.g. denied MEMORY.md delete)
   produces no tombstone and cannot mutate disk via reconcile (§3).
-- **R4 #5 (genuine)** — reconcile is **hook-independent** and runs regardless; session-start
+- **R4 #5 (genuine)**: reconcile is **hook-independent** and runs regardless; session-start
   verifies the hook and **fails loud** if it's missing ("interception OFF, import-only"),
   so a missing hook degrades safely, never silently (§5).
-- **R4 #1** — added a manual `aimee harness-memory reconcile` trigger + an explicit
+- **R4 #1**: added a manual `aimee harness-memory reconcile` trigger + an explicit
   durability boundary for the intra-session external-edit race (§5).
 - Sharpened (already implied): explicit `realpath(dirname) ⊂ realpath(memdir)` symlink check
   (#3, §3), all-or-nothing bulk-tombstone txn + per-row audit (#4, §3/§4), spill-write-
   failure path (#8, §3), `$AIMEE_PROJECT_ID` non-security trust boundary + 0700 memdir
   creation (#9/#14, §6), named loop-bypass/concurrency/reject-deny/hook-absent tests (#15).
 
-NITs #11 (EXDEV) and #12 (SHA-256) were panel misreads — the doc already specifies
+NITs #11 (EXDEV) and #12 (SHA-256) were panel misreads. The doc already specifies
 refuse-cross-fs→spill and SHA-256 (the brief is a summary). Remaining open items
 (canonicalization-codec enumeration #7, per-client deny edge cases #10) are **implementation
 deliverables of P2/P3 with their own tests**, not proposal-level blockers.
 
 **Convergence assessment:** three review rounds (R2 degraded, R3 clean, R4 clean) show a
-falling blocking count (—/9/6) with no new architectural objections — only successively
+falling blocking count ( /9/6) with no new architectural objections, only successively
 finer correctness detail. The proposal is considered **settled**; remaining specificity
 (canonicalization codec, per-client deny matrices) is owned by the phase PRs, each of which
 gets its own code-level roundtable before merge.
 
 **Erratum (timestamp domain).** The §2 schema sketch wrote `created_at/updated_at INTEGER`;
-the implementation plan aligns them to DB1's house style — TEXT-ISO `(datetime('now'))`,
-`deleted_at TEXT` — to match every neighbouring table. Identical semantics, no design change.
+the implementation plan aligns them to DB1's house style, TEXT-ISO `(datetime('now'))`,
+`deleted_at TEXT`, to match every neighbouring table. Identical semantics, no design change.

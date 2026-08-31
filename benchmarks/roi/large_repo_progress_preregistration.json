@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "registered_at": "2026-08-27T00:00:00Z",
+  "purpose": "Test whether Aimee's economizer plus a sliding-window write-progress controller converts context runway into a completed, tested repair on a task where the plain agent previously exceeded its context window.",
+  "controller": {
+    "initial_calls": 12,
+    "followup_calls": 8,
+    "duplicate_hits": 2,
+    "window": 12
+  },
+  "conditions": {
+    "off": "Unmodified canonical transcript and no progress controller.",
+    "aimee_progress": "Production Go economizer plus the production-equivalent write-progress controller."
+  },
+  "initial_task": "trust_bundle_readiness",
+  "initial_repeats": 1,
+  "fixed_controls": [
+    "Qwen3.8 27B Q4_K_XL",
+    "temperature zero",
+    "same buggy parent revision",
+    "same tools and tool-output limits",
+    "same 65536-token context cap",
+    "same hidden child-era tests",
+    "same 30-turn maximum"
+  ],
+  "primary_outcome": "hidden grader passes",
+  "secondary_outcomes": [
+    "plain condition reaches a context-limit error",
+    "candidate authors regression-sensitive tests",
+    "provider-reported billable input and output tokens",
+    "wall time",
+    "checkpoint and escalation counts",
+    "repeated or overlapping retrieval count"
+  ],
+  "success_claim": "A context-capacity crossover requires off unresolved specifically because of context_limit and aimee_progress hidden-passed. Test-authorship claims additionally require candidate-visible green and the authored test-only patch red on the buggy parent.",
+  "stopping_rule": "Run every planned cell to submit, assistant final, provider/context failure, progress abort, or 30 turns. Do not change thresholds, prompts, task, grader, or stopping rules after dispatch begins.",
+  "interpretation_guardrail": "A non-completing treatment may support token, context, or liveness diagnostics but may not be described as a completion crossover. One repeat remains exploratory and is not a population estimate."
+}

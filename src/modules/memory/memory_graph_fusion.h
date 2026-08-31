@@ -4,15 +4,34 @@
 #define DEC_MEMORY_GRAPH_FUSION_H 1
 
 #include "memory.h"
-#include "db2/entity_edges.h"
+#include "modules/db2/c/entity_edges.h"
+
+/* Gravity fallbacks for relations with no explicit prior in the table.
+ * A co-occurrence edge means "these two appeared together"; a typed-fact edge
+ * means "someone asserted this and it survived type validation". The semantic
+ * baseline sits well above the co-occurrence default so a stated fact does not
+ * rank at parity with a co_discussed observation. Provisional — ablate before
+ * enabling by default. */
+#define MEMORY_GRAPH_GRAVITY_DEFAULT  0.45
+#define MEMORY_GRAPH_GRAVITY_SEMANTIC 0.80
 
 /* Relation gravity table: traversal multiplier per relation label.
  * These are provisional priors — must be labelled as such in diagnostics
- * and stay behind allow_code_graph gate until benchmarked. */
+ * and stay behind allow_code_graph gate until benchmarked.
+ * Relations with no entry return MEMORY_GRAPH_GRAVITY_DEFAULT; prefer
+ * memory_graph_edge_score() when the edge's class is known, so a typed fact
+ * picks up the semantic baseline instead. */
 double memory_graph_relation_gravity(const char *relation);
+
+/* A/B/C confidence weighting for typed-fact edges: A=1.0, B=0.75, C=0.5.
+ * NULL/empty (a co-occurrence edge, which carries no class) returns 1.0 so the
+ * gravity term alone decides. Unrecognised classes fail conservative to 0.5,
+ * matching the writer's default for an unspecified class. */
+double memory_graph_confidence_factor(const char *confidence_class);
 
 /* Compute the edge score formula from the proposal:
  *   edge_score = relation_gravity(relation)
+ *              * confidence_factor(confidence_class)
  *              * structural_factor
  *              * observed_factor
  *              * (1 + clamp(effective_utility, -0.5, 2.0))
@@ -22,9 +41,15 @@ double memory_graph_relation_gravity(const char *relation);
  * observed_factor   = 1 + clamp(log1p(weight), 0, 3) / 3
  * hop_decay         = pow(0.5, max(hop - 1, 0))  (1-based hop)
  *
+ * confidence_class is the traversed edge's A/B/C class for a typed-fact edge,
+ * or NULL/"" for a co-occurrence edge (and for a node, where there is no edge at
+ * all). A non-empty class is also what selects the semantic gravity baseline for
+ * relations absent from the table.
+ *
  * Labelled provisional; must be ablated before enabling by default. */
 double memory_graph_edge_score(const char *relation, int is_code_edge, int structural_weight,
-                               int weight, double effective_utility, int hop);
+                               int weight, double effective_utility, int hop,
+                               const char *confidence_class);
 
 /* Detect whether a query should open code subgraph traversal.
  * Updates plan->allow_code_graph and plan->code_seed_reason.

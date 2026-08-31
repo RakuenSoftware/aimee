@@ -215,14 +215,17 @@ static void test_request_reply(void)
 
    bus_frame_t f;
    uint8_t buf[8];
-   must(recv_event(&server, &f, buf, sizeof buf) == 1 && f.correlation_id == corr &&
-            (f.hdr_flags & BUS_F_REQUEST),
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_REQUEST),
         "server got the request");
+   /* The server is handed the host's own id, not the requester's, so that two
+    * clients that pick the same number stay distinguishable. It echoes back
+    * whatever it was given. */
+   const uint64_t served = f.correlation_id;
    must(recv_event(&bystander, &f, buf, sizeof buf) == 0, "bystander got nothing");
    must(recv_event(&req, &f, buf, sizeof buf) == 0, "requester got nothing yet");
 
-   /* Server replies with the same correlation. */
-   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x22);
+   /* Server replies with the correlation it was handed. */
+   emit(&server, BUS_F_REPLY, KIND_A, served, 4, 0x22);
    must(bus_host_pump(&h) == 1, "reply routed");
    must(recv_event(&req, &f, buf, sizeof buf) == 1 && f.correlation_id == corr &&
             (f.hdr_flags & BUS_F_REPLY) && buf[0] == 0x22,
@@ -257,9 +260,10 @@ static void test_fragmented_request_reply(void)
    must(recv_event(&server, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) &&
             buf[0] == 0x10,
         "server got first request fragment");
+   const uint64_t served = f.correlation_id;
 
    /* A server cannot close the correlation before the request is complete. */
-   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x99);
+   emit(&server, BUS_F_REPLY, KIND_A, served, 4, 0x99);
    must(bus_host_pump(&h) == 1, "premature reply processed");
    must(recv_event(&req, &f, buf, sizeof buf) == 0, "premature reply dropped");
 
@@ -269,11 +273,11 @@ static void test_fragmented_request_reply(void)
             buf[0] == 0x11,
         "server got final request fragment");
 
-   emit(&server, BUS_F_REPLY | BUS_F_MORE, KIND_A, corr, 4, 0x20);
+   emit(&server, BUS_F_REPLY | BUS_F_MORE, KIND_A, served, 4, 0x20);
    must(bus_host_pump(&h) == 1, "first reply fragment routed");
    must(recv_event(&req, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_MORE) && buf[0] == 0x20,
         "requester got first reply fragment");
-   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x21);
+   emit(&server, BUS_F_REPLY, KIND_A, served, 4, 0x21);
    must(bus_host_pump(&h) == 1, "final reply fragment routed");
    must(recv_event(&req, &f, buf, sizeof buf) == 1 && !(f.hdr_flags & BUS_F_MORE) && buf[0] == 0x21,
         "requester got final reply fragment");
@@ -292,7 +296,7 @@ static void test_fragmented_request_reply(void)
    must(bus_host_pump(&h) == 1, "cancelled correlation reused");
    must(recv_event(&server, &f, buf, sizeof buf) == 1 && buf[0] == 0x31,
         "reused correlation starts a fresh request");
-   emit(&server, BUS_F_REPLY, KIND_A, cancelled, 4, 0x32);
+   emit(&server, BUS_F_REPLY, KIND_A, f.correlation_id, 4, 0x32);
    must(bus_host_pump(&h) == 1, "fresh request answered");
    must(recv_event(&req, &f, buf, sizeof buf) == 1 && buf[0] == 0x32, "fresh reply delivered");
 
@@ -322,10 +326,11 @@ static void test_reply_and_cancel_spoofing_refused(void)
    must(bus_host_pump(&h) == 1, "request routed");
    bus_frame_t f;
    must(recv_event(&server, &f, NULL, 0) == 1, "server got the request");
+   const uint64_t served = f.correlation_id;
 
-   /* The attacker forges a reply for the requester's correlation. It must be
+   /* The attacker forges a reply for the served correlation. It must be
     * dropped: it is not the server. */
-   emit(&attacker, BUS_F_REPLY, KIND_A, corr, 4, 0x99);
+   emit(&attacker, BUS_F_REPLY, KIND_A, served, 4, 0x99);
    must(bus_host_pump(&h) == 1, "forged reply processed");
    must(recv_event(&req, &f, NULL, 0) == 0, "forged reply did not reach the requester");
 
@@ -336,7 +341,7 @@ static void test_reply_and_cancel_spoofing_refused(void)
    must(recv_event(&server, &f, NULL, 0) == 0, "forged cancel did not reach the server");
 
    /* The genuine server reply still works. */
-   emit(&server, BUS_F_REPLY, KIND_A, corr, 4, 0x22);
+   emit(&server, BUS_F_REPLY, KIND_A, served, 4, 0x22);
    must(bus_host_pump(&h) == 1, "genuine reply routed");
    must(recv_event(&req, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_REPLY),
         "genuine server reply reaches the requester");
@@ -386,11 +391,14 @@ static void test_cancel(void)
    must(bus_host_pump(&h) == 1, "request routed");
    bus_frame_t f;
    must(recv_event(&server, &f, NULL, 0) == 1, "server got the request");
+   const uint64_t served = f.correlation_id;
 
+   /* The requester cancels in its own numbering; the server sees the cancel
+    * against the id it is actually working on. */
    emit(&req, BUS_F_CANCEL, KIND_A, corr, 0, 0);
    must(bus_host_pump(&h) == 1, "cancel routed");
    must(recv_event(&server, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_CANCEL) &&
-            f.correlation_id == corr,
+            f.correlation_id == served,
         "server got the cancel");
 
    detach(&req);
@@ -800,16 +808,16 @@ static void test_arena_request_reply(void)
 
    bus_frame_t f;
    must(recv_event(&server, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_REQUEST) &&
-            (f.hdr_flags & BUS_F_ARENA) && f.correlation_id == corr &&
-            (uint32_t)f.payload_ref == qlease,
+            (f.hdr_flags & BUS_F_ARENA) && (uint32_t)f.payload_ref == qlease,
         "server got the arena request");
+   const uint64_t served = f.correlation_id;
    must(recv_event(&bystander, &f, NULL, 0) == 0, "bystander got nothing");
    consume_arena(&h, &f, server.reply.handle_id, ALEN, 0x33);
    must(bus_arena_live_leases(&h.arena, req.reply.handle_id) == 0, "request span drained");
 
    /* Server replies with its own arena lease. */
    uint32_t rlease, rgen;
-   emit_arena_pat(&h, &server, BUS_F_REPLY, KIND_A, corr, ALEN + 200, 0x44, &rlease, &rgen);
+   emit_arena_pat(&h, &server, BUS_F_REPLY, KIND_A, served, ALEN + 200, 0x44, &rlease, &rgen);
    must(bus_host_pump(&h) == 1, "reply routed");
    must(recv_event(&req, &f, NULL, 0) == 1 && (f.hdr_flags & BUS_F_REPLY) &&
             (f.hdr_flags & BUS_F_ARENA) && f.correlation_id == corr,
@@ -872,11 +880,12 @@ static void test_arena_reply_forged_dropped(void)
    must(bus_host_pump(&h) == 1, "request routed");
    bus_frame_t f;
    must(recv_event(&server, &f, NULL, 0) == 1, "server got the request");
+   const uint64_t served = f.correlation_id;
    consume_arena(&h, &f, server.reply.handle_id, ALEN, 0x11);
 
    /* The attacker (not the server) forges an arena reply for the correlation. */
    uint32_t flease, fgen;
-   emit_arena_pat(&h, &attacker, BUS_F_REPLY, KIND_A, corr, ALEN, 0x99, &flease, &fgen);
+   emit_arena_pat(&h, &attacker, BUS_F_REPLY, KIND_A, served, ALEN, 0x99, &flease, &fgen);
    must(bus_host_pump(&h) == 1, "forged reply processed");
    must(recv_event(&req, &f, NULL, 0) == 0, "forged reply did not reach the requester");
    must(bus_arena_refcount(&h.arena, flease) == 0, "forged reply's lease reclaimed");
@@ -888,11 +897,68 @@ static void test_arena_reply_forged_dropped(void)
    printf("  arena: a forged (non-server) reply is dropped and its lease reclaimed\n");
 }
 
+/* Correlation ids are chosen by each client independently, so two clients
+ * calling the same server will pick the same number sooner or later. Each
+ * requester's reply must still come back to it: before the pending table was
+ * keyed by requester, the second caller's request was refused as a correlation
+ * clash and its reply -- if one came -- could be delivered to the first. */
+static void test_concurrent_requesters_share_a_correlation(void)
+{
+   bus_host_config_t c = cfg();
+   bus_host_t h;
+   must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
+   g_tap_n = 0;
+
+   client_t one, two, server;
+   attach(&h, 1, &one);
+   attach(&h, 2, &two);
+   attach(&h, 3, &server);
+   must(bus_host_serve_kind(&h, server.reply.handle_id, KIND_A) == BUS_HOST_OK, "server serves A");
+
+   const uint64_t corr = 1; /* what a fresh caller naturally picks first */
+   emit(&one, BUS_F_REQUEST, KIND_A, corr, 4, 0x11);
+   must(bus_host_pump(&h) == 1, "first request routed");
+   emit(&two, BUS_F_REQUEST, KIND_A, corr, 4, 0x22);
+   must(bus_host_pump(&h) == 1, "second request routed");
+
+   bus_frame_t f;
+   uint8_t buf[8];
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && buf[0] == 0x11, "server got the first");
+   const uint64_t served_one = f.correlation_id;
+   must(recv_event(&server, &f, buf, sizeof buf) == 1 && buf[0] == 0x22,
+        "server got the second, not a capability-absent refusal");
+   const uint64_t served_two = f.correlation_id;
+   must(served_one != served_two, "the two calls are distinguishable to the server");
+   must(recv_event(&one, &f, buf, sizeof buf) == 0, "first requester not answered yet");
+   must(recv_event(&two, &f, buf, sizeof buf) == 0, "second requester not answered yet");
+
+   /* The server answers the second caller first. Each reply must reach the
+    * client that asked, in that client's own numbering. */
+   emit(&server, BUS_F_REPLY, KIND_A, served_two, 4, 0xBB);
+   must(bus_host_pump(&h) == 1, "reply routed");
+   emit(&server, BUS_F_REPLY, KIND_A, served_one, 4, 0xAA);
+   must(bus_host_pump(&h) == 1, "second reply routed");
+
+   must(recv_event(&two, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_REPLY) &&
+            f.correlation_id == corr && buf[0] == 0xBB,
+        "second requester got its own reply");
+   must(recv_event(&one, &f, buf, sizeof buf) == 1 && (f.hdr_flags & BUS_F_REPLY) &&
+            f.correlation_id == corr && buf[0] == 0xAA,
+        "first requester got its own reply");
+
+   detach(&one);
+   detach(&two);
+   detach(&server);
+   bus_host_destroy(&h);
+   printf("  concurrent requesters: a shared correlation id still routes per requester\n");
+}
+
 int main(void)
 {
    printf("test_bus_route:\n");
    test_notification_observer_routing();
    test_request_reply();
+   test_concurrent_requesters_share_a_correlation();
    test_fragmented_request_reply();
    test_reply_and_cancel_spoofing_refused();
    test_capability_absent();

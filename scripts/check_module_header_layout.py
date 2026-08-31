@@ -8,6 +8,7 @@ import importlib.util
 from pathlib import Path
 import re
 import shlex
+import subprocess
 import sys
 
 
@@ -39,8 +40,34 @@ def _read_descriptor(path: Path) -> dict[str, object]:
 
 
 def _source_files(root: Path):
+    tracked = subprocess.run(
+        [
+            "git", "-C", str(root), "ls-files", "--cached", "--others",
+            "--exclude-standard", "-z", "--", "*.c", "*.cpp", "*.h", "*.hpp",
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if tracked.returncode == 0:
+        for raw in tracked.stdout.split(b"\0"):
+            if not raw:
+                continue
+            try:
+                relative = raw.decode("utf-8", errors="strict")
+            except UnicodeError as exc:
+                raise HeaderLayoutError("rule=input: git returned a non-UTF-8 path") from exc
+            path = root / relative
+            if path.is_symlink() or path.is_file():
+                yield path
+        return
+
+    # Standalone mutation fixtures are not Git repositories. Keep that path
+    # exhaustive while pruning repository-control and local-worktree trees.
     for path in root.rglob("*"):
-        if ".git" in path.parts or path.suffix not in SOURCE_SUFFIXES:
+        relative_parts = path.relative_to(root).parts
+        if (any(part.startswith(".") for part in relative_parts) or
+                path.suffix not in SOURCE_SUFFIXES):
             continue
         if path.is_symlink() or path.is_file():
             yield path

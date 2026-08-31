@@ -73,8 +73,37 @@ extern "C"
     * SSL_shutdown + SSL_free) on success, or NULL on handshake failure. */
    SSL *server_tls_accept(int fd);
 
-   /* Initialize from <config>/tls/server.crt plus the Vault-held private key. */
+   /* Why TLS could not start. Three unrelated failures used to share one return
+    * value, and the caller reported all of them as "TLS cert/key not loadable" --
+    * so a server whose certificate was perfectly good, but whose mTLS ramp
+    * self-test could not reach DB1, told the operator to go and look at the
+    * certificate. Measured: with no db1 module the log read
+    *
+    *   WARN  db1.pki: DB1 pki is unreachable (module call result 1)
+    *   WARN  pki.ramp: mTLS ramp startup self-test failed; refusing mTLS startup
+    *   ERROR server.http: tls_port=8743 set but TLS cert/key not loadable
+    *
+    * and only the last line is what an operator reads. */
+   typedef enum
+   {
+      SERVER_TLS_INIT_OK = 0,
+      SERVER_TLS_INIT_ERR_MTLS_RAMP = -1, /* the ramp self-test refused (DB1 pki) */
+      SERVER_TLS_INIT_ERR_CLIENT_CA = -2, /* aimee's client CA could not be made/loaded */
+      SERVER_TLS_INIT_ERR_IDENTITY = -3,  /* the server cert/key itself */
+   } server_tls_init_result_t;
+
+   /* A human-readable cause for the value above. Never NULL. */
+   const char *server_tls_init_result_str(int result);
+
+   /* Initialize from <config>/tls/server.crt plus the Vault-held private key.
+    * Returns SERVER_TLS_INIT_OK, or one of the negative causes above. */
    int server_tls_init_default(void);
+
+   /* Wait for the store the mTLS ramp needs before server_tls_init_default runs.
+      The caller supplies the probe so this translation unit keeps no DB1
+      dependency. Returns one when initialization may proceed, including when
+      mTLS is off, and zero after the bounded readiness window expires. */
+   int server_tls_wait_for_store(int (*store_ready)(void));
 
    /* Live cert reload (live-config-reload): re-read the same public cert and
     * Vault key (or explicit test key path) and atomically swap the SSL_CTX;

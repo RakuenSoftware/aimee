@@ -3,8 +3,8 @@
  * without pulling in db2/kb_payload.o and its dependency tree. Mirrors the
  * kb_payload.c implementations exactly; under the sqlite shim BEGIN/COMMIT/
  * ROLLBACK behave the same, so fenced-abort paths are exercised for real. */
-#include "db2/db_postgres.h"
-#include "db2/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
 
 int db2_kb_txn_begin(void)
 {

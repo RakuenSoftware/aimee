@@ -8,12 +8,16 @@
 #include "cli_client.h"
 #include "cli_mcp_serve.h"
 #include "client_constants.h"
-#include "client_session_worktree.h"
 #include "platform_path.h"
 #include "platform_random.h"
+#include "util.h"
 #include "cJSON.h"
+#include <aimee/ir/aimee_ir.h>
+#include <aimee/protocols/mcp/mcp_tools.h> /* mcp_compact_tool_prose */
 #include <ctype.h>
 #include <fcntl.h>
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -46,11 +50,64 @@
 
 static int g_output_ndjson = 1;
 
+/* When CLI is the preferred surface but the Runtime projection contains
+ * MCP-only module capabilities, the generated Codex registration starts this
+ * bridge with their exact tool names. An absent allowlist means ordinary/full
+ * MCP mode; a present list is both presentation and dispatch policy, so hidden
+ * dual-surface tools cannot still be invoked by guessing their names. */
+static int mcp_tool_allowlisted(const char *name)
+{
+   const char *list = getenv("AIMEE_MCP_TOOL_ALLOWLIST");
+   if (!list || !list[0])
+      return 1;
+   if (!name || !name[0])
+      return 0;
+   size_t want = strlen(name);
+   for (const char *p = list; *p;)
+   {
+      const char *end = strchr(p, ',');
+      size_t n = end ? (size_t)(end - p) : strlen(p);
+      if (n == want && memcmp(p, name, n) == 0)
+         return 1;
+      if (!end)
+         break;
+      p = end + 1;
+   }
+   return 0;
+}
+
+static int mcp_filter_tool_allowlist(cJSON *tools)
+{
+   if (!cJSON_IsArray(tools) || !getenv("AIMEE_MCP_TOOL_ALLOWLIST"))
+      return 0;
+   int removed = 0;
+   for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+   {
+      cJSON *tool = cJSON_GetArrayItem(tools, i);
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(tool, "name");
+      if (!cJSON_IsString(name) || !mcp_tool_allowlisted(name->valuestring))
+      {
+         cJSON_DeleteItemFromArray(tools, i);
+         removed++;
+      }
+   }
+   return removed;
+}
+
+/* Serialises writes to stdout.
+ *
+ * The list-changed watcher below emits notifications from its own thread while
+ * the main loop may be writing a response. Two interleaved writes produce one
+ * corrupt frame and the client drops the session, so every frame goes out under
+ * this lock. */
+static pthread_mutex_t g_out_lock = PTHREAD_MUTEX_INITIALIZER;
+
 static void mcp_send(cJSON *msg)
 {
    char *s = cJSON_PrintUnformatted(msg);
    if (s)
    {
+      pthread_mutex_lock(&g_out_lock);
       size_t len = strlen(s);
       if (g_output_ndjson)
       {
@@ -63,6 +120,7 @@ static void mcp_send(cJSON *msg)
          fwrite(s, 1, len, stdout);
       }
       fflush(stdout);
+      pthread_mutex_unlock(&g_out_lock);
       free(s);
    }
    cJSON_Delete(msg);
@@ -103,12 +161,11 @@ static const char *client_session_id(void)
    static int loaded = 0;
    if (loaded)
       return id[0] ? id : NULL;
-   loaded = 1;
-
    const char *env = getenv("AIMEE_SESSION_ID");
    if (env && env[0])
    {
       snprintf(id, sizeof(id), "%s", env);
+      loaded = 1;
       return id;
    }
 
@@ -129,6 +186,7 @@ static const char *client_session_id(void)
          id[--len] = '\0';
    }
    fclose(fp);
+   loaded = id[0] != '\0';
    return id[0] ? id : NULL;
 }
 
@@ -150,6 +208,43 @@ static int session_id_read_published(const char *path, char *out, size_t cap)
       return -1;
    snprintf(out, cap, "%s", buf);
    return 0;
+}
+
+/* How long the proxy will wait for the host's SessionStart hook to publish the
+ * real session id before minting one of its own, and how often it looks.
+ *
+ * Only paid when the parent IS the host (see session_id_host_parent), and only
+ * on the first startup of a session -- once the id is published the read hits
+ * immediately. Two seconds is far longer than the hook needs to reach its
+ * publish, which happens before it chooses a transport or contacts a server. */
+#define SESSION_ID_HOST_WAIT_MS 2000
+#define SESSION_ID_HOST_POLL_MS 25
+
+/* Is `pid` the agent host that runs a SessionStart hook? Same signal the hook's
+ * own ancestor walk uses, so the writer and the waiter agree on who to expect.
+ * Linux-only: elsewhere there is no /proc to ask and the proxy mints as before,
+ * which is the pre-existing behaviour rather than a regression. */
+static int session_id_host_parent(int pid)
+{
+#if defined(__linux__)
+   char path[64];
+   snprintf(path, sizeof(path), "/proc/%d/comm", pid);
+   FILE *fp = fopen(path, "r");
+   if (!fp)
+      return 0;
+   char buf[64] = "";
+   if (!fgets(buf, sizeof(buf), fp))
+   {
+      fclose(fp);
+      return 0;
+   }
+   fclose(fp);
+   buf[strcspn(buf, "\r\n")] = '\0';
+   return strcmp(buf, "claude") == 0;
+#else
+   (void)pid;
+   return 0;
+#endif
 }
 
 /* Mint this agent session's id and publish it at session-ppid-<ppid>, so every
@@ -188,6 +283,32 @@ static int client_session_id_ensure(char *out, size_t cap)
    /* Already published by a sibling (or an earlier run of this session). */
    if (session_id_read_published(path, out, cap) == 0)
       return 0;
+
+   /* Nothing published YET is not the same as nothing coming.
+    *
+    * The host fires its SessionStart hook and starts this proxy at roughly the
+    * same moment, and only the hook knows the host's session id. Minting the
+    * instant the file is missing loses that race about as often as it wins it,
+    * and the loss is expensive: the proxy keys a SECOND worktree, so the
+    * session runs on two and everything behind the proxy -- delegates, `aimee
+    * git` -- operates on the empty one. Measured on a repro box, running the
+    * proxy before the hook produced exactly that: two worktrees, one keyed on a
+    * minted id and one on the host's.
+    *
+    * So wait briefly for the hook, but only when there is a hook to wait for:
+    * the wait is gated on the parent being the host process, which is the same
+    * signal client_session_id_publish walks to. Any other MCP host -- one with
+    * no aimee hook installed -- mints immediately as before and pays nothing. */
+   if (session_id_host_parent(ppid))
+   {
+      for (int waited_ms = 0; waited_ms < SESSION_ID_HOST_WAIT_MS;
+           waited_ms += SESSION_ID_HOST_POLL_MS)
+      {
+         usleep(SESSION_ID_HOST_POLL_MS * 1000);
+         if (session_id_read_published(path, out, cap) == 0)
+            return 0;
+      }
+   }
 
    unsigned char rnd[16];
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
@@ -381,53 +502,31 @@ static void add_prompt_message(cJSON *messages, const char *role, const char *te
 
 /* --- Local protocol handlers --- */
 
-/* Place this MCP session on its own branch + worktree, and ENTER it.
- *
- * An MCP-hosted agent has no SessionStart hook, so nothing else would isolate
- * it: it would drive aimee's file/exec tools straight against the shared
- * checkout. Unlike a hook — which cannot chdir its host — this proxy IS the
- * process those tools resolve their paths in, so it can complete the handoff
- * itself by chdir'ing into the worktree.
- *
- * Runs once, at `initialize`, before any tool traffic. Writes the entered path
- * into out[cap] and returns 1; returns 0 when no worktree was entered (isolation
- * disabled, already inside one, not a git repo, or creation failed — in which
- * case client_session_worktree_ensure has already explained itself on stderr,
- * which the MCP host surfaces as server log output). Never fatal: a session that
- * cannot be isolated still serves read-only tools, and the attention guard
- * remains the backstop that refuses its writes. */
-static int mcp_enter_session_worktree(char *out, size_t cap)
+/* Bootstrap the repository visible in the client-bound cwd before the first
+ * remote code-index request. The helper uploads only when that project/root is
+ * absent, so ordinary initialization remains one cheap readiness read. */
+static void mcp_ensure_remote_repo_index(void)
 {
-   const char *sid = client_session_id();
-   char fallback[64];
-   if (!sid || !sid[0])
-   {
-      /* No host-provided id (no AIMEE_SESSION_ID, no session-ppid file yet).
-       * Mint one the way config.c does and PERSIST it to session-ppid-<ppid>,
-       * rather than inventing a private "mcp-ppid-N" string.
-       *
-       * Both halves matter. Processes of one agent session share a PPID, and
-       * that file is how the hook, this proxy and the delegates agree on one
-       * session id — an id invented here would be seen by nobody else, so the
-       * proxy would work in a different worktree from its own session. And a
-       * bare ppid is not unique enough to key a worktree on: two proxies under
-       * one host process would derive the same key and land in the SAME
-       * worktree, overwriting each other. The file's O_EXCL create settles that
-       * race — whoever loses re-reads the winner's id. */
-      if (client_session_id_ensure(fallback, sizeof(fallback)) != 0 || !fallback[0])
-         return 0; /* no stable identity -> better unisolated than colliding */
-      sid = fallback;
-   }
+   if (!cli_v1_remote_endpoint_is_network())
+      return;
 
-   if (client_session_worktree_ensure(sid, out, cap) != 0)
-      return 0;
-   if (chdir(out) != 0)
+   char cwd[MAX_PATH_LEN];
+   if (!getcwd(cwd, sizeof(cwd)) || !cwd[0])
+      return;
+   const char *const argv[] = {"git", "-C", cwd, "rev-parse", "--show-toplevel", NULL};
+   char *root = NULL;
+   if (safe_exec_capture(argv, &root, MAX_PATH_LEN) != 0 || !root)
    {
-      fprintf(stderr, "aimee: prepared session worktree %s but could not enter it\n", out);
-      return 0;
+      free(root);
+      return; /* not a repository: there is no project to index */
    }
-   fprintf(stderr, "aimee: MCP session isolated in %s\n", out);
-   return 1;
+   size_t len = strlen(root);
+   while (len > 0 && (root[len - 1] == '\n' || root[len - 1] == '\r' || root[len - 1] == ' ' ||
+                      root[len - 1] == '\t'))
+      root[--len] = '\0';
+   if (root[0] && cli_index_ensure_remote(root) != 0)
+      fprintf(stderr, "aimee: warning: could not bootstrap the remote code index for %s\n", root);
+   free(root);
 }
 
 static void handle_initialize(cJSON *id)
@@ -456,48 +555,27 @@ static void handle_initialize(cJSON *id)
    cJSON_AddStringToObject(info, "version", MCP_VERSION);
    cJSON_AddItemToObject(result, "serverInfo", info);
 
-   /* EVERY TOOL IN tools/list IS DIRECTLY CALLABLE. SAY SO FIRST.
-    *
-    * This text used to open with "call get_help() before trying anything else"
-    * and then describe find_tools -> describe_tool -> call_tool as the way to
-    * reach tools. Agents read that as the normal path and spent their tool budget
-    * on the protocol rather than the work. Measured twice now: once at five of
-    * fourteen calls, and again on a benchmark cell that made two find_tools, two
-    * describe_tool and two call_tool calls and NOT ONE direct find_symbol -- while
-    * find_symbol was in the advertised list the whole time, one call away.
-    *
-    * Discovery is for what is NOT in the list. Leading with it taxes every session
-    * to buy something almost none of them need. */
-   static const char *const base_instructions =
-       "The tools in tools/list are directly callable — call them directly, by "
-       "name, with their arguments. Do not route a listed tool through call_tool, "
-       "and do not look one up before using it. find_symbol, "
-       "preview_blast_radius, search_docs and search_memory are listed: use them "
-       "as your first move on repository questions rather than after a shell "
-       "search. Only when you need a tool that is NOT listed: find_tools("
-       "\"<keyword>\") to locate it, describe_tool(\"<name>\") for its schema, "
-       "then call_tool with that name and matching arguments. get_help(\"<topic>\") "
-       "explains how aimee itself works — work queue, delegation, memory, git, "
-       "build, conventions — when you are unsure; it is not a required first step. "
-       "Do not use provider-native sub-agent tools such as spawn_agent or Agent; "
-       "use the aimee delegate tool for delegated work.";
+   /* Initialize describes capabilities, not desired model behaviour. Persona and
+    * standing instructions belong to the first conversation message at shared
+    * model ingress; lookup strategy belongs to the caller. */
+   static const char *const surface_instructions =
+       "Tools returned by tools/list are optional and directly callable by name. "
+       "Use find_tools only to discover a capability that is not listed.";
 
-   /* Isolate before serving any tool call, and tell the caller where its work
-    * will land — the host's own idea of the cwd is now stale for aimee's tools. */
-   char wt[4200];
-   if (mcp_enter_session_worktree(wt, sizeof(wt)))
-   {
-      char instructions[8192];
-      snprintf(instructions, sizeof(instructions),
-               "%s\n\nThis session has its own isolated checkout — a branch cut from the "
-               "repository's default branch, in a dedicated worktree at %s. aimee's file and "
-               "shell tools already run there; use RELATIVE paths, or absolute paths under that "
-               "root. Do not edit the shared checkout.",
-               base_instructions, wt);
-      cJSON_AddStringToObject(result, "instructions", instructions);
-   }
-   else
-      cJSON_AddStringToObject(result, "instructions", base_instructions);
+   /* The canonical checkout must be known to the remote index before isolation
+    * moves this process underneath its hidden .aimee/worktrees directory. */
+   mcp_ensure_remote_repo_index();
+
+   /* Session identity remains shared for MCP-only hosts, but cwd allocation is
+    * not repeated here. The universal launcher has already entered the one
+    * session worktree; an MCP child changing only its own cwd would split the
+    * host shell and Aimee tools across two checkouts. */
+   char prepared_sid[64];
+   if (!client_session_id())
+      (void)client_session_id_ensure(prepared_sid, sizeof(prepared_sid));
+   /* MCP initialization describes the tool surface only. Persona content is
+    * delivered at shared model ingress, so every client gets the same behavior. */
+   cJSON_AddStringToObject(result, "instructions", surface_instructions);
 
    mcp_respond(id, result);
 }
@@ -542,6 +620,16 @@ static void handle_tools_list(cJSON *id)
       return;
    }
 
+   (void)mcp_filter_tool_allowlist(tools);
+
+   /* Trim guidance prose on the way out, when asked. The server applies the same
+    * function at its own choke point, but this is the one that decides what THIS
+    * consumer's context carries, and a thin client can face a server it does not
+    * control. Hides no tool and alters no callable shape; see mcp_compact_tool_prose.
+    * Off unless AIMEE_MCP_TOOL_PROSE=lean, so the default payload is unchanged. */
+   if (mcp_tool_prose_lean())
+      (void)mcp_compact_tool_prose(tools);
+
    cJSON *result = cJSON_CreateObject();
    cJSON_AddItemToObject(result, "tools", cJSON_DetachItemFromObjectCaseSensitive(resp, "tools"));
    mcp_respond(id, result);
@@ -566,6 +654,11 @@ static void handle_tools_call(cJSON *id, cJSON *req)
    }
 
    const char *tool = name->valuestring;
+   if (!mcp_tool_allowlisted(tool))
+   {
+      mcp_error(id, -32601, "Tool is not registered on this MCP-only capability surface");
+      return;
+   }
 
    /* A remote bridge only needs the detached-workspace long poll once an
     * actual tool may touch its working tree. Starting it at process startup
@@ -573,6 +666,27 @@ static void handle_tools_call(cJSON *id, cJSON *req)
     * polls then filled the 64-worker cap and made an unrelated tools/list fail.
     * The helper is idempotent, so subsequent tool calls are cheap. */
    cli_workspace_reverse_channel_start();
+
+   /* A remote Git tool runs in the server's reconstructed mirror. Refresh its
+    * immutable client snapshot on every call: unchanged trees reuse the same
+    * generation (preserving server-side commits/index state), while local
+    * commits or edits select a fresh worktree. Fail closed if the refresh cannot
+    * be acknowledged; forwarding would knowingly act on stale source. */
+   if (strcmp(tool, "git") == 0 && cli_workspace_reverse_channel_sync() != 0)
+   {
+      cJSON *result = cJSON_CreateObject();
+      cJSON *content = cJSON_AddArrayToObject(result, "content");
+      cJSON *block = cJSON_CreateObject();
+      cJSON_AddStringToObject(block, "type", "text");
+      cJSON_AddStringToObject(
+          block, "text",
+          "could not refresh the remote workspace mirror; refusing to run Git against a stale "
+          "checkout. Verify the Aimee server connection and retry.");
+      cJSON_AddItemToArray(content, block);
+      cJSON_AddBoolToObject(result, "isError", 1);
+      mcp_respond(id, result);
+      return;
+   }
 
    int timeout = DEFAULT_TIMEOUT_MS;
    if (strcmp(tool, "delegate") == 0)
@@ -1197,6 +1311,120 @@ static int read_mcp_message(FILE *in, char **out)
    return read_framed_json(in, ch, out);
 }
 
+/* --- tools/list_changed watcher ---------------------------------------------
+ *
+ * handle_initialize advertises tools.listChanged, which tells a client "I will
+ * tell you when the list changes, you need not re-poll". Nothing ever sent that
+ * notification, so a client that trusted the capability never re-listed: a
+ * plugin module could attach, register its commands, and remain invisible for
+ * the life of the session.
+ *
+ * The list is owned by aimee-server, not by this bridge, so the change signal
+ * has to travel. mcp.tools_list now returns the command-registry `generation`;
+ * this thread samples it and emits notifications/tools/list_changed whenever it
+ * moves. Polling rather than a server push because the bridge has no inbound
+ * channel of its own -- and from the CLIENT's side this is still push, which is
+ * what the capability actually promises.
+ *
+ * A server that does not return `generation` (an older one) simply never
+ * triggers a notification, which is exactly the behaviour before this existed. */
+static atomic_int g_watch_stop;
+static pthread_t g_watch_thread;
+static int g_watch_running;
+
+/* Seconds between samples. Slow on purpose: this costs one tools_list build per
+ * tick per connected bridge, and a plugin appearing a few seconds late is not a
+ * cost anyone can perceive.
+ *
+ * A variable rather than a constant so the watcher is testable at all -- a
+ * 15-second loop cannot be driven by a unit test, and an untested background
+ * thread in a shipped path is exactly the thing to avoid. Also lets an operator
+ * tighten or loosen it without a rebuild. */
+static int g_tools_watch_interval_sec = 15;
+
+static void tools_watch_read_interval(void)
+{
+   const char *env = getenv("AIMEE_MCP_TOOLS_WATCH_SECONDS");
+   if (!env || !env[0])
+      return;
+   int v = atoi(env);
+   if (v > 0)
+      g_tools_watch_interval_sec = v;
+}
+
+static int tools_generation_now(double *out)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return -1;
+   cJSON_AddStringToObject(req, "method", "mcp.tools_list");
+   cJSON *resp = server_request(req, DEFAULT_TIMEOUT_MS);
+   cJSON_Delete(req);
+   if (!resp)
+      return -1;
+   cJSON *gen = cJSON_GetObjectItemCaseSensitive(resp, "generation");
+   int ok = cJSON_IsNumber(gen);
+   if (ok && out)
+      *out = gen->valuedouble;
+   cJSON_Delete(resp);
+   return ok ? 0 : -1;
+}
+
+static void *tools_watch_run(void *unused)
+{
+   (void)unused;
+   double last = 0;
+   int have_last = 0;
+
+   while (!atomic_load(&g_watch_stop))
+   {
+      /* Sleep in short slices so stop() is prompt even on a long interval: a
+       * thread that only checks its stop flag once per interval makes shutdown
+       * wait out the whole tick. */
+      for (int i = 0; i < g_tools_watch_interval_sec * 10 && !atomic_load(&g_watch_stop); i++)
+         usleep(100000);
+      if (atomic_load(&g_watch_stop))
+         break;
+
+      double now = 0;
+      if (tools_generation_now(&now) != 0)
+         continue; /* server down or too old to report it; try again next tick */
+      if (!have_last)
+      {
+         last = now;
+         have_last = 1;
+         continue; /* the first sample is a baseline, not a change */
+      }
+      if (now == last)
+         continue;
+      last = now;
+
+      cJSON *note = cJSON_CreateObject();
+      if (!note)
+         continue;
+      cJSON_AddStringToObject(note, "jsonrpc", "2.0");
+      cJSON_AddStringToObject(note, "method", "notifications/tools/list_changed");
+      mcp_send(note); /* a notification carries no id */
+   }
+   return NULL;
+}
+
+static void tools_watch_start(void)
+{
+   tools_watch_read_interval();
+   atomic_store(&g_watch_stop, 0);
+   g_watch_running = pthread_create(&g_watch_thread, NULL, tools_watch_run, NULL) == 0;
+}
+
+static void tools_watch_stop(void)
+{
+   if (!g_watch_running)
+      return;
+   atomic_store(&g_watch_stop, 1);
+   pthread_join(g_watch_thread, NULL);
+   g_watch_running = 0;
+}
+
 /* --- Entry point --- */
 
 int cli_mcp_serve(void)
@@ -1205,6 +1433,9 @@ int cli_mcp_serve(void)
     * by cli_main so write() to a dead server socket surfaces EPIPE rather
     * than killing the bridge. */
    setvbuf(stdout, NULL, _IONBF, 0);
+
+   /* Honour the tools.listChanged capability handle_initialize advertises. */
+   tools_watch_start();
 
    char *message = NULL;
    int rc;
@@ -1227,6 +1458,7 @@ int cli_mcp_serve(void)
    free(message);
    if (rc < 0)
       mcp_error(NULL, -32700, "Parse error");
+   tools_watch_stop();
    cli_workspace_reverse_channel_stop();
    cli_close(&g_conn);
    return 0;

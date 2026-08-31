@@ -4,11 +4,11 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "wiki_render.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char s_tmpdir[256];
 
@@ -22,7 +22,8 @@ static int file_exists(const char *dir, const char *name)
 
 static void test_render_creates_files(void)
 {
-   char tmpl[] = "/tmp/aimee-wiki-test-XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-wiki-test-XXXXXX", platform_tmpdir());
    char *dir = mkdtemp(tmpl);
    assert(dir);
    snprintf(s_tmpdir, sizeof(s_tmpdir), "%s", dir);
@@ -69,7 +70,6 @@ int main(void)
 {
    printf("wiki_render:\n");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    test_render_creates_files();

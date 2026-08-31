@@ -43,6 +43,7 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
    cJSON *jb = cJSON_GetObjectItemCaseSensitive(args, "branch");
    cJSON *jdcwd = cJSON_GetObjectItemCaseSensitive(args, "cwd");
    cJSON *jpersona = cJSON_GetObjectItemCaseSensitive(args, "persona");
+   cJSON *jtools = cJSON_GetObjectItemCaseSensitive(args, "tools");
    /* A persona is required for every delegate (it sets the delegate's identity
     * and principles). */
    if (!cJSON_IsString(jpersona) || !jpersona->valuestring[0])
@@ -61,6 +62,10 @@ int handle_mcp_delegate_call(server_ctx_t *ctx, server_conn_t *conn, cJSON *args
       cJSON_AddStringToObject(dreq, "branch", jb->valuestring);
    if (cJSON_IsString(jpersona) && jpersona->valuestring[0])
       cJSON_AddStringToObject(dreq, "persona", jpersona->valuestring);
+   /* Only a stated boolean is forwarded: absent must stay absent so the role's
+    * own tools default decides, exactly as it does for the CLI. */
+   if (cJSON_IsBool(jtools))
+      cJSON_AddBoolToObject(dreq, "tools", cJSON_IsTrue(jtools));
    if (sid && sid[0])
       cJSON_AddStringToObject(dreq, "session_id", sid);
    if (cJSON_IsString(jdcwd) && jdcwd->valuestring[0])

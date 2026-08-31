@@ -16,13 +16,13 @@
 #include <unistd.h>
 
 #include "cJSON.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "../kb_planner.h"
-#include "../db2/artifacts.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../modules/db2/c/artifacts.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 #include "config.h"
-#include "config_learning.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
@@ -38,14 +38,11 @@ static void close_db(void)
 /* ---- 1. config_planner_defaults ---- */
 static void test_config_planner_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_planner_settings(&cfg, NULL);
-
-   assert(cfg.planner_search_command[0] == '\0');
-   assert(cfg.constraint_solver_command[0] == '\0');
-   assert(cfg.planner_budget_default == 32);
-   assert(cfg.planner_exploration_constant > 1.3 && cfg.planner_exploration_constant < 1.5);
+   assert(config_planner_search_command()[0] == '\0');
+   assert(config_constraint_solver_command()[0] == '\0');
+   assert(config_planner_budget_default() == 32);
+   assert(config_planner_exploration_constant() > 1.3 &&
+          config_planner_exploration_constant() < 1.5);
 
    printf("  config_planner_defaults: ok\n");
 }
@@ -53,29 +50,21 @@ static void test_config_planner_defaults(void)
 /* ---- 2. config_planner_overrides ---- */
 static void test_config_planner_overrides(void)
 {
-   const char *json = "{\"intelligence\":{"
-                      "\"planner_search_command\":\"python3 scripts/mcts-planner.py\","
-                      "\"constraint_solver_command\":\"python3 scripts/z3-solver.py\","
-                      "\"planner\":{\"budget_default\":64,\"exploration_constant\":2.0}"
-                      "}}";
+   assert(config_set_planner_search_command("python3 scripts/mcts-planner.py") == 0);
+   assert(config_set_constraint_solver_command("python3 scripts/z3-solver.py") == 0);
+   assert(config_set_planner_budget_default(64) == 0);
+   assert(config_set_planner_exploration_constant(2.0) == 0);
 
-   cJSON *root = cJSON_Parse(json);
-   assert(root);
-
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_planner_settings(&cfg, root);
-   cJSON_Delete(root);
-
-   assert(strcmp(cfg.planner_search_command, "python3 scripts/mcts-planner.py") == 0);
-   assert(strcmp(cfg.constraint_solver_command, "python3 scripts/z3-solver.py") == 0);
-   assert(cfg.planner_budget_default == 64);
-   assert(cfg.planner_exploration_constant > 1.9 && cfg.planner_exploration_constant < 2.1);
+   assert(strcmp(config_planner_search_command(), "python3 scripts/mcts-planner.py") == 0);
+   assert(strcmp(config_constraint_solver_command(), "python3 scripts/z3-solver.py") == 0);
+   assert(config_planner_budget_default() == 64);
+   assert(config_planner_exploration_constant() > 1.9 &&
+          config_planner_exploration_constant() < 2.1);
 
    printf("  config_planner_overrides: ok\n");
 }
 
-/* kb_planner_* now read the LIVE config instead of taking a config_t, so the "disabled"
+/* kb_planner_* read the live module config, so the "disabled"
  * cases must pin the config they read. Without this they would inherit the developer's real
  * aimee.yaml and fail on any machine that has a planner command configured. An empty HOME
  * gives the declared defaults (both commands empty). */
@@ -86,12 +75,14 @@ static void pin_empty_config(void)
 {
    /* Fresh template per call: mkdtemp REWRITES the XXXXXX in place, so reusing one
     * static buffer makes the second call fail. */
-   snprintf(g_cfg_home, sizeof(g_cfg_home), "/tmp/aimee-test-planner-XXXXXX");
+   snprintf(g_cfg_home, sizeof(g_cfg_home), "%s/aimee-test-planner-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_cfg_home));
    g_saved_home = getenv("HOME") ? strdup(getenv("HOME")) : NULL;
    setenv("HOME", g_cfg_home, 1);
    unsetenv("AIMEE_HOME");
    setenv("AIMEE_NO_CACHE", "1", 1);
+   assert(config_set_planner_search_command("") == 0);
+   assert(config_set_constraint_solver_command("") == 0);
 }
 
 static void unpin_config(void)

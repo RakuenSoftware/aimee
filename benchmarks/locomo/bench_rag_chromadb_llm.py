@@ -16,6 +16,7 @@ from pathlib import Path
 
 from benchmarks.common.harness import AimeeHarness, git_commit
 from benchmarks.common.llm_eval import ANSWER_SYSTEM, build_answer_prompt, judge_majority, llm_cost_breakdown
+from benchmarks.common.result_schema import make_coverage
 from benchmarks.common.runner import build_summary, print_summary, write_result_file
 from benchmarks.locomo.common.dataset import load_cases
 
@@ -74,7 +75,9 @@ def main() -> int:
     results = []
     tmp, home = harness.prepare_home()
     try:
+        samples_run = 0
         for sample in load_cases(args.dataset, args.max_samples):
+            samples_run += 1
             docs = build_documents(sample)
 
             # Build an ephemeral ChromaDB collection for this sample
@@ -148,6 +151,14 @@ def main() -> int:
         "result_count": len(results),
         "agent_model": harness.current_model,
         "judge_runs": 3,
+        # Records whether this run was capped, so a subsample cannot later be
+        # compared against a full-run baseline without the difference showing.
+        # See require_complete_run in benchmarks/common/result_schema.py.
+        "coverage": make_coverage(
+            max_samples=args.max_samples,
+            samples_run=samples_run,
+            questions_run=len(results),
+        ),
         "results": results,
         "summary": summary,
     }

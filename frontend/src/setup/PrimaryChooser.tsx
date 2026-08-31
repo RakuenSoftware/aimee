@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@rakuensoftware/smoothgui';
 
-/* Provider chooser — wizard page 1 AND the Agents tab's "add delegate" first
+/* Provider chooser — wizard page 1 AND the Models tab's "add model" first
  * window. Four supported providers, two shapes:
  *
  *   API key      → agent.add (Anthropic API, OpenAI-compatible API)
@@ -12,12 +12,12 @@ import { Button } from '@rakuensoftware/smoothgui';
  *   'primary'  (wizard default) — the agent becomes the GLOBAL default (the one
  *              resolve_primary drives): agent.add --default, and the OAuth flow
  *              promotes the vendor agent via agent.set --default.
- *   'delegate' (Agents tab) — a named roster entry, NOT the default: the API
+ *   'delegate' (Models tab) — a named roster entry, NOT the default: the API
  *              form collects a delegate name + roles, and the OAuth flow leaves
  *              the registered vendor agent unpromoted.
  *
- * Every write goes through an existing endpoint — /api/agents/add,
- * /api/agents/set, and the /api/agents/oauth/* proxies — so there is no new
+ * Every write goes through an existing endpoint — /api/models/add,
+ * /api/models/set, and the /api/models/oauth/* proxies — so there is no new
  * config surface. In primary mode, on success we also stamp the legacy
  * `provider` config breadcrumb so the wizard summary + header chip (which read
  * config, not the agent roster) reflect that a primary now exists.
@@ -88,7 +88,7 @@ const SUB_SPECS: SubSpec[] = [
 
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 
 function csrf(): string {
@@ -127,7 +127,7 @@ export interface PrimaryChooserProps {
    * it into config as the legacy breadcrumb). */
   onConfigured: (provider: string) => void | Promise<void>;
   /** 'primary' (default): the wizard's add-and-make-default. 'delegate': the
-   * Agents tab's add — a named, non-default roster entry. */
+   * Models tab's add — a named, non-default roster entry. */
   mode?: 'primary' | 'delegate';
 }
 
@@ -208,7 +208,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
         args.push('--default');
       }
       args.push('--primary-only', primaryOnly ? 'on' : 'off');
-      await postJSON('/api/agents/add', { args });
+      await postJSON('/api/models/add', { args });
       await onConfigured(apiSpec.provider);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Could not add the agent.');
@@ -220,7 +220,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   const pollOnce = useCallback(async (vendor: string, session: string): Promise<'pending' | 'authenticated' | 'failed'> => {
     try {
       const r = await postJSON<{ state?: string; agent?: string; error?: string }>(
-        '/api/agents/oauth/poll', { vendor, session });
+        '/api/models/oauth/poll', { vendor, session });
       if (r.state === 'authenticated') {
         // Apply the operator's "Primary Agent Only" choice to the freshly
         // OAuth-registered agent (the server registers a claude subscription
@@ -229,7 +229,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
         const agent = r.agent || vendor;
         const setArgs = [agent, '--primary-only', primaryOnly ? 'on' : 'off'];
         if (!delegate) setArgs.push('--default');
-        await postJSON('/api/agents/set', { args: setArgs });
+        await postJSON('/api/models/set', { args: setArgs });
         return 'authenticated';
       }
       if (r.state === 'failed') { setError(r.error || 'Login failed or timed out.'); return 'failed'; }
@@ -258,7 +258,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
     setError('');
     try {
       const r = await postJSON<{ url: string; code?: string; session: string; needs_code_back?: boolean }>(
-        '/api/agents/oauth/start', { vendor: subSpec.vendor });
+        '/api/models/oauth/start', { vendor: subSpec.vendor });
       const st: OauthState = {
         session: r.session, url: r.url, code: r.code || '', needsCodeBack: !!r.needs_code_back,
       };
@@ -279,7 +279,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
     setBusy(true);
     setError('');
     try {
-      await postJSON('/api/agents/oauth/code', {
+      await postJSON('/api/models/oauth/code', {
         vendor: subSpec.vendor, session: oauth.session, code: codeBack.trim(),
       });
       setBusy(false);
@@ -294,10 +294,10 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   if (!selected) {
     return (
       <div style={{ display: 'grid', gap: 10, marginBottom: 14 }}>
-        <p style={{ fontSize: 13, color: '#556', margin: '0 0 2px' }}>
+        <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: '0 0 2px' }}>
           {delegate
             ? 'Pick the provider for this delegate.'
-            : 'Pick the primary model aimee drives. You can change it later on the Agents tab.'}
+            : 'Pick the primary model aimee drives. You can change it later on the Models tab.'}
         </p>
         {API_SPECS.map((s) => (
           <button key={s.kind} onClick={() => chooseApi(s)} style={cardStyle}>
@@ -345,7 +345,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
             <input style={input} type="password" autoComplete="off" value={apiKey}
               onChange={(e) => setApiKey(e.target.value)} placeholder={apiSpec.keyHint} />
           </Field>
-          <div style={{ fontSize: 11.5, color: '#778' }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
             The key is sealed into aimee-server’s vault — it is never stored in the browser or in agents.json.
           </div>
           <PrimaryOnlyToggle checked={primaryOnly} disabled={busy} onChange={setPrimaryOnly} />
@@ -362,7 +362,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
           <div style={{ fontSize: 15, fontWeight: 700 }}>{subSpec.label}</div>
           {!oauth ? (
             <>
-              <p style={{ fontSize: 13, color: '#556', margin: 0, lineHeight: 1.5 }}>
+              <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: 0, lineHeight: 1.5 }}>
                 aimee installs the {subSpec.vendor} CLI on the server and starts a login. You’ll get a
                 link to authorize in your browser. This can take up to a minute on first run.
               </p>
@@ -375,23 +375,23 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
             </>
           ) : (
             <div style={{ display: 'grid', gap: 10 }}>
-              <div style={{ fontSize: 13, color: '#556' }}>
+              <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                 1. Open this link and authorize:
                 <div style={{ marginTop: 4 }}>
-                  <a href={oauth.url} target="_blank" rel="noreferrer" style={{ color: '#2c6', wordBreak: 'break-all' }}>
+                  <a href={oauth.url} target="_blank" rel="noreferrer" style={{ color: 'var(--sg-success-dark)', wordBreak: 'break-all' }}>
                     {oauth.url}
                   </a>
                 </div>
               </div>
               {oauth.code && (
-                <div style={{ fontSize: 13, color: '#556' }}>
+                <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                   2. Enter this one-time code on that page:{' '}
-                  <code style={{ background: '#f1f4f9', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{oauth.code}</code>
+                  <code style={{ background: 'var(--sg-surface-sunken)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>{oauth.code}</code>
                 </div>
               )}
               {oauth.needsCodeBack && !polling && (
                 <div style={{ display: 'grid', gap: 6 }}>
-                  <div style={{ fontSize: 13, color: '#556' }}>
+                  <div style={{ fontSize: 13, color: 'var(--sg-text-muted)' }}>
                     {oauth.code ? '3.' : '2.'} After authorizing, paste the code shown back here:
                   </div>
                   <input style={input} value={codeBack} onChange={(e) => setCodeBack(e.target.value)} placeholder="paste code" />
@@ -403,7 +403,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
                 </div>
               )}
               {polling && (
-                <div style={{ fontSize: 13, color: '#2c8f56' }}>⏳ Waiting for sign-in to complete…</div>
+                <div style={{ fontSize: 13, color: 'var(--sg-success-dark)' }}>⏳ Waiting for sign-in to complete…</div>
               )}
             </div>
           )}
@@ -411,7 +411,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       )}
 
       {error && (
-        <div style={{ marginTop: 12, fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ marginTop: 12, fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
@@ -421,10 +421,10 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
 
 const cardStyle: React.CSSProperties = {
   display: 'flex', flexDirection: 'column', gap: 3, textAlign: 'left', padding: '11px 13px',
-  borderRadius: 9, border: '1px solid #dde', background: '#fbfcfe', cursor: 'pointer',
+  borderRadius: 9, border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface-alt)', cursor: 'pointer',
 };
-const cardTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: '#233' };
-const cardBlurb: React.CSSProperties = { fontSize: 12, color: '#667' };
+const cardTitle: React.CSSProperties = { fontSize: 14, fontWeight: 700, color: 'var(--sg-text)' };
+const cardBlurb: React.CSSProperties = { fontSize: 12, color: 'var(--sg-text-secondary)' };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -443,11 +443,11 @@ function PrimaryOnlyToggle(
   { checked: boolean; disabled?: boolean; onChange: (v: boolean) => void },
 ) {
   return (
-    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: '#556', cursor: disabled ? 'default' : 'pointer' }}>
+    <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12.5, color: 'var(--sg-text-muted)', cursor: disabled ? 'default' : 'pointer' }}>
       <input type="checkbox" checked={checked} disabled={disabled}
         onChange={(e) => onChange(e.target.checked)} style={{ marginTop: 2 }} />
       <span>
-        <strong style={{ color: '#334' }}>Primary Agent Only</strong> — use only as the primary,
+        <strong style={{ color: 'var(--sg-text)' }}>Primary Agent Only</strong> — use only as the primary,
         never as a delegate. Recommended for a Claude subscription: driving a personal Claude plan as
         an automated delegate may breach Anthropic’s terms.
       </span>

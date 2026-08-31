@@ -1,5 +1,5 @@
 #include "server/server_mgmt_checkpoint_client.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb/kb_mgmt_client.h"
 #include "kb_mgmt_status.h"
 #include "server_mgmt_status.h"
@@ -12,6 +12,8 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include "support/store_module_fixture.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Unused production transport seams; verify_with injects the fake below. */
 int kb_mgmt_endpoint_validate(const char *e)
@@ -148,6 +150,13 @@ static void make_staple(uint64_t generation, const char *purpose,
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    char a[65], b[65], c[65];
    memset(a, 'a', 64);
    memset(b, 'b', 64);
@@ -159,12 +168,11 @@ int main(void)
    a[0] = 'A';
    assert(!server_mgmt_checkpoint_pin_matches(a, a, NULL));
 
-   char dbpath[] = "/tmp/aimee-checkpoint-client-XXXXXX";
+   char dbpath[256];
+   snprintf(dbpath, sizeof dbpath, "%s/aimee-checkpoint-client-XXXXXX", platform_tmpdir());
    int fd = mkstemp(dbpath);
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(dbpath) == 0 && server_mgmt_status_init() == 0);
-
    fake_t fake = {0};
    for (size_t i = 0; i < sizeof(fake.private_key); i++)
       fake.private_key[i] = (unsigned char)(i + 1);
@@ -295,7 +303,6 @@ int main(void)
    assert(server_mgmt_status_hwm_advance(9) == 0);
    assert(server_mgmt_status_hwm_advance(8) == -1);
    assert(server_mgmt_status_hwm(&hwm) == 0 && hwm == 9);
-   db1_shutdown();
    unlink(dbpath);
    puts("server management checkpoint client tests passed");
    return 0;

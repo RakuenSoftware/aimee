@@ -15,6 +15,12 @@
   "sources": [
     "src/modules/response-composition/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/response-composition/response_composition.go"
+  ],
+  "go_tests": [
+    "server-go/modules/response-composition/response_composition_test.go"
+  ],
   "public_headers": [
     "src/modules/response-composition/include/aimee/response-composition/module_api.h"
   ],

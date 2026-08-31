@@ -300,6 +300,33 @@ components:
         session_id: { type: string }
         attach_id: { type: string }
         events_url: { type: string }
+    CliManifest:
+      type: object
+      required: [manifest_version, routes]
+      properties:
+        manifest_version:
+          type: integer
+          description: >
+            Bumped only when the SHAPE of this document changes. A client that
+            does not recognise the version must say so rather than guess at the
+            rows.
+        server_version: { type: string }
+        routes:
+          type: array
+          items:
+            type: object
+            required: [op, verb, path]
+            properties:
+              op:
+                type: string
+                description: Method name the client asks for, e.g. "config.show".
+              verb: { type: string, enum: [GET, POST, PUT, DELETE] }
+              path: { type: string }
+              async:
+                type: boolean
+                description: >
+                  Present and true when POSTing returns a run handle to poll at
+                  GET /v1/runs/{id} instead of a final response.
 paths:
   /health:
     get:
@@ -311,6 +338,32 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/HealthResponse' }
+  /cli/manifest:
+    get:
+      summary: The thin client's method to route map
+      description: >
+        The map of dispatchable method (`op`) to `/v1` route, read off this
+        server's live route registry. The thin client fetches this instead of
+        carrying a compiled-in copy, so a capability added to the server is
+        reachable from an existing client with no client rebuild.
+
+        `async: true` marks rows whose POST returns a run handle to poll at
+        `GET /v1/runs/{id}` rather than a final response; the client must know
+        this to drive the request and cannot infer it from the path. Rows with
+        an inline `{id}` segment are not listed; those carry a different
+        marshalling contract.
+
+        Unauthenticated for the same reason as the OpenAPI document: it
+        describes the surface and grants nothing, and a client that cannot read
+        it cannot address the server at all, so gating it would make an
+        authentication failure look like a missing command.
+      security: []
+      responses:
+        "200":
+          description: The route map
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CliManifest' }
   /ready:
     get:
       summary: Readiness probe
@@ -1427,7 +1480,7 @@ paths:
               schema: { type: object }
   /agents:
     get:
-      summary: List configured agents and the default agent
+      summary: List configured models and the default agent
       responses:
         "200":
           description: Configured agents ({default, agents[]})
@@ -1614,7 +1667,11 @@ paths:
         turn_version is the point-in-time version captured at emit; drifted is true
         when a still-present source's current version differs from turn_version
         (version-change drift). present is false when the source no longer exists
-        (deleted/superseded since the turn). provenance_status is one of the
+        (deleted/superseded since the turn). outcomes is the P5 work-outcome
+        history for the retrieval event, including authenticated evaluator, task,
+        workflow, correction and fault attribution; it is `not-computed` only if
+        that projection could not be read. The same payload is exported by
+        `aimee audit provenance <turn_id>`. provenance_status is one of the
         exhaustive states ok / not_instrumented / not_evaluated /
         evidence_unavailable (P2 produces ok and evidence_unavailable). Requires
         aimee-kb. Gated by kb_evidence_emit_enabled at emit time.
@@ -1763,6 +1820,125 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /index/hybrid:
+    post:
+      summary: Fused lexical and semantic search over the code index
+      description: >
+        The command-line twin of the index_hybrid MCP tool, for finding a PHRASE
+        rather than a symbol. Accepts `queries` so several phrases cost one round
+        trip. scope=all widens beyond the active project. Note the MCP twin also
+        performs cite-capture against an MCP session id; this route does not,
+        because it has no such session. The retrieval is identical.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                query: { type: string }
+                queries:
+                  type: array
+                  items: { type: string }
+                symbol: { type: string }
+                scope: { type: string, enum: [current, all] }
+                max_results: { type: integer }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: One result entry per query, in order
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing query/queries, bad scope, or no active project
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /index/investigate:
+    post:
+      summary: Ask the code index a plain-words question
+      description: >
+        The command-line twin of the index_investigate MCP tool. Returns ranked
+        evidence with the code attached rather than a list of paths to go read.
+        Accepts `queries` so several questions cost one round trip; `query` is
+        the single-question form.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                project: { type: string }
+                query: { type: string }
+                queries:
+                  type: array
+                  items: { type: string }
+                symbol: { type: string }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: One result entry per question, in order
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing query/queries, or no active project to scope it to
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
+  /index/span:
+    post:
+      summary: Read an exact line range from an indexed file
+      description: >
+        The command-line twin of the code_span_get MCP tool. It exists so a range
+        read can be chained with && into one shell call instead of costing a tool
+        turn per read. line_end defaults to line_start, so an omitted range
+        returns a single line rather than a whole file.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [file_path]
+              properties:
+                project: { type: string }
+                file_path: { type: string }
+                line_start: { type: integer }
+                line_end: { type: integer }
+                cwd: { type: string }
+      responses:
+        "200":
+          description: Span envelope with the file content for the range
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing file_path, or no active project to scope it to
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: Knowledge service unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+
   /index/structure:
     post:
       summary: List the definitions in an indexed file
@@ -2072,6 +2248,23 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /config/deploy-env:
+    get:
+      summary: Emit the compose environment for this backend record
+      description: >
+        The KEY=VALUE lines a managed `docker compose up -d` needs, derived from
+        the saved configuration. Intended for the operator wrapper
+        `eval "$(aimee config deploy-env)" && docker compose up -d`: recreating a
+        managed container without these silently reinterpolates AIMEE_KB_VARIANT
+        to empty, which resolves the knowledge-base image to the embedderless
+        variant. Carries no credential: embedder and synthesis API keys are
+        deliberately omitted and live only in Vault.
+      responses:
+        "200":
+          description: Envelope whose `env` string holds the KEY=VALUE lines
+          content:
+            application/json:
+              schema: { type: object }
   /config/get:
     post:
       summary: Get one configuration value
@@ -2256,6 +2449,16 @@ paths:
       summary: Status of a delegate job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Delegate status, content: { application/json: { schema: { type: object } } } } }
+  /delegate/reservation/forget:
+    post:
+      summary: Release a delegate replay reservation (job_id makes it a compare-delete, so a newer job under the same key is not erased)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Release outcome; released is false when the reservation was already gone or now names a different job", content: { application/json: { schema: { type: object } } } } }
+  /delegate/cancel_unassigned:
+    post:
+      summary: Cancel a delegate job that was never assigned to a worker, if it has been unassigned for at least min_unassigned_secs
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: "Cancellation outcome; cancelled is false when the job was assigned, already terminal, or not yet old enough", content: { application/json: { schema: { type: object } } } } }
   /delegate/sandbox/images:
     get:
       summary: List build-from-spec sandbox images (aimee-sbx:*) with created time, size, and in-use flag
@@ -2427,10 +2630,10 @@ paths:
       summary: Cancel a durable job
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Cancelled, content: { application/json: { schema: { type: object } } } } }
-  /agent/list:
+  /model/list:
     get:
-      summary: List configured agents
-      responses: { "200": { description: Agent list, content: { application/json: { schema: { type: object } } } } }
+      summary: List configured models
+      responses: { "200": { description: Model list, content: { application/json: { schema: { type: object } } } } }
   /audit/verify:
     get:
       summary: Verify the WORM audit chain + checkpoint MACs (green/amber/red)
@@ -2456,51 +2659,51 @@ paths:
       summary: Replay one audit-on-bus capture file's governed-action rows as JSON (paged; observational)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Replay page, content: { application/json: { schema: { type: object } } } } }
-  /agent/local:
+  /model/local:
     get:
       summary: List local agents
       responses: { "200": { description: Local agent list, content: { application/json: { schema: { type: object } } } } }
-  /agent/add:
+  /model/add:
     post:
       summary: Add an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent added, content: { application/json: { schema: { type: object } } } } }
-  /agent/remove:
+  /model/remove:
     post:
       summary: Remove an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent removed, content: { application/json: { schema: { type: object } } } } }
-  /agent/enable:
+  /model/enable:
     post:
       summary: Enable an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent enabled, content: { application/json: { schema: { type: object } } } } }
-  /agent/disable:
+  /model/disable:
     post:
       summary: Disable an agent
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent disabled, content: { application/json: { schema: { type: object } } } } }
-  /agent/roles:
+  /model/roles:
     post:
       summary: Set an agent's roles
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent roles updated, content: { application/json: { schema: { type: object } } } } }
-  /agent/personas:
+  /model/personas:
     post:
       summary: Set the personas an agent may be dispatched as ("all" = every persona)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Agent personas updated, content: { application/json: { schema: { type: object } } } } }
-  /agent/set:
+  /model/set:
     post:
       summary: Surgically patch only the provided fields of an existing agent (model, endpoint, provider, cost_tier, max_turns, max_parallel, context_window, tools, roles, personas, enabled, key)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Updated agent record, content: { application/json: { schema: { type: object } } } } }
-  /agent/probe:
+  /model/probe:
     post:
       summary: Probe an agent/provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Probe result, content: { application/json: { schema: { type: object } } } } }
-  /agent/stats:
+  /model/stats:
     get:
       summary: Per-delegate run statistics
       responses: { "200": { description: Per-delegate run stats, content: { application/json: { schema: { type: object } } } } }
@@ -2508,41 +2711,128 @@ paths:
     get:
       summary: Economizer telemetry (gateway mutation counters, tool-condense savings, avoided-$)
       responses: { "200": { description: Economizer stats, content: { application/json: { schema: { type: object } } } } }
-  /agent/draft:
+  /model/draft:
     post:
       summary: One-shot tool-free text generation (proposal drafting) via a non-CLI delegate
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: "{text, agent}", content: { application/json: { schema: { type: object } } } } }
-  /agent/setup:
+  /model/setup:
     post:
       summary: Set up an agent (async)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Setup started, content: { application/json: { schema: { type: object } } } } }
-  /agent/setup_poll:
+  /model/setup_poll:
     post:
       summary: Poll agent setup progress
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Setup status, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_start:
+  /model/cli_oauth_start:
     post:
       summary: Install a vendor CLI on the server and start its OAuth login (claude/codex)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Verification URL + code, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_code:
+  /model/cli_oauth_code:
     post:
       summary: Submit the operator-pasted code into a server-side CLI OAuth login (claude)
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Submitted, content: { application/json: { schema: { type: object } } } } }
-  /agent/cli_oauth_poll:
+  /model/cli_oauth_poll:
     post:
       summary: Poll a server-side CLI OAuth login; register the agent on success
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Login state, content: { application/json: { schema: { type: object } } } } }
-  /agent/episodes:
+  /model/episodes:
     post:
       summary: List an agent's episodes
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Episode list, content: { application/json: { schema: { type: object } } } } }
+  /agent/list:
+    get:
+      summary: Roster list (deprecated alias of /model/list)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/local:
+    get:
+      summary: Roster local (deprecated alias of /model/local)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/add:
+    post:
+      summary: Roster add (deprecated alias of /model/add)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/remove:
+    post:
+      summary: Roster remove (deprecated alias of /model/remove)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/enable:
+    post:
+      summary: Roster enable (deprecated alias of /model/enable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/roles:
+    post:
+      summary: Roster roles (deprecated alias of /model/roles)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/personas:
+    post:
+      summary: Roster personas (deprecated alias of /model/personas)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/set:
+    post:
+      summary: Roster set (deprecated alias of /model/set)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/disable:
+    post:
+      summary: Roster disable (deprecated alias of /model/disable)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/probe:
+    post:
+      summary: Roster probe (deprecated alias of /model/probe)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/stats:
+    get:
+      summary: Roster stats (deprecated alias of /model/stats)
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/draft:
+    post:
+      summary: Roster draft (deprecated alias of /model/draft)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup:
+    post:
+      summary: Roster setup (deprecated alias of /model/setup)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/setup_poll:
+    post:
+      summary: Roster setup_poll (deprecated alias of /model/setup_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_start:
+    post:
+      summary: Roster cli_oauth_start (deprecated alias of /model/cli_oauth_start)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_code:
+    post:
+      summary: Roster cli_oauth_code (deprecated alias of /model/cli_oauth_code)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/cli_oauth_poll:
+    post:
+      summary: Roster cli_oauth_poll (deprecated alias of /model/cli_oauth_poll)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
+  /agent/episodes:
+    post:
+      summary: Roster episodes (deprecated alias of /model/episodes)
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: OK, content: { application/json: { schema: { type: object } } } } }
   /episode/list:
     get:
       summary: List episodes
@@ -2580,15 +2870,15 @@ paths:
       summary: Test a provider
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Test result, content: { application/json: { schema: { type: object } } } } }
-  /model/list:
+  /catalog/list:
     get:
-      summary: List models (provider catalog)
+      summary: List catalogued models
       responses: { "200": { description: Model list, content: { application/json: { schema: { type: object } } } } }
-  /model/show:
+  /catalog/show:
     get:
-      summary: Show the current model
+      summary: Show a catalogued model
       responses: { "200": { description: Model, content: { application/json: { schema: { type: object } } } } }
-  /model/refresh:
+  /catalog/refresh:
     post:
       summary: Refresh the model catalog
       requestBody: { content: { application/json: { schema: { type: object } } } }
@@ -2833,6 +3123,11 @@ paths:
       summary: Evaluate a skill
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Eval result, content: { application/json: { schema: { type: object } } } } }
+  /skills/eval-exec:
+    post:
+      summary: Run bounded executable held-out trials for a skill
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Executable eval result, content: { application/json: { schema: { type: object } } } } }
   /skills/lifecycle:
     post:
       summary: Skill lifecycle action
@@ -2941,6 +3236,73 @@ paths:
     get:
       summary: Evaluation results
       responses: { "200": { description: Eval results, content: { application/json: { schema: { type: object } } } } }
+  /learning/approaches:
+    post:
+      summary: Approaches that already failed against a similar goal
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Recalled dead ends, content: { application/json: { schema: { type: object } } } } }
+  /learning/attribution:
+    get:
+      summary: Measured per-capability contribution from the ablation grid
+      responses: { "200": { description: Attribution per ablation arm, content: { application/json: { schema: { type: object } } } } }
+  /learning/fate:
+    post:
+      summary: Record what became of a committed learning proposal
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Recorded fate, content: { application/json: { schema: { type: object } } } } }
+  /learning/resolve:
+    post:
+      summary: Resolve curiosity-backlog gaps that the corpus now answers
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Resolution counts, content: { application/json: { schema: { type: object } } } } }
+  /eval/candidates:
+    get:
+      summary: Synthesised regression candidates and the admission gate
+      responses: { "200": { description: Candidate list, content: { application/json: { schema: { type: object } } } } }
+    post:
+      summary: Scan, admit, reject, or retire regression candidates
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Update result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/list:
+    get:
+      summary: List roundtable authoring pipelines
+      responses: { "200": { description: Pipeline list, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/status:
+    post:
+      summary: Roundtable authoring pipeline status
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Pipeline status, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/start:
+    post:
+      summary: Start a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Started pipeline, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/cancel:
+    post:
+      summary: Cancel a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Cancel result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/resume:
+    post:
+      summary: Resume a roundtable authoring pipeline
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Resume result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/advance:
+    post:
+      summary: Advance a roundtable authoring pipeline to its next phase
+      description: >-
+        Returns the next action for the caller (advance, revise, escalate) after
+        recording the current pass. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Advance result, content: { application/json: { schema: { type: object } } } } }
+  /pipeline/gate:
+    post:
+      summary: Record a human gate verdict on a roundtable authoring pipeline
+      description: >-
+        Verdict is pass or fail. Gate authority is checked against the active local
+        operator. Capability: delegate.
+      requestBody: { content: { application/json: { schema: { type: object } } } }
+      responses: { "200": { description: Gate result, content: { application/json: { schema: { type: object } } } } }
   /trigger/list:
     get:
       summary: List triggers
@@ -2978,6 +3340,14 @@ paths:
     get:
       summary: Server health (RPC twin)
       responses: { "200": { description: Health, content: { application/json: { schema: { type: object } } } } }
+  /workers:
+    get:
+      summary: Server worker-pool status
+      description: >-
+        Occupancy of the server's thread pools: the request and compute pools, per-session
+        pools, on-demand delegate threads, any ephemeral secondary pools, and aimee-kb
+        connection workers. Read-only. Capability: dashboard:read.
+      responses: { "200": { description: Worker-pool status, content: { application/json: { schema: { type: object } } } } }
   /server/forensics:
     get:
       summary: Recent server shutdown forensics
@@ -3025,6 +3395,28 @@ paths:
         returns a dry-run plan naming each table and row count.
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /kb/erase-subject:
+    post:
+      summary: Erase one data subject from mutable DB1 and DB2 stores
+      description: >-
+        Owner-only, idempotent two-phase erasure. The server derives affected
+        sessions, commits mutable deletion in both stores, reconciles orphaned
+        blobs, and appends minimized completion evidence without the subject.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [subject]
+              properties:
+                subject: { type: string, minLength: 1 }
+                request_id: { type: string, minLength: 16, maxLength: 128 }
+      responses:
+        "200": { description: Erasure completed or replayed idempotently }
+        "400": { description: Invalid subject or request identifier }
+        "403": { description: Owner authorization required }
+        "500": { description: A store phase failed; retry with the same request identifier }
   /memory/embed:
     post:
       summary: (Re)generate memory embeddings (async; poll GET /runs/{id})
@@ -3050,6 +3442,28 @@ paths:
       summary: Sync the code graph (async; poll GET /runs/{id})
       requestBody: { content: { application/json: { schema: { type: object } } } }
       responses: { "200": { description: Queued op run, content: { application/json: { schema: { type: object } } } } }
+  /index/verify:
+    post:
+      summary: Compare a workspace with its published canonical index without mutating either
+      description: >-
+        Performs a read-only manifest comparison. Set deep=true to hash file contents;
+        otherwise verification uses the stored manifest metadata. The response distinguishes
+        current index state from matched, modified, missing, and unavailable workspace state.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project, root]
+              properties:
+                project: { type: string }
+                root: { type: string }
+                deep: { type: boolean, default: false }
+      responses:
+        "200": { description: Verification result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or invalid project/root }
+        "503": { description: Canonical index unavailable }
   /index/scan:
     post:
       summary: Scan/re-index the codebase (async; poll GET /runs/{id})
@@ -3063,20 +3477,37 @@ paths:
         thin client to ingest a workspace whose root lives on the client and is
         not visible to the server (a `detached` workspace). The server relays the
         supplied {rel_path, content} entries to aimee-kb without reading any
-        local filesystem.
+        local filesystem. Complete snapshots use begin, one or more stage
+        requests, and seal; staged files remain private until seal atomically
+        publishes the manifest. The legacy files-only request remains supported
+        as an incremental update.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [name, root, files]
+              required: [name, root]
+              anyOf:
+                - required: [files]
+                - required: [phase, scan_id]
               properties:
                 name: { type: string }
                 root: { type: string }
                 force: { type: boolean }
+                phase:
+                  type: string
+                  enum: [begin, stage, seal, abort]
+                scan_id:
+                  type: string
+                  description: Client-generated identifier shared by every phase of one scan.
+                expected_files:
+                  type: integer
+                  minimum: 0
+                  description: Required for seal; must equal the distinct files staged.
                 files:
                   type: array
+                  description: Required for legacy and stage requests.
                   items:
                     type: object
                     required: [rel_path, content]
@@ -3158,8 +3589,12 @@ paths:
               type: object
               required: [keywords]
               properties:
-                keywords: { type: array, items: { type: string } }
-                limit: { type: integer }
+                keywords: { type: array, minItems: 1, maxItems: 16, items: { type: string, minLength: 1 } }
+                limit: { type: integer, minimum: 1, maximum: 32 }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
       responses:
         "200":
           description: Memory search envelope
@@ -3168,6 +3603,11 @@ paths:
               schema: { type: object }
         "400":
           description: Missing keywords or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3183,12 +3623,78 @@ paths:
                 tier: { type: string }
                 kind: { type: string }
                 limit: { type: integer }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
       responses:
         "200":
           description: Memory list envelope
           content:
             application/json:
               schema: { type: object }
+  /memory/review:
+    post:
+      summary: List human-reviewable memories, including retained inactive rows
+      description: Scope is explicit or derived from cwd; ordinary recall remains active-only.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+                scope: { type: string, enum: [all] }
+                state: { type: string, enum: [active, pending, rejected, archived, fulfilled, superseded] }
+                limit: { type: integer, minimum: 1, maximum: 256 }
+      responses:
+        "200":
+          description: Review rows with lifecycle, scope, content, reason, and timestamps
+          content:
+            application/json:
+              schema: { type: object }
+  /memory/reject:
+    post:
+      summary: Reject a memory and create a durable exact-value tombstone
+      description: Requires memory-write. Re-extraction and exact-key merge cannot restore the value.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                reason: { type: string }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200": { description: Rejection result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or non-positive id }
+        "404": { description: No visible memory or rejection refused }
+  /memory/restore:
+    post:
+      summary: Explicitly restore a rejected memory and retire its tombstone
+      description: Requires memory-admin so automatic extraction cannot invoke this exception path.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [id]
+              properties:
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
+      responses:
+        "200": { description: Restore result, content: { application/json: { schema: { type: object } } } }
+        "400": { description: Missing or non-positive id }
+        "404": { description: No visible rejected memory or restore refused }
   /memory/stats:
     get:
       summary: Memory store statistics
@@ -3209,6 +3715,14 @@ paths:
         Delete is for content that should not exist at all, such as a credential, PII
         under an erasure request, or data written to the wrong store.
         Requires the memory-write capability.
+
+        Whether the row is DESTROYED or merely retired depends on the connection,
+        not on the capability. A caller the transport attested as a person (a
+        local UDS peer, or a webuser over the trusted socket) destroys the row and
+        its provenance irreversibly. Any other caller that clears the capability
+        gate, including a bearer over TCP, retires it instead: it stops answering
+        recall under its key but stays readable through memory.fact_history. The
+        response reports which happened as `destroyed`.
       requestBody:
         required: true
         content:
@@ -3220,7 +3734,7 @@ paths:
                 id: { type: integer, minimum: 1, maximum: 9007199254740991 }
       responses:
         "200":
-          description: Deletion result ({ id, deleted })
+          description: Deletion result ({ id, deleted, destroyed })
           content:
             application/json:
               schema: { type: object }
@@ -3269,6 +3783,132 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /facts/retract:
+    post:
+      summary: Retract a typed fact
+      description: >
+        Withdraws a typed fact the store got wrong. Nothing is deleted: the
+        relation's correction_behavior decides whether the edge is superseded
+        (archived, still auditable) or tombstoned, and either way the row is
+        retained. Omit `target` to retract every current value of
+        (source, relation); supply it to retract one specific value.
+
+        `authority` defaults to "model". A model authority may not retract a
+        user-stated Class A fact; those edges are skipped rather than refused,
+        so a partial retraction reports how many edges it actually affected.
+        `retracted: 0` is a success meaning nothing current matched.
+
+        `authority: "user"` REQUESTS user authority; it does not confer it. The
+        request is granted only when the connection itself attested a person: a
+        local UDS peer whose uid the kernel vouched for, or a webuser asserted
+        over the trusted socket. A bearer token or client certificate identifies
+        a service, not a user, so requests carrying one are served at model
+        authority however they label themselves, and the user's own facts stand.
+
+        An immutable relation is refused with 400 unless the authority is "user".
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [source, relation]
+              properties:
+                source: { type: string, minLength: 1 }
+                relation: { type: string, minLength: 1 }
+                target:
+                  type: string
+                  description: Optional; omit to retract all current values of (source, relation)
+                authority:
+                  type: string
+                  enum: [user, model]
+                  default: model
+      responses:
+        "200":
+          description: Retraction result ({ retracted })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing source/relation, bad authority, or an immutable relation
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: The knowledge service refused the retraction
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /entities/merge:
+    post:
+      summary: Merge two entity records into one
+      description: >
+        Collapses `from_id` into `into_id` when both name the same real entity.
+        Entity resolution then follows the merge pointer, so facts recorded
+        against either name resolve to one node.
+
+        The response carries `merge_id`, the audit handle /entities/unmerge
+        needs. A caller that discards it cannot reverse the merge.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [from_id, into_id]
+              properties:
+                from_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+                into_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Merge result ({ merge_id })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive ids, or from_id equal to into_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Merge refused; both ids must be distinct active entities
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /entities/unmerge:
+    post:
+      summary: Reverse a recorded entity merge
+      description: >
+        Restores the merged entity to active and marks the audit row undone,
+        using the `merge_id` returned by /entities/merge.
+        Requires the memory-write capability.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [merge_id]
+              properties:
+                merge_id: { type: integer, minimum: 1, maximum: 9007199254740991 }
+      responses:
+        "200":
+          description: Unmerge result ({ merge_id, undone })
+          content:
+            application/json:
+              schema: { type: object }
+        "400":
+          description: Missing or non-positive merge_id
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such merge, or it was already undone
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /memory/get:
     post:
       summary: Get a memory by id
@@ -3280,7 +3920,7 @@ paths:
               type: object
               required: [id]
               properties:
-                id: { type: integer }
+                id: { type: integer, minimum: 1, maximum: 9007199254740991 }
       responses:
         "200":
           description: Memory envelope
@@ -3289,6 +3929,16 @@ paths:
               schema: { type: object }
         "400":
           description: Missing id or invalid body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: Memory not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Knowledge service unavailable
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
@@ -3353,6 +4003,27 @@ paths:
           content:
             application/json:
               schema: { type: object }
+  /hooks/session_end:
+    post:
+      summary: Revoke a session-scoped authenticated harness-hook token
+      description: >-
+        Ends the authenticated hook identity established by session_start.
+        The session id, harness client, and hook token must match the attested
+        transport principal that originally minted the token.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [session_id, harness_client, hook_token]
+              properties:
+                session_id: { type: string }
+                harness_client: { type: string }
+                hook_token: { type: string }
+      responses:
+        "200": { description: Hook identity revoked }
+        "400": { description: Invalid session or token binding }
   /session/brief_assemble:
     post:
       summary: Workspace-independent session brief for the remote thin client
@@ -3396,6 +4067,9 @@ paths:
                 kind: { type: string }
                 key: { type: string }
                 content: { type: string }
+                cwd: { type: string }
+                project: { type: string }
+                workspace: { type: string }
                 tier: { type: string }
       responses:
         "200":
@@ -3403,6 +4077,16 @@ paths:
           content:
             application/json:
               schema: { type: object }
+        "400":
+          description: Missing kind, key, or content
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "503":
+          description: Per-user memory store unavailable
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /tools/execute:
     post:
       summary: Execute a tool via the workspace plane (privileged)
@@ -4111,6 +4795,56 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/ErrorResponse' }
+  /commands/{method}:
+    post:
+      summary: Invoke a command declared in the command registry
+      description: >-
+        Invokes a capability registered in THE command table
+        (src/headers/command_registry.h), addressed by its RPC spelling
+        "<group>.<verb>". This is how a module-declared command - including one
+        contributed by a plugin module hosting an MCP server or a pluggy plugin -
+        is actually called; the same declaration also drives the CLI manifest and
+        the MCP tool surface, so a listed capability is a reachable one. The
+        request body is the command's own argument object and reaches its handler
+        unchanged.
+      parameters:
+        - name: method
+          in: path
+          required: true
+          description: The command's RPC spelling, "<group>.<verb>".
+          schema: { type: string }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        "200":
+          description: The command's result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [ok] }
+                  result: { type: object, additionalProperties: true }
+        "400":
+          description: Missing command method, or an invalid JSON body
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "404":
+          description: No such command, or it is not on the RPC surface
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+        "502":
+          description: The command handler failed
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /personas/{name}:
     get:
       summary: Show a persona by name
@@ -4529,13 +5263,54 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Persona' }
+  /workspace/mirror-sync:
+    post:
+      summary: Upload the client working-tree patch for a mirror workspace
+      description: >
+        The client of a remote server ships its full working-tree patch (tracked
+        modifications, deletions and untracked files, as a --binary diff against
+        HEAD) so the server's mirror reconstructs the tree the client actually
+        has. Absent, the reconstruct is a clean checkout at head and every
+        uncommitted change is silently missing from the tree agents work in. The
+        target must already be registered as a `mirror` workspace. Capability:
+        tool:execute.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [args, diff]
+              properties:
+                args:
+                  type: array
+                  items: { type: string }
+                  description: Single element - the workspace root as the client knows it
+                diff:
+                  type: string
+                  description: The patch; empty string for a clean tree
+      responses:
+        "200":
+          description: Patch stored for the next reconstruct
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+        "400":
+          description: Not a registered mirror workspace, or missing root
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
   /workspaces:
     get:
       summary: List registered workspaces (instance-scoped)
       description: >
         The workspaces registered on this instance, each with its provider
-        (shared|detached) and the projects discovered under it. Capability:
-        index:read.
+        (shared|detached|mirror) and the projects discovered under it. A mirror
+        workspace also reports the client vcs coordinates its server-side tree is
+        reconstructed from. Capability: index:read.
       responses:
         "200":
           description: Workspace registry
@@ -4550,14 +5325,19 @@ paths:
                       type: object
                       properties:
                         path: { type: string }
-                        provider: { type: string, enum: [shared, detached] }
+                        provider: { type: string, enum: [shared, detached, mirror] }
+                        remote: { type: string, description: "mirror only: client remote URL" }
+                        head: { type: string, description: "mirror only: client HEAD commit" }
                         projects: { type: array, items: { type: string } }
     post:
       summary: Register a workspace (instance-scoped)
       description: >
         Register a working tree as an instance-scoped workspace. The optional
-        provider selects co-located (shared) or marshalled (detached) access.
-        Capability: tool:execute.
+        provider selects co-located (shared), marshalled to the client
+        (detached), or a server-side tree reconstructed from the client's git
+        remote (mirror). A mirror registration requires both `remote` and `head`,
+        since the server seeds its bare mirror by fetching that head from that
+        remote, and is rejected without them. Capability: tool:execute.
       requestBody:
         required: true
         content:
@@ -4569,7 +5349,13 @@ paths:
                 root_hint:
                   type: string
                   description: Absolute path to the workspace root
-                provider: { type: string, enum: [shared, detached] }
+                provider: { type: string, enum: [shared, detached, mirror] }
+                remote:
+                  type: string
+                  description: "Required for provider=mirror: the client's git remote URL"
+                head:
+                  type: string
+                  description: "Required for provider=mirror: the client's HEAD commit"
       responses:
         "200":
           description: Workspace registered (with discovered projects)

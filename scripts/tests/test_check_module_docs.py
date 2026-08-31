@@ -75,6 +75,16 @@ class ModuleDocTests(unittest.TestCase):
             with self.assertRaisesRegex(docs.DocError, "orphan"):
                 docs.run(root, modules, catalog, status)
 
+    def test_catalog_readme_is_allowed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            modules, catalog, status = self.fixture(root)
+            (catalog / "README.md").write_text("# Module catalog\n", encoding="utf-8")
+            self.assertEqual(
+                docs.run(root, modules, catalog, status),
+                "PASS alpha\nDEBT beta\nSUMMARY debt=beta\n",
+            )
+
     def test_missing_and_out_of_order_sections_fail(self) -> None:
         for mutation in (lambda text: text.replace("## Compatibility", "### Compatibility"),
                          lambda text: text.replace("## Public contracts", "## Zed contracts")):

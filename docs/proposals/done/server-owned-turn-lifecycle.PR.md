@@ -1,5 +1,9 @@
 # Server-owned turn lifecycle (Phase 1): a turn outlives the connection
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 ## Why
 
 For aimee to act as an **autonomous agent**, a turn and session must be owned by
@@ -22,7 +26,7 @@ agent-initiated outreach are later phases).
   ordering-safe (non-text flushes pending text first).
 - **Always mirror to the ring** for any presence-tracked session (dropped the
   `>1`-attachment gate).
-- **New `turn_registry`** — per-turn atomic cancel flag + single-reaper child
+- **New `turn_registry`**: per-turn atomic cancel flag + single-reaper child
   ownership, leaf-mutex lock discipline, NULL-on-collision, crash-backstop sweep.
 - **CLI worker** rewritten to an `O_NONBLOCK` + `poll()` read loop (no `fgets`):
   a dropped connection no longer ends the loop or kills the child; the turn ends
@@ -31,7 +35,7 @@ agent-initiated outreach are later phases).
 - **In-process agent path** cancels cooperatively via `agent_set_request_cancel`.
 - **Triggers:** `session.close` and server shutdown cancel in-flight turns
   (cancel-all **before** the drain so it stays bounded); new
-  `chat.graceful_cancel` handler with owner-authz — also fixes the gateway
+  `chat.graceful_cancel` handler with owner-authz, also fixes the gateway
   `/stop`, previously a no-op.
 - `presence_session_owner` accessor; `test_turn_registry` unit test.
 
@@ -57,7 +61,7 @@ Those were fixed and the diff re-approved with `participants_failed: 0`.
 
 Design + plan: `docs/proposals/pending/server-owned-turn-lifecycle{,.plan}.md`.
 
-## WP-5 — webchat reconnect/replay (included)
+## WP-5: webchat reconnect/replay (included)
 
 Cursor-resumable presence events so the browser experience matches the
 server-owned lifecycle:
@@ -73,9 +77,9 @@ server-owned lifecycle:
 ## Scope / follow-ups
 
 - Finer-grained mid-call interruption of the in-process agent path (the CLI
-  path — the default — is fully interruptible).
+  path (the default) is fully interruptible).
 - Finer-grained mid-call interruption of the in-process agent path (the CLI
-  path — the default — is fully interruptible).
+  path (the default) is fully interruptible).
 - Wire `turn_registry_sweep_dead` to the periodic compute-thread bookkeeping
   (crash backstop; not on the primary path).
 

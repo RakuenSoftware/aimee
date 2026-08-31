@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { loadConfig, type ConfigMap } from '../setup/configApi';
 import { computeReadiness, stepsRemaining } from '../setup/readiness';
-import { fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
+import { fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { requestOpenWizard, isDismissed, SETUP_UPDATED_EVENT } from '../setup/setupState';
 
 /* Header chip: "Setup — N left". Reads GET /api/config once (and again whenever
@@ -16,14 +16,16 @@ export default function SetupChip() {
   const [accountReady, setAccountReady] = useState(false);
   const [projectCount, setProjectCount] = useState(0);
   const [hostsConnected, setHostsConnected] = useState(0);
+  const [gitIdentityReady, setGitIdentityReady] = useState(false);
 
   const load = useCallback(() => {
-    Promise.all([loadConfig(), fetchSetupAccountReady(), fetchProjectCount(), fetchHostCount()])
-      .then(([config, account, projects, hosts]) => {
+    Promise.all([loadConfig(), fetchSetupAccountReady(), fetchProjectCount(), fetchHostCount(), fetchGitIdentityReady()])
+      .then(([config, account, projects, hosts, identity]) => {
         setCfg(config);
         setAccountReady(account);
         setProjectCount(projects);
         setHostsConnected(hosts);
+        setGitIdentityReady(identity);
       });
   }, []);
 
@@ -40,8 +42,8 @@ export default function SetupChip() {
   }, [load]);
 
   const readiness = useMemo(
-    () => (cfg ? computeReadiness(cfg, { accountReady, projectCount, hostsConnected }) : null),
-    [cfg, accountReady, projectCount, hostsConnected],
+    () => (cfg ? computeReadiness(cfg, { accountReady, projectCount, hostsConnected, gitIdentityReady }) : null),
+    [cfg, accountReady, projectCount, hostsConnected, gitIdentityReady],
   );
 
   // Auto-open the wizard once per page load when unconfigured and not dismissed.
@@ -63,7 +65,7 @@ export default function SetupChip() {
       style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '3px 10px',
         borderRadius: 12, cursor: 'pointer', fontSize: 12.5, whiteSpace: 'nowrap',
-        background: '#3a2a12', color: '#f4b860', border: '1px solid #6a4a1a',
+        background: 'var(--sg-warning-bg)', color: 'var(--sg-warning)', border: '1px solid var(--sg-warning-bg)',
       }}
     >
       <span aria-hidden>⚙️</span> Setup — {n} left

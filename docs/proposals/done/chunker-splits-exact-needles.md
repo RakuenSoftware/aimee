@@ -1,6 +1,10 @@
 # The page chunker splits exact needles, defeating a documented guarantee
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
@@ -27,7 +31,7 @@ Slice 5. Classification: **correctness, medium**.*
 That guarantee fails in two distinct ways, neither of which is a ranking
 problem. Both were found by measurement, not inspection.
 
-## Failure 1 — the chunker splits the token
+## Failure 1: the chunker splits the token
 
 `chunk_text` cuts at a target size (~480 bytes), backing off to a nearby newline
 or period. It has no notion of token boundaries. When the cut lands inside the
@@ -38,13 +42,13 @@ Measured over 500 generated pages carrying an exact identifier at a random
 depth: **1.6% lost the needle to a chunk boundary**. Every selector is affected
 equally, because the loss happens before ranking runs.
 
-## Failure 2 — more literal hits than the budget can hold
+## Failure 2: more literal hits than the budget can hold
 
 `WEBREAD_BUDGET` is 1500 bytes, roughly three spans. A page with 60+ literal
 hits cannot emit them all under any ordering. A deeply-placed target is dropped
 whether the emission order is literal-first or fusion-ranked.
 
-This one is arguably not a defect — it is the budget doing its job — but the
+This one is not a defect (it is the budget doing its job) but the
 promise as worded does not admit it.
 
 ## What was tried and rejected

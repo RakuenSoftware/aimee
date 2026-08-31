@@ -1,6 +1,7 @@
 #include <stdint.h>
 
 #include "config_accessors.h"
+#include "cJSON.h"
 #include "log.h"
 #include "pki.h"
 #include "server_conn_io.h"
@@ -16,16 +17,20 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Narrow link stubs: this test exercises only the dedicated context and exact
  * peer profile, never the generic config/roster path. */
 static int g_default_mtls_mode;
 static int g_server_cert_ensure_calls;
 static int g_client_ca_ensure_calls;
+static int g_revoked = 1;
+static const char *g_default_dir = "/nonexistent";
+static int g_store_probe_calls;
 
 const char *config_default_dir(void)
 {
-   return "/nonexistent";
+   return g_default_dir;
 }
 int config_server_api_mtls(void)
 {
@@ -43,7 +48,7 @@ int pki_ca_ensure(void)
 int pki_is_revoked(const char *serial)
 {
    (void)serial;
-   return 1;
+   return g_revoked;
 }
 int pki_mtls_ramp_init(int mode)
 {
@@ -78,6 +83,11 @@ void server_conn_io_clear(int fd)
    (void)fd;
 }
 
+static int store_ready_after_three_probes(void)
+{
+   return ++g_store_probe_calls >= 3;
+}
+
 static void write_text(const char *path, const char *text)
 {
    FILE *f = fopen(path, "wb");
@@ -105,6 +115,7 @@ typedef struct
    int fd;
    int profile;
    int management;
+   int accepted;
 } server_arg_t;
 
 static void *accept_one(void *opaque)
@@ -113,6 +124,7 @@ static void *accept_one(void *opaque)
    SSL *ssl = arg->management ? server_tls_management_begin(arg->fd) : server_tls_begin(arg->fd);
    if (ssl)
    {
+      arg->accepted = 1;
       if (arg->management)
       {
          server_tls_peer_cert_t peer;
@@ -160,6 +172,50 @@ static int present_on(const char *ca, const char *cert, const char *key, int man
    return arg.profile;
 }
 
+static int accepted_on(const char *ca, const char *cert, const char *key, int management)
+{
+   int sv[2];
+   assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
+   server_arg_t arg = {.fd = sv[0], .profile = -1, .management = management};
+   pthread_t thread;
+   assert(pthread_create(&thread, NULL, accept_one, &arg) == 0);
+   SSL_CTX *ctx = SSL_CTX_new(TLS_client_method());
+   assert(ctx);
+   SSL_CTX_set_verify(ctx, SSL_VERIFY_PEER, NULL);
+   assert(SSL_CTX_load_verify_locations(ctx, ca, NULL) == 1);
+   if (cert && key)
+   {
+      assert(SSL_CTX_use_certificate_chain_file(ctx, cert) == 1);
+      assert(SSL_CTX_use_PrivateKey_file(ctx, key, SSL_FILETYPE_PEM) == 1);
+   }
+   SSL *ssl = SSL_new(ctx);
+   assert(ssl && SSL_set_fd(ssl, sv[1]) == 1);
+   if (SSL_connect(ssl) == 1)
+      SSL_shutdown(ssl);
+   SSL_free(ssl);
+   SSL_CTX_free(ctx);
+   close(sv[1]);
+   assert(pthread_join(thread, NULL) == 0);
+   return arg.accepted;
+}
+
+static void write_identity(const char *dir, const char *cert_path)
+{
+   char path[512];
+   char cert[8192];
+   read_text(cert_path, cert, sizeof(cert));
+   snprintf(path, sizeof(path), "%s/kb-client-identity.json", dir);
+   cJSON *root = cJSON_CreateObject();
+   assert(root && cJSON_AddNumberToObject(root, "version", 1) &&
+          cJSON_AddStringToObject(root, "cert", cert));
+   char *raw = cJSON_PrintUnformatted(root);
+   cJSON_Delete(root);
+   assert(raw);
+   write_text(path, raw);
+   free(raw);
+   assert(chmod(path, 0600) == 0);
+}
+
 static int present(const char *ca, const char *cert, const char *key)
 {
    return present_on(ca, cert, key, 1);
@@ -174,21 +230,34 @@ int main(void)
 {
    signal(SIGPIPE, SIG_IGN);
 
+   /* A transiently unavailable DB1 module must be polled until it becomes
+    * usable instead of permanently stranding the TLS listener. */
+   g_default_mtls_mode = 1;
+   g_store_probe_calls = 0;
+   assert(server_tls_wait_for_store(store_ready_after_three_probes) == 1);
+   assert(g_store_probe_calls >= 3);
+
    /* Fresh wizard installs use optional mTLS so the first bearer-authenticated
     * client can enroll its certificate. That mode must still provision the
     * server identity certificate needed to bring up HTTPS. Fail at the stubbed
     * client-CA step so this assertion stays independent of filesystem fixtures. */
    g_default_mtls_mode = 1;
-   assert(server_tls_init_default() == -1);
+   /* Asserts WHICH step failed, which is what this case was always about: the
+    * comment above already says "fail at the stubbed client-CA step", and a bare
+    * -1 could not tell that apart from a ramp refusal or a bad certificate.
+    * Those three now have their own codes precisely so a caller (and this test)
+    * stops treating them as one outcome. */
+   assert(server_tls_init_default() == SERVER_TLS_INIT_ERR_CLIENT_CA);
    assert(g_server_cert_ensure_calls == 1);
    assert(g_client_ca_ensure_calls == 1);
 
-   char dir[] = "/tmp/aimee-mgmt-tls-XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-mgmt-tls-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir));
    char ca[256], cakey[256], server[256], serverkey[256], client[256], clientkey[256], dual[256],
-       dualkey[256], ca_server[256], ca_server_key[256], ca_client[256], ca_client_key[256],
-       serverext[256], ext[256], dualext[256], ca_server_ext[256], ca_client_ext[256],
-       other_ca[256], linkpath[256], cmd[4096];
+       dualkey[256], collision_client[256], ca_server[256], ca_server_key[256], ca_client[256],
+       ca_client_key[256], serverext[256], ext[256], dualext[256], ca_server_ext[256],
+       ca_client_ext[256], other_ca[256], linkpath[256], cmd[4096];
 #define PATH(name, suffix) snprintf(name, sizeof(name), "%s/%s", dir, suffix)
    PATH(ca, "ca.pem");
    PATH(cakey, "ca.key");
@@ -198,6 +267,7 @@ int main(void)
    PATH(clientkey, "client.key");
    PATH(dual, "dual.pem");
    PATH(dualkey, "dual.key");
+   PATH(collision_client, "collision-client.pem");
    PATH(ca_server, "ca-server.pem");
    PATH(ca_server_key, "ca-server.key");
    PATH(ca_client, "ca-client.pem");
@@ -250,6 +320,13 @@ int main(void)
    command(cmd);
 
    snprintf(cmd, sizeof(cmd),
+            "openssl req -new -key %s -subj /CN=server-kb-client -out %s/collision.csr "
+            ">/dev/null 2>&1 && openssl x509 -req -in %s/collision.csr -CA %s -CAkey %s "
+            "-days 1 -extfile %s -out %s >/dev/null 2>&1",
+            serverkey, dir, dir, ca, cakey, ext, collision_client);
+   command(cmd);
+
+   snprintf(cmd, sizeof(cmd),
             "openssl req -newkey rsa:2048 -nodes -subj /CN=management-server -keyout %s "
             "-out %s/ca-server.csr >/dev/null 2>&1 && "
             "openssl x509 -req -in %s/ca-server.csr -CA %s -CAkey %s -days 1 -extfile %s "
@@ -280,9 +357,24 @@ int main(void)
     * durable posture reaches required. HTTP authorization then admits only the
     * exact enrollment routes for a cert-less peer. The dedicated management
     * listener assertions above remain hard-required at the transport layer. */
+   /* The thinclient-facing listener is a server role, never the KB-facing
+    * client identity and never a dual-purpose certificate. */
+   assert(server_tls_init(client, clientkey, 2, ca) == -1);
+   assert(server_tls_init(dual, dualkey, 2, ca) == -1);
+   /* Reciprocal installation order: a later thinclient-facing server cert
+    * cannot reuse the key of an existing KB-facing client identity. */
+   g_default_dir = dir;
+   write_identity(dir, collision_client);
+   assert(server_tls_init(server, serverkey, 2, ca) == -1);
+   write_identity(dir, client);
    assert(server_tls_init(server, serverkey, 2, ca) == 0);
    assert(server_tls_mtls_mode() == 2);
    assert(present_main(ca, NULL, NULL) == 0);
+   /* The CA has no clientAuth EKU; only the leaf role is pinned. */
+   g_revoked = 0;
+   assert(accepted_on(ca, client, clientkey, 0) == 1);
+   assert(accepted_on(ca, dual, dualkey, 0) == 0);
+   g_revoked = 1;
 
    snprintf(cmd, sizeof(cmd), "cp %s %s && printf '\\n' >> %s", ca, other_ca, other_ca);
    command(cmd);

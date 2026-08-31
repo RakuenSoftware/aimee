@@ -1,6 +1,6 @@
-# Proposal: Language coverage for code intelligence — reach the grammars we already ship, then extend
+# Proposal: Language coverage for code intelligence: reach the grammars we already ship, then extend
 
-- **State:** PENDING — design only, no code in this PR. Motivated by the
+- **State:** PENDING. Design only, no code in this PR. Motivated by the
   aimee-encoder corpus contract, which was extended from 30 to 48 code streams
   (build/config, mainstream gaps, infra DSLs). The encoder learns to *retrieve*
   over those languages; this proposal is about Aimee's own extraction and
@@ -26,7 +26,7 @@ The comment in `code_collect.c` states the two extend "in lockstep so the
 collector never sends an extension the extractor can't parse." Neither direction
 actually holds, and the expensive one is measured below.
 
-**Nine grammars are compiled in and unreachable — C# among them.** Twenty
+**Nine grammars are compiled in and unreachable. C# among them.** Twenty
 extensions parse today and are never collected:
 
 ```
@@ -42,7 +42,7 @@ symbols at all.
 
 The reverse gap exists too: `.hxx` is collected but has no extractor entry
 (`.hpp`/`.hh`/`.cxx` do). `.md`, `.yaml`, `.yml`, `.toml`, `.json` are also
-collected without an extractor, but that is deliberate — they feed the
+collected without an extractor, but that is deliberate. They feed the
 build-declared-edge pass as content.
 
 That is the first half of the problem and it needs no new dependency to fix.
@@ -63,23 +63,23 @@ encoder's corpus mix; those are separate artifacts.
 
 Three bounded slices, ordered so the cheapest real gain lands first.
 
-**S1 — Reach the grammars we already have.** Extend the collector's extension
+**S1. Reach the grammars we already have.** Extend the collector's extension
 list to the full set the extractor can parse, add the missing `.hxx` extractor
 entry, and replace the two hand-maintained lists with one table that both sites
 read. Two lists that must agree, maintained by comment, is the defect; one table
-removes the class. No new grammar, no new dependency, no binary growth — this
+removes the class. No new grammar, no new dependency, no binary growth, this
 slice alone restores nine languages including C#.
 
-**S2 — Build and configuration as first-class.** Add `cmake`, `make`,
+**S2. Build and configuration as first-class.** Add `cmake`, `make`,
 `dockerfile`, `yaml`, `toml`, `json` classification, including the filename-only
-forms (`CMakeLists.txt`, `Makefile`, `Dockerfile.server`, `Containerfile`).
+forms (`CMakeLists.txt`, `src/Makefile`, `Dockerfile.server`, `Containerfile`).
 Aimee is itself a CMake + Docker + compose-YAML project: a 68 KB
 `CMakeLists.txt`, dozens of compose files, and `aimee.yaml` are core artifacts
 that symbol search cannot currently see as code. Symbol extraction for these is
-target/variable/service level, not function level — a CMake `add_library`, a
+target/variable/service level, not function level, a CMake `add_library`, a
 compose service name, a YAML anchor.
 
-**S3 — The remaining languages, by evidenced demand.** haskell, zig, erlang,
+**S3. The remaining languages, by evidenced demand.** haskell, zig, erlang,
 ocaml, fortran, julia, r, perl, solidity, sql, html, clojure, fsharp, vue,
 svelte, hcl, nix, protobuf, graphql. Each is a tree-sitter grammar addition plus
 an extractor query set. These are not equal in value and should not land as one
@@ -102,7 +102,7 @@ batch; see the ordering rule below.
 S3 languages land in the order that evidence supports, not alphabetically and
 not by my guess. The ordering input is the encoder corpus itself: after the 10B
 shard build, per-language unique-token capacity is a measured quantity, and the
-`aimee index` corpus gives a second signal — how many files of each extension
+`aimee index` corpus gives a second signal, how many files of each extension
 actually exist in the repositories this instance serves. A language with neither
 corpus volume nor local files waits.
 
@@ -135,14 +135,14 @@ implicit expectation that existing deployments pick it up.
 - One table is the single source of extension → language; a test asserts the
   collector and extractor derive from it and cannot diverge.
 - For each newly reachable or added language, a fixture file yields a non-zero,
-  asserted symbol count. Not "parses" — extracts.
+  asserted symbol count. Not "parses", extracts.
 - Ambiguous extensions have an explicit recorded owner and a test proving the
   loser is not silently accepted.
 - Generated/lockfile names are excluded, proven by fixture.
 
 **Integration:**
 - `aimee index find <symbol>` returns results from a `.php`, `.lua`, and `.ps1`
-  fixture repository after S1 — the direct proof that the unreachable grammars
+  fixture repository after S1. The direct proof that the unreachable grammars
   are reachable.
 - After S2, `aimee index find` locates a CMake target and a compose service
   defined in Aimee's own tree.

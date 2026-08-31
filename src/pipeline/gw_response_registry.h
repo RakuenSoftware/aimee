@@ -4,8 +4,8 @@
  * response/orchestration-stages proposal. Per the roundtable ruling: the stage takes a
  * TYPED context (not a raw void*) and returns a STRUCTURED result (ok/reject/error) so the
  * caller can fail-closed at runtime (never emit a reply after a governance reject/error).
- * First consumer (Slice 2): the response governance stage that wraps
- * gateway_policy_police_parsed_response, collapsing the 4 inline call sites. */
+ * First consumer (Slice 2): the response governance stage that applies
+ * decisions obtained from the separately supervised event-bus module. */
 #ifndef DEC_GW_RESPONSE_REGISTRY_H
 #define DEC_GW_RESPONSE_REGISTRY_H 1
 

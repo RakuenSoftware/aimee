@@ -11,11 +11,28 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "cli_attention_guard.h"
+#include "client_session_worktree.h"
+#include "client_config.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Stubs/fakes for handle_attention_guard's deps. read_stdin + aimee_home are
  * driven by the functional test below via these globals. */
 static const char *g_stdin_json = NULL;
 static char g_home[256] = "/tmp";
+static int g_ingress_max_raw_scans;
+static int g_require_session_worktree = 1;
+static int g_require_aimee_memory = 1;
+
+static cJSON *test_config_value(const char *key)
+{
+   if (!strcmp(key, "ingress_max_raw_scans"))
+      return cJSON_CreateNumber(g_ingress_max_raw_scans);
+   if (!strcmp(key, "require_session_worktree"))
+      return cJSON_CreateBool(g_require_session_worktree);
+   if (!strcmp(key, "require_aimee_memory"))
+      return cJSON_CreateBool(g_require_aimee_memory);
+   return NULL;
+}
 
 char *read_stdin(void)
 {
@@ -106,18 +123,14 @@ static void test_score(void)
 
 /* Hook input for a recursive raw scan (the Bash `grep -r` form). */
 #define RAW_SCAN_HOOK                                                                              \
-   "{\"session_id\":\"agtest\",\"tool_name\":\"Bash\","                                            \
+   "{\"session_id\":\"agtest\",\"cwd\":\"/home/u/nonrepo\",\"tool_name\":\"Bash\","                \
    "\"tool_input\":{\"command\":\"grep -r TODO src\"}}"
 
 static void write_config(const char *body)
 {
-   char path[320];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", g_home);
-   FILE *f = fopen(path, "wb");
-   assert(f);
-   if (body)
-      fputs(body, f);
-   fclose(f);
+   g_ingress_max_raw_scans = body && strstr(body, "ingress_max_raw_scans: 2") ? 2 : 0;
+   g_require_session_worktree = !(body && strstr(body, "require_session_worktree: false"));
+   g_require_aimee_memory = !(body && strstr(body, "require_aimee_memory: false"));
 }
 
 static void rm_path(const char *p)
@@ -130,15 +143,14 @@ static void rm_path(const char *p)
 static void test_guard_enforcement(void)
 {
    /* Isolated, real temp home so config + the session log persist. */
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_ag_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_ag_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char logpath[400], cfgpath[400];
+   char logpath[400];
    snprintf(logpath, sizeof(logpath), "%s/.cache/attention/agtest.json", g_home);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
    g_stdin_json = RAW_SCAN_HOOK;
 
    /* (1) Inert default: no aimee.yaml at all -> raw scans allowed (exit 0). */
-   rm_path(cfgpath);
+   write_config(NULL);
    rm_path(logpath);
    assert(handle_attention_guard() == 0);
    assert(handle_attention_guard() == 0); /* still allowed, repeatedly */
@@ -162,9 +174,40 @@ static void test_guard_enforcement(void)
    unsetenv("AIMEE_GUARD");
 
    rm_path(logpath);
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("enforcement OK\n");
+}
+
+static void test_required_discovery_activation(void)
+{
+   snprintf(g_home, sizeof(g_home), "%s/aimee_discovery_test_%d", platform_tmpdir(), (int)getpid());
+   mkdir(g_home, 0700);
+   char reason[1024];
+
+   unsetenv("AIMEE_HOOK_TRANSPORT");
+   assert(attn_discovery_gate("Bash", "ls", "legacy", reason, sizeof(reason)) == 0);
+
+   setenv("AIMEE_HOOK_TRANSPORT", "cli", 1);
+   setenv("AIMEE_CLI_PATH", "/opt/aimee/bin/aimee", 1);
+   assert(attn_discovery_gate("Bash", "ls -la", "cli-session", reason, sizeof(reason)) == 2);
+   assert(strstr(reason, "/opt/aimee/bin/aimee index investigate") != NULL);
+   assert(attn_discovery_gate("Bash", "/opt/aimee/bin/aimee index investigate \"fix cache\"",
+                              "cli-session", reason, sizeof(reason)) == 0);
+   assert(attn_discovery_gate("Read", NULL, "cli-session", reason, sizeof(reason)) == 0);
+
+   setenv("AIMEE_HOOK_TRANSPORT", "mcp", 1);
+   assert(attn_discovery_gate("Read", NULL, "mcp-session", reason, sizeof(reason)) == 2);
+   assert(attn_discovery_gate("mcp__aimee__index", "investigate", "mcp-session", reason,
+                              sizeof(reason)) == 0);
+   assert(attn_discovery_gate("Grep", NULL, "mcp-session", reason, sizeof(reason)) == 0);
+
+   unsetenv("AIMEE_HOOK_TRANSPORT");
+   unsetenv("AIMEE_CLI_PATH");
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", g_home);
+   system(cmd);
+   printf("required discovery OK\n");
 }
 
 /* The session-scratch carve-out. Real directories, because the decision is no
@@ -177,8 +220,8 @@ static void test_session_scratch_decision(const char *primary_cwd)
 {
    const char *sid = "21bc2e70-537c-4d1d-b970-7afc858a7769";
    char tmproot[256], outside[256], cmd[700];
-   snprintf(tmproot, sizeof(tmproot), "/tmp/aimee_scratch_test_%d", (int)getpid());
-   snprintf(outside, sizeof(outside), "/tmp/aimee_scratch_out_%d", (int)getpid());
+   snprintf(tmproot, sizeof(tmproot), "%s/aimee_scratch_test_%d", platform_tmpdir(), (int)getpid());
+   snprintf(outside, sizeof(outside), "%s/aimee_scratch_out_%d", platform_tmpdir(), (int)getpid());
    setenv("TMPDIR", tmproot, 1);
 
    char root[512], p[900];
@@ -340,6 +383,51 @@ static void test_session_isolation_decision(void)
    assert(attn_unregistered_lineage_blocked(0, 0) == 1);
    assert(attn_unregistered_lineage_blocked(0, 1) == 1);
 
+   /* ---- git probe directory (attn_git_dir_for) ----
+    * THE REGRESSION: the probe directory was derived by stripping ONE component off the
+    * target. For a new file in a not-yet-created directory that yields another missing
+    * path, so `git -C` fails and BOTH lineage probes come back empty. The caller reads
+    * default_resolved == 0 and fails closed (asserted just above) — so creating a file in
+    * a new subdirectory was refused with a branch-lineage error that had nothing to do
+    * with the branch, for every session without a registry row. */
+   {
+      char tmpl[256];
+      snprintf(tmpl, sizeof tmpl, "%s/aimee_attn_gitdir_XXXXXX", platform_tmpdir());
+      const char *root = mkdtemp(tmpl);
+      assert(root != NULL);
+
+      char got[2048];
+
+      /* An existing directory is returned as-is. */
+      attn_git_dir_for(root, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* An existing FILE resolves to its (existing) parent. */
+      char existing_file[2200];
+      snprintf(existing_file, sizeof(existing_file), "%s/present.txt", root);
+      FILE *f = fopen(existing_file, "w");
+      assert(f != NULL);
+      fclose(f);
+      attn_git_dir_for(existing_file, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* A new file in a MISSING directory must still resolve to a real directory —
+       * one level of absence... */
+      char one_deep[2200];
+      snprintf(one_deep, sizeof(one_deep), "%s/newdir/corpus.json", root);
+      attn_git_dir_for(one_deep, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      /* ...and several. A single strip returned "<root>/a/b/c", which does not exist. */
+      char deep[2400];
+      snprintf(deep, sizeof(deep), "%s/a/b/c/corpus.json", root);
+      attn_git_dir_for(deep, got, sizeof(got));
+      assert(strcmp(got, root) == 0);
+
+      unlink(existing_file);
+      rmdir(root);
+   }
+
    /* ---- Bash reaching outside the worktree (attn_bash_escapes_worktree) ----
     * The observed bypass: cwd was a valid managed worktree, so the isolation check
     * passed, while the command cd'd to the shared checkout and wrote there. */
@@ -489,10 +577,8 @@ static void test_external_memory_decision(void)
  * opts out, no env-var bypass). */
 static void test_external_memory_enforcement(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_mem_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_mem_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char cfgpath[400];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
 
 #define WRITE_MEMORY_HOOK                                                                          \
    "{\"session_id\":\"memtest\",\"tool_name\":\"Write\",\"tool_input\":{\"file_path\":"            \
@@ -505,7 +591,7 @@ static void test_external_memory_enforcement(void)
    "\"/home/u/.claude/projects/p/memory/fact.md\"}}"
 
    /* (1) Default ON: no config -> a Write into the store is BLOCKED. */
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = WRITE_MEMORY_HOOK;
    assert(handle_attention_guard() == 2);
 
@@ -514,7 +600,10 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 2);
 
    /* (3) Reading the store stays allowed (worktree isolation off so only the
-    *     memory guard is in play). */
+    *     memory guard is in play). The invalid base makes this deterministic:
+    *     an accidental routing attempt cannot succeed because of local Git
+    *     configuration. */
+   setenv("AIMEE_SESSION_WORKTREE_BASE", "refs/heads/definitely-missing", 1);
    write_config("require_session_worktree: false\n");
    g_stdin_json = READ_MEMORY_HOOK;
    assert(handle_attention_guard() == 0);
@@ -526,6 +615,7 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 0);
    g_stdin_json = BASH_MEMORY_HOOK;
    assert(handle_attention_guard() == 0);
+   unsetenv("AIMEE_SESSION_WORKTREE_BASE");
 
    /* (5) No env-var bypass. */
    write_config("require_session_worktree: false\n");
@@ -534,7 +624,7 @@ static void test_external_memory_enforcement(void)
    assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("external-memory enforcement OK\n");
 }
@@ -547,7 +637,7 @@ static void test_external_memory_enforcement(void)
 static int capture_stderr(char *out, size_t outsz)
 {
    char tmp[256];
-   snprintf(tmp, sizeof(tmp), "/tmp/aimee_attn_stderr_%d", (int)getpid());
+   snprintf(tmp, sizeof(tmp), "%s/aimee_attn_stderr_%d", platform_tmpdir(), (int)getpid());
    int saved = dup(STDERR_FILENO);
    assert(saved >= 0);
    FILE *f = fopen(tmp, "w+");
@@ -570,25 +660,24 @@ static int capture_stderr(char *out, size_t outsz)
 
 static void test_isolation_enforcement(void)
 {
-   snprintf(g_home, sizeof(g_home), "/tmp/aimee_iso_test_%d", (int)getpid());
+   snprintf(g_home, sizeof(g_home), "%s/aimee_iso_test_%d", platform_tmpdir(), (int)getpid());
    mkdir(g_home, 0700);
-   char cfgpath[400];
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", g_home);
 
 #define EDIT_PRIMARY_HOOK                                                                          \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Edit\","                                           \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Edit\","                  \
    "\"tool_input\":{\"file_path\":\"/home/u/repo/src/x.c\"}}"
 #define EDIT_WORKTREE_HOOK                                                                         \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":"             \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/"                                                \
+   "repo\",\"tool_name\":\"Edit\",\"tool_input\":{\"file_path\":"                                  \
    "\"/home/u/repo/.aimee/worktrees/ab/main/src/x.c\"}}"
 #define READ_PRIMARY_HOOK                                                                          \
-   "{\"session_id\":\"isotest\",\"tool_name\":\"Read\","                                           \
+   "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Read\","                  \
    "\"tool_input\":{\"file_path\":\"/home/u/repo/src/x.c\"}}"
 
    /* (1) Default ON: with no config, a mutating op on the primary checkout is
     *     BLOCKED — session-worktree isolation is required by default so two aimee
     *     sessions cannot collide on one shared git HEAD. */
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = EDIT_PRIMARY_HOOK;
    assert(handle_attention_guard() == 2);
 
@@ -600,8 +689,19 @@ static void test_isolation_enforcement(void)
    write_config("require_session_worktree: true\n");
    assert(handle_attention_guard() == 2);
 
-   /* (4) Enabled: an Edit whose target is inside a managed worktree is allowed. */
+   /* (4) Another session's managed worktree is not ours and is blocked. */
    g_stdin_json = EDIT_WORKTREE_HOOK;
+   assert(handle_attention_guard() == 2);
+
+   /* This session's own keyed worktree remains allowed. */
+   char own_key[80], own_hook[1024];
+   client_session_worktree_key("isotest", own_key, sizeof own_key);
+   snprintf(own_hook, sizeof own_hook,
+            "{\"session_id\":\"isotest\",\"cwd\":\"/home/u/repo\",\"tool_name\":\"Edit\","
+            "\"tool_input\":{\"file_path\":"
+            "\"/home/u/repo/.aimee/worktrees/%s/main/src/x.c\"}}",
+            own_key);
+   g_stdin_json = own_hook;
    assert(handle_attention_guard() == 0);
 
    /* (5) Enabled: a Read on the primary checkout is allowed (non-mutating). */
@@ -615,11 +715,8 @@ static void test_isolation_enforcement(void)
    assert(handle_attention_guard() == 2);
    unsetenv("AIMEE_GUARD");
 
-   /* (7) The refusal must name the path it JUDGED. With an absolute file_path
-    *     the effective target is that file — and the cwd can be a perfectly
-    *     good managed worktree. Reporting the cwd as "not a managed worktree"
-    *     there is a false statement that sends the reader diagnosing the wrong
-    *     thing (observed: a whole session lost to it). */
+   /* (7) Isolation is an implementation detail. Even a fail-closed response
+    * must not tell the agent/user to create or reason about worktrees. */
    char wtcwd[512];
    snprintf(wtcwd, sizeof(wtcwd), "%s/repo/.aimee/worktrees/ab/main", g_home);
    platform_mkdir_p(wtcwd, 0700);
@@ -630,8 +727,9 @@ static void test_isolation_enforcement(void)
    g_stdin_json = EDIT_PRIMARY_HOOK; /* target /home/u/repo/src/x.c, cwd IS managed */
    char msg[4096];
    assert(capture_stderr(&msg[0], sizeof(msg)) == 2);
-   assert(strstr(msg, "/home/u/repo/src/x.c") != NULL); /* names the real offender */
-   assert(strstr(msg, wtcwd) == NULL);                  /* does not accuse the good cwd */
+   assert(strstr(msg, "internal session workspace isolation failed") != NULL);
+   assert(strstr(msg, "/home/u/repo/src/x.c") == NULL);
+   assert(strstr(msg, "worktree") == NULL);
 
    /* A Bash mutation has no file_path, so the cwd IS the judged target and
     * naming it is correct. Same cwd, and now it is allowed — which is exactly
@@ -642,20 +740,47 @@ static void test_isolation_enforcement(void)
 
    assert(chdir(prev_cwd) == 0);
 
-   rm_path(cfgpath);
+   write_config(NULL);
    g_stdin_json = NULL;
    printf("isolation enforcement OK\n");
 }
 
+static void test_camel_case_client_path_routing(void)
+{
+   char repo[512], cmd[2048], absolute[640];
+   snprintf(repo, sizeof repo, "%s/aimee_camel_route_%d", platform_tmpdir(), (int)getpid());
+   snprintf(cmd, sizeof cmd,
+            "rm -rf '%s' && git init -q -b main '%s' && git -C '%s' config user.email t@t && "
+            "git -C '%s' config user.name t && touch '%s/seed' && git -C '%s' add seed && "
+            "git -C '%s' commit -qm seed",
+            repo, repo, repo, repo, repo, repo, repo);
+   assert(system(cmd) == 0);
+   snprintf(absolute, sizeof absolute, "%s/new.txt", repo);
+   cJSON *input = cJSON_CreateObject(), *updated = NULL;
+   cJSON_AddStringToObject(input, "filePath", absolute);
+   assert(attn_route_tool_input("camel-session", repo, "Write", input, &updated) == 0);
+   const char *routed = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(updated, "filePath"));
+   assert(routed && strstr(routed, "/.aimee/worktrees/") != NULL);
+   assert(strcmp(routed, absolute) != 0);
+   cJSON_Delete(updated);
+   cJSON_Delete(input);
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", repo);
+   system(cmd);
+   printf("camelCase client path routing OK\n");
+}
+
 int main(void)
 {
+   client_config_set_provider(test_config_value);
    printf("attention_guard: ");
    test_classify();
    test_weight();
    test_score();
    test_guard_enforcement();
+   test_required_discovery_activation();
    test_session_isolation_decision();
    test_isolation_enforcement();
+   test_camel_case_client_path_routing();
    test_external_memory_decision();
    test_external_memory_enforcement();
    printf("all tests passed\n");

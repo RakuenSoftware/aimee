@@ -1,0 +1,1481 @@
+{
+  "schema_version": 1,
+  "module": "db2",
+  "wire_version": 1,
+  "catalog_complete": false,
+  "body_envelope": {
+    "request_magic": 1364341316,
+    "reply_magic": 1381118532,
+    "header_len": 24
+  },
+  "families": [
+    {
+      "id": 1,
+      "name": "lifecycle",
+      "event_kind": 11521,
+      "active": true
+    },
+    {
+      "id": 2,
+      "name": "tenancy",
+      "event_kind": 11522,
+      "active": false
+    },
+    {
+      "id": 3,
+      "name": "memory",
+      "event_kind": 11523,
+      "active": false
+    },
+    {
+      "id": 4,
+      "name": "index",
+      "event_kind": 11524,
+      "active": false
+    },
+    {
+      "id": 5,
+      "name": "learning",
+      "event_kind": 11525,
+      "active": false
+    },
+    {
+      "id": 6,
+      "name": "organization",
+      "event_kind": 11526,
+      "active": false
+    },
+    {
+      "id": 7,
+      "name": "custody",
+      "event_kind": 11527,
+      "active": false
+    },
+    {
+      "id": 8,
+      "name": "maintenance",
+      "event_kind": 11528,
+      "active": false
+    }
+  ],
+  "result_codes": [
+    "ok",
+    "not_found",
+    "conflict",
+    "denied",
+    "retryable",
+    "invalid_state"
+  ],
+  "operations": [
+    {
+      "family": "lifecycle",
+      "id": 1,
+      "name": "health",
+      "wire_format": "db2-health-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_health_probe",
+        "db2_is_initialized",
+        "db2_kb_health_probe"
+      ],
+      "request": {
+        "magic": 1363685956,
+        "encoded_size": 8
+      },
+      "reply": {
+        "magic": 1380463172,
+        "encoded_size": 16,
+        "flags": [
+          {
+            "bit": 0,
+            "name": "schema"
+          },
+          {
+            "bit": 1,
+            "name": "pg_trgm"
+          },
+          {
+            "bit": 2,
+            "name": "kb_tables"
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 2,
+      "name": "embedding_dimension",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_embedding_dim"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "dimension",
+          "type": "u32",
+          "minimum": 1,
+          "maximum": 4000
+        }
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 3,
+      "name": "pool_status",
+      "wire_format": "db2-envelope-pool-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_pool_stats"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 68,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "size",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 256
+          },
+          {
+            "name": "in_use",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 256
+          },
+          {
+            "name": "waiters",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          {
+            "name": "lease_grants",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "lease_timeouts",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "stuck",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "poisoned",
+            "type": "u64",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 4,
+      "name": "embedding_refusals",
+      "wire_format": "db2-envelope-embedding-refusals-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_embedding_dim_last_offered",
+        "db2_embedding_dim_refused_count"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "refused_count",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "last_offered",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 5,
+      "name": "postgres_status",
+      "wire_format": "db2-envelope-postgres-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_pg_stat_summary"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 48,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "available",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 15
+          },
+          {
+            "name": "active_connections",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "max_connections",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "is_replica",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "replica_lag_bytes",
+            "type": "u64",
+            "minimum": 0
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 6,
+      "name": "reembed_status",
+      "wire_format": "db2-envelope-reembed-status-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "not_found",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_in_progress_get"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "started_epoch",
+            "type": "u64",
+            "minimum": 1
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 7,
+      "name": "reembed_clear",
+      "wire_format": "db2-envelope-reembed-clear-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_in_progress_clear"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 8,
+      "name": "reembed_clear_maintenance",
+      "wire_format": "db2-envelope-reembed-clear-maintenance-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "conflict",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_reembed_clear_maintenance"
+      ],
+      "request": {
+        "encoded_size": 28,
+        "field": {
+          "name": "force",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "reply": {
+        "encoded_size_payload": 36,
+        "encoded_size_error": 24,
+        "payload_results": [
+          "ok",
+          "conflict"
+        ],
+        "fields": [
+          {
+            "name": "was_in_progress",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "recorded_dimension",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          {
+            "name": "running_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          }
+        ]
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 9,
+      "name": "embedder_serving_id",
+      "wire_format": "db2-envelope-embedder-serving-id-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_embedder_serving_id"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 187,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "serving_id",
+          "type": "opaque-string",
+          "minimum_bytes": 0,
+          "maximum_bytes": 159
+        }
+      }
+    },
+    {
+      "family": "lifecycle",
+      "id": 10,
+      "name": "dimension_reset",
+      "wire_format": "db2-envelope-dimension-reset-v1",
+      "scope": "none",
+      "transaction": "single",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "conflict",
+        "denied",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_dim_change_reset"
+      ],
+      "request": {
+        "encoded_size": 36,
+        "fields": [
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "force",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "dry_run",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_payload": 56,
+        "encoded_size_error": 24,
+        "payload_results": [
+          "ok",
+          "conflict",
+          "denied"
+        ],
+        "fields": [
+          {
+            "name": "recorded_dimension",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 4000
+          },
+          {
+            "name": "target_dimension",
+            "type": "u32",
+            "minimum": 1,
+            "maximum": 4000
+          },
+          {
+            "name": "tables_discovered",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 16
+          },
+          {
+            "name": "tables_dropped",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 16
+          },
+          {
+            "name": "rows_cleared",
+            "type": "u64",
+            "minimum": 0
+          },
+          {
+            "name": "curator_requeued",
+            "type": "i32",
+            "minimum": -1,
+            "maximum": 2147483647
+          },
+          {
+            "name": "evidence_requeued",
+            "type": "i32",
+            "minimum": -1,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 1,
+      "name": "level3_count",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l3"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 2,
+      "name": "level2_count",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l2"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 3,
+      "name": "orphaned_l0_count",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_orphaned_l0"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 4,
+      "name": "total_count",
+      "wire_format": "db2-envelope-u64-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "count",
+          "type": "u64",
+          "minimum": 0,
+          "maximum": 9223372036854775807
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 5,
+      "name": "session_l2_count",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_count_l2_for_session"
+      ],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 155,
+        "field": {
+          "name": "source_session",
+          "type": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 127
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 6,
+      "name": "key_exists",
+      "wire_format": "db2-envelope-string-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_key_exists"
+      ],
+      "request": {
+        "encoded_size_min": 29,
+        "encoded_size_max": 539,
+        "field": {
+          "name": "key",
+          "type": "utf8",
+          "minimum_bytes": 1,
+          "maximum_bytes": 511
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "exists",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 7,
+      "name": "find_id_by_key_kind",
+      "wire_format": "db2-envelope-string-pair-u32-u64-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_find_id_by_key_kind"
+      ],
+      "request": {
+        "encoded_size_min": 34,
+        "encoded_size_max": 558,
+        "fields": [
+          {
+            "name": "key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "kind",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 36,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "found",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "id",
+            "type": "u64",
+            "minimum": 0,
+            "maximum": 9223372036854775807
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 8,
+      "name": "key_exists_in_tier_pair",
+      "wire_format": "db2-envelope-string-triple-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_key_exists_in_tier_pair"
+      ],
+      "request": {
+        "encoded_size_min": 39,
+        "encoded_size_max": 577,
+        "fields": [
+          {
+            "name": "key",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 511
+          },
+          {
+            "name": "tier_a",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          },
+          {
+            "name": "tier_b",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 15
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "exists",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 9,
+      "name": "effectiveness_update",
+      "wire_format": "db2-envelope-u64-u32-f64-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok",
+        "invalid_state"
+      ],
+      "c_symbols": [
+        "db2_memory_health_clear_effectiveness",
+        "db2_memory_health_set_effectiveness"
+      ],
+      "request": {
+        "encoded_size": 44,
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "has_value",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 1
+          },
+          {
+            "name": "value",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le"
+          }
+        ],
+        "consistency": "has_value=0 requires value bits to be positive zero"
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "memory",
+      "id": 10,
+      "name": "retention_enforce",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_delete_by_sensitivity"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": [
+          {
+            "sensitivity": "restricted",
+            "retention_days": 7
+          },
+          {
+            "sensitivity": "sensitive",
+            "retention_days": 90
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "deleted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 11,
+      "name": "effectiveness_demote",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_demote_low_effectiveness"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "threshold_binary64_bits": 4599075939470750515
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "demoted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 12,
+      "name": "effectiveness_stats",
+      "wire_format": "db2-envelope-f64-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_effectiveness_stats"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "low_threshold_binary64_bits": 4599075939470750515
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 40,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "avg_effectiveness",
+            "type": "f64",
+            "encoding": "ieee754-binary64-le",
+            "minimum_binary64_bits": 0,
+            "maximum_binary64_bits": 4607182418800017408
+          },
+          {
+            "name": "low_effectiveness_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "high_impact_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 13,
+      "name": "l2_memory_ids",
+      "wire_format": "db2-envelope-u64-list-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_list_l2_memory_ids"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "maximum_ids": 2048
+        }
+      },
+      "reply": {
+        "encoded_size_min_ok": 28,
+        "encoded_size_max_ok": 16412,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "memory_ids",
+          "type": "u64-list",
+          "minimum_items": 0,
+          "maximum_items": 2048,
+          "item_minimum": 1,
+          "item_maximum": 9223372036854775807
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 14,
+      "name": "health_record",
+      "wire_format": "db2-envelope-u32-triple-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "unsafe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_record"
+      ],
+      "request": {
+        "encoded_size": 36,
+        "policy": {
+          "conflict_window_days": 1
+        },
+        "fields": [
+          {
+            "name": "promotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "demotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "expirations",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    },
+    {
+      "family": "memory",
+      "id": 15,
+      "name": "health_retention",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_prune_old",
+        "db2_memory_health_prune_old_contradictions"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "snapshot_retention_days": 90,
+          "contradiction_retention_days": 90
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "snapshots_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "contradictions_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 16,
+      "name": "health_counters",
+      "wire_format": "db2-envelope-health-counters-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_health_query_counters"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "promote_use_count": 3,
+          "promote_confidence_binary64_bits": 4606281698874543309
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 60,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "cycles",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_contradictions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_promotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_demotions",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "total_expirations",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "new_memories",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l1_eligible",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l2_total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "l2_stale_30_days",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 17,
+      "name": "stats_counts",
+      "wire_format": "db2-envelope-memory-stats-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_stats_counts"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none"
+      },
+      "reply": {
+        "encoded_size_ok": 96,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "tier_counts",
+            "type": "u32-array",
+            "items": 6,
+            "item_minimum": 0,
+            "item_maximum": 2147483647,
+            "labels": [
+              "L0",
+              "L1",
+              "L2",
+              "L3",
+              "L4",
+              "L5"
+            ]
+          },
+          {
+            "name": "kind_counts",
+            "type": "u32-array",
+            "items": 10,
+            "item_minimum": 0,
+            "item_maximum": 2147483647,
+            "labels": [
+              "fact",
+              "preference",
+              "decision",
+              "episode",
+              "task",
+              "scratch",
+              "procedure",
+              "policy",
+              "workflow",
+              "opinion"
+            ]
+          },
+          {
+            "name": "total",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "conflicts",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 18,
+      "name": "expire",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_delete_l0_provenance",
+        "db2_memory_promotion_delete_l0",
+        "db2_memory_promotion_delete_stale_l1_provenance",
+        "db2_memory_promotion_delete_stale_l1"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "stale_l1_tier": "L1",
+          "maximum_kinds": 16
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "level0_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "stale_level1_deleted",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ]
+      }
+    },
+    {
+      "family": "memory",
+      "id": 19,
+      "name": "demote",
+      "wire_format": "db2-envelope-u32-pair-v1",
+      "scope": "none",
+      "transaction": "none",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_demote_kind",
+        "db2_memory_promotion_demote_cascade"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "demote_tier": "L2",
+          "maximum_kinds": 16
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 32,
+        "encoded_size_error": 24,
+        "fields": [
+          {
+            "name": "demoted_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          },
+          {
+            "name": "cascaded_count",
+            "type": "u32",
+            "minimum": 0,
+            "maximum": 2147483647
+          }
+        ],
+        "consistency": "demoted_count=0 requires cascaded_count=0"
+      }
+    },
+    {
+      "family": "memory",
+      "id": 20,
+      "name": "promote_stable",
+      "wire_format": "db2-envelope-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_promote_stable_l2_to_l3"
+      ],
+      "request": {
+        "encoded_size": 24,
+        "payload": "none",
+        "policy": {
+          "source_tier": "L2",
+          "target_tier": "L3",
+          "kinds": [
+            "fact",
+            "preference"
+          ],
+          "minimum_confidence_binary64_bits": 4606732058837280358,
+          "minimum_use_count": 5,
+          "stable_days": 30
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "promoted_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 21,
+      "name": "reclassify_directives",
+      "wire_format": "db2-envelope-flag-u32-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_reclassify_directives"
+      ],
+      "request": {
+        "encoded_size": 28,
+        "policy": {
+          "source_tier": "L3",
+          "target_tier": "L4",
+          "kinds": [
+            "policy",
+            "workflow"
+          ],
+          "gated_kind": "policy"
+        },
+        "field": {
+          "name": "require_approval",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "reply": {
+        "encoded_size_ok": 28,
+        "encoded_size_error": 24,
+        "field": {
+          "name": "reclassified_count",
+          "type": "u32",
+          "minimum": 0,
+          "maximum": 2147483647
+        }
+      }
+    },
+    {
+      "family": "memory",
+      "id": 22,
+      "name": "record_l4_approval",
+      "wire_format": "db2-envelope-u64-string-pair-v1",
+      "scope": "none",
+      "transaction": "single-statement",
+      "idempotency": "safe",
+      "results": [
+        "ok"
+      ],
+      "c_symbols": [
+        "db2_memory_promotion_record_l4_approval"
+      ],
+      "request": {
+        "encoded_size_min": 41,
+        "encoded_size_max": 614,
+        "policy": {
+          "target_tier": "L4"
+        },
+        "fields": [
+          {
+            "name": "memory_id",
+            "type": "u64",
+            "minimum": 1,
+            "maximum": 9223372036854775807
+          },
+          {
+            "name": "approver",
+            "type": "utf8",
+            "minimum_bytes": 1,
+            "maximum_bytes": 63
+          },
+          {
+            "name": "note",
+            "type": "utf8",
+            "minimum_bytes": 0,
+            "maximum_bytes": 511
+          }
+        ]
+      },
+      "reply": {
+        "encoded_size_ok": 24,
+        "encoded_size_error": 24,
+        "fields": []
+      }
+    }
+  ]
+}

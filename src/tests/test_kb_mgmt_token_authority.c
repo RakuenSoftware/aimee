@@ -1,4 +1,4 @@
-#include "kb/kb_mgmt_token_authority.h"
+#include "management_token_authority.h"
 
 #include <assert.h>
 #include <openssl/bn.h>
@@ -6,6 +6,39 @@
 #include <openssl/pem.h>
 #include <openssl/rsa.h>
 #include <string.h>
+
+static int contract_result;
+
+static int management_record_valid_contract(const kb_mgmt_token_authority_record_t *record)
+{
+   assert(record);
+   return contract_result;
+}
+
+static int identity_record_valid_unused(const kb_identity_token_authority_record_t *record)
+{
+   (void)record;
+   return 1;
+}
+
+static void test_injected_record_validator(void)
+{
+   kb_mgmt_token_authority_record_t record = {0};
+
+   aimee_db2_register_token_record_validators(NULL, identity_record_valid_unused);
+   assert(!db2_management_token_authority_record_validate(&record));
+
+   aimee_db2_register_token_record_validators(management_record_valid_contract,
+                                              identity_record_valid_unused);
+   contract_result = 1;
+   assert(db2_management_token_authority_record_validate(&record));
+   contract_result = 0;
+   assert(!db2_management_token_authority_record_validate(&record));
+   contract_result = 2;
+   assert(!db2_management_token_authority_record_validate(&record));
+   contract_result = -1;
+   assert(!db2_management_token_authority_record_validate(&record));
+}
 
 static void sha256(const void *data, size_t len, unsigned char out[32])
 {
@@ -86,6 +119,8 @@ static void record_init(kb_mgmt_token_authority_record_t *r, EVP_PKEY *key)
 
 int main(void)
 {
+   test_injected_record_validator();
+
    EVP_PKEY *key = rsa3072();
    PKCS8_PRIV_KEY_INFO *p8 = EVP_PKEY2PKCS8(key);
    assert(p8);

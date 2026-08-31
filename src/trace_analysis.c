@@ -1,9 +1,9 @@
 /* trace_analysis.c: mine execution traces for recurring patterns */
 #include "aimee.h"
-#include "db1.h"
-#include "db2/anti_patterns.h"
-#include "db2/memory_payload.h"
-#include "db2/trace_mining.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/anti_patterns.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/trace_mining.h"
 #include "memory.h"
 #include "trace_analysis.h"
 #include "log.h"

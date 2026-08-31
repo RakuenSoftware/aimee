@@ -1,6 +1,10 @@
 # Proposal: Envelope compression, cache-prefix alignment, reversible rehydration, and failure-mined corrections
 
-- **State:** done — **defaults flipped ON** (operator decision, 2026-06-28). The full
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** done. **defaults flipped ON** (operator decision, 2026-06-28). The full
   machinery (P0–P5 + the §6 bench) shipped behind flags (PRs #585, #743, #744, #746,
   #748, #750, #751, #754, with deploy/transport fixes #756/#759/#761), was validated
   live on `.254`, and the **ingress envelope + code-fold compression + cache-prefix
@@ -11,7 +15,7 @@
   off** (see §8 "Operating the default-on levers"). What stays **opt-in**:
   `ingress_preinject_anthropic_enabled` (Claude-Code MCP-reachability gate, §2.3/§3.4)
   and the failure-mining levers (`kb.mining.*`, pipeline-correctness gate). **P2e** (the
-  in-process rehydration handle store) remains deferred — no producer until ephemeral
+  in-process rehydration handle store) remains deferred. No producer until ephemeral
   JSON/tool-result folding lands (durable code folds recover via `code_span_get` and
   never touch a store). The design-roundtable blockers are resolved in **§6.5**.
 - **Completed:** 2026-06-28
@@ -24,7 +28,7 @@
 - {id: 4, tier: deployment, check: "per-ingress MCP-tool reachability proven from the installed Codex/Claude-Code MCP config (memory_get/code_span_get/rehydrate callable)"}
 - {id: 5, tier: hardware, check: "realized provider cache_read/cache_creation tokens, by placement, read from the cost-accounting ledger on a deployed corpus"}
 ```
-- **Design roundtable (2026-06-16):** found 9 blocking / 12 major — **all resolved
+- **Design roundtable (2026-06-16):** found 9 blocking / 12 major. **all resolved
   in §6.5.** Key blockers were: the `X-Aimee-Compress` override using thread-local
   state (unsafe in the threaded server); the lossy-fold transform enum not
   distinguishing recoverability; rehydrate conflating byte-exact replay with
@@ -46,13 +50,13 @@
   at the live Codex/OpenAI seam), `src/server/server_http.c` +
   `api/openapi-server-v1.yaml` + generated `src/server/openapi_server_data.h`
   (compression request override if exposed),
-  `src/server/anthropic_http.c` (a *separate opt-in phase* — see §2.3 / §7),
+  `src/server/anthropic_http.c` (a *separate opt-in phase*; see §2.3 / §7),
   `src/server/server_mcp.c` +
   `src/server/server_mcp_call_table.inc` + `src/mcp_tools.c` (rehydration tool,
   any missing durable resolver tools such as `memory_get` / code-span read,
   discovery metadata + goldens), config plumbing (`src/headers/config.h`,
   `src/config.c`, `src/config_fields.c`, `src/config_sections.c`,
-  `src/config_save.c`), the learning machinery (`src/db2/learning.c/.h`,
+  `src/config_save.c`), the learning machinery (`src/modules/db2/c/learning.c/.h`,
   `src/kb/kb_learning_synth.c`, `src/config_learning.c`, the
   `interaction_event_embeddings` table, `src/kb/kb_mining.c`) for failure
   mining, `src/payload_rewrite.c` + `src/headers/payload_rewrite.h` +
@@ -74,20 +78,20 @@ For readers not following the review history (the "Review findings (resolved)"
 map below records how eight rounds hardened the contract), the design is four
 default-off levers added to the pre-injection path, mined from headroom:
 
-1. **Compress** envelope content over a typed IR — code folder first (§1).
+1. **Compress** envelope content over a typed IR, code folder first (§1).
 2. **Place** volatile per-turn context *after* the provider cache prefix (§2).
-3. **Recover** folded detail through a *callable* resolver — `code_span_get` /
+3. **Recover** folded detail through a *callable* resolver, `code_span_get` /
    `memory_get` for durable data, `rehydrate` for ephemeral (§3).
 4. **Learn** from failed sessions via the existing learning-signal pipeline (§4).
 
 Phasing is P0→P5 (§7). Two hard gates dominate (§6): a lossy fold ships only where
 its resolver is *provably reachable* on that ingress, and a default flip requires a
 **net** token win (resident savings minus recovery round-trips) on Aimee's own
-corpora — not merely a resident-token reduction.
+corpora, not merely a resident-token reduction.
 
 ## Provenance
 
-The four ideas below are lifted — by design, not code — from
+The four ideas below are lifted (by design, not code) from
 [`chopratejas/headroom`](https://github.com/chopratejas/headroom), an
 Apache-2.0 context-compression layer for agents (ContentRouter → specialized
 compressors → CacheAligner → reversible-compression/CCR, plus a `headroom learn`
@@ -103,7 +107,7 @@ This proposal sits between three siblings and must not duplicate them:
 
 - `docs/proposals/pending/recall-economy-progressive-disclosure.md` owns
   **bounded envelope assembly**, **progressive disclosure (preview + pull-handle)**,
-  **learned shortcuts**, and **intent annotation** — *which records, at what size,
+  **learned shortcuts**, and **intent annotation**, *which records, at what size,
   in what shape* enter the envelope. This proposal's envelope IR (§1) and
   recovery resolver contract (§3) are designed to **be** that proposal's
   preview/read contract where it has one, not a parallel scheme.
@@ -123,7 +127,7 @@ This proposal sits between three siblings and must not duplicate them:
 ## Review findings (resolved)
 
 Eight review rounds against the live tree hardened this contract; all 35 findings
-are resolved in the body sections (§1–§8) and were re-verified in-tree — the seven
+are resolved in the body sections (§1–§8) and were re-verified in-tree, the seven
 load-bearing code claims especially: the five OpenAI/Responses injection sites in
 `openai_chat.c`, the server-dispatch `index.structure` route dropping `line_end`
 (the KB HTTP route emits it), the absent `memory_get`/`code_span_get` MCP tools,
@@ -148,7 +152,7 @@ in the body.
   owns only the placement invariant → §2.1 (the envelope-volatile vs
   "stable-anchor" premise mismatch is settled empirically → §2.2). #4 Anthropic
   injection is not a free stateless-proxy-preserving change → §2.3/P5. #5 cache
-  controls are provider-specific — capability table, no-op default → §2.4. #11
+  controls are provider-specific, capability table, no-op default → §2.4. #11
   reuse the existing `payload_rewrite` prefix subsystem, and #19 the Responses
   path (`agent_execute_messages()`) carries no session state for prefix telemetry
   → §2.5. #13 `ingress_preinject_build()` is called at five OpenAI sites, and #30
@@ -157,7 +161,7 @@ in the body.
   binding, version invalidation, topology, and log-hygiene rules → §3.2. #18/#27
   the durable pull-handle is recall-economy's `memory_get` (a backend, not yet an
   MCP tool), not a generic `fetch` → §3.1. #26/#22 durable code recovery needs a
-  callable `code_span_get`/range read (which does not exist — `find_symbol`
+  callable `code_span_get`/range read (which does not exist, `find_symbol`
   returns locations only), and the first lossy phase gates on *that* reachability,
   not on `rehydrate` → §3.1/§3.4. #16/#21/#25 resolver reachability is a
   per-ingress precondition proven from the installed MCP config, distinct from the
@@ -174,8 +178,8 @@ in the body.
   (`ingress_compress_enabled`, `ingress_rehydrate_*`, the failure-mining gate)
   needs full load/save, CLI, generated docs, and config-surface tests, or it is a
   dead switch → §1.4/§3.5/§4.5.
-- **Validation (§6).** #8/#15 the harnesses are not pre-existing —
-  `learning_replay.py` needs the live prediction wire and `ingress_token_bench.py`
+- **Validation (§6).** #8/#15 the harnesses are not pre-existing,
+`learning_replay.py` needs the live prediction wire and `ingress_token_bench.py`
   needs per-stage, cache, and correctness arms → §6 (in scope). #31 the
   default-flip gate is **net** token economics (resident savings − recovery
   round-trips, by task class), not resident reduction alone → §6.
@@ -186,21 +190,21 @@ Cut the per-turn token cost *and* the per-turn dollar cost of pre-injection
 without losing task fidelity, and close the loop so the records we inject get
 better when a session goes wrong. Four levers:
 
-1. **Structural compression of envelope content** — fold the code block (and,
+1. **Structural compression of envelope content**: fold the code block (and,
    later, typed tool-result previews) over a *typed envelope IR* before it enters
    `<aimee-context>`, so more signal fits under the same budget and the attention
    guard fights less filler. The resident form is treated as intentionally lossy
    only when the applicable recovery resolver is reachable (§3).
-2. **Cache-prefix placement** — keep genuinely volatile, per-turn envelope content
+2. **Cache-prefix placement**: keep genuinely volatile, per-turn envelope content
    *after* the provider's cacheable prefix so it does not invalidate cached
    history. This owns only the *placement invariant*; the `cache_control` marking
    mechanism and ledger belong to the cost-accounting proposal.
-3. **Recovery resolvers + a rehydration tool** — durable folds reopen through
+3. **Recovery resolvers + a rehydration tool**: durable folds reopen through
    their durable resolver (`memory_get`, code-span/range read); ephemeral folds
    keep the uncompressed original locally behind a capability-bound, TTL-scoped
    handle and expose `rehydrate` so the model recovers full fidelity only when
    it needs it.
-4. **Failure-mined corrections** — a pass that turns a badly-ended session into a
+4. **Failure-mined corrections**: a pass that turns a badly-ended session into a
    *learning signal* routed through the existing proposal/review machinery, not a
    direct memory write.
 
@@ -208,7 +212,7 @@ better when a session goes wrong. Four levers:
 
 ## §1 Structural compression over a typed envelope IR
 
-### §1.1 P0 dependency — the envelope IR (resolves review #1)
+### §1.1 P0 dependency: the envelope IR (resolves review #1)
 
 Today `ingress_preinject_build()` renders one opaque string from three sources
 (`ingress_preinject_format_code_block()`, the rendered `memory.context_block`,
@@ -220,29 +224,29 @@ So §1 is gated on a **P0 envelope IR**: before rendering, `ingress_preinject_bu
 assembles a list of typed entries, and the final string is produced from that
 list. Each entry carries, minimally:
 
-- `source_kind` — `code_hit` | `memory_block` | `audit` | (future) `tool_result`;
-- `record_id` / `handle` — id-addressable, shared with §3 and recall-economy's
+- `source_kind`: `code_hit` | `memory_block` | `audit` | (future) `tool_result`;
+- `record_id` / `handle`, id-addressable, shared with §3 and recall-economy's
   preview/read contract;
-- `sensitivity` / `scope` — session, workspace, tenant (drives §3.2 and redaction);
-- `preview` — the rendered text that goes resident in the envelope;
-- `original_ref` — how to recover the original (§3). Recovery guarantees differ by
+- `sensitivity` / `scope`, session, workspace, tenant (drives §3.2 and redaction);
+- `preview`: the rendered text that goes resident in the envelope;
+- `original_ref`: how to recover the original (§3). Recovery guarantees differ by
   resolver. For **durable** sources (code spans, memory records) this is a
   **re-read pointer** (project/file/line-range, or record id + version) re-fetched
-  on demand — cheaper than copying bytes into the store every turn. A re-read
+  on demand, cheaper than copying bytes into the store every turn. A re-read
   returns the **current** durable content plus a version/hash **drift signal**; it
   equals the pre-fold bytes only when the source has not changed (the agent may
   have edited it mid-session), so it is *not* an unconditional byte-exact replay.
   For **ephemeral** sources (tool output that will not survive the turn) it is the
   **stored bytes**, which *are* byte-exact. Copying every code-hit body into the
   store on the per-turn hot path is explicitly avoided (see the latency risk in §8);
-- `budget` — bytes/tokens this entry is allowed, from recall-economy's bounded
+- `budget`: bytes/tokens this entry is allowed, from recall-economy's bounded
   assembler when present;
-- `transform` — which fold was applied, so the metadata is visible to the model and
+- `transform`: which fold was applied, so the metadata is visible to the model and
   the test suite. **§6.5 B2 normatively expands this enum** to one value per
   lossiness class: `none` · `code_whitespace_collapse` · `code_comment_strip` ·
   `code_signature_span` · `json_fold` (the original `code_fold` is split by
   recoverability).
-- `metrics` — entry id, original/resident byte and token estimates, transform,
+- `metrics`: entry id, original/resident byte and token estimates, transform,
   resolver kind, resolver invoked/not invoked, recovered bytes/tokens, provider
   round-trips, and latency. Aggregate provider usage cannot attribute net savings
   to a specific fold, so this per-entry telemetry is part of the IR contract.
@@ -293,13 +297,13 @@ removes detail that some tasks need. The corrected contract:
 - every lossy fold carries a visible `rehydrate` handle and a `transform` tag, so
   the model can see what was summarized and decide to open it;
 - the byte-exact original (§3) bounds the loss **only if** the handle is
-  available, authorized, and discoverable in that ingress — it does not make the
+  available, authorized, and discoverable in that ingress. It does not make the
   resident text itself lossless;
 - the default-on flip is **blocked** until the accuracy A/B (§6) includes tasks
   where the omitted detail is required *and* confirms the model rehydrates when
   it needs it.
 
-Because **byte-equivalent** folds (P1a — blank-line/whitespace collapse) lose
+Because **byte-equivalent** folds (P1a, blank-line/whitespace collapse) lose
 nothing, they are exempt from the resolver requirement (§3.4(b)), the
 rehydrate-handle pairing, and the forced-rehydration accuracy gate; they need only
 the resident-token and net-economics measurement. Only the **lossy** tier (P1b)
@@ -319,7 +323,7 @@ If a per-call escape is exposed, it requires actual HTTP plumbing:
 
 - parse `X-Aimee-Compress: 0` in `server_http.c` alongside `X-Aimee-Preinject`;
 - carry it via the **per-request context struct** into `ingress_preinject_build()`
-  (scoped + reset per request — never an unscoped thread-local; see §6.5 B1);
+  (scoped + reset per request, never an unscoped thread-local; see §6.5 B1);
 - cover buffered chat/completions, buffered Responses, streaming chat/completions,
   and streaming Responses tests;
 - document it in the OpenAPI surface if it is part of the public `/v1` contract,
@@ -342,7 +346,7 @@ internal/shadow gate, or may ride the existing `cache_aware_rewrite_enabled`
 prefix subsystem (§2.5), because placement telemetry and cache marking are
 different rollout risks.
 
-This proposal owns one thing the other does not: the **placement invariant** —
+This proposal owns one thing the other does not: the **placement invariant**,
 ensuring that whatever is marked cacheable is actually byte-stable turn-to-turn,
 and that genuinely volatile content is not placed ahead of the cached prefix.
 Marking and placement are complementary: marking a *volatile* block cacheable
@@ -352,20 +356,20 @@ that from happening.
 ### §2.2 Reconciling the premise (resolves review #3, premise mismatch)
 
 The two proposals disagree on a fact: cost-accounting calls the envelope "large
-and constant across a session — the ideal prompt-cache anchor"; this proposal
+and constant across a session. The ideal prompt-cache anchor"; this proposal
 calls it volatile. `ingress_preinject_build(query, …)` rebuilds the envelope from
 the **current turn's query** and the hook fires on every `UserPromptSubmit`, so
 its *content* is per-turn volatile. The merged classification:
 
-- **Stable, cacheable prefix:** system / persona / prior history — these do not
+- **Stable, cacheable prefix:** system / persona / prior history. These do not
   change turn-to-turn within a session.
-- **Volatile, after-the-boundary:** `<aimee-context>` — rebuilt per turn.
+- **Volatile, after-the-boundary:** `<aimee-context>`. Rebuilt per turn.
 
 This is settled **empirically, not by assertion**: the bench (§6) reports
 realized `cache_read` vs `cache_creation` tokens for the envelope under both
 placements. If, in practice, the envelope turns out stable enough on many turns
-(similar queries) that marking it nets positive, the data — not either
-proposal's prose — decides. The two proposals must publish the same classification
+(similar queries) that marking it nets positive, the data, not either
+proposal's prose, decides. The two proposals must publish the same classification
 once measured.
 
 ### §2.3 Anthropic is a separate opt-in phase (resolves review #4)
@@ -373,8 +377,8 @@ once measured.
 `anthropic_http.c` is a deliberate stateless wire-format proxy: it does not run
 Aimee's agent loop, memory, persona, or toolset, because Claude Code owns its own
 context and tools. The earlier claim that injection can happen "without
-abandoning" that contract "because the proxy still forwards" is **withdrawn** —
-it is not precise. Injecting into the Anthropic path requires, at minimum:
+abandoning" that contract "because the proxy still forwards" is **withdrawn**.
+It is not precise. Injecting into the Anthropic path requires, at minimum:
 
 - extracting a query from Anthropic messages without mutating client-owned tool
   state;
@@ -449,7 +453,7 @@ the synthetic tool call to the client in both buffered and SSE modes.
 
 ## §3 Recovery resolvers + a rehydration tool
 
-### §3.1 Approach — headroom's CCR, unified with recall-economy's pull-handle
+### §3.1 Approach: headroom's CCR, unified with recall-economy's pull-handle
 
 Give every lossy fold a callable recovery resolver, but store byte-exact
 pre-fold bytes behind a handle only for ephemeral entries that cannot be re-read.
@@ -459,8 +463,8 @@ its concrete durable-memory surface is `memory_get` over the existing
 `memory.get` / `kb_client_memory_get` backend. This proposal aligns to that
 surface rather than creating a generic `fetch` verb:
 
-- `memory_get` — recall-economy: durable memory preview → full memory record.
-- code-span/range read — durable code preview → full source span. This is **not**
+- `memory_get`: recall-economy: durable memory preview → full memory record.
+- code-span/range read, durable code preview → full source span. This is **not**
   currently an Aimee MCP tool: `find_symbol` returns path/line metadata, while
   `read_file` lives in the delegate/agent toolset. P1/P2 must either add a real
   Aimee MCP resolver such as `code_span_get` (path/project + line range, with
@@ -469,7 +473,7 @@ surface rather than creating a generic `fetch` verb:
   A server-side `code_span_get` must read through the active workspace-provider
   boundary (`shared`, `detached`, or `mirror`) rather than directly opening the
   indexed path on the server host.
-- `rehydrate` — this proposal: folded ephemeral/compressed resident form →
+- `rehydrate`: this proposal: folded ephemeral/compressed resident form →
   byte-exact original for data that cannot be re-read cheaply or safely.
 
 If the projects later choose a generic `fetch` verb, it must be adopted in
@@ -489,17 +493,17 @@ path to potentially sensitive originals, so:
   sensitivity/tenant; a request may only rehydrate handles minted for its own
   scope.
 - **Unguessable / capability-bound:** handles are capability tokens, not short
-  sequential ids — possessing the envelope is the only way to learn a handle.
+  sequential ids, possessing the envelope is the only way to learn a handle.
 - **Version invalidation:** a handle carries the source record's version/hash;
   rehydrate fails closed if the underlying record changed.
-- **Topology:** the store is in-process and **best-effort across restarts** — a
+- **Topology:** the store is in-process and **best-effort across restarts**. A
   handle may expire on restart or under LRU pressure. This is documented, not
   hidden.
 - **Log hygiene:** handles and originals are never written to logs where they
   would expose sensitive content.
 - **Recoverable failure:** on expired/unauthorized/unknown handle, the tool
   returns clear error text steering the model to the durable resolver
-  (`memory_get`, code/file-span read, or rerun recall) instead — never a silent
+  (`memory_get`, code/file-span read, or rerun recall) instead, never a silent
   empty result.
 - **Lifetime config:** the store's TTL and size are config-driven, but the
   implementation must choose and fully plumb the names/section:
@@ -510,8 +514,8 @@ path to potentially sensitive originals, so:
 ### §3.3 Payoff
 
 Lets §1 fold **aggressively** (optimize resident density, not "safe to lose"),
-because the detail is deferred behind a tool call the model makes iff it needs it
-— but only to the extent §3.4's reachability precondition holds in that ingress.
+because the detail is deferred behind a tool call the model makes iff it needs it,
+but only to the extent §3.4's reachability precondition holds in that ingress.
 
 ### §3.4 Tool reachability is a per-ingress precondition (resolves review #16)
 
@@ -520,7 +524,7 @@ by ingress:
 
 - **Claude Code hook path:** expected to work only when the installed Claude
   config has Aimee's MCP server registered. Note this is a **separate installer
-  action** from the context-preinjection *hooks* the done proposal shipped — hooks
+  action** from the context-preinjection *hooks* the done proposal shipped, hooks
   inject context but do not make `memory_get`/`rehydrate` callable. P2 must prove
   reachability from the actual integration installer/config and an end-to-end
   hook-session fixture that asserts the **MCP-tool registration**, not just the
@@ -533,8 +537,8 @@ by ingress:
 - **Anthropic:** gated on §2.3/P5.
 
 Contract: per target ingress, P2 must **(a)** prove **the fold's resolver** is
-reachable end-to-end — a callable code-span/range read for a code fold,
-`memory_get` for a memory fold, `rehydrate` for an ephemeral fold (§3.1) — or
+reachable end-to-end. A callable code-span/range read for a code fold,
+`memory_get` for a memory fold, `rehydrate` for an ephemeral fold (§3.1), or
 **(b)** restrict that ingress to non-lossy folds (byte-equivalent only) and
 previews rich enough to stand alone. A **lossy** fold is permitted only where its
 resolver's reachability is proven. The first phase's code folder is therefore
@@ -546,7 +550,7 @@ to the same workspace. This is the concrete gate that turns §1.3's "lossy is
 safe" from an assumption into a tested precondition.
 
 **Store topology.** The handle store is in-process and assumes the mint (envelope
-build) and the `rehydrate` call land in the **same server process** — true for
+build) and the `rehydrate` call land in the **same server process**, true for
 Aimee's single-process threaded server and the single-container Docker deploy, so
 the cross-thread mint→rehydrate path works with a mutex. A **multi-replica /
 load-balanced** deployment can route `rehydrate` to a replica that never minted
@@ -584,12 +588,12 @@ complete:
 
 ---
 
-## §4 Failure-mined corrections — as learning signals, not memory writes
+## §4 Failure-mined corrections: as learning signals, not memory writes
 
 ### §4.1 Route through the existing learning machinery (resolves review #7)
 
 The repo already has a learning pipeline: signals → proposals → review/accept →
-promotion to a sink. The public surface is in `src/db2/learning.c/.h`
+promotion to a sink. The public surface is in `src/modules/db2/c/learning.c/.h`
 (`db2_learning_signal_insert`, `db2_learning_proposal_insert`,
 `db2_learning_proposal_find_pending`, `db2_learning_proposal_list`, accept/reject
 states), synthesis in `src/kb/kb_learning_synth.c`, CLI in `src/cmd_learning.c`.
@@ -613,7 +617,7 @@ pipeline already has, instead of a parallel writer.
   failure-shaped events server-side. Mining clusters of `failure_mode` is the
   reliable signal.
 - The **attention guard's per-session log is a Claude-Code-hook artifact**, not a
-  general server-side outcome log — it is usable only for the Claude Code ingress
+  general server-side outcome log. It is usable only for the Claude Code ingress
   and must not be assumed present elsewhere.
 - **"Abandoned / retried turn" is not a reliable cross-ingress observable** today;
   it is dropped from the v1 detector unless/until a server-side turn-outcome
@@ -631,8 +635,8 @@ generated docs, CLI visibility, and tests listed in §4.5.
 
 ### §4.3 Why a signal, not a file
 
-Headroom's `headroom learn` writes corrections to a flat `CLAUDE.md`/`AGENTS.md`
-— per-clone, unranked, unreviewed. Routing through Aimee's learning pipeline
+Headroom's `headroom learn` writes corrections to a flat `CLAUDE.md`/`AGENTS.md`,
+per-clone, unranked, unreviewed. Routing through Aimee's learning pipeline
 yields a record that is cross-agent, ranked, deduped, contradiction-checked, and
 **human/Gate-Promote-reviewed before** it becomes durable. This is the place
 Aimee's design is strictly better than headroom's.
@@ -671,18 +675,18 @@ Either way, the default is off until the validation gates pass.
 ## §5 What is explicitly out of scope
 
 - **The ML prose compressor (`Kompress-base`).** It needs HuggingFace/GPU weight
-  and a second model deploy — operationally heavy given the single-embedder
+  and a second model deploy, operationally heavy given the single-embedder
   history (`single-embedder-pivot`). The structural code folder (§1) captures the
   near-term win with none of that cost. Revisit only if A/B shows prose is the
   residual.
 - **JSON folding in the first phase** (deferred until typed tool-result previews
-  exist in the IR — §1.2).
-- **Anthropic ingress injection in the first phases** (P5, separate opt-in — §2.3).
+  exist in the IR, §1.2).
+- **Anthropic ingress injection in the first phases** (P5, separate opt-in, §2.3).
 - **Adopting headroom as a sidecar/proxy.** A per-turn network hop fights Aimee's
   stateless-proxy latency story; reimplementing the structural folder in C is the
   cleaner path.
 - **Cross-agent memory store / `SharedContext`.** Aimee's is more mature.
-- **The cache-marking mechanism, ledger, pricing, and `/v1/usage/*`** — owned by
+- **The cache-marking mechanism, ledger, pricing, and `/v1/usage/*`**: owned by
   the cost-accounting proposal (§2.1).
 
 ---
@@ -697,16 +701,16 @@ harness upgrades below are **in-scope work**, not pre-existing validation.
 does not exercise the live detector, and its own docstring still calls out the
 missing `aimee learning replay --fixtures …` prediction emitter. This proposal
 depends on that live prediction wire plus compression-specific fixtures.
-`bench/ingress_token_bench.py` today is only a preinject on/off **token** bench —
-it has no per-stage resident tokens, no provider cache reads/writes, no
+`bench/ingress_token_bench.py` today is only a preinject on/off **token** bench.
+It has no per-stage resident tokens, no provider cache reads/writes, no
 compression-on/off arm, and no correctness outcomes. Adding those is part of
 this proposal.
 
 **Acceptance gates:**
 
-- **Resident reduction** — bytes/tokens by IR section and `transform`, compression
+- **Resident reduction**: bytes/tokens by IR section and `transform`, compression
   on vs off.
-- **Net token economics (resolves review #31)** — beyond resident reduction, the
+- **Net token economics (resolves review #31)**: beyond resident reduction, the
   bench reports the **recovery rate** (fraction of lossy folds the agent re-opens
   via a resolver) and the **net** per-session token delta = resident tokens saved
   − recovery round-trip tokens (the resolver tool call + the recovered span),
@@ -720,11 +724,11 @@ this proposal.
   > resident-saving arm is confirmed: on a code-heavy **chat** turn the fold cut
   > the prompt by ~48% (678 → 355 prompt tokens; the envelope code block shrank
   > ~78%). For **non-agentic chat ingress** there is no tool loop, so recovery
-  > rate is zero and the fold is a pure win — that ingress is the justified first
+  > rate is zero and the fold is a pure win. That ingress is the justified first
   > flip candidate. For **agentic coding ingress** (Codex/Claude-Code, the
   > dominant traffic) the agent re-opens the code it was pointed at, so the
   > recovery rate is expected to be high and a single recovery round-trip
-  > (~80–130 tok) costs more than the fold saved (~40 tok) — the net is likely
+  > (~80–130 tok) costs more than the fold saved (~40 tok). The net is likely
   > **negative**, exactly the risk this gate guards. Making the fold net-positive
   > for the agentic case (e.g. recovery-rate-aware folding, or folding only spans
   > the agent is statistically unlikely to re-open) is a **deferred future
@@ -736,24 +740,24 @@ this proposal.
   > **Codex connectivity prerequisite (fixed).** Pointing the Codex CLI at a
   > TLS Aimee failed at the transport layer: Aimee's server set **no ALPN**, and
   > Codex's reqwest/hyper model client then attempts HTTP/2 and the request dies
-  > before reaching the server (Aimee is HTTP/1.1-only — `server_http.c`). The
+  > before reaching the server (Aimee is HTTP/1.1-only, `server_http.c`). The
   > cert was never the cause (`CODEX_CA_CERTIFICATE` loads and verifies the
   > IP-SAN). Fix: Aimee's TLS context now advertises `http/1.1` over ALPN
   > (`SSL_CTX_set_alpn_select_cb` in `server_tls.c`), so ALPN-strict clients
   > settle on HTTP/1.1 instead of a doomed HTTP/2 attempt. Validated: a Codex turn
   > then connects and starts (`thread.started`/`turn.started`) where it previously
   > errored instantly.
-- **Realized cache** — provider `cache_read` / `cache_creation` tokens, read from
+- **Realized cache**: provider `cache_read` / `cache_creation` tokens, read from
   the cost-accounting proposal's **ledger fields** (not re-derived), under both
   placements (§2.2).
-- **Answer correctness under forced rehydration** — accuracy A/B
+- **Answer correctness under forced rehydration**: accuracy A/B
   (`learning_replay.py`) that **includes tasks where the folded-out detail is
   required**, asserting the model rehydrates when it needs to. Aimee's analog of
-  headroom's GSM8K/SQuAD/BFCL claim — **verified on Aimee's own corpora; not
+  headroom's GSM8K/SQuAD/BFCL claim, **verified on Aimee's own corpora; not
   trusted transitively.**
-- **Handle safety** — handle expiry, unauthorized-scope rehydration, and
+- **Handle safety**: handle expiry, unauthorized-scope rehydration, and
   version-mismatch all return the §3.2 recoverable error, proven by test.
-- **Tool reachability and authorization** — Claude Code reachability proven from
+- **Tool reachability and authorization**: Claude Code reachability proven from
   installed config, OpenAI/Codex tool-definition injection or interception denied
   when route auth / workspace / session / remote TCP policy does not allow it,
   and lossy folds disabled on ingresses that fail the reachability fixture.
@@ -763,37 +767,37 @@ this proposal.
   MCP wrapper if memory handles are emitted. For server-owned `code_span_get`,
   tests cover shared, detached, and mirror workspace-provider behavior or the
   implementation explicitly restricts the resolver to supported provider kinds.
-- **Prompt-injection / sensitivity fixtures** — for both compressed previews and
+- **Prompt-injection / sensitivity fixtures**: for both compressed previews and
   rehydrated originals (a folded preview must not become an injection vector, and
   a rehydrate must not cross scope).
 - **Prefix-stability invariant** (§2) and **recovery round-trip** (§3) as hard
-  unit-suite invariants — split by resolver: an **ephemeral stored-bytes**
+  unit-suite invariants. Split by resolver: an **ephemeral stored-bytes**
   rehydrate is byte-exact, while a **durable re-read pointer** returns current
   content and must surface a correct drift flag when the source changed between
   fold and read (the test mutates the source and asserts the flag, not byte
   equality).
-- **Responses/Codex prefix telemetry** — `agent_execute_messages()` records the
+- **Responses/Codex prefix telemetry**: `agent_execute_messages()` records the
   provider-facing prefix through the existing `payload_rewrite` subsystem with a
   real session id for both buffered and streaming Responses.
-- **Inline Responses interception** — if synthetic resolver tools are injected,
+- **Inline Responses interception**: if synthetic resolver tools are injected,
   tests cover buffered and SSE Responses where the provider calls the synthetic
   tool; Aimee consumes it, returns `function_call_output`, continues the provider
   turn, preserves call ids, and does not leak the internal tool call to Codex.
-- **Config/doc surface** — every new flag round-trips through load/save and
+- **Config/doc surface**: every new flag round-trips through load/save and
   `aimee config`, appears in `docs/gen/configuration.md`, and is covered by
   `test_config`, `test_config_surface`, and `test_cmd_config`.
-- **MCP metadata parity** — `mcp_build_tools_list()` and
+- **MCP metadata parity**: `mcp_build_tools_list()` and
   `server_mcp_call_table.inc` agree for `memory_get`, `code_span_get`/range read,
   and `rehydrate`, with generated/golden tool metadata updated.
-- **Span propagation parity** — `/v1/code/search`, `/v1/code/structure`, the
+- **Span propagation parity**: `/v1/code/search`, `/v1/code/structure`, the
   server-dispatch `index.structure` route, and the MCP/envelope rendering path
   preserve `line` and `line_end` consistently when span enrichment is enabled.
 - **Request-body serialization** (§2.4) asserting client cache controls survive.
-- **Runtime OpenAPI freshness** — if `X-Aimee-Compress` is documented, both
+- **Runtime OpenAPI freshness**: if `X-Aimee-Compress` is documented, both
   `api/openapi-server-v1.yaml` and generated `src/server/openapi_server_data.h`
   are updated, and the served `/v1/openapi.yaml` / `/v1/openapi.json` content
   includes the header.
-- **Latency / KB-call budget** — P0/P1 may add secondary structure lookups and
+- **Latency / KB-call budget**: P0/P1 may add secondary structure lookups and
   handle storage work to a per-turn hot path that already calls code search and
   memory context. Bench output must include p50/p95 ingress build latency and KB
   request counts.
@@ -805,21 +809,21 @@ this proposal.
 The 2026-06-16 design roundtable returned 9 blockers (+ 6 majors). Each is resolved
 below; the decisions are normative for implementation.
 
-**B1 — Request override via thread-local is unsafe (§1.4).** The `X-Aimee-Compress`
-override flows through the **per-request context struct**, not a raw thread-local —
-the same scoped, RAII-reset request context introduced by ingress-cost-accounting
+**B1. Request override via thread-local is unsafe (§1.4).** The `X-Aimee-Compress`
+override flows through the **per-request context struct**, not a raw thread-local.
+The same scoped, RAII-reset request context introduced by ingress-cost-accounting
 §2 (set at handler entry, cleared on every exit path, structurally enforced). The
 two proposals share that context plumbing; neither may read compression state from
 an unscoped thread-local.
 
-**B2 — code_fold transform enum doesn't distinguish lossy sub-transforms (§1.2/1.3).**
+**B2, code_fold transform enum doesn't distinguish lossy sub-transforms (§1.2/1.3).**
 Expand the per-entry transform enum to one value per **lossiness class**: `none` ·
 `code_whitespace_collapse` (byte-recoverable) · `code_comment_strip` (lossy) ·
 `code_signature_span` (lossy, P1b) · `json_fold`. Each value maps to a distinct
 lossiness class and a required resolver, so per-entry telemetry and the §3.4
 reachability gate can reason about recoverability exactly.
 
-**B3 — Rehydrate conflates byte-exact replay with durable re-read (§3.1/3.4).** Define
+**B3. Rehydrate conflates byte-exact replay with durable re-read (§3.1/3.4).** Define
 one MCP response schema with an explicit `recovery_mode` enum:
 `byte_exact` (the ephemeral in-memory handle is still live → returns the exact folded
 bytes) · `current_with_drift` (durable re-read → returns CURRENT content + a drift
@@ -829,7 +833,7 @@ fold-time version → drift unknown). The response carries
 drift_advisory?}`, and the handle metadata encodes the expected `recovery_mode` so the
 model knows the recovery guarantee before it calls.
 
-**B4 — code_span_get takes model-supplied path/line (§3.1/3.5).** Concrete input
+**B4, code_span_get takes model-supplied path/line (§3.1/3.5).** Concrete input
 validation, fail-closed: (1) the path must resolve **within the active workspace
 root via verified realpath** (reject symlink/`..` escapes); (2) line ranges are
 clamped to a configurable max span (`code_span_max_lines`, default 400); (3) reject
@@ -837,7 +841,7 @@ null bytes / control chars in the path; (4) refuse any path resolving outside th
 workspace-provider boundary. Reuses the existing workspace-provider boundary checks;
 no raw model string ever reaches the filesystem unvalidated.
 
-**B5 — Envelope stability premise has no baseline protocol (§2.2).** Protocol: per
+**B5. Envelope stability premise has no baseline protocol (§2.2).** Protocol: per
 ingress type, sample the candidate prefix bytes across consecutive turns over **≥200
 turns / ≥20 sessions**; stability metric = the fraction of turns whose candidate
 prefix is byte-identical to the prior turn's; **≥90% unchanged → "stable"** (eligible
@@ -845,7 +849,7 @@ for a cache boundary / fold), else "volatile". The classification is recorded an
 re-run whenever prefix construction changes. This makes the empirical resolution
 falsifiable.
 
-**B6 — "task class" undefined in the §6 gates (§6).** Enumerate the classes the gates
+**B6, "task class" undefined in the §6 gates (§6).** Enumerate the classes the gates
 break down by: `code_generation` · `code_review` · `debugging` · `question_answer` ·
 `summarization` · `agent_tool_loop`. Labeling is an automated heuristic from the
 turn's tools/intent (e.g. `agent_tool_loop` = the turn emits a `function_call`;
@@ -853,13 +857,13 @@ turn's tools/intent (e.g. `agent_tool_loop` = the turn emits a `function_call`;
 validation set only. The net-token-economics and forced-rehydration-accuracy gates
 report per class.
 
-**B7 — Drift-signal test has no independent oracle (§1.1/3.4).** The drift test
+**B7. Drift-signal test has no independent oracle (§1.1/3.4).** The drift test
 independently computes `sha256` of the source file **before and after** mutation in
 the harness (not via the resolver), then asserts the resolver's drift flag equals
 `pre != post`. The resolver's own hash is never the oracle, so a buggy resolver hash
 fails the test instead of passing trivially.
 
-**B8 — Config hierarchy unchosen (§1.4/3.5/4.5).** Decided: **flat snake_case keys**,
+**B8. Config hierarchy unchosen (§1.4/3.5/4.5).** Decided: **flat snake_case keys**,
 matching the existing `config_fields.c` convention (`kb_evidence_emit_enabled`,
 `ingress_preinject_enabled`, `fidelity_check_enabled` are all flat top-level). Master
 gates: `ingress_compress_enabled`, `ingress_rehydrate_enabled`; params:
@@ -867,13 +871,13 @@ gates: `ingress_compress_enabled`, `ingress_rehydrate_enabled`; params:
 `code_span_max_lines`. No nested `[ingress.rehydrate]` tree (would diverge from the
 existing flat config and force a migration).
 
-**B9 — Responses inline tool-interception state machine underspecified (§2.6/3.4).**
+**B9. Responses inline tool-interception state machine underspecified (§2.6/3.4).**
 Concrete spec for the inline Responses continuation loop:
 (1) **detect** a synthetic resolver `function_call` by its injected tool name;
 (2) **execute** the resolver server-side and **emit** a `function_call_output` with
 the **same `call_id`** the provider issued; (3) on resolver error/timeout, emit a
-`function_call_output` carrying an error payload (the turn continues — never aborts
-mid-stream); (4) **SSE vs buffered parity** — identical logic; the buffered path
+`function_call_output` carrying an error payload (the turn continues, never aborts
+mid-stream); (4) **SSE vs buffered parity**, identical logic; the buffered path
 accumulates then emits, the SSE path forwards provider continuation chunks; (5) the
 synthetic `function_call` and its `function_call_output` are consumed server-side and
 **never leaked** into the client stream. Both happy-path (call → output → provider
@@ -881,7 +885,7 @@ continuation) and failure-path (resolver error → error output → provider con
 are covered by tests asserting client-stream cleanliness and `call_id` matching.
 
 **Majors, resolved.** **P0 equivalence (§7):** P0 (typed-IR refactor of
-`ingress_preinject_build`) ships with a **golden-output test** — render envelopes for
+`ingress_preinject_build`) ships with a **golden-output test**, render envelopes for
 N representative sessions covering every `source_kind` before the refactor, assert
 byte-identical output after. **Responses session id (§2.5):** the continuation/retry
 path carries the session id from the request's bearer/session key (the same identity
@@ -895,7 +899,7 @@ durable resolver; a deployment-shape flag makes durable resolvers the default fo
 non-single-process deployments. **Inline-tool authorization (§3.5):** injected
 resolver tools carry the same authorization metadata as their MCP equivalents and are
 **re-authorized per call** against the request's bearer/session/workspace.
-**kb_mining integration (§4.4):** commit to the refactor path — `kb_mining.c` emits
+**kb_mining integration (§4.4):** commit to the refactor path, `kb_mining.c` emits
 `learning_signals`/proposals (not direct artifacts), dedup key `cluster_key +
 event_type`, existing artifacts grandfathered.
 
@@ -907,10 +911,10 @@ implementer and do not gate the first phase.
 
 ## §7 Phasing
 
-- **P0 — Envelope IR (§1.1). DONE (PR #585).** `ingress_preinject_build()` now
+- **P0. Envelope IR (§1.1). DONE (PR #585).** `ingress_preinject_build()` now
   assembles a typed entry list and renders from it; no behaviour change, no flag.
   Blocks everything else.
-- **P1a — Byte-equivalent code fold (§1.2/§1.3). WITHDRAWN — it is a no-op on the
+- **P1a (Byte-equivalent code fold (§1.2/§1.3); WITHDRAWN) it is a no-op on the
   current resident form.** A design roundtable (2026-06-21, 3 lenses, unanimous)
   found that today's resident code form is already a single collapsed line per
   hit: every `code_hit` snippet is routed through `append_single_line_escaped()`,
@@ -920,13 +924,13 @@ implementer and do not gate the first phase.
   byte savings. P1a is removed from the phase list; the `ingress_compress_enabled`
   flag is **not** introduced until a fold with real input exists (P1b). **Precondition
   carried forward:** audit what `append_single_line_escaped()` already destroys
-  (heredocs, multi-line strings, indentation-sensitive snippets like YAML/Make) —
-  the resident form is already lossy, so the byte-equivalence framing for code
+  (heredocs, multi-line strings, indentation-sensitive snippets like YAML/Make).
+The resident form is already lossy, so the byte-equivalence framing for code
   snippets is moot and any future fold must be measured against that baseline.
-- **P1b — Lossy code fold + resident-form enrichment (§1.2/§1.3/§1.4). DONE
+- **P1b. Lossy code fold + resident-form enrichment (§1.2/§1.3/§1.4). DONE
   default-off (PRs #744 enrichment, #746 fold).** Shipped as a matched-line span on
   `code_search_hit_t` (computed in the KB search, gated by `ingress_compress_enabled`
-  so the default search query/cost is unchanged — #744), then a fold that replaces
+  so the default search query/cost is unchanged, #744), then a fold that replaces
   the snippet with a compact `file:line` reference under a `code_span_get`-expandable
   header, with the `X-Aimee-Compress: 0` per-request escape (request context, B1),
   per-turn telemetry, and `ingress_compress_min_chars` (#746). Below is the original
@@ -935,21 +939,21 @@ implementer and do not gate the first phase.
   (signature + relevant lines), which pulls in span enrichment, a reachable
   rehydrate resolver, `transform` tags, the `X-Aimee-Compress` per-call escape, the
   per-entry telemetry (#34), and the forced-rehydration accuracy A/B (§6) before any
-  default flip. The roundtable also surfaced an alternative worth A/B-ing here — a
+  default flip. The roundtable also surfaced an alternative worth A/B-ing here, a
   `file:line[:span]` reference resolved through the rehydrate path instead of an
-  inline fold — but it is **not** non-lossy-for-free: it shifts bytes to a runtime
+  inline fold, but it is **not** non-lossy-for-free: it shifts bytes to a runtime
   resolve (latency), changes the P0 IR's inline shape, and depends on the same
   resolver/reachability infra, so it lives inside P1b's preconditions, not ahead of
   them. No default flip until P2.
-- **P2 — Durable-read reachability + accuracy A/B for the lossy fold (P1b). Resolver
+- **P2. Durable-read reachability + accuracy A/B for the lossy fold (P1b). Resolver
   DONE (PR #743); accuracy A/B is the open default-flip gate.** Aimee now has a
-  callable `code_span_get` MCP tool — it reads a clamped line range through the
+  callable `code_span_get` MCP tool. It reads a clamped line range through the
   active workspace provider with B4 fail-closed path validation (realpath +
   within-project-root containment + `code_span_max_lines` clamp + control-char
   reject) and returns a whole-file `source_version` drift hash; the
   server-dispatch `index.structure` `line_end` drop (#33) is fixed. What remains is
   the **forced-rehydration accuracy A/B on Aimee's corpora** and proving the
-  resolver is reachable per ingress — both need a live model + registered MCP. A
+  resolver is reachable per ingress. Both need a live model + registered MCP. A
   lossy code fold recovers via a durable code-span/range read, so its
   forced-rehydration accuracy A/B and its default-flip candidacy need a real
   callable resolver: either add an Aimee MCP `code_span_get`-style tool or prove
@@ -958,7 +962,7 @@ implementer and do not gate the first phase.
   includes `line_end` propagation fixes on server-dispatch `index.structure`.
   `memory_get` is required only before memory handles are emitted. This phase
   does **not** require the new in-process handle store or `rehydrate`.
-- **P2e — Rehydration handle (§3) for ephemeral folds. DEFERRED — no live producer
+- **P2e (Rehydration handle (§3) for ephemeral folds; DEFERRED) no live producer
   yet.** Durable code folds recover via `code_span_get` and never touch the handle
   store, and ephemeral JSON/tool-result folding is not yet in the IR, so the store
   has nothing to mint for. It lands with the first ephemeral fold. When ephemeral
@@ -967,20 +971,20 @@ implementer and do not gate the first phase.
   full §3.2 safety contract, the `rehydrate` MCP tool + metadata goldens, and the
   injected-tool auth-denial tests. Only ephemeral data needs it; durable folds
   never do.
-- **P3 — Cache-prefix placement (§2). Placement invariant DONE default-off (PR
+- **P3. Cache-prefix placement (§2). Placement invariant DONE default-off (PR
   #750).** The shared `gw_stage_memory` consolidation (universal-gateway P3) already
   collapsed the five Codex/OpenAI injection sites into one seam, and the Anthropic
   arm already split at the `<aimee-context>` marker (`cache_shaping_enabled`); OpenAI
-  caching is automatic longest-prefix, so **placement — not marking — is the only
+  caching is automatic longest-prefix, so **placement (not marking) is the only
   lever there**. PR #750 makes `ingress_preinject_apply` append the volatile envelope
   *after* the stable instructions prefix when `ingress_cache_placement_enabled` is
   on, so the prefix cache survives; no duplicate cache-marking flag is added, and the
   realized `cache_read`/`cache_creation` effect is read from `token_tracker` by the
   §6 bench (#748). **Deferred follow-up:** the `agent_execute_messages()`
   `payload_rewrite` session-scoped prefix tracking (§2.5) and chat/completions
-  placement — the bench measures realized cache without the tracker, and the
+  placement, the bench measures realized cache without the tracker, and the
   Responses `instructions` arm is the primary Codex seam. The remaining §2 surface:
-- **P4 — Failure-mined corrections (§4). DONE default-off (PR #751).** The
+- **P4. Failure-mined corrections (§4). DONE default-off (PR #751).** The
   `kb_mining.c` recurrence job, when `kb.mining.failure_learning_enabled` is on, now
   dedups on the `event_type:role:failure_mode` cluster and emits a
   `db2_learning_signal_insert` + a pending `learning_proposal` (sink `artifact`)
@@ -990,7 +994,7 @@ implementer and do not gate the first phase.
   original framing: emitting learning signals, default-off,
   promoted through the existing review/Gate-Promote path, preferably by
   refactoring `kb_mining.c` recurrence rather than creating a parallel miner.
-- **P5 — Anthropic ingress injection (§2.3). DONE default-off (PR #754).** The
+- **P5. Anthropic ingress injection (§2.3). DONE default-off (PR #754).** The
   injector (`messages_apply_preinject`) already appends the envelope as a trailing
   `system` text block, preserving the Anthropic system-block **array** and any
   per-block `cache_control` (no `anthropic_system_to_text` flatten). PR #754 adds the
@@ -999,7 +1003,7 @@ implementer and do not gate the first phase.
   `anthropic_http.c`, so injection can fire on the Anthropic-native passthrough. The
   **Claude-Code MCP tool-call proof** (that Claude Code calls the advertised
   `memory_get`/`code_span_get`/`rehydrate` when the envelope points at them) remains
-  the open reachability gate before any default flip — it needs a live Claude Code
+  the open reachability gate before any default flip. It needs a live Claude Code
   with the Aimee MCP server registered. Shipped as a separate opt-in phase behind its
   own gate, with system-block-array preservation.
 
@@ -1011,7 +1015,7 @@ them off** and the honest framing of the win.
 
 **What's on:** `ingress_preinject_enabled` (the `<aimee-context>` memory/code preview on
 primary ingress turns), `ingress_compress_enabled` (fold each code hit's snippet to a
-recoverable `file:line` reference — recover via `code_span_get`), and
+recoverable `file:line` reference, recover via `code_span_get`), and
 `ingress_cache_placement_enabled` (place the envelope after the stable instructions
 prefix so provider prefix caches survive). Anthropic injection and failure-mining stay
 opt-in.
@@ -1022,7 +1026,7 @@ shrank ~78%, 416→93 tokens). We deliberately report this real number rather th
 headline. **Most compression systems fail to benchmark honestly**: rates of ~90% are
 reached only by (a) dropping information the consumer actually needs, or (b) handpicking /
 tailoring the benchmark dataset. ~50% is close to optimal for compression that *preserves
-the critical information the agent needs* — aimee's folds stay **recoverable**
+the critical information the agent needs*, aimee's folds stay **recoverable**
 (`code_span_get` re-reads the exact span on demand), so nothing critical is lost. We could
 cherry-pick datasets to post a ~90% headline too, but we use reliable datasets with numbers
 **end-users can expect in production**.
@@ -1032,20 +1036,20 @@ chat ingress** *when no recovery is needed* (no tool loop, no follow-up that re-
 folded code). For **agentic ingress** (Codex / Claude-Code, the dominant coding traffic) the
 agent re-opens the very code it was pointed at, so `code_span_get` **recovery round-trips can
 erase or invert the saving** (per-hit the fold saves ~one snippet ≈ 40 tok; a recovery costs
-the tool-call ≈ 30–40 tok + the returned span ≈ 40–100 tok — so a high recovery rate is
+the tool-call ≈ 30–40 tok + the returned span ≈ 40–100 tok, so a high recovery rate is
 net-negative). This is the proposal's own §6 net-token risk. **Disable for
 agentic/high-recovery workloads** via:
 - per-request **`X-Aimee-Compress: 0`** header (request-scoped via `request_context_t`,
-  §1.4/B1 — never thread-local, never forced on);
+  §1.4/B1, never thread-local, never forced on);
 - the config flags (`ingress_compress_enabled: false`, or the whole envelope via
   `ingress_preinject_enabled: false`).
 
 The ~48% / ~78% figures are a **single representative live measurement** on `.254` (one
-code-heavy turn), not a full distribution — the per-task-class spread is what the §6 bench
+code-heavy turn), not a full distribution. The per-task-class spread is what the §6 bench
 quantifies. Those remaining §6 gates (the per-task-class net-token bench + forced-rehydration
 accuracy A/B on a deployed agentic corpus) stay **valuable future measurement** and no longer
 block the ship decision (the operator has made it). The natural **follow-up refinement** is
-to auto-detect ingress class (agentic vs plain chat — e.g. the presence of a tool loop / the
+to auto-detect ingress class (agentic vs plain chat, e.g; the presence of a tool loop / the
 Codex/Claude-Code MCP surface) and keep the fold on for plain chat while defaulting it off
 for detected agentic traffic, instead of one global switch.
 
@@ -1057,7 +1061,7 @@ for detected agentic traffic, instead of one global switch.
   "stateless-proxy-preserving" mitigation is withdrawn for Anthropic (§2.3).
 - **Lossy folding degrades answers invisibly.** Mitigated by the lossy-by-contract
   framing (§1.3), reachable rehydration (§3.2), and the **forced-rehydration**
-  accuracy gate (§6) — never flip a default on token count alone.
+  accuracy gate (§6), never flip a default on token count alone.
 - **Rehydration handle as a data-exfil path.** Mitigated by the §3.2 scope +
   capability-binding + log-hygiene contract and the sensitivity fixtures (§6).
   If OpenAI/Codex inline tool interception is implemented, it must also inherit
@@ -1082,7 +1086,7 @@ for detected agentic traffic, instead of one global switch.
   envelope is cache-friendly after all, the two proposals reconcile on the data;
   no code is committed to either premise before the bench reports.
 - **Provider cache semantics drift.** §2 depends on current Anthropic/OpenAI
-  caching rules — re-verify against the live Claude API reference before
+  caching rules, re-verify against the live Claude API reference before
   implementing, not from memory.
 - **Hot-path latency regression.** A span-enriched IR can add KB lookups or body
   serialization to every turn. Keep P0 behavior-preserving, cache per-request
@@ -1095,10 +1099,10 @@ for detected agentic traffic, instead of one global switch.
 - **Resolver unreachable on the target ingress.** If a lossy fold's resolver is
   not callable (client lacks Aimee's MCP, the installed Claude config registers the
   hooks but not the MCP tools, the durable code-span read is unavailable, or a
-  multi-replica deploy routes `rehydrate` to another process — §3.4), the fold
+  multi-replica deploy routes `rehydrate` to another process, §3.4), the fold
   silently strands detail the model cannot recover. Mitigated by gating lossy folds
   on proven per-ingress **resolver** reachability (§3.4) and falling back to
-  byte-equivalent folds / stand-alone previews otherwise — a P2 acceptance check,
+  byte-equivalent folds / stand-alone previews otherwise, a P2 acceptance check,
   not an assumption.
 - **Source drift on durable re-read.** A re-read pointer returns *current* content,
   not the pre-fold bytes (§1.1); if the agent edited the file/record after the fold,
@@ -1121,7 +1125,7 @@ for detected agentic traffic, instead of one global switch.
   Mitigated by making the generated embed part of the acceptance gate (§1.4, §6).
 - **Recovery round-trips erase the saving.** Resident-token reduction is not net
   reduction: a frequently re-opened fold spends a resolver tool call plus the full
-  recovered span, sometimes exceeding what was saved, plus latency — so an
+  recovered span, sometimes exceeding what was saved, plus latency, so an
   aggressively-folded but body-heavy task class can net negative while the resident
   numbers look excellent. Mitigated by measuring recovery rate and net token delta
   per task class (§6) and gating the §1 default flip on **net** positive, never on

@@ -11,6 +11,7 @@
 #define SKILL_SUPPORT_MAX_SIZE (1024 * 1024)
 #define SKILL_LINT_MAX_WORDS   1200
 #define SKILL_EVAL_MAX_CASES   32
+#define SKILL_TRIAL_ROUTE_MAX  128
 
 typedef struct
 {
@@ -47,6 +48,66 @@ typedef struct
 
 typedef struct
 {
+   int prompt_tokens;
+   int completion_tokens;
+   int cache_read_tokens;
+   int cache_write_tokens;
+   int latency_ms;
+   int tool_calls;
+   int effects_attempted;
+   int cost_unknown;
+   double cost_usd;
+   char route[SKILL_TRIAL_ROUTE_MAX];
+} skill_trial_usage_t;
+
+/* The runner returns a heap response owned by the evaluator. It must execute a
+ * tool-free text trial; any reported tool/effect attempt makes the trial
+ * inconclusive. */
+typedef int (*skill_trial_runner_fn)(void *ctx, const char *system_prompt, const char *prompt,
+                                     int max_tokens, char **response_out,
+                                     skill_trial_usage_t *usage_out, char *errbuf,
+                                     size_t errbuf_len);
+
+typedef struct
+{
+   skill_trial_runner_fn runner;
+   void *runner_ctx;
+   int repeats;
+   int max_tokens;
+   double minimum_delta;
+   double max_case_cost_usd;
+   double max_total_cost_usd;
+   const char *route;
+} skill_trial_options_t;
+
+typedef struct
+{
+   int scenarios;
+   int repeats;
+   int calls;
+   int baseline_violations;
+   int baseline_compliances;
+   int treatment_compliances;
+   int paired_improvements;
+   int paired_regressions;
+   int passed;
+   int inconclusive;
+   int cost_unknown;
+   int prompt_tokens;
+   int completion_tokens;
+   int latency_ms;
+   double compliance_delta;
+   double cost_usd;
+   char route[SKILL_TRIAL_ROUTE_MAX];
+   char skill_digest[65];
+   char held_out_case_set_digest[65];
+   char policy_digest[65];
+   char manifest_digest[65];
+   char first_failure[256];
+} skill_trial_result_t;
+
+typedef struct
+{
    int scanned;
    int existing;
    int proposed;
@@ -73,7 +134,9 @@ char *skill_load(const char *project_root, const char *name);
  * Returns count written. */
 int skill_list(const char *project_root, char names_out[][SKILL_NAME_MAX], int max_names);
 int skill_description(const char *project_root, const char *name, char *out, size_t out_len);
-int skill_trigger_matches_content(const char *content, const char *tool_name, const char *subject);
+/* Resolve the skill and ask the supervised skills process to evaluate its trigger.
+ * Returns 1 for a match, 0 for a definite non-match/missing skill, and -1 when
+ * the process is unavailable or returns an invalid decision. */
 int skill_trigger_matches(const char *project_root, const char *name, const char *tool_name,
                           const char *subject);
 
@@ -100,6 +163,9 @@ int skill_lint_content(const char *name, const char *content, char *report, size
 int skill_lint(const char *project_root, const char *name, char *report, size_t report_len);
 int skill_eval_run(const char *project_root, const char *name, skill_eval_result_t *out,
                    char *errbuf, size_t errbuf_len);
+int skill_eval_executable(const char *project_root, const char *name,
+                          const skill_trial_options_t *options, skill_trial_result_t *out,
+                          char *errbuf, size_t errbuf_len);
 int skill_change_eval_gate_allows(const char *payload_json, double threshold, char *reason,
                                   size_t reason_len);
 int skill_manage_write_file(const char *project_root, const char *name, const char *file_path,

@@ -1,13 +1,10 @@
-#include "aimee_home.h"
-#include "platform_path.h"
-#include <sys/stat.h>
-#include <dirent.h>
+#include "client_config.h"
+#include "cJSON.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <errno.h>
 
 static int profile_name_valid(const char *name)
 {
@@ -25,82 +22,28 @@ static int profile_name_valid(const char *name)
    return 1;
 }
 
-static int path_join(char *out, size_t outsz, const char *dir, const char *leaf)
+static int profile_config_operation(const char *operation, const char *name)
 {
-   int n = snprintf(out, outsz, "%s/%s", dir ? dir : "", leaf ? leaf : "");
-   return n > 0 && (size_t)n < outsz ? 0 : -1;
-}
-
-static int write_default_profile_config(const char *dir, const char *name)
-{
-   char path[4096];
-   if (path_join(path, sizeof(path), dir, "aimee.yaml") != 0)
-      return -1;
-   if (access(path, F_OK) == 0)
-      return 0;
-
-   FILE *f = fopen(path, "w");
-   if (!f)
-      return -1;
-   fprintf(f, "# Created by `aimee profile create %s`.\n", name);
-   fprintf(f, "# Local runtime paths are derived from AIMEE_PROFILE.\n");
-   fprintf(f, "provider: claude\n");
-   fprintf(f, "guardrail_mode: approve\n");
-   if (fclose(f) != 0)
-      return -1;
-   return 0;
-}
-
-static int is_dir(const char *path)
-{
-   struct stat st;
-   return path && stat(path, &st) == 0 && S_ISDIR(st.st_mode);
-}
-
-static int remove_tree(const char *path)
-{
-   DIR *d = opendir(path);
-   if (!d)
-      return -1;
-
-   struct dirent *e;
-   while ((e = readdir(d)) != NULL)
+   cJSON *value = cJSON_CreateObject();
+   if (!value || !cJSON_AddStringToObject(value, "name", name))
    {
-      if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
-         continue;
-
-      char child[4096];
-      if (path_join(child, sizeof(child), path, e->d_name) != 0)
-      {
-         closedir(d);
-         return -1;
-      }
-
-      struct stat st;
-      if (lstat(child, &st) != 0)
-      {
-         closedir(d);
-         return -1;
-      }
-      if (S_ISDIR(st.st_mode))
-      {
-         if (remove_tree(child) != 0)
-         {
-            closedir(d);
-            return -1;
-         }
-      }
-      else if (unlink(child) != 0)
-      {
-         closedir(d);
-         return -1;
-      }
+      cJSON_Delete(value);
+      return -1;
    }
-   closedir(d);
-   return rmdir(path);
+   return client_config_operation(operation, value);
 }
 
-int cmd_profile_run(int argc, char **argv)
+static void profile_print_json(cJSON *value)
+{
+   char *json = cJSON_PrintUnformatted(value);
+   if (json)
+   {
+      puts(json);
+      free(json);
+   }
+}
+
+int cmd_profile_run(int argc, char **argv, int json_output)
 {
    if (argc < 1)
    {
@@ -113,31 +56,55 @@ int cmd_profile_run(int argc, char **argv)
    if (strcmp(sub, "current") == 0)
    {
       const char *p = getenv("AIMEE_PROFILE");
-      printf("%s\n", (p && p[0]) ? p : "default");
+      const char *current = (p && p[0]) ? p : "default";
+      if (json_output)
+      {
+         cJSON *result = cJSON_CreateObject();
+         if (!result || !cJSON_AddStringToObject(result, "profile", current))
+         {
+            cJSON_Delete(result);
+            return 1;
+         }
+         profile_print_json(result);
+         cJSON_Delete(result);
+      }
+      else
+         printf("%s\n", current);
       return 0;
    }
 
    if (strcmp(sub, "list") == 0)
    {
-      const char *base = aimee_profiles_dir();
-      if (!base)
+      cJSON *profiles = client_config_profile_list();
+      if (!profiles)
+      {
+         fprintf(stderr, "error listing profiles through the server\n");
          return 1;
-      DIR *d = opendir(base);
-      if (!d)
-      {
-         printf("(no profiles)\n");
-         return 0;
       }
-      struct dirent *e;
-      while ((e = readdir(d)) != NULL)
+      if (json_output)
       {
-         if (e->d_name[0] == '.')
-            continue;
-         char path[4096];
-         if (path_join(path, sizeof(path), base, e->d_name) == 0 && is_dir(path))
-            printf("%s\n", e->d_name);
+         cJSON *result = cJSON_CreateObject();
+         if (!result)
+         {
+            cJSON_Delete(profiles);
+            return 1;
+         }
+         cJSON_AddItemToObject(result, "profiles", profiles);
+         profile_print_json(result);
+         cJSON_Delete(result);
       }
-      closedir(d);
+      else
+      {
+         if (cJSON_GetArraySize(profiles) == 0)
+            printf("(no profiles)\n");
+         cJSON *profile = NULL;
+         cJSON_ArrayForEach(profile, profiles)
+         {
+            if (cJSON_IsString(profile))
+               printf("%s\n", profile->valuestring);
+         }
+         cJSON_Delete(profiles);
+      }
       return 0;
    }
 
@@ -154,30 +121,18 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error: invalid profile name: %s\n", name);
          return 1;
       }
-      const char *base = aimee_profiles_dir();
-      if (!base)
-         return 1;
-      if (platform_mkdir_p(base, 0700) != 0)
+      if (profile_config_operation("profile-create", name) != 0)
       {
-         fprintf(stderr, "error creating profiles directory: %s\n", strerror(errno));
+         fprintf(stderr, "error creating profile config through the server\n");
          return 1;
       }
-      char dir[4096];
-      if (path_join(dir, sizeof(dir), base, name) != 0)
-         return 1;
-      if (platform_mkdir_p(dir, 0700) != 0)
+      if (json_output)
+         printf("{\"profile\":\"%s\",\"config\":\"present\"}\n", name);
+      else
       {
-         fprintf(stderr, "error creating profile: %s\n", strerror(errno));
-         return 1;
+         printf("profile: %s\n", name);
+         printf("config:  present\n");
       }
-      if (write_default_profile_config(dir, name) != 0)
-      {
-         fprintf(stderr, "error writing default config: %s\n", strerror(errno));
-         return 1;
-      }
-      printf("profile: %s\n", name);
-      printf("path:    %s\n", dir);
-      printf("config:  present\n");
       return 0;
    }
 
@@ -194,23 +149,24 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error: invalid profile name: %s\n", name);
          return 1;
       }
-      const char *base = aimee_profiles_dir();
-      if (!base)
+      int present = client_config_profile_present(name);
+      if (present < 0)
+      {
+         fprintf(stderr, "error reading profile config through the server\n");
          return 1;
-      char dir[4096];
-      if (path_join(dir, sizeof(dir), base, name) != 0)
-         return 1;
-      if (!is_dir(dir))
+      }
+      if (!present)
       {
          fprintf(stderr, "error: profile not found: %s\n", name);
          return 1;
       }
-      printf("profile: %s\n", name);
-      printf("path:    %s\n", dir);
-      char cfg[4096];
-      if (path_join(cfg, sizeof(cfg), dir, "aimee.yaml") != 0)
-         return 1;
-      printf("config:  %s\n", access(cfg, F_OK) == 0 ? "present" : "absent");
+      if (json_output)
+         printf("{\"profile\":\"%s\",\"config\":\"present\"}\n", name);
+      else
+      {
+         printf("profile: %s\n", name);
+         printf("config:  present\n");
+      }
       return 0;
    }
 
@@ -244,13 +200,13 @@ int cmd_profile_run(int argc, char **argv)
          fprintf(stderr, "error: cannot delete the active profile\n");
          return 1;
       }
-      const char *base = aimee_profiles_dir();
-      if (!base)
+      int present = client_config_profile_present(name);
+      if (present < 0)
+      {
+         fprintf(stderr, "error reading profile config through the server\n");
          return 1;
-      char dir[4096];
-      if (path_join(dir, sizeof(dir), base, name) != 0)
-         return 1;
-      if (!is_dir(dir))
+      }
+      if (!present)
       {
          fprintf(stderr, "error: profile not found: %s\n", name);
          return 1;
@@ -273,12 +229,15 @@ int cmd_profile_run(int argc, char **argv)
             return 1;
          }
       }
-      if (remove_tree(dir) != 0)
+      if (profile_config_operation("profile-delete", name) != 0)
       {
-         fprintf(stderr, "error deleting profile: %s\n", strerror(errno));
+         fprintf(stderr, "error deleting profile through the server\n");
          return 1;
       }
-      printf("deleted: %s\n", name);
+      if (json_output)
+         printf("{\"deleted\":\"%s\"}\n", name);
+      else
+         printf("deleted: %s\n", name);
       return 0;
    }
 

@@ -4,12 +4,20 @@
 set -eu
 
 usage() {
-    printf 'usage: %s [-p PROJECT] -f COMPOSE_FILE {server|kb|all}\n' "$0" >&2
+    printf 'usage: %s [-p PROJECT] [-e ENV_FILE] -f COMPOSE_FILE {server|kb|all}\n' "$0" >&2
     exit 2
 }
 
 compose_file=
 project=
+# Compose reads `.env` from the PROJECT directory, which is the directory holding
+# the first -f file -- so `-f deploy/compose/aimee.yaml` looks in deploy/compose/
+# and never sees the repository-root .env. Once a profile declares a required
+# variable with no default, every compose call here fails at interpolation before
+# it can seal anything. -e forwards the same --env-file the operator used for
+# `up`; the repo-root .env is picked up automatically when it exists, so the
+# common case needs no flag.
+env_file=
 while [ "$#" -gt 0 ]; do
     case "$1" in
         -f|--file)
@@ -26,11 +34,24 @@ while [ "$#" -gt 0 ]; do
             project=$2
             shift 2
             ;;
+        -e|--env-file)
+            [ "$#" -ge 2 ] || usage
+            env_file=$2
+            shift 2
+            ;;
         -*) usage ;;
         *) break ;;
     esac
 done
 [ -n "$compose_file" ] && [ -r "$compose_file" ] || usage
+if [ -z "$env_file" ]; then
+    repo_env=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)/.env
+    [ -r "$repo_env" ] && env_file=$repo_env
+fi
+[ -z "$env_file" ] || [ -r "$env_file" ] || {
+    printf '%s: cannot read env file %s\n' "$0" "$env_file" >&2
+    exit 2
+}
 [ "$#" -eq 1 ] || usage
 target=$1
 
@@ -60,11 +81,10 @@ if [ -z "$project" ] && [ -z "${COMPOSE_PROJECT_NAME:-}" ]; then
 fi
 
 compose() {
-    if [ -n "$project" ]; then
-        docker compose -p "$project" -f "$compose_file" "$@"
-    else
-        docker compose -f "$compose_file" "$@"
-    fi
+    set -- -f "$compose_file" "$@"
+    [ -z "$env_file" ] || set -- --env-file "$env_file" "$@"
+    [ -z "$project" ] || set -- -p "$project" "$@"
+    docker compose "$@"
 }
 
 announce_project() {

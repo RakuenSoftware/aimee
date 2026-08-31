@@ -9,6 +9,21 @@
 #include <string.h>
 #include "slop_detect.h"
 
+struct cJSON;
+
+void agent_tools_effect_reset(void);
+int agent_tools_effect_classification(const char *name, int (*classifier)(const char *, int *));
+int agent_tools_effect_mcp_failure_is_timeout(const char *error);
+void agent_tools_effect_propose(const char *name, struct cJSON *args, int classification);
+int agent_tools_effect_validate_and_execute(const char *name, struct cJSON *args,
+                                            int classification);
+int agent_tools_effect_postcondition_pending(void);
+int agent_tools_effect_result_claims_success(const char *result);
+int agent_tools_effect_verify_file_postcondition(const char *name, struct cJSON *args,
+                                                 const char *dispatch_cwd);
+void agent_tools_effect_record_postcondition(int passed, const char *detail);
+void agent_tools_effect_finish(const char *verdict, const char *reason);
+
 static inline int agent_tools_cmd_refers_to_readonly_root(const char *cmd, const char *ro,
                                                           const char *rw)
 {

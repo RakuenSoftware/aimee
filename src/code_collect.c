@@ -735,8 +735,8 @@ int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx)
    /* Source selection (AIMEE_CODE_INDEX_SOURCE): "worktree" forces the working
     * tree (a user who wants their WIP indexed); "default"/"auto"/unset index the
     * git default branch for a git repo. Non-git dirs always use the working
-    * tree. A git repo with no resolvable default branch is SKIPPED rather than
-    * silently indexing unstable code. */
+    * tree. A git repo with no resolvable default branch falls back to the
+    * working tree and SAYS SO. */
    const char *mode = getenv("AIMEE_CODE_INDEX_SOURCE");
    if (!mode || !mode[0])
       mode = "auto";
@@ -757,12 +757,25 @@ int code_collect_files_cb(const char *root, code_collect_file_cb cb, void *ctx)
       }
       else
       {
+         /* No default branch: index the working tree rather than nothing.
+          *
+          * The old behaviour returned 0 files here, on the reasoning that
+          * indexing a branch-less repo risks capturing unstable WIP. But the
+          * repos that reach this branch are overwhelmingly the STABLE ones: a
+          * detached checkout pinned at a commit, a CI clone, a git worktree.
+          * None has an origin/HEAD and none is going to move under the index.
+          *
+          * The cost of the old choice was not a stale graph, it was a silent
+          * one. The caller got "0 files" with no reason it could report, and
+          * the kb then warned that it "saw no files at that path -- it may not
+          * be able to read it", which was flatly untrue: the files were there
+          * and readable, and every symbol lookup afterwards missed for a reason
+          * nothing in the system could name. Skipping is still a defensible
+          * policy; skipping without telling the caller is not. */
          fprintf(stderr,
                  "[code_collect] %s: no default branch resolvable (origin/HEAD unset, no "
-                 "main/master); skipping. Set AIMEE_CODE_INDEX_SOURCE=worktree to index the "
-                 "working tree.\n",
+                 "main/master); indexing the working tree instead\n",
                  root);
-         return 0;
       }
    }
 

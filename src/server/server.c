@@ -4,17 +4,14 @@
 #endif
 #include "server_internal.h"
 #include "aimee.h"
-#include "harness_memory_audit.h"  /* hmem_audit */
-#include "harness_memory_common.h" /* hmem_resolve_project / hmem_project_key_ok */
-#include "harness_memory_scope.h"  /* hmem_scope_for_client */
-#include "harness_memory_spill.h"  /* hmem_spill_write (retirement db1-outage fail-open) */
-#include "json_fluent.h"           /* jo_ok */
-#include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
+#include "harness_memory_scope.h" /* hmem_scope_for_client */
+#include "hook_session_token.h"
+#include "json_fluent.h" /* jo_ok */
 #include "primary_cli_ingestor.h"
 #include "server.h"
 #include "server_mcp_internal.h" /* mcp_tool_register_native_surface */
 #include "kb_client.h"           /* request-local memory scope context */
-
+#include <aimee/audit/obs_bus.h>
 #include <aimee/tools/agent_tools.h> /* agent_tools_set_git_write_provider / _set_shell_git_gate */
 #include "modules/git/git_cred_inject.h" /* git_cred_forge_configured — no aimee route, no restriction */
 #include "modules/git/mcp_git.h" /* mcp_git_run_tool — the native surface's git-write impl */
@@ -29,8 +26,6 @@
 #include <aimee/delegates/delegate_backend_docker.h>
 #include "modules/workspace/workspace_provider.h" /* the shared provider: probe docker for the sandbox posture */
 #include "modules/workspace/workspace_turn.h" /* the ONE workspace bound, shared with the delegate turn */
-#include <aimee/delegates/delegate_backend_local.h>
-#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
@@ -51,9 +46,8 @@
 #include <aimee/delegates/delegate_sandbox_image.h>
 #include "model_registry.h"
 #include "model_provider.h"
-#include "model_registry.h"
-#include "db1.h"
-#include "db1/user_memory.h"
+#include "db1_client/db1.h"
+#include "db1_client/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -75,14 +69,12 @@
 #include <fcntl.h>
 #include <poll.h>
 #include <signal.h>
-
 /* Defined in server_main.c; set by the SIGHUP handler, observed by the main loop (P1b). */
 extern volatile sig_atomic_t g_config_reload_requested;
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 #include <string.h>
-
 extern int hooks_ensure_cwd_worktree(session_state_t *state, const char *sid, const char *cwd);
 
 typedef int (*server_method_handler_t)(server_ctx_t *, server_conn_t *, cJSON *);
@@ -369,15 +361,20 @@ static int handle_server_info(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 static int handle_server_health(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)req;
-
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "uptime", (double)(time(NULL) - ctx->start_time));
-   cJSON_AddStringToObject(resp, "state", db1_is_initialized() ? "ok" : "unavailable");
+   /* Probe DB1 directly; module registry state survives death for about 37s. */
+   cJSON_AddStringToObject(resp, "state", db1_store_probe() ? "ok" : "unavailable");
    cJSON_AddNumberToObject(resp, "connections", ctx->conn_count);
+   obs_bus_capture_health_t capture;
+   obs_bus_capture_health(&capture);
+   cJSON_AddBoolToObject(resp, "capture_ok", capture.capture_ok);
+   cJSON_AddStringToObject(resp, "capture_reason", capture.reason);
+   cJSON_AddStringToObject(resp, "capture_session_id", capture.session_id);
+   cJSON_AddNumberToObject(resp, "capture_last_seq", (double)capture.last_seq);
    server_health_add_kb(resp); /* kb block — see server_api_status.c */
    return server_send_ok(conn, resp);
 }
-
 /* worktree.gc: remove abandoned session worktrees under the operator's git_root.
  * Server-side because the GC primitive lives in workspace.c (already linked into
  * the daemon); the CLI just sends client_cwd and renders the report. */
@@ -639,9 +636,9 @@ static cJSON *server_run_kb_bootstrap(void)
    if (server_sibling_kb_path(kb_path, sizeof(kb_path)) != 0)
       return NULL;
 
-   char *quoted = shell_escape(kb_path);
+   char *quoted = shell_quote(kb_path);
    char cmd[MAX_PATH_LEN + 128];
-   snprintf(cmd, sizeof(cmd), "'%s' --bootstrap-db2 --json", quoted);
+   snprintf(cmd, sizeof(cmd), "%s --bootstrap-db2 --json", quoted);
    free(quoted);
 
    char *out = NULL;
@@ -677,17 +674,13 @@ static int handle_launch_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd_in->valuestring;
 
    /* Fresh session ID per launch; never inherit a stale session-ppid file. */
-   char sid[16];
+   char sid[33];
    {
-      unsigned char rnd[4];
+      unsigned char rnd[16];
       if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
-      {
-         rnd[0] = (unsigned char)(getpid() & 0xff);
-         rnd[1] = (unsigned char)((getpid() >> 8) & 0xff);
-         rnd[2] = (unsigned char)(time(NULL) & 0xff);
-         rnd[3] = (unsigned char)((time(NULL) >> 8) & 0xff);
-      }
-      snprintf(sid, sizeof(sid), "%02x%02x%02x%02x", rnd[0], rnd[1], rnd[2], rnd[3]);
+         return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
+      for (size_t i = 0; i < sizeof(rnd); i++)
+         snprintf(sid + i * 2, sizeof(sid) - i * 2, "%02x", rnd[i]);
    }
 
    /* Copied out: held across the worktree/session work below. */
@@ -772,8 +765,8 @@ static int handle_init_run(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cwd = jcwd->valuestring;
 
    cJSON *resp = jo_ok();
-   cJSON_AddBoolToObject(resp, "local_ready", db1_is_initialized() ? 1 : 0);
-   cJSON_AddBoolToObject(resp, "db1_ready", db1_is_initialized() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "local_ready", db1_store_ready() ? 1 : 0);
+   cJSON_AddBoolToObject(resp, "db1_ready", db1_store_ready() ? 1 : 0);
 
    if (cwd)
    {
@@ -809,7 +802,7 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
-   if (!db1_is_initialized())
+   if (!db1_store_ready())
       return server_send_error(conn, "server storage unavailable", NULL);
    hud_status_t hs;
    if (hud_gather(&hs) != 0)
@@ -824,141 +817,39 @@ static int handle_hud_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, parsed);
 }
 
-/* Server-side central agent-memory interception. The split server owns DB1, so
- * (unlike the CLI path's HTTP POST) it writes the archive row directly via
- * db1_user_memory_upsert; the .md is retired and never materialized. Returns 2
- * (deny — msg set) when a memory op was intercepted/rejected, else 0 (allow).
- * Fail-open: any inability to identify or store returns 0 so a normal tool call
- * is never blocked by this stage. */
-static int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd,
-                                   cJSON *req, char *msg, size_t msg_len)
+static void server_hook_principal(const server_conn_t *conn, char *out, size_t cap)
 {
-   /* The client identity is per-REQUEST: a single shared server fields hooks from
-    * many agents (claude/gemini/codex/...), so it must use the harness_client the
-    * thin client forwarded — NOT the server's own AIMEE_HOOK_CLIENT env (which
-    * would scope every request to one fixed client). Fall back to the env only for
-    * the local/combined-binary path where no field is sent; on a shared split
-    * server AIMEE_HOOK_CLIENT must be UNSET so an older/3rd-party client that omits
-    * the field is treated as unknown (no interception) rather than mis-scoped.
-    * TRUST: harness_client is client-supplied and untrusted, but it is used SOLELY
-    * as a scope-registry lookup key — never an authorization, filesystem, or DB
-    * path input. An unknown key → no interception; a spoofed registered name only
-    * re-scopes the spoofer's OWN writes (no cross-client exposure, no escalation).
-    * Do not derive anything but the scope from it. */
-   const char *client = NULL;
-   cJSON *hc = cJSON_GetObjectItemCaseSensitive(req, "harness_client");
-   if (cJSON_IsString(hc) && hc->valuestring && hc->valuestring[0])
-      client = hc->valuestring;
-   if (!client)
-      client = getenv("AIMEE_HOOK_CLIENT");
-   const char *home = getenv("HOME");
-   if (!client || !client[0] || !home || !home[0])
+   if (conn->vault_principal[0])
+      snprintf(out, cap, "%s", conn->vault_principal);
+   else
+      snprintf(out, cap, "transport:%d:uid:%u", (int)conn->attested_transport,
+               (unsigned)conn->peer_uid);
+}
+
+/* 1 = trusted, 0 = continue without identity-derived privileges, -1 = hardened
+ * refusal. AIMEE_HOOK_IDENTITY_MODE is intentionally server-only operational
+ * policy: observe and enforce both refuse attribution, while hardened refuses
+ * the entire hook before any stateful policy consumer runs. */
+static int server_hook_identity(server_conn_t *conn, cJSON *req, const char *sid,
+                                const char **trusted_client)
+{
+   *trusted_client = NULL;
+   const char *client =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
+   const char *token = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "hook_token"));
+   if (!client || !client[0])
       return 0;
-   const hmem_scope_t *scope = hmem_scope_for_client(client);
-   if (!scope)
-      return 0;
-   cJSON *ti = tool_input ? cJSON_Parse(tool_input) : NULL;
-   if (!ti)
-      return 0;
-
-   int verdict = 0;
-
-   /* Bash bypass: a shell command that writes a memory file is reject-denied (we
-    * can't capture its output) — steer the agent to the Write tool. */
-   if (strcmp(tool, "Bash") == 0)
+   char principal[128];
+   server_hook_principal(conn, principal, sizeof(principal));
+   if (hook_session_token_verify(sid, client, principal, token))
    {
-      cJSON *jc = cJSON_GetObjectItemCaseSensitive(ti, "command");
-      const char *cmd = (jc && cJSON_IsString(jc)) ? jc->valuestring : NULL;
-      if (cmd && memory_redirect_bash_targets_memory(client, cmd, home))
-      {
-         snprintf(msg, msg_len,
-                  "Memory files are managed by aimee — use the Write tool to set "
-                  "memory/<name>.md, not shell redirection.");
-         hmem_audit("reject", NULL, NULL, "bash-write-memory");
-         verdict = 2;
-      }
-      cJSON_Delete(ti);
-      return verdict;
+      *trusted_client = client;
+      return 1;
    }
-
-   cJSON *jp = cJSON_GetObjectItemCaseSensitive(ti, "file_path");
-   if (!jp || !cJSON_IsString(jp))
-      jp = cJSON_GetObjectItemCaseSensitive(ti, "path");
-   const char *path = (jp && cJSON_IsString(jp)) ? jp->valuestring : NULL;
-   if (!path)
-   {
-      cJSON_Delete(ti);
-      return 0;
-   }
-
-   char name[HMEM_NAME_LEN];
-   const char *reason = NULL;
-   mr_verdict_t v = memory_redirect_classify(client, tool, path, home, name, sizeof(name), &reason);
-   if (v == MR_ALLOW)
-   {
-      cJSON_Delete(ti);
-      return 0;
-   }
-   if (v == MR_REJECT)
-   {
-      snprintf(msg, msg_len, "%s", reason ? reason : "memory write rejected");
-      hmem_audit("reject", NULL, NULL, reason);
-      cJSON_Delete(ti);
-      return 2;
-   }
-
-   /* MR_REDIRECT: a Write with no string content is invalid — never store an
-    * empty body over an existing entry. */
-   cJSON *jcont = cJSON_GetObjectItemCaseSensitive(ti, "content");
-   const char *content = (jcont && cJSON_IsString(jcont)) ? jcont->valuestring : NULL;
-   if (!content)
-   {
-      snprintf(msg, msg_len, "Memory Write needs a string 'content' field.");
-      cJSON_Delete(ti);
-      return 2;
-   }
-
-   /* Project key: prefer the client-resolved hint (correct for a remote server),
-    * else resolve from cwd (local server). */
-   char project[HMEM_PROJECT_KEY_MAX], rootdir[1024];
-   const char *hp = NULL;
-   cJSON *hpj = cJSON_GetObjectItemCaseSensitive(req, "harness_project");
-   if (cJSON_IsString(hpj) && hpj->valuestring && hpj->valuestring[0])
-      hp = hpj->valuestring;
-   if (hp && hmem_project_key_ok(hp))
-      snprintf(project, sizeof(project), "%s", hp);
-   else if (hmem_resolve_project(cwd, project, sizeof(project), rootdir, sizeof(rootdir)) != 0)
-   {
-      cJSON_Delete(ti); /* can't identify the project — fail open */
-      return 0;
-   }
-
-   /* .md retirement (unconditional): store the intercepted write into db1 as a
-    * private, non-recallable archive row (kind='archive', tier L1 — outside the
-    * recall selectors) and never materialize the .md — the file never exists;
-    * content lives only in aimee. The agent is steered to `aimee memory` by the
-    * session brief. Server owns db1, so write directly. */
-   {
-      /* Project-qualified so identically-named memories from different projects
-       * don't collide under this user's UNIQUE(kind,key). */
-      char akey[HMEM_PROJECT_KEY_MAX + 600];
-      snprintf(akey, sizeof(akey), "archive:%s/%s", project, name);
-      if (db1_user_memory_upsert("archive", "L1", akey, content, 1.0, client) != 0)
-      {
-         /* db1 outage: spill for the next reconcile, then fail-open so the agent
-          * isn't blocked on our store. */
-         int sp = hmem_spill_write(project, name, "archive", content);
-         hmem_audit(sp == 0 ? "spill" : "spill-failed", project, name, "db1 store unreachable");
-         cJSON_Delete(ti);
-         return 0;
-      }
-      hmem_audit("redirect-db1", project, name, NULL);
-      snprintf(msg, msg_len,
-               "Saved to aimee memory. Memory files are retired — retrieve with "
-               "`aimee memory search` and use `aimee memory store` going forward.");
-      cJSON_Delete(ti);
-      return 2;
-   }
+   const char *mode = getenv("AIMEE_HOOK_IDENTITY_MODE");
+   LOG_WARN("hook_identity", "untrusted hook session=%s client=%s mode=%s", sid, client,
+            mode && mode[0] ? mode : "enforce");
+   return mode && !strcmp(mode, "hardened") ? -1 : 0;
 }
 
 /* S2 pre-delivery native-tool externalization gate (server side; tracks 2+3). This
@@ -997,6 +888,12 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   const char *trusted_client = NULL;
+   int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
+   if (hook_identity < 0)
+      return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
+                               request_id);
+
    session_state_t state;
    session_state_load(&state, sid);
    hooks_ensure_cwd_worktree(&state, sid, cwd);
@@ -1005,7 +902,8 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
    {
       char mr_msg[1024] = "";
-      if (server_memory_intercept(tool_name, tool_input, cwd, req, mr_msg, sizeof(mr_msg)) == 2)
+      if (trusted_client && server_memory_intercept(tool_name, tool_input, cwd, req, trusted_client,
+                                                    mr_msg, sizeof(mr_msg)) == 2)
       {
          free(ti_heap);
          return hook_send_blocked(conn, mr_msg, request_id);
@@ -1086,6 +984,7 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", rc == 2 ? "blocked" : "ok");
    cJSON_AddNumberToObject(resp, "exit_code", rc);
+   cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
    if (msg[0])
       cJSON_AddStringToObject(resp, "message", msg);
    if (request_id)
@@ -1107,6 +1006,16 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jrid = cJSON_GetObjectItemCaseSensitive(req, "request_id");
    const char *request_id = cJSON_IsString(jrid) ? jrid->valuestring : NULL;
 
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   if (!sid || !is_safe_id(sid))
+      return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
+                               request_id);
+   const char *trusted_client = NULL;
+   int hook_identity = server_hook_identity(conn, req, sid, &trusted_client);
+   if (hook_identity < 0)
+      return hook_send_blocked(conn, "Unauthenticated or mismatched session hook identity.",
+                               request_id);
+
    const char *tool_name = cJSON_IsString(jtn) ? jtn->valuestring : "";
    char *ti_heap = NULL;
    const char *tool_input = "{}";
@@ -1123,6 +1032,7 @@ static int handle_hooks_post(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
+   cJSON_AddStringToObject(resp, "hook_identity", trusted_client ? "trusted" : "untrusted");
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
    int rc = server_send_response(conn, resp);
@@ -1235,6 +1145,21 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
                                request_id);
 
+   const char *hook_client =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "harness_client"));
+   if (hook_client && !hmem_scope_for_client(hook_client))
+      return server_send_error(conn, "unknown harness_client", request_id);
+   char hook_token[HOOK_SESSION_TOKEN_CAP] = "";
+   time_t hook_token_expires = 0;
+   if (sid && sid[0] && hook_client && hook_client[0])
+   {
+      char principal[128];
+      server_hook_principal(conn, principal, sizeof(principal));
+      if (hook_session_token_mint(sid, hook_client, principal, hook_token, &hook_token_expires) !=
+          0)
+         return server_send_error(conn, "could not establish hook identity", request_id);
+   }
+
    /* Register the session in the server_sessions registry under its real host id
     * (session_start_emit persists session_state, but NOT this listings row). This
     * makes every session locatable after a crash — the gap that meant a Claude
@@ -1247,7 +1172,8 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       {
          char principal[32];
          snprintf(principal, sizeof(principal), "uid:%d", (int)conn->peer_uid);
-         (void)db1_server_session_create(sid, "claude-code", principal);
+         (void)db1_server_session_create(sid, hook_client && hook_client[0] ? hook_client : "hook",
+                                         principal);
       }
    }
 
@@ -1282,6 +1208,11 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
       cJSON *resp = jo_ok();
       cJSON_AddNumberToObject(resp, "exit_code", 0);
       cJSON_AddStringToObject(resp, "output", "");
+      if (hook_token[0])
+      {
+         cJSON_AddStringToObject(resp, "hook_token", hook_token);
+         cJSON_AddNumberToObject(resp, "hook_token_expires_at", (double)hook_token_expires);
+      }
       if (request_id)
          cJSON_AddStringToObject(resp, "request_id", request_id);
       return server_send_ok(conn, resp);
@@ -1309,6 +1240,11 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "exit_code", 0);
    cJSON_AddStringToObject(resp, "output", captured ? captured : "");
+   if (hook_token[0])
+   {
+      cJSON_AddStringToObject(resp, "hook_token", hook_token);
+      cJSON_AddNumberToObject(resp, "hook_token_expires_at", (double)hook_token_expires);
+   }
    if (request_id)
       cJSON_AddStringToObject(resp, "request_id", request_id);
 
@@ -1316,6 +1252,26 @@ static int handle_hooks_session_start(server_ctx_t *ctx, server_conn_t *conn, cJ
    cJSON_Delete(resp);
    free(captured);
    return rc;
+}
+
+static int handle_hooks_session_end(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   const char *request_id =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "request_id"));
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
+   if (!sid || !is_safe_id(sid))
+      return server_send_error(conn, "invalid session_id (must be alphanumeric/dash/underscore)",
+                               request_id);
+   const char *trusted_client = NULL;
+   if (server_hook_identity(conn, req, sid, &trusted_client) != 1)
+      return server_send_error(conn, "unauthenticated session hook identity", request_id);
+   char principal[128];
+   server_hook_principal(conn, principal, sizeof(principal));
+   hook_session_token_revoke(sid, trusted_client, principal);
+   cJSON *resp = jo_ok();
+   cJSON_AddNumberToObject(resp, "exit_code", 0);
+   return server_send_ok(conn, resp);
 }
 
 /* session.brief_assemble: workspace-independent SessionStart brief for the
@@ -1370,11 +1326,14 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
    const char *tier = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "tier"));
    const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(req, "session_id"));
    if (!kind || !kind[0] || !key || !key[0])
-      return server_send_error(conn, "kind and key are required", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "kind and key are required",
+                                    request_id);
    if (!content || !content[0])
-      return server_send_error(conn, "content is required", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "content is required",
+                                    request_id);
    if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
-      return server_send_error(conn, "failed to store user memory", request_id);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to store user memory",
+                                    request_id);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "kind", kind);
@@ -1388,256 +1347,7 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
 }
 
 static const server_method_dispatch_t server_dispatch_table[] = {
-    /* Server */
-    {"server.info", handle_server_info},
-    {"server.health", handle_server_health},
-    {"api.status", handle_api_status},
-    {"api.enable", handle_api_enable},
-    {"api.rotate_bearer", handle_api_rotate_bearer},
-    {"api.enroll_bearer", handle_api_enroll_bearer},
-    {"api.disable", handle_api_disable},
-    {"insights.overview", handle_insights_overview},
-    {"toolset.list", handle_toolset_list},
-    {"toolset.show", handle_toolset_show},
-    {"toolset.resolve", handle_toolset_resolve},
-    {"worktree.gc", handle_worktree_gc},
-    {"delegate.backend_list", handle_delegate_backend_list},
-    {"delegate.backend_exec", handle_delegate_backend_exec},
-    {"delegate.sandbox_list", handle_delegate_sandbox_list},
-    {"delegate.sandbox_gc", handle_delegate_sandbox_gc},
-    {"provider.list", handle_provider_list},
-    {"provider.show", handle_provider_show},
-    {"provider.models", handle_provider_models},
-    {"provider.test", handle_provider_test},
-    {"provider.quota", handle_provider_quota},
-    {"provider.get", handle_provider_get},
-    {"provider.set", handle_provider_set},
-    {"model.list", handle_model_list},
-    {"model.show", handle_model_show},
-    {"model.refresh", handle_model_refresh},
-    {"init.run", handle_init_run},
-    {"launch.run", handle_launch_run},
-    {"hud.status", handle_hud_status},
-    {"agent.list", handle_agent_list},
-    {"agent.add", handle_agent_add},
-    {"agent.local", handle_agent_local},
-    {"agent.remove", handle_agent_remove},
-    {"agent.enable", handle_agent_enable},
-    {"agent.roles", handle_agent_roles},
-    {"agent.personas", handle_agent_personas},
-    {"agent.set", handle_agent_set},
-    {"agent.disable", handle_agent_disable},
-    {"agent.probe", handle_agent_probe},
-    {"agent.stats", handle_agent_stats},
-    {"agent.draft", handle_agent_draft},
-    {"agent.setup", handle_agent_setup},
-    {"agent.setup_poll", handle_agent_setup_poll},
-    {"agent.cli_oauth_start", handle_agent_cli_oauth_start},
-    {"agent.cli_oauth_code", handle_agent_cli_oauth_code},
-    {"agent.cli_oauth_poll", handle_agent_cli_oauth_poll},
-    {"hooks.pre", handle_hooks_pre},
-    {"hooks.post", handle_hooks_post},
-    {"hooks.session_start", handle_hooks_session_start},
-    {"session.brief_assemble", handle_session_brief_assemble},
-    {"memory.user_capture", handle_memory_user_capture},
-    {"session.create", handle_session_create},
-    {"session.record_transcript", handle_session_record_transcript},
-    {"session.list", handle_session_list},
-    {"session.get", handle_session_get},
-    {"session.close", handle_session_close},
-    {"chat.graceful_cancel", handle_chat_graceful_cancel},
-    {"chat.interrupt", handle_chat_interrupt},
-    {"session.brief", handle_session_brief},
-    {"session.attach", handle_session_attach},
-    {"session.detach", handle_session_detach},
-    {"session.presence", handle_session_presence},
-    {"trajectory.export", handle_trajectory_export},
-    {"trajectory.batch", handle_trajectory_batch},
-    /* Memory */
-    {"memory.search", handle_memory_search},
-    {"memory.store", handle_memory_store},
-    {"memory.list", handle_memory_list},
-    {"memory.stats", handle_memory_stats},
-    {"memory.get", handle_memory_get},
-    {"memory.delete", handle_memory_delete},
-    {"memory.supersede", handle_memory_supersede},
-    {"memory.read", handle_memory_read},
-    {"memory.benchmark", handle_memory_benchmark},
-    {"index.scan", handle_index_scan},
-    {"index.ingest", handle_index_ingest},
-    {"index.find", handle_index_find},
-    {"index.list", handle_index_list},
-    {"index.blast_radius", handle_index_blast_radius},
-    {"index.structure", handle_index_structure},
-    {"index.find_callers", handle_index_find_callers},
-    {"index.deps", handle_index_deps},
-    {"graph.sync_code", handle_graph_sync_code},
-    {"graph.explain", handle_graph_explain},
-    {"blast_radius.preview", handle_blast_radius_preview},
-    /* KB */
-    {"kb.search", handle_kb_search},
-    {"evidence.trace_retrieval_event", handle_evidence_trace},
-    {"evidence.provenance_retrieval_event", handle_evidence_provenance},
-    {"evidence.fidelity_retrieval_event", handle_evidence_fidelity},
-    {"css.signals", handle_css_signals},
-    {"curator.implements", handle_curator_implements},
-    {"curator.synthesize", handle_curator_synthesize},
-    {"curator.contradictions", handle_curator_contradictions},
-    {"curator.invalidated", handle_curator_invalidated},
-    {"kb.build", handle_kb_build},
-    {"kb.update", handle_kb_update},
-    {"kb.docs.push", handle_kb_docs_push},
-    {"kb.ingest", handle_kb_ingest},
-    {"kb.ingest.status", handle_kb_ingest_status},
-    {"kb.reembed", handle_kb_reembed},
-    {"memory.embed", handle_memory_embed},
-    {"kb.status", handle_kb_status},
-    {"optimize.export", handle_optimize_export},
-    {"optimize.promote", handle_optimize_promote},
-    {"optimize.replay_record", handle_optimize_replay_record},
-    {"calibration.readiness", handle_calibration_readiness},
-    {"demotion.check", handle_demotion_check},
-    {"ranker.export_view", handle_ranker_export_view},
-    {"ranker.fit", handle_ranker_fit},
-    {"workers", handle_workers},
-    /* Rules */
-    {"rules.list", handle_rules_list},
-    {"rules.generate", handle_rules_generate},
-    {"rules.delete", handle_rules_delete},
-    /* Skills */
-    {"skill.list", handle_skill_list},
-    {"skill.show", handle_skill_show},
-    {"skill.lint", handle_skill_lint},
-    {"skill.eval", handle_skill_eval},
-    {"skill.create", handle_skill_create},
-    {"skill.edit", handle_skill_edit},
-    {"skill.patch", handle_skill_patch},
-    {"skill.archive", handle_skill_archive},
-    {"skill.pin", handle_skill_pin},
-    {"skill.unpin", handle_skill_pin},
-    {"skill.lifecycle", handle_skill_lifecycle},
-    {"skill.autostub", handle_skill_autostub},
-    {"collab_rules.list", handle_collab_rules_list},
-    {"collab_rules.list_active", handle_collab_rules_list_active},
-    {"collab_rules.approve", handle_collab_rules_approve},
-    {"collab_rules.reject", handle_collab_rules_reject},
-    {"collab_rules.retire", handle_collab_rules_retire},
-    /* Working memory */
-    {"wm.set", handle_wm_set},
-    {"wm.get", handle_wm_get},
-    {"wm.list", handle_wm_list},
-    {"wm.context", handle_wm_context},
-    /* Per-session primary agent selection */
-    {"primary.set", handle_primary_set},
-    {"hosts.list", handle_hosts_list},
-    {"embedders.list", handle_embedders_list},
-    {"primary.get", handle_primary_get},
-    {"primary.clear", handle_primary_clear},
-    {"attempt.record", handle_attempt_record},
-    {"attempt.list", handle_attempt_list},
-    /* Dashboard */
-    {"dashboard.metrics", handle_dashboard_metrics},
-    {"economizer.stats", handle_economizer_stats},
-    {"dashboard.delegations", handle_dashboard_delegations},
-    {"dashboard.traces", handle_dashboard_traces},
-    {"dashboard.plans", handle_dashboard_plans},
-    {"dashboard.logs", handle_dashboard_logs},
-    {"dashboard.onboard", handle_dashboard_onboard},
-    {"dashboard.memory_stats", handle_dashboard_memory_stats},
-    {"dashboard.all", handle_dashboard_all},
-    {"dashboard.audit", handle_dashboard_audit},
-    {"audit.verify", handle_audit_verify},
-    {"audit.captures", handle_audit_captures},
-    {"audit.replay", handle_audit_replay},
-    {"audit.checkpoint", handle_audit_checkpoint},
-    {"audit.seal", handle_audit_seal},
-    {"audit.snapshot", handle_audit_snapshot},
-    {"lsp.diagnostics_summary", handle_lsp_diagnostics_summary},
-    {"workspace.context", handle_workspace_context},
-    {"workspace.add", handle_workspace_add},
-    {"workspace.list", handle_workspace_list},
-    {"workspace.get", handle_workspace_get},
-    {"workspace.remove", handle_workspace_remove},
-    {"workspace.mirror-sync", handle_workspace_mirror_sync},
-    {"runner.poll", handle_runner_poll},
-    {"runner.respond", handle_runner_respond},
-    {"dogfood.tag", handle_dogfood_tag},
-    {"dogfood.review", handle_dogfood_review},
-    {"dogfood.report", handle_dogfood_report},
-    {"eval.run", handle_eval_run},
-    {"eval.results", handle_eval_results},
-    /* Identity */
-    {"identity.show", handle_identity_show},
-    {"identity.snapshot", handle_identity_snapshot},
-    {"identity.diff", handle_identity_diff},
-    /* Compute (thread pool) */
-    {"tool.execute", handle_tool_execute},
-    {"delegate", handle_delegate},
-    /* Public /v1 delegate aggregate/roundtable routes enqueue through
-     * rh_dispatch_op_async. Direct raw dispatch remains synchronous for
-     * compatibility with the dispatch-method surface. */
-    {"delegate.aggregate", handle_delegate_aggregate},
-    {"roundtable.review", handle_roundtable_review_proxy},
-    {"dev.sweep", handle_dev_sweep},
-    {"delegate.launch", handle_delegate_launch},
-    {"delegate.status", handle_delegate_status},
-    {"vault.unlock", handle_vault_unlock},
-    {"vault.rekey", handle_vault_rekey},
-    {"vault.set", handle_vault_set},
-    {"vault.set_server", handle_vault_set_server},
-    {"vault.capability", handle_vault_capability},
-    {"vault.list", handle_vault_list},
-    {"vault.delete", handle_vault_delete},
-    {"vault.lock", handle_vault_lock},
-    {"cert.issue", handle_cert_issue},
-    {"cert.sign", handle_cert_sign},
-    {"cert.list", handle_cert_list},
-    {"cert.revoke", handle_cert_revoke},
-    {"jobs.list", handle_jobs_list},
-    {"jobs.status", handle_jobs_status},
-    {"jobs.logs", handle_jobs_logs},
-    {"jobs.cancel", handle_jobs_cancel},
-    {"job.start", handle_coord_job_start},
-    {"job.list", handle_coord_job_list},
-    {"job.status", handle_coord_job_status},
-    {"job.cancel", handle_coord_job_cancel},
-    {"aux.config_show", handle_aux_config_show},
-    {"config.show", handle_config_show},
-    {"config.get", handle_config_get},
-    {"config.set", handle_config_set},
-    {"pipeline.start", handle_pipeline_start},
-    {"pipeline.status", handle_pipeline_status},
-    {"pipeline.list", handle_pipeline_list},
-    {"pipeline.cancel", handle_pipeline_cancel},
-    {"pipeline.resume", handle_pipeline_resume},
-    {"pipeline.advance", handle_pipeline_advance},
-    {"pipeline.gate", handle_pipeline_gate},
-    {"aux.test", handle_aux_test},
-    {"delegate.reply", handle_delegate_reply},
-    {"delegate.log", handle_delegate_log},
-    {"episode.list", handle_episode_list},
-    {"agent.episodes", handle_agent_episodes},
-    {"chat.send_stream", handle_chat_send_stream},
-    /* MCP proxy */
-    {"mcp.tools_list", handle_mcp_tools_list},
-    {"mcp.audit", handle_mcp_audit},
-    {"mcp.recheck", handle_mcp_recheck},
-    {"mcp.call", handle_mcp_call},
-    {"help.get", handle_get_help}, /* handler force-selects get_help */
-    /* Triggers */
-    {"trigger.fire", handle_trigger_fire},
-    {"trigger.list", handle_trigger_list},
-    {"trigger.status", handle_trigger_status},
-    {"trigger.cancel", handle_trigger_cancel},
-    {"cron.list", handle_cron_list},
-    {"cron.add", handle_cron_add},
-    {"cron.show", handle_cron_show},
-    {"cron.history", handle_cron_history},
-    {"cron.run", handle_cron_run},
-    {"cron.enable", handle_cron_enable},
-    {"cron.disable", handle_cron_disable},
-    {"cron.remove", handle_cron_remove},
-    {NULL, NULL},
+#include "server/server_dispatch_defs_data.h"
 };
 
 /* --- Dispatch --- */
@@ -1704,6 +1414,9 @@ static size_t method_size_limit(const char *method)
    return LIMIT_DEFAULT;
 }
 
+/* Above this an RPC earns an INFO access line of its own; below it DEBUG. */
+#define SERVER_RPC_SLOW_MS 1000
+
 int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, size_t msg_len)
 {
    /* Quick method extraction for size limit check (scan for "method":"..." in raw JSON) */
@@ -1732,8 +1445,14 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
       snprintf(errmsg, sizeof(errmsg),
                "PAYLOAD_TOO_LARGE: %zu bytes exceeds %zu limit for method '%s'", msg_len, limit,
                quick_method);
-      return server_send_error(conn, errmsg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_PAYLOAD_TOO_LARGE, errmsg, NULL);
    }
+
+   /* cJSON accepts arbitrary bytes inside quoted strings. Reject them before
+    * parsing so every JSON surface observes the same Unicode text contract. */
+   if (strlen(msg) != msg_len || !text_is_valid_utf8(msg))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "invalid JSON: input is not valid UTF-8", NULL);
 
    cJSON *req = cJSON_Parse(msg);
    if (!req)
@@ -1743,7 +1462,8 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    if (json_check_depth(req, 0, JSON_MAX_DEPTH) != 0)
    {
       cJSON_Delete(req);
-      return server_send_error(conn, "PAYLOAD_MALFORMED: JSON exceeds depth/field limits", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "PAYLOAD_MALFORMED: JSON exceeds depth/field limits", NULL);
    }
 
    cJSON *method = cJSON_GetObjectItemCaseSensitive(req, "method");
@@ -1789,6 +1509,7 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    }
 
    rc = -1;
+   const long long dispatch_started_ms = util_now_ms();
    for (int i = 0; server_dispatch_table[i].method; i++)
    {
       if (strcmp(m, server_dispatch_table[i].method) == 0)
@@ -1797,6 +1518,16 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
          break;
       }
    }
+   /* Every HTTP request has an access line; this surface had none, so a call
+    * that stalled here was invisible: the client reported only that it gave
+    * up, and the log showed an idle server because it never recorded being
+    * asked. Duration is the point -- 30s and 3ms are the same line without
+    * it. Promote only slow or failed calls, as the HTTP line does for poll. */
+   const long long dispatch_ms = util_now_ms() - dispatch_started_ms;
+   if (rc < 0 || dispatch_ms >= SERVER_RPC_SLOW_MS)
+      LOG_INFO("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
+   else
+      LOG_DEBUG("server.rpc", "%s -> rc=%d %lldms", m, rc, dispatch_ms);
    if (rc == -1)
    {
       cJSON *resp = cJSON_CreateObject();
@@ -1947,7 +1678,7 @@ static int server_agent_route_is_degraded(const char *agent_name)
  * explicit agent policy plus review-role membership; they do not invent a
  * second hidden exclusion based on the configured primary provider.
  * The gate is config-independent (it reads the agent record), so it holds even
- * when config_load would fail. */
+ * when legacy_config_read would fail. */
 static int server_agent_route_policy_excluded(const agent_t *ag)
 {
    if (!ag)
@@ -2034,20 +1765,12 @@ static int server_shell_git_blocked(const char *command, const char *cwd)
  * prevent. An operator must not have to read the code to learn that. */
 static void delegate_sandbox_log_posture(void)
 {
-   int dial_on = config_present() && config_delegate_sandbox();
-   if (!dial_on)
-   {
-      aimee_log(LOG_INFO, "delegate-sandbox",
-                "OFF: delegate_sandbox=false — a delegate's shell and file ops run IN-PROCESS "
-                "inside aimee-server, with the server's filesystem and environment");
-      return;
-   }
    delegate_backend_t *b = delegate_backend_lookup("docker");
    if (!b || !b->acquire)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "INERT: delegate_sandbox is ON but the docker backend is not registered — every "
-                "delegate will run on the HOST while appearing sandboxed");
+                "UNAVAILABLE: the docker backend is not registered — no delegate can be given a "
+                "container, so every delegation will REFUSE to run");
       return;
    }
 
@@ -2067,9 +1790,8 @@ static void delegate_sandbox_log_posture(void)
    if (rc != 0)
    {
       aimee_log(LOG_ERROR, "delegate-sandbox",
-                "INERT: delegate_sandbox is ON and the docker backend is registered, but `%s "
-                "version` failed (rc=%d) — no daemon reachable, so every delegate will run on "
-                "the HOST while appearing sandboxed",
+                "UNAVAILABLE: the docker backend is registered, but `%s version` failed (rc=%d) — "
+                "no daemon reachable, so every delegation will REFUSE to run",
                 bin, rc);
       free(ver);
       return;
@@ -2148,10 +1870,10 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
       return -1;
    }
    /* Ensure the config dir (parent of the socket, pid file, and DB1 file)
-    * exists before we write the pid file or open DB1. On a fresh AIMEE_HOME
-    * (e.g. a deploy not seeded by install.sh) nothing else has created it yet,
-    * so without this both server_pid_write and db1_init silently fail and DB1
-    * stays unavailable for the whole process lifetime. */
+    * exists before we write the pid file. On a fresh AIMEE_HOME (e.g. a deploy
+    * not seeded by install.sh) nothing else has created it yet, so without this
+    * server_pid_write silently fails -- and the module, which opens the DB1
+    * file in that same directory, has nowhere to create it either. */
    {
       char cfg_dir[sizeof(ctx->socket_path)];
       snprintf(cfg_dir, sizeof(cfg_dir), "%s", socket_path);
@@ -2166,31 +1888,28 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
    /* Record our pid so future server_init calls can detect us deterministically
     * (and `aimee server start/restart` can probe liveness). */
    server_pid_write(socket_path);
-   /* Initialize DB1 (aimee-server is DB1's exclusive owner). */
-   /* Copied out: named twice here, and the warning path must report the SAME
-    * path db1_init was given. */
-   char db1_path[MAX_PATH_LEN];
-   snprintf(db1_path, sizeof(db1_path), "%s", config_db1_path());
-   if (db1_init(db1_path) != 0)
-      LOG_WARN("server", "db1_init failed for %s — DB1-backed handlers will be unavailable",
-               db1_path);
-   else
-   {
-      db1_apply_server_pragmas();
-      int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
-      if (orphaned < 0)
-         LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
-      else if (orphaned > 0)
-         LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
-      if (server_mgmt_status_init() != 0)
-         LOG_WARN("server", "management status nonce initialization failed");
-      const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
-      if (trust_path && trust_path[0] &&
-          server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
-                                         kb_client_mtls_management_jwks_fetch,
-                                         NULL) != SERVER_MGMT_JWKS_CACHE_OK)
-         LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
-   }
+   /* This process opens no database. DB1 is a module, and every family it
+    * serves is reached over the bus -- so the connection the server used to
+    * hold here was one it never read or wrote through, and the cache and mmap
+    * tuning that went with it was being applied to the one process where it
+    * could not matter. The module applies it now.
+    *
+    * The three restart chores below reach the store over the bus. Each already
+    * warns when it cannot, which is also what happens when the module has not
+    * attached yet: nothing in this process launches it. */
+   int orphaned = db1_agent_job_cancel_nonterminal_on_restart("orphaned by server restart");
+   if (orphaned < 0)
+      LOG_WARN("server", "failed to reconcile delegate jobs from the prior process");
+   else if (orphaned > 0)
+      LOG_INFO("server", "cancelled %d delegate jobs orphaned by the prior process", orphaned);
+   if (server_mgmt_status_init() != 0)
+      LOG_WARN("server", "management status nonce initialization failed");
+   const char *trust_path = getenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   if (trust_path && trust_path[0] &&
+       server_mgmt_jwks_cache_startup(trust_path, (int64_t)time(NULL),
+                                      kb_client_mtls_management_jwks_fetch,
+                                      NULL) != SERVER_MGMT_JWKS_CACHE_OK)
+      LOG_WARN("server.mgmt", "management JWKS authorization unavailable");
    /* Container cleanup is independent of DB availability. No worker pool exists
     * yet, so a matching container cannot belong to this server generation. */
    int orphan_containers = delegate_backend_docker_remove_orphans();
@@ -2309,10 +2028,6 @@ int server_init(server_ctx_t *ctx, const char *socket_path)
     * to register is non-fatal: the legacy local-exec path keeps
     * working, callers that explicitly opt into the new dispatcher
     * just won't find a backend. */
-   if (delegate_backend_register_local() != 0)
-      LOG_WARN("server", "delegate_backend_register_local failed (already registered?)");
-   if (delegate_backend_register_ssh() != 0)
-      LOG_WARN("server", "delegate_backend_register_ssh failed (already registered?)");
    if (delegate_backend_register_docker() != 0)
       LOG_WARN("server", "delegate_backend_register_docker failed (already registered?)");
    /* Log what's actually in the registry so operators can confirm
@@ -2480,10 +2195,12 @@ void server_shutdown(server_ctx_t *ctx)
    platform_evloop_destroy(&ctx->evloop);
    /* Drop our pid file so a future server can detect that we are gone. */
    server_pid_clear(ctx->socket_path);
-   /* Drain any audit rows still queued in the async writer before closing DB1, so
-    * rows enqueued near shutdown are not lost (the writer thread is detached). The
-    * request/compute pools are already drained above, so no new rows arrive. */
+   /* Drain any audit rows still queued in the async writer, so rows enqueued
+    * near shutdown are not lost (the writer thread is detached). The
+    * request/compute pools are already drained above, so no new rows arrive.
+    *
+    * Nothing to close afterwards: this process opens no DB1 connection, and
+    * the module closes its own when it stops. */
    agent_audit_async_flush();
-   db1_shutdown();
    LOG_INFO("server", "shut down");
 }

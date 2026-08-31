@@ -3,12 +3,15 @@
 
 #include "deploy_apply.h"
 
+#include "appliance_admin.h"
 #include "aimee_home.h"      /* one-shot legacy credential migration path */
 #include "cJSON.h"           /* scope `docker compose ps` to the managed services */
-#include "config.h"          /* config_t, config_load */
+#include "config.h"          /* legacy_config_record, legacy_config_read */
 #include "config_database.h" /* config_emit_deploy_env */
 #include "platform_random.h" /* 256-bit managed kb -> llm bearer */
 #include "runtime_secret.h"
+#include "modules/kb_client/kb_client.h"
+#include "modules/kb_client/kb_client_mtls.h"
 #include "vault_config_bootstrap.h"
 
 #include <ctype.h>
@@ -16,6 +19,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,10 +30,14 @@
 
 extern char **environ;
 
-#define DEPLOY_DEFAULT_COMPOSE "/opt/aimee/deploy/aimee-managed.compose.yaml"
-#define DEPLOY_OUT_CAP         8192                    /* tail of compose output kept for the UI */
-#define DEPLOY_LLM_TOKEN_FILE  ".managed-kb-llm-token" /* legacy migration only */
-#define DEPLOY_LLM_TOKEN_HEX   64                      /* 256-bit opaque bearer */
+#define DEPLOY_DEFAULT_COMPOSE    "/opt/aimee/deploy/aimee-managed.compose.yaml"
+#define DEPLOY_OUT_CAP            8192 /* tail of compose output kept for the UI */
+#define DEPLOY_LLM_TOKEN_FILE     ".managed-kb-llm-token" /* legacy migration only */
+#define DEPLOY_LLM_TOKEN_HEX      64                      /* 256-bit opaque bearer */
+#define DEPLOY_KB_TOKEN_HEX       64                      /* 256-bit managed KB credential secret */
+#define DEPLOY_KB_SERVICE_SCOPE   "scope:service:aimee-server:"
+#define DEPLOY_KB_TOKEN_MAX       ((sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1) + DEPLOY_KB_TOKEN_HEX)
+#define DEPLOY_MANAGED_MEMBER_ENV "AIMEE_MANAGED_KB_MEMBER="
 
 /* Background-deploy state (one at a time; the wizard drives a single stack). */
 static pthread_mutex_t g_lock = PTHREAD_MUTEX_INITIALIZER;
@@ -85,6 +93,19 @@ static int deploy_env_has_profile(const char *env, const char *profile)
    return 0;
 }
 
+static int deploy_managed_member(char out[33])
+{
+   appliance_admin_webuser(out, 33);
+   size_t n = strnlen(out, 33);
+   if (!n || n > 32 || out[0] < 'a' || out[0] > 'z')
+      return -1;
+   for (size_t i = 1; i < n; i++)
+      if (!((out[i] >= 'a' && out[i] <= 'z') || (out[i] >= '0' && out[i] <= '9') || out[i] == '-' ||
+            out[i] == '_'))
+         return -1;
+   return 0;
+}
+
 static int deploy_llm_token_valid(const char *token)
 {
    if (!token)
@@ -101,6 +122,69 @@ static int deploy_llm_token_valid(const char *token)
             token[i] == '='))
          return 0;
    return 1;
+}
+
+static int deploy_kb_scoped_token_valid(const char *token)
+{
+   size_t prefix_len = sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1;
+   return token && strncmp(token, DEPLOY_KB_SERVICE_SCOPE, prefix_len) == 0 &&
+          deploy_llm_token_valid(token + prefix_len);
+}
+
+/* Resolve or mint one certificate-bound service credential. Older managed
+ * installs stored the KB connection bearer as an unscoped owner token. Scope
+ * that same secret during upgrade so the enrolled service certificate and the
+ * independently rotating bearer name exactly the same identity, without
+ * silently granting aimee-server KB-administrator authority. */
+static int deploy_kb_scoped_token(const char *name, char *out, size_t cap)
+{
+   if (!name || !out || cap < DEPLOY_KB_TOKEN_MAX + 1)
+      return -1;
+
+   char configured[513] = "";
+   if (runtime_secret_get(name, configured, sizeof(configured)))
+   {
+      if (deploy_kb_scoped_token_valid(configured))
+      {
+         snprintf(out, cap, "%s", configured);
+         runtime_secret_wipe(configured, sizeof(configured));
+         return 0;
+      }
+      int n = deploy_llm_token_valid(configured)
+                  ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, configured)
+                  : -1;
+      if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
+      {
+         runtime_secret_wipe(configured, sizeof(configured));
+         runtime_secret_wipe(out, cap);
+         return -1;
+      }
+      runtime_secret_wipe(configured, sizeof(configured));
+      return 0;
+   }
+
+   char proposed[DEPLOY_KB_TOKEN_HEX + 1];
+   int n = platform_random_hex(proposed, DEPLOY_KB_TOKEN_HEX) == 0
+               ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, proposed)
+               : -1;
+   if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
+   {
+      runtime_secret_wipe(proposed, sizeof(proposed));
+      runtime_secret_wipe(out, cap);
+      return -1;
+   }
+   runtime_secret_wipe(proposed, sizeof(proposed));
+   return 0;
+}
+
+static int deploy_kb_token(char *out, size_t cap)
+{
+   return deploy_kb_scoped_token("AIMEE_KB_API_BEARER_TOKEN", out, cap);
+}
+
+static int deploy_kb_service_identity_token(char *out, size_t cap)
+{
+   return deploy_kb_scoped_token("AIMEE_KB_SERVICE_IDENTITY_TOKEN", out, cap);
 }
 
 static void deploy_remove_legacy_token_file(const char *path, off_t size)
@@ -249,6 +333,56 @@ static int deploy_env_overrides(const char *deploy_env, const char *inherited)
  * lines config_emit_deploy_env produced for the live config (later entries win, so
  * the deploy-env overrides any inherited value). Returns a NULL-terminated,
  * heap-owned array, or NULL on OOM / no config. */
+/* Write `env` as the compose project's `.env`, atomically, best-effort.
+ *
+ * Only the non-secret topology reaches this file: config_emit_deploy_env omits
+ * embedder_api_key and synthesis_api_key, and the managed-inference bearer is
+ * appended to the child envp below rather than emitted, so it never lands on
+ * disk. 0600 regardless, because the file still describes the deployment.
+ *
+ * Silent on failure and returns nothing: every caller has already obtained the
+ * environment it needs directly, so there is no decision left to make here. */
+static void deploy_write_compose_env_file(const char *env)
+{
+   if (!env || !env[0])
+      return;
+   const char *file = getenv("AIMEE_DEPLOY_COMPOSE_FILE");
+   if (!file || !file[0])
+      file = DEPLOY_DEFAULT_COMPOSE;
+
+   const char *slash = strrchr(file, '/');
+   if (!slash || slash == file)
+      return;
+
+   char tmp[PATH_MAX];
+   char dest[PATH_MAX];
+   const int dirlen = (int)(slash - file);
+   if (snprintf(dest, sizeof(dest), "%.*s/.env", dirlen, file) >= (int)sizeof(dest))
+      return;
+   if (snprintf(tmp, sizeof(tmp), "%.*s/.env.tmp", dirlen, file) >= (int)sizeof(tmp))
+      return;
+
+   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0600);
+   if (fd < 0)
+      return;
+   const size_t len = strlen(env);
+   size_t off = 0;
+   while (off < len)
+   {
+      ssize_t w = write(fd, env + off, len - off);
+      if (w <= 0)
+      {
+         close(fd);
+         unlink(tmp);
+         return;
+      }
+      off += (size_t)w;
+   }
+   close(fd);
+   if (rename(tmp, dest) != 0)
+      unlink(tmp);
+}
+
 static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
                                 int *managed_kb_out, int *managed_identity_out)
 {
@@ -268,6 +402,19 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    }
    char env[2048];
    config_emit_deploy_env_current(env, sizeof(env));
+
+   /* Keep the compose `.env` in step with the config this deploy is applying.
+    *
+    * The entrypoint writes it once at container start, which covers a restart or
+    * an image swap. It does NOT cover config changed while this container keeps
+    * running: the operator sets a new embedder, deploys from the UI, and the file
+    * beside the compose still describes the old choice. A later manual
+    * `docker compose up -d` would then quietly rebuild the old topology.
+    *
+    * Best-effort by design. The deploy child gets its environment from envp
+    * below and does not read this file, so failing to refresh it must not fail
+    * the deploy -- it only costs later callers their safety net. */
+   deploy_write_compose_env_file(env);
 
    char llm_token[513] = "";
    /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when
@@ -314,6 +461,14 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       *managed_kb_out = managed_kb;
    if (managed_identity_out)
       *managed_identity_out = managed_kb && explicit_parts == 0;
+   char managed_member[33] = "";
+   if (managed_kb && explicit_parts == 0 && deploy_managed_member(managed_member) != 0)
+   {
+      if (err && err_cap)
+         snprintf(err, err_cap,
+                  "could not resolve a valid appliance operator for managed KB membership");
+      return NULL;
+   }
    if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
    {
       if (err && err_cap)
@@ -333,7 +488,8 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       if (*p == '\n')
          extra++;
 
-   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + 1, sizeof(char *));
+   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + (managed_member[0] ? 1 : 0) + 1,
+                        sizeof(char *));
    if (!envp)
    {
       if (err && err_cap)
@@ -351,7 +507,10 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
            * OLD names, and a rename silently stopped the filter matching. */
           (managed_llm &&
            (strncmp(*e, "SYNTHESIS_API_KEY=", sizeof("SYNTHESIS_API_KEY=") - 1) == 0 ||
-            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) == 0)))
+            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) ==
+                0)) ||
+          (managed_member[0] &&
+           strncmp(*e, DEPLOY_MANAGED_MEMBER_ENV, sizeof(DEPLOY_MANAGED_MEMBER_ENV) - 1) == 0))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -402,18 +561,87 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       }
       n++;
    }
+   if (managed_member[0])
+   {
+      size_t len = strlen(DEPLOY_MANAGED_MEMBER_ENV) + strlen(managed_member);
+      envp[n] = malloc(len + 1);
+      if (!envp[n])
+      {
+         free_envp(envp);
+         return NULL;
+      }
+      snprintf(envp[n++], len + 1, "%s%s", DEPLOY_MANAGED_MEMBER_ENV, managed_member);
+   }
    envp[n] = NULL;
    return envp;
 }
 
-/* Run `docker <argv...>` with the given environment, capturing combined
- * stdout+stderr into out (truncated to out_cap). *exit_code gets the child's exit
- * status (-1 if it did not exit normally). Returns 0 on success, -1 on
- * fork/pipe/wait failure. envp may be NULL (inherit environ). */
-static int run_capture_input(const char *const argv[], char **envp, const void *input,
-                             size_t input_len, char *out, size_t out_cap, int *exit_code)
+/* Append DATA while retaining the newest out_cap-1 bytes. Deploy output is a
+ * diagnostic: when Compose emits more than the UI buffer can hold, its final
+ * error/result is more useful than the beginning of a pull progress stream. */
+static void capture_tail_append(char *out, size_t out_cap, size_t *len, const char *data,
+                                size_t data_len)
 {
-   if (out && out_cap)
+   if (!out || !out_cap || !len || !data || !data_len)
+      return;
+   const size_t keep = out_cap - 1;
+   if (!keep)
+   {
+      out[0] = '\0';
+      *len = 0;
+      return;
+   }
+   if (*len > keep)
+      *len = keep;
+   if (data_len >= keep)
+   {
+      memcpy(out, data + data_len - keep, keep);
+      *len = keep;
+      out[*len] = '\0';
+      return;
+   }
+   if (*len + data_len > keep)
+   {
+      size_t drop = *len + data_len - keep;
+      memmove(out, out + drop, *len - drop);
+      *len -= drop;
+   }
+   memcpy(out + *len, data, data_len);
+   *len += data_len;
+   out[*len] = '\0';
+}
+
+static void capture_tail_printf(char *out, size_t out_cap, const char *fmt, ...)
+{
+   char text[2048];
+   va_list ap;
+   va_start(ap, fmt);
+   int n = vsnprintf(text, sizeof(text), fmt, ap);
+   va_end(ap);
+   if (n <= 0)
+      return;
+   size_t text_len = (size_t)n < sizeof(text) ? (size_t)n : sizeof(text) - 1;
+   size_t len = strnlen(out, out_cap);
+   capture_tail_append(out, out_cap, &len, text, text_len);
+}
+
+/* Run `docker <argv...>` with the given environment, capturing combined
+ * stdout+stderr into out (retaining its newest out_cap-1 bytes). *exit_code gets
+ * the child's exit status (-1 if it did not exit normally). Returns 0 on
+ * success, -1 on fork/pipe/wait failure. envp may be NULL (inherit environ). */
+static int run_capture_input_mode(const char *const argv[], char **envp, const void *input,
+                                  size_t input_len, char *out, size_t out_cap, int *exit_code,
+                                  int append)
+{
+   size_t len = 0;
+   if (out && out_cap && append)
+   {
+      len = strnlen(out, out_cap);
+      if (len >= out_cap)
+         len = out_cap - 1;
+      out[len] = '\0';
+   }
+   else if (out && out_cap)
       out[0] = '\0';
    if (exit_code)
       *exit_code = -1;
@@ -482,19 +710,12 @@ static int run_capture_input(const char *const argv[], char **envp, const void *
          return -1;
       }
    }
-   size_t len = 0;
    char buf[1024];
    ssize_t r;
    while ((r = read(pipefd[0], buf, sizeof(buf))) > 0)
    {
-      if (out && out_cap && len < out_cap - 1)
-      {
-         size_t room = (out_cap - 1) - len;
-         size_t take = (size_t)r < room ? (size_t)r : room;
-         memcpy(out + len, buf, take);
-         len += take;
-      }
-      /* keep draining even once the buffer is full so the child never blocks */
+      capture_tail_append(out, out_cap, &len, buf, (size_t)r);
+      /* keep draining while shifting old bytes so the child never blocks */
    }
    close(pipefd[0]);
    if (out && out_cap)
@@ -508,10 +729,28 @@ static int run_capture_input(const char *const argv[], char **envp, const void *
    return 0;
 }
 
+static int run_capture_input(const char *const argv[], char **envp, const void *input,
+                             size_t input_len, char *out, size_t out_cap, int *exit_code)
+{
+   return run_capture_input_mode(argv, envp, input, input_len, out, out_cap, exit_code, 0);
+}
+
+static int run_capture_append_input(const char *const argv[], char **envp, const void *input,
+                                    size_t input_len, char *out, size_t out_cap, int *exit_code)
+{
+   return run_capture_input_mode(argv, envp, input, input_len, out, out_cap, exit_code, 1);
+}
+
 static int run_capture(const char *const argv[], char **envp, char *out, size_t out_cap,
                        int *exit_code)
 {
    return run_capture_input(argv, envp, NULL, 0, out, out_cap, exit_code);
+}
+
+static int run_capture_append(const char *const argv[], char **envp, char *out, size_t out_cap,
+                              int *exit_code)
+{
+   return run_capture_append_input(argv, envp, NULL, 0, out, out_cap, exit_code);
 }
 
 /* Retire the pre-baked aimee-llm-cpu container left over from an older install.
@@ -561,10 +800,8 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
       return;
    char buf[512];
    int code = -1;
-   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0 &&
-       out_cap > strlen(out) + 1)
-      snprintf(out + strlen(out), out_cap - strlen(out),
-               "retired obsolete aimee-llm-cpu container\n");
+   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0)
+      capture_tail_printf(out, out_cap, "retired obsolete aimee-llm-cpu container\n");
 }
 
 /* Background worker: ordered `docker compose -f <file> up -d --no-deps SERVICE`.
@@ -593,28 +830,32 @@ static void deploy_retire_stale_llm(char **envp, const char *file, char *out, si
  * --no-deps is deliberate: the orchestrator starts aimee-kb first so its CPU-only
  * initialization/indexing can run while aimee-llm downloads models. Deliberately
  * omits --remove-orphans, for the reason above. */
-static int deploy_up_service_argv(const char *file, const char *service, const char **argv,
-                                  size_t cap)
+static int deploy_up_service_argv(const char *file, const char *service, int force_recreate,
+                                  const char **argv, size_t cap)
 {
-   const char *cmd[] = {"docker", "compose", "-f", file, "up", "-d", "--no-deps", service};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
+   const char *cmd[] = {"docker",    "compose",          "-f",   file, "up", "-d",
+                        "--no-deps", "--force-recreate", service};
+   size_t n = force_recreate ? sizeof(cmd) / sizeof(cmd[0]) : sizeof(cmd) / sizeof(cmd[0]) - 1;
    if (!argv || !file || !file[0] || !service || !service[0] || cap < n + 1)
       return -1;
-   for (size_t i = 0; i < n; i++)
+   for (size_t i = 0; i < n - 1; i++)
       argv[i] = cmd[i];
+   argv[n - 1] = service;
    argv[n] = NULL;
    return (int)n;
 }
 
-/* Bootstrap the managed KB's LLM service bearer over stdin before creating the
- * long-lived KB container. The one-shot is --rm and its Config.Env is clean;
- * only the pipe carries the first-boot value. */
+/* Bootstrap managed credentials over stdin before creating the long-lived KB
+ * container. The one-shot is --rm and its Config.Env contains only a public
+ * overwrite-control flag; only the pipe carries credential values. Overwrite is
+ * required for rotation and for upgrading the old unscoped owner bearer. */
 static int deploy_kb_vault_bootstrap_argv(const char *file, const char **argv, size_t cap)
 {
    const char *cmd[] = {"docker",       "compose",
                         "-f",           file,
                         "run",          "--rm",
                         "-T",           "--no-deps",
+                        "-e",           "AIMEE_VAULT_ENV_OVERWRITE=1",
                         "--entrypoint", "/usr/local/bin/aimee-kb",
                         "aimee-kb",     "--bootstrap-vault-stdin"};
    size_t n = sizeof(cmd) / sizeof(cmd[0]);
@@ -649,6 +890,16 @@ static int deploy_identity_bootstrap_argv(const char *file, const char **argv, s
       argv[i] = cmd[i];
    argv[n] = NULL;
    return (int)n;
+}
+
+/* The server stays alive while its managed identity is installed into the shared
+ * home volume. Drop any pre-install TLS objects and outage backoff immediately;
+ * otherwise the first project cloned after the wizard can report the healthy KB
+ * unavailable until a process restart or the circuit's longest retry window. */
+static void deploy_managed_identity_activated(void)
+{
+   kb_client_mtls_pool_reset();
+   kb_client_dependency_reset();
 }
 
 /* Run the isolated offline root/JWKS bootstrap. The service receives only named
@@ -689,12 +940,49 @@ static void *deploy_worker(void *arg)
       out[0] = '\0';
       deploy_retire_stale_llm(envp, file, out, sizeof(out));
       code = 0;
-      size_t used = 0;
+
+      /* Bootstrap the managed KB's own bearer before its long-lived container
+       * exists. The token crosses only stdin to a disposable one-shot and is
+       * sealed into the KB Vault; it never enters Compose metadata or .env. */
+      if (managed_kb)
+      {
+         char token[DEPLOY_KB_TOKEN_MAX + 1] = "";
+         char service_token[DEPLOY_KB_TOKEN_MAX + 1] = "";
+         char record[sizeof("AIMEE_KB_API_BEARER_TOKEN=") + DEPLOY_KB_TOKEN_MAX +
+                     sizeof("AIMEE_KB_SERVICE_IDENTITY_TOKEN=") + DEPLOY_KB_TOKEN_MAX];
+         int first_len =
+             deploy_kb_token(token, sizeof(token)) == 0
+                 ? snprintf(record, sizeof(record), "AIMEE_KB_API_BEARER_TOKEN=%s", token)
+                 : -1;
+         int second_len =
+             first_len > 0 && (size_t)first_len + 1 < sizeof(record) &&
+                     deploy_kb_service_identity_token(service_token, sizeof(service_token)) == 0
+                 ? snprintf(record + first_len + 1, sizeof(record) - (size_t)first_len - 1,
+                            "AIMEE_KB_SERVICE_IDENTITY_TOKEN=%s", service_token)
+                 : -1;
+         size_t record_len = second_len > 0 ? (size_t)first_len + 1 + (size_t)second_len + 1 : 0;
+         const char *bootstrap_argv[16];
+         int bootstrap_code = -1;
+         if (!record_len || record_len > sizeof(record) ||
+             deploy_kb_vault_bootstrap_argv(
+                 file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
+             run_capture_append_input(bootstrap_argv, envp, record, record_len, out, sizeof(out),
+                                      &bootstrap_code) != 0 ||
+             bootstrap_code != 0)
+         {
+            code = bootstrap_code == 0 ? -1 : bootstrap_code;
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to seal the managed KB bearer into its Vault\n");
+         }
+         runtime_secret_wipe(token, sizeof(token));
+         runtime_secret_wipe(service_token, sizeof(service_token));
+         memset(record, 0, sizeof(record));
+      }
 
       /* The server is already running this worker. Start KB next and LLM last.
        * Model downloads continue inside the LLM container after this deploy
        * finishes; KB initialization and CPU indexing do not wait for them. */
-      if (managed_kb && managed_llm)
+      if (code == 0 && managed_kb && managed_llm)
       {
          const char *token = deploy_env_value(envp, "SYNTHESIS_API_KEY");
          char record[sizeof("SYNTHESIS_API_KEY=") + 512];
@@ -702,52 +990,49 @@ static void *deploy_worker(void *arg)
              token ? snprintf(record, sizeof(record), "SYNTHESIS_API_KEY=%s", token) : -1;
          const char *bootstrap_argv[16];
          int bootstrap_code = -1;
-         used = strlen(out);
          if (record_len <= 0 || (size_t)record_len >= sizeof(record) ||
              deploy_kb_vault_bootstrap_argv(
                  file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out + used,
-                               sizeof(out) - used, &bootstrap_code) != 0 ||
+             run_capture_append_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out,
+                                      sizeof(out), &bootstrap_code) != 0 ||
              bootstrap_code != 0)
          {
             code = bootstrap_code == 0 ? -1 : bootstrap_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to seal the managed LLM credential into the KB Vault\n");
+            capture_tail_printf(
+                out, sizeof(out),
+                "deploy: failed to seal the managed LLM credential into the KB Vault\n");
          }
          memset(record, 0, sizeof(record));
       }
       if (code == 0 && managed_kb)
       {
          const char *kb_argv[10];
-         used = strlen(out);
-         if (deploy_up_service_argv(file, "aimee-kb", kb_argv,
+         /* Recreate even when Compose sees no configuration change: the
+          * immediately preceding one-shot may have added or rotated Vault
+          * credentials which the live process can only load at startup. */
+         if (deploy_up_service_argv(file, "aimee-kb", 1, kb_argv,
                                     sizeof(kb_argv) / sizeof(kb_argv[0])) < 0 ||
-             run_capture(kb_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+             run_capture_append(kb_argv, envp, out, sizeof(out), &code) != 0)
          {
             code = -1;
-            snprintf(out, sizeof(out), "deploy: failed to start aimee-kb with `docker compose`\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to start aimee-kb with `docker compose`\n");
          }
       }
       if (code == 0 && managed_llm)
       {
          const char *llm_argv[10];
-         used = strlen(out);
-         if (deploy_up_service_argv(file, "aimee-llm", llm_argv,
+         if (deploy_up_service_argv(file, "aimee-llm", 0, llm_argv,
                                     sizeof(llm_argv) / sizeof(llm_argv[0])) < 0 ||
-             run_capture(llm_argv, envp, out + used, sizeof(out) - used, &code) != 0)
+             run_capture_append(llm_argv, envp, out, sizeof(out), &code) != 0)
          {
             code = -1;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: failed to start aimee-llm with `docker compose`\n");
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: failed to start aimee-llm with `docker compose`\n");
          }
       }
       if (code == 0 && !managed_kb && !managed_llm)
-         snprintf(out + strlen(out), sizeof(out) - strlen(out),
-                  "deploy: no managed sibling services selected\n");
+         capture_tail_printf(out, sizeof(out), "deploy: no managed sibling services selected\n");
 
       if (code == 0 && managed_identity)
       {
@@ -761,19 +1046,13 @@ static void *deploy_worker(void *arg)
              authority_code != 0)
          {
             code = authority_code == 0 ? -1 : authority_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed authority/JWKS bootstrap failed%s%s\n",
-                        authority_out[0] ? ": " : "", authority_out);
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed authority/JWKS bootstrap failed%s%s\n",
+                                authority_out[0] ? ": " : "", authority_out);
          }
          else
-         {
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed authority roots and signed JWKS verified\n");
-         }
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed authority roots and signed JWKS verified\n");
       }
       if (code == 0 && managed_identity)
       {
@@ -787,18 +1066,15 @@ static void *deploy_worker(void *arg)
              identity_code != 0)
          {
             code = identity_code == 0 ? -1 : identity_code;
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed server identity enrollment failed%s%s\n",
-                        identity_out[0] ? ": " : "", identity_out);
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed server identity enrollment failed%s%s\n",
+                                identity_out[0] ? ": " : "", identity_out);
          }
          else
          {
-            used = strlen(out);
-            if (used < sizeof(out) - 1)
-               snprintf(out + used, sizeof(out) - used,
-                        "deploy: managed server identity enrolled and verified\n");
+            deploy_managed_identity_activated();
+            capture_tail_printf(out, sizeof(out),
+                                "deploy: managed server identity enrolled and verified\n");
          }
       }
    }

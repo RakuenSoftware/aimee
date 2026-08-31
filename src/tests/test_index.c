@@ -3,16 +3,96 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <utime.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
-#include "db2.h"
+#include "modules/db2/c/db2.h"
 #include "canonical_index.h"
 #include "entity_edges.h"
-#include "db2_test_shim.h"
-#include "db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "platform_test_util.h"
+#include "util.h"
+
+static int css_analysis_mode;
+static int css_token_mode;
+static int css_invalid_release_count;
+static css_stylesheet_t css_invalid_stylesheet;
+
+static css_stylesheet_t *test_css_analyze_provider(const char *text, size_t len)
+{
+   if (css_analysis_mode)
+   {
+      memset(&css_invalid_stylesheet, 0, sizeof(css_invalid_stylesheet));
+      css_invalid_stylesheet.truncated = 2;
+      return &css_invalid_stylesheet;
+   }
+   return css_analyze(text, len);
+}
+
+static void test_css_stylesheet_free_provider(css_stylesheet_t *stylesheet)
+{
+   if (stylesheet == &css_invalid_stylesheet)
+   {
+      css_invalid_release_count++;
+      return;
+   }
+   css_stylesheet_free(stylesheet);
+}
+
+static int test_css_token_provider(const char *text, size_t len, char (*out)[CSS_CLASS_TOKEN_MAX],
+                                   int max)
+{
+   if (css_token_mode == 1)
+      return max + 1;
+   if (css_token_mode == 2)
+   {
+      memset(out[0], 'x', CSS_CLASS_TOKEN_MAX);
+      return 1;
+   }
+   if (css_token_mode == 3)
+   {
+      strcpy(out[0], "duplicate");
+      strcpy(out[1], "duplicate");
+      return 2;
+   }
+   return css_extract_class_tokens(text, len, out, max);
+}
+
+static void test_css_analysis_contract(void)
+{
+   const char *css = ".one { color: black; }";
+   const char *markup = "<div className=\"one two\" />";
+   char tokens[4][CSS_CLASS_TOKEN_MAX];
+
+   aimee_db2_register_css_analysis_providers(NULL, NULL, NULL);
+   assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+
+   aimee_db2_register_css_analysis_providers(
+       test_css_analyze_provider, test_css_stylesheet_free_provider, test_css_token_provider);
+   css_analysis_mode = 1;
+   assert(canonical_index_css_analyze(css, strlen(css)) == NULL);
+   assert(css_invalid_release_count == 1);
+
+   css_analysis_mode = 0;
+   css_stylesheet_t *stylesheet = canonical_index_css_analyze(css, strlen(css));
+   assert(stylesheet && stylesheet->rule_count == 1);
+   canonical_index_css_stylesheet_free(stylesheet);
+
+   css_token_mode = 1;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   assert(tokens[0][0] == '\0');
+   css_token_mode = 2;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   css_token_mode = 3;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == -1);
+   css_token_mode = 0;
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 4) == 2);
+   assert(strcmp(tokens[0], "one") == 0 && strcmp(tokens[1], "two") == 0);
+   assert(canonical_index_css_extract_class_tokens(markup, strlen(markup), tokens, 513) == -1);
+}
 
 /* Create a temp directory with a test source file */
 static char *create_test_project(void)
@@ -317,11 +397,13 @@ static char *create_cochange_repo(void)
 {
    char *dir = malloc(PATH_MAX);
    assert(dir != NULL);
-   snprintf(dir, PATH_MAX, "%s/aimee-cochange-XXXXXX", platform_tmpdir());
+   /* Spaces and shell metacharacters remain one literal argv element. A shell-
+    * joined implementation would execute/substitute `false` and miss this root. */
+   snprintf(dir, PATH_MAX, "%s/aimee $(false) cochange-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char cmd[4096];
    snprintf(cmd, sizeof(cmd),
-            "cd %s && git init -q && git config user.email t@t && git config user.name t && "
+            "cd '%s' && git init -q && git config user.email t@t && git config user.name t && "
             "printf 'int a(){return 1;}\\n' > a.c && printf 'int b(){return 2;}\\n' > b.c && "
             "printf 'int c(){return 3;}\\n' > c.c && printf 'int d(){return 4;}\\n' > d.c && "
             "git add -A && git commit -qm init && "
@@ -338,6 +420,15 @@ static char *create_cochange_repo(void)
 int main(void)
 {
    printf("index: ");
+
+   test_css_analysis_contract();
+
+   int missing_host_inspected = 7;
+   canonical_index_set_exec_capture(NULL);
+   assert(canonical_index_scan_project("missing-host", "/not-scanned", 1,
+                                       &missing_host_inspected) == -1);
+   assert(missing_host_inspected == 0);
+   canonical_index_set_exec_capture(safe_exec_capture);
 
    db2_test_shim_open();
 
@@ -604,7 +695,10 @@ int main(void)
       canonical_index_file_input_t inputs[] = {
           {"src/app.c", "void app_entry(void) {}\n"},
           {".gitmodules", gitmod_body},
-          {".bashrc", "export X=1\n"},                /* hidden non-manifest dotfile */
+          {".travis.yml", "language: c\n"},
+          {".eslintrc.json", "{\"env\":{}}\n"},
+          {".bashrc", "export X=1\n"},
+          {".env", "SECRET=1\n"},
           {".github/workflows/ci.yml", "name: ci\n"}, /* file inside a hidden dir */
           {".gitmodules/payload.txt", "x\n"},         /* .gitmodules as an interior DIR */
       };
@@ -613,11 +707,14 @@ int main(void)
           "pushproj", "remote", inputs, (int)(sizeof(inputs) / sizeof(inputs[0])), 1, &inspected);
       /* canonical_index_scan_files upserts the project; of 5 inputs only the 2
        * non-excluded (src/app.c + .gitmodules) are counted (inspected is post-filter). */
-      assert(inspected == 2);
-      assert(scanned == 2);
+      assert(inspected == 4);
+      assert(scanned == 4);
       assert(file_row_count("pushproj", ".gitmodules") == 1); /* dotfile manifest ingested */
       assert(file_row_count("pushproj", "src/app.c") == 1);
+      assert(file_row_count("pushproj", ".travis.yml") == 1);
+      assert(file_row_count("pushproj", ".eslintrc.json") == 1);
       assert(file_row_count("pushproj", ".bashrc") == 0); /* hidden non-manifest excluded */
+      assert(file_row_count("pushproj", ".env") == 0);
       assert(file_row_count("pushproj", ".github/workflows/ci.yml") == 0); /* hidden dir excluded */
       assert(file_row_count("pushproj", ".gitmodules/payload.txt") ==
              0); /* interior dir excluded */
@@ -814,9 +911,90 @@ int main(void)
       assert(found_coedited);
 
       char rmcmd[512];
-      snprintf(rmcmd, sizeof(rmcmd), "rm -rf %s", repo);
+      snprintf(rmcmd, sizeof(rmcmd), "rm -rf '%s'", repo);
       (void)system(rmcmd);
       free(repo);
+   }
+
+   /* --- complete-manifest invariants: stage privacy, exact retraction,
+    * content-hash verification, retry idempotency, and revision ABA guard. --- */
+   {
+      char *dir = malloc(PATH_MAX);
+      assert(dir != NULL);
+      snprintf(dir, PATH_MAX, "%s/aimee-test-reconcile-XXXXXX", platform_tmpdir());
+      assert(platform_mkdtemp(dir) != NULL);
+      char a_path[PATH_MAX], b_path[PATH_MAX];
+      snprintf(a_path, sizeof(a_path), "%s/a.c", dir);
+      snprintf(b_path, sizeof(b_path), "%s/b.c", dir);
+      FILE *f = fopen(a_path, "w");
+      assert(f != NULL);
+      fputs("int aa=1;\n", f);
+      fclose(f);
+      f = fopen(b_path, "w");
+      assert(f != NULL);
+      fputs("int bb=1;\n", f);
+      fclose(f);
+      int inspected = 0;
+      assert(canonical_index_scan_project("reconcile", dir, 0, &inspected) == 2);
+
+      struct stat before;
+      assert(stat(a_path, &before) == 0);
+      assert(remove(b_path) == 0);
+      f = fopen(a_path, "w");
+      assert(f != NULL);
+      fputs("int aa=2;\n", f); /* same byte length */
+      fclose(f);
+      struct utimbuf same_time = {.actime = before.st_atime, .modtime = before.st_mtime};
+      assert(utime(a_path, &same_time) == 0);
+
+      canonical_index_verify_result_t verify;
+      assert(canonical_index_verify_project("reconcile", dir, 1, &verify) == 0);
+      assert(verify.modified_files == 1); /* hashes catch same-size/same-mtime edits */
+      assert(verify.missing_files == 1);
+
+      canonical_index_file_input_t staged = {"a.c", "int aa=2;\n"};
+      assert(canonical_index_scan_begin("reconcile", dir, "interrupted", NULL) == 0);
+      assert(canonical_index_scan_stage("interrupted", &staged, 1, NULL) == 0);
+      char stored[64];
+      file_content("reconcile", "a.c", stored, sizeof(stored));
+      assert(strcmp(stored, "int aa=1;\n") == 0); /* no seal: staged data stays private */
+      assert(canonical_index_scan_abort("interrupted") == 0);
+
+      assert(canonical_index_scan_project("reconcile", dir, 0, &inspected) == 1);
+      assert(file_row_count("reconcile", "b.c") == 0);
+      assert(canonical_index_verify_project("reconcile", dir, 1, &verify) == 0);
+      assert(!verify.unavailable && verify.modified_files == 0 && verify.missing_files == 0 &&
+             verify.unindexed_files == 0);
+
+      /* Two sessions may share a baseline, but only the first successful seal
+       * advances it; the late seal is rejected instead of overwriting newer facts. */
+      assert(canonical_index_scan_begin("reconcile", dir, "older", NULL) == 0);
+      assert(canonical_index_scan_begin("reconcile", dir, "newer", NULL) == 0);
+      canonical_index_file_input_t old_input = {"a.c", "int aa=3;\n"};
+      canonical_index_file_input_t new_input = {"a.c", "int aa=4;\n"};
+      assert(canonical_index_scan_stage("older", &old_input, 1, NULL) == 0);
+      assert(canonical_index_scan_stage("newer", &new_input, 1, NULL) == 0);
+      canonical_index_seal_result_t seal;
+      assert(canonical_index_scan_seal("newer", 1, &seal) == 0);
+      assert(canonical_index_scan_seal("older", 1, &seal) == -2);
+      file_content("reconcile", "a.c", stored, sizeof(stored));
+      assert(strcmp(stored, "int aa=4;\n") == 0);
+
+      /* Duplicate and out-of-order batches converge on distinct manifest paths. */
+      assert(canonical_index_scan_begin("reconcile", dir, "retry-order-scan", NULL) == 0);
+      canonical_index_file_input_t retry_inputs[] = {
+          {"z.c", "int z;\n"}, {"y.c", "int y;\n"}, {"z.c", "int z;\n"}};
+      int accepted = 0;
+      assert(canonical_index_scan_stage("retry-order-scan", retry_inputs, 3, &accepted) == 0);
+      assert(accepted == 3);
+      assert(canonical_index_scan_seal("retry-order-scan", 2, &seal) == 0);
+      assert(file_row_count("reconcile", "y.c") == 1);
+      assert(file_row_count("reconcile", "z.c") == 1);
+
+      char rmcmd[PATH_MAX + 16];
+      snprintf(rmcmd, sizeof(rmcmd), "rm -rf %s", dir);
+      (void)system(rmcmd);
+      free(dir);
    }
 
    /* Cleanup */

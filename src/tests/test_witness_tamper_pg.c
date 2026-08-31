@@ -29,15 +29,17 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/db2/c/db_postgres.h"
 #include "kb/kb_vault_policy.h"
 #include "kb/kb_witness_cadence.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "vault_witness_provider_fixture.h"
 
 /* Every step of this test either performs the tampering or checks for it, so none
  * of it may be compiled away. assert() would vanish under NDEBUG and leave a
@@ -131,13 +133,15 @@ static int disable_worm(void *conn)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {
       printf("witness_tamper_pg: SKIP (AIMEE_TEST_PG_URL unset)\n");
       return 0;
    }
-   char home[] = "/tmp/aimee-witness-tamper-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-tamper-home-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "mkdtemp failed\n");

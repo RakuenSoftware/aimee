@@ -3,10 +3,10 @@
  */
 
 #include "kb_bandit.h"
-#include "db2/artifacts.h"
-#include "db2/bandit.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/bandit.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 #include "headers/platform_process.h"
 
 #include <cJSON.h>
@@ -218,14 +218,20 @@ int kb_bandit_sample(const char *decision_point, const char *context_json,
       return -1;
    }
 
-   const char *selected = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "selected_arm"));
+   /* Copy before deleting `resp`: cJSON owns the selected_arm string. Keeping
+    * its pointer across cJSON_Delete made every successful sidecar answer a
+    * use-after-free; in the live policy loop it usually degraded to arm 0. */
+   char selected[KB_BANDIT_MAX_ARM_ID] = "";
+   const char *selected_value = cJSON_GetStringValue(cJSON_GetObjectItem(resp, "selected_arm"));
+   if (selected_value && strlen(selected_value) < sizeof(selected))
+      snprintf(selected, sizeof(selected), "%s", selected_value);
    cJSON *prop_item = cJSON_GetObjectItem(resp, "propensity");
    double propensity = prop_item ? prop_item->valuedouble : 1.0;
    cJSON_Delete(resp);
 
    /* Find selected arm index; fall back to 0 on unknown. */
    int arm_idx = 0;
-   if (selected)
+   if (selected[0])
    {
       for (int i = 0; i < n_arms; i++)
       {
@@ -311,6 +317,9 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
       estimator = "unknown";
    if (!status)
       status = "unknown";
+   /* status points into parsed and must not be consulted after parsed is
+    * released below. */
+   double confidence = (strcmp(status, "ok") == 0) ? 1.0 : 0.5;
 
    cJSON *wrap = cJSON_CreateObject();
    cJSON_AddStringToObject(wrap, "source", "bandit_replay");
@@ -331,7 +340,6 @@ int kb_bandit_record_replay_evidence(const char *decision_point, const char *res
    /* Replay evidence is durable, system-scoped: scope_kind="bandit_replay",
     * scope_id=<decision_point>. Confidence reflects estimator status:
     * ok → 1.0, insufficient_data → 0.5, else → 0.5. */
-   double confidence = (strcmp(status, "ok") == 0) ? 1.0 : 0.5;
    int rc = db2_artifact_write(id, "benchmark_trace", "committed", "bandit_replay", decision_point,
                                "", confidence, payload);
    free(payload);

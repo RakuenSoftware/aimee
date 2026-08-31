@@ -1,6 +1,6 @@
 /* test_roundtable_preset.c: round-trip a named roundtable preset through
  * from_json -> save -> load and to_json, and verify apply_to_config mirrors the
- * preset onto the live config_t ensemble/roundtable fields. */
+ * preset onto the live legacy_config_record ensemble/roundtable fields. */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -102,6 +102,33 @@ int main(void)
                                       &errmsg) != 0);
    assert(errmsg && strcmp(errmsg, "chairman_enabled requires a chairman") == 0);
 
+   /* A PANEL OF ONE HAS NOBODY TO CHAIR, SYNTHESISE OR DISCUSS WITH.
+    *
+    * Each of these arbitrates or exchanges BETWEEN seats; with one seat the
+    * agent would be discussing with itself. Measured: a one-seat review returned
+    * a correct blocking finding and the chair then died on "unknown persona
+    * 'chairman'", failing the whole run and hiding the finding. Refused at
+    * intake so the operator is told, rather than having it silently dropped. */
+   {
+      roundtable_preset_t one;
+      const char *e1 = NULL;
+      assert(roundtable_preset_from_json("{\"seats\":[{\"model\":\"m\"}],\"chairman\":\"c\"}",
+                                         "one-chair", &one, &e1) != 0);
+      assert(e1 && strstr(e1, "roundtable of one") != NULL);
+
+      const char *e2 = NULL;
+      assert(roundtable_preset_from_json("{\"seats\":[{\"model\":\"m\"}],\"discussion\":true}",
+                                         "one-disc", &one, &e2) != 0);
+      assert(e2 && strstr(e2, "roundtable of one") != NULL);
+
+      /* Two seats may have all three. */
+      const char *e3 = NULL;
+      assert(roundtable_preset_from_json(
+                 "{\"seats\":[{\"model\":\"a\"},{\"model\":\"b\"}],"
+                 "\"chairman\":\"c\",\"chairman_enabled\":true,\"discussion\":true}",
+                 "two-ok", &one, &e3) == 0);
+   }
+
    /* url_name overrides body name */
    roundtable_preset_t p2;
    assert(roundtable_preset_from_json(PRESET_JSON, "override-name", &p2, &err) == 0);
@@ -157,7 +184,7 @@ int main(void)
    assert(strcmp(resolved, "default") == 0);
    assert(runtime.reference_count == 3);
 
-   /* apply_to_config mirrors the preset onto the live config_t */
+   /* apply_to_config mirrors the preset onto the live legacy_config_record */
    assert(config_set_ensemble_aggregator("c-only") == 0);
    char aerr[128];
    assert(roundtable_preset_apply_to_config("deep-review", aerr, sizeof(aerr)) == 0);

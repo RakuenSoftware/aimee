@@ -30,9 +30,10 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
     inventory = repo / validator.INVENTORY_PATH
     inventory.parent.mkdir(parents=True)
     shutil.copy2(REPO_ROOT / validator.INVENTORY_PATH, inventory)
+    include_roots: set[str] = set()
     for source in (REPO_ROOT / "src/modules").glob("*/module.yaml"):
         target = repo / "src/modules" / source.parent.name / "module.yaml"
-        target.parent.mkdir(parents=True)
+        target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, target)
         descriptor = json.loads(source.read_text(encoding="utf-8"))
         for field in validator.OWNERSHIP_FIELDS:
@@ -40,6 +41,26 @@ def production_repo() -> tempfile.TemporaryDirectory[str]:
                 owned_target = repo / relative
                 owned_target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(REPO_ROOT / relative, owned_target)
+        build = descriptor.get("c_build")
+        if isinstance(build, dict):
+            include_roots.update(build.get("include_roots", []))
+            for relative in build.get("header_dependencies", []):
+                dependency = repo / relative
+                dependency.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(REPO_ROOT / relative, dependency)
+            for header in build.get("generated_headers", []):
+                for entry in header.get("entries", []):
+                    relative = entry["source"]
+                    generated_input = repo / relative
+                    generated_input.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy2(REPO_ROOT / relative, generated_input)
+    # The validator requires every c_build include root to be a real directory.
+    # Only roots that happen to hold a descriptor-owned file appear from the
+    # copies above, so materialize the rest: a module may legitimately include
+    # from a root it owns no file in. Deferred until every descriptor is copied
+    # so that creating one module's root cannot race another module's own dir.
+    for root in sorted(include_roots):
+        (repo / root).mkdir(parents=True, exist_ok=True)
     return tmp
 
 
@@ -92,8 +113,10 @@ class DescriptorTests(unittest.TestCase):
 
     def test_complete_production_graph(self) -> None:
         required, optional = self.taxonomy()
-        self.assertEqual(len(required | optional), 25)
-        self.assertEqual(validator.validate_roots(REPO_ROOT, [Path("src/modules")]), 25)
+        expected = len(required | optional)
+        self.assertEqual(
+            validator.validate_roots(REPO_ROOT, [Path("src/modules")]), expected
+        )
 
     def test_schema_is_generated_byte_for_byte(self) -> None:
         validator.check_schema(REPO_ROOT)
@@ -143,7 +166,21 @@ class DescriptorTests(unittest.TestCase):
             path = repo / validator.INVENTORY_PATH
             path.parent.mkdir(parents=True)
             path.write_text(
-                json.dumps({"schema_version": True, "required": ["memory"], "optional": ["x"]}),
+                json.dumps(
+                    {
+                        "schema_version": True,
+                        "required": ["memory"],
+                        "optional": ["x"],
+                        "principal_refs": {"memory": 7, "x": 29},
+                        "retired_principal_refs": [],
+                        # The reserved bands are present because load_inventory
+                        # compares the key set EXACTLY. Without them this
+                        # fixture fails on inventory-shape and never reaches
+                        # the version rule it exists to exercise.
+                        "plugin_principal_ref_band": {"first": 200, "limit": 456},
+                        "retired_principal_ref_band": {"first": 456, "limit": 512},
+                    }
+                ),
                 encoding="utf-8",
             )
             with self.assertRaisesRegex(validator.DescriptorError, "rule=inventory-version"):
@@ -203,6 +240,90 @@ class DescriptorTests(unittest.TestCase):
         complete_type["ownership_complete"] = 1
         self.assert_rule(complete_type, "ownership-complete-type")
 
+    def test_c_build_contract_is_closed_sorted_and_safe(self) -> None:
+        descriptor = self.required()
+        descriptor["c_build"] = {
+            "compile_definitions": ["AIMEE_DB1_DISABLED"],
+            "generated_headers": [{
+                "entries": [{
+                    "source": "src/modules/memory/schema.sql",
+                    "symbol": "AIMEE_MEMORY_SCHEMA_SQL",
+                }],
+                "output": "schema_data.h",
+            }],
+            "header_dependencies": ["src/headers/aimee.h"],
+            "include_roots": ["src", "src/modules/memory"],
+            "pkg_config": ["libpq"],
+            "system_libraries": ["OpenSSL::Crypto", "m"],
+        }
+        required, optional = self.taxonomy()
+        self.assertEqual(
+            validator.validate_descriptor(descriptor, required, optional), "memory"
+        )
+
+        cases = (
+            ({"include_roots": ["src"], "pkg_config": []}, "c-build-shape"),
+            ({"include_roots": [], "pkg_config": [], "system_libraries": []},
+             "c-build-empty"),
+            ({"include_roots": ["src", "src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-order"),
+            ({"include_roots": ["../outside"], "pkg_config": [],
+              "system_libraries": []}, "c-build-path"),
+            ({"include_roots": ["src"], "pkg_config": ["libpq;injected"],
+              "system_libraries": []}, "c-build-token"),
+            ({"compile_definitions": ["BAD=1"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-token"),
+            ({"compile_definitions": ["Z", "A"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-order"),
+            ({"generated_headers": "bad", "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-type"),
+            ({"header_dependencies": "bad", "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-type"),
+            ({"header_dependencies": ["../outside.h"], "include_roots": ["src"],
+              "pkg_config": [], "system_libraries": []}, "c-build-path"),
+            ({"header_dependencies": ["src/modules/memory/private.h"],
+              "include_roots": ["src"], "pkg_config": [], "system_libraries": []},
+             "c-build-header-owned"),
+            ({"generated_headers": [{"output": "../bad.h", "entries": [
+                {"source": "src/schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-generated-output"),
+            ({"generated_headers": [{"output": "schema.h", "entries": [
+                {"source": "../schema.sql", "symbol": "SCHEMA_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-path"),
+            ({"generated_headers": [{"output": "schema.h", "entries": [
+                {"source": "src/a.sql", "symbol": "Z_SQL"},
+                {"source": "src/z.sql", "symbol": "A_SQL"},
+            ]}], "include_roots": ["src"], "pkg_config": [],
+              "system_libraries": []}, "c-build-order"),
+            ({"include_roots": ["src"], "pkg_config": [],
+              "system_libraries": [7]}, "c-build-type"),
+        )
+        for build, rule in cases:
+            mutated = self.required()
+            mutated["c_build"] = build
+            with self.subTest(rule=rule):
+                self.assert_rule(mutated, rule)
+
+    def test_c_build_include_roots_must_be_real_directories(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(
+                encoding="utf-8"
+            )
+        )
+        descriptor["c_build"] = {
+            "include_roots": ["src/modules/module-runtime/missing"],
+            "pkg_config": [],
+            "system_libraries": [],
+        }
+        required, optional = self.taxonomy()
+        validator.validate_descriptor(descriptor, required, optional)
+        with self.assertRaisesRegex(
+            validator.DescriptorError, r"rule=c-build-directory"
+        ):
+            validator.validate_ownership(REPO_ROOT, "module-runtime", descriptor)
+
     def test_ownership_is_optional_and_report_preserves_declared_order(self) -> None:
         report = validator.ownership_report(REPO_ROOT, [Path("src/modules")])
         self.assertEqual(report["schema_version"], 1)
@@ -221,19 +342,13 @@ class DescriptorTests(unittest.TestCase):
             runtime["ownership"]["docs"],
             [{"path": "docs/modules/module-runtime.md", "result": "PASS"}],
         )
-        # An undeclared descriptor still reports every ownership role as empty. Derived from
-        # the graph rather than naming one module, so completing a module's declaration does
-        # not stale this fixture the way declaring `memory` did.
+        # Every production descriptor is now ownership-latched. A new empty descriptor is
+        # migration debt and must make this assertion fail.
         undeclared = [
             item for item in descriptors
             if not any(item["ownership"][field] for field in validator.OWNERSHIP_FIELDS)
         ]
-        self.assertTrue(undeclared, "expected at least one descriptor with no declared ownership")
-        for item in undeclared:
-            with self.subTest(identifier=item["id"]):
-                self.assertEqual(
-                    item["ownership"], {field: [] for field in validator.OWNERSHIP_FIELDS}
-                )
+        self.assertEqual(undeclared, [])
 
     def test_ownership_report_sorts_descriptors_independent_of_root_order(self) -> None:
         root = Path("tests/fixtures/modules/positive")
@@ -254,8 +369,52 @@ class DescriptorTests(unittest.TestCase):
         self.assertEqual(
             {field: len(report["ownership"][field]) for field in validator.OWNERSHIP_FIELDS},
             {"sources": 1, "private_headers": 0, "public_headers": 1, "tests": 1,
-             "docs": 1},
+             "contracts": 0, "docs": 1, "go_sources": 0, "go_tests": 0},
         )
+
+    def test_contract_ownership_is_scoped_and_complete(self) -> None:
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            relative = "src/modules/module-runtime/eventcontract/example.json"
+            contract = repo / relative
+            contract.parent.mkdir(parents=True)
+            contract.write_text('{"schema_version":1}\n', encoding="utf-8")
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", [relative]),
+            )
+            validator.validate_roots(repo, [Path("src/modules")])
+
+            self.mutate_descriptor(
+                repo,
+                "module-runtime",
+                lambda value: value.__setitem__("contracts", []),
+            )
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-complete pointer=/contracts.*example.json",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
+
+    def test_contract_ownership_rejects_wrong_boundary_and_extension(self) -> None:
+        descriptor = json.loads(
+            (REPO_ROOT / "src/modules/module-runtime/module.yaml").read_text(encoding="utf-8")
+        )
+        cases = (
+            ("src/modules/module-runtime/example.json", "ownership-role-boundary"),
+            ("src/modules/module-runtime/eventcontract/example.yaml", "ownership-role"),
+        )
+        for relative, rule in cases:
+            mutated = copy.deepcopy(descriptor)
+            mutated["contracts"] = [relative]
+            with self.subTest(relative=relative), self.assertRaisesRegex(
+                validator.DescriptorError, rf"rule={rule} pointer=/contracts/0"
+            ):
+                validator.validate_ownership(REPO_ROOT, "module-runtime", mutated)
 
     def test_production_complete_ownership_mutations(self) -> None:
         cases = (
@@ -272,7 +431,8 @@ class DescriptorTests(unittest.TestCase):
             ("translation", "sources", "src/modules/translation/aimee_ir_stream.c"),
             ("skills", "sources", "src/modules/skills/skill.c"),
             ("skills", "sources", "src/modules/skills/skill_rollback.c"),
-            ("skills", "sources", "src/modules/skills/skill_review.c"),
+            ("skills", "sources", "src/modules/skills/skill_trigger_policy.c"),
+            ("skills", "private_headers", "src/modules/skills/skill_trigger_policy.h"),
             ("audit", "sources", "src/modules/audit/audit_action.c"),
             ("audit", "sources", "src/modules/audit/audit_worm.c"),
             ("audit", "sources", "src/modules/audit/audit_worm_chain.c"),
@@ -280,9 +440,15 @@ class DescriptorTests(unittest.TestCase):
             ("benchmarks", "sources", "src/modules/benchmarks/agent_eval.c"),
             ("benchmarks", "private_headers", "src/modules/benchmarks/agent_eval.h"),
             ("tools", "sources", "src/modules/tools/agent_tools_dispatch.c"),
-            ("tools", "private_headers", "src/modules/tools/agent_tools.h"),
+            ("tools", "go_sources", "server-go/modules/tools/tools.go"),
+            ("tools", "go_tests", "server-go/modules/tools/tools_test.go"),
             ("routing", "sources", "src/modules/routing/routing.c"),
-            ("execution-policy", "sources", "src/modules/execution-policy/execution_policy.c"),
+            ("routing", "go_sources", "server-go/modules/routing/routing.go"),
+            ("routing", "go_tests", "server-go/modules/routing/routing_test.go"),
+            ("execution-policy", "go_sources",
+             "server-go/modules/execution-policy/execution_policy.go"),
+            ("execution-policy", "go_tests",
+             "server-go/modules/execution-policy/execution_policy_test.go"),
             ("kb-synthesis", "sources", "src/modules/kb-synthesis/kb_curator_synthesize.c"),
             ("kb-synthesis", "private_headers", "src/modules/kb-synthesis/kb_curator_synthesize.h"),
             ("gateway", "sources", "src/modules/gateway/gateway_delegate.c"),
@@ -291,20 +457,64 @@ class DescriptorTests(unittest.TestCase):
             ("governance", "sources", "src/modules/governance/gw_stage_governance.c"),
             ("governance", "private_headers", "src/modules/governance/gw_stage_governance.h"),
             ("learning", "sources", "src/modules/learning/learning_router.c"),
-            ("learning", "private_headers", "src/modules/learning/learning.h"),
+            ("learning", "go_sources", "server-go/modules/learning/learning.go"),
+            ("learning", "go_tests", "server-go/modules/learning/learning_test.go"),
+            ("skills", "go_sources", "server-go/modules/skills/skills.go"),
+            ("skills", "go_tests", "server-go/modules/skills/skills_test.go"),
             ("workspace", "sources", "src/modules/workspace/workspace_turn.c"),
             ("workspace", "private_headers", "src/modules/workspace/workspace_provider.h"),
+            ("workspace", "go_sources", "server-go/modules/workspace/workspace.go"),
+            ("workspace", "go_tests", "server-go/modules/workspace/workspace_test.go"),
             ("vault", "sources", "src/modules/vault/vault_service.c"),
             ("vault", "private_headers", "src/modules/vault/vault_internal.h"),
-            ("config", "sources", "src/modules/config/config.c"),
-            ("config", "private_headers", "src/modules/config/config_internal.h"),
+            ("config", "contracts", "src/modules/config/eventcontract/operations.json"),
             ("git", "sources", "src/modules/git/git_ops.c"),
             ("git", "private_headers", "src/modules/git/git_verify_internal.h"),
+            ("git", "go_sources", "server-go/modules/git/git.go"),
+            ("git", "go_tests", "server-go/modules/git/git_test.go"),
             ("delegates", "sources", "src/modules/delegates/delegate_driver.c"),
+            ("delegates", "go_sources", "server-go/modules/delegates/delegates.go"),
+            ("delegates", "go_tests", "server-go/modules/delegates/delegates_test.go"),
+            ("response-composition", "go_sources",
+             "server-go/modules/response-composition/response_composition.go"),
+            ("response-composition", "go_tests",
+             "server-go/modules/response-composition/response_composition_test.go"),
             ("workflows", "sources", "src/modules/workflows/wfe_engine.c"),
             ("workflows", "private_headers", "src/modules/workflows/wfe_engine.h"),
             ("memory", "sources", "src/modules/memory/memory_core.c"),
             ("memory", "private_headers", "src/modules/memory/memory_core_internal.h"),
+            ("memory", "go_sources", "server-go/modules/memory/memory.go"),
+            ("memory", "go_tests", "server-go/modules/memory/memory_test.go"),
+            ("roundtable", "sources", "src/modules/roundtable/module_adapter.c"),
+            ("roundtable", "go_sources", "server-go/modules/roundtable/roundtable.go"),
+            ("roundtable", "go_tests", "server-go/modules/roundtable/roundtable_test.go"),
+            ("benchmarks", "sources", "src/modules/benchmarks/module_adapter.c"),
+            ("benchmarks", "go_sources", "server-go/modules/benchmarks/benchmarks.go"),
+            ("benchmarks", "go_tests", "server-go/modules/benchmarks/benchmarks_test.go"),
+            ("governance", "sources", "src/modules/governance/module_adapter.c"),
+            ("governance", "go_sources", "server-go/modules/governance/governance.go"),
+            ("governance", "go_tests", "server-go/modules/governance/governance_test.go"),
+            ("workflows", "sources", "src/modules/workflows/module_adapter.c"),
+            ("workflows", "go_sources", "server-go/modules/workflows/workflows.go"),
+            ("workflows", "go_tests", "server-go/modules/workflows/workflows_test.go"),
+            ("kb-synthesis", "sources", "src/modules/kb-synthesis/module_adapter.c"),
+            ("kb-synthesis", "go_sources", "server-go/modules/kb-synthesis/kb_synthesis.go"),
+            ("kb-synthesis", "go_tests",
+             "server-go/modules/kb-synthesis/kb_synthesis_test.go"),
+            ("runtime-web", "sources", "src/modules/runtime-web/module_adapter.c"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/policy/status.go"),
+            ("runtime-web", "go_sources",
+             "server-go/modules/runtime-web/runtime_web.go"),
+            ("runtime-web", "go_tests",
+             "server-go/modules/runtime-web/runtime_web_test.go"),
+            ("control-web", "sources", "src/modules/control-web/module_adapter.c"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/policy/acl.go"),
+            ("control-web", "go_sources",
+             "server-go/modules/control-web/control_web.go"),
+            ("control-web", "go_tests",
+             "server-go/modules/control-web/control_web_test.go"),
         )
         for identifier, field, relative in cases:
             tmp = self.production_repo()
@@ -323,7 +533,7 @@ class DescriptorTests(unittest.TestCase):
             finally:
                 tmp.cleanup()
 
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "protocols", "ir", "translation", "skills",
+        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "runtime-web", "control-web", "roundtable", "protocols", "ir", "translation", "skills",
                            "audit", "module-runtime", "gateway", "governance",
                            "learning", "workspace", "vault", "config", "git", "delegates",
                            "workflows", "memory"):
@@ -365,50 +575,56 @@ class DescriptorTests(unittest.TestCase):
 
     def test_empty_module_root_cannot_be_latched(self) -> None:
         """An unmigrated module must not satisfy the latch vacuously."""
-        empty = (
-            "control-web",
-            "response-composition", "runtime-web",
-        )
-        for identifier in empty:
-            tmp = self.production_repo()
-            try:
-                repo = Path(tmp.name)
-                document = f"docs/modules/{identifier}.md"
-                self.mutate_descriptor(
-                    repo, identifier,
-                    lambda value, document=document: value.update(
-                        {"ownership_complete": True, "docs": [document]}
-                    ),
-                )
-                (repo / document).parent.mkdir(parents=True, exist_ok=True)
-                (repo / document).write_text("placeholder\n", encoding="utf-8")
-                with self.subTest(identifier=identifier), self.assertRaisesRegex(
-                    validator.DescriptorError,
-                    r"rule=ownership-empty-domain pointer=/ownership_complete",
-                ):
-                    validator.validate_roots(repo, [Path("src/modules")])
-            finally:
-                tmp.cleanup()
+        tmp = self.production_repo()
+        try:
+            repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
+            root = repo / "src/modules/control-web"
+            root.mkdir(parents=True)
+            (root / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": ["docs/modules/control-web.md"],
+            }) + "\n", encoding="utf-8")
+            document = repo / "docs/modules/control-web.md"
+            document.parent.mkdir(parents=True, exist_ok=True)
+            document.write_text("placeholder\n", encoding="utf-8")
+            with self.assertRaisesRegex(
+                validator.DescriptorError,
+                r"rule=ownership-empty-domain pointer=/ownership_complete",
+            ):
+                validator.validate_roots(repo, [Path("src/modules")])
+        finally:
+            tmp.cleanup()
 
     def test_a_single_module_local_file_is_enough_domain_to_latch(self) -> None:
         """The guard rejects an empty domain, not a small one."""
         tmp = self.production_repo()
         try:
             repo = Path(tmp.name)
+            shutil.rmtree(repo / "src/modules/control-web")
+            shutil.rmtree(repo / "server-go/modules/control-web")
+            (repo / "docs/modules/control-web.md").unlink()
             source = repo / "src/modules/control-web/control_web_stub.c"
             source.parent.mkdir(parents=True, exist_ok=True)
             source.write_text("/* planted */\n", encoding="utf-8")
             document = "docs/modules/control-web.md"
-            self.mutate_descriptor(
-                repo, "control-web",
-                lambda value: value.update(
-                    {
-                        "ownership_complete": True,
-                        "docs": [document],
-                        "sources": ["src/modules/control-web/control_web_stub.c"],
-                    }
-                ),
-            )
+            (source.parent / "module.yaml").write_text(json.dumps({
+                "descriptor_version": 1,
+                "id": "control-web",
+                "dependencies": ["config", "gateway", "module-runtime", "protocols"],
+                "enabled_by_default": True,
+                "runtime_toggle": {"supported": True},
+                "ownership_complete": True,
+                "docs": [document],
+                "sources": ["src/modules/control-web/control_web_stub.c"],
+            }) + "\n", encoding="utf-8")
             (repo / document).parent.mkdir(parents=True, exist_ok=True)
             (repo / document).write_text("placeholder\n", encoding="utf-8")
             validator.validate_roots(repo, [Path("src/modules")])
@@ -416,7 +632,7 @@ class DescriptorTests(unittest.TestCase):
             tmp.cleanup()
 
     def test_latched_modules_all_have_a_non_empty_domain(self) -> None:
-        """Derived from the graph, so latching a tenth module needs no edit here."""
+        """Derived from the graph, so latching another module needs no edit here."""
         latched = 0
         for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
             descriptor = json.loads(path.read_text(encoding="utf-8"))
@@ -424,14 +640,18 @@ class DescriptorTests(unittest.TestCase):
                 continue
             latched += 1
             with self.subTest(identifier=path.parent.name):
-                self.assertTrue(descriptor.get("sources") or descriptor.get("private_headers"))
+                self.assertTrue(
+                    any(descriptor.get(field) for field in validator.OWNERSHIP_FIELDS)
+                )
         self.assertTrue(latched, "no latched descriptor found; the guard would be untested")
 
     def test_complete_ownership_requires_canonical_doc(self) -> None:
-        for identifier in ("benchmarks", "tools", "routing", "execution-policy", "kb-synthesis", "roundtable", "ir", "translation", "skills", "audit",
-                           "module-runtime", "gateway", "governance", "learning",
-                           "workspace", "vault", "config", "git", "delegates", "workflows",
-                           "memory"):
+        identifiers = []
+        for path in sorted((REPO_ROOT / "src/modules").glob("*/module.yaml")):
+            descriptor = json.loads(path.read_text(encoding="utf-8"))
+            if descriptor.get("ownership_complete") is True:
+                identifiers.append(path.parent.name)
+        for identifier in identifiers:
             tmp = self.production_repo()
             try:
                 repo = Path(tmp.name)
@@ -449,10 +669,12 @@ class DescriptorTests(unittest.TestCase):
         try:
             repo = Path(tmp.name)
             public = repo / "src/modules/roundtable/include/aimee/roundtable/public.h"
-            public.parent.mkdir(parents=True)
+            public.parent.mkdir(parents=True, exist_ok=True)
             public.write_text("/* public contract */\n", encoding="utf-8")
+            required, optional = validator.load_inventory(repo)
             self.assertEqual(
-                validator.validate_roots(repo, [Path("src/modules")]), 25
+                validator.validate_roots(repo, [Path("src/modules")]),
+                len(required | optional),
             )
         finally:
             tmp.cleanup()
@@ -879,7 +1101,8 @@ class OwnershipCliTests(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["schema_version"], 1)
         self.assertEqual(payload["result"], "PASS")
-        self.assertEqual(len(payload["descriptors"]), 25)
+        required, optional = validator.load_inventory(REPO_ROOT)
+        self.assertEqual(len(payload["descriptors"]), len(required | optional))
         for descriptor in payload["descriptors"]:
             self.assertEqual(
                 set(descriptor), {"id", "module_root", "ownership", "result"}

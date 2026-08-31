@@ -9,13 +9,14 @@
 #define _GNU_SOURCE
 #endif
 
-#include "db2/db2.h"
-#include "db2/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
-#include "db2/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
-#include "db2/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
-#include "db2/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
-#include "db2/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
-#include "db2/ontology_evolution.h"  /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/decision_log.h"        /* db2_decision_log_mark_revisit_due (P1) */
+#include "modules/db2/c/cross_repo_identity.h" /* db2_cross_repo_rebuild_identities (H0c) */
+#include "modules/db2/c/cross_repo_route.h"    /* db2_cross_repo_rebuild_routes (H0d) */
+#include "modules/db2/c/cross_repo_build.h"    /* db2_cross_repo_rebuild_build_deps (recall R2) */
+#include "modules/db2/c/cross_repo_stats.h"    /* db2_cross_repo_recompute_blocked_symbols */
+#include "modules/db2/c/ontology_evolution.h" /* db2_ontology_eval_candidates/_approve (§7.2 auto-promote) */
 #include "kb_curator_drain.h"
 #include "kb_curator_extract.h"
 #include "kb_curator_resolve_entities.h"
@@ -235,10 +236,21 @@ static void curator_index_set_status(const char *label)
  * kb_curator_queue_docs_for_project does) and returns 1=did work / 0=idle. */
 static int en_embedder(void)
 {
-   /* config_embedder_command_current resolves request > config > env > builtin;
-    * this stage only cares whether an embedder is CONFIGURED, so read the raw
-    * field rather than the resolved value, which is never empty. */
-   return config_embedder_command_field()[0] != '\0';
+   /* Ask the RESOLVER, not the stored field. config_embedder_command is explicit
+    * that EMBEDDER_URL outranks config precisely because it is how the running
+    * embedder announces itself, so "the bundled model and an operator's external
+    * endpoint arrive by the same route and obey one rule". The raw field is not on
+    * that route: a bundled deployment stores embedder_model and exports
+    * EMBEDDER_URL, never embedder_command, so this gate read empty and the doc/code
+    * embed stages never ran on the wizard's own recommended setup -- while query
+    * embedding kept working, because it goes through the resolver. A healthy KB
+    * that retrieves nothing, forever.
+    *
+    * Reading the raw field was correct when the resolver fell back to "builtin" and
+    * so could never answer "nothing configured". That fallback is gone: the resolver
+    * returns "" when no embedder is selected, which is exactly the signal this gate
+    * wants. */
+   return config_embedder_command_current(NULL)[0] != '\0';
 }
 static int en_evidence_embed(void)
 {
@@ -248,7 +260,7 @@ static int en_evidence_embed(void)
 static int stage_embed_code(const kb_curator_extract_opts_t *opts)
 {
    (void)opts;
-   if (!config_embedder_command_field()[0])
+   if (!config_embedder_command_current(NULL)[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -257,8 +269,13 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
    {
       kb_code_embed_result_t r;
       memset(&r, 0, sizeof(r));
-      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+      if (db2_maintenance_job_enter(DB2_MAINTENANCE_CODE_INDEXER, projects[i].name) != 0)
          continue;
+      if (kb_code_embed_refresh(projects[i].name, "changed_files", NULL, 0, 0, 0, 0, &r) != 0)
+      {
+         db2_maintenance_job_leave();
+         continue;
+      }
       total += (int)r.embedded;
 
       /* indexed -> embedded -> CURATED. The scan handler used to enqueue curation
@@ -272,6 +289,7 @@ static int stage_embed_code(const kb_curator_extract_opts_t *opts)
        * on a synthesis endpoint being configured. */
       if (kb_code_embed_project_fully_embedded(projects[i].name))
          kb_curator_queue_code_units_for_project(projects[i].name, NULL);
+      db2_maintenance_job_leave();
    }
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.code.embed", "embedded %d code/doc vector(s) across %d project(s)",
@@ -286,7 +304,11 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
     * sufficient.  Rotating one bounded project per pass prevents an early large
     * corpus from starving every later project in lexical name order. */
    static size_t next_project = 0;
-   if (!config_embedder_command_field()[0])
+   /* Copied, not held: the resolver hands back a thread-local buffer that the next
+    * call on this thread overwrites, and there are two calls below. */
+   char embedder[512];
+   snprintf(embedder, sizeof(embedder), "%s", config_embedder_command_current(NULL));
+   if (!embedder[0])
       return 0;
    project_info_t projects[CURATOR_PROJECT_SWEEP_MAX];
    int np = index_list_projects(projects, CURATOR_PROJECT_SWEEP_MAX);
@@ -294,21 +316,24 @@ static int stage_ingest_docs(const kb_curator_extract_opts_t *opts)
       return 0;
    size_t selected = next_project % (size_t)np;
    next_project = (selected + 1) % (size_t)np;
+   int reembed = db2_reembed_in_progress_get(NULL, NULL) == 1;
+   db2_maintenance_worker_t worker = reembed ? DB2_MAINTENANCE_REEMBED : DB2_MAINTENANCE_CURATOR;
+   if (db2_maintenance_job_enter(worker, projects[selected].name) != 0)
+      return 0;
    int total = 0;
-   int e = kb_doc_refresh(projects[selected].name, config_embedder_command_field(),
-                          CURATOR_DOC_SWEEP_BATCH);
+   int e = kb_doc_refresh(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (e > 0)
       total += e;
-   int b = kb_doc_embed_backfill(projects[selected].name, config_embedder_command_field(),
-                                 CURATOR_DOC_SWEEP_BATCH);
+   int b = kb_doc_embed_backfill(projects[selected].name, embedder, CURATOR_DOC_SWEEP_BATCH);
    if (b > 0)
       total += b;
+   db2_maintenance_job_leave();
    if (total > 0)
       aimee_log(LOG_DEBUG, "kb.docs.ingest", "ingested %d doc chunk(s) for project '%s'", total,
                 projects[selected].name);
    /* dim-change re-embed clears its maintenance marker once the backfill has caught
     * up (a pass that embedded nothing means every chunk has a vector). */
-   if (total == 0 && db2_reembed_in_progress_get(NULL, NULL) == 1)
+   if (total == 0 && reembed)
    {
       db2_reembed_in_progress_clear();
       aimee_log(LOG_INFO, "kb.reembed",
@@ -758,7 +783,6 @@ static size_t kb_curator_ordered_stages(kb_curator_stage_desc_t *out, size_t max
 static void *drain_thread_main(void *arg)
 {
    kb_curator_drain_ctx_t *ctx = (kb_curator_drain_ctx_t *)arg;
-
    /* Cold-start backfill: a quiescent / already-indexed corpus never produces a
     * built>0 event, so the incremental rebuild below would never fire and
     * cross_repo_route would stay empty — silently demoting every legitimate
@@ -808,42 +832,18 @@ static void *drain_thread_main(void *arg)
 
       /* Typed-fact extraction drain — runs every poll, independent of the
        * curator extract gates. Pulls "memory_facts" jobs enqueued by memory.store
-       * and runs the general LLM extractor over each memory's content. Gated on
-       * typed_facts_enabled (a no-op when off). */
-      if (config_typed_facts_enabled())
+       * and runs the general LLM extractor over each memory's content. No longer
+       * gated: config.typed_facts_enabled is retired and the layer is
+       * unconditional. */
       {
          int n = kb_memory_facts_drain(8);
          if (n > 0)
             aimee_log(LOG_DEBUG, "kb.memory.facts", "drained %d memory_facts job(s)", n);
 
-         /* §7.2 autonomous ontology reconciliation: promote provisional relations
-          * (novel predicates the extractor's "other" fallback staged) to active
-          * once they have recurred >= threshold times across sources, so facts
-          * using them become durable/recallable WITHOUT a human approving each.
-          * Default-on with typed facts; the threshold is operator-tunable via
-          * kb.typed_facts.promote_threshold (§8), falling back to the built-in. */
-         if (config_kb_typed_facts_auto_promote_enabled())
-         {
-            int thr = config_kb_typed_facts_promote_threshold() > 0
-                          ? config_kb_typed_facts_promote_threshold()
-                          : KB_ONTO_PROMOTE_DEFAULT_THRESHOLD;
-            char cands[KB_ONTO_PROMOTE_BATCH][REL_TYPE_NAME_MAX];
-            int nc = db2_ontology_eval_candidates(thr, cands, KB_ONTO_PROMOTE_BATCH);
-            for (int i = 0; i < nc; i++)
-            {
-               /* Never promote a generic catch-all bucket to active: it would make
-                * low-quality "misc" facts durable and can't be reconciled to a
-                * real predicate. The extractor is instructed not to emit these,
-                * but exclude them defensively. */
-               if (strcmp(cands[i], "other") == 0 || strcmp(cands[i], "unknown") == 0 ||
-                   strcmp(cands[i], "misc") == 0 || strcmp(cands[i], "unspecified") == 0)
-                  continue;
-               if (db2_ontology_approve(cands[i]) == 0)
-                  aimee_log(LOG_INFO, "kb.ontology.promote",
-                            "auto-promoted relation '%s' to active (>= %d observations)", cands[i],
-                            thr);
-            }
-         }
+         /* Observation counts only affect the operator queue's priority. P7
+          * deliberately removes the former count-based ontology promotion:
+          * activating a provisional relation is an authenticated governance
+          * decision, regardless of how often extraction observed it. */
       }
 
       /* Backfill: queue extract_doc curation for docs that entered kb_documents
@@ -1092,24 +1092,15 @@ void kb_curator_drain_init(kb_curator_drain_ctx_t *ctx)
       return;
    memset(ctx, 0, sizeof(*ctx));
 
-   if (!config_kb_curator_extract_docs_enabled() && !config_kb_curator_extract_code_enabled() &&
-       !config_kb_curator_resolve_entities_enabled() &&
-       !config_kb_curator_index_narrative_enabled() && !config_kb_curator_index_claims_enabled() &&
-       !config_kb_curator_detect_contradictions_enabled() &&
-       !config_kb_curator_index_code_unit_enabled() &&
-       !config_kb_curator_link_artifacts_enabled() && !config_kb_curator_synthesize_enabled() &&
-       !config_kb_curator_promote_entity_enabled() &&
-       !config_kb_curator_projection_graph_enabled() && !config_kb_evidence_embed_enabled() &&
-       !config_learning_synthesize_enabled() && !config_typed_facts_enabled())
-   {
-      aimee_log(LOG_DEBUG, "kb.curator.drain",
-                "all gates off (kb_curator_extract_docs_enabled=0,"
-                " kb_curator_extract_code_enabled=0, kb_curator_resolve_entities_enabled=0,"
-                " kb_curator_index_narrative_enabled=0, kb_curator_index_claims_enabled=0,"
-                " kb_evidence_embed_enabled=0, learning_synthesize_enabled=0);"
-                " drain thread not started");
-      return;
-   }
+   /* THE "ALL GATES OFF" EARLY RETURN IS GONE, because one of the gates it
+    * tested no longer exists and the work behind it is now unconditional.
+    *
+    * This skipped starting the drain thread when every curator gate was off,
+    * with config.typed_facts_enabled as the last term. The typed-fact drain runs
+    * every poll and is no longer gated, so the thread always has work to do:
+    * keeping the check would mean an install with the curator stages off never
+    * drains "memory_facts" jobs, and typed facts would silently stop being
+    * extracted -- exactly the class of silent-disable this retirement removes. */
 
    ctx->stop = 0;
 

@@ -14,7 +14,7 @@
 #include "wfe_autonomy.h"
 #include "wfe_blocks.h" /* wfe_worktree_cleanup (terminal) + wfe_worktree_orphan_gc (age-based) */
 #include "wfe_iface.h"  /* wfe_repo_local — resolve each item's own repo for cleanup */
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 #include <pthread.h>
 #include <stdio.h>

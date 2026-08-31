@@ -17,9 +17,15 @@
  * `acfg` may be NULL to check only the built-in/adapter sets. */
 int provider_name_settable(const char *name, const agent_config_t *acfg);
 #include "vault_principal.h"
+#include "memory_authority.h" /* memory_authority_t — attested write authority */
 
 /* Forward declaration */
 typedef struct cJSON cJSON;
+
+/* Authenticated hook memory interception, implemented with the other hook
+ * helpers so the main method table does not own storage-policy details. */
+int server_memory_intercept(const char *tool, const char *tool_input, const char *cwd, cJSON *req,
+                            const char *client, char *msg, size_t msg_len);
 
 #define SERVER_PROTOCOL_VERSION 1
 /* Per-server cap on concurrent connections held in the dispatch table.
@@ -49,13 +55,54 @@ typedef struct cJSON cJSON;
 #define SERVER_LISTEN_BACKLOG  128
 #define CONN_WRITE_DEADLINE_MS 10000 /* 10 seconds */
 
+/* The largest /v1 request body the HTTP listener will accept (the roundtable
+ * review path has its own, larger cap). Lives here rather than inside
+ * server_http.c so a CLIENT can refuse an oversized request itself and say why:
+ * a body over this is dropped by the listener, which the client could otherwise
+ * only report as "could not reach the endpoint" — blaming a server that is up
+ * and answering. The sibling LIMIT_* values below are already documented against
+ * it. */
+#define SHTTP_MAX_BODY (4 * 1024 * 1024)
+
+/* The roundtable review artifact is hard-limited where the CLI reads it --
+ * marshal_read_stdin_limited / marshal_read_file_limited in cli_v1_routes.c, all
+ * three call sites -- so a review body is that artifact plus a small envelope.
+ *
+ * THE ARTIFACT IS BOUNDED BY THE REVIEWING MODEL, NOT BY THE WIRE. It is the
+ * thing being read, so an artifact bigger than the context that has to hold it
+ * cannot be reviewed -- it is truncated or refused downstream, and accepting it
+ * here only moves the failure later. A 1M-token context holds roughly 3-4MB of
+ * code (code tokenizes at about 3-3.5 chars/token), so 8MB is already twice the
+ * largest artifact that can be read, with room for tokenizer variance and
+ * multi-byte UTF-8. 16MB was inherited from 842ff35656 ("preserve exact review
+ * artifacts"), a Go-side change that touched the C client limit in passing; it
+ * had no recorded rationale.
+ *
+ * For scale on this repo: the largest single source file is 0.25MB, and EVERY
+ * .c and .h in src/ concatenated is 32.8MB -- larger than even the 16MB limit
+ * this replaces, so "review the whole tree at once" never fit either way.
+ *
+ * The transport cap is TWICE the artifact: real review text and diffs escape at
+ * about 1.02x, and the doubling covers the envelope plus quote/backslash-dense
+ * content with room to spare.
+ *
+ * It was 128MB. That assumed a 6x blowup -- every byte a control character
+ * escaping to \u00XX -- and rounded up to 2^27, which made this route accept 32x
+ * what the rest of /v1 does. The artifact reaches cJSON as a NUL-terminated
+ * string, so the all-control-bytes case it was sized for cannot arrive intact.
+ * If an escape-dense artifact ever genuinely needs more room, raise
+ * ROUNDTABLE_MAX_ARTIFACT and let the cap follow; do not re-inflate the
+ * transport limit on its own, because the listener allocates against it. */
+#define ROUNDTABLE_MAX_ARTIFACT   (8 * 1024 * 1024)
+#define SHTTP_MAX_ROUNDTABLE_BODY (2 * ROUNDTABLE_MAX_ARTIFACT)
+
 /* Per-method payload size limits */
-#define LIMIT_MEMORY     (256 * 1024)        /* 256KB for memory operations */
-#define LIMIT_TOOL       (4 * 1024 * 1024)   /* 4MB for tool I/O */
-#define LIMIT_DELEGATE   (4 * 1024 * 1024)   /* 4MB: supports 2MB prompt-file + JSON overhead */
-#define LIMIT_ROUNDTABLE (128 * 1024 * 1024) /* 16MB artifact plus worst-case JSON escaping */
-#define LIMIT_CHAT       (512 * 1024)        /* 512KB for chat messages */
-#define LIMIT_INGEST     (1024 * 1024)       /* 1MB: client-pushed code files (kb req cap) */
+#define LIMIT_MEMORY     (256 * 1024)      /* 256KB for memory operations */
+#define LIMIT_TOOL       (4 * 1024 * 1024) /* 4MB for tool I/O */
+#define LIMIT_DELEGATE   (4 * 1024 * 1024) /* 4MB: supports 2MB prompt-file + JSON overhead */
+#define LIMIT_ROUNDTABLE SHTTP_MAX_ROUNDTABLE_BODY /* artifact + JSON escaping; see above */
+#define LIMIT_CHAT       (512 * 1024)              /* 512KB for chat messages */
+#define LIMIT_INGEST     (1024 * 1024)             /* 1MB: client-pushed code files (kb req cap) */
 #define LIMIT_TRANSCRIPT                                                                           \
    (3 * 1024 * 1024)               /* 3MB: session transcript snapshots (< SHTTP_MAX_BODY) */
 #define LIMIT_DEFAULT (256 * 1024) /* 256KB default */
@@ -82,6 +129,9 @@ typedef struct cJSON cJSON;
 #define CAP_INDEX_ADMIN    (1u << 12)
 #define CAP_SESSION_READ   (1u << 13)
 #define CAP_SESSION_ADMIN  (1u << 14)
+/* Operator/auditor-only. Dashboard and audit views aggregate principals,
+ * workspaces, prompts, tool arguments, and policy outcomes; a generic bearer
+ * must never receive this capability merely because it can perform reads. */
 #define CAP_DASHBOARD_READ (1u << 15)
 /* Operator-level: approve/reject autonomous-workflow human gates. Deliberately
  * OUTSIDE CAPS_AUTHENTICATED (full-trust / UDS / webchat-admin only), so a mere
@@ -105,14 +155,26 @@ typedef struct cJSON cJSON;
  * any capability check. kb then independently requires admin or team-lead authority. */
 #define CAP_GRANT_ADMIN (1u << 18)
 
+/* Destructive memory administration: memory.delete — the ONLY memory operation
+ * that can destroy a stored value rather than version it. Deliberately separate
+ * from CAP_MEMORY_WRITE, mirroring rules.delete/CAP_RULES_ADMIN vs rules.*: a
+ * grant that lets an agent remember must not, by itself, let it forget. It sits
+ * inside CAPS_AUTHENTICATED (an operator-grade bearer may still administer its
+ * own store) but outside the narrower memory:write grants handed to delegates. */
+#define CAP_MEMORY_ADMIN (1u << 19)
+/* Explicit authority to read across project/workspace boundaries.  Kept out of
+ * every bearer set; only the filesystem-attested UDS/operator path receives
+ * CAPS_ALL. Caller JSON such as scope=all is never authority by itself. */
+#define CAP_CROSS_SCOPE_READ (1u << 20)
+
 /* Composite capability sets */
-#define CAPS_ALL 0x7FFFFu
+#define CAPS_ALL 0x1FFFFFu
 #define CAPS_READ_ONLY                                                                             \
    (CAP_CHAT | CAP_MEMORY_READ | CAP_RULES_READ | CAP_INDEX_READ | CAP_SESSION_READ |              \
-    CAP_DASHBOARD_READ | CAP_DESCRIBE_READ)
+    CAP_DESCRIBE_READ)
 #define CAPS_AUTHENTICATED                                                                         \
    (CAPS_READ_ONLY | CAP_DELEGATE | CAP_TOOL_EXECUTE | CAP_TOOL_BASH | CAP_TOOL_WRITE |            \
-    CAP_MEMORY_WRITE | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
+    CAP_MEMORY_WRITE | CAP_MEMORY_ADMIN | CAP_RULES_ADMIN | CAP_SESSION_ADMIN)
 
 /* aimee.api.remote_writes levels: how far an authorized TCP bearer may go. The
  * UDS path is always full (CAPS_ALL); these gate the optional TCP listener.
@@ -267,15 +329,27 @@ server_ctx_t *server_active_ctx(void);
 int server_send_response(server_conn_t *conn, cJSON *resp);
 int server_send_error(server_conn_t *conn, const char *message, const char *request_id);
 
-/* Fault classes for server_send_error_kind. The dispatch envelope otherwise says
- * only "error", which leaves anything mapping it to HTTP unable to separate a
- * caller's mistake from a server-side failure — so runtime-web called all of
- * them 502. Optional and additive: an unclassified error keeps the old
- * behaviour. */
+/* Fault classes for server_send_error_kind. The runtime-web process maps these
+ * over the event bus and the server adds its status to the dispatch envelope.
+ * Optional and additive: an unclassified or unavailable decision remains a
+ * generic 502 at the physical web boundary. */
 #define SERVER_ERR_INVALID_ARGUMENT  "invalid_argument"  /* caller sent bad/missing input */
 #define SERVER_ERR_NOT_FOUND         "not_found"         /* named thing does not exist */
 #define SERVER_ERR_PERMISSION_DENIED "permission_denied" /* caller not allowed */
 #define SERVER_ERR_UNAVAILABLE       "unavailable"       /* a dependency is down */
+#define SERVER_ERR_PAYLOAD_TOO_LARGE "payload_too_large" /* request exceeds method budget */
+
+/* The typed error as a VALUE, for commands that RETURN a result rather than write
+ * one. jo_err is not a substitute: it omits `kind` and the derived `http_status`,
+ * so splitting an RPC handler through it downgrades a typed error to an untyped
+ * one. Same function builds both forms, so they cannot drift. */
+cJSON *server_error_kind_json(const char *kind, const char *message, const char *request_id);
+
+/* Add or replace the typed-error classification on an existing response. This
+ * preserves richer dependency fields (retryability, dependency, retry delay)
+ * while giving the HTTP boundary the same authoritative status mapping used by
+ * server_error_kind_json(). */
+void server_error_kind_apply(cJSON *resp, const char *kind);
 
 int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id);
@@ -303,6 +377,50 @@ int server_ct_equal(const char *a, const char *b);
 uint32_t server_capability_for_method(const char *method);
 const method_policy_t *server_policy_for_method(const char *method);
 
+/* Does this request come from a PERSON?
+ *
+ * Capability answers what a caller may do; this answers who it is, which is a
+ * different question and the one the memory and typed-fact layers ask before
+ * letting a write speak as the user (typed-fact §5, memory_authority.h).
+ *
+ * The answer is the ACCOUNT, and nothing else. Authentication happens once, at
+ * message receipt: the channel (mTLS), the session (bearer) and the account
+ * (OIDC / PAM host account / webuser / enrolled first-user cert) are each
+ * verified there, and a request that fails any of them never reaches a handler.
+ * By the time this is asked, identity is already proven -- so the only question
+ * left is whether the proven identity names a person, which is exactly "is
+ * there an account".
+ *
+ * This deliberately does NOT look at the transport. An earlier version keyed
+ * off attested_transport_t and treated UDS/webchat as people and everything
+ * else -- including mTLS and OIDC-over-TCP -- as anonymous agents. That was
+ * wrong twice over: an mTLS client cert names a specific enrolled machine
+ * (narrower than a person, not weaker), and an OIDC subject is the same account
+ * whichever socket carried it. It also disagreed with aimee-kb, which derives
+ * the same decision from the authenticated principal, so one caller could be a
+ * person to one daemon and an agent to the other.
+ *
+ * The account comes from request_context_caller_subject(), which is
+ * verify-then-trust at every entry: a kernel-verified UDS peer uid resolved to
+ * a host account, a verified KB-signed identity token's subject, an enrolled
+ * client certificate's grant, or a proxy stamp honoured only from the root UDS
+ * hop or a caller presenting the vaulted ingress secret. A plain authorized TCP
+ * client cannot choose its own.
+ *
+ * Empty account -> 0. That is a bare bearer: it authorizes the call but names
+ * nobody, so it cannot speak as the user. Such a caller is not refused
+ * anything -- it acts with model authority, which is non-destructive and cannot
+ * outrank the user's own facts. */
+int server_account_is_person(const char *account);
+
+/* The memory-write authority a request from `account` has earned. Shorthand for
+ * the above at the memory surfaces, so the mapping lives in exactly one place. */
+memory_authority_t server_account_memory_authority(const char *account);
+
+/* The verified account for the request being handled, or "" if it proved none.
+ * The single point every surface below ingress asks "who is this". */
+const char *server_request_account(void);
+
 /* Session handlers (server_session.c) */
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_session_record_transcript(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -325,19 +443,59 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
  * active identity is missing; caller must clear the client context. */
 int server_memory_scope_begin(cJSON *req);
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* The same command in the shape the core command table routes: takes arguments,
+ * RETURNS the result, writes to no connection. The handler above is now only the
+ * RPC surface's connection write. This is the shape every surface needs, and the
+ * lack of it is why capability surface was declared four separate times. */
+/* Takes the write's authority for the same reason: it is persisted as the new
+ * row's provenance and governs what the typed-fact drain may later mine from it
+ * (memory.h). handle_memory_store derives it from the connection's attestation. */
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority);
+cJSON *memory_list_command(const cJSON *req);
+cJSON *memory_get_command(cJSON *req);
+/* Takes the request's authenticated ACCOUNT because only a person's delete
+ * DESTROYS; a caller with no account that clears CAP_MEMORY_ADMIN retires the
+ * row instead. The response reports which happened via `destroyed`. */
+cJSON *memory_delete_command(cJSON *req, const char *account);
+/* Typed-fact correction surface (§3 / §4); all CAP_MEMORY_WRITE.
+ *
+ * facts_retract_command takes the request's authenticated ACCOUNT because a
+ * retraction's authority (typed-fact §5) decides whether it may delete a
+ * user-stated Class-A fact. It is derived from that account via
+ * server_account_is_person(), never from the request body and never from which
+ * socket the request arrived on. */
+cJSON *facts_retract_command(cJSON *req, const char *account);
+cJSON *entities_merge_command(cJSON *req);
+cJSON *entities_unmerge_command(cJSON *req);
 int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_review_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_reject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_memory_restore(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int memory_request_positive_id(cJSON *req, const char *field, int64_t *out);
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+/* Canonical investigation packet shared by the command and MCP surfaces.  The
+ * returned object is owned by the caller.  It performs the product-level
+ * context -> hybrid fallback and attaches systemic-scope evidence. */
+cJSON *server_index_investigate_packet(const char *query, const char *symbol, const char *project,
+                                       int include_code, int fallback_enabled);
+int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_index_deps(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_blast_radius_preview(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -358,6 +516,7 @@ int handle_kb_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_docs_push(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_ingest_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_optimize_export(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -424,7 +583,9 @@ int handle_identity_diff(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_tool_execute(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
-int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_delegate_reservation_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 /* Deepening sweep (Part B): analysis-only — proposes seams per area and re-grounds
  * each against the live code index; returns a JSON report. Files nothing. */
 int handle_dev_sweep(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
@@ -464,6 +625,7 @@ int handle_coord_job_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_aux_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_config_deploy_env(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_config_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_aux_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_delegate_reply(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);

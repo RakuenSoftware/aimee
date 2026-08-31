@@ -175,10 +175,32 @@ static void test_result_from_response(void)
    char *s5 = td_search_result_from_response(r5, "nothing");
    assert(s5 && strncmp(s5, "error:", 6) != 0);
    assert(strstr(s5, "No knowledge-base results"));
+   assert(strstr(s5, "<aimee_retrieval_outcome>"));
+   assert(strstr(s5, "\"status\":\"empty\""));
+   assert(strstr(s5, "\"action\":\"web_search\""));
+   assert(strstr(s5, "\"policy_recheck\":true"));
+   assert(strstr(s5, "\"authorized\":false"));
    free(s5);
    cJSON_Delete(r5);
 
    printf("  ok: result_from_response (hits/legacy/error/null/empty)\n");
+}
+
+static void test_typed_continuations(void)
+{
+   char *empty = td_render_retrieval_continuation(TD_RETRIEVAL_EMPTY, "memory", "a \"query\"",
+                                                  "no local facts");
+   assert(empty && strstr(empty, "\"status\":\"empty\""));
+   assert(strstr(empty, "a \\\"query\\\""));
+   assert(strstr(empty, "\"required_capability\":\"external_read\""));
+   free(empty);
+
+   char *failed = td_render_retrieval_continuation(TD_RETRIEVAL_FAILED, "memory", "q", "down");
+   assert(failed && strstr(failed, "\"status\":\"failed\""));
+   assert(strstr(failed, "\"continuations\":[]"));
+   assert(strstr(failed, "web_search") == NULL);
+   free(failed);
+   printf("  ok: typed continuations\n");
 }
 
 int main(void)
@@ -190,6 +212,7 @@ int main(void)
    test_extract();
    test_extract_guards();
    test_result_from_response();
+   test_typed_continuations();
    printf("all td_search_render tests passed\n");
    return 0;
 }

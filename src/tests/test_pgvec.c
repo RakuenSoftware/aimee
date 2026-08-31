@@ -1,4 +1,4 @@
-/* test_pgvec.c: smoke tests for the pgvector transport in src/db2/.
+/* test_pgvec.c: smoke tests for the pgvector transport in src/modules/db2/c/.
  *
  * The test shim provides sqlite-backed aimee_pg_* stubs.  pgvec SQL will
  * fail at the statement level (sqlite does not understand the vector type or
@@ -14,14 +14,14 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/lifecycle.h" /* db2_set_embedding_dim */
-#include "../db2/pgvec_transport.h"
-#include "../db2/pgvec_scope_query.h"
-#include "../db2/memory_vectors.h"
-#include "../db2/kb_vectors.h"
-#include "../db2/vector_verify.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/lifecycle.h" /* db2_set_embedding_dim */
+#include "../modules/db2/c/pgvec_transport.h"
+#include "../modules/db2/c/pgvec_scope_query.h"
+#include "../modules/db2/c/memory_vectors.h"
+#include "../modules/db2/c/kb_vectors.h"
+#include "../modules/db2/c/vector_verify.h"
 
 static void test_collection_names(void)
 {
@@ -63,6 +63,17 @@ static void test_collection_names(void)
    assert(strcmp(code_unit, narr) != 0);
    assert(strcmp(code_unit, claim) != 0);
    printf("pgvec: collection names distinct and non-empty OK\n");
+}
+
+static void test_collection_readiness_accepts_supported_ann_indexes(void)
+{
+   assert(pgvec_table_ready(PGVEC_MEMORY_TABLE) == 1); /* HNSW */
+   assert(pgvec_table_ready(PGVEC_KB_TABLE) == 1);     /* DiskANN */
+   /* Existing indexes satisfy ensure without trying to create a redundant
+    * second ANN index (SQLite cannot execute either backend's DDL). */
+   assert(pgvec_ensure_index(PGVEC_MEMORY_TABLE, 4, 0) == 0);
+   assert(pgvec_ensure_index(PGVEC_KB_TABLE, 4, 0) == 0);
+   printf("pgvec: HNSW and DiskANN both satisfy collection readiness OK\n");
 }
 
 static void test_schema_version_nonempty(void)
@@ -222,13 +233,13 @@ static void test_scope_hints(void)
 
 static void test_memory_scope_sql_uses_canonical_owner_scope(void)
 {
-   const char *filter = PGVEC_MEMORY_SCOPE_FILTER_SQL;
+   const char *filter = PGVEC_MEMORY_RECALL_FILTER_SQL;
    const char *rank = PGVEC_MEMORY_SCOPE_RANK_SQL;
-   assert(strstr(filter, "memory_scopes") != NULL);
-   assert(strstr(filter, "memory_workspaces") != NULL);
-   assert(strstr(filter, "memory_units") != NULL);
+   assert(strstr(filter, "memories") != NULL);
+   assert(strstr(filter, "lifecycle_state='active'") != NULL);
+   assert(strstr(filter, "scope_type") != NULL);
    assert(strstr(filter, "e.point_id - 1000000000000") != NULL);
-   assert(strstr(rank, "memory_workspaces") != NULL);
+   assert(strstr(rank, "scope_value") != NULL);
    printf("pgvec: canonical memory owner scope SQL OK\n");
 }
 
@@ -265,41 +276,49 @@ static void test_public_api_symbols(void)
    printf("pgvec: all public API symbols resolve OK\n");
 }
 
-static void test_corpus_index_type_hnsw_default(void)
+/* pgvectorscale is the DEFAULT index, and these cases exist because the tree
+ * used to say otherwise in two places at once: this policy returned HNSW for an
+ * unset setting and gated "auto" behind a million-row threshold, while
+ * schema.sql created DiskANN whenever the extension was present. Two policies,
+ * opposite defaults, and no production caller of this one to make the
+ * disagreement visible. */
+static void test_corpus_index_type_defaults_to_diskann(void)
 {
-   /* auto + no vectorscale + below threshold → hnsw */
-   const char *t = pgvec_corpus_index_type("auto", 0, 0, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* explicit hnsw → always hnsw regardless of scale or extension */
-   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   /* NULL/empty configured → hnsw */
-   t = pgvec_corpus_index_type(NULL, 0, 1, 1000000);
-   assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type default hnsw OK\n");
+   /* Unset, "auto" and "diskann" all mean the same thing: use the access method
+    * this system indexes with, whenever it is installed. */
+   const char *t = pgvec_corpus_index_type(NULL, 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("auto", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+   t = pgvec_corpus_index_type("diskann", 0, 1, 0);
+   assert(strcmp(t, "diskann") == 0);
+
+   /* A corpus of ZERO rows still gets DiskANN. The old threshold would have sent
+    * it to HNSW, which is exactly backwards for a small corpus of wide vectors:
+    * HNSW caps at 2000 dimensions and DiskANN does not, so the threshold sent
+    * the one case that cannot use HNSW straight to it. */
+   t = pgvec_corpus_index_type("auto", 0, 1, 1000000);
+   assert(strcmp(t, "diskann") == 0);
+   printf("pgvec: corpus_index_type defaults to diskann OK\n");
 }
 
-static void test_corpus_index_type_diskann(void)
+static void test_corpus_index_type_falls_back_without_the_extension(void)
 {
-   /* diskann forced + vectorscale present → diskann */
-   const char *t = pgvec_corpus_index_type("diskann", 0, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* diskann forced + vectorscale absent → hnsw fallback */
-   t = pgvec_corpus_index_type("diskann", 0, 0, 1000000);
+   /* Without pgvectorscale there is only one answer available. */
+   const char *t = pgvec_corpus_index_type(NULL, 0, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   /* auto + above threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 2000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + at threshold + vectorscale present → diskann */
-   t = pgvec_corpus_index_type("auto", 1000000, 1, 1000000);
-   assert(strcmp(t, "diskann") == 0);
-   /* auto + above threshold + vectorscale absent → hnsw */
-   t = pgvec_corpus_index_type("auto", 2000000, 0, 1000000);
+   t = pgvec_corpus_index_type("auto", 2000000, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   /* auto + below threshold + vectorscale present → hnsw */
-   t = pgvec_corpus_index_type("auto", 999999, 1, 1000000);
+   t = pgvec_corpus_index_type("diskann", 0, 0, 0);
    assert(strcmp(t, "hnsw") == 0);
-   printf("pgvec: corpus_index_type diskann selection OK\n");
+
+   /* An operator who names HNSW gets it even where DiskANN is available: a
+    * setting that was silently overridden would be a lie. */
+   t = pgvec_corpus_index_type("hnsw", 999999999, 1, 0);
+   assert(strcmp(t, "hnsw") == 0);
+   printf("pgvec: corpus_index_type falls back without vectorscale OK\n");
 }
 
 static void test_corpus_ensure_index_graceful(void)
@@ -324,6 +343,7 @@ int main(void)
    db2_set_embedding_dim(4);
 
    test_collection_names();
+   test_collection_readiness_accepts_supported_ann_indexes();
    test_schema_version_nonempty();
    test_upsert_graceful_on_no_db();
    test_search_graceful_on_no_db();
@@ -332,8 +352,8 @@ int main(void)
    test_memory_scope_sql_uses_canonical_owner_scope();
    test_latency_snapshot();
    test_public_api_symbols();
-   test_corpus_index_type_hnsw_default();
-   test_corpus_index_type_diskann();
+   test_corpus_index_type_defaults_to_diskann();
+   test_corpus_index_type_falls_back_without_the_extension();
    test_corpus_ensure_index_graceful();
 
    db2_test_shim_close();

@@ -13,6 +13,10 @@ AIMEE_SERVER="$REPO_ROOT/aimee-server"
 TEST_HOME=$(mktemp -d /tmp/aimee-test-home-XXXXXX)
 export HOME="$TEST_HOME"
 export AIMEE_HOME="$HOME/.config/aimee"
+# The client reaches a server ONLY through an explicitly configured endpoint; it
+# no longer discovers a co-located one. This harness runs both halves on one box
+# on purpose, so it states the endpoint rather than relying on a fallback.
+export AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock"
 export AIMEE_SOCK="$AIMEE_HOME/aimee.sock"
 unset AIMEE_PROFILE
 mkdir -p "$AIMEE_HOME"
@@ -117,6 +121,61 @@ fi
 check "version" $AIMEE version
 check "version flag" $AIMEE --version
 check_output "version --json" "\"version\"" $AIMEE --json version
+check_output "presence default action --json" "[" $AIMEE --json presence
+check_output "primary default action --json" "\"agent\"" $AIMEE --json primary
+check_output "profile list --json" "\"profiles\":[" $AIMEE --json profile list
+check_output "profile current --json" "\"profile\":\"default\"" \
+    $AIMEE --json profile current
+check_output "profile create --json" "\"profile\":\"cli-json-test\"" \
+    $AIMEE --json profile create cli-json-test
+check_output "profile show --json" "\"config\":\"present\"" \
+    $AIMEE --json profile show cli-json-test
+check_output "profile delete --json" "\"deleted\":\"cli-json-test\"" \
+    $AIMEE --json profile delete cli-json-test --force
+
+# --- Unknown commands ---
+# A typo used to take the same fallback as a genuine routing gap and answer
+# "command 'foobarbaz' has no /v1 route", pointing at the route table for a word
+# that was never a command. It must name the typo instead.
+check_output "unknown command names itself" "unknown command 'foobarbaz'" \
+    $AIMEE foobarbaz
+check_output "unknown command points at help" "aimee help --all" $AIMEE foobarbaz
+check_output_not_contains "unknown command does not blame the route table" \
+    "has no /v1 route" $AIMEE foobarbaz
+check_output "unknown command --json" "\"message\"" $AIMEE --json foobarbaz
+# A real command whose family has subcommands still names the subcommand, and a
+# real-but-unroutable command still reports the routing gap: that diagnostic is
+# for maintainers and must survive.
+check_output "wrong subcommand names the subcommand" "is not a subcommand of" \
+    $AIMEE economizer status
+
+# --- {id}-bearing routes with the id missing ---
+# `workspace get` with no path used to answer "'workspace.get' has no /v1 route",
+# pointing at the route table when the route is present and correct -- the same
+# command with a path works. It must name the missing argument instead, and must
+# not also claim the server request failed, since no request was attempted.
+check_output "missing path-id argument names the argument" "needs an argument" \
+    $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the route table" \
+    "has no /v1 route" $AIMEE workspace get
+check_output_not_contains "missing argument does not blame the server" \
+    "request failed" $AIMEE workspace get
+# The same command WITH the argument still routes.
+check_output_not_contains "workspace get with a path still routes" \
+    "needs an argument" $AIMEE workspace get /tmp
+
+# --- Server-owned config over /v1 (roles, personas) ---
+# These moved off a hardcoded http_uds_request() onto cli_v1_path_request(), so
+# they follow whichever transport is configured. This run has no remote endpoint,
+# so it is the local-socket regression guard for that swap.
+check_output "roles list over local socket" "review" $AIMEE roles list
+check_output "roles list --json" "\"role_templates\"" $AIMEE --json roles list
+check_output "roles show" "max_turns" $AIMEE roles show review
+check_output "roles show unknown is a clean 404" "no such role template" \
+    $AIMEE roles show zzz-no-such-role
+check_output_not_contains "roles does not report the server unreachable" \
+    "is not reachable" $AIMEE roles list
+check_output "persona list over local socket" "engineer" $AIMEE persona list
 
 # --- Memory (read-only baseline; write/KB routing lives in service tests) ---
 check_output "memory list json" "[" $AIMEE --json memory list

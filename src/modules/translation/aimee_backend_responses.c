@@ -24,6 +24,48 @@ static const char *ostr(const cJSON *o, const char *k)
    return (it && cJSON_IsString(it)) ? it->valuestring : NULL;
 }
 
+/* See aimee_backend.h: accepts `summary` as a bare string OR as an array of typed
+ * parts, so neither parser has to bet on which shape the wire uses. */
+char *responses_reasoning_summary_text(const cJSON *item)
+{
+   const cJSON *summary = item ? cJSON_GetObjectItemCaseSensitive((cJSON *)item, "summary") : NULL;
+   if (!summary)
+      return NULL;
+   if (cJSON_IsString(summary))
+      return (summary->valuestring && summary->valuestring[0]) ? strdup(summary->valuestring)
+                                                               : NULL;
+   if (!cJSON_IsArray(summary))
+      return NULL;
+
+   /* Join the parts' `text` with blank lines, mirroring how a message's content
+    * parts are read. Parts without text (a future part kind) are skipped rather
+    * than rendered as gaps. */
+   char *acc = NULL;
+   size_t len = 0;
+   const cJSON *part = NULL;
+   cJSON_ArrayForEach(part, summary)
+   {
+      const char *t = ostr(part, "text");
+      if (!t || !t[0])
+         continue;
+      size_t add = strlen(t);
+      size_t sep = len ? 2 : 0; /* "\n\n" between parts */
+      char *n = realloc(acc, len + sep + add + 1);
+      if (!n)
+      {
+         free(acc);
+         return NULL;
+      }
+      acc = n;
+      if (sep)
+         memcpy(acc + len, "\n\n", sep);
+      memcpy(acc + len + sep, t, add);
+      len += sep + add;
+      acc[len] = '\0';
+   }
+   return acc;
+}
+
 /* grow out->content by one; return the new zeroed block or NULL on OOM. */
 static aimee_block_t *grow_content(aimee_response_t *out)
 {
@@ -102,6 +144,10 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
             cJSON_AddStringToObject(fc, "type", "function_call");
             cJSON_AddStringToObject(fc, "call_id", b->tool_id ? b->tool_id : "");
             cJSON_AddStringToObject(fc, "name", b->tool_name ? b->tool_name : "");
+            /* Only when set: a plain tool has no group, and an empty `namespace`
+             * would claim one that does not exist. */
+            if (b->tool_namespace && b->tool_namespace[0])
+               cJSON_AddStringToObject(fc, "namespace", b->tool_namespace);
             char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
             cJSON_AddStringToObject(fc, "arguments", args ? args : "{}");
             free(args);
@@ -132,9 +178,31 @@ cJSON *responses_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
+         /* Re-emit anything the IR does not model as a plain named function exactly
+          * as it arrived. A Codex client's `namespace` groups carry their nested tool
+          * list under `tools`, and flattening one into a single function named
+          * mcp__aimee lost all nineteen aimee tools and made the model call a name
+          * Codex then rejected ("unsupported call: mcp__aimee"). `web_search` and
+          * friends carry no name at all, and synthesising `"name": ""` for them made
+          * the provider reject the entire request.
+          *
+          * Only a sidecar whose own type is `function` is safe to re-render from the
+          * modelled fields; everything else goes back verbatim. */
+         const cJSON *raw = ir->tools[i].raw;
+         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
+         int raw_is_function = cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0;
+         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+         {
+            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
+            if (verbatim)
+               cJSON_AddItemToArray(tools, verbatim);
+            continue;
+         }
+         if (!ir->tools[i].name || !ir->tools[i].name[0])
+            continue; /* unnamed and unmodelled: never emit name:"" */
          cJSON *t = cJSON_CreateObject();
          cJSON_AddStringToObject(t, "type", "function");
-         cJSON_AddStringToObject(t, "name", ir->tools[i].name ? ir->tools[i].name : "");
+         cJSON_AddStringToObject(t, "name", ir->tools[i].name);
          if (ir->tools[i].description)
             cJSON_AddStringToObject(t, "description", ir->tools[i].description);
          cJSON_AddItemToObject(t, "parameters",
@@ -183,6 +251,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
             b->raw = cJSON_Duplicate(item, 1);
             b->tool_id = dupstr(ostr(item, "call_id"));
             b->tool_name = dupstr(ostr(item, "name"));
+            b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
             b->tool_input = args ? cJSON_Parse(args) : NULL;
             saw_tool = 1;
@@ -194,7 +263,7 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
                goto oom;
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
-            b->text = dupstr(ostr(item, "summary"));
+            b->text = responses_reasoning_summary_text(item);
          }
          else if (type && strcmp(type, "message") == 0)
          {
@@ -232,6 +301,18 @@ int responses_backend_parse(const cJSON *resp, aimee_response_t *out, char *err,
          out->usage_in = (long)in->valuedouble;
       if (ou && cJSON_IsNumber(ou))
          out->usage_out = (long)ou->valuedouble;
+      /* CACHED PROMPT TOKENS. Responses reports them in a sibling object,
+       * usage.input_tokens_details.cached_tokens -- the same shape as Chat's
+       * prompt_tokens_details, under a different name. Reading only the two flat
+       * counters loses them, which is why the Anthropic arm was the only one ever
+       * reporting cache numbers. See the note in aimee_backend_openai.c. */
+      const cJSON *itd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "input_tokens_details");
+      if (itd && cJSON_IsObject(itd))
+      {
+         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)itd, "cached_tokens");
+         if (cr && cJSON_IsNumber(cr))
+            out->usage_cache_read = (long)cr->valuedouble;
+      }
    }
    return 0;
 

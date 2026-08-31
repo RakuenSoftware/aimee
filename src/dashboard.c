@@ -1,7 +1,7 @@
 /* dashboard.c: embedded HTTP dashboard server with JSON API endpoints */
 #include "aimee.h"
 #include "aimee_home.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "commands.h"
 #include "dashboard.h"
 #include "kb_client.h"

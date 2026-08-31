@@ -14,20 +14,25 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/skills/skill.c",
-    "src/modules/skills/skill_curator.c",
-    "src/modules/skills/skill_review.c",
     "src/modules/skills/skill_rollback.c",
+    "src/modules/skills/skill_trigger_policy.c",
     "src/modules/skills/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/skills/skills.go"
+  ],
+  "go_tests": [
+    "server-go/modules/skills/skills_test.go"
+  ],
+  "private_headers": [
+    "src/modules/skills/skill_trigger_policy.h"
   ],
   "public_headers": [
     "src/modules/skills/include/aimee/skills/skill.h",
-    "src/modules/skills/include/aimee/skills/skill_curator.h",
-    "src/modules/skills/include/aimee/skills/skill_review.h",
     "src/modules/skills/include/aimee/skills/module_api.h"
   ],
   "tests": [
-    "src/tests/test_skill.c",
-    "src/tests/test_skill_review.c"
+    "src/tests/test_skill.c"
   ],
   "docs": [
     "docs/modules/skills.md"

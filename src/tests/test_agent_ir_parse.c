@@ -11,18 +11,12 @@
 #include "aimee.h"
 
 #include "agent_protocol.h"
+#include <aimee/ir/aimee_ir_metrics.h>
 #include "cJSON.h"
 
 /* Local copy of agent_free_parsed_response (agent_bridge.c) so the test stays
  * self-contained rather than linking the whole legacy bridge. Same semantics. */
-/* Stub the tool registry: the dialect rescue consults it only on bare-JSON/bracket
- * paths, which these explicit <tool_call> cases do not hit -- same pattern as
- * test_delegate_xml_fallback.c. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   (void)tool_name;
-   return NULL;
-}
+#include "support/rescue_fixture_provider.h"
 
 void agent_free_parsed_response(parsed_response_t *p)
 {
@@ -39,6 +33,7 @@ void agent_free_parsed_response(parsed_response_t *p)
 int main(void)
 {
    printf("agent-ir-parse:\n");
+   delegate_register_rescue_provider(rescue_fixture_provider);
 
    /* 1. Anthropic: text AND a tool_use in one turn. Both survive; assistant_message
     * is the raw content array (what the anthropic multi-turn append re-wraps). */
@@ -156,6 +151,68 @@ int main(void)
       agent_free_parsed_response(&p);
       cJSON_Delete(root);
       printf("  PASS: rescue_mode<0 leaves embedded calls as text\n");
+   }
+
+   /* The buffered reasoning tap. ir_bridge_common is the funnel every JSON-wire
+    * response parse passes through, so one neutral rule covers all three wires --
+    * and it is the LAST point at which the reasoning exists, since
+    * parsed_response_t has no field for it. */
+   {
+      /* Anthropic wire: a thinking block is observed, and the answer text is
+       * unaffected by the tap. */
+      aimee_ir_metrics_reset();
+      const char *resp = "{\"model\":\"m\",\"stop_reason\":\"end_turn\",\"content\":["
+                         "{\"type\":\"thinking\",\"thinking\":\"weighing it up\","
+                         "\"signature\":\"sig\"},"
+                         "{\"type\":\"text\",\"text\":\"the answer\"}],"
+                         "\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}";
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      parsed_response_t p;
+      assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 1);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+      /* the tap observes; it must not disturb what the turn loop consumes */
+      assert(p.content && strcmp(p.content, "the answer") == 0);
+      agent_free_parsed_response(&p);
+      cJSON_Delete(root);
+      printf("  PASS: reasoning observed on the buffered wire\n");
+   }
+
+   {
+      /* A turn with no reasoning must move neither counter, or the base rate the
+       * counters exist to measure is meaningless. */
+      aimee_ir_metrics_reset();
+      const char *resp = "{\"model\":\"m\",\"stop_reason\":\"end_turn\","
+                         "\"content\":[{\"type\":\"text\",\"text\":\"just an answer\"}]}";
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      parsed_response_t p;
+      assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+      agent_free_parsed_response(&p);
+      cJSON_Delete(root);
+      printf("  PASS: a turn without reasoning moves no counter\n");
+   }
+
+   {
+      /* A thinking block that arrives EMPTY counts as incomplete, never observed:
+       * "the reasoning was dropped upstream" must not read as "there was none". */
+      aimee_ir_metrics_reset();
+      const char *resp = "{\"model\":\"m\",\"stop_reason\":\"end_turn\",\"content\":["
+                         "{\"type\":\"thinking\",\"thinking\":\"\"},"
+                         "{\"type\":\"text\",\"text\":\"a\"}]}";
+      cJSON *root = cJSON_Parse(resp);
+      assert(root);
+      parsed_response_t p;
+      assert(agent_ir_parse_json_response(root, 1, -1, NULL, &p) == 0);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+      assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 1);
+      agent_free_parsed_response(&p);
+      cJSON_Delete(root);
+      aimee_ir_metrics_reset();
+      printf("  PASS: an empty thinking block counts as incomplete, not observed\n");
    }
 
    printf("agent-ir-parse: ok\n");

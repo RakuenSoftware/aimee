@@ -26,7 +26,7 @@
 # The name is lowercased and the tag is not: a repository name must be lowercase,
 # a tag may carry case, and UD-Q6_K_XL is the upstream quant spelling.
 
-FROM --platform=$BUILDPLATFORM debian:trixie-slim AS fetch
+FROM --platform=$BUILDPLATFORM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS fetch
 ARG AIMEE_SYNTHESIS_MODEL
 # A mirror is an untrusted input; scripts/fetch-synthesis-model.sh verifies the
 # result against Hugging Face's own digest, which is what makes it safe to allow.

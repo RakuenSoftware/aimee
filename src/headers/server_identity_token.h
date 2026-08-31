@@ -4,7 +4,7 @@
 /* server_identity_token.h — server-side verification of the kb-signed data-plane
  * identity token (proposal per-user-remote-writes-authz.md §4). Counterpart to
  * the kb-side builder in kb_identity_token.{h,c}. Implemented in
- * server_mgmt_token.c so it reuses that file's vetted JWS/JWKS primitives
+ * shared/auth_token_verify.c so it reuses that file's vetted JWS/JWKS primitives
  * (base64url decode, RS256 verify, JWKS key-selection by kid), and is kept a
  * strictly separate token type from the P5 management JWT: it requires the
  * `aimee-id+jwt` header `typ`, so a management token can never verify here and

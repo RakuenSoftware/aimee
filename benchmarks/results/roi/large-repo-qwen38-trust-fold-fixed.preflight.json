@@ -1,0 +1,28 @@
+{
+  "budget": {
+    "budget_limit_usd": 0.0,
+    "expected_input_tokens": 640000,
+    "expected_output_tokens": 10240,
+    "expected_provider_calls": 20,
+    "expected_spend_usd": 0.0,
+    "hard_input_token_cap": 1966080,
+    "hard_maximum_spend_usd": 0.0,
+    "hard_output_token_cap": 61440,
+    "hard_provider_call_cap": 30,
+    "planned_cells": 1,
+    "pricing_contract": "operator-owned local endpoint; configured marginal rates"
+  },
+  "conditions": [
+    "aimee"
+  ],
+  "created_at": "2026-08-27T07:55:16.769492+00:00",
+  "dispatch_started": false,
+  "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+  "repeats": 1,
+  "schema_version": 1,
+  "source_commit": "c8daa4b3d58c20c00ada3c9bdebb0e1bb8c8ebeb",
+  "task_manifest_sha256": "98fac06fceb6480aaa083524b15265261b42d1bae84f75083546155633697e2e",
+  "tasks": [
+    "trust_bundle_readiness"
+  ]
+}

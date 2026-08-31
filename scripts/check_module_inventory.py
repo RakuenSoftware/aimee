@@ -20,9 +20,36 @@ from pathlib import Path
 
 MODULE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 DEFAULT_INVENTORY = Path("tests/baselines/modules/canonical-inventory.yaml")
-ALLOWED_KEYS = {"schema_version", "required", "optional"}
-REQUIRED_COUNT = 18
-OPTIONAL_COUNT = 7
+ALLOWED_KEYS = {
+    "schema_version",
+    "required",
+    "optional",
+    "principal_refs",
+    "retired_principal_refs",
+    "plugin_principal_ref_band",
+    "retired_principal_ref_band",
+}
+
+# Every band of principal refs reserved for DYNAMICALLY provisioned processes.
+# A ref carves a whole 256-kind block (4096 + ref*256 + stage), so a module
+# assigned a ref inside one of these would have its kinds land where a
+# provisioned instance may already be serving.
+#
+# Generalised to a list rather than special-casing the plugin band: DB3 vector
+# providers need exactly the same protection, and a second hand-written copy of
+# this rule is how the two would drift.
+RESERVED_BANDS = (
+    ("plugin_principal_ref_band", "plugin instances"),
+    # Refs an external vector database provider was allocated from, before that
+    # subsystem was removed. RESERVED rather than released: an installed
+    # deployment may still carry a grant naming a ref in this band, and handing
+    # the same ref to a future module would give it kinds that grant claims.
+    ("retired_principal_ref_band", "refs a removed subsystem allocated"),
+)
+REQUIRED_COUNT = 21
+# Principal references stay stable when a module changes activation class;
+# PostgreSQL is also appended while its C-to-Go migration is staged.
+OPTIONAL_COUNT = 11
 PINNED_REQUIRED = {"git"}
 
 
@@ -90,10 +117,10 @@ def validate_inventory(
 ) -> None:
     data, required, optional = load_inventory(path)
 
-    if type(data["schema_version"]) is not int or data["schema_version"] != 1:
+    if type(data["schema_version"]) is not int or data["schema_version"] != 2:
         _fail(
             "schema-version",
-            f"expected 1, actual {data['schema_version']!r}",
+            f"expected 2, actual {data['schema_version']!r}",
             path=path,
         )
 
@@ -145,6 +172,79 @@ def validate_inventory(
             f"expected OPTIONAL_COUNT={OPTIONAL_COUNT}, actual {len(optional)}",
             path=path,
         )
+
+    _validate_principal_refs(data, path)
+
+
+def _validate_principal_refs(data: dict[str, object], path: Path) -> None:
+    """Refs are unique, and none falls inside the band reserved for plugins.
+
+    Event kinds are carved from a ref as 4096 + ref*256 + stage, so a ref is not
+    just an id: it reserves a whole 256-kind block. Handing a module a ref inside
+    the plugin band would put its kinds where a provisioned plugin instance may
+    already be serving, and bus_host_serve_kind() binds one kind to exactly one
+    slot -- the loser is denied at attach with nothing in its own log to say why.
+    That is not hypothetical: the plugin range formerly sat at 11264, which is
+    postgres's block (4096 + 28*256), and a live aimee-kb reproduced the denial.
+    """
+    refs = data.get("principal_refs")
+    if not isinstance(refs, dict):
+        _fail("structure", "expected principal_refs to be an object", path=path)
+
+    bands = []
+    for key, what in RESERVED_BANDS:
+        band = data.get(key)
+        if (
+            not isinstance(band, dict)
+            or type(band.get("first")) is not int
+            or type(band.get("limit")) is not int
+        ):
+            _fail(
+                "structure",
+                f"expected {key} to be an object with integer first/limit",
+                path=path,
+            )
+        first, limit = band["first"], band["limit"]
+        if first >= limit:
+            _fail("plugin-band", f"{key}: expected first < limit, actual {first} >= {limit}",
+                  path=path)
+        bands.append((key, what, first, limit))
+
+    # Reserved bands must not overlap each other either -- two dynamic allocators
+    # drawing from one range is the same defect as a module inside a band.
+    for i, (k1, _, f1, l1) in enumerate(bands):
+        for k2, _, f2, l2 in bands[i + 1:]:
+            if f1 < l2 and f2 < l1:
+                _fail("plugin-band",
+                      f"{k1} [{f1},{l1}) overlaps {k2} [{f2},{l2})", path=path)
+
+    seen: dict[int, str] = {}
+    for module_id, ref in sorted(refs.items()):
+        if type(ref) is not int or ref < 1:
+            _fail("principal-ref", f"module {module_id!r}: expected a positive integer ref, "
+                  f"actual {ref!r}", path=path)
+        if ref in seen:
+            _fail("principal-ref", f"modules {seen[ref]!r} and {module_id!r} share "
+                  f"principal_ref={ref}", path=path)
+        seen[ref] = module_id
+        for key, what, first, limit in bands:
+            if first <= ref < limit:
+                _fail(
+                    "plugin-band",
+                    f"module {module_id!r} has principal_ref={ref}, inside {key} "
+                    f"[{first},{limit}) reserved for {what}; its event kinds "
+                    f"({4096 + ref * 256}+) would collide with a provisioned instance",
+                    path=path,
+                )
+
+    retired = data.get("retired_principal_refs")
+    if not isinstance(retired, list) or not all(type(r) is int for r in retired):
+        _fail("structure", "expected retired_principal_refs to be an array of integers",
+              path=path)
+    for ref in retired:
+        if ref in seen:
+            _fail("principal-ref", f"principal_ref={ref} is retired but still assigned to "
+                  f"{seen[ref]!r}; a retired ref is never recycled", path=path)
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

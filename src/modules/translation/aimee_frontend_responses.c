@@ -10,6 +10,8 @@
  * Anthropic/OpenAI turn. */
 #include <aimee/translation/aimee_frontend.h>
 
+#include <aimee/translation/aimee_backend.h> /* responses_reasoning_summary_text (shared) */
+
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -92,9 +94,26 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       b->text = dupstr(instr);
    }
 
-   /* input items */
+   /* A Responses input can be the shorthand string form or the full flat item
+    * array. Normalize the shorthand to the same user/text IR used by a message
+    * item so protocol-neutral transforms (including first-message persona
+    * placement) cannot depend on which equivalent client shape was chosen. */
    const cJSON *input = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "input");
-   if (input && cJSON_IsArray(input))
+   if (input && cJSON_IsString(input))
+   {
+      int mi = new_message(out, "user");
+      if (mi < 0)
+         goto oom;
+      aimee_message_t *m = &out->messages[mi];
+      aimee_block_t *b = grow1((void **)&m->blocks, &m->n_blocks, sizeof(aimee_block_t));
+      if (!b)
+         goto oom;
+      b->type = AIMEE_BLK_TEXT;
+      b->text = dupstr(input->valuestring);
+      if (!b->text)
+         goto oom;
+   }
+   else if (input && cJSON_IsArray(input))
    {
       int tool_run = -1; /* index of a pending user msg accumulating tool_result blocks */
       const cJSON *item = NULL;
@@ -135,6 +154,9 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
             b->raw = cJSON_Duplicate(item, 1);
             b->tool_id = dupstr(ostr(item, "call_id"));
             b->tool_name = dupstr(ostr(item, "name"));
+            /* Present when the client grouped this tool under a `namespace`; the
+             * name is bare in that case and only the pair identifies the tool. */
+            b->tool_namespace = dupstr(ostr(item, "namespace"));
             const char *args = ostr(item, "arguments");
             b->tool_input = args ? cJSON_Parse(args) : NULL;
          }
@@ -149,7 +171,7 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
                goto oom;
             b->type = AIMEE_BLK_THINKING;
             b->raw = cJSON_Duplicate(item, 1);
-            b->text = dupstr(ostr(item, "summary"));
+            b->text = responses_reasoning_summary_text(item);
          }
          else /* "message" (default) */
          {
@@ -186,7 +208,21 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       }
    }
 
-   /* tools: flat function tools {type:function, name, description, parameters} */
+   /* tools: flat function tools {type:function, name, description, parameters}
+    *
+    * ONLY named function tools. A Codex client also sends provider-native tool
+    * TYPES -- custom, local_shell, web_search, image_generation -- which carry no
+    * top-level `name`. Admitting them produced an IR tool with a NULL name, which
+    * reached the provider as `tools[N].name: ""` and made it reject the WHOLE
+    * request: 400 empty_string, every tool in the catalog lost, the turn dead. With
+    * a real Codex client that was tools[16] of 17, so the gateway path failed on
+    * every request that carried a catalog.
+    *
+    * openai_parse_responses_to_chat -- the legacy translator this path runs ahead of
+    * -- has always filtered exactly this, and says so ("Codex's
+    * namespace/web_search/image_generation tool *types* are dropped"). The two
+    * disagreeing is what made the failure depend on which translator handled the
+    * request. */
    const cJSON *tools = cJSON_GetObjectItemCaseSensitive((cJSON *)req, "tools");
    if (tools && cJSON_IsArray(tools))
    {
@@ -195,6 +231,15 @@ int responses_frontend_parse(const cJSON *req, aimee_request_t *out, char *err, 
       {
          aimee_tool_t *tool = grow1((void **)&out->tools, &out->n_tools, sizeof(aimee_tool_t));
          if (!tool)
+            goto oom;
+         /* Carry the entry verbatim. Only `function` is modelled; a Codex client
+          * also sends namespace / custom / local_shell / web_search / image_generation,
+          * and the backend re-emits those from this sidecar untouched rather than
+          * flattening them into a function. Captured from a real client: of 17 tools,
+          * six were `namespace` groups (mcp__aimee and five others, each holding its
+          * nested function list) and one was `web_search` with no name at all. */
+         tool->raw = cJSON_Duplicate(t, 1);
+         if (!tool->raw)
             goto oom;
          tool->name = dupstr(ostr(t, "name"));
          tool->description = dupstr(ostr(t, "description"));
@@ -245,6 +290,8 @@ cJSON *responses_frontend_render(const aimee_response_t *r)
          cJSON_AddStringToObject(item, "type", "function_call");
          cJSON_AddStringToObject(item, "call_id", b->tool_id ? b->tool_id : "");
          cJSON_AddStringToObject(item, "name", b->tool_name ? b->tool_name : "");
+         if (b->tool_namespace && b->tool_namespace[0])
+            cJSON_AddStringToObject(item, "namespace", b->tool_namespace);
          char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
          cJSON_AddStringToObject(item, "arguments", args ? args : "{}");
          free(args);

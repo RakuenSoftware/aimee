@@ -3,7 +3,8 @@
  *
  * Role templates are the delegate analog of personas: the body
  * `aimee delegate <role>` uses. They are server-owned config; the client edits
- * them over /v1 (http_uds_client) rather than touching files directly. `edit`
+ * them over /v1 (cli_v1_path_request, so a remote thin client reaches its own
+ * server rather than a local socket) rather than touching files directly. `edit`
  * round-trips the raw markdown body through $EDITOR. */
 #include "http_uds_client.h"
 #include "cJSON.h"
@@ -37,7 +38,7 @@ static int roles_server_down(int status)
 static int roles_list_cmd(int json_output)
 {
    int st = 0;
-   char *resp = http_uds_request("GET", "/v1/role_templates", NULL, &st);
+   char *resp = cli_v1_path_request("GET", "/v1/role_templates", NULL, &st);
    if (roles_server_down(st))
    {
       free(resp);
@@ -66,24 +67,94 @@ static int roles_list_cmd(int json_output)
 }
 
 /* GET the raw body for a role into *out (heap; caller frees). Returns the HTTP
- * status; *out is NULL on a non-200. */
-static int roles_fetch_body(const char *role, char **out)
+ * status; *out is NULL on a non-200.
+ *
+ * `permissions_out` may be NULL when the caller only wants the text. When it is
+ * not, it receives the DETACHED permissions object (caller frees) rather than a
+ * pointer into a tree that is about to be deleted. */
+static int roles_fetch_body(const char *role, char **out, cJSON **permissions_out)
 {
    *out = NULL;
+   if (permissions_out)
+      *permissions_out = NULL;
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int st = 0;
-   char *resp = http_uds_request("GET", path, NULL, &st);
+   char *resp = cli_v1_path_request("GET", path, NULL, &st);
    if (st == 200 && resp)
    {
       cJSON *o = cJSON_Parse(resp);
       cJSON *c = o ? cJSON_GetObjectItemCaseSensitive(o, "content") : NULL;
       if (cJSON_IsString(c))
          *out = strdup(c->valuestring);
+      if (permissions_out && o)
+         *permissions_out = cJSON_DetachItemFromObjectCaseSensitive(o, "permissions");
       cJSON_Delete(o);
    }
    free(resp);
    return st;
+}
+
+/* Print what the role came to, under the template that declares it.
+ *
+ * The frontmatter says what an operator wrote; this says what it resolved to,
+ * which is the part they cannot see. Two lines earn their place here: a
+ * permission nothing enforces grants and denies nothing at runtime, and a tool
+ * the set withholds will be refused however the toolset was chosen. Both used to
+ * reach a log line and stop. */
+static void roles_print_permissions(cJSON *perms)
+{
+   if (!cJSON_IsObject(perms))
+      return;
+
+   if (!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(perms, "resolved")))
+   {
+      printf("\nPermissions: could not be resolved, so this role holds none and a "
+             "delegate for it is refused.\n");
+      return;
+   }
+
+   cJSON *held = cJSON_GetObjectItemCaseSensitive(perms, "held");
+   printf("\nPermissions:\n");
+   if (cJSON_GetArraySize(held) == 0)
+      printf("  (none: this role may read, and change nothing)\n");
+   cJSON *g = NULL;
+   cJSON_ArrayForEach(g, held)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "name"));
+      const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "enforced_at"));
+      printf("  %-16s enforced at %s", name ? name : "?", (at && at[0]) ? at : "nothing");
+      cJSON *scopes = cJSON_GetObjectItemCaseSensitive(g, "scopes");
+      if (cJSON_GetArraySize(scopes) > 0)
+      {
+         printf(", scoped to");
+         cJSON *sc = NULL;
+         cJSON_ArrayForEach(sc, scopes)
+             printf(" %s", cJSON_GetStringValue(sc) ? cJSON_GetStringValue(sc) : "?");
+      }
+      printf("\n");
+   }
+
+   cJSON *unenforced = cJSON_GetObjectItemCaseSensitive(perms, "unenforced");
+   if (cJSON_GetArraySize(unenforced) > 0)
+   {
+      printf("\nNothing enforces:");
+      cJSON *u = NULL;
+      cJSON_ArrayForEach(u, unenforced)
+          printf(" %s", cJSON_GetStringValue(u) ? cJSON_GetStringValue(u) : "?");
+      printf("\n  These are carried and evaluated by no one, so they grant nothing and\n"
+             "  deny nothing. Bind a point that consults them, or drop them.\n");
+   }
+
+   cJSON *denied = cJSON_GetObjectItemCaseSensitive(perms, "denied_tools");
+   if (cJSON_GetArraySize(denied) > 0)
+   {
+      printf("\nTools withheld:");
+      cJSON *d = NULL;
+      cJSON_ArrayForEach(d, denied)
+          printf(" %s", cJSON_GetStringValue(d) ? cJSON_GetStringValue(d) : "?");
+      printf("\n  Refused whatever toolset this role runs with.\n");
+   }
 }
 
 static int roles_show_cmd(const char *role, int json_output)
@@ -93,7 +164,7 @@ static int roles_show_cmd(const char *role, int json_output)
       char path[256];
       snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
       int st = 0;
-      char *resp = http_uds_request("GET", path, NULL, &st);
+      char *resp = cli_v1_path_request("GET", path, NULL, &st);
       if (roles_server_down(st))
       {
          free(resp);
@@ -105,18 +176,22 @@ static int roles_show_cmd(const char *role, int json_output)
       return st == 200 ? 0 : 1;
    }
    char *body = NULL;
-   int st = roles_fetch_body(role, &body);
+   cJSON *permissions = NULL;
+   int st = roles_fetch_body(role, &body, &permissions);
    if (roles_server_down(st))
       return 1;
    if (st == 404 || !body)
    {
       fprintf(stderr, "aimee: no such role template '%s'\n", role);
+      cJSON_Delete(permissions);
       free(body);
       return 1;
    }
    fputs(body, stdout);
    if (body[0] && body[strlen(body) - 1] != '\n')
       fputc('\n', stdout);
+   roles_print_permissions(permissions);
+   cJSON_Delete(permissions);
    free(body);
    return 0;
 }
@@ -124,7 +199,7 @@ static int roles_show_cmd(const char *role, int json_output)
 static int roles_edit_cmd(const char *role)
 {
    char *body = NULL;
-   int st = roles_fetch_body(role, &body);
+   int st = roles_fetch_body(role, &body, NULL);
    if (roles_server_down(st))
       return 1;
    if (!body)
@@ -184,7 +259,7 @@ static int roles_edit_cmd(const char *role)
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int wst = 0;
-   char *resp = http_uds_request("PUT", path, reqbody, &wst);
+   char *resp = cli_v1_path_request("PUT", path, reqbody, &wst);
    free(reqbody);
    if (wst != 200)
    {
@@ -204,7 +279,7 @@ static int roles_rm_cmd(const char *role)
    char path[256];
    snprintf(path, sizeof(path), "/v1/role_templates/%s", role);
    int st = 0;
-   char *resp = http_uds_request("DELETE", path, NULL, &st);
+   char *resp = cli_v1_path_request("DELETE", path, NULL, &st);
    free(resp);
    if (roles_server_down(st))
       return 1;

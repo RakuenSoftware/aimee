@@ -9,6 +9,114 @@
 #include <stdlib.h>
 #include <string.h>
 
+void liveness_progress_init(liveness_progress_state_t *state)
+{
+   if (state)
+      memset(state, 0, sizeof(*state));
+}
+
+static int progress_retrieval_matches(const liveness_progress_retrieval_t *prior, const char *tool,
+                                      const char *target, int range_start, int range_end,
+                                      int has_range)
+{
+   if (!prior || !tool || !target || strcmp(prior->tool, tool) != 0 ||
+       strcmp(prior->target, target) != 0)
+      return 0;
+   if (!prior->has_range || !has_range)
+      return 1;
+   return range_start <= prior->range_end && prior->range_start <= range_end;
+}
+
+liveness_progress_action_t liveness_progress_observe(liveness_progress_state_t *state,
+                                                     const char *tool, const char *target,
+                                                     int range_start, int range_end, int has_range,
+                                                     int successful, int mutation)
+{
+   if (!state || !successful)
+      return LIVENESS_PROGRESS_NONE;
+
+   if (mutation)
+   {
+      int successful_mutations = state->successful_mutations + 1;
+      memset(state, 0, sizeof(*state));
+      state->successful_mutations = successful_mutations;
+      return LIVENESS_PROGRESS_NONE;
+   }
+
+   state->calls_since_mutation++;
+   if (state->checkpoints > 0)
+      state->calls_since_checkpoint++;
+
+   if (tool && tool[0] && target && target[0])
+   {
+      int duplicate = 0;
+      for (int i = 0; i < state->window_count; i++)
+      {
+         if (progress_retrieval_matches(&state->window[i], tool, target, range_start, range_end,
+                                        has_range))
+         {
+            duplicate = 1;
+            break;
+         }
+      }
+      if (duplicate)
+         state->duplicate_hits++;
+
+      liveness_progress_retrieval_t *slot = &state->window[state->window_next];
+      memset(slot, 0, sizeof(*slot));
+      snprintf(slot->tool, sizeof(slot->tool), "%s", tool);
+      snprintf(slot->target, sizeof(slot->target), "%s", target);
+      slot->range_start = range_start;
+      slot->range_end = range_end;
+      slot->has_range = has_range != 0;
+      state->window_next = (state->window_next + 1) % LIVENESS_PROGRESS_WINDOW;
+      if (state->window_count < LIVENESS_PROGRESS_WINDOW)
+         state->window_count++;
+   }
+
+   if (state->checkpoints == 0 && (state->calls_since_mutation >= LIVENESS_PROGRESS_INITIAL_CALLS ||
+                                   state->duplicate_hits >= LIVENESS_PROGRESS_DUPLICATE_HITS))
+   {
+      state->checkpoints = 1;
+      state->calls_since_checkpoint = 0;
+      return LIVENESS_PROGRESS_CHECKPOINT;
+   }
+   if (state->checkpoints > 0 && state->calls_since_checkpoint >= LIVENESS_PROGRESS_FOLLOWUP_CALLS)
+   {
+      state->checkpoints++;
+      state->calls_since_checkpoint = 0;
+      return state->checkpoints >= 3 ? LIVENESS_PROGRESS_ABORT : LIVENESS_PROGRESS_ESCALATE;
+   }
+   return LIVENESS_PROGRESS_NONE;
+}
+
+void liveness_format_progress_hint(const liveness_progress_state_t *state,
+                                   liveness_progress_action_t action, char *buf, size_t bufsz)
+{
+   if (!buf || bufsz == 0)
+      return;
+   int calls = state ? state->calls_since_mutation : 0;
+   int duplicates = state ? state->duplicate_hits : 0;
+   if (action == LIVENESS_PROGRESS_ESCALATE)
+   {
+      snprintf(buf, bufsz,
+               "No-progress escalation: this write-capable task has completed %d successful "
+               "tool calls without an edit (%d repeated or overlapping retrievals). You must "
+               "now make the smallest justified edit and run focused verification, or return "
+               "a specific blocker. Do not spend more calls on broad repository exploration or "
+               "reread ranges already present in the transcript.",
+               calls, duplicates);
+      return;
+   }
+   snprintf(buf, bufsz,
+            "Progress checkpoint: this write-capable task has completed %d successful tool "
+            "calls without an edit (%d repeated or overlapping retrievals). Stop gathering "
+            "broadly. State a concrete defect hypothesis, then make the smallest justified edit "
+            "or run the decisive test. If blocked, return the blocker explicitly. Reuse earlier "
+            "results instead of rereading them.",
+            calls, duplicates);
+}
+
 static int tool_markup_line(const char *start, const char *end)
 {
    const size_t tool_close_len = sizeof("</tool_call>") - 1;
@@ -397,11 +505,19 @@ int liveness_circuit_breaker_tripped(int total_triggers)
 liveness_final_response_mode_t
 liveness_final_response_mode(int turn, int max_turns, int total_tool_calls, int final_after_turns)
 {
-   if (total_tool_calls <= 0)
-      return LIVENESS_FINAL_RESPONSE_NONE;
-
+   /* The hard boundary does not depend on prior tool use. The budget is ending
+    * either way, and total_tool_calls counts calls that LANDED: a delegate
+    * whose every attempt was denied by policy or emptied by compaction has done
+    * nothing but call tools while this count stayed at zero. Gating the hard
+    * turn on it let exactly that delegate spend all its turns and return
+    * nothing, which is what "max turns exhausted without final response" is. */
    if (max_turns > 1 && turn >= max_turns - 1)
       return LIVENESS_FINAL_RESPONSE_HARD;
+
+   /* The soft, role-policy threshold still does: nudging an agent that has not
+    * done anything yet, while turns remain, is just noise. */
+   if (total_tool_calls <= 0)
+      return LIVENESS_FINAL_RESPONSE_NONE;
 
    if (final_after_turns > 0 && turn >= final_after_turns)
       return LIVENESS_FINAL_RESPONSE_SOFT;

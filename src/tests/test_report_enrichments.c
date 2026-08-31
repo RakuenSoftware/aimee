@@ -5,7 +5,8 @@
 
 #include "report_enrichment.h"
 #include "report_enrichments.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "support/json_canonical.h"
 
 static void open_db(void)
 {
@@ -32,7 +33,7 @@ static void test_upsert_read_and_conflict_update(void)
    assert(db2_report_enrichment_read(&subject, "repository_profile", "unit", "v1", &row) == 0);
    assert(strcmp(row.subject.type, REPORT_SUBJECT_TYPE_GIT_REPO) == 0);
    assert(strcmp(row.subject.id, "https://github.com/org/repo") == 0);
-   assert(strstr(row.payload_json, "\"score\":1") != NULL);
+   assert(strstr(json_canonical(row.payload_json), "\"score\":1") != NULL);
    assert(strcmp(row.input_hash, "h1") == 0);
    assert(db2_report_enrichment_is_expired(&row, "2026-05-16 23:59:59") == 0);
    assert(db2_report_enrichment_is_expired(&row, "2026-05-17 00:00:00") == 1);
@@ -40,7 +41,7 @@ static void test_upsert_read_and_conflict_update(void)
    assert(db2_report_enrichment_upsert(&subject, "repository_profile", "unit", "v1",
                                        "{\"score\":2}", "h2", "2026-05-16 13:00:00", "") == 0);
    assert(db2_report_enrichment_read(&subject, "repository_profile", "unit", "v1", &row) == 0);
-   assert(strstr(row.payload_json, "\"score\":2") != NULL);
+   assert(strstr(json_canonical(row.payload_json), "\"score\":2") != NULL);
    assert(strcmp(row.input_hash, "h2") == 0);
    assert(strcmp(row.expires_at, "") == 0);
    assert(db2_report_enrichment_is_expired(&row, "2026-05-18 00:00:00") == 0);

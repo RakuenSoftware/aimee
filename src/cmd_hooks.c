@@ -3,7 +3,7 @@
  * Session-start / launch / wrapup live in cmd_session_lifecycle.c; scope-aware
  * section building (shared with that file) lives in cmd_hooks_scope.c. */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "headers/cmd_hooks_scope.h"
 #include "memory_redirect.h"
 #include "platform_process.h"
@@ -11,10 +11,10 @@
 #include "agent_coord.h"
 #include "agent_eval.h"
 #include "log.h"
-#include "wfe_binding.h"     /* db1_wfe_binding_get -- S2 native-tool gate */
-#include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
-#include "wfe_enforce.h"     /* the enforce dial -> deny (hard) vs warn (soft) */
-#include "wfe_native_gate.h" /* wfe_native_tool_externalizes / wfe_is_shell_tool */
+#include "wfe_binding.h"          /* db1_wfe_binding_get -- S2 native-tool gate */
+#include "db1_client/wfe_store.h" /* db1_work_item_get (delivered==accepted) */
+#include "wfe_enforce.h"          /* the enforce dial -> deny (hard) vs warn (soft) */
+#include "wfe_native_gate.h"      /* wfe_native_tool_externalizes / wfe_is_shell_tool */
 #include <aimee/audit/audit_action.h>
 #include "trace_analysis.h"
 #include <aimee/workspace/workspace.h>
@@ -86,8 +86,10 @@ static int hook_client_supports_updated_input(void)
 {
    const char *client = getenv("AIMEE_HOOK_CLIENT");
    if (client)
-      return strcmp(client, "claude") == 0;
-   return getenv("CLAUDE_SESSION_ID") != NULL;
+      return strcmp(client, "claude") == 0 || strcmp(client, "codex") == 0;
+   return getenv("CLAUDE_SESSION_ID") != NULL || getenv("CODEX_THREAD_ID") != NULL ||
+          getenv("CODEX_SANDBOX") != NULL || getenv("CODEX_HOME") != NULL ||
+          getenv("CODEX_CWD") != NULL;
 }
 
 static void emit_pretool_deny_json(const char *reason)
@@ -203,8 +205,9 @@ static void s2_native_gate_pretool(const char *sid, const char *tool_name, const
       emit_pretool_deny_json(
           "aimee: delegates do not run git or gh directly — use aimee's git tools, which "
           "execute on aimee-server: git_status, git_log, git_diff_summary, git_branch, "
-          "git_commit, git_push, git_pr, git_verify. (Operator: require_aimee_git: false "
-          "in aimee.yaml opts out.)");
+          "git_add, git_commit, git_push, git_pr, git_verify, git_merge, git_rebase, "
+          "git_sync, git_cherry_pick, git_revert, git_switch. (Operator: "
+          "require_aimee_git: false in aimee.yaml opts out.)");
       exit(0);
    }
 
@@ -276,7 +279,8 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    argv++;
 
    audit_log_open();
-   audit_ensure_key(); /* provision the per-action audit key (best-effort) */
+   if (audit_ensure_key() != 0)
+      fatal("required governed-action audit key is unavailable");
 
    /* Read JSON from stdin -- hook input is small (tool name + args) */
    char input[65536];
@@ -317,7 +321,7 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
    }
 
    /* DB1 owns its own connection; session_state_load/save delegate to DB1. */
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("cannot open database");
 
    if (strcmp(phase, "pre") == 0)

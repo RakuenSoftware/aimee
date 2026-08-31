@@ -3,9 +3,9 @@
 
 #include <aimee/translation/aimee_frontend.h>
 #include "cJSON.h"
-#include "db2/enrollments.h"
-#include "db2/org_egress.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/enrollments.h"
+#include "modules/db2/c/org_egress.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "../kb_bedrock_egress.h"
 #include "../kb_vault_key_use.h"
 #include "../kb_vault_policy.h"

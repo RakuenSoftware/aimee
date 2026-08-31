@@ -8,6 +8,7 @@
 #include "cJSON.h"
 #include "config.h"
 #include "memory.h"
+#include "aimee_client.h"
 #include "headers/curator_profile.h"
 #include <aimee/workspace/workspace.h>
 #include <stdio.h>
@@ -955,7 +956,7 @@ static void kb_cmd_reembed(app_ctx_t *ctx, int argc, char **argv)
    if (prc != 0)
    {
       if (prc == -2)
-         fprintf(stderr, "refused: an unknown halfvec table exists; not auto-resetting.\n");
+         fprintf(stderr, "refused: an unknown vector table exists; not auto-resetting.\n");
       else if (prc == -3)
          fprintf(stderr, "an inbound foreign key exists; re-run with --force.\n");
       return;
@@ -1007,7 +1008,38 @@ static void kb_cmd_reembed(app_ctx_t *ctx, int argc, char **argv)
    }
 }
 
+static void kb_cmd_erase_subject(app_ctx_t *ctx, int argc, char **argv)
+{
+   opt_parsed_t opts;
+   opt_parse(argc, argv, NULL, &opts);
+   if (opts.pos_count != 1)
+      fatal("usage: aimee kb erase-subject <principal> [--request-id ID]");
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddStringToObject(req, "subject", opts.positional[0]);
+   const char *request_id = opt_get(&opts, "request-id");
+   if (request_id && request_id[0])
+      cJSON_AddStringToObject(req, "request_id", request_id);
+   char *body = cJSON_PrintUnformatted(req);
+   cJSON_Delete(req);
+   int status = 0;
+   char *response =
+       body ? aimee_client_request("POST", "/v1/kb/erase-subject", body, &status) : NULL;
+   free(body);
+   if (!response || status < 200 || status >= 300)
+   {
+      free(response);
+      fatal("subject erasure coordinator failed (HTTP %d)", status);
+   }
+   printf("%s\n", response);
+   free(response);
+   (void)ctx;
+}
+
 static const subcmd_t kb_subcmds[] = {
+    {"erase-subject",
+     "Erase one principal's mutable memory, document, conversation, and derived data "
+     "[--request-id ID]",
+     kb_cmd_erase_subject},
     {"reembed",
      "Dim-change reset: re-embed the vector store at the configured dim "
      "[--confirm] [--force] [--dry-run] [--target-dim N] [--clear-maintenance] "

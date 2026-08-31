@@ -1,5 +1,5 @@
 /* test_kb_releases_db.c — DB-backed release lifecycle tests for the curation
- * release gate (src/db2/kb_releases.c), exercising the real promote/rollback
+ * release gate (src/modules/db2/c/kb_releases.c), exercising the real promote/rollback
  * logic against the DB2 sqlite shim (no stubs).
  *
  * Covers the proposal ACs:
@@ -15,9 +15,9 @@
 
 #include <sqlite3.h>
 
-#include "db2_test_shim.h"
-#include "db2/kb_releases.h"
-#include "db2/kb_runtime_state.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/kb_releases.h"
+#include "modules/db2/c/kb_runtime_state.h"
 
 /* Insert a docs row directly (the release_docs FK references docs(id)).
  * review_needed != 0 marks a staged doc that must be excluded from live
@@ -190,6 +190,9 @@ static void test_release_membership(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("kb_releases_db"))
+      return 0;
+
    printf("kb_releases_db:\n");
    test_create_read();
    test_promote_activates();

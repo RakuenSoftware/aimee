@@ -16,7 +16,7 @@
 #include "kb_client_cache.h"
 #include "kb_client_mtls.h"
 #include "kb_client_ws.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
 #include "server.h"
 #include "server_http.h"
@@ -28,6 +28,8 @@
 #include "agent_exec.h"
 #include "log.h"
 #include <aimee/audit/audit_action.h>
+#include <aimee/audit/audit_worm.h>
+#include <aimee/audit/audit_worm_chain.h>
 #include "platform_path.h"
 #include "platform_process.h"
 #include "platform_random.h"
@@ -44,6 +46,7 @@
 #include "sandbox_audit_bridge.h" /* route sandbox degraded-isolation events onto the audit bus */
 #include "memory_audit_bridge.h"  /* route server-side memory mutations onto the audit bus */
 #include "tool_completion_audit_bridge.h" /* route tool-dispatch outcomes onto the audit bus */
+#include "turn_integrity_audit_bridge.h"  /* route turn-contract observations onto the audit bus */
 #include "obs_bus_adapter.h"              /* bind shared bus events to server-owned durable sinks */
 #include "module_routing_adapter.h"       /* route selection through the local routing process */
 #include "module_stage_adapters.h"        /* process-owned stage decisions */
@@ -99,6 +102,13 @@ static int startup_notify_fd(void)
 
 static void startup_notify(int fd, const char *message)
 {
+   /* stderr as well as the pipe, and BEFORE it: the pipe exists only when a
+      service manager started us, so a foreground run -- a container that execs
+      the binary, a developer, a test rig -- got the exit code and nothing else.
+      A daemon that refuses to start owes the operator the reason wherever they
+      are watching from. */
+   if (message && message[0])
+      (void)fputs(message, stderr);
    if (fd < 0)
       return;
    if (message && message[0])
@@ -168,12 +178,33 @@ static int run_server(const char *socket_path, log_level_t log_level)
          setvbuf(log_fp, NULL, _IOLBF, 0);
          platform_server_redirect_stderr(log_fp);
          fclose(log_fp);
+         /* stderr is now this file, so it is ours to bound. Only registered
+          * here: the CLI's stderr is the user's terminal. */
+         log_set_rotating_sink(log_path);
       }
    }
 
    /* Initialize logging */
    log_init(log_level);
    audit_log_open();
+
+   /* The SQLite WORM ledger is an admission boundary, not a health warning.
+    * Verify it before the durable bus sink, configuration module, sockets, or
+    * listeners can accept work. A fresh home creates an empty GREEN ledger; an
+    * intact non-empty ledger receives a startup checkpoint; any chain, MAC, or
+    * storage failure rejects startup. */
+   {
+      char worm_err[256] = "";
+      if (audit_worm_startup_verify(worm_err, sizeof(worm_err), NULL, NULL) != 0)
+      {
+         startup_notify(notify_fd, "error: SQLite WORM startup verification failed\n");
+         aimee_log(LOG_ERROR, "audit.worm", "server startup rejected: %s",
+                   worm_err[0] ? worm_err : "verification failure");
+         audit_worm_close();
+         audit_log_close();
+         return 1;
+      }
+   }
    if (server_obs_bus_configure() != 0)
       LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
    if (obs_bus_configure_daemon_module_runtime("server", config_default_dir()) != 0)
@@ -182,11 +213,30 @@ static int run_server(const char *socket_path, log_level_t log_level)
       audit_log_close();
       return 1;
    }
-   audit_ensure_key();             /* provision the per-action audit key (best-effort) */
+   /* The config store is a required supervised process. Start the daemon bus
+    * explicitly before any startup consumer asks for config, then give the
+    * supervisor a bounded window to attach after it observes the socket. */
+   if (obs_bus_start() != 0)
+   {
+      startup_notify(notify_fd, "error: module bus failed to start\n");
+      audit_log_close();
+      return 1;
+   }
+   unsigned char worm_key[32];
+   char worm_key_id[17];
+   if (audit_ensure_key() != 0 || audit_worm_chain_key_load(worm_key, worm_key_id) != 0 ||
+       (config_audit_worm_enabled() &&
+        audit_worm_append("system", "server", "server.startup", "aimee-server", "ok", "{}") != 0))
+   {
+      startup_notify(notify_fd, "error: required audit key/WORM store unavailable\n");
+      audit_log_close();
+      return 1;
+   }
    vault_audit_bridge_install();   /* route vault credential-access events onto the audit bus */
    sandbox_audit_bridge_install(); /* route sandbox degraded-isolation events onto the audit bus */
    memory_audit_bridge_install();  /* route server-side memory mutations onto the audit bus */
    tool_completion_audit_bridge_install(); /* route tool-dispatch outcomes onto the audit bus */
+   turn_integrity_audit_bridge_install();  /* route turn-contract observations onto the audit bus */
 
    /* Credential env vars are deployment bootstrap transport (for example a
     * Kubernetes Secret), never runtime storage. Seal and unset them before any
@@ -237,7 +287,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
       }
    }
 
-   if (!config_present())
+   if (!config_wait_ready(10000))
    {
       startup_notify(notify_fd, "error: invalid configuration\n");
       aimee_log(LOG_ERROR, "config", "server startup rejected invalid configuration");
@@ -251,7 +301,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
     * individual enrollment bearer; `aimee api enable` can reveal the primary to
     * a local operator when a headless deployment explicitly needs it. */
    if ((config_server_api_http_port() > 0 || config_server_api_tls_port() > 0) &&
-       !config_server_api_bearer_token()[0])
+       !runtime_secret_has("AIMEE_API_BEARER_TOKEN"))
    {
       char primary[65] = "";
       if (platform_random_hex(primary, 64) != 0 ||
@@ -263,7 +313,7 @@ static int run_server(const char *socket_path, log_level_t log_level)
          return 1;
       }
       runtime_secret_wipe(primary, sizeof(primary));
-      /* No need to write it back here: the seed below reloads, and config_load
+      /* No need to write it back here: the seed below reloads, and legacy_config_read
        * applies AIMEE_API_BEARER_TOKEN out of Vault, so the snapshot every reader
        * below sees carries the freshly minted primary. */
       aimee_log(LOG_INFO, "vault.env", "minted Vault-only API primary for configured listener");
@@ -304,6 +354,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
          platform_setenv("AIMEE_KB_API_URL", local_kb);
       }
    }
+   /* The workflow engine is deliberately config-free (it links and tests in isolation),
+    * so it reads the PR base policy from the environment. Export the configured value
+    * here to keep `pr_base_mode` the single operator knob rather than letting the engine
+    * and the session/CLI path disagree. Pre-set env still wins. */
+   if (!(getenv("AIMEE_PR_BASE_MODE") && getenv("AIMEE_PR_BASE_MODE")[0]))
+      platform_setenv("AIMEE_PR_BASE_MODE", config_pr_base_mode());
+
    /* KB bearer credentials are consumed through runtime_secret. Never export a
     * config value back into the process environment. */
 
@@ -362,6 +419,12 @@ static int run_server(const char *socket_path, log_level_t log_level)
    presence_set_delivery_fn(presence_deliver_via_notify, NULL); /* outbound: ntfy/local */
    turn_registry_init(); /* per-turn cancel registry (server-owned turn lifecycle) */
 
+   /* Modules declare their commands over the EVENT BUS when they connect -- a
+    * module never links into core and never calls another module. The memory
+    * module answers stage 6 (event 5894) with its declaration; see
+    * server-go/modules/memory/commands.go. An earlier version of this called a C
+    * registration function in-process, which is the arrangement that replaced. */
+
    /* Wire the inference-backed OpenAI completion handlers before the listener
     * accepts requests (agent_http_init above must run first). */
    openai_chat_register();
@@ -393,10 +456,13 @@ static int run_server(const char *socket_path, log_level_t log_level)
       server_http_set_bearer_extra(extra, extra_count);
    }
    cli_session_pty_set_forwarding(config_server_api_cli_session_forwarding());
-   int http_start =
-       server_http_start(NULL, config_server_api_http_port(), config_server_api_tls_port(),
-                         config_server_api_bearer_token(), config_server_api_rate_limit_per_min(),
-                         config_server_api_remote_writes());
+   char api_primary_bearer[256] = "";
+   (void)runtime_secret_get("AIMEE_API_BEARER_TOKEN", api_primary_bearer,
+                            sizeof(api_primary_bearer));
+   int http_start = server_http_start(
+       NULL, config_server_api_http_port(), config_server_api_tls_port(), api_primary_bearer,
+       config_server_api_rate_limit_per_min(), config_server_api_remote_writes());
+   runtime_secret_wipe(api_primary_bearer, sizeof(api_primary_bearer));
    if (http_start == SERVER_HTTP_START_MGMT_FATAL)
    {
       char management_error[256];
@@ -448,6 +514,15 @@ int main(int argc, char **argv)
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   if (argc == 3 && strcmp(argv[1], "--egress-vault-secret") == 0)
+   {
+      if (vault_env_egress_parent_attest() != 0 || vault_env_bootstrap_init() < 0)
+         return 1;
+      int rc = vault_env_print_egress_credential(argv[2]);
+      runtime_secret_clear();
+      return rc == 0 ? 0 : 1;
+   }
+
    /* The co-located root-UDS-attested web service consumes these labelled base64
     * records through a pipe for authentication, signed sessions, and in-memory
     * TLS setup. The helper is intentionally webchat-specific: there is no
@@ -463,6 +538,16 @@ int main(int argc, char **argv)
     * Vault module. */
    if (argc == 3 && strcmp(argv[1], "--webchat-vault-seal") == 0)
       return vault_env_seal_webchat_record(argv[2]) == 0 ? 0 : 1;
+
+   /* Provision the server-principal git credentials after first boot. Without
+    * this, AIMEE_FORGE_TOKEN at first boot was the only writer of that entry:
+    * a deployment that came up without it could not be given a forge token at
+    * all (`aimee vault set` stores under the calling principal, which the forge
+    * reader never consults), so `aimee git pr` failed with "no github
+    * credential" until the whole deployment was re-created. Same transport
+    * rules as the webchat seal: stdin only, closed name allowlist. */
+   if (argc == 3 && strcmp(argv[1], "--forge-vault-seal") == 0)
+      return vault_env_seal_forge_credential(argv[2]) == 0 ? 0 : 1;
 
    /* Container/POD entrypoints use this short-lived process to consume
     * first-boot credential inputs before launching any long-lived process. */

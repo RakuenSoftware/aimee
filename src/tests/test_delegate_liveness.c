@@ -144,7 +144,7 @@ static void test_unexecuted_tool_plan_detected(void)
 
 static void test_unexecuted_tool_plan_preserves_findings(void)
 {
-   const char *content = "I found the calibration bug in src/db2/calibration.c.\n"
+   const char *content = "I found the calibration bug in src/modules/db2/c/calibration.c.\n"
                          "```\n"
                          "make test\n"
                          "```\n"
@@ -337,6 +337,126 @@ static void test_circuit_breaker_negative(void)
    printf("  PASS: circuit breaker does not trip on negative input\n");
 }
 
+/* --- sliding-window write progress --- */
+
+static void test_progress_unique_retrieval_checkpoint(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   for (int i = 0; i < LIVENESS_PROGRESS_INITIAL_CALLS - 1; i++)
+   {
+      char target[32];
+      snprintf(target, sizeof(target), "file-%d.c", i);
+      assert(liveness_progress_observe(&state, "read_file", target, 0, 99, 1, 1, 0) ==
+             LIVENESS_PROGRESS_NONE);
+   }
+   assert(liveness_progress_observe(&state, "read_file", "last.c", 0, 99, 1, 1, 0) ==
+          LIVENESS_PROGRESS_CHECKPOINT);
+   assert(state.calls_since_mutation == LIVENESS_PROGRESS_INITIAL_CALLS);
+   printf("  PASS: unique retrievals eventually require an action checkpoint\n");
+}
+
+static void test_progress_detects_nonconsecutive_overlap(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   assert(liveness_progress_observe(&state, "read_file", "src/a.c", 1, 100, 1, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(liveness_progress_observe(&state, "read_file", "src/b.c", 1, 100, 1, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(liveness_progress_observe(&state, "read_file", "src/a.c", 90, 150, 1, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(liveness_progress_observe(&state, "grep", "src:trust_bundle", 0, 0, 0, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(liveness_progress_observe(&state, "read_file", "src/a.c", 20, 40, 1, 1, 0) ==
+          LIVENESS_PROGRESS_CHECKPOINT);
+   assert(state.duplicate_hits == 2);
+   printf("  PASS: nonconsecutive overlapping reads bring the checkpoint forward\n");
+}
+
+static void test_progress_disjoint_ranges_are_unique(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   assert(liveness_progress_observe(&state, "read_file", "src/a.c", 1, 100, 1, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(liveness_progress_observe(&state, "read_file", "src/a.c", 101, 200, 1, 1, 0) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(state.duplicate_hits == 0);
+   printf("  PASS: disjoint file ranges do not count as repeated retrieval\n");
+}
+
+static void test_progress_mutation_resets_guard(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   for (int i = 0; i < 7; i++)
+      assert(liveness_progress_observe(&state, "grep", "same query", 0, 0, 0, 1, 0) !=
+             LIVENESS_PROGRESS_ABORT);
+   assert(liveness_progress_observe(&state, "edit_file", "src/a.c", 0, 0, 0, 1, 1) ==
+          LIVENESS_PROGRESS_NONE);
+   assert(state.calls_since_mutation == 0);
+   assert(state.duplicate_hits == 0);
+   assert(state.checkpoints == 0);
+   assert(state.successful_mutations == 1);
+   printf("  PASS: successful mutation clears no-progress evidence\n");
+}
+
+static void test_progress_unsuccessful_calls_do_not_advance(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   for (int i = 0; i < 20; i++)
+      assert(liveness_progress_observe(&state, "read_file", "missing.c", 0, 0, 0, 0, 0) ==
+             LIVENESS_PROGRESS_NONE);
+   assert(state.calls_since_mutation == 0);
+   printf("  PASS: failed tools do not fabricate no-progress evidence\n");
+}
+
+static void test_progress_escalates_then_aborts(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   liveness_progress_action_t action = LIVENESS_PROGRESS_NONE;
+   for (int i = 0; i < LIVENESS_PROGRESS_INITIAL_CALLS; i++)
+   {
+      char target[32];
+      snprintf(target, sizeof(target), "first-%d", i);
+      action = liveness_progress_observe(&state, "grep", target, 0, 0, 0, 1, 0);
+   }
+   assert(action == LIVENESS_PROGRESS_CHECKPOINT);
+   for (int i = 0; i < LIVENESS_PROGRESS_FOLLOWUP_CALLS; i++)
+   {
+      char target[32];
+      snprintf(target, sizeof(target), "second-%d", i);
+      action = liveness_progress_observe(&state, "grep", target, 0, 0, 0, 1, 0);
+   }
+   assert(action == LIVENESS_PROGRESS_ESCALATE);
+   for (int i = 0; i < LIVENESS_PROGRESS_FOLLOWUP_CALLS; i++)
+   {
+      char target[32];
+      snprintf(target, sizeof(target), "third-%d", i);
+      action = liveness_progress_observe(&state, "grep", target, 0, 0, 0, 1, 0);
+   }
+   assert(action == LIVENESS_PROGRESS_ABORT);
+   printf("  PASS: ignored checkpoints escalate and eventually terminate\n");
+}
+
+static void test_progress_hint_is_actionable(void)
+{
+   liveness_progress_state_t state;
+   liveness_progress_init(&state);
+   state.calls_since_mutation = 12;
+   state.duplicate_hits = 3;
+   char hint[768];
+   liveness_format_progress_hint(&state, LIVENESS_PROGRESS_CHECKPOINT, hint, sizeof(hint));
+   assert(strstr(hint, "concrete defect hypothesis") != NULL);
+   assert(strstr(hint, "12 successful tool calls") != NULL);
+   liveness_format_progress_hint(&state, LIVENESS_PROGRESS_ESCALATE, hint, sizeof(hint));
+   assert(strstr(hint, "specific blocker") != NULL);
+   printf("  PASS: progress hints require an edit, decisive test, or blocker\n");
+}
+
 /* --- liveness_final_response_mode --- */
 
 static void test_final_response_mode_requires_tools(void)
@@ -362,6 +482,12 @@ static void test_final_response_mode_hard_last_turn(void)
 {
    assert(liveness_final_response_mode(11, 12, 3, 8) == LIVENESS_FINAL_RESPONSE_HARD);
    assert(liveness_final_response_mode(4, 5, 1, -1) == LIVENESS_FINAL_RESPONSE_HARD);
+   /* No call ever landed. That is precisely the delegate that needs the last
+    * turn taken away from tools: every attempt was denied or emptied, so the
+    * count is zero while the whole budget went on calling. Without this it
+    * returned nothing at all. */
+   assert(liveness_final_response_mode(11, 12, 0, 8) == LIVENESS_FINAL_RESPONSE_HARD);
+   assert(liveness_final_response_mode(23, 24, 0, -1) == LIVENESS_FINAL_RESPONSE_HARD);
    printf("  PASS: final response mode marks max-turn boundary hard\n");
 }
 
@@ -437,6 +563,13 @@ int main(void)
    test_circuit_breaker_above_threshold();
    test_circuit_breaker_zero();
    test_circuit_breaker_negative();
+   test_progress_unique_retrieval_checkpoint();
+   test_progress_detects_nonconsecutive_overlap();
+   test_progress_disjoint_ranges_are_unique();
+   test_progress_mutation_resets_guard();
+   test_progress_unsuccessful_calls_do_not_advance();
+   test_progress_escalates_then_aborts();
+   test_progress_hint_is_actionable();
 
    test_final_response_mode_requires_tools();
    test_final_response_mode_before_policy();

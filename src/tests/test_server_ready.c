@@ -4,17 +4,24 @@
  * by passing an explicit clock, so staleness and roll-up behavior are tested
  * deterministically rather than by sleeping past a real sampling interval.
  *
- * The sampler's own I/O (kb_client_health / db1_is_initialized) is stubbed:
+ * The sampler's own I/O (kb_client_health / db1_store_probe) is stubbed:
  * this suite is about the decision, not about reaching the dependencies. */
 #include "server_http.h"
 #include "kb_client.h"
+#include <aimee/git/module_api.h>
+#include <aimee/runtime-web/module_api.h>
+#include <aimee/skills/module_api.h>
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
-int db1_is_initialized(void)
+static int g_db1_probe_calls;
+
+int db1_store_probe(void)
 {
+   g_db1_probe_calls++;
    return 1;
 }
 
@@ -36,9 +43,18 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    snprintf(out->state, sizeof(out->state), "closed");
 }
 
+static int g_runtime_web_checked;
+static int g_skills_trigger_checked;
+static int g_git_ref_checked;
+
 int obs_bus_module_available(uint32_t event_kind)
 {
-   (void)event_kind;
+   if (event_kind == AIMEE_RUNTIME_WEB_EVENT_CLASSIFY)
+      g_runtime_web_checked = 1;
+   if (event_kind == AIMEE_SKILLS_EVENT_TRIGGER)
+      g_skills_trigger_checked = 1;
+   if (event_kind == AIMEE_GIT_EVENT_REF_VALIDATE)
+      g_git_ref_checked = 1;
    return 1;
 }
 
@@ -47,6 +63,36 @@ int obs_bus_module_available(uint32_t event_kind)
 int main(void)
 {
    char resp[2048];
+
+   unsetenv("AIMEE_RUNTIME_WEB_ENABLED");
+   unsetenv("AIMEE_MODULE_RUNTIME_WEB");
+   server_ready_sample_now();
+   assert(g_db1_probe_calls == 1);
+   assert(g_runtime_web_checked == 1);
+   assert(g_skills_trigger_checked == 1);
+   assert(g_git_ref_checked == 1);
+
+   /* runtime-web is optional. Readiness must follow the same operator intent
+    * as the entrypoint instead of waiting forever for an intentionally
+    * disabled module. An explicit module switch wins over the UI switch. */
+   g_runtime_web_checked = 0;
+   setenv("AIMEE_RUNTIME_WEB_ENABLED", "0", 1);
+   server_ready_sample_now();
+   assert(g_runtime_web_checked == 0);
+
+   g_runtime_web_checked = 0;
+   setenv("AIMEE_MODULE_RUNTIME_WEB", "yes", 1);
+   server_ready_sample_now();
+   assert(g_runtime_web_checked == 1);
+
+   g_runtime_web_checked = 0;
+   setenv("AIMEE_RUNTIME_WEB_ENABLED", "true", 1);
+   setenv("AIMEE_MODULE_RUNTIME_WEB", "off", 1);
+   server_ready_sample_now();
+   assert(g_runtime_web_checked == 0);
+
+   unsetenv("AIMEE_RUNTIME_WEB_ENABLED");
+   unsetenv("AIMEE_MODULE_RUNTIME_WEB");
    server_ready_diagnostics_t ok = {.retrieval_ok = 1,
                                     .modules_ok = 1,
                                     .failed_boundary = "",

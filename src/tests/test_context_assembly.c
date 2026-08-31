@@ -4,19 +4,20 @@
 #include <string.h>
 #include "aimee.h"
 #include "agent_exec.h"
-#include "db.h"
-#include "../db1/db1.h"
-#include "../db2/db2.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
+#include "db1_client/db1.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/memory_query.h"
+#include "../modules/db2/c/memory_relations.h"
+#include "../modules/db2/c/memory_vectors.h"
 
 static void setup(void)
 {
    /* db1_init is idempotent: reuse a single in-memory db1 across all
     * tests. anti-pattern test cases clear the table at the start. */
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
    db2_set_ephemeral(1);
 }
@@ -24,6 +25,184 @@ static void setup(void)
 static void teardown(void)
 {
    db2_test_shim_close();
+}
+
+static int count_text(const char *haystack, const char *needle)
+{
+   int count = 0;
+   size_t n = strlen(needle);
+   for (const char *p = haystack; n > 0 && (p = strstr(p, needle)) != NULL; p += n)
+      count++;
+   return count;
+}
+
+static void test_unit_cursor_drains_more_than_one_page(void)
+{
+   setup();
+   memory_t parent = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "cursor-parent", "cursor parent fixture", 0.8,
+                        "cursor-origin", &parent) == 0);
+
+   char err[256] = "";
+   aimee_pg_stmt_t *insert =
+       aimee_pg_prepare(db2_conn(),
+                        "INSERT INTO memory_units(memory_id,unit_type,unit_key,unit_text)"
+                        " VALUES(?1,'chunk',?2,?3)",
+                        err, sizeof(err));
+   assert(insert != NULL);
+   for (int i = 0; i < 130; i++)
+   {
+      char key[32], text[64];
+      snprintf(key, sizeof(key), "unit-%03d", i);
+      snprintf(text, sizeof(text), "cursor unit %03d", i);
+      assert(aimee_pg_reset(insert) == 0);
+      aimee_pg_bind_int64(insert, "?1", parent.id);
+      aimee_pg_bind_text(insert, "?2", key);
+      aimee_pg_bind_text(insert, "?3", text);
+      assert(aimee_pg_step(insert, err, sizeof(err)) == AIMEE_PG_DONE);
+   }
+   aimee_pg_finalize(insert);
+
+   aimee_pg_stmt_t *count = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM memory_units WHERE memory_id=?1", err, sizeof(err));
+   assert(count != NULL);
+   aimee_pg_bind_int64(count, "?1", parent.id);
+   assert(aimee_pg_step(count, err, sizeof(err)) == AIMEE_PG_ROW);
+   int expected = aimee_pg_column_int(count, 0);
+   aimee_pg_finalize(count);
+   assert(expected >= 130);
+
+   int64_t after = 0;
+   int total = 0;
+   int has_more = 0;
+   do
+   {
+      int64_t ids[17];
+      int n = db2_memory_unit_list_ids_after(parent.id, after, ids, 17, &has_more);
+      assert(n > 0 && n <= 17);
+      for (int i = 0; i < n; i++)
+      {
+         assert(ids[i] > after);
+         after = ids[i];
+      }
+      total += n;
+   } while (has_more);
+   assert(total == expected);
+
+   /* Seed every synthetic point, including more than the old reclamation
+    * buffer, without a parent FK that could hide a missed delete. */
+   char sql[512];
+   snprintf(sql, sizeof(sql),
+            "INSERT INTO memory_embeddings(point_id)"
+            " SELECT id+%lld FROM memory_units WHERE memory_id=%lld",
+            (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql), "INSERT INTO memory_embeddings(point_id) VALUES(%lld)",
+            (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql),
+            "INSERT INTO vector_index_ops(point_id,memory_id)"
+            " SELECT id+%lld,NULL FROM memory_units WHERE memory_id=%lld",
+            (long long)PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+   snprintf(sql, sizeof(sql), "INSERT INTO vector_index_ops(point_id,memory_id) VALUES(%lld,NULL)",
+            (long long)parent.id);
+   assert(aimee_pg_exec(db2_conn(), sql, err, sizeof(err)) == 0);
+
+   assert(memory_delete(parent.id) == 0);
+   aimee_pg_stmt_t *remaining = aimee_pg_prepare(db2_conn(),
+                                                 "SELECT (SELECT COUNT(*) FROM memory_embeddings)"
+                                                 "     + (SELECT COUNT(*) FROM vector_index_ops)",
+                                                 err, sizeof(err));
+   assert(remaining != NULL);
+   assert(aimee_pg_step(remaining, err, sizeof(err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int(remaining, 0) == 0);
+   aimee_pg_finalize(remaining);
+
+   teardown();
+}
+
+static void test_origin_diversity_and_labels_reach_production(void)
+{
+   setup();
+   memory_t m = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-one",
+                        "ORIGIN_ALPHA_ONE quota evidence about release signatures", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-two",
+                        "ORIGIN_ALPHA_TWO quota evidence about deployment regions", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-alpha-three",
+                        "ORIGIN_ALPHA_THREE quota evidence about database retention", 0.8,
+                        "origin-alpha", &m) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "origin-beta-one",
+                        "ORIGIN_BETA_ONE quota evidence from an independent session", 0.2,
+                        "origin&beta", &m) == 0);
+
+   context_assemble_explain_entry_t explain[16];
+   context_budget_metrics_t metrics;
+   int explain_count = 0;
+   char *ctx =
+       memory_assemble_context_explain("quota evidence", explain, &explain_count, 16, &metrics);
+   assert(ctx != NULL);
+   assert(count_text(ctx, "origin_session=\"origin-alpha\"") == 2);
+   assert(count_text(ctx, "origin_session=\"origin&amp;beta\"") == 1);
+   assert(metrics.deferred_for_origin_quota >= 2);
+   int quota_rejected = 0;
+   for (int i = 0; i < explain_count; i++)
+      if (strcmp(explain[i].rejection_reason, "origin_quota_cap") == 0)
+         quota_rejected++;
+   assert(quota_rejected >= 1);
+   free(ctx);
+
+   teardown();
+}
+
+static void test_withheld_memories_cannot_reenter_production_reads(void)
+{
+   setup();
+   memory_t active = {0}, archived = {0}, suppressed = {0};
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-active", "NEGATIVE_ACTIVE_VISIBLE", 0.9,
+                        "origin-a", &active) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-archived", "NEGATIVE_ARCHIVED_HIDDEN", 0.9,
+                        "origin-b", &archived) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "negative-suppressed", "NEGATIVE_SUPPRESSED_HIDDEN",
+                        0.9, "origin-c", &suppressed) == 0);
+   assert(memory_transition_lifecycle(archived.id, MEMORY_LIFECYCLE_STATE_ARCHIVED,
+                                      "negative retrieval fixture") == 0);
+   assert(memory_activation_policy_set(suppressed.id, 2, 1, 0, 1) == 0);
+
+   /* Envelope assembly drives the real candidate query and emitter. */
+   char *ctx = memory_assemble_context("negative reachability sentinel");
+   assert(ctx != NULL);
+   assert(strstr(ctx, "NEGATIVE_ACTIVE_VISIBLE") != NULL);
+   assert(strstr(ctx, "NEGATIVE_ARCHIVED_HIDDEN") == NULL);
+   assert(strstr(ctx, "NEGATIVE_SUPPRESSED_HIDDEN") == NULL);
+   free(ctx);
+
+   /* Graph recall is a separate production lane and must apply the same
+    * negative predicate rather than trusting envelope filtering downstream. */
+   db2_memory_relation_insert(active.id, "neggraph-active", "rel", "target", "active relation");
+   db2_memory_relation_insert(archived.id, "neggraph-archived", "rel", "target",
+                              "archived relation");
+   db2_memory_relation_insert(suppressed.id, "neggraph-suppressed", "rel", "target",
+                              "suppressed relation");
+   memory_relation_t relations[8];
+   assert(memory_search_graph("neggraph-active", 8, relations, 8) == 1);
+   assert(memory_search_graph("neggraph-archived", 8, relations, 8) == 0);
+   assert(memory_search_graph("neggraph-suppressed", 8, relations, 8) == 0);
+
+   /* Episode cards bypass the ordinary fact candidate pool, so exercise that
+    * production query too. */
+   db2_memory_unit_episode_card_insert(archived.id, "card-a", "ARCHIVED_CARD_HIDDEN");
+   db2_memory_unit_episode_card_insert(suppressed.id, "card-s", "SUPPRESSED_CARD_HIDDEN");
+   ctx = memory_assemble_context("what happened in the session overview?");
+   assert(ctx != NULL);
+   assert(strstr(ctx, "ARCHIVED_CARD_HIDDEN") == NULL);
+   assert(strstr(ctx, "SUPPRESSED_CARD_HIDDEN") == NULL);
+   free(ctx);
+
+   teardown();
 }
 
 static void test_null_hint_produces_same_as_original(void)
@@ -220,54 +399,52 @@ static void test_task_hint_formats_xml_and_negative_context(void)
    teardown();
 }
 
-/* --- Task type classification tests --- */
-
-static void test_classify_bug_fix(void)
+/* The shape of the work comes from the ROLE, and the role alone.
+ *
+ * A keyword scan of the brief used to answer this. It read the prose again at
+ * every context refresh, and the real roundtable panel prompt -- "must fail
+ * closed", "must be fixed", alongside "Review" -- classified as a bug fix, so
+ * every seat was handed execution-agent instructions and died without emitting
+ * its verdict. The role is stated once and does not change mid-run.
+ *
+ * WHICH role maps to which shape is the module's list, pinned against the
+ * module in server-go/modules/delegates/rolepolicy_test.go. What is asserted
+ * HERE is that the answer reaches the instructions. */
+static void test_the_role_decides_the_shape_of_the_work(void)
 {
-   assert(task_type_classify("fix the crash in auth module") == TASK_TYPE_BUG_FIX);
-   assert(task_type_classify("Debug the error in login") == TASK_TYPE_BUG_FIX);
-   assert(task_type_classify("Something is broken in deploy") == TASK_TYPE_BUG_FIX);
-   assert(task_type_classify("Investigate the regression") == TASK_TYPE_BUG_FIX);
-   assert(task_type_classify("The build fails on CI") == TASK_TYPE_BUG_FIX);
+   assert(agent_task_type_for_role("review") == TASK_TYPE_REVIEW);
+   assert(strstr(agent_exec_instructions(agent_task_type_for_role("review")),
+                 "final message IS the deliverable"));
+
+   assert(agent_task_type_for_role("code") != TASK_TYPE_REVIEW);
+   assert(strstr(agent_exec_instructions(agent_task_type_for_role("code")), "execution agent"));
+
+   /* No role is no delegate: neutral weighting, acting instructions. */
+   assert(agent_task_type_for_role(NULL) == TASK_TYPE_GENERAL);
 }
 
-static void test_classify_refactor(void)
+/* A reviewer's deliverable is its final message. The execution-agent
+ * instruction "always invoke tools, never write as plain text" forbids exactly
+ * that, and a reviewer given it spends its whole turn budget calling tools and
+ * dies with "max turns exhausted without final response". */
+static void test_review_instructions_do_not_forbid_a_final_answer(void)
 {
-   assert(task_type_classify("refactor the auth module") == TASK_TYPE_REFACTOR);
-   assert(task_type_classify("rename getUserData to fetchUser") == TASK_TYPE_REFACTOR);
-   assert(task_type_classify("extract common logic into helper") == TASK_TYPE_REFACTOR);
-   assert(task_type_classify("clean up the unused imports") == TASK_TYPE_REFACTOR);
-}
+   const char *review = agent_exec_instructions(TASK_TYPE_REVIEW);
+   assert(strstr(review, "review agent"));
+   assert(strstr(review, "final message IS the deliverable"));
+   assert(!strstr(review, "Always invoke tools"));
+   assert(!strstr(review, "Never write shell commands"));
 
-static void test_classify_feature(void)
-{
-   assert(task_type_classify("add pagination to the API") == TASK_TYPE_FEATURE);
-   assert(task_type_classify("implement rate limiting") == TASK_TYPE_FEATURE);
-   assert(task_type_classify("create a new endpoint for users") == TASK_TYPE_FEATURE);
-   assert(task_type_classify("build webhook support") == TASK_TYPE_FEATURE);
-}
-
-static void test_classify_review(void)
-{
-   assert(task_type_classify("review the PR changes") == TASK_TYPE_REVIEW);
-   assert(task_type_classify("audit the security config") == TASK_TYPE_REVIEW);
-   assert(task_type_classify("verify the deployment worked") == TASK_TYPE_REVIEW);
-   assert(task_type_classify("validate the schema migration") == TASK_TYPE_REVIEW);
-}
-
-static void test_classify_test(void)
-{
-   assert(task_type_classify("test the auth flow") == TASK_TYPE_TEST);
-   assert(task_type_classify("increase test coverage for db") == TASK_TYPE_TEST);
-   assert(task_type_classify("write unit tests for parser") == TASK_TYPE_TEST);
-}
-
-static void test_classify_general(void)
-{
-   assert(task_type_classify("deploy the service") == TASK_TYPE_GENERAL);
-   assert(task_type_classify("update the config") == TASK_TYPE_GENERAL);
-   assert(task_type_classify(NULL) == TASK_TYPE_GENERAL);
-   assert(task_type_classify("") == TASK_TYPE_GENERAL);
+   /* Acting agents keep their own instruction: they must call tools rather than
+    * narrate shell commands. */
+   for (task_type_t t = TASK_TYPE_GENERAL; t < TASK_TYPE_COUNT; t++)
+   {
+      if (t == TASK_TYPE_REVIEW)
+         continue;
+      const char *acting = agent_exec_instructions(t);
+      assert(strstr(acting, "execution agent"));
+      assert(strstr(acting, "Always invoke tools"));
+   }
 }
 
 static void test_task_type_name_strings(void)
@@ -417,8 +594,63 @@ static void test_agent_context_budget_caps_unpinned_output_reserve(void)
    assert(small > (size_t)(1000000 - 1000000 / 4) * 4u);
 }
 
+/* A restatement must not be assembled twice, on the PRODUCTION path.
+ *
+ * Read-time near-duplicate suppression was added to
+ * memory_assemble_context_explain(), whose comment claims it "runs a candidate
+ * scoring pass (identical to memory_assemble_context)". They are two separate
+ * implementations, and the explain one has a single production caller (the
+ * `memory improve` diagnostic) -- so the suppression never ran for `aimee memory
+ * read` or the agent-runtime fallback context.
+ *
+ * Reproduced on a live deployment before this fix: two memories that are pure
+ * word-order reorderings of each other -- identical token sets, so far above the
+ * 0.85 lexical threshold -- BOTH appeared in the assembled context.
+ *
+ * The second assertion is the one that keeps the fix honest. Suppressing a
+ * DISTINCT fact silently loses evidence, which is worse than admitting a
+ * redundant line, so a memory that merely shares vocabulary must survive. */
+static void test_restatements_are_suppressed_but_distinct_facts_survive(void)
+{
+   setup();
+   memory_t m;
+
+   memory_insert(TIER_L2, KIND_FACT, "release-a",
+                 "The release checklist requires the changelog to be regenerated before any tag "
+                 "is pushed to the origin remote",
+                 0.9, "s1", &m);
+   /* Same sentence, reordered: nothing new is said. */
+   memory_insert(TIER_L2, KIND_FACT, "release-b",
+                 "Before any tag is pushed to the origin remote, the release checklist requires "
+                 "the changelog to be regenerated",
+                 0.9, "s1", &m);
+   /* Heavy vocabulary overlap, DIFFERENT claim. Must not be suppressed. */
+   memory_insert(TIER_L2, KIND_FACT, "release-c",
+                 "The release checklist forbids pushing any tag to the origin remote on a Friday",
+                 0.9, "s1", &m);
+
+   char *ctx = memory_assemble_context(NULL);
+   assert(ctx != NULL);
+
+   /* Count how many of the two restatements survived. */
+   int a = strstr(ctx, "requires the changelog to be regenerated before any tag") != NULL;
+   int b = strstr(ctx, "Before any tag is pushed to the origin remote, the release") != NULL;
+   assert(a + b == 1); /* exactly one, not both */
+
+   /* The distinct fact is still there. */
+   assert(strstr(ctx, "on a Friday") != NULL);
+
+   free(ctx);
+   teardown();
+   printf("  restatement suppressed, distinct fact kept\n");
+}
+
 int main(void)
 {
+   test_unit_cursor_drains_more_than_one_page();
+   test_origin_diversity_and_labels_reach_production();
+   test_withheld_memories_cannot_reenter_production_reads();
+   test_restatements_are_suppressed_but_distinct_facts_survive();
    test_null_hint_produces_same_as_original();
    test_task_hint_prioritizes_relevant_memories();
    test_task_hint_respects_budget();
@@ -426,12 +658,8 @@ int main(void)
    test_empty_db_with_task_hint();
    test_graph_boost_integration();
    test_task_hint_formats_xml_and_negative_context();
-   test_classify_bug_fix();
-   test_classify_refactor();
-   test_classify_feature();
-   test_classify_review();
-   test_classify_test();
-   test_classify_general();
+   test_the_role_decides_the_shape_of_the_work();
+   test_review_instructions_do_not_forbid_a_final_answer();
    test_task_type_name_strings();
    test_agent_exec_context_truncates_large_prompt();
    test_agent_exec_context_ex_can_skip_kb();

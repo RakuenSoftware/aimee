@@ -1,5 +1,9 @@
 # Proposal: Recall economy progressive disclosure
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-06-09
 - **Author:** JBailes
@@ -39,9 +43,9 @@ Implemented behavior:
 - `src/mcp_tools.c`
 - `src/server/kb_client_memory.c`
 - `src/kb/kb_service_memory.c`
-- `src/db2/kb_service_backend_memory.c`
-- `src/db2/memory_query_bookkeeping.c`
-- `src/db2/schema.sql`
-- `src/db2/schema_sqlite.sql`
+- `src/modules/db2/c/kb_service_backend_memory.c`
+- `src/modules/db2/c/memory_query_bookkeeping.c`
+- `src/modules/db2/c/schema.sql`
+- `src/modules/db2/c/schema_sqlite.sql`
 - `src/tests/test_ingress_preinject.c`
 - `src/tests/test_mcp_tools_golden.inc`

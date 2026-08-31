@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include "modules/git/git_verify.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ---- Helpers ---- */
 
@@ -13,7 +14,7 @@ static char g_tmpdir[256];
 
 static void setup_fake_git_repo(void)
 {
-   snprintf(g_tmpdir, sizeof(g_tmpdir), "/tmp/aimee-hook-test-XXXXXX");
+   snprintf(g_tmpdir, sizeof(g_tmpdir), "%s/aimee-hook-test-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmpdir) != NULL);
 
    char cmd[512];

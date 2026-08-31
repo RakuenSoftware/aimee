@@ -30,14 +30,14 @@ async function sendJSON<T>(
   return { status: r.status, data };
 }
 
-const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
+const lbl: React.CSSProperties = { fontSize: 12, color: "var(--sg-text-secondary)", display: "block", marginBottom: 2 };
 const ta: React.CSSProperties = {
   width: "100%",
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
   padding: 6,
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   boxSizing: "border-box",
 };
 const nameOk = (s: string) => /^[a-z0-9][a-z0-9_-]*$/i.test(s);
@@ -132,7 +132,7 @@ export default function Roles() {
 
       <div style={{ maxWidth: 720 }}>
         <Panel title="Roles" count={roles.length}>
-          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
             The shared vocabulary. A role’s body describes what it does; personas and agents are matched on
             these names (plus the <code>all</code> wildcard). The turn cap is a <strong>role</strong> setting —
             personas never carry one.
@@ -143,7 +143,7 @@ export default function Roles() {
                 key={r}
                 size="md"
                 onClick={() => openRole(r)}
-                style={{ background: roleSel === r ? "#e8eef9" : "#fff" }}
+                style={{ background: roleSel === r ? "var(--sg-info-bg)" : "var(--sg-surface)" }}
                 title="Open this role to edit its prompt template and turn cap."
               >
                 {r}

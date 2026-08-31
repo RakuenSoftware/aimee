@@ -411,22 +411,20 @@ static void handle_build_command(gateway_ctx_t *ctx, const session_source_t *src
       return;
    }
 
-   cli_conn_t conn;
-   /* The co-located server socket is filesystem-trusted; the separate
-    * NDJSON authenticate step was removed in the /v1-only cutover (#2708). */
-   if (cli_connect(&conn, NULL) != 0)
-   {
-      reply_origin(ctx, src, "Could not reach aimee-server.");
-      return;
-   }
+   /* Reached over /v1 like every other handler here. This used to open the
+    * legacy NDJSON socket (cli_connect/cli_request) against
+    * <aimee_home>/aimee.sock -- a socket aimee-server has not bound since the
+    * NDJSON listener was removed (server_init sets listen_fd = -1 and says so),
+    * so this gate could only ever answer "Could not reach aimee-server". The
+    * sibling /pr handler two functions up already dispatches the same mcp.call
+    * over /v1; this one was simply missed by the cutover. */
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "method", "mcp.call");
    cJSON_AddStringToObject(req, "tool", "git_verify");
    cJSON_AddStringToObject(req, "cwd", wspath);
    cJSON_AddObjectToObject(req, "arguments");
-   cJSON *resp = cli_request(&conn, req, 300000); /* verify gate (build/test) */
+   cJSON *resp = cli_v1_dispatch_local(req, 300000); /* verify gate (build/test) */
    cJSON_Delete(req);
-   cli_close(&conn);
 
    const char *reply = "Build command sent (no response from server).";
    char buf[1024];

@@ -183,11 +183,11 @@ snapshot_role aimee_kb_owner
 snapshot_role aimee_kb_migrate
 snapshot_role aimee_kb_runtime
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/db2/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 runuser -u postgres -- createdb -O aimee_kb_owner "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/db2/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 # PG15+ stopped granting CREATE on public to non-owners. A real migrate step holds this.
 psqlq -c 'GRANT USAGE, CREATE ON SCHEMA public TO aimee_kb_owner, aimee_kb_migrate' >/dev/null 2>&1
 
@@ -208,7 +208,7 @@ psqlq -c "ALTER ROLE aimee_kb_migrate LOGIN PASSWORD '$migpw'" >/dev/null 2>&1 \
 # EMBED_DIM must equal the embedding_dim kb is configured with, or the vector columns will not
 # match the embedder; that equality is asserted below rather than left to coincide.
 EMBED_DIM=1024
-sed "s/__EMBED_DIM__/$EMBED_DIM/g" src/db2/schema.sql | \
+sed "s/__EMBED_DIM__/$EMBED_DIM/g" src/modules/db2/c/schema.sql | \
   PGPASSWORD=$migpw PGSSLROOTCERT=$certs/ca.crt \
   psql -q -v ON_ERROR_STOP=1 \
   "postgresql://aimee_kb_migrate@127.0.0.1:5432/$db?sslmode=verify-full" \
@@ -220,7 +220,7 @@ step "The schema is re-appliable (a second apply must be clean)"
 # The dev rig documented an FK/UNIQUE drop-order fix but never reproduced it, because it only
 # ever applied the schema once. A hardened deployment re-runs migrations over an existing
 # database on every upgrade, so this is that path.
-sed "s/__EMBED_DIM__/$EMBED_DIM/g" src/db2/schema.sql | \
+sed "s/__EMBED_DIM__/$EMBED_DIM/g" src/modules/db2/c/schema.sql | \
   PGPASSWORD=$migpw PGSSLROOTCERT=$certs/ca.crt \
   psql -q -v ON_ERROR_STOP=1 \
   "postgresql://aimee_kb_migrate@127.0.0.1:5432/$db?sslmode=verify-full" \
@@ -240,7 +240,7 @@ step "Phase 3: schema_grants.sql gives the runtime role its DML and EXECUTE"
 # phase 3 to the migrate role fails with "permission denied to alter role". Only the DDL is the
 # migrate role's job, and only kb's own connection is the one that must be verify-full TLS --
 # these two run over the local admin socket, as a real deployment's provisioning does.
-psqlq -f src/db2/schema_grants.sql > "$work/grants.log" 2>&1 \
+psqlq -f src/modules/db2/c/schema_grants.sql > "$work/grants.log" 2>&1 \
   || { echo "--- grants log:"; tail -30 "$work/grants.log"; fail "phase-3 grants apply"; }
 echo "  applied as superuser (phase 2 stays the migrate role's)"
 
@@ -417,7 +417,7 @@ out=$(G set --subject alice --server livesrv --team 990001 --tier data) || fail 
 # The granter is the actor kb AUTHENTICATED, never a value from the request body.
 [ "$(rows "SELECT granted_by FROM kb_write_tier_grant WHERE subject='alice'")" = "owner" ] \
   || fail "granted_by is not the authenticated operator"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox
              WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
   || fail "the audit row does not name the operator as actor"
 # THIS is what the hardened tier adds: the SECURITY DEFINER write succeeded while connected as
@@ -482,7 +482,7 @@ out=$(G revoke --subject alice --server livesrv --team 990001) || fail "revoke: 
   || fail "revoked_at was not set"
 [ "$(rows "SELECT count(*) FROM kb_write_tier_grant WHERE subject='alice'")" = "1" ] \
   || fail "revocation did not retain exactly one row"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox
              WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
   || fail "the revoke audit row does not name the operator"
 # The second warning an operator could not previously see: access is gone SHORTLY, not now.
@@ -562,9 +562,9 @@ done
 echo "  health=200 with the same bearer, so the refusal is the TRANSPORT gate, not auth"
 
 step "the audit trail reconstructs the sequence"
-psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_event
-            WHERE action LIKE 'authz.write_tier%' ORDER BY seq" | sed 's/^/  /'
-n=$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")
+psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_outbox
+            WHERE action LIKE 'authz.write_tier%' ORDER BY outbox_id" | sed 's/^/  /'
+n=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")
 [ "$n" -ge 7 ] || fail "expected at least 7 audit rows, found $n"
 
 step "kb logged no schema or permission failure"

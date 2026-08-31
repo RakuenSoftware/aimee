@@ -21,19 +21,23 @@
 #include "kb_background.h"
 #include "kb_ingest_workers.h"
 #include "kb_service.h"
+#include "kb_service_code_embed.h"
 #include "log.h"
 #include <aimee/workspace/workspace.h>
 #include "modules/workspace/workspace_scope.h"
 
-#include "db2/db2.h" /* db2_lease_release_idle */
-#include "db2/canonical_index.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/kb_service_backend.h"
-#include "db2/kb_payload.h"
-#include "db2/db_postgres.h"
-#include "db2/lifecycle.h"
-#include "db2/pgvec_kb_service.h"
+#include "modules/db2/c/db2.h" /* db2_lease_release_idle */
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/canonical_index.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/lifecycle.h"
+#include "modules/db2/c/pgvec_kb_service.h"
+#include "code_collect.h" /* git_resolve_default_sha, code_index_source_is_worktree */
 #include "kb_doc_hash.h"
+#include "integrity.h"
 #include "memory.h"
 
 #include <dirent.h>
@@ -45,6 +49,7 @@
 #include <string.h>
 #include <time.h>
 #ifndef AIMEE_WINDOWS
+#include <sched.h>
 #include <unistd.h>
 #include <poll.h>
 #include <sys/resource.h>
@@ -144,6 +149,12 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
    aimee_log(LOG_INFO, "kb.ingest.worker", "picked up project='%s' (force=%d)", job->project,
              job->force);
    kb_background_set("ingest", "project=%s phase=build", job->project);
+   if (db2_maintenance_job_enter(DB2_MAINTENANCE_INGEST, job->project) != 0)
+   {
+      db2_kb_ingest_queue_fail(job->id, "could not establish ingest maintenance identity");
+      kb_background_clear("ingest");
+      return;
+   }
 
    /* The kb_embeddings vector column dimension comes from the schema (sized to
     * the deployment's configured embedding_dim); pgvec_ensure_index infers the
@@ -154,6 +165,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
                 job->project);
       db2_kb_ingest_queue_fail(job->id, "vector store unavailable");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
    const char *embed_cmd = config_embedder_command_current(NULL);
@@ -166,6 +178,7 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
       aimee_log(LOG_WARN, "kb.ingest.worker", "kb_build failed for project='%s'", job->project);
       db2_kb_ingest_queue_fail(job->id, "kb_build failed");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
 
@@ -182,16 +195,66 @@ static void kbiw_process_job(const db2_kb_ingest_job_t *job)
                 job->project);
       db2_kb_ingest_queue_fail(job->id, "canonical index scan failed");
       kb_background_clear("ingest");
+      db2_maintenance_job_leave();
       return;
    }
+
+   /* Record the branch SHA now the walk has actually happened. The HTTP route
+    * used to do this inline because it did the walk; now that it only queues,
+    * doing it there would claim a project was indexed at a SHA before any of it
+    * ran -- and a later failure would leave that claim standing, so every
+    * !force scan would skip a project that was never ingested. */
+   char scanned_sha[128] = "";
+   if (!code_index_source_is_worktree() &&
+       git_resolve_default_sha(job->root_path, scanned_sha, sizeof(scanned_sha)) == 0 &&
+       scanned_sha[0])
+   {
+      char sha_key[320];
+      snprintf(sha_key, sizeof(sha_key), "code_scan_sha:%s", job->project);
+      db2_kb_runtime_state_set(sha_key, scanned_sha);
+   }
+
+   /* Code vectors are part of a complete build, and they belong HERE.
+    *
+    * This worker built doc vectors and the code index but never called
+    * kb_code_embed_refresh, so code_embeddings stayed empty for every project
+    * that arrived through the queue -- which is every project. Semantic CODE
+    * search therefore had nothing to search and abstained with candidate_count
+    * 0, and agents fell back to grep.
+    *
+    * That gap is also why the HTTP build route was made synchronous: the
+    * symptom ("my project never got embedded") read as the global backlog
+    * starving it, so the fix was to make the caller wait. No amount of waiting
+    * on the queue would ever have produced a code vector, because nothing on
+    * this path made one. Embedding is asynchronous by design -- it completes
+    * when it completes -- so the queue is where it has to happen.
+    *
+    * Ordered after the canonical scan on purpose: code embeddings are derived
+    * from indexed definitions, so the index must exist first. A failure here is
+    * NOT fatal to the job: the code index and doc vectors are already durable
+    * and useful on their own, and the next pass re-embeds what is missing.
+    * Failing the whole job would discard that work and re-do it forever. */
+   kb_background_set("ingest", "project=%s phase=code-embed", job->project);
+   kb_code_embed_result_t code_embed;
+   memset(&code_embed, 0, sizeof(code_embed));
+   if (kb_code_embed_refresh(job->project, "changed_files", NULL, 0, 0, 0, 0, &code_embed) != 0)
+      aimee_log(LOG_WARN, "kb.ingest.worker",
+                "code embedding incomplete for project='%s' (index and docs are durable; "
+                "the next pass retries)",
+                job->project);
+   else
+      stats.embeddings_added += (int)code_embed.embedded;
 
    db2_kb_ingest_queue_complete(job->id, stats.files_indexed, stats.chunks_added,
                                 stats.embeddings_added);
    db2_kb_runtime_state_set_now("last_ingest_at");
    kb_background_clear("ingest");
+   db2_maintenance_job_leave();
 
-   aimee_log(LOG_INFO, "kb.ingest.worker", "done: project='%s' files=%d chunks=%d embeddings=%d",
-             job->project, stats.files_indexed, stats.chunks_added, stats.embeddings_added);
+   aimee_log(LOG_INFO, "kb.ingest.worker",
+             "done: project='%s' files=%d chunks=%d embeddings=%d code_vectors=%lld", job->project,
+             stats.files_indexed, stats.chunks_added, stats.embeddings_added,
+             (long long)code_embed.embedded);
 }
 
 /* Claim one job and process it. Returns 1 if a job was processed, 0 if the
@@ -284,6 +347,11 @@ static void *kbiw_timer_thread(void *arg)
       if (interval_secs <= 0)
          interval_secs = 6 * 3600;
 
+      /* Same reason as the watch thread, over a much longer wait: the enqueue
+       * above leases lazily, and this loop then sleeps out the whole ingest
+       * interval (six hours by default) with nothing to end the unit of work. */
+      db2_lease_release_idle();
+
       int slept = 0;
       while (slept < interval_secs)
       {
@@ -368,6 +436,13 @@ static void *kbiw_watch_thread(void *arg)
    char evbuf[4096] __attribute__((aligned(__alignof__(struct inotify_event))));
    while (!ctx->ingest_stop)
    {
+      /* Let go before waiting for the next filesystem event. The enqueue below
+       * leases a pooled DB2 connection lazily and this thread has no unit of
+       * work to end, so without this it kept the connection across an idle
+       * watch -- which on a quiet tree is the whole life of the process, and
+       * the pool reaper reports it as a stuck lease. Releasing here costs one
+       * re-acquire per burst of edits, not per event. */
+      db2_lease_release_idle();
       struct pollfd pfd = {.fd = ifd, .events = POLLIN};
       if (poll(&pfd, 1, 1000) <= 0)
          continue;
@@ -416,6 +491,59 @@ static void *kbiw_watch_thread(void *arg)
 }
 #endif
 
+/* CPUs this process may actually run on.
+ *
+ * sysconf(_SC_NPROCESSORS_ONLN) reports the HOST's online CPUs and ignores the
+ * cgroup/affinity mask a container is confined to. On the bench container it
+ * answers 8 while the process is pinned to 4 -- so a cap computed from it left
+ * headroom on cores that do not exist and started one worker per usable core,
+ * which is precisely the saturation the cap exists to prevent. sched_getaffinity
+ * is what nproc uses and what the scheduler will honour. */
+static long kbiw_usable_cpus(void)
+{
+#ifdef __linux__
+   cpu_set_t set;
+   CPU_ZERO(&set);
+   if (sched_getaffinity(0, sizeof(set), &set) == 0)
+   {
+      int n = CPU_COUNT(&set);
+      if (n > 0)
+         return (long)n;
+   }
+#endif
+   long n = sysconf(_SC_NPROCESSORS_ONLN);
+   return n > 0 ? n : 1;
+}
+
+/* Effective ingest-worker count.
+ *
+ * Ingest work is embedding, and embedding is CPU-bound: each worker drives the
+ * embedder, which itself runs torch with EMBEDDER_THREADS threads. Running as
+ * many workers as the config allows (up to KB_WORKER_MAX=8) on a 4-CPU box
+ * oversubscribes the machine several times over -- measured against bekko-a25m,
+ * a 128-text batch goes from 6.6s at concurrency 1 to 25.5s at concurrency 8,
+ * i.e. every in-flight batch slows together until one of them trips a bound.
+ *
+ * Embedding is background work and must never take the whole machine: ALWAYS
+ * leave at least one core for the interactive path (search, the /v1 routes, the
+ * agent waiting on them). Workers additionally run at nice +5 so even the cores
+ * they do use yield to foreground work.
+ *
+ * Pure and separated from sysconf so the policy is testable without a host of a
+ * particular size. */
+int kb_ingest_worker_cap(int configured, long ncpu)
+{
+   if (configured <= 0)
+      return 0; /* explicitly disabled */
+   int cpu_cap = (ncpu > 1) ? (int)(ncpu - 1) : 1;
+   int cap = configured;
+   if (cap > KB_WORKER_MAX)
+      cap = KB_WORKER_MAX;
+   if (cap > cpu_cap)
+      cap = cpu_cap;
+   return cap;
+}
+
 /* ------------------------------------------------------------------ */
 /* Start / stop                                                        */
 /* ------------------------------------------------------------------ */
@@ -431,11 +559,7 @@ void kb_ingest_workers_start(kb_service_ctx_t *ctx)
    ctx->ingest_count = 0;
    ctx->ingest_timer_active = 0;
    ctx->bg_watch_active = 0;
-   int cap = config_kb_worker_count();
-   if (cap < 0)
-      cap = 0;
-   if (cap > KB_WORKER_MAX)
-      cap = KB_WORKER_MAX;
+   int cap = kb_ingest_worker_cap(config_kb_worker_count(), kbiw_usable_cpus());
 
    if (cap == 0 || !db2_is_initialized())
    {
@@ -564,13 +688,19 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    char hash[KB_DOC_HASH_HEX_LEN + 1];
    kb_doc_content_hash_for_path(source_path, content, (int)len, hash);
 
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    char stored[KB_DOC_HASH_HEX_LEN + 1] = "";
    if (db2_kb_documents_get_stored_hash(project, source_path, stored, sizeof(stored)) == 1 &&
        strcmp(stored, hash) == 0)
+   {
+      if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+         return -1;
       return 0; /* unchanged — already ingested */
-
-   if (delete_file_chunks(project, source_path) != 0)
-      return -1; /* purge fence: drop this document */
+   }
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return -1;
 
    text_chunk_t *chunks = malloc(MAX_CHUNKS_PER_FILE * sizeof(text_chunk_t));
    if (!chunks)
@@ -580,6 +710,29 @@ int kb_ingest_doc_content(const char *project, const char *source_path, const ch
    {
       free(chunks);
       return 0;
+   }
+
+   /* Repository, watcher, upload, and future converted-document sources all
+    * converge here. Classify every bounded chunk before deleting prior state or
+    * writing any new row, so an instruction-bearing document is parked without
+    * creating a partial ingest. */
+   for (int ci = 0; ci < n_chunks; ci++)
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(chunks[ci].content, INTEGRITY_SOURCE_DOCUMENT, "document", 1,
+                                   &gate))
+      {
+         LOG_WARN("integrity", "document ingest parked (%s): %s",
+                  integrity_verdict_name(gate.verdict), gate.match_category);
+         free(chunks);
+         return -1;
+      }
+   }
+
+   if (delete_file_chunks(project, source_path) != 0)
+   {
+      free(chunks);
+      return -1; /* purge fence: drop this document */
    }
 
    /* Phase 1: all chunk rows + neighbour links in ONE guarded, fenced
@@ -662,9 +815,16 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
 {
    if (!project || !project[0] || !db2_is_initialized())
       return -1;
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    if (max_docs <= 0)
       max_docs = 200;
 
@@ -687,7 +847,11 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project);
    aimee_pg_bind_int(st, "?2", max_docs);
 
@@ -715,6 +879,13 @@ int kb_doc_refresh(const char *project, const char *embedding_cmd, int max_docs)
       }
    }
    aimee_pg_finalize(st);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   {
+      for (int i = 0; i < n; i++)
+         free(rows[i].content);
+      free(rows);
+      return -1;
+   }
 
    int embedded = 0;
    for (int i = 0; i < n; i++)
@@ -743,9 +914,16 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
    const char *effective_cmd = kb_effective_embedding_cmd(embedding_cmd);
    if (!effective_cmd[0])
       return 0; /* no embedder configured — nothing to do */
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+      return -1;
    void *conn = db2_conn();
    if (!conn)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    if (max_chunks <= 0)
       max_chunks = 200;
 
@@ -760,7 +938,11 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
    char err[256] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
+   {
+      if (read_scope == 1)
+         db2_maintenance_scope_rollback();
       return -1;
+   }
    aimee_pg_bind_text(st, "?1", project);
    aimee_pg_bind_int(st, "?2", max_chunks);
 
@@ -791,6 +973,13 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       }
    }
    aimee_pg_finalize(st);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+   {
+      for (int i = 0; i < n; i++)
+         free(rows[i].content);
+      free(rows);
+      return -1;
+   }
 
    int embedded = 0;
    for (int i = 0; i < n; i++)
@@ -804,7 +993,11 @@ int kb_doc_embed_backfill(const char *project, const char *embedding_cmd, int ma
       float vec[EMBED_MAX_DIM];
       int dim =
           memory_embed_text(embed_text, effective_cmd, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
-      if (dim > 0 && sync_vector_embedding(rows[i].id, vec, dim) == 0)
+      /* Payload reconstruction reads kb_documents, so it needs a fresh short
+       * project scope after the embedder round-trip. The fenced helper opens
+       * that transaction, reapplies the current maintenance context, and keeps
+       * the purge generation check atomic with the vector write. */
+      if (dim > 0 && kb_sync_vector_embedding_fenced(project, rows[i].id, vec, dim) == 0)
          embedded++;
       free(rows[i].content);
    }

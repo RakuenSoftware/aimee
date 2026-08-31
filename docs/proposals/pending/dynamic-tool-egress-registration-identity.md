@@ -1,6 +1,6 @@
 # Dynamic tool egress: authenticated registration identity
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`dynamic-tool-egress-classification.md`](../done/dynamic-tool-egress-classification.md)
 

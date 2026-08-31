@@ -2,15 +2,15 @@
 #define _GNU_SOURCE
 #endif
 #include "aimee.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/kb_payload.h"
-#include "db2/code_index.h"
-#include "db2/db_postgres.h"
-#include "db2/kb_service_backend.h"
-#include "db2/memory_query.h"
-#include "db2/vector_index_ops.h"
-#include "db2/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
-#include "db2/sketch.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/code_index.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/kb_runtime_state.h" /* db2_kb_purge_fence_active: ingest fence checks */
+#include "modules/db2/c/sketch.h"
 #include "kb_vectors.h"
 #include "kb_curator_notify.h"
 #include "kb_features.h"
@@ -18,9 +18,9 @@
 #include "kb_detect.h"
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
-#include "db2/bandit.h"
-#endif
+#include "modules/db2/c/bandit.h"
 #include "headers/sketch.h"
+#include <strings.h>
 #include "kb.h"
 #include "kb_fusion.h"
 #include "kb_neardup.h"
@@ -42,85 +42,6 @@
 #include <unistd.h>
 
 #define KB_ERRBUF 256
-
-#if defined(AIMEE_DB2_DISABLED)
-int kb_build(const char *root_path, const char *project, const char *embedding_cmd,
-             int force_rebuild, kb_stats_t *stats_out)
-{
-   (void)root_path;
-   (void)project;
-   (void)embedding_cmd;
-   (void)force_rebuild;
-   if (stats_out)
-      memset(stats_out, 0, sizeof(*stats_out));
-   return -1;
-}
-
-int kb_update(const char *root_path, const char *project, const char *embedding_cmd,
-              kb_stats_t *stats_out)
-{
-   (void)root_path;
-   (void)project;
-   (void)embedding_cmd;
-   if (stats_out)
-      memset(stats_out, 0, sizeof(*stats_out));
-   return -1;
-}
-
-char *kb_search(const char *project, const char *query, const char *embedding_cmd, int max_results)
-{
-   (void)project;
-   (void)query;
-   (void)embedding_cmd;
-   (void)max_results;
-   return safe_strdup("error: knowledge base storage is owned by aimee-kb");
-}
-
-char *kb_search_json(const char *project, const char *query, const char *embedding_cmd,
-                     int max_results)
-{
-   (void)project;
-   (void)query;
-   (void)embedding_cmd;
-   (void)max_results;
-   return safe_strdup("{\"error\":\"knowledge base storage is owned by aimee-kb\"}");
-}
-
-/* Storage-disabled alternative to the full implementation below. The outer
- * AIMEE_DB2_DISABLED #if/#else makes the definitions mutually exclusive. */
-char *kb_search_json_scoped_ex(const char *preferred_project, int all_projects, const char *query,
-                               const char *embedding_cmd, int max_results,
-                               const char *fusion_mode_override)
-{
-   (void)all_projects;
-   (void)fusion_mode_override;
-   return kb_search_json(preferred_project, query, embedding_cmd, max_results);
-}
-
-void kb_resolve_project(const char *project, const char *root_path, char *out, size_t out_len)
-{
-   (void)root_path;
-   if (!out || out_len == 0)
-      return;
-   out[0] = '\0';
-   if (project && project[0])
-   {
-      snprintf(out, out_len, "%s", project);
-      return;
-   }
-}
-
-int kb_async_enabled(void)
-{
-   return 0;
-}
-
-int kb_extract_convention_candidates(void)
-{
-   return 0;
-}
-
-#else
 
 static int estimate_tokens(const char *text, size_t len)
 {
@@ -292,7 +213,7 @@ static int should_index_file(const char *rel_path, char includes[][KB_GLOB_MAX],
 /* File walking                                                         */
 /* ------------------------------------------------------------------ */
 
-#define MAX_FILES        4096
+#define MAX_FILES 4096
 
 typedef struct
 {
@@ -625,6 +546,13 @@ int kb_purge_fenced_txn_begin(const char *project)
 {
    if (db2_kb_txn_begin() != 0)
       return -1;
+   int maintenance = db2_maintenance_context_apply_current();
+   if (maintenance < 0)
+   {
+      db2_kb_txn_rollback();
+      LOG_WARN("kb_build", "maintenance scope refused for project '%s'", project ? project : "");
+      return -1;
+   }
    if (project && project[0] &&
        (db2_kb_purge_txn_guard(project) != 0 || db2_kb_purge_fence_active(project)))
    {
@@ -844,8 +772,106 @@ typedef struct
  * LSH near-duplicate handling, chunk insertion, and synchronous-or-async
  * embedding with batched pgvector upserts. Mutates the shared sketches, batch
  * buffer, and stats counters through `c`. */
+/* Embed every chunk of one file in a single call, into a caller-owned buffer.
+ *
+ * Ingest used to call the single-text memory_embed_text() once per chunk, so a
+ * ~3000 file project paid one embedder round trip per chunk -- measured at
+ * ~190ms each, which is the round trip, not the model. memory_embed_texts()
+ * has always existed (memory search embeds a query and its sub-questions in ONE
+ * call) and the bundled embedder serves /embed_batch.
+ *
+ * The buffer is caller-owned rather than cached in a static: ingest runs up to
+ * KB_WORKER_MAX worker threads, and a shared cache here would hand one file's
+ * vectors to another file being embedded concurrently.
+ *
+ * Returns the vector dimension, or <= 0 if the batch could not be produced --
+ * the caller then falls back to the per-text path, which computes the same
+ * vectors more slowly. */
+static int kb_embed_file_chunks(kb_build_file_ctx_t *c, int n_chunks, float *out)
+{
+   if (!c || !out || n_chunks <= 1 || !c->effective_cmd[0])
+      return 0;
+
+   char **texts = calloc((size_t)n_chunks, sizeof(*texts));
+   if (!texts)
+      return 0;
+   int built = 1;
+   for (int i = 0; i < n_chunks; i++)
+   {
+      texts[i] = malloc(4096);
+      if (!texts[i])
+      {
+         built = 0;
+         break;
+      }
+      kb_async_make_embed_text(c->chunks[i].heading_path, c->chunks[i].content, texts[i], 4096);
+   }
+   int dim = built ? memory_embed_texts((const char *const *)texts, n_chunks, c->effective_cmd,
+                                        EMBED_INPUT_DOCUMENT, out, EMBED_MAX_DIM)
+                   : 0;
+   for (int i = 0; i < n_chunks; i++)
+      free(texts[i]);
+   free(texts);
+   return dim;
+}
+
+/* Does this file's TEXT deserve a dense vector, or only lexical indexing?
+ *
+ * Source files are embedded twice today. kb_build treats every indexable file as
+ * a prose document and embeds its chunks, and kb_code_embed_refresh separately
+ * embeds the same files as code. Measured on the am_ corpus, the prose pass over
+ * source is 82% of the doc-embedding token budget:
+ *
+ *     non-prose  5333 chunks / 749 files / 1,985,386 tokens
+ *     prose      1862 chunks / 137 files /   445,519 tokens
+ *
+ * and at the host's measured 532 tok/s that is the difference between ~76 and
+ * ~14 minutes for a pass. Semantic search over code is what code_embeddings is
+ * for; a second, prose-shaped vector of the same bytes buys little and costs
+ * five times the ingest.
+ *
+ * Chunk rows are still written for every file, so lexical/FTS search over source
+ * is unchanged -- only the dense vector is skipped. Set
+ * AIMEE_KB_EMBED_ALL_FILES=1 to restore the previous behaviour.
+ */
+/* Test seam: the policy is pure, so it is exercised directly. */
+int kb_path_wants_dense_vector_for_test(const char *rel_path);
+static int kb_path_wants_dense_vector(const char *rel_path);
+int kb_path_wants_dense_vector_for_test(const char *rel_path)
+{
+   return kb_path_wants_dense_vector(rel_path);
+}
+
+static int kb_path_wants_dense_vector(const char *rel_path)
+{
+   if (!rel_path || !rel_path[0])
+      return 1;
+   const char *env = getenv("AIMEE_KB_EMBED_ALL_FILES");
+   if (env && env[0] == '1')
+      return 1;
+   static const char *prose_ext[] = {".md",  ".mdx",  ".markdown", ".txt",
+                                     ".rst", ".adoc", ".org",      NULL};
+   size_t n = strlen(rel_path);
+   for (int i = 0; prose_ext[i]; i++)
+   {
+      size_t m = strlen(prose_ext[i]);
+      if (n >= m && strcasecmp(rel_path + n - m, prose_ext[i]) == 0)
+         return 1;
+   }
+   /* Extensionless files at a repo root are conventionally prose (README,
+    * LICENSE, CHANGELOG, NOTICE) and are cheap, so keep embedding them. */
+   return strrchr(rel_path, '.') == NULL;
+}
+
 static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
 {
+   int read_scope = db2_maintenance_scope_begin_current();
+   if (read_scope < 0)
+   {
+      LOG_WARN("kb_build", "maintenance read scope refused for project '%s'",
+               c->project ? c->project : "");
+      return;
+   }
    if (fi > 0 && fi % c->kb_progress_every == 0)
       LOG_INFO("kb_build", "project=%s: %d/%d files processed (indexed=%d, skipped=%d, chunks=%d)",
                c->project ? c->project : "?", fi, c->n_files, c->stats->files_indexed,
@@ -862,17 +888,22 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
                                 findex_ingested, sizeof(findex_ingested)) == 1 &&
           findex_ingested[0])
       {
-         struct tm tm_ingest;
-         memset(&tm_ingest, 0, sizeof(tm_ingest));
-         strptime(findex_ingested, "%Y-%m-%d %H:%M:%S", &tm_ingest);
-         time_t ingested_t = timegm(&tm_ingest);
-         if (fst.st_mtime < ingested_t)
+         /* Shared parser: this read only the space form AND ignored strptime's
+          * return, so an unparsed stamp left a zeroed tm and compared as the
+          * epoch -- every file then looked newer and was re-ingested. */
+         time_t ingested_t = parse_utc_ts(findex_ingested);
+         if (ingested_t > 0 && fst.st_mtime < ingested_t)
          {
+            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+               return;
             c->stats->files_skipped++;
             return;
          }
       }
    }
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return;
+   read_scope = 0;
 
    char hash[32];
    file_hash(c->files[fi].path, hash, sizeof(hash));
@@ -881,12 +912,22 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    /* Check if file needs re-indexing */
    if (!c->force_rebuild)
    {
+      read_scope = db2_maintenance_scope_begin_current();
+      if (read_scope < 0)
+      {
+         LOG_WARN("kb_build", "maintenance hash scope refused for project '%s'",
+                  c->project ? c->project : "");
+         return;
+      }
       char stored[32];
       if (db2_kb_documents_get_stored_hash(c->project, c->files[fi].rel_path, stored,
                                            sizeof(stored)) == 0)
       {
          if (strcmp(stored, hash) == 0)
          {
+            if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+               return;
+            read_scope = 0;
             kb_file_index_upsert_fenced(c->project, c->files[fi].rel_path, hash, NULL);
             c->stats->files_skipped++;
             return;
@@ -900,6 +941,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       int dup_exists = db2_kb_documents_hash_exists(c->project, hash, dup_path, sizeof(dup_path));
       if (dup_exists == 1)
       {
+         if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+            return;
+         read_scope = 0;
          if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
             return; /* purge fence: drop this file */
          db2_sketch_minhash_row_t dup_sig;
@@ -917,6 +961,9 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          LOG_WARN("kb_build", "project=%s path=%s: bloom cross-check failed; indexing normally",
                   c->project ? c->project : "?", c->files[fi].rel_path);
    }
+
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      return;
 
    /* Remove old chunks for this file */
    if (delete_file_chunks(c->project, c->files[fi].rel_path) != 0)
@@ -1021,8 +1068,28 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
    }
    c->stats->chunks_added += inserted;
 
-   /* Phase 2: embed each committed chunk (sync or async). */
-   for (int ci = 0; ci < n_chunks; ci++)
+   /* Phase 2: embed each committed chunk (sync or async).
+    *
+    * One batched call for the whole file, then each chunk reads its own vector
+    * out of it. The buffer is per-call: ingest is multi-threaded. */
+   /* Chunk rows are already committed above, so lexical/FTS search covers this
+    * file either way. Only the dense vector is conditional. */
+   int wants_vector = kb_path_wants_dense_vector(c->files[fi].rel_path);
+   float *batch_vecs = NULL;
+   int batch_dim = 0;
+   if (wants_vector)
+   {
+      batch_vecs =
+          calloc((size_t)(n_chunks > 0 ? n_chunks : 1) * EMBED_MAX_DIM, sizeof(*batch_vecs));
+      batch_dim = batch_vecs ? kb_embed_file_chunks(c, n_chunks, batch_vecs) : 0;
+   }
+   /* Gate the embed loop, NOT the rest of the function. Returning early here
+    * skipped the per-file bookkeeping at the bottom -- the dedup sketches, the
+    * minhash signature, and above all kb_file_index_store_from_path. A file
+    * with no file-index row is never skippable, so every non-prose file was
+    * re-chunked on every build; and files_indexed stopped counting, which is
+    * why a pass reported "0 indexed" while adding 7683 chunks. */
+   for (int ci = 0; wants_vector && ci < n_chunks; ci++)
    {
       int64_t doc_id = doc_ids[ci];
       if (doc_id < 0)
@@ -1036,14 +1103,31 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
       }
       if (c->effective_cmd[0])
       {
-         /* Embed heading_path + content */
+         /* Embed heading_path + content.
+          *
+          * One call per chunk is the whole reason a corpus ingest took hours:
+          * the cost here is the round trip, not the model. bekko-a25m is a 25M
+          * parameter embedder that batches hundreds of texts per call, and
+          * memory_embed_texts() -- which memory search already uses to embed a
+          * query and its sub-questions in ONE call -- takes an array. Ingest
+          * kept calling the single-text entry point in a loop, so a ~3000 file
+          * project paid one request per chunk. */
          char embed_text[4096];
          kb_async_make_embed_text(c->chunks[ci].heading_path, c->chunks[ci].content, embed_text,
                                   sizeof(embed_text));
 
          float vec[EMBED_MAX_DIM];
-         int dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
-                                     EMBED_MAX_DIM);
+         int dim = 0;
+         if (batch_dim > 0)
+         {
+            memcpy(vec, batch_vecs + (size_t)ci * EMBED_MAX_DIM, (size_t)batch_dim * sizeof(float));
+            dim = batch_dim;
+         }
+         else
+         {
+            dim = memory_embed_text(embed_text, c->effective_cmd, EMBED_INPUT_DOCUMENT, vec,
+                                    EMBED_MAX_DIM);
+         }
          if (dim > 0)
          {
             accept_generated_embedding(doc_id, vec, dim);
@@ -1079,6 +1163,7 @@ static void kb_process_one_file(kb_build_file_ctx_t *c, int fi)
          }
       }
    }
+   free(batch_vecs);
    free(doc_ids);
 
    sketch_bloom_add_hash(c->bloom, h64);
@@ -1121,8 +1206,15 @@ static int kb_build_or_update(const char *root_path, const char *project, const 
       LOG_INFO("kb_build", "force rebuild: clearing project '%s' from DB2", project);
       /* Vectors must be selected while their current document rows still exist. */
       pgvec_kb_vector_delete_current_project(project);
-      db2_kb_service_clear_current_project(project);
-      db2_sketch_minhash_signature_delete_project(project);
+      int maintenance_scope = db2_maintenance_scope_begin_current();
+      if (maintenance_scope < 0)
+         return -1;
+      int clear_rc = db2_kb_service_clear_current_project(project);
+      int sketch_rc = db2_sketch_minhash_signature_delete_project(project);
+      if (maintenance_scope == 1 && db2_maintenance_scope_commit() != 0)
+         return -1;
+      if (clear_rc < 0 || sketch_rc < 0)
+         return -1;
    }
 
    /* Resolve include/exclude patterns */
@@ -1272,7 +1364,7 @@ typedef struct
 
 /* Fetch a kb_documents row by (id, project) into out, returning 1 on
  * hit / 0 on miss. Routes through db2_kb_document_fetch so the SQL
- * stays inside src/db2/. */
+ * stays inside src/modules/db2/c/. */
 static int kb_fetch_doc_row(int64_t id, const char *project, kb_result_t *out)
 {
    db2_kb_document_row_t row;
@@ -1826,19 +1918,17 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          fusion_mode = "rrf";
       }
    }
-   else if (n_lex > 0)
+   else if (n_lex > 0 || n_vec > 0)
    {
-      int copy = (n_lex < max_results) ? n_lex : max_results;
-      memcpy(merged, lex_res, (size_t)copy * sizeof(kb_result_t));
-      n_results = copy;
-      fusion_mode = "rrf";
-   }
-   else if (n_vec > 0)
-   {
-      int copy = (n_vec < max_results) ? n_vec : max_results;
-      memcpy(merged, vec_res, (size_t)copy * sizeof(kb_result_t));
-      n_results = copy;
-      fusion_mode = "rrf";
+      /* Keep `score` in one relevance space. Copying a lone leg preserved its
+       * raw ts_rank/cosine score while a two-leg result used RRF. On a one-doc
+       * corpus that made an exact lexical+dense match print 0.0328 and a
+       * dense-only nonsense query print 0.56, even though higher is documented
+       * as better. A missing leg is still a one-list fusion: rank it with RRF so
+       * callers never compare unrelated scales. */
+      n_results = rrf_merge(lex_res, n_lex, vec_res, n_vec, merged, max_results);
+      if (n_results > 0)
+         fusion_mode = "rrf";
    }
 
    if (fusion_mode_out)
@@ -1849,7 +1939,6 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
    free(lex_res);
    free(vec_res);
 
-#if !defined(AIMEE_DB2_DISABLED)
    if (n_results > 0)
    {
       int cfg_ok = (config_present());
@@ -1934,7 +2023,6 @@ static char *kb_search_gather(const char *project, const char *exclude_project, 
          kb_detect_observe(sum / n_results, n_results);
       }
    }
-#endif
 
    *n_out = n_results;
 
@@ -2300,5 +2388,3 @@ void kb_resolve_project(const char *project, const char *root_path, char *out, s
       return;
    }
 }
-
-#endif /* !AIMEE_DB2_DISABLED */

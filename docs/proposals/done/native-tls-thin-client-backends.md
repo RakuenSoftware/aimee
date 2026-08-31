@@ -1,5 +1,9 @@
 # Native TLS backends for the Windows and macOS thin clients
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Scope:** deterministic / build + client transport. Not an intelligence-surface
   proposal (no Architecture Charter role).
@@ -15,7 +19,7 @@ prebuilt links TLS (system OpenSSL, `WITH_TLS` defaults to `1` on POSIX in
 the documented stopgap is to terminate TLS at a reverse proxy and use its
 `http://` address (`docs/QUICKSTART.md`, "TLS support by build").
 
-The two are off for concrete, *different* reasons — both rooted in OpenSSL
+The two are off for concrete, *different* reasons, both rooted in OpenSSL
 packaging, not in the TLS code:
 
 - **macOS**: the release artifact is a **universal (arm64 + x86_64) fat binary**.
@@ -31,7 +35,7 @@ packaging, not in the TLS code:
 
 Ship Windows and macOS prebuilt thin clients that speak `https://` **out of the
 box**, with **certificate verification against the OS trust store** and no
-configuration, no bundled CA bundle, and no extra runtime dependencies — i.e. the
+configuration, no bundled CA bundle, and no extra runtime dependencies, i.e. the
 binary stays a single self-contained file, which is the defining property of the
 thin client.
 
@@ -54,15 +58,15 @@ Keeping OpenSSL and fixing packaging was considered and rejected:
 - **macOS**: would require building two per-arch binaries each linking its arch's
   OpenSSL and `lipo`-merging them, or vendoring a universal static OpenSSL. Worse,
   OpenSSL on macOS does not read the Keychain, so `SSL_CTX_set_default_verify_paths`
-  finds no trust anchors — we would have to **bundle a CA bundle** (which rots) or
+  finds no trust anchors. We would have to **bundle a CA bundle** (which rots) or
   write Keychain glue anyway.
 - **Windows**: static-linking MSYS2 OpenSSL keeps a single exe, but OpenSSL has no
   default trust store on Windows either, so we would again bundle a CA bundle or
   load the system `ROOT` store into an `X509_STORE` by hand.
 
 Net: bigger binaries, a stale CA bundle (or cert-store glue we'd have to write
-regardless), and OpenSSL CVE-tracking on two more platforms — for a result that is
-still not truly "automatic." If we're writing trust-store glue anyway, the native
+regardless), and OpenSSL CVE-tracking on two more platforms, for a result that is
+still not "automatic." If we're writing trust-store glue anyway, the native
 backends are simpler and use the OS store directly.
 
 ## Design
@@ -84,17 +88,17 @@ interface, selected at build time by platform:
 | Platform | Backend | Links | Trust store |
 |----------|---------|-------|-------------|
 | Linux | OpenSSL (`aimee_tls.c`, unchanged) | `-lssl -lcrypto` | system PEM paths |
-| Windows | **Schannel (SSPI)** — new `aimee_tls_schannel.c` | `secur32`, `crypt32` (in the Windows SDK; no external libs) | Windows certificate store (automatic) |
-| macOS | **Secure Transport** (`SSLContext`) — new `aimee_tls_securetransport.c` | `Security`, `CoreFoundation` frameworks (universal) | Keychain (automatic) |
+| Windows | **Schannel (SSPI)**: new `aimee_tls_schannel.c` | `secur32`, `crypt32` (in the Windows SDK; no external libs) | Windows certificate store (automatic) |
+| macOS | **Secure Transport** (`SSLContext`): new `aimee_tls_securetransport.c` | `Security`, `CoreFoundation` frameworks (universal) | Keychain (automatic) |
 
 Backend selection is mechanical: extend the `WITH_TLS=1` branch in the build to
 pick the source file and link flags by target OS, replacing the single hardcoded
-OpenSSL path. `aimee_client.c` is unchanged — the new backends honor the existing
+OpenSSL path. `aimee_client.c` is unchanged, the new backends honor the existing
 contract exactly:
 
 - TLS ≥ 1.2 minimum, SNI from `host`, hostname verification on by default.
 - The `AIMEE_TLS_INSECURE=1` escape hatch (skip verification for self-signed/dev
-  servers) — already honored by `aimee_tls.c:tls_insecure()` — is reproduced in
+  servers) (already honored by `aimee_tls.c:tls_insecure()`) is reproduced in
   both new backends.
 - Opaque handle owns the TLS state, does **not** close the underlying `fd`
   (matches the header contract); partial reads/writes and clean shutdown handled.
@@ -108,7 +112,7 @@ would not map as cleanly onto the synchronous `connect/read/write` interface.
 Recommendation: Secure Transport for v1 (lowest blast radius), with
 Network.framework noted as a future migration if Apple removes Secure Transport.
 Either way the framework is universal, so the fat-binary problem disappears
-entirely — this is the strongest single argument for the native route.
+entirely. This is the strongest single argument for the native route.
 
 ### Release-workflow changes
 
@@ -172,8 +176,8 @@ must implement to match the OpenSSL backend's behavior and security posture.
    `kTLSProtocol12`. Matches the OpenSSL backend's `TLS1_2_VERSION` floor.
 4. **`AIMEE_TLS_INSECURE` semantics + blast radius.** Read it via `getenv` **at
    connect time** (per-connection, exactly like the OpenSSL backend's
-   `tls_insecure()` — not a compile-time flag, not a one-shot startup read). When
-   set it disables **all** verification — chain AND hostname — so the proposal must
+   `tls_insecure()`, not a compile-time flag, not a one-shot startup read). When
+   set it disables **all** verification (chain AND hostname) so the proposal must
    document it as a dev-only MITM-accepting switch. Insecure path per backend:
    Schannel `SCH_CRED_MANUAL_CRED_VALIDATION` + skip the policy check; Secure
    Transport `kSSLSessionOptionBreakOnServerAuth` + accept without evaluating. Secure
@@ -210,7 +214,7 @@ must implement to match the OpenSSL backend's behavior and security posture.
    Transport is deprecated since macOS 10.15 and emits `-Wdeprecated-declarations`,
    which `-Werror` makes fatal. Apply `-Wno-deprecated-declarations` **only to the
    `aimee_tls_securetransport.c` translation unit** (a per-file CMake
-   `set_source_files_properties(... COMPILE_OPTIONS ...)`, never globally — that would
+   `set_source_files_properties(..; COMPILE_OPTIONS ...)`, never globally. That would
    mask other deprecations). Long-term migration to Network.framework noted if Apple
    removes Secure Transport.
 9. **CMake is the release build for Win/macOS** (the Makefile is the Linux path).

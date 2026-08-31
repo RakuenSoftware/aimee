@@ -15,6 +15,12 @@ The supported runtime contract is the Go API under `/v1/workflow/*`, `/v1/trigge
 `/v1/dev/submit`. C routes proxy to the Go Unix socket or return `410 Gone`; they do not select a C
 engine.
 
+The separately supervised `workflows` process serves one bounded Go stage at principal 20/event
+9217: it classifies an already-parsed `advance_request` as `ok`, `replay`, `stale`, `unbound`,
+`terminal`, or `badargs`. The caller still owns state reads, authorization, audit, persistence, and
+the transition itself. Its C `module_adapter.c` is a wire-parity fixture, not an executable workflow
+engine.
+
 The local CLI still uses the C parser for `workflow blocks`, `validate`, `show`, `list`, and `new`.
 Those commands are compatibility helpers. Browser Save and Validate, server admission, and the Go
 registry are authoritative for execution. `workflow run` and `workflow status` call the server.
@@ -100,7 +106,8 @@ The C-only engine, scheduler, trigger dispatcher, and approval path are not supp
 ## Tests and failure behavior
 
 The descriptor lists the C tests that preserve retirement safety and compatibility behavior. They do
-not prove that C is a supported runtime. Go engine, API, WFE, and roundtable tests own current lifecycle
+not prove that C is a supported runtime. The C/Go process parity tests cover only the advance
+classification described above. Go engine, API, WFE, and roundtable tests own current lifecycle
 behavior under `server-go/internal`.
 
 Invalid definitions fail before Go admission. Missing providers, denied effects, lease conflicts,

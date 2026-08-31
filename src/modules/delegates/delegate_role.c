@@ -4,24 +4,6 @@
 
 #include <string.h>
 
-/* Known role aliases: map non-canonical names to the canonical role that
- * agents.json registers.  Extend this table as new planner roles appear. */
-static const struct
-{
-   const char *alias;
-   const char *canonical;
-} g_role_aliases[] = {
-    {"implement", "code"},        {"build", "code"},
-    {"reviewer", "review"},       {"verifier", "validate"},
-    {"test", "validate"},         {"check", "validate"},
-    {"evaluate", "validate"},     {"evaluate-optimize", "validate"},
-    {"inspect", "diagnose"},      {"research", "execute"},
-    {"enforce", "execute"},       {"recall", "search"},
-    {"synthesize", "summarize"},  {"rank-fuse", "reason"},
-    {"classify-score", "reason"}, {"planner", "plan"},
-    {"planning", "plan"},         {NULL, NULL},
-};
-
 static delegate_role_canonicalizer_fn g_canonicalizer;
 
 void delegate_role_register_canonicalizer(delegate_role_canonicalizer_fn canonicalizer)
@@ -63,32 +45,90 @@ const char *delegate_role_removed_reason(const char *role)
    return NULL;
 }
 
-/* Roles with a built-in prompt template, plus `plan` (the planner alias target,
- * whose prompt is assembled by the planner rather than a template). This is the
- * identity of a role name, which is why it lives beside the alias table: the two
- * must agree, and test_delegate_role asserts every alias resolves to a member.
+static delegate_role_policy_fn g_role_policy;
+
+void delegate_register_role_policy_provider(delegate_role_policy_fn provider)
+{
+   g_role_policy = provider;
+}
+
+/* Fails closed to `fallback`: with no answer, claim nothing.
  *
- * Kept as a positive list because the removed-role blacklist above only rejects
- * six names. Any OTHER unknown name used to reach exactly the state that
- * blacklist exists to prevent — no template (so a generic prompt), no write
- * classification (so silently read-only), and no role eligibility an agent could
- * actually declare. An operator's custom role is still honoured: those are
- * template files, and delegate_role_known() accepts anything with one. */
-static const char *const g_known_roles[] = {"review",    "validate",   "diagnose",   "code",
-                                            "refactor",  "explain",    "draft",      "execute",
-                                            "summarize", "format",     "search",     "reason",
-                                            "plan",      "continuity", "beat-check", NULL};
+ * `c` carries a fact the module cannot look up. Only the auto-tools op reads it
+ * today, and that op is the only one that does NOT require a role: it asks about
+ * a permission the caller already resolved, so an empty role is a legitimate
+ * question rather than a missing one. */
+static int role_policy_ask_ex(int op, const char *role, int a, int b, int c, int fallback)
+{
+   int out = fallback;
+   if (!g_role_policy)
+      return fallback;
+   if (g_role_policy(op, role ? role : "", a, b, c, &out) != 0)
+      return fallback;
+   return out;
+}
+
+/* The role-keyed ops. No role is no answer: every one of these IS a fact about
+ * the role, so there is nothing to say about a delegate that has none. */
+static int role_policy_ask(int op, const char *role, int a, int b, int fallback)
+{
+   if (!role || !role[0])
+      return fallback;
+   return role_policy_ask_ex(op, role, a, b, 0, fallback);
+}
+
+int delegate_role_is_write(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_IS_WRITE, role, 0, 0, 0);
+}
+
+int delegate_role_result_cache_enabled(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_CACHE, role, 0, 0, 0);
+}
+
+int delegate_role_needs_parent_diff(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_PARENT_DIFF, role, 0, 0, 0);
+}
+
+int delegate_role_task_shape(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_TASK_SHAPE, role, 0, 0, 0);
+}
+
+int delegate_auto_tools_for_invocation(int holds_tools, int max_turns, int explicit_tools)
+{
+   if (explicit_tools)
+      return 1;
+   /* The role is not consulted: the caller resolved the permission, and that
+      answer already accounts for a role an operator defined. */
+   return role_policy_ask_ex(DELEGATE_ROLE_OP_AUTO_TOOLS, "", max_turns, explicit_tools,
+                             holds_tools, 0);
+}
+
+int delegate_final_after_turns_for_role(const char *role)
+{
+   return role_policy_ask(DELEGATE_ROLE_OP_FINAL_TURNS, role, 0, 0, -1);
+}
 
 int delegate_role_known(const char *project_root, const char *role)
 {
    if (!role || !role[0])
       return 0;
    const char *canonical = delegate_role_canonicalize(role);
-   for (int i = 0; g_known_roles[i]; i++)
-      if (strcmp(canonical, g_known_roles[i]) == 0)
-         return 1;
-   /* A project- or user-level template file defines a custom role. Check the
-    * name as given AND canonicalized so an alias to a custom role still works. */
+   if (!canonical || !canonical[0])
+      return 0; /* the module could not name it, so neither can we */
+
+   /* WHICH roles ship is the module's list, and that list is the permission
+      table: a role with no entry there holds nothing. This used to be a copy of
+      it living here, agreeing by nothing but coincidence. */
+   if (role_policy_ask(DELEGATE_ROLE_OP_BUILTIN, canonical, 0, 0, 0))
+      return 1;
+
+   /* The other half is a filesystem lookup, which IS ours: a project- or
+      user-level template file defines a custom role. Check the name as given and
+      canonicalized, so an alias to a custom role still works. */
    char path[ROLE_TEMPLATE_PATH_MAX];
    return role_template_path(project_root, canonical, path, sizeof(path)) == 0 ||
           role_template_path(project_root, role, path, sizeof(path)) == 0;
@@ -105,52 +145,11 @@ const char *delegate_role_canonicalize(const char *role)
          return canonical;
       return ""; /* required module failed: unknown role paths fail closed */
    }
-   for (int i = 0; g_role_aliases[i].alias; i++)
-   {
-      if (strcmp(role, g_role_aliases[i].alias) == 0)
-         return g_role_aliases[i].canonical;
-   }
-   return role;
-}
-
-int delegate_role_is_write(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-   const char *canonical = delegate_role_canonicalize(role);
-   return strcmp(canonical, "code") == 0 || strcmp(canonical, "refactor") == 0;
-}
-
-int delegate_role_enable_tools_by_default(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-
-   role = delegate_role_canonicalize(role);
-   return strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
-          strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
-          strcmp(role, "validate") == 0 ||
-          /* Novel-mode read-only checks inspect the world bible by default. */
-          strcmp(role, "continuity") == 0 || strcmp(role, "beat-check") == 0;
-}
-
-int delegate_role_result_cache_enabled(const char *role)
-{
-   if (!role || !role[0])
-      return 0;
-
-   role = delegate_role_canonicalize(role);
-   return strcmp(role, "summarize") == 0 || strcmp(role, "format") == 0 ||
-          strcmp(role, "draft") == 0;
-}
-
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
-{
-   if (explicit_tools)
-      return 1;
-   if (max_turns == 1)
-      return 0;
-   return delegate_role_enable_tools_by_default(role);
+   /* No provider, no answer. This used to fall back to a copy of the module's
+      alias table, so the canonical spelling of a role depended on whether the
+      module happened to be registered: one question, two answers. Failing closed
+      makes an unregistered module a refusal rather than a quiet second opinion. */
+   return "";
 }
 
 void delegate_apply_max_turns_override(agent_config_t *cfg, int max_turns)
@@ -171,21 +170,6 @@ int delegate_default_max_turns_for_role(const char *role)
    if (!role || !role[0])
       return -1;
    return role_template_max_turns(delegate_role_canonicalize(role));
-}
-
-int delegate_final_after_turns_for_role(const char *role)
-{
-   if (!role || !role[0])
-      return -1;
-
-   role = delegate_role_canonicalize(role);
-   if (strcmp(role, "validate") == 0)
-      return 8;
-   if (strcmp(role, "search") == 0)
-      return 10;
-   if (strcmp(role, "diagnose") == 0)
-      return 12;
-   return -1;
 }
 
 void delegate_apply_max_turns_policy(agent_config_t *cfg, const char *role, int max_turns)

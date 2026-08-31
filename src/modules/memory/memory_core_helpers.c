@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -13,27 +10,28 @@
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -223,29 +221,52 @@ static int memory_find_index_by_id(const memory_t *matches, int count, int64_t m
    return -1;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void neighbors_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.helpers", "neighbour linking is unavailable: the relational store is "
+                              "unreachable, so matches gain no linked neighbours rather than "
+                              "having none to gain");
+}
+
 int memory_append_linked_neighbors(memory_t *matches, int count, int max_count,
                                    const char *allowed_relations)
 {
+   if (!db2_conn())
+   {
+      neighbors_warn_store_unreachable();
+      return 0;
+   }
    if (!matches || count <= 0 || count >= max_count)
       return count;
 
    int seed_count = count;
-   for (int i = 0; i < seed_count && count < max_count; i++)
+   int64_t seed_ids[128];
+   for (int i = 0; i < seed_count; i++)
+      seed_ids[i] = matches[i].id;
+   int link_cap = seed_count * 64;
+   memory_link_t *links = calloc((size_t)link_cap, sizeof(*links));
+   if (!links)
+      return count;
+   int n = db2_memory_link_query_many(seed_ids, seed_count, links, link_cap);
+   for (int j = 0; j < n && count < max_count; j++)
    {
-      memory_link_t links[64];
-      int n = db2_memory_link_query(matches[i].id, links, (int)(sizeof(links) / sizeof(links[0])));
-      for (int j = 0; j < n && count < max_count; j++)
-      {
-         int64_t neighbor_id =
-             links[j].source_id == matches[i].id ? links[j].target_id : links[j].source_id;
-         if (neighbor_id <= 0 || !memory_relation_allowed(allowed_relations, links[j].relation))
-            continue;
-         if (memory_find_index_by_id(matches, count, neighbor_id) >= 0)
-            continue;
-         if (memory_get(neighbor_id, &matches[count]) == 0)
-            count++;
-      }
+      int source_is_seed = memory_find_index_by_id(matches, seed_count, links[j].source_id) >= 0;
+      int64_t neighbor_id = source_is_seed ? links[j].target_id : links[j].source_id;
+      if (neighbor_id <= 0 || !memory_relation_allowed(allowed_relations, links[j].relation))
+         continue;
+      if (memory_find_index_by_id(matches, count, neighbor_id) >= 0)
+         continue;
+      if (memory_get(neighbor_id, &matches[count]) == 0)
+         count++;
    }
+   free(links);
    return count;
 }
 
@@ -270,22 +291,25 @@ int memory_compute_pagerank_scores(const memory_t *matches, int count,
    for (int i = 0; i < count; i++)
       scores[i] = 1.0 / (double)count;
 
+   int64_t candidate_ids[128];
    for (int i = 0; i < count; i++)
+      candidate_ids[i] = matches[i].id;
+   int link_cap = count * 64;
+   memory_link_t *links = calloc((size_t)link_cap, sizeof(*links));
+   if (!links)
+      return 0;
+   int nlinks = db2_memory_link_query_many(candidate_ids, count, links, link_cap);
+   for (int k = 0; k < nlinks; k++)
    {
-      memory_link_t links[64];
-      int n = db2_memory_link_query(matches[i].id, links, (int)(sizeof(links) / sizeof(links[0])));
-      for (int k = 0; k < n; k++)
-      {
-         int64_t other_id =
-             links[k].source_id == matches[i].id ? links[k].target_id : links[k].source_id;
-         int j = memory_find_index_by_id(matches, count, other_id);
-         if (j < 0 || i == j || !memory_relation_allowed(cfg->relations, links[k].relation))
-            continue;
-         adjacency[i][j] += 1.0;
-         adjacency[j][i] += 1.0;
-         edge_count += 2;
-      }
+      int i = memory_find_index_by_id(matches, count, links[k].source_id);
+      int j = memory_find_index_by_id(matches, count, links[k].target_id);
+      if (i < 0 || j < 0 || i == j || !memory_relation_allowed(cfg->relations, links[k].relation))
+         continue;
+      adjacency[i][j] += 1.0;
+      adjacency[j][i] += 1.0;
+      edge_count += 2;
    }
+   free(links);
 
    const double damping = 0.85;
    for (int iter = 0; iter < cfg->iterations; iter++)

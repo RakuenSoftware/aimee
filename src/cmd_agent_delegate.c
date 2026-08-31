@@ -3,7 +3,7 @@
 #include "aimee.h"
 #include "agent.h"
 #include "log.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "otel.h"
 #include "platform_path.h"
 #include "platform_process.h"
@@ -33,6 +33,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <aimee/delegates/delegate_launch_args.h>
 
 /* Max bytes of pre-loaded content (per --file block, --context-file block, and the
    symbol block) handed to a delegate/roundtable. 256KB (~62k tokens) sits well inside
@@ -67,23 +68,19 @@ void delegate_worktree_restore(const char *orig_cwd, const char *git_root, const
  * aimee routes to the cheapest agent, executes, returns result on stdout.
  * This allows Claude Code / Gemini / Codex to delegate expensive work
  * to cheaper or local LLMs. */
-void generate_task_id(char *buf, size_t len)
+int generate_task_id(char *buf, size_t len)
 {
-   static unsigned long fallback_counter = 0;
    unsigned char rand_bytes[8];
    if (platform_random_bytes(rand_bytes, sizeof(rand_bytes)) != 0)
    {
-      unsigned long seed =
-          (unsigned long)time(NULL) ^ ((unsigned long)getpid() << 16) ^ ++fallback_counter;
-      for (size_t i = 0; i < sizeof(rand_bytes); i++)
-      {
-         seed = seed * 1103515245u + 12345u;
-         rand_bytes[i] = (unsigned char)((seed >> 16) & 0xffu);
-      }
+      if (buf && len)
+         buf[0] = '\0';
+      return -1;
    }
    snprintf(buf, len, "aimee-task-%02x%02x%02x%02x%02x%02x%02x%02x", rand_bytes[0], rand_bytes[1],
             rand_bytes[2], rand_bytes[3], rand_bytes[4], rand_bytes[5], rand_bytes[6],
             rand_bytes[7]);
+   return 0;
 }
 
 static void delegate_list_roles(void)
@@ -455,16 +452,6 @@ static void cmd_delegate_plan(int argc, char **argv)
    cJSON_Delete(plan);
 }
 
-/* Nested delegate creation is denied at runtime; do not add a prompt block that
- * tells delegates to fan out work they cannot actually create. */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role)
-{
-   (void)via_name;
-   (void)tier_override;
-   (void)role;
-   return NULL;
-}
-
 void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
@@ -561,7 +548,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
    {
       const char *parent_env = getenv("AIMEE_PARENT_DELEGATION_ID");
       const char *depth_env = getenv("AIMEE_DELEGATE_DEPTH");
-      int known = db1_init(config_db1_path()) == 0;
+      int known = db1_store_ready();
       int active = known ? db1_delegation_spawn_is_active(parent_env) : 0;
       if (delegate_chain_env_should_clear(depth_env, parent_env, known, active))
       {
@@ -710,7 +697,22 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
         strcmp(role, "diagnose") == 0))
       explicit_toolset = "review_indexed";
 
-   int force_tools = delegate_role_auto_tools_for_invocation(role, max_turns, explicit_tools);
+   /* What this delegate may do, resolved ONCE. The tool default below reads it,
+      and so does the write decision further down: one answer, two readers. */
+   delegate_permissions_t delegate_perms;
+   {
+      char *role_definition = role_template_frontmatter(NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, role_definition, &delegate_perms);
+      free(role_definition);
+      if (perms_rc != 0)
+         fatal("permissions for role '%s' could not be resolved, so it holds none; check the "
+               "role template's `permissions:` block",
+               role);
+   }
+
+   int force_tools = delegate_auto_tools_for_invocation(
+       delegate_permissions_has(&delegate_perms, AIMEE_DELEGATES_PERM_TOOLS), max_turns,
+       explicit_tools);
    if (explicit_toolset && explicit_toolset[0])
    {
       char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX], toolset_err[TOOLSET_ERROR_MAX] = "";
@@ -835,28 +837,6 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
             sys_prompt = skill_sys_prompt;
             skill_sys_prompt = NULL; /* ownership transferred to template_sys_prompt */
          }
-      }
-   }
-
-   /* Inject tier orchestration context for tools-enabled mid-tier delegates */
-   {
-      char *tier_ctx = delegate_build_tier_context(via_agent_name, tier_override, role);
-      if (tier_ctx)
-      {
-         size_t base_len = sys_prompt ? strlen(sys_prompt) : 0;
-         size_t ctx_len = strlen(tier_ctx);
-         char *combined = malloc(base_len + ctx_len + 1);
-         if (combined)
-         {
-            if (sys_prompt)
-               memcpy(combined, sys_prompt, base_len);
-            memcpy(combined + base_len, tier_ctx, ctx_len + 1);
-            if (template_sys_prompt)
-               free(template_sys_prompt);
-            template_sys_prompt = combined;
-            sys_prompt = combined;
-         }
-         free(tier_ctx);
       }
    }
 
@@ -1119,12 +1099,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
             if (*tok)
             {
-               /* shell_escape the symbol: it is interpolated into a popen()
+               /* shell_quote the symbol: it is interpolated into a popen()
                 * command, so a raw single quote in the token would break out of
                 * the quotes and inject shell commands. */
-               char *esc_tok = shell_escape(tok);
+               char *esc_tok = shell_quote(tok);
                char find_cmd[512];
-               snprintf(find_cmd, sizeof(find_cmd), "aimee index find '%s' 2>/dev/null", esc_tok);
+               snprintf(find_cmd, sizeof(find_cmd), "aimee index find %s 2>/dev/null", esc_tok);
                free(esc_tok);
                FILE *fp = popen(find_cmd, "r");
                if (fp)
@@ -1205,13 +1185,26 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       }
    }
 
-   int delegate_allows_writes = delegate_prompt_allows_writes(prompt);
+   /* Read, not resolved: delegate_perms was established before the tool default
+      above, and this is the same answer. */
+   int delegate_allows_writes = 0;
+   /* Scoped against the repository this delegate was pointed at. See the same
+      decision in server_compute.c for why that is the object and why the match
+      is exact. */
+   {
+      char here[MAX_PATH_LEN] = "";
+      if (!getcwd(here, sizeof(here)))
+         here[0] = '\0';
+      delegate_allows_writes =
+          delegate_permissions_allow(&delegate_perms, AIMEE_DELEGATES_PERM_REPO_WRITE, here);
+   }
    if (worktree_branch && worktree_branch[0] && !delegate_allows_writes)
-      fatal("--worktree is only valid for write-capable delegates; read-only delegates must "
-            "use the parent worktree");
-   int delegate_needs_worktree = delegate_allows_writes;
-   effective_prompt = delegate_maybe_append_validation_bundle(
-       role, cwd_for_template, effective_prompt, prompt, caller_provided_target);
+      fatal("--worktree is only valid for write-capable delegates; a read-only delegate's "
+            "dedicated branch cannot be retargeted");
+   /* Every repository-backed delegate gets a distinct checkout. Read-only is
+    * enforced later by the container mount/tool policy; sharing the parent's
+    * directory would still couple its view to another session's live files. */
+   int delegate_needs_worktree = 1;
    if (source_path_count > 0)
    {
       const char *base = effective_prompt ? effective_prompt : prompt;
@@ -1231,8 +1224,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          final_prompt = handoff_prompt;
    }
 
-   /* Worktree: read-only delegates inspect the parent workspace directly.
-    * Only write-capable delegates get an isolated sibling worktree. */
+   /* Worktree: every repository-backed delegate gets an isolated sibling. */
    char worktree_path[MAX_PATH_LEN] = "";
    char original_cwd[MAX_PATH_LEN] = "";
    char delegate_git_root[MAX_PATH_LEN] = "";
@@ -1297,14 +1289,12 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                if (stat(target, &tst) == 0 && S_ISDIR(tst.st_mode))
                {
                   if (chdir(target) != 0)
-                     LOG_WARN("delegate", "could not chdir to worktree: %s", target);
+                     fatal("could not enter isolated delegate worktree %s", target);
                   else
                      LOG_INFO("delegate", "delegate running in worktree %s", worktree_path);
                }
                else if (chdir(worktree_path) != 0)
-               {
-                  LOG_WARN("delegate", "could not chdir to worktree: %s", worktree_path);
-               }
+                  fatal("could not enter isolated delegate worktree %s", worktree_path);
                else
                {
                   LOG_INFO("delegate", "delegate running in worktree %s", worktree_path);
@@ -1325,10 +1315,7 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
                }
             }
             else
-            {
-               LOG_WARN("delegate", "could not create sibling worktree for %s", delegate_git_root);
-               delegate_git_root[0] = '\0';
-            }
+               fatal("could not create isolated delegate worktree for %s", delegate_git_root);
          }
       }
    }
@@ -1348,9 +1335,19 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       /* Use same routing logic as real execution (respects --tier and --via pinning) */
       agent_t *ag = agent_route(&cfg, role);
       if (!ag)
-         fatal("no agent available for role '%s'", role);
+      {
+         /* Same distinction the server draws, from the same helper: a
+          * routing-module fault is not an empty roster, and reporting it as one
+          * sends the operator to the wrong place. */
+         char why[256];
+         agent_route_failure_message(role, why, sizeof(why));
+         fatal("%s", why);
+      }
 
-      char *assembled = agent_build_exec_context(ag, &cfg.network, sys_prompt);
+      /* Pass the role: the real run selects instructions from it, so a dry run
+       * that omitted it would preview a different system prompt than the one
+       * the delegate actually receives. */
+      char *assembled = agent_build_exec_context_for_role(ag, &cfg.network, role, sys_prompt, 0);
       fprintf(stderr, "--- Dry Run ---\n");
       fprintf(stderr, "Agent:  %s\n", ag->name);
       fprintf(stderr, "Model:  %s\n", ag->model);
@@ -1391,7 +1388,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       platform_mkdir_p(tasks_dir, 0700);
 
       char task_id[64];
-      generate_task_id(task_id, sizeof(task_id));
+      if (generate_task_id(task_id, sizeof(task_id)) != 0)
+         fatal("secure entropy unavailable; background task not created");
       char result_path[MAX_PATH_LEN];
       snprintf(result_path, sizeof(result_path), "%s/%s.json", tasks_dir, task_id);
 
@@ -1444,7 +1442,8 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
 
    /* Generate a delegation ID for checkpoint tracking */
    char deleg_id[32];
-   generate_task_id(deleg_id, sizeof(deleg_id));
+   if (generate_task_id(deleg_id, sizeof(deleg_id)) != 0)
+      fatal("secure entropy unavailable; delegation not created");
 
    /* OTel: start a delegation span covering the full delegate execution */
    otel_span_t otel_deleg_span;
@@ -1463,9 +1462,9 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
          agent_http_init();
 
          /* Inject prior attempt context from checkpoint */
-         char ckpt_steps[2048] = "";
-         char ckpt_error[512] = "";
-         char ckpt_output[2048] = "";
+         char ckpt_steps[DB1_CHECKPOINT_STEPS_LEN] = "";
+         char ckpt_error[DB1_CHECKPOINT_ERROR_LEN] = "";
+         char ckpt_output[DB1_CHECKPOINT_OUTPUT_LEN] = "";
          if (db1_delegation_checkpoint_load(deleg_id, ckpt_steps, sizeof(ckpt_steps), ckpt_error,
                                             sizeof(ckpt_error), ckpt_output,
                                             sizeof(ckpt_output)) == 0)
@@ -1501,7 +1500,11 @@ void cmd_delegate(app_ctx_t *ctx, int argc, char **argv)
       {
          agent_t *ag = agent_route(&cfg, role);
          if (!ag)
-            fatal("no agent available for role '%s'", role);
+         {
+            char why[256];
+            agent_route_failure_message(role, why, sizeof(why));
+            fatal("%s", why);
+         }
          rc = agent_execute_with_plan(ag, &cfg.network, sys_prompt, prompt_to_use, max_tokens, 0.3,
                                       &result);
       }

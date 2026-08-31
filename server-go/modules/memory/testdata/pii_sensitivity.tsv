@@ -1,0 +1,100 @@
+works_for	0
+  works for  	0
+member_of	0
+  member of  	0
+has_role	0
+  has role  	0
+spouse	1
+  spouse  	1
+knows	1
+  knows  	1
+parent_of	1
+  parent of  	1
+child_of	1
+  child of  	1
+lives_in	1
+  lives in  	1
+born_in	1
+  born in  	1
+located_in	0
+  located in  	0
+device_has_ip	0
+  device has ip  	0
+has_hostname	0
+  has hostname  	0
+age	1
+  age  	1
+also_known_as	0
+  also known as  	0
+supersedes	0
+  supersedes  	0
+linked_policy	0
+  linked policy  	0
+decided_by	0
+  decided by  	0
+password	2
+user_password	2
+db passwd	2
+passphrase	2
+SECRET	2
+api_key	2
+apiKey	2
+access_key	2
+private_key	2
+privkey	2
+ssh_key	2
+auth_token	2
+credential	2
+credentials	2
+ssn	1
+social_security	1
+passport	1
+credit_card	1
+creditcard	1
+card_number	1
+cvv	1
+bank_account	1
+account_number	1
+routing_number	1
+tax_id	1
+national_id	1
+drivers_license	1
+license_number	1
+phone	1
+phone_number	1
+email	1
+work email	1
+date_of_birth	1
+birthdate	1
+dob	1
+home_address	1
+street_address	1
+favorite_color	0
+name	0
+city	0
+hobby	0
+pet	0
+employer	0
+nickname	0
+Home Address	1
+home-address	1
+homeAddress	1
+HOME_ADDRESS	1
+  api key  	2
+	0
+___	0
+---	0
+!!!	0
+ 	0
+_a_	0
+tokenizer	2
+secretary_of_state	2
+phonetics	1
+dobro	1
+email_password	2
+phone_secret	2
+password_email	2
+ssn_api_key	2
+bank_account_passphrase	2
+dob_token	2
+credit_card_credential	2

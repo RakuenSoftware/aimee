@@ -13,8 +13,8 @@
 #include "aimee_home.h"
 #include "cJSON.h"
 #include "platform_path.h"
-#include "platform_random.h" /* platform_random_bytes (portable CSPRNG) */
-#include "wfe_def.h"         /* wfe_sha256_raw */
+#include "platform_random.h"      /* platform_random_bytes (portable CSPRNG) */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw */
 
 /* O_NOFOLLOW / O_CLOEXEC are POSIX hardening flags absent on some toolchains
  * (e.g. MinGW). Degrade to no-ops there — the audit key is server-side (POSIX);
@@ -133,7 +133,7 @@ static int hmac_sha256(const unsigned char *key, size_t keylen, const unsigned c
    unsigned char k[64];
    memset(k, 0, sizeof k);
    if (keylen > 64)
-      wfe_sha256_raw(key, keylen, k); /* key = H(key): 32 bytes, rest zero */
+      aimee_sha256_raw(key, keylen, k); /* key = H(key): 32 bytes, rest zero */
    else
       memcpy(k, key, keylen);
 
@@ -153,13 +153,13 @@ static int hmac_sha256(const unsigned char *key, size_t keylen, const unsigned c
    if (mlen)
       memcpy(inner_in + 64, msg, mlen);
    unsigned char inner[32];
-   wfe_sha256_raw(inner_in, 64 + mlen, inner);
+   aimee_sha256_raw(inner_in, 64 + mlen, inner);
    free(inner_in);
 
    unsigned char outer_in[96]; /* opad(64) || inner(32) */
    memcpy(outer_in, opad, 64);
    memcpy(outer_in + 64, inner, 32);
-   wfe_sha256_raw(outer_in, 96, mac);
+   aimee_sha256_raw(outer_in, 96, mac);
    return 0;
 }
 
@@ -258,19 +258,23 @@ static void canon_add_value(char *canon, size_t *pos, const cJSON *v)
 
 int audit_args_hash(const char *tool_name, const char *args_json, char *out, size_t out_sz)
 {
-   /* Stable sentinel for any failure path (never a forgeable/unkeyed digest). */
-   if (out && out_sz >= AUDIT_ARGS_HASH_LEN)
-   {
-      memcpy(out, "v1-", 3);
-      memset(out + 3, '0', 64);
-      out[67] = '\0';
-   }
+   /* Failure is represented only by the return code and an empty output. A
+    * zero-looking digest is indistinguishable from successfully bound evidence. */
+   if (out && out_sz > 0)
+      out[0] = '\0';
    if (!out || out_sz < AUDIT_ARGS_HASH_LEN)
       return -1;
 
    unsigned char key[AUDIT_KEY_LEN];
    if (audit_load_key(key) != 0)
-      return -1; /* no key -> caller skips the row (never HMAC-over-empty) */
+   {
+      /* Standalone governed paths (including native MCP dispatch) do not all
+       * pass through server startup. Provision the dedicated key atomically on
+       * first use so they remain auditable; still fail closed if secure random
+       * key creation or the subsequent no-follow load fails. */
+      if (audit_ensure_key() != 0 || audit_load_key(key) != 0)
+         return -1;
+   }
 
    char *canon = malloc(AUDIT_CANON_ALLOC);
    if (!canon)
@@ -313,7 +317,7 @@ int audit_args_hash(const char *tool_name, const char *args_json, char *out, siz
    int hrc = hmac_sha256(key, AUDIT_KEY_LEN, (const unsigned char *)canon, pos, mac);
    free(canon);
    if (hrc != 0)
-      return -1; /* keep the sentinel; never emit an unkeyed digest */
+      return -1; /* output remains empty; never emit an unkeyed digest */
 
    static const char hx[] = "0123456789abcdef";
    memcpy(out, "v1-", 3);

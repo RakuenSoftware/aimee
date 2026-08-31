@@ -97,7 +97,7 @@ new commits and state the inspected product-diff result; the tracked result pres
 
 `on` improves median total wall by 13.59% versus standard, does not regress the lower confidence
 bound, and consumes the packet before the decisive edit in 8/8 answerable cells. Its token median is
-1.14% higher, so wall—not tokens—is the qualifying efficiency metric. Provider retrieval p95 is
+1.14% higher, so wall, not tokens, is the qualifying efficiency metric. Provider retrieval p95 is
 1.562 seconds and packet p95 is 122 whitespace-estimated tokens, both within gate. A separate forced
 34-file local index costs 1.241 seconds and the isolated KB rebuild costs 1.217 seconds, including
 SSH/container dispatch overhead.

@@ -1,5 +1,9 @@
 # Lossless JSON economizer transform and activation gate
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived complete (2026-07-26).** The audit found the scoped deliverables shipped,
 > superseded by the current implementation, or fully represented by completed child slices.
 
@@ -9,7 +13,7 @@
 > tool-result boundary; aggressive owns lossy reduction. See
 > [the economizer overview](../../features/economizer.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Review status:** ROUND TABLE APPROVED (3/3, zero findings)
 - **Date:** 2026-07-22
 - **Normative gate:** `provider-neutral-economizer-safety-spec.md`
@@ -63,8 +67,8 @@ subset of the signed cache/pricing outcomes.
 | complete-call output bound | preserved client limit or documented hard maximum, priced at the worst applicable rate | same | request-dependent |
 | long-context threshold | strict `>272000`; full-request multipliers apply | model- and contract-specific | only after exact pinned counts |
 
-OpenAI remote counting is exact token evidence, but exact tokens alone are not a cost proof. It is not
-used on the live path unless its own marginal charge is authoritatively bounded and included in every
+OpenAI remote counting is exact token evidence, but exact tokens alone do not prove a cost. The
+count is not used on the live path unless its own marginal charge is authoritatively bounded and included in every
 candidate scenario and the safety specification is amended to permit that preflight. The planner
 models this current state explicitly as `remote_token_count_unpriced` and rejects it. Anthropic's free
 estimate cannot authorize a strict inequality without a finite error bound. Returned usage is

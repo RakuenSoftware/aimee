@@ -122,6 +122,15 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
          cJSON *call = cJSON_CreateObject();
          cJSON_AddStringToObject(call, "id", b->tool_id ? b->tool_id : "");
          cJSON_AddStringToObject(call, "type", "function");
+         /* Chat has no namespace concept, but a Responses request crosses this shape
+          * on its way to the provider (responses -> IR -> chat -> IR -> responses),
+          * so dropping the group here loses it for good -- the same trap that made
+          * the tools fix at the Responses ends insufficient on its own. Carried
+          * beside `function` rather than inside it, so a strict `function` schema is
+          * untouched, and only when the client actually grouped the tool: a request
+          * that never used namespace grouping is byte-identical to before. */
+         if (b->tool_namespace && b->tool_namespace[0])
+            cJSON_AddStringToObject(call, "namespace", b->tool_namespace);
          cJSON *fn = cJSON_AddObjectToObject(call, "function");
          cJSON_AddStringToObject(fn, "name", b->tool_name ? b->tool_name : "");
          char *args = b->tool_input ? cJSON_PrintUnformatted(b->tool_input) : NULL;
@@ -146,10 +155,33 @@ cJSON *openai_backend_build(const aimee_request_t *ir)
       cJSON *tools = cJSON_AddArrayToObject(out, "tools");
       for (int i = 0; i < ir->n_tools; i++)
       {
+         /* Carry an entry this shape cannot express, verbatim -- the same rule the
+          * Responses backend follows, and needed here because a Responses request
+          * reaches the provider as responses -> IR -> CHAT -> IR -> responses
+          * (aimee_ir_responses_to_chat renders chat, then openai_build_body rebuilds).
+          * Flattening at this hop undid the sidecar the ends preserve: a Codex
+          * `namespace` group became a chat function named mcp__aimee with no schema,
+          * its nineteen nested tools gone by the time the request was rebuilt.
+          *
+          * A tool whose sidecar is a plain named `function` renders normally; anything
+          * else (namespace / custom / web_search / local_shell) passes through. */
+         const cJSON *raw = ir->tools[i].raw;
+         const cJSON *rtype = raw ? cJSON_GetObjectItemCaseSensitive((cJSON *)raw, "type") : NULL;
+         int raw_is_function =
+             !rtype || (cJSON_IsString(rtype) && strcmp(rtype->valuestring, "function") == 0);
+         if (raw && (!raw_is_function || !ir->tools[i].name || !ir->tools[i].name[0]))
+         {
+            cJSON *verbatim = cJSON_Duplicate((cJSON *)raw, 1);
+            if (verbatim)
+               cJSON_AddItemToArray(tools, verbatim);
+            continue;
+         }
+         if (!ir->tools[i].name || !ir->tools[i].name[0])
+            continue; /* never emit name:"" -- the provider rejects the whole request */
          cJSON *t = cJSON_CreateObject();
          cJSON_AddStringToObject(t, "type", "function");
          cJSON *fn = cJSON_AddObjectToObject(t, "function");
-         cJSON_AddStringToObject(fn, "name", ir->tools[i].name ? ir->tools[i].name : "");
+         cJSON_AddStringToObject(fn, "name", ir->tools[i].name);
          if (ir->tools[i].description)
             cJSON_AddStringToObject(fn, "description", ir->tools[i].description);
          cJSON_AddItemToObject(fn, "parameters",
@@ -366,6 +398,7 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
             b->type = AIMEE_BLK_TOOL_USE;
             b->raw = cJSON_Duplicate(c, 1);
             b->tool_id = dupstr(ostr(c, "id"));
+            b->tool_namespace = dupstr(ostr(c, "namespace"));
             const cJSON *fn = cJSON_GetObjectItemCaseSensitive((cJSON *)c, "function");
             b->tool_name = dupstr(fn ? ostr(fn, "name") : NULL);
             const char *args = fn ? ostr(fn, "arguments") : NULL;
@@ -382,6 +415,24 @@ int openai_backend_parse(const cJSON *resp, aimee_response_t *out, char *err, si
          out->usage_in = (long)pt->valuedouble;
       if (ct && cJSON_IsNumber(ct))
          out->usage_out = (long)ct->valuedouble;
+      /* CACHED PROMPT TOKENS, which this parser ignored while the Anthropic one
+       * read its equivalent. OpenAI reports them in a SIBLING object --
+       * usage.prompt_tokens_details.cached_tokens -- not as a top-level field, so
+       * reading only the two flat counters silently loses them.
+       *
+       * The IR field and every downstream accounting consumer already existed and
+       * worked; nothing was missing but this read. The effect was that cache reads
+       * were billed at the uncached rate in aimee's own cost reporting for EVERY
+       * OpenAI-family model, and measured zero: 158 calls and 3.1M prompt tokens
+       * across a whole day reported cache_read_tokens=0. That reads as "prompt
+       * caching is not working", when it may have been working the entire time. */
+      const cJSON *ptd = cJSON_GetObjectItemCaseSensitive((cJSON *)usage, "prompt_tokens_details");
+      if (ptd && cJSON_IsObject(ptd))
+      {
+         const cJSON *cr = cJSON_GetObjectItemCaseSensitive((cJSON *)ptd, "cached_tokens");
+         if (cr && cJSON_IsNumber(cr))
+            out->usage_cache_read = (long)cr->valuedouble;
+      }
    }
    return 0;
 }

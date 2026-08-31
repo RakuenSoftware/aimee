@@ -32,9 +32,33 @@ cJSON *mcp_build_tools_list_flat(void);
 const char *mcp_tool_profile_effective(const char *explicit_profile);
 
 /* Filter a served tools/list IN PLACE to the named profile (NULL => resolve via
- * mcp_tool_profile_effective). "full" / unknown is a no-op (fail open); "core"
- * or "lean" keeps only the Tier-0 set. Returns the number of tools removed. */
-int mcp_filter_tools_for_profile(cJSON *tools, const char *profile);
+ * mcp_tool_profile_effective). "full" / unknown is a no-op for the PROFILE (fail
+ * open); "core" or "lean" keeps only the Tier-0 set. Returns tools removed.
+ *
+ * delegates_enabled == 0 additionally removes the delegate tools, on EVERY
+ * profile including "full": a profile decides how much of a working surface to
+ * show, whereas delegation being off decides what exists at all. Passed in
+ * rather than read from config because this module may not reach the config
+ * module directly; the server supplies it. Pass 1 to keep them. */
+int mcp_filter_tools_for_profile(cJSON *tools, const char *profile, int delegates_enabled);
+
+/* Byte caps for the trimmed presentation. A top-level description keeps roughly a
+ * sentence. Parameter hints are dropped outright (cap 0): they were 7,841 of the
+ * surface's 11,894 prose bytes -- the largest single block -- and the type, enum and
+ * required list beside each one already carry everything needed to construct a call.
+ * describe_tool still returns the full text for a caller that wants the guidance. */
+#define MCP_TOOL_PROSE_TOP_CAP   180
+#define MCP_TOOL_PROSE_PARAM_CAP 0
+
+/* Shorten guidance prose in a tools/list payload, in place. Hides no tool and alters
+ * no callable shape -- types, enums and required lists are untouched; describe_tool
+ * still returns the full text. Returns the number of tools visited.
+ *
+ * Opt-in via AIMEE_MCP_TOOL_PROSE=lean (default "full" leaves the payload as-is), so
+ * the two presentations can be measured against each other rather than swapped on a
+ * hunch. */
+int mcp_compact_tool_prose(cJSON *tools);
+int mcp_tool_prose_lean(void);
 
 /* Append the find_tools / describe_tool discovery meta-tools and the call_tool
  * bridge to a tools list. Called by mcp_build_tools_list so they are always

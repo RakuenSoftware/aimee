@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* ------------------------------------------------------------------ */
 /* Stubs                                                               */
@@ -23,9 +24,11 @@
 static int g_remote_mode = 0; /* controls kb_client_v1_base_url return */
 static char *g_last_path = NULL;
 static char *g_last_body = NULL;
+static char *g_last_files_body = NULL;
 static int g_post_calls = 0;
 static int g_files_pushed_total = 0; /* rel_path entries summed across calls */
 static size_t g_max_body_bytes = 0;  /* largest single request body seen */
+static int g_next_status = 200;
 static const char *g_next_response =
     "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 
@@ -46,10 +49,20 @@ char *kb_client_v1_post_json(const char *path, cJSON *body, int timeout_ms, int 
       g_max_body_bytes = strlen(g_last_body);
    cJSON *files = body ? cJSON_GetObjectItemCaseSensitive(body, "files") : NULL;
    if (cJSON_IsArray(files))
+   {
       g_files_pushed_total += cJSON_GetArraySize(files);
+      free(g_last_files_body);
+      g_last_files_body = cJSON_PrintUnformatted(body);
+   }
    if (status_out)
-      *status_out = 200;
+      *status_out = g_next_status;
    return strdup(g_next_response);
+}
+
+char *kb_client_v1_post_json_keep_error(const char *path, cJSON *body, int timeout_ms,
+                                        int *status_out)
+{
+   return kb_client_v1_post_json(path, body, timeout_ms, status_out);
 }
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
@@ -70,12 +83,16 @@ static void reset_stub(void)
 {
    free(g_last_path);
    free(g_last_body);
+   free(g_last_files_body);
    g_last_path = NULL;
    g_last_body = NULL;
+   g_last_files_body = NULL;
    g_post_calls = 0;
    g_files_pushed_total = 0;
    g_max_body_bytes = 0;
    g_remote_mode = 0;
+   g_next_status = 200;
+   g_next_response = "{\"status\":\"ok\",\"skipped\":false,\"projects\":1,\"files\":0}";
 }
 
 /* ------------------------------------------------------------------ */
@@ -132,7 +149,8 @@ static void test_local_mode_no_files_array(void)
    reset_stub();
    g_remote_mode = 0;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char p[4096];
@@ -161,7 +179,8 @@ static void test_remote_mode_pushes_files(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* Source files that should be collected. */
@@ -198,10 +217,10 @@ static void test_remote_mode_pushes_files(void)
    kb_client_index_scan_result_t res;
    kb_client_index_scan("proj", tmpdir, 0, &res);
 
-   assert(g_post_calls == 1);
-   assert(g_last_body != NULL);
+   assert(g_post_calls == 3); /* begin, stage, seal */
+   assert(g_last_files_body != NULL);
 
-   cJSON *body = cJSON_Parse(g_last_body);
+   cJSON *body = cJSON_Parse(g_last_files_body);
    assert(body != NULL);
 
    /* files array must be present. */
@@ -257,18 +276,20 @@ static void test_remote_mode_empty_dir(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    kb_client_index_scan_result_t res;
    kb_client_index_scan("proj", tmpdir, 0, &res);
 
-   assert(g_post_calls == 1);
+   assert(g_post_calls == 2); /* begin + an authoritative empty seal */
    cJSON *body = cJSON_Parse(g_last_body);
    assert(body != NULL);
-   cJSON *files = cJSON_GetObjectItemCaseSensitive(body, "files");
-   assert(cJSON_IsArray(files));
-   assert(cJSON_GetArraySize(files) == 0);
+   cJSON *phase = cJSON_GetObjectItemCaseSensitive(body, "phase");
+   cJSON *expected = cJSON_GetObjectItemCaseSensitive(body, "expected_files");
+   assert(cJSON_IsString(phase) && strcmp(phase->valuestring, "seal") == 0);
+   assert(cJSON_IsNumber(expected) && expected->valueint == 0);
    cJSON_Delete(body);
 
    rmdir_r(tmpdir);
@@ -284,7 +305,8 @@ static void test_remote_mode_batches_large_tree(void)
    reset_stub();
    g_remote_mode = 1;
 
-   char tmpdir[] = "/tmp/aimee_idx_test_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_idx_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* 5 x 200 KB source files = ~1 MB of content against the 600 KB batch
@@ -311,7 +333,7 @@ static void test_remote_mode_batches_large_tree(void)
 
    assert(rc == 0);
    assert(res.skipped == 0);
-   assert(g_post_calls >= 2);              /* batched, not one giant push */
+   assert(g_post_calls >= 4);              /* begin + multiple stages + seal */
    assert(g_files_pushed_total == NFILES); /* nothing dropped */
    assert(g_max_body_bytes < 1048576);     /* every body under the kb cap */
 
@@ -338,6 +360,27 @@ static void test_remote_mode_missing_args(void)
    reset_stub();
 }
 
+/* A non-2xx response still carries the kb's refusal body. The production
+ * transport deliberately retains it, so the scan layer must not replace a
+ * precise policy/validation error with a bare HTTP status. */
+static void test_scan_refusal_preserves_kb_error(void)
+{
+   reset_stub();
+   g_next_status = 403;
+   g_next_response = "{\"error\":\"project enrollment is required\","
+                     "\"code\":\"project_not_enrolled\"}";
+
+   kb_client_index_scan_result_t res;
+   int rc = kb_client_index_scan("proj", "/some/path", 0, &res);
+   assert(rc == -1);
+   assert(res.skipped == 1);
+   assert(strcmp(res.reason, "error") == 0);
+   assert(strstr(res.message, "HTTP 403") != NULL);
+   assert(strstr(res.message, "project enrollment is required") != NULL);
+   assert(strstr(res.message, "project_not_enrolled") != NULL);
+   reset_stub();
+}
+
 int main(void)
 {
    test_local_mode_no_files_array();
@@ -345,6 +388,7 @@ int main(void)
    test_remote_mode_empty_dir();
    test_remote_mode_batches_large_tree();
    test_remote_mode_missing_args();
+   test_scan_refusal_preserves_kb_error();
    printf("kb_client_index_remote: all tests passed\n");
    return 0;
 }

@@ -1,7 +1,12 @@
 name: c-repository-pins
 
 on:
+  # main ONLY, on both triggers. The pins describe a RELEASE, so they are a
+  # main-branch question and nothing else: pushes to main, and pull requests
+  # INTO main. Nothing here runs for a branch or a PR targeting testing.
   push:
+    branches:
+      - main
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"
@@ -9,10 +14,20 @@ on:
       - "src/tests/**"
       - "docs/modules/**"
       - "scripts/export_c_repositories.py"
+      - "scripts/build_c_module_runtime_bundle.py"
+      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
+      - "scripts/check_go_module_runtime_bundle.py"
+      - "server-go/bus/**"
+      - "server-go/modules/**"
+      - "server-go/cmd/aimee-module/**"
+      - "Dockerfile"
+      - "Dockerfile.server"
       - ".github/workflows/c-repositories.yml"
   pull_request:
+    branches:
+      - main
     paths:
       - "dependencies/aimee-repositories.lock.json"
       - "src/core/**"
@@ -20,8 +35,16 @@ on:
       - "src/tests/**"
       - "docs/modules/**"
       - "scripts/export_c_repositories.py"
+      - "scripts/build_c_module_runtime_bundle.py"
+      - "scripts/generate_c_embedded_header.py"
       - "scripts/check_c_repository_lock.py"
       - "scripts/validate_module_process_contracts.py"
+      - "scripts/check_go_module_runtime_bundle.py"
+      - "server-go/bus/**"
+      - "server-go/modules/**"
+      - "server-go/cmd/aimee-module/**"
+      - "Dockerfile"
+      - "Dockerfile.server"
       - ".github/workflows/c-repositories.yml"
 
 permissions:
@@ -30,8 +53,56 @@ permissions:
 jobs:
   pins:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - run: python3 -I -S scripts/validate_module_process_contracts.py
-      - run: python3 -I scripts/check_c_repository_lock.py
+      - run: python3 -I scripts/tests/test_export_c_process_build.py -v
+      - run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
+      - run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
+      - run: python3 -I scripts/check_go_module_runtime_bundle.py
+      # SCOPE, stated because the list reads like a Go gate and is not one.
+      # These are the Go pieces that ship in the module runtime bundle this
+      # workflow builds, tested here without cgo because that is how they are
+      # bundled. It is deliberately NOT complete coverage of server-go: eleven
+      # top-level packages (config, db1, db2, db3, delegate, internal/**,
+      # cmd/aimee-server) fall outside it, and a new top-level package falls
+      # outside it silently.
+      #
+      # That is not a coverage hole, but only because ci.yml's go-unit-tests job
+      # runs `./...` over every Go module and is unfiltered, so it triggers on
+      # pushes to main and PRs into main -- the same events as this workflow,
+      # and more. Before that job existed this list was the only `go test` in
+      # CI, and everything outside it was gated by nothing.
+      #
+      # So do not treat this step as the thing that proves Go is green. If it is
+      # ever the last one standing, replace it with `./...` rather than adding
+      # an entry: an enumerated gate needs its own completeness check, and this
+      # one has never had it.
+      - run: cd server-go && CGO_ENABLED=0 go test ./bus ./modules/... ./cmd/aimee-module
+      - name: Export standalone repositories
+        run: python3 scripts/export_c_repositories.py --output-root "$RUNNER_TEMP/aimee-repositories"
+      - name: Install exported C core
+        run: |
+          cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-core-c" -B "$RUNNER_TEMP/core-build" -DCMAKE_BUILD_TYPE=Release
+          cmake --build "$RUNNER_TEMP/core-build" --parallel 2
+          cmake --install "$RUNNER_TEMP/core-build" --prefix "$RUNNER_TEMP/prefix"
+      - name: Build isolated DB2 repository
+        run: |
+          cmake -S "$RUNNER_TEMP/aimee-repositories/aimee-module-db2" -B "$RUNNER_TEMP/db2-build" -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$RUNNER_TEMP/prefix"
+          cmake --build "$RUNNER_TEMP/db2-build" --parallel 2
+          test -x "$RUNNER_TEMP/db2-build/aimee-module-db2"
+      # The exact commit/digest pins in dependencies/aimee-repositories.lock.json
+      # describe a RELEASE: which external core/module repository commit each
+      # vendored mirror was cut from. `testing` is the integration tip, where the
+      # vendored source is meant to run ahead of any published repository commit,
+      # so enforcing the lock there only demands a lock refresh after every edit
+      # under src/core|modules/** — noise that says nothing about the change.
+      # `main` (and every PR into it) is where the pins must hold, because that is
+      # what ships and what the main deployments run. Refresh with
+      # `export_c_repositories.py --refresh-lock-root` when a release is cut; see
+      # docs/core/repository-extraction.md.
+      - name: Repository pins (main only)
+        if: github.ref == 'refs/heads/main' || github.base_ref == 'main'
+        run: python3 -I scripts/check_c_repository_lock.py
       - run: sh src/tests/test_module_supervisor.sh

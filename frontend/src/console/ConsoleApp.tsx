@@ -8,6 +8,7 @@ import Fleet from './pages/Fleet';
 import Pipeline from './pages/Pipeline';
 import Settings from './pages/Settings';
 import TypedFacts from './pages/TypedFacts';
+import Memories from './pages/Memories';
 
 // ConsoleApp is the shell for the aimee-kb web console: a session gate wrapping a
 // nav + the Dashboard / Accounts / Governance / Pipeline / Typed facts / Settings
@@ -44,6 +45,7 @@ export default function ConsoleApp() {
         <NavLink to="/fleet">Fleet</NavLink>
         <NavLink to="/pipeline">Pipeline</NavLink>
         <NavLink to="/typed-facts">Typed facts</NavLink>
+        <NavLink to="/memories">Memories</NavLink>
         <NavLink to="/settings">Settings</NavLink>
       </nav>
       <main className="kbc-main">
@@ -54,6 +56,7 @@ export default function ConsoleApp() {
           <Route path="/fleet" element={<Fleet mutationBlocked={fleetMutationBlocked} onMutationBlocked={() => setFleetMutationBlocked(true)} />} />
           <Route path="/pipeline" element={<Pipeline />} />
           <Route path="/typed-facts" element={<TypedFacts />} />
+          <Route path="/memories" element={<Memories />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/dashboard" replace />} />
         </Routes>

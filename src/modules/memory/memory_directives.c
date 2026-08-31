@@ -10,11 +10,10 @@
 #include "aimee.h"
 #include "util.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/epistemic_directives.h"
-#include "db2/failed_queries.h"
+#include "modules/db2/c/epistemic_directives.h"
+#include "modules/db2/c/failed_queries.h"
 #include "log.h"
-#endif
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include <ctype.h>
 #include <pthread.h>
@@ -54,124 +53,6 @@ void memory_directive_metrics(int64_t *created_total, int64_t *resolved_total,
       *match_ms_max = s_ed_metric_match_ms_max;
    pthread_mutex_unlock(&s_ed_metrics_mu);
 }
-
-#if defined(AIMEE_DB2_DISABLED)
-/* Directive storage is DB2-owned. Server code should access it through
- * aimee-kb RPCs, not by linking DB2 directive helpers. */
-int memory_directive_get(int64_t id, memory_directive_t *out)
-{
-   (void)id;
-   (void)out;
-   return -1;
-}
-
-int memory_directive_create(const char *question, const char *topic, const char *anchor_entity,
-                            const char *anchor_file, const char *cause, int priority,
-                            int64_t memory_a_id, int64_t memory_b_id, const char *evidence,
-                            const char *source_session, const char *valid_until,
-                            memory_directive_t *out)
-{
-   (void)question;
-   (void)topic;
-   (void)anchor_entity;
-   (void)anchor_file;
-   (void)cause;
-   (void)priority;
-   (void)memory_a_id;
-   (void)memory_b_id;
-   (void)evidence;
-   (void)source_session;
-   (void)valid_until;
-   (void)out;
-   return -1;
-}
-
-int memory_directive_list(const char *state, const char *cause, memory_directive_t *out, int max)
-{
-   (void)state;
-   (void)cause;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_directive_counts(memory_directive_counts_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_directive_resolve(int64_t id, int64_t resolution_memory_id, const char *note)
-{
-   (void)id;
-   (void)resolution_memory_id;
-   (void)note;
-   return -1;
-}
-
-int memory_directive_suppress(int64_t id)
-{
-   (void)id;
-   return -1;
-}
-
-int memory_directive_sweep_expired(void)
-{
-   return 0;
-}
-
-int memory_directive_match(const char *turn_text, const char *active_entity,
-                           const char *active_file, memory_directive_t *out, int max)
-{
-   (void)turn_text;
-   (void)active_entity;
-   (void)active_file;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_directive_mark_surfaced(int64_t id)
-{
-   (void)id;
-   return -1;
-}
-
-int64_t memory_directive_record_retrieval_failure(const char *query_norm, int threshold,
-                                                  const char *source_session)
-{
-   (void)query_norm;
-   (void)threshold;
-   (void)source_session;
-   return 0;
-}
-
-int64_t memory_directive_record_contradiction(int64_t memory_a_id, int64_t memory_b_id,
-                                              const char *topic, const char *anchor_entity,
-                                              const char *content_a, const char *content_b,
-                                              const char *source_session)
-{
-   (void)memory_a_id;
-   (void)memory_b_id;
-   (void)topic;
-   (void)anchor_entity;
-   (void)content_a;
-   (void)content_b;
-   (void)source_session;
-   return 0;
-}
-
-int memory_directive_resolve_contradiction(int64_t memory_a_id, int64_t memory_b_id,
-                                           int64_t resolution_memory_id, const char *note)
-{
-   (void)memory_a_id;
-   (void)memory_b_id;
-   (void)resolution_memory_id;
-   (void)note;
-   return 0;
-}
-#else
 
 static void ed_metrics_inc(int64_t *field)
 {
@@ -247,8 +128,27 @@ int memory_directive_create(const char *question, const char *topic, const char 
    return 0;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void directive_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.directives", "directive listing is unavailable: the relational store is "
+                                 "unreachable, so no directives are returned and active "
+                                 "directives will not be applied");
+}
+
 int memory_directive_list(const char *state, const char *cause, memory_directive_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      directive_warn_store_unreachable();
+      return 0;
+   }
    return db2_directive_list(state, cause, out, max);
 }
 
@@ -522,8 +422,6 @@ int memory_directive_resolve_contradiction(int64_t memory_a_id, int64_t memory_b
       ed_metrics_add(&s_ed_metric_resolved_total, n);
    return n > 0 ? n : 0;
 }
-
-#endif
 
 struct cJSON *memory_directive_to_json(const memory_directive_t *d)
 {

@@ -15,6 +15,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "computer_use.h"
 #include "config.h"
+#include "config_client.h"
 #include "diff.h"
 #include "dstr.h"
 #include "guardrails.h"
@@ -27,6 +28,8 @@
 #include "cJSON.h"
 #include <ctype.h>
 #include <pthread.h>
+#include <aimee/delegates/delegate_role.h>
+#include "role_templates.h"
 
 /* --- Auto-snapshot turn context (thread-local, set by the agent runtime) ---
  *
@@ -184,22 +187,49 @@ int agent_tools_parent_write_guard_blocks(const char *path, const char *cwd)
    return agent_tools_path_under_root(norm, g_parent_ro_root);
 }
 
-/* Session-isolation backstop (Layer 2, opt-in via require_session_worktree).
+static size_t agent_tools_managed_root_len(const char *path)
+{
+   const char *marker = strstr(path, "/.aimee/worktrees/");
+   if (marker)
+   {
+      const char *key = marker + strlen("/.aimee/worktrees/");
+      const char *slash = strchr(key, '/');
+      if (!slash || strncmp(slash, "/main", 5) != 0 || (slash[5] != '\0' && slash[5] != '/'))
+         return 0;
+      return (size_t)(slash + 5 - path);
+   }
+   marker = strstr(path, "/wfe-worktrees/");
+   if (marker)
+   {
+      const char *id = marker + strlen("/wfe-worktrees/");
+      const char *slash = strchr(id, '/');
+      return (size_t)((slash ? slash : id + strlen(id)) - path);
+   }
+   return 0;
+}
+
+/* Session-isolation backstop (Layer 2, enforced unless require_session_worktree
+ * is explicitly false).
  * Blocks a server-side agent/delegate write whose normalized target is NOT
  * inside an aimee-managed worktree (path component .aimee/worktrees/...). This
  * mirrors the client-side attention-guard
  * (Layer 1) so aimee's own in-process agent writes obey the same isolation
  * policy that a thin client's PreToolUse hook enforces — covering the case
- * where session-start never provisioned a worktree. Default off (the config
- * flag defaults to 0), so this is a no-op unless explicitly enabled. */
+ * where session-start never provisioned a worktree. */
 int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
 {
    if (!path || !path[0])
       return 0;
-   /* config_load here mirrors the per-call pattern already used elsewhere in
-    * this file (it is cheap and reads the cached config). Default-off: when the
-    * flag is unset — or the config is unreadable, which leaves the default 0 —
-    * this is a no-op, matching the feature's opt-in nature. */
+   /* Fail closed. testing reached this independently and fixed it HERE, noting
+    * that the generated accessor "returns zero for both explicit false and
+    * transport failure, which would silently disable isolation". That is the
+    * same defect this branch fixed one level down, in the accessor itself --
+    * which also covers require_aimee_memory and require_aimee_git, who had it
+    * too and no call-site workaround.
+    *
+    * With the accessor fail-closed, the local guard here is redundant, so the
+    * call goes back to reading as the intent does: only an explicit
+    * `require_session_worktree: false` turns isolation off. */
    if (!config_require_session_worktree())
       return 0;
    /* normalize_path resolves '.'/'..'/relative against cwd, closing traversal
@@ -215,10 +245,15 @@ int agent_tools_session_isolation_blocks(const char *path, const char *cwd)
     * preferences. */
    char norm[MAX_PATH_LEN];
    normalize_path(path, cwd, norm, sizeof(norm));
-   if (strstr(norm, "/.aimee/worktrees/") != NULL)
-      return 0;
-   if (strstr(norm, "/wfe-worktrees/") != NULL)
-      return 0;
+   size_t root_len = agent_tools_managed_root_len(norm);
+   if (root_len && cwd && cwd[0])
+   {
+      char norm_cwd[MAX_PATH_LEN];
+      normalize_path(cwd, NULL, norm_cwd, sizeof(norm_cwd));
+      size_t cwd_root_len = agent_tools_managed_root_len(norm_cwd);
+      if (cwd_root_len == root_len && strncmp(norm, norm_cwd, root_len) == 0)
+         return 0;
+   }
    return 1;
 }
 
@@ -473,12 +508,106 @@ int agent_tools_strip_delegate_respond(parsed_response_t *parsed)
 
 /* Tool definition builders are in agent_tools_defs.c */
 
-int agent_tools_role_current_code_only(const char *role)
+/* Carried, not derived. Set once per run from the permission set the delegate
+ * was created with; every site below reads the same answer.
+ *
+ * THREAD-LOCAL for the same reason g_write_capable and g_active_toolset above
+ * are: delegate turns run on POOLED worker threads and overlap by design. A
+ * process-wide carrier would let one delegate's posture become another's, and
+ * for a permission that means a confined delegate silently un-confined by
+ * whichever turn happened to write last. */
+_Thread_local static int g_knowledge_write = 1;
+
+/* Borrowed, and the borrow is the point: the resolved set lives for the run, and
+   copying it here would be a second answer to keep in step. Thread-local for the
+   reason above, and the borrow is per-thread too: each turn points at its own
+   resolved set, so no turn can be reading a list another turn is replacing. */
+_Thread_local static const char *const *g_denied;
+_Thread_local static int g_denied_count;
+
+void agent_tools_denied_set(const char *const *denied, int count)
+{
+   g_denied = (count > 0) ? denied : NULL;
+   g_denied_count = (count > 0) ? count : 0;
+}
+
+int agent_tools_tool_denied(const char *tool)
+{
+   if (!tool || !g_denied)
+      return 0;
+   for (int i = 0; i < g_denied_count; i++)
+      if (g_denied[i] && strcmp(g_denied[i], tool) == 0)
+         return 1;
+   return 0;
+}
+
+_Thread_local static int g_shell = 1;
+
+void agent_tools_shell_set(int allowed)
+{
+   g_shell = allowed ? 1 : 0;
+}
+
+int agent_tools_shell_allowed(void)
+{
+   return g_shell;
+}
+
+void agent_tools_knowledge_write_set(int allowed)
+{
+   g_knowledge_write = allowed ? 1 : 0;
+}
+
+int agent_tools_knowledge_write_allowed(void)
+{
+   return g_knowledge_write;
+}
+
+/* Which toolset a delegate runs with.
+ *
+ * Three sources, in order:
+ *   1. the role template's `toolset:` frontmatter, when an operator named one;
+ *   2. the built-in map for the roles that ship;
+ *   3. `readonly`, for a role that matches neither.
+ *
+ * That third case is the one that mattered. A role defined at runtime matches no
+ * entry in the built-in map, and the filter used to take a NULL toolset as "do
+ * not filter" -- so a custom role was handed every tool aimee has, including
+ * write_file and the whole index surface, whatever its permissions said. A role
+ * nobody described gets the set that can do the least, and an operator who wants
+ * more says so in the template.
+ *
+ * This is the SELECTION, not the ceiling. Permissions clamp whatever it returns:
+ * see permission_denies_tool. */
+static const char *delegate_toolset_for_role(const char *role)
 {
    if (!role || !role[0])
-      return 0;
-   return strcmp(role, "review") == 0 || strcmp(role, "diagnose") == 0 ||
-          strcmp(role, "inspect") == 0;
+      return NULL;
+
+   /* One entry, per thread, keyed on the role.
+    *
+    * This is called once per ADVERTISED TOOL by the filter and again at every
+    * dispatch, and reading the template means opening a file: without this a
+    * turn with thirty tools opened thirty of them to answer the same question
+    * thirty times. The role does not change within a run, which is the same
+    * reason the permissions themselves are resolved once and carried.
+    *
+    * An operator editing a template mid-run is therefore not seen until the next
+    * run, which is exactly how their `permissions:` block already behaves. */
+   static _Thread_local char cached_role[128];
+   static _Thread_local char cached_toolset[TOOLSET_NAME_MAX];
+   if (cached_role[0] && strcmp(cached_role, role) == 0)
+      return cached_toolset[0] ? cached_toolset : NULL;
+
+   const char *canonical = delegate_role_canonicalize(role);
+   const char *named = role_template_toolset(NULL, canonical);
+   const char *answer = (named && named[0]) ? named : toolset_for_delegate_role(canonical);
+   if (!answer)
+      answer = "readonly";
+
+   snprintf(cached_role, sizeof(cached_role), "%s", role);
+   snprintf(cached_toolset, sizeof(cached_toolset), "%s", answer);
+   return cached_toolset;
 }
 
 /* The three read-only worktree tools review_indexed carries under slice 7. Kept as
@@ -513,7 +642,13 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
    if (!toolset_name || !toolset_name[0])
       toolset_name = getenv("AIMEE_ACTIVE_TOOLSET");
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(role);
+      toolset_name = delegate_toolset_for_role(role);
+   /* The permission is the ceiling, checked before the toolset is even resolved.
+      A toolset says what a role is for; it cannot grant what the role does not
+      hold, and a role whose toolset carries write_file used to get it anyway. */
+   if (agent_tools_tool_denied(tool_name))
+      return 0;
+
    if (toolset_name && toolset_name[0])
    {
       char tools[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
@@ -545,7 +680,7 @@ int agent_tools_tool_allowed_for_role(const char *role, const char *tool_name)
                err[0] ? err : "unknown error");
    }
 
-   if (!agent_tools_role_current_code_only(role))
+   if (agent_tools_knowledge_write_allowed())
       return 1;
    if (strchr(tool_name, ':') != NULL)
       return 0;
@@ -608,8 +743,11 @@ void agent_tools_filter_for_role(cJSON *tools, const char *role)
    char resolved[TOOLSET_MAX_TOOLS][TOOLSET_TOOL_MAX];
    int resolved_count = -1;
    if (!toolset_name || !toolset_name[0])
-      toolset_name = toolset_for_delegate_role(role);
-   if (!cJSON_IsArray(tools) || (!toolset_name && !agent_tools_role_current_code_only(role)))
+      toolset_name = delegate_toolset_for_role(role);
+   /* No toolset and nothing withheld means no role: an ordinary turn, which is
+      not a delegate and is not filtered. Every delegate role now resolves to a
+      toolset, so this is no longer the custom-role path it used to be. */
+   if (!cJSON_IsArray(tools) || (!toolset_name && agent_tools_knowledge_write_allowed()))
       return;
    if (toolset_name)
    {
@@ -975,11 +1113,12 @@ static cJSON *tp_git_pr(void)
    cJSON *params = tp_obj();
    cJSON *props = cJSON_CreateObject();
    tp_prop(props, "action", "string",
-           "create | view | list | edit | checks | watch | merge_status | merge");
+           "create | view | list | edit | checks | watch | merge_status | update_branch | merge");
    tp_prop(props, "path", "string",
            "Path to the git repository / worktree — the SAME path you pass to git_status. "
            "Without it the repo is resolved from the session, which may not be your worktree.");
-   tp_prop(props, "number", "integer", "PR number (for view/edit/checks/merge_status/merge)");
+   tp_prop(props, "number", "integer",
+           "PR number (for view/edit/checks/merge_status/update_branch/merge)");
    tp_prop(props, "title", "string", "PR title (for create/edit)");
    tp_prop(props, "body", "string", "PR body (for create/edit)");
    tp_prop(props, "base", "string", "Base branch (for create/edit)");
@@ -1710,6 +1849,44 @@ cJSON *agent_tool_get_schema_cached(const char *tool_name)
       return cJSON_GetObjectItemCaseSensitive(fn, "parameters");
    }
    return NULL;
+}
+
+/* List the built-in tool names, for callers that must hand the inventory to
+ * someone who cannot look tools up themselves -- the rescue parser runs in the
+ * delegates module and is not allowed to ask the tools module directly.
+ *
+ * The names point into the cache, which lives for the process, so the caller
+ * borrows rather than owns them. Returns how many were written. */
+int agent_tool_known_names(const char **out, int max)
+{
+   int count = 0;
+   if (!out || max <= 0)
+      return 0;
+
+   if (!g_schema_cache_tools)
+   {
+      pthread_mutex_lock(&g_schema_cache_mu);
+      if (!g_schema_cache_tools)
+         g_schema_cache_tools = build_tools_array();
+      pthread_mutex_unlock(&g_schema_cache_mu);
+   }
+   if (!g_schema_cache_tools)
+      return 0;
+
+   cJSON *tool = NULL;
+   cJSON_ArrayForEach(tool, g_schema_cache_tools)
+   {
+      cJSON *fn = cJSON_GetObjectItemCaseSensitive(tool, "function");
+      if (!fn)
+         continue;
+      cJSON *name = cJSON_GetObjectItemCaseSensitive(fn, "name");
+      if (!cJSON_IsString(name) || !name->valuestring[0])
+         continue;
+      if (count >= max)
+         break;
+      out[count++] = name->valuestring;
+   }
+   return count;
 }
 
 static const char *agent_tools_schema_provider_for_agent(const agent_t *agent)

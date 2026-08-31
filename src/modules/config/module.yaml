@@ -8,49 +8,13 @@
     "supported": false
   },
   "ownership_complete": true,
-  "sources": [
-    "src/modules/config/config_accessors_0.c",
-    "src/modules/config/config_accessors_1.c",
-    "src/modules/config/config_accessors_2.c",
-    "src/modules/config/config_accessors_3.c",
-    "src/modules/config/config_accessors_4.c",
-    "src/modules/config/config_accessors_5.c",
-    "src/modules/config/config_accessors_6.c",
-    "src/modules/config/config_accessors_7.c",
-    "src/modules/config/config.c",
-    "src/modules/config/config_charter.c",
-    "src/modules/config/config_database.c",
-    "src/modules/config/config_econ.c",
-    "src/modules/config/config_elements.c",
-    "src/modules/config/config_fields.c",
-    "src/modules/config/config_kb_curator.c",
-    "src/modules/config/config_kb_maintenance.c",
-    "src/modules/config/config_learning.c",
-    "src/modules/config/config_memory.c",
-    "src/modules/config/config_mode.c",
-    "src/modules/config/config_save.c",
-    "src/modules/config/config_sections.c",
-    "src/modules/config/config_server_api.c",
-    "src/modules/config/config_skills.c",
-    "src/modules/config/config_trigger.c"
-  ],
-  "private_headers": [
-    "src/modules/config/config_accessors.h",
-    "src/modules/config/config.h",
-    "src/modules/config/config_database.h",
-    "src/modules/config/config_embedder_dims.h",
-    "src/modules/config/config_fields.h",
-    "src/modules/config/config_internal.h",
-    "src/modules/config/config_learning.h",
-    "src/modules/config/config_memory.h",
-    "src/modules/config/config_sections.h",
-    "src/modules/config/config_snapshot_test.h"
-  ],
-  "tests": [
-    "src/tests/test_config.c",
-    "src/tests/test_config_economizer.c",
-    "src/tests/test_config_snapshot.c",
-    "src/tests/test_config_surface.c"
+  "external_source": {
+    "module": "github.com/RakuenSoftware/aimee-module-config",
+    "package": "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config",
+    "repository": "https://github.com/RakuenSoftware/aimee-module-config"
+  },
+  "contracts": [
+    "src/modules/config/eventcontract/operations.json"
   ],
   "docs": [
     "docs/modules/config.md"

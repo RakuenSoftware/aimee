@@ -9,10 +9,9 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
 #include "cJSON.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "memory.h"
 #include "platform_test_util.h"
 
@@ -22,6 +21,22 @@ typedef int (*onboard_memory_insert_fn)(const char *tier, const char *kind, cons
 typedef int (*onboard_memory_get_fn)(int64_t id, memory_t *out);
 void onboard_set_memory_client_for_test(onboard_memory_insert_fn insert_fn,
                                         onboard_memory_get_fn get_fn);
+
+/* This suite exercises the pure onboarding report builder. Keep the unrelated
+ * setup path link-complete without starting a store or writing MCP config. */
+int db1_store_ready(void)
+{
+   return 0;
+}
+
+void db1_shutdown(void)
+{
+}
+
+void ensure_mcp_json(const char *dir)
+{
+   (void)dir;
+}
 
 static memory_t g_onboard_memory_smoke;
 static int64_t g_onboard_memory_next_id = 1000;
@@ -69,11 +84,12 @@ static void scratch_env(char *tmpdir, size_t cap)
    platform_setenv("HOME", tmpdir);
    platform_setenv("AIMEE_NO_CACHE", "1");
 
-   config_t cfg;
-   config_load(&cfg);
-   assert(config_save(&cfg) == 0);
-   assert(db1_init(cfg.db1_path) == 0);
-   db1_shutdown();
+   /* Nothing to seed here any more. Upstream seeded a SQLite file at
+    * config_db1_path(); the store is a module now and neither that accessor
+    * nor the file exists. This branch's own lines called
+    * the config module's old read/write pair, which the move of config into
+    * Go renamed. The onboarding
+    * flow creates what it needs in the scratch home above. */
 }
 
 static void scratch_cleanup(const char *tmpdir)

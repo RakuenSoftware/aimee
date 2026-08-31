@@ -20,17 +20,8 @@
  * create_compute_ctx then copies the conn's identity into compute_ctx_t for the
  * detached worker. The principal is the ONLY identity key the vault trusts —
  * never a client-supplied session_id.
- *
- * KNOWN GAP (tracked for WP-C.2): the streaming chat/responses/messages branches
- * in handle_conn return before this capture runs, and the SSE handlers build
- * their own server_conn_t that never receives _apply — so a streaming request
- * carries an empty principal (ATTEST_NONE). This is fail-closed (no vault, never
- * a wrong vault) and has zero impact on WP-C.1: every vault-consuming path — the
- * POST /v1/vault routes and the delegate credential use-path — is dispatched
- * through the NON-streaming loopback bridge, and webchat vault ops (C.2) ride
- * the token-bearing first-class routes, not the streaming OpenAI proxy. Wiring
- * identity onto the streaming conns is deferred to C.2 where it becomes
- * exercisable + testable. */
+ * Streaming chat/responses/messages handlers are synchronous on the same worker
+ * and receive the same capture/clear lifetime before their early return. */
 
 /* Capture this request's attested identity into the per-thread state.
  *   fd      - the connection socket (SO_PEERCRED source for UDS).
@@ -56,6 +47,18 @@ void server_http_identity_override_principal(const char *principal);
  * principal); the bearer buffer is zeroed on clear. */
 const char *server_http_identity_session_hdr(void);
 const char *server_http_identity_bearer(void);
+
+/* Split the generic session-bound gateway credential
+ *   <bearer>.aimee-session.<32 lowercase hex chars>
+ * into its authorization bearer and launcher-owned session id. Unbound tokens
+ * are copied unchanged with an empty session id. The suffix is correlation
+ * state inside the already-authenticated bearer principal; it grants no
+ * authority on its own. Returns 1 when bound. */
+/* Constant-time bearer comparison that tolerates a session-binding suffix. */
+int server_http_bearer_matches(const char *presented, const char *bearer_cfg);
+
+int server_http_session_bearer_unbind(const char *presented, char *bearer, size_t bearer_n,
+                                      char *session_id, size_t session_n);
 const char *server_http_identity_status_staple(void);
 const server_tls_peer_cert_t *server_http_identity_peer_cert(void);
 const server_tls_peer_cert_t *server_http_identity_local_cert(void);

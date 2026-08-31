@@ -4,6 +4,112 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": false,
   "properties": {
+    "c_build": {
+      "additionalProperties": false,
+      "properties": {
+        "compile_definitions": {
+          "items": {
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "generated_headers": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "entries": {
+                "items": {
+                  "additionalProperties": false,
+                  "properties": {
+                    "source": {
+                      "type": "string"
+                    },
+                    "symbol": {
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "source",
+                    "symbol"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              "output": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "entries",
+              "output"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "header_dependencies": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "include_roots": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "pkg_config": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "shared_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "system_libraries": {
+          "items": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:+-]*$",
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "vendor_sources": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "uniqueItems": true
+        }
+      },
+      "required": [
+        "include_roots",
+        "pkg_config",
+        "system_libraries"
+      ],
+      "type": "object"
+    },
+    "contracts": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
     "dependencies": {
       "items": {
         "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",
@@ -24,6 +130,40 @@
     },
     "enabled_by_default": {
       "type": "boolean"
+    },
+    "external_source": {
+      "additionalProperties": false,
+      "properties": {
+        "module": {
+          "type": "string"
+        },
+        "package": {
+          "type": "string"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "module",
+        "package",
+        "repository"
+      ],
+      "type": "object"
+    },
+    "go_sources": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
+    },
+    "go_tests": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array",
+      "uniqueItems": true
     },
     "id": {
       "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$",

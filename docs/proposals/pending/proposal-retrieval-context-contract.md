@@ -1,13 +1,13 @@
 # Proposal: Binding retrieval context-contract for agents + a survey of context-engine ideas
 
-- **State:** proposed (pending — not started)
+- **State:** proposed (pending; Not started)
 - **Charter roles:** Recall / Rank-Fuse / Calibrate / Plan-Search / Enforce / Gate-Promote
 
 ## Thesis
 
 A public open-source *context engine* for coding assistants has converged on a
 handful of disciplines for keeping an agent from burning tokens on exploration.
-Read against Aimee, **most of its headline mechanisms already exist here** — the
+Read against Aimee, **most of its headline mechanisms already exist here**, the
 semantic graph, the attention-weighted destructive-op guard, per-intent retrieval
 budgets, a confidence scorer, tool-output condensation, episodic memory. The one
 idea Aimee does **not** yet have is the discipline that ties them together: a
@@ -15,7 +15,7 @@ idea Aimee does **not** yet have is the discipline that ties them together: a
 *pre-loads the right code* and *binds the agent's exploration budget* to the
 retriever's confidence. This proposal records the full survey (so we don't
 rediscover it), maps every idea to the code that already realizes it, and scopes
-the one genuinely-new piece — the context contract — to an implementation plan.
+the one genuinely-new piece (the context contract) to an implementation plan.
 
 The reference implementation is described in concept terms only; nothing below
 depends on adopting its (proprietary) graph engine, which Aimee's KB already
@@ -28,13 +28,13 @@ left column.**
 
 | External concept | Aimee's existing surface | Verdict |
 | --- | --- | --- |
-| Attention-weighted destructive-op guard ("undo shield") | `cli_attention_guard.c` — same model, same weights (Read=2, edit=8), recency decay, exit-2 hard block, `$AIMEE_HOME/.cache/attention/<session>.json` | **Have it.** Do nothing. |
+| Attention-weighted destructive-op guard ("undo shield") | `cli_attention_guard.c`: same model, same weights (Read=2, edit=8), recency decay, exit-2 hard block, `$AIMEE_HOME/.cache/attention/<session>.json` | **Have it.** Do nothing. |
 | Semantic graph: files/symbols/imports/call-chains | KB index + projection-graph + cross-repo sweep (`#1169`), `docs/CODE_INTELLIGENCE.md` | **Have it (stronger).** |
-| Per-intent / per-turn retrieval budgets | `retrieval_plan_for_intent` + `retrieval_plan_t` (`memory_context.c`) — `kind_budget[]`, `recency_weight`, `include_l3` per DEBUG/PLAN/REVIEW/DEPLOY | **Have it (internal).** |
+| Per-intent / per-turn retrieval budgets | `retrieval_plan_for_intent` + `retrieval_plan_t` (`memory_context.c`): `kind_budget[]`, `recency_weight`, `include_l3` per DEBUG/PLAN/REVIEW/DEPLOY | **Have it (internal).** |
 | Retrieval confidence scoring | `memory_retrieval_confidence` + `retrieval_confidence_t` (`memory_context.c`); continuous blended `score` | **Have it (internal, score-only).** |
 | Symbol-scoped reads (`file::symbol` → just the def span) | `marshal_preload_append_symbol` (`cli_v1_routes.c`) resolves via `aimee index find`, preloads a ±heuristic excerpt | **Have it (heuristic window).** Refine, don't rebuild. |
 | Pre-loading code into the agent prompt | `marshal_build_preload_context` + delegate `--files` / `--context-file` / `--context-dir` / `--context SYMS` (`cmd_agent_delegate.c`, `cli_v1_routes.c`) | **Have the plumbing.** Missing: auto-selection. |
-| Tool-output compaction + realized-savings telemetry | `tool_condense.c` | **Have it.** |
+| Tool-output compaction + realized-savings telemetry | Go `economizer` module | **Have it.** |
 | Episodic memory ("graph knows WHERE, episodes know HOW") | delegation episodes with confidence scores (project memory), `docs/KNOWLEDGE.md` | **Have it.** |
 | Graph-derived code auditor (dead exports, cycles, dupes…) | `cli_code_audit.c` | **Have it (partial).** Extend, don't rebuild. |
 | Learned ranking weights | pending `learning-to-rank-weight-fitting` proposal; `kb_ranker.c` | **Tracked already.** |
@@ -43,21 +43,21 @@ left column.**
 `retrieval_plan_for_intent` / `memory_retrieval_confidence` never leave the memory
 assembler, and the enforcement cap is a **static, session-wide** config scalar.
 Nothing hands the delegate a *per-task binding* "here are the files, here is your
-grep/read budget, stop when spent" contract. That is Part II.
+grep/read budget, stop when spent" contract; that is Part II.
 
-## Survey — ideas ranked by payoff, each tied to existing code
+## Survey: ideas ranked by payoff, each tied to existing code
 
 Grouped by what work they actually imply.
 
-### Tier A — already covered; adopt nothing, just validation
+### Tier A: already covered; adopt nothing, just validation
 
 - **Attention-weighted destructive-op guard.** `cli_attention_guard.c` is a
   near-identical independent implementation. No action.
 - **Episodic memory / "compounding" recall.** Aimee already captures delegation
   episodes with confidence. No action beyond what's tracked in `KNOWLEDGE.md`.
-- **Tool-output condensation with savings telemetry.** `tool_condense.c`. No action.
+- **Tool-output condensation with savings telemetry.** Go `economizer` module. No action.
 
-### Tier B — refinements to surfaces that already exist (small, high-DRY)
+### Tier B: refinements to surfaces that already exist (small, high-DRY)
 
 1. **Exact-span symbol reads (refine `marshal_preload_append_symbol`).**
    Today it preloads a fixed heuristic window around the definition line. The index
@@ -69,10 +69,10 @@ Grouped by what work they actually imply.
    `cli_attention_guard.c` already maintains a per-session attention log; the KB
    ranker doesn't read it. Up-weight recently-read/edited files/symbols in
    `retrieval_plan_for_intent` scoring using that existing signal. One signal, two
-   consumers — no new collection. **Rank-Fuse.**
+   consumers, no new collection. **Rank-Fuse.**
 
 3. **Re-prime durable context after window compaction.** Aimee compacts context
-   (`tool_condense.c`, `memory_context.c` window compaction). Add a re-assert of
+   (Go `economizer` module, `memory_context.c` window compaction). Add a re-assert of
    the stable project pack immediately post-compaction so the project map survives.
    Mirrors a "PreCompact re-prime" hook. **Recall / Reflect.**
 
@@ -81,14 +81,14 @@ Grouped by what work they actually imply.
    cap) as operator config alongside the 13 curator flags already in the GUI
    (`#1170`). Makes implicit behavior governable. **Enforce.**
 
-### Tier C — genuinely new to Aimee
+### Tier C: genuinely new to Aimee
 
-5. **Binding retrieval context-contract for agents.** *(Part II — the scoped
+5. **Binding retrieval context-contract for agents.** *(Part II, the scoped
    deliverable.)* Surface confidence + caps from the memory assembler to the
    delegate as an enforced contract. **This is the item worth building first.**
 
 6. **Extend the code auditor with persist-and-re-inject.** The transferable trick
-   isn't the checks (`cli_code_audit.c` has several) — it's writing findings to a
+   isn't the checks (`cli_code_audit.c` has several), it's writing findings to a
    TTL'd context blob that auto-injects into subsequent session primes for N days,
    so the agent starts each session already knowing the top debt without being
    re-told. Wire audit output into `cli_session_start.c` priming with an expiry.
@@ -106,21 +106,21 @@ Grouped by what work they actually imply.
 
 9. **Domain context "packs" + handshake discipline.** Split context into stable /
    session / per-domain packs and request *only the missing pack, one scoped
-   question at a time* — never "full context." A retrieval-granularity idea layered
+   question at a time*, never "full context." A retrieval-granularity idea layered
    on Aimee's memory tiers. Lower priority; overlaps existing memory scoping.
    **Recall.**
 
 ### Recommended adoption order
 
 **#5 first** (it closes the one clean gap and directly attacks Aimee's own
-documented failure mode — the delegate that "elapsed 15 turns with no Write, stuck
-in discovery"). Then the cheap Tier-B refinements **#1–#3** (they mostly wire
+documented failure mode, the delegate that "elapsed 15 turns with no Write, stuck
+in discovery"); then the cheap Tier-B refinements **#1–#3** (they mostly wire
 existing signals together). Then **#6–#8** at the session/delegation/measurement
-layers. **#8 should run in parallel** — it's how we'd prove #5 and #1–#3 help.
+layers. **#8 should run in parallel**, it's how we'd prove #5 and #1–#3 help.
 
 ---
 
-## Part II — Implementation plan: the binding context-contract (item #5)
+## Part II: Implementation plan: the binding context-contract (item #5)
 
 ### Goal
 
@@ -128,7 +128,7 @@ When a delegate (or any agent turn) starts a task, the memory assembler returns 
 `retrieval_contract` alongside the preloaded context: the recommended files/symbols
 *and* a hard exploration budget derived from confidence. The agent policy binds it;
 the attention guard enforces a **server-clamped** cap. High confidence ⇒ raw
-recursive scanning is redirected to the index (not blocked — indexed exploration
+recursive scanning is redirected to the index (not blocked, indexed exploration
 still works).
 
 ### §1 Verified surface inventory (reuse classification)
@@ -139,15 +139,15 @@ Confirmed against the tree, with signatures, so the plan reuses real surfaces:
 | --- | --- | --- |
 | `void retrieval_plan_for_intent(task_intent_t, retrieval_plan_t *)` (`memory_context.c`) | per-intent `kind_budget[]`, `recency_weight`, `include_l3` | **reuse + extend** struct with two int caps |
 | `void memory_retrieval_confidence(const char **terms, int, const void *cands, int, double thr, retrieval_confidence_t *)` (`memory_context.c`) | continuous `score = 0.6·coverage + 0.4·separation`, `below_threshold`; **no discrete levels** | **reuse `score`**; level+cap mapping is **new (small) work** |
-| `static char *marshal_build_preload_context(const rpc_opts_t *)` (`cli_v1_routes.c`) | builds the preload block from `--files/--context/...` | **reuse + extend** to append the contract block |
+| `static char *marshal_build_preload_context(const cli_args_t *)` (`cli_v1_routes.c`) | builds the preload block from `--files/--context/...` | **reuse + extend** to append the contract block |
 | `static void marshal_preload_append_symbol(char *, size_t, size_t *, const char *)` (`cli_v1_routes.c`) | resolves a symbol via `aimee index find`, appends an excerpt (POSIX-only, `popen`) | **reuse**; exact-span is Tier-B #1 |
 | `static int attn_config_ingress_max_raw_scans(void)` + enforcement at the `ATTN_OP_RAW_SCAN` branch of `cli_attention_guard.c` (uses `attn_raw_scan_count(arr, now_ts)`) | a **static, session-wide** raw-scan cap read from `aimee.yaml`; on hit, **redirects** to `find_symbol`/`ast_grep_search`/`search_graph`/`get_context_block` (exit 2), does **not** hard-block edits | **reuse as the enforcement point + trust ceiling**; a per-task override source is **new control-plane machinery** (see §4) |
-| `tool_condense.c` realized-savings counters | per-turn token telemetry | **reuse** for §6 |
+| Go `economizer` realized-savings counters | per-turn token telemetry | **reuse** for §6 |
 
 **Honest scoping correction:** `ingress_max_raw_scans` is currently a static
-config scalar (`config_t.ingress_max_raw_scans`, default 0), counted **session-
+config scalar (`legacy_config_record.ingress_max_raw_scans`, default 0), counted **session-
 wide**. Driving it **per task/turn** from a contract is therefore *new machinery*,
-not free reuse — scoped explicitly in §4.
+not free reuse, scoped explicitly in §4.
 
 ### §2 Formal contract schema + confidence→caps mapping
 
@@ -166,7 +166,7 @@ typedef struct {
 ```
 
 **Precise mapping** from the existing continuous `score` (a pure function, no new
-model — a bucketing of a number Aimee already computes). Thresholds are the
+model, a bucketing of a number Aimee already computes). Thresholds are the
 proposed defaults, config-overridable (§7 nice-to-haves):
 
 | `retrieval_confidence_t.score` | `level` | `max_supplementary_scans` | `max_supplementary_files` |
@@ -208,7 +208,7 @@ Concretely:
 1. **New control-plane (scoped honestly):** at contract time, the server writes the
    task's `max_supplementary_scans` into a per-session sidecar next to the existing
    attention log (`$AIMEE_HOME/.cache/attention/<session>.contract.json`, with a
-   turn/task id). This is the new piece — a small writer + a read in the guard.
+   turn/task id). This is the new piece. A small writer + a read in the guard.
 2. **Guard change:** at the `ATTN_OP_RAW_SCAN` branch, compute the effective cap as
    `min(config ingress_max_raw_scans_ceiling, contract max_supplementary_scans)`
    when a live contract sidecar exists, else fall back to today's static behavior.
@@ -222,7 +222,7 @@ Concretely:
    current task id in the sidecar so the budget is per-task, not only session-wide.
 
 This is deliberately small: one sidecar file, one clamp expression, one scope
-predicate — no new IPC, no new enforcement surface beyond the guard that already
+predicate, no new IPC, no new enforcement surface beyond the guard that already
 runs on every `PreToolUse`.
 
 ### §5 Starvation defense (cap=0 cannot wedge the agent)
@@ -231,7 +231,7 @@ Three independent guarantees, in priority order:
 
 1. **Redirect, not block.** The existing guard on a raw-scan-cap hit **redirects to
    indexed tools** (exit 2 with a message pointing at `find_symbol`,
-   `ast_grep_search`, `search_graph`, `get_context_block`) — it does not block
+   `ast_grep_search`, `search_graph`, `get_context_block`). It does not block
    edits or indexed exploration. So `cap=0` means "explore through the index," not
    "cannot discover you were wrong." This is verified current behavior, not a
    promise.
@@ -256,8 +256,8 @@ Three independent guarantees, in priority order:
 
 ### §7 Observability & configuration
 
-- **Telemetry (nice-to-have #8):** per-turn structured event via `tool_condense.c`'s
-  existing realized-savings counters — `{intent, confidence_score, level, cap,
+- **Telemetry (nice-to-have #8):** per-turn structured event via the Go economizer's
+  existing realized-savings counters, `{intent, confidence_score, level, cap,
   scans_used, extra_files_read, cap_hit, decayed}`. Feeds #8's benchmark so token
   deltas attribute to contract adherence.
 - **Config ownership (nice-to-have #9):** `ingress_max_raw_scans` (the ceiling) and
@@ -292,7 +292,7 @@ validation-pending, not done.*
 
 ### Non-goals
 
-- Not a new graph or ranker — Aimee's KB stands. This surfaces + enforces what the
+- Not a new graph or ranker. Aimee's KB stands. This surfaces + enforces what the
   assembler already computes, plus one small per-task override sidecar.
 - Not auto-mutating operator-specified `--files`/`--context` preloads.
 - Not raising any cap above the operator-configured ceiling (tighten-only).
@@ -301,7 +301,7 @@ validation-pending, not done.*
 ## Open questions
 
 - Should the contract govern the primary interactive session too, or delegates
-  only? (Recommend **delegate-first** — smaller blast radius, and it targets the
+  only? (Recommend **delegate-first**, smaller blast radius, and it targets the
   observed discovery-spiral failure directly.)
 - Should `K` (decay turns) and the score thresholds be global config or per-intent
   (a DEBUG task may warrant a looser LOW cap than a REVIEW task)?

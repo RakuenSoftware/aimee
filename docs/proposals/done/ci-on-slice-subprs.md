@@ -1,7 +1,12 @@
 # Proposal: run CI on slice sub-PRs
 
-- **State:** implementation prepared — option 1 is present in `ci.yml`; rollout
-  remains blocked until the pre-enablement Q0 baseline is recorded.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Archived after the implementation and rollout decision were completed.
+- **Historical state:** implementation prepared. Option 1 is present in `ci.yml`; rollout remained
+  blocked until the pre-enablement Q0 baseline was recorded.
 
 ## Problem
 
@@ -18,8 +23,8 @@ pull_request:
 
 Slice sub-PRs targeted `aimee/feat/<work_item_id>`, which was not in that list.
 Observed on PR #2011, opened and merged by the pipeline: `check-runs` total_count
-= 0. The engine correctly advanced — `wfe_live_forge.c` deliberately treats
-`GIT_PR_CI_NONE` as merge-permitting so an intermediate PR cannot park forever —
+= 0. The engine correctly advanced, `wfe_live_forge.c` deliberately treats
+`GIT_PR_CI_NONE` as merge-permitting so an intermediate PR cannot park forever,
 so the gate passed because there was nothing to check.
 
 Consequence: a slice sub-PR whose target branch is not in the trigger list merges
@@ -53,7 +58,7 @@ By direct observation:
 ### Measured job durations
 
 Elapsed wall-clock per job, from the Actions jobs API for the two most recent
-complete `ci.yml` runs. These are **elapsed minutes, not billed minutes** — see
+complete `ci.yml` runs. These are **elapsed minutes, not billed minutes**. See
 above; nothing here is billed.
 
 | Job | Runner | Run 30221629787 | Run 30221474744 |
@@ -81,7 +86,7 @@ above; nothing here is billed.
 
 Derivation: the "sum" rows add the column above them; the option-2 row adds only
 `build` and `unit-tests`. Jobs run concurrently, so the sum is total machine
-occupancy, not elapsed time — elapsed time is bounded below by the longest job.
+occupancy, not elapsed time, elapsed time is bounded below by the longest job.
 
 **n = 2.** These are point estimates from two runs. They do not characterise
 variance, which for hosted runners is driven largely by queue and runner
@@ -103,7 +108,7 @@ The real costs of adding slice CI are:
 
    So a full slice gate costs **~10 minutes** of wall-clock (n=3).
 
-   The corresponding figure for option 2 is **not measured** — that
+   The corresponding figure for option 2 is **not measured**. That
    configuration does not exist, so no run of it can be timed. Its elapsed time
    is bounded *below* by its longest job (`unit-tests`, ~5.85 min) plus queue and
    setup overhead, which the job table does not capture. Consequently the saving
@@ -136,15 +141,15 @@ latency
 per slice and a reduction in concurrent job slots. What it costs is real:
 partial attribution (e2e-only and cross-slice regressions still surface only at
 the final PR) and a second CI configuration that must be kept in sync with the
-first — a standing source of drift where the slice gate and the delivery gate
+first, a standing source of drift where the slice gate and the delivery gate
 silently diverge.
 
 Trading complete attribution and a single source of truth for four minutes is a
 bad trade when nothing is being billed. Option 1 also needs no new job
 definitions: it is one line added to an existing trigger list.
 
-If runner concurrency later proves to be the binding constraint — the one cost
-above that is real but unmeasured — option 2 remains available as a targeted
+If runner concurrency later proves to be the binding constraint. The one cost
+above that is real but unmeasured, option 2 remains available as a targeted
 remedy, and should be revisited with concurrency data in hand rather than
 adopted pre-emptively now.
 
@@ -231,7 +236,7 @@ Common to any option that adds slice CI:
 
 If **option 1** is implemented:
 
-- A slice that breaks *any* gated leg — including an e2e or docker leg — fails
+- A slice that breaks *any* gated leg (including an e2e or docker leg) fails
   its own sub-PR rather than the final one.
 - No new workflow file or job definition is introduced; the change is confined
   to `ci.yml`'s trigger list.

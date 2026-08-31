@@ -1,6 +1,6 @@
 #include "hardware_probe.h"
 #include "util.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 
 #include <ctype.h>
 #include <dirent.h>

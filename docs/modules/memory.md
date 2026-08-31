@@ -5,14 +5,59 @@
 Memory is required core: it recalls, ranks, assembles, stores, and maintains information that makes
 Aimee useful across turns and repositories. It includes code intelligence, embedding, and reranking;
 `kb-synthesis` is not part of this module. Current ownership is split between `src/modules/memory`,
-`src/db2`, KB services, clients, and root command files, which is migration debt rather than a second
+`src/modules/db2/c`, KB services, clients, and root command files, which is migration debt rather than a second
 memory subsystem.
+
+### Go process stage
+
+The supervised memory process now uses the shared pure-Go module runtime and
+serves four of the five stage identities. Its `reranking` stage preserves the
+MRNK/MCNF fixed-point confidence contract and the existing 330000/660000
+thresholds.
+
+| Stage | Event | What the module decides |
+| --- | --- | --- |
+| `write` | `5890` | the typed-fact write gate: whether a candidate triple may commit as a semantic edge |
+| `extract_index` | `5889` | pattern-first extraction, and the §4 retraction pre-scan (two request shapes, distinct magics) |
+| `retrieve` | `5892` | the §7 PII recall gate: whether a turn asks for sensitive data, and each relation's sensitivity tier (two request shapes) |
+| `reranking` | `5893` | the fixed-point confidence band |
+| `embedding` | `5891` | HTTP single-text embedding and its process-owned dependency breaker |
+
+Those four pure decisions each have a seam in the C: a registered provider that
+is authoritative and never falls back to the local implementation, because a
+silent fallback lets a broken module look healthy. What a failure does instead
+is chosen per seam: the write gate defers (nothing written, caller retries),
+extraction returns an error rather than "no facts", and both halves of the PII
+gate fail closed, withholding rather than exposing. The retraction scan does not
+retract, because that path deletes and a fact left behind is recoverable where
+one deleted by mistake is not.
+
+`embedding` (`5891`) is served by the Go module for HTTP embedders. Its
+process-local circuit breaker distinguishes suppression, authorization refusal,
+and attempted-call failure, and grants exactly one half-open probe. DB2 reaches
+that stage through a startup-installed host contract and accepts only bounded,
+finite vectors. Program-based embedders remain in the C host path by explicit
+contract: the Go module declines those commands without changing its breaker.
+Storage, graph, and lifecycle units likewise remain C.
+
+Every ported decision is held to the C by differential fixtures generated from
+the C itself (`scripts/gen-memory-pattern-fixtures.c`,
+`scripts/gen-memory-ontology-seed.c`, `scripts/gen-memory-pii-fixtures.c`), not
+by expectations transcribed from reading it. Each generator's header carries its
+build and run line; regenerate rather than edit the fixtures.
+
+The server's context pre-injection path requests its `high`/`medium`/`low`
+confidence tier from that process over event `5893`. It no longer substitutes a
+local `low` tier when the process is absent, fails, or returns an invalid value;
+instead it omits the envelope and logs the unavailable classification. The
+envelope formatter also rejects missing or unknown tiers, so callers cannot
+bypass the module by leaving confidence unset.
 
 ## Public contracts
 
 The current C contract is principally `src/headers/memory.h`, with platform seams in
 `src/modules/memory/memory_platform.h` and provider seams in
-`src/modules/memory/memory_provider.h`. Code-index operations in `src/db2/code_index_ops.c`, vector
+`src/modules/memory/memory_provider.h`. Code-index operations in `src/modules/db2/c/code_index_ops.c`, vector
 search, `memory_assemble`, and `gw_stage_memory` are one required capability family even though their
 physical paths have not all reached the module directory.
 
@@ -42,7 +87,7 @@ and `aimee kb` commands, learning, skills, response-composition, and KB ingestio
 ## Providers and readiness
 
 Memory is ready only when durable storage can open and the configured embedding path has a compatible
-dimension; semantic ranking additionally requires the reranking path selected by `config_t`.
+dimension; semantic ranking additionally requires the reranking path selected by `legacy_config_record`.
 Lexical fallbacks may preserve a degraded lookup journey, but they do not make a deployment compliant
 with the required embedding-and-reranking capability boundary.
 
@@ -68,7 +113,7 @@ evidence are recalled from the same required knowledge capability.
 ## Data and migrations
 
 Durable state spans DB1 memory records and DB2/PostgreSQL memory, embedding, code-index, graph, and
-artifact relations; their concrete schemas live under `src/db1` and `src/db2`. Embedding dimension and
+artifact relations; their concrete schemas live under `server-go/modules/aimee/families` and `src/modules/db2/c`. Embedding dimension and
 model-version migrations must keep text, vector rows, provenance, and active-version metadata coherent;
 deleting vectors is safe only where the source records are demonstrably regenerable.
 
@@ -97,7 +142,7 @@ The descriptor's sixteen direct tests are `test_memory.c`, `test_memory_advanced
 defined in `memory_core.c`, which is why slice 44 excluded it from workspace.
 
 The `memory` name collides in two directions, so a `*memory*` filename is not an ownership signal.
-DB1 owns a separate working-memory store (`src/db1/wm.c`, tested by `test_working_memory.c`), and the
+DB1 owns a separate working-memory family (`server-go/modules/aimee/families/conversation_wm.go`), and the
 root-level `src/harness_memory_*.c` files implement the memory-interception harness (tested by the four
 `test_harness_memory*.c` files). Neither is claimed here, nor is `test_kb_client_memory.c` (a kb_client
 test) or `test_server_memory_benchmark.c` (a server test). Together with the code curator/index tests
@@ -111,6 +156,33 @@ and `memory_health` diagnostics to separate empty knowledge from provider or ind
 retain the concrete database, sidecar, and HTTP error rather than collapsing every failure into a generic
 `index unavailable` message.
 
+### Per-lane recall outcomes
+
+Recall runs several candidate lanes (graph, variant, decomposition, unit-semantic, semantic,
+negation, FTS) and each candidate is already tagged with the lane that produced it. That tagging fed
+ranking, through the multi-source fusion bonus, and nothing else: whether a lane's contribution
+*survived* ranking was never recorded, so a lane that produces candidates on every query and never
+places one looked identical to a lane carrying the answer.
+
+After ranking fixes the order, `memory_record_lane_outcome_metrics()` attributes the served window
+back to its lanes:
+
+| Counter | Meaning |
+| --- | --- |
+| `memory.query.lane.<lane>.candidates` | rows this lane contributed to the pool |
+| `memory.query.lane.<lane>.served` | of those, how many are in the window handed back |
+| `memory.query.lane.<lane>.shutout` | queries where the lane contributed and placed nothing |
+| `memory.query.route.<route>.lane.<lane>.served` | the same, split by query route |
+
+A lane that contributed nothing emits no counters, so a silent lane and a losing lane are not summed
+together.
+
+This is measurement, not control. No lane is skipped, reordered, or truncated on the strength of
+these counters, and no recall decision reads them back. Stopping collection early would need the
+lanes ordered by expected yield relative to each other, and they are not: candidate volume is not
+evidence that the lane holding the answer has already run. The counters exist so a decision to drop
+a lane can be made from evidence about this corpus, the way the reranker's removal was.
+
 ## Compatibility
 
 Public `memory_*`, KB-client JSON, CLI, route, schema, and embedding-version contracts remain stable
@@ -121,6 +193,6 @@ baseline decision.
 ## Extension and removal
 
 New recall sources must enter through the shared candidate, ranking, scope, and evidence contracts, not
-an independent store-and-inject path. The root and `src/db2` implementation inventory is a relocation
+an independent store-and-inject path. The root and `src/modules/db2/c` implementation inventory is a relocation
 queue; each move must prove consumers and delete duplicate glue. Removing `memory`, embedding, reranking,
 or code intelligence would break the core product and is not an allowed optional profile.

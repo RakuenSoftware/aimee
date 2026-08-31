@@ -12,20 +12,24 @@ configuration, memories, skills, rules, or workflows without the applicable evid
 `src/modules/learning/learning.h` defines signal inputs, dispatch results, proposals, actions, metrics,
 and the router API. `learning_implicit.h`, `learning_bundle.h`, and `learning_evidence.h` cover detection,
 evidence assembly, and candidate generation, while DB2 persistence currently remains in
-`src/db2/db2_learning.h` and related source files as explicit physical-ownership debt.
+`src/modules/db2/c/db2_learning.h` and related source files as explicit physical-ownership debt.
 
-The descriptor declares this module's four sources (`learning_bundle.c`, `learning_evidence.c`,
-`learning_implicit.c`, `learning_router.c`), its four module-root headers, its two direct tests, and
-this document; it sets `ownership_complete: true`. All four headers are declared as
-`private_headers` because they live at the module root rather than under
-`src/modules/learning/include/aimee/learning/`, which is the layout the header-layout checker treats as
-private. `learning.h` is nonetheless a de-facto public contract: it is included repository-wide via the
-`-Imodules/learning` search path, including by `src/headers/aimee.h`. Promoting it to a canonical public
-header would move the file under the include tree and rewrite every include site, which is a separate
-header-layout slice; an ownership-declaration slice moves nothing. `docs/validation/core-modularization-slice-42.md`
-records the declaration audit and `docs/validation/core-modularization-slice-43.md` the completeness
-audit; the two were split so the latch reviews declarations merged on their own first. Adding a new
-module-local source or module-root header without declaring it now fails CI on `rule=ownership-complete`.
+The pointer-free learning-observation stage is now implemented by
+`server-go/modules/learning` and shipped as the supervised Go
+`aimee-module-learning` process. Its C `module_adapter.c` remains a parity
+fixture for the unchanged `module_api.h` wire contract, with the pure C parity
+policy isolated in `learning_signal_policy.c`. The production router has no
+local signal-to-sink fallback: it requests the sink mask over event `6145` and
+aborts before signal persistence when the process is absent or its response is
+invalid. Proposal persistence, evidence assembly, and the broader learning
+engine are still C migration work.
+
+The descriptor declares the module-owned C implementation and parity adapter, the Go process handler
+and tests, its headers, direct C tests, and this document; it sets `ownership_complete: true`.
+`learning.h` and `module_api.h` are canonical public headers under
+`src/modules/learning/include/aimee/learning/`. The bundle, evidence, implicit-detection, and C parity
+policy headers remain private at the module root. Adding a new module-local source or header without
+declaring it fails CI on `rule=ownership-complete`.
 
 ## Dependencies and consumers
 
@@ -55,15 +59,16 @@ used, and must distinguish a temporarily idle provider from removal of required 
 
 ## Surfaces
 
-User and operator surfaces include `aimee learning list|status|accept|reject|metrics`, KB/server learning
-routes, proposal review, and dashboard metrics derived from `learning_metrics_commit_ratio` and
-`learning_metrics_per_sink_caps`. Internal signal ingestion is also a surface because rules, turns, and
-delegates rely on its result states and evidence references.
+`aimee learning` exposes `approaches`, `attribution`, `fate`, and `resolve`. Proposal review runs
+through the KB/server learning routes and the browser queue; dashboard metrics derive from
+`learning_metrics_commit_ratio` and `learning_metrics_per_sink_caps`. Internal signal ingestion is
+also a surface because rules, turns, and delegates rely on its result states and evidence
+references.
 
 ## Data and migrations
 
 `DB2` tables store learning signals, proposals, evidence references, state transitions, and synthesis
-work; schema and queries currently live under `src/db2`. Migrations must preserve proposal IDs, sink,
+work; schema and queries currently live under `src/modules/db2/c`. Migrations must preserve proposal IDs, sink,
 target, corroboration, expiry, and audit history so an old unresolved action cannot be replayed as an
 unreviewed committed change after an upgrade.
 
@@ -90,13 +95,15 @@ carry the `learning` name and link `learning_bundle.o` as a dependency but are K
 claimed here, the same way gateway does not claim the delivery-binary `test_gateway_*` tests.
 `learning_implicit_replay.c` is a replay harness, not a `unit-test-learning-*` target. Together these
 cover evidence, detection, proposals, metrics, candidate synthesis, and version behavior. Invalid
-signals and unavailable storage fail closed; optional synthesis failure leaves evidence/proposals
-inspectable and must not fabricate an accepted action.
+signals, unavailable storage, and unavailable learning-module classification fail closed. The router
+metrics test verifies that a missing classifier returns before producing a signal or proposal result.
+Optional synthesis failure leaves evidence/proposals inspectable and must not fabricate an accepted
+action.
 
 ## Operational diagnostics
 
-The `aimee learning metrics` surface reports commit ratios, per-sink cap utilization, and router/detector
-latency from `learning_router_metrics`. Operators should correlate those counters with proposal states,
+`learning_router_metrics` reports commit ratios, per-sink cap utilization, and router/detector
+latency to the dashboard. Operators should correlate those counters with proposal states,
 KB drain logs, provider readiness, and evidence references to distinguish no useful signal from a broken
 ingestion or synthesis path.
 

@@ -1,5 +1,5 @@
-/* wfe_advance.h -- S2 sub-slice 3: the explicit `advance_request` tool + the pure
- * driver decision core.
+/* wfe_advance.h -- S2 sub-slice 3: the explicit `advance_request` tool and its
+ * event-bus decision seam.
  *
  * A bound interactive session does NOT let the engine auto-run its work-item (that
  * is the autonomous scheduler's job). Instead the primary, having produced the
@@ -8,12 +8,10 @@
  * tool-executor action -- NEVER inferred from prose ("I've completed X") -- so a
  * free-text claim can never cross a gate (consult Q1, RT1).
  *
- * This module is PURE: it parses + validates the tool arguments and decides the
- * outcome against the work-item's already-fetched state, with no engine / DB /
- * gateway dependency, so every branch is unit-testable in isolation. The binding
- * lookup, the work-item read, the actual `wfe_engine_advance`, and the audit write
- * are the integration layer (wfe_advance_exec). Design per the S2 roundtable
- * consult (2026-07-01). */
+ * This C seam parses and validates tool arguments, then obtains the decision from
+ * the separately supervised workflows module over the event bus. The binding
+ * lookup, work-item read, actual `wfe_engine_advance`, and audit write remain in
+ * the integration layer (wfe_advance_exec). */
 #ifndef DEC_WFE_ADVANCE_H
 #define DEC_WFE_ADVANCE_H 1
 
@@ -63,22 +61,28 @@ typedef enum
 
 const char *wfe_advance_outcome_name(wfe_advance_outcome_t o);
 
+/* Implemented by the server's event-bus bridge. The workflows seam never
+ * evaluates advance policy locally. */
+typedef int (*wfe_advance_decision_provider_fn)(const char *bound_wi,
+                                                const wfe_advance_args_t *args,
+                                                const char *actual_stage, const char *actual_state,
+                                                const char *last_nonce,
+                                                wfe_advance_outcome_t *outcome);
+
+void wfe_advance_register_decision_provider(wfe_advance_decision_provider_fn provider);
+
 /* Decide the outcome. `bound_wi` = the work-item the caller's session is bound to
  * ("" / NULL if unbound). `a` = parsed args. `actual_stage` / `actual_state` = the
  * work-item row's current stage + state ("active" | "accepted" | "rejected" |
  * "abandoned"). `last_nonce` = the nonce of the most recent APPLIED advance for
  * this work-item ("" / NULL if none).
  *
- * Ordering is load-bearing: a genuine retry of an already-applied advance has a
- * stale observed_stage AND the matching nonce, so REPLAY must be tested before
- * both TERMINAL and STALE -- otherwise an idempotent retry would read as an error.
+ * Returns 0 with the module's validated outcome, or -1 when no provider is
+ * registered or the event-bus decision fails. There is no local fallback.
  */
-wfe_advance_outcome_t wfe_advance_decide(const char *bound_wi, const wfe_advance_args_t *a,
-                                         const char *actual_stage, const char *actual_state,
-                                         const char *last_nonce);
-
-/* 1 if `state` is a terminal work-item state (accepted | rejected | abandoned). */
-int wfe_advance_state_is_terminal(const char *state);
+int wfe_advance_decide(const char *bound_wi, const wfe_advance_args_t *a, const char *actual_stage,
+                       const char *actual_state, const char *last_nonce,
+                       wfe_advance_outcome_t *outcome);
 
 /* Emit the `advance_request` tool JSON-Schema "parameters" object (fresh cJSON,
  * caller owns). Shared by the sub-slice-4 tool injector so the schema has a single

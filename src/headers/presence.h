@@ -221,6 +221,29 @@ extern "C"
     * still holds the turn before a long step. 0 if not (released/unknown). */
    int presence_turn_is_live(const char *session_id, const char *turn_id);
 
+   /* Seconds since the in-flight turn was acquired, or -1 when none is in
+    * flight. Copies the live turn id into out_turn_id[id_n] when given.
+    *
+    * The lock is released by whoever acquired it, which is correct exactly as
+    * long as that party still exists. Nothing here can tell: turn_in_flight was
+    * a bare flag, so a turn whose worker died left the session declining every
+    * later submit with presence_busy, permanently, until the process restarted.
+    * A caller that CAN tell — it can see whether a worker still owns the turn —
+    * needs the age to distinguish "long" from "abandoned", so expose it rather
+    * than have this file reach for evidence it has no business holding. */
+   long presence_turn_inflight_age(const char *session_id, char *out_turn_id, size_t id_n);
+
+   /* Release turn_id WITHOUT being its holder, for a caller that has
+    * established the turn is abandoned. Otherwise identical to
+    * presence_turn_release: publishes turn_done, drops the holder's workspace
+    * leases, promotes the queue. Returns 1 if it released, 0 if turn_id is not
+    * the live turn (someone else got there first, or it finished normally).
+    *
+    * Deliberately separate from presence_turn_release rather than a flag on it:
+    * releasing a turn you do not hold is a repair, not a normal completion, and
+    * a caller should have to name it. */
+   int presence_turn_reclaim(const char *session_id, const char *turn_id);
+
    /* ====================================================================== */
    /* Workspace single-writer leases                                         */
    /* ====================================================================== */

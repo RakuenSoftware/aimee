@@ -18,6 +18,7 @@ static int g_get_seen = 0;
 static int g_route_case = 0;
 static int g_search_expect_all = 0;
 static char g_push_root[512];
+static char g_scan_id[128];
 static int64_t g_dependency_now_ms = 100000;
 static int g_mtls_enabled;
 static int g_mtls_status;
@@ -549,11 +550,28 @@ static int maintenance_post_handler(const char *url, const char *auth_header, co
       cJSON *project = cJSON_GetObjectItemCaseSensitive(json, "project");
       cJSON *root_path = cJSON_GetObjectItemCaseSensitive(json, "root_path");
       cJSON *force = cJSON_GetObjectItemCaseSensitive(json, "force");
+      cJSON *phase = cJSON_GetObjectItemCaseSensitive(json, "phase");
+      cJSON *scan_id = cJSON_GetObjectItemCaseSensitive(json, "scan_id");
       cJSON *files = cJSON_GetObjectItemCaseSensitive(json, "files");
       assert(cJSON_IsString(project) && strcmp(project->valuestring, "aimee") == 0);
       assert(cJSON_IsString(root_path) && strcmp(root_path->valuestring, "/repo") == 0);
       assert(cJSON_IsBool(force) && cJSON_IsTrue(force));
       assert(files == NULL || (cJSON_IsArray(files) && cJSON_GetArraySize(files) == 0));
+      assert(cJSON_IsString(phase));
+      assert(cJSON_IsString(scan_id) && scan_id->valuestring[0]);
+      if (g_post_seen == 0)
+      {
+         assert(strcmp(phase->valuestring, "begin") == 0);
+         snprintf(g_scan_id, sizeof(g_scan_id), "%s", scan_id->valuestring);
+      }
+      else
+      {
+         assert(g_post_seen == 1);
+         assert(strcmp(phase->valuestring, "seal") == 0);
+         assert(strcmp(scan_id->valuestring, g_scan_id) == 0);
+         cJSON *expected = cJSON_GetObjectItemCaseSensitive(json, "expected_files");
+         assert(cJSON_IsNumber(expected) && expected->valueint == 0);
+      }
       if (response_buf)
          *response_buf = strdup("{\"status\":\"ok\",\"skipped\":false,\"project\":\"aimee\","
                                 "\"files\":2,\"inspected\":3}");
@@ -667,7 +685,7 @@ static void test_search_v1_reports_http_status(void)
    assert(resp);
    assert(strstr(resp, "\"status\":\"unauthorized\"") != NULL);
    assert(strstr(resp, "\"retryable\":false") != NULL);
-   assert(strstr(resp, "HTTP 401") != NULL);
+   assert(strstr(resp, "\"message\":\"unauthorized\"") != NULL);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
    free(resp);
 
@@ -814,7 +832,110 @@ static void test_health_uses_v1_api_when_configured(void)
    assert(strstr(health.warnings, "warn-a") != NULL);
    assert(strstr(health.warnings, "warn-b") != NULL);
 
+   assert(strcmp(health.status, "ok") == 0);
+   assert(health.blockers[0] == '\0');
+
    assert(g_get_seen == 2);
+   unsetenv("AIMEE_KB_API_URL");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mock_agent_http_reset();
+}
+
+/* A kb that answers "degraded" is UP and is telling us exactly what is wrong.
+ *
+ * kb_client_health used to require status == "ok" and return -1 for anything
+ * else, which predates the kb having any other verdict to send. The moment it
+ * gained one, that check would have converted every degraded kb into a transport
+ * failure: `aimee status` would print "the knowledge base did not answer" about a
+ * running kb, and the blockers explaining the fault would be discarded unread —
+ * the original defect inverted, and strictly worse, because "unreachable" sends
+ * the operator to look at the network.
+ *
+ * Reachability and capability are separate answers. Assert they stay separate. */
+static int degraded_health_get_handler(const char *url, const char *extra_headers,
+                                       char **response_buf, int timeout_ms)
+{
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url);
+   g_get_seen++;
+   if (strstr(url, "/v1/version"))
+   {
+      if (response_buf)
+         *response_buf = strdup("{\"version\":\"v0.3.0-test\",\"service\":\"aimee-kb\"}");
+      return 200;
+   }
+   assert(strcmp(url, "http://127.0.0.1:4010/v1/health") == 0);
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"degraded\",\"db2_ok\":true,"
+                             "\"db2_kb_tables_ok\":true,\"pgvec_ok\":true,"
+                             "\"pgvec_collection_ok\":true,\"pgvec_vectors\":0,"
+                             "\"embed_ok\":false,\"embed_command\":\"\","
+                             "\"chunk_count\":0,\"embedding_count\":0,"
+                             "\"warnings\":[],"
+                             "\"blockers\":[\"no embedder configured: set embedder_model\","
+                             "\"embedder width mismatch: 3 vector(s) refused\"]}");
+   return 200;
+}
+
+static void test_health_degraded_is_reachable_and_carries_blockers(void)
+{
+   g_get_seen = 0;
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(degraded_health_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
+
+   kb_health_t health;
+   /* Not -1: the kb answered. */
+   assert(kb_client_health(&health) == 0);
+   assert(health.process_ok == 1);
+   assert(strcmp(health.status, "degraded") == 0);
+   /* Every blocker survives the boundary, newline-joined and in order. */
+   assert(strstr(health.blockers, "no embedder configured") != NULL);
+   assert(strstr(health.blockers, "width mismatch") != NULL);
+   assert(strchr(health.blockers, '\n') != NULL);
+   /* The siblings still parse — a degraded response is a full response. */
+   assert(health.embed_ok == 0);
+   assert(health.db2_ok == 1);
+
+   unsetenv("AIMEE_KB_API_URL");
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mock_agent_http_reset();
+}
+
+/* An older kb sends no `status` field shape we recognise beyond the string, and
+ * no blockers at all. It must still read as reachable with an empty verdict —
+ * callers distinguish "said ok" from "said nothing" and must not read the latter
+ * as the former. */
+static int legacy_health_get_handler(const char *url, const char *extra_headers,
+                                     char **response_buf, int timeout_ms)
+{
+   (void)timeout_ms;
+   (void)extra_headers;
+   assert(url);
+   g_get_seen++;
+   if (strstr(url, "/v1/version"))
+      return 404;
+   if (response_buf)
+      *response_buf = strdup("{\"status\":\"ok\",\"db2_ok\":true,\"pgvec_ok\":true}");
+   return 200;
+}
+
+static void test_health_legacy_kb_without_blockers(void)
+{
+   g_get_seen = 0;
+   mock_agent_http_reset();
+   mock_agent_http_set_get_handler(legacy_health_get_handler);
+   assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010/", 1) == 0);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", "test-token") == 0);
+
+   kb_health_t health;
+   assert(kb_client_health(&health) == 0);
+   assert(health.process_ok == 1);
+   assert(strcmp(health.status, "ok") == 0);
+   assert(health.blockers[0] == '\0');
+
    unsetenv("AIMEE_KB_API_URL");
    runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    mock_agent_http_reset();
@@ -1233,6 +1354,13 @@ static void test_mtls_non_2xx_is_not_returned_as_valid_json(void)
    assert(status == 403);
    assert(kb_client_last_result_status() == KB_CLIENT_RESULT_UNAUTHORIZED);
 
+   char *search = kb_client_search_json_ex("aimee", "split kb", NULL, 7, "json", NULL);
+   assert(search != NULL);
+   assert(strstr(search, "\"status\":\"unauthorized\"") != NULL);
+   assert(strstr(search, "\"retryable\":false") != NULL);
+   assert(strstr(search, "knowledge service search was rejected") != NULL);
+   free(search);
+
    g_mtls_response = NULL;
    g_mtls_status = 0;
    g_mtls_enabled = 0;
@@ -1272,6 +1400,7 @@ static void test_mtls_raw_post_preserves_content_type_and_status(void)
 static void test_index_scan_uses_v1_api_when_configured(void)
 {
    g_post_seen = 0;
+   g_scan_id[0] = '\0';
    mock_agent_http_reset();
    mock_agent_http_set_post_handler(maintenance_post_handler);
    assert(setenv("AIMEE_KB_API_URL", "http://127.0.0.1:4010", 1) == 0);
@@ -1285,15 +1414,65 @@ static void test_index_scan_uses_v1_api_when_configured(void)
    assert(res.files == 2);
    assert(res.inspected == 3);
 
-   assert(g_post_seen == 1);
+   assert(g_post_seen == 2);
    unsetenv("AIMEE_KB_API_URL");
    mock_agent_http_reset();
    g_route_case = 0;
 }
 
+/* A call that burned its whole budget and got nothing timed out; one that failed
+ * immediately did not. Only the latter is evidence the KB is unreachable, and
+ * only the latter may open the shared breaker -- a slow ingest scan opening it
+ * suppressed every unrelated KB call in the process. */
+static void test_timeout_is_distinguished_from_unreachable(void)
+{
+   /* Spent the budget with nothing to show: a timeout. */
+   assert(kb_transport_call_timed_out(-1, NULL, 300000, 300000) == 1);
+   assert(kb_transport_call_timed_out(-1, NULL, 270000, 300000) == 1); /* 90% counts */
+
+   /* Failed fast: nobody answered. */
+   assert(kb_transport_call_timed_out(-1, NULL, 5, 300000) == 0);
+
+   /* Anything that actually answered is not a timeout, however long it took. */
+   assert(kb_transport_call_timed_out(200, "{}", 300000, 300000) == 0);
+   assert(kb_transport_call_timed_out(503, NULL, 300000, 300000) == 0);
+
+   /* No budget declared: cannot claim a timeout. */
+   assert(kb_transport_call_timed_out(-1, NULL, 300000, 0) == 0);
+}
+
+/* Bulk ingestion and interactive reads keep separate failure budgets. A corpus
+ * ingest that is failing says nothing about whether a symbol lookup will work,
+ * and while they shared one breaker it could suppress every unrelated KB call
+ * in the process. */
+static void test_bulk_and_interactive_have_separate_budgets(void)
+{
+   assert(kb_dependency_class_for_path("/v1/code/scan") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/code/build") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/code/embed") == KB_DEP_BULK);
+   assert(kb_dependency_class_for_path("/v1/ingest") == KB_DEP_BULK);
+
+   /* Reads and lookups are interactive and must stay answerable. */
+   assert(kb_dependency_class_for_path("/v1/code/find") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/code/callers") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/search") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/health") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("/v1/memory/recall") == KB_DEP_INTERACTIVE);
+
+   /* Unknown and empty paths default to interactive: a path we cannot classify
+    * must not silently borrow the bulk budget. */
+   assert(kb_dependency_class_for_path("/v1/something/new") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path("") == KB_DEP_INTERACTIVE);
+   assert(kb_dependency_class_for_path(NULL) == KB_DEP_INTERACTIVE);
+}
+
 int main(void)
 {
+   test_bulk_and_interactive_have_separate_budgets();
+   test_timeout_is_distinguished_from_unreachable();
    test_health_uses_v1_api_when_configured();
+   test_health_degraded_is_reachable_and_carries_blockers();
+   test_health_legacy_kb_without_blockers();
    test_status_uses_v1_api_when_configured();
    test_search_uses_v1_api_when_configured();
    test_search_v1_reports_http_status();

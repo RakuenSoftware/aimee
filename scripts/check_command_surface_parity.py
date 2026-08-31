@@ -1,0 +1,278 @@
+#!/usr/bin/env python3
+"""Report where aimee's capability surfaces disagree.
+
+Capability surface is declared independently in several hand-maintained tables.
+Nothing derives one from another, so they drift, and the drift is invisible until
+an agent asks for something that is not there. Found on 2026-08-11: `memory_get`
+reachable from the CLI and registered for MCP dispatch but absent from the surface
+an agent is SHOWN; `get_context_block` marked native="core,..." in one table while
+missing from the other list called core; and standing guidance naming three tools
+no external client could call.
+
+This prints the divergence so the port onto src/command_registry.c has a work
+list, and so new divergence is visible rather than latent.
+
+Deliberately a REPORT, not yet a gate. Failing the build today would fail it on
+~200 pre-existing divergences, which teaches everyone to pass --ignore. It becomes
+a gate per-group as each group is ported: once `memory` routes from the registry,
+`--require memory` fails on any memory command missing from a surface.
+"""
+import argparse
+import pathlib
+import re
+import sys
+
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+# The dispatch rows live with the server now (they are served to the thin
+# client); src/cli_v1_routes.c only #includes them.
+CLI = ROOT / "src/server/cli_dispatch_defs_data.h"
+MCP_DISPATCH = ROOT / "src/server/server_mcp_call_table.c"
+MCP_PROFILE = ROOT / "src/modules/protocols/mcp/mcp_tool_profile.c"
+GUIDANCE = ROOT / "src/headers/aimee_session_guidance.h"
+
+
+def read(p):
+    return p.read_text(encoding="utf-8", errors="replace") if p.is_file() else ""
+
+
+_CLI_TEXT = None  # plant-test override; None means read the real file
+
+
+def cli_routes():
+    """Dispatch rows: {"group", "verb", "group.verb", ...}.
+
+    The rows are a bare initializer list in the shared data file -- both the
+    server (which serves them) and the client (which falls back to them)
+    #include it -- so there is no surrounding table to find; read it whole.
+
+    Returning {} on a parse miss made this report "0 CLI routes" and exit
+    happily, which reads as "the surfaces agree" when it means "I could not see
+    the rows". An empty read is a failure, not a result.
+    """
+    body = _CLI_TEXT if _CLI_TEXT is not None else read(CLI)
+    if '{"' not in body:
+        raise SystemExit(f"check_command_surface_parity: no dispatch rows in {CLI}; "
+                         "the extractor has drifted from the source")
+    out = {}
+    # The verb may contain HYPHENS ("sync-code", "blast-radius", "set-server")
+    # or be the bare token NULL for a group that is itself a command ("aimee
+    # use", "aimee presence", "aimee git"). A verb class of [a-z0-9_]* matched
+    # neither, so this gate silently skipped 15 methods -- it reported parity
+    # over a subset while reading as parity over the surface. That is the same
+    # failure the docstring above warns about, one level down: not an empty
+    # read, but a SHORT one, which no "did I see any rows?" check can catch.
+    row = re.compile(r'\{\s*"([a-z0-9_.-]+)"\s*,\s*(?:"([a-z0-9_.-]*)"|NULL)\s*,\s*"([a-z0-9_.]+)"')
+    for m in row.finditer(body):
+        group, verb, method = m.groups()
+        verb = verb or ""  # NULL verb: the group itself is the command
+        # A LIST, not an assignment. This was `out[method] = (group, verb)`,
+        # last-writer-wins, so a method reachable under two group names
+        # collapsed to one entry and this report could not see aliasing at all
+        # -- it was blind to it by construction, not by omission. `agent` and
+        # `model` resolve to the same ten methods; `server` and `status` to the
+        # same one.
+        #
+        # These do NOT block command_registry, which I claimed three times
+        # before reading its contract properly: it keys on (group, verb), so
+        # (agent, list) and (model, list) are distinct entries and both register
+        # against one handler. What they are is two spellings of one capability,
+        # which is a thing worth SEEING -- an operator reading `aimee help`
+        # cannot tell that `agent list` and `model list` are the same command,
+        # and a report that hides it is worse than no report.
+        out.setdefault(method, []).append((group, verb))
+    return out
+
+
+def mcp_dispatch():
+    """mcp_tool_table[] entries: tool name -> native toolset string (or None)."""
+    s = read(MCP_DISPATCH)
+    start = s.find("} mcp_tool_table[] = {")
+    if start == -1:
+        return {}
+    body = s[start:s.find("\n};", start)]
+    out = {}
+    for m in re.finditer(r'\{"([A-Za-z0-9_]+)",\s*[A-Za-z0-9_]+,\s*(NULL|"[^"]*")', body):
+        name, native = m.groups()
+        out[name] = None if native == "NULL" else native.strip('"')
+    return out
+
+
+def mcp_core():
+    """MCP_CORE_TOOLS[] -- what an external MCP client is SHOWN in tools/list."""
+    s = read(MCP_PROFILE)
+    start = s.find("MCP_CORE_TOOLS[] = {")
+    if start == -1:
+        return set()
+    body = s[start:s.find("\n};", start)]
+    names = set(re.findall(r'"([A-Za-z0-9_]+)"', body))
+    # Entries written as macros resolve via agent_code_capabilities.h.
+    caps = read(ROOT / "src/headers/agent_code_capabilities.h")
+    for macro in re.findall(r"(AIMEE_CODE_[A-Z_]+)", body):
+        mm = re.search(rf'#define\s+{macro}\s+"([A-Za-z0-9_=]+)"', caps)
+        if mm:
+            names.add(mm.group(1))
+    return names
+
+
+def guidance_names(core):
+    """Tool names the standing guidance tells an agent to call."""
+    s = read(GUIDANCE)
+    block = s[s.find("#define AIMEE_GUIDANCE_EXPLORE_WITH_LINE"):]
+    block = block[:block.find("#define AIMEE_GUIDANCE_BLOCK")] if block else ""
+    names = set()
+    caps = read(ROOT / "src/headers/agent_code_capabilities.h")
+    for macro in re.findall(r"(AIMEE_CODE_TOOL_[A-Z_]+)", block):
+        mm = re.search(rf'#define\s+{macro}\s+"([A-Za-z0-9_]+)"', caps)
+        if mm:
+            names.add(mm.group(1))
+    # Bare literals: any lowercase identifier that is a known tool-ish word.
+    for lit in re.findall(r"\b([a-z][a-z0-9_]{3,})\b", block):
+        if lit in core or lit in ("lsp_references", "get_context_block", "memory_get",
+                                  "memory_recall", "search_docs", "search_memory"):
+            names.add(lit)
+    return names
+
+
+def _plant_test():
+    """Prove this check FAILS when it cannot see the rows.
+
+    It used to return {} on a parse miss and print "0 CLI routes ... 0 with no
+    MCP counterpart", then exit 0 -- which reads as "the surfaces agree" but
+    means "I could not see the rows". A checker that launders a parse failure
+    into a clean bill of health is worse than no checker, so prove it cannot.
+    """
+    global _CLI_TEXT
+    _CLI_TEXT = "/* planted: rows the extractor cannot see */\n"
+    try:
+        cli_routes()
+    except SystemExit:
+        print("check_command_surface_parity: plant-test ok (empty read refused)")
+        return 0
+    finally:
+        _CLI_TEXT = None
+    print("check_command_surface_parity: PLANT FAIL - an unreadable table did NOT "
+          "fail the check; it is decoration", file=sys.stderr)
+    return 1
+
+
+def _plant_test_aliases():
+    """Prove the extractor still SEES a method under two group names.
+
+    It did not, for as long as this report existed: `out[method] = (group, verb)`
+    is last-writer-wins, so aliasing was invisible by construction. The first
+    plant test above only proves the rows can be read at all -- it would pass
+    just as happily with the collapsing assignment restored, which is exactly
+    how the blindness survived having a plant test.
+    """
+    global _CLI_TEXT
+    _CLI_TEXT = ('{"alpha", "run", "thing.run", NULL, NULL, 0},\n'
+                 '{"beta", "run", "thing.run", NULL, NULL, 0},\n')
+    try:
+        rows = cli_routes()
+    finally:
+        _CLI_TEXT = None
+    names = {g for g, _ in rows.get("thing.run", [])}
+    if names == {"alpha", "beta"}:
+        print("check_command_surface_parity: alias plant-test ok "
+              "(one method under two groups was kept, not collapsed)")
+        return 0
+    print("check_command_surface_parity: ALIAS PLANT FAIL - a method reachable under "
+          f"two groups came back as {sorted(names)}; aliasing is invisible again",
+          file=sys.stderr)
+    return 1
+
+
+def main():
+    if "--plant-test" in sys.argv:
+        return _plant_test() or _plant_test_aliases()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--require", action="append", default=[],
+                    help="group that MUST be consistent; exits non-zero if not")
+    args = ap.parse_args()
+
+    cli = cli_routes()
+    disp = mcp_dispatch()
+    core = mcp_core()
+    guide = guidance_names(core)
+
+    spellings = sum(len(v) for v in cli.values())
+    print(f"CLI methods (dispatch rows):       {len(cli)} "
+          f"({spellings} group/verb spellings)")
+    print(f"MCP dispatch (mcp_tool_table[]):  {len(disp)}")
+    print(f"MCP shown (MCP_CORE_TOOLS[]):     {len(core)}")
+    print()
+
+    # The defect that started this: guidance naming what an agent cannot see.
+    unfollowable = sorted(n for n in guide if n not in core)
+    print(f"guidance names not in the shown surface: {len(unfollowable)}")
+    for n in unfollowable:
+        where = "registered for dispatch" if n in disp else "NOT REGISTERED ANYWHERE"
+        print(f"  {n:24s} {where}")
+    print()
+
+    # Dispatchable but never shown: reachable only via find_tools/describe_tool/
+    # call_tool, which mcp_tool_profile.c records agents will not pay for.
+    hidden = sorted(n for n in disp if n not in core)
+    print(f"MCP tools registered but not shown: {len(hidden)}")
+    print(f"  {', '.join(hidden[:12])}{' ...' if len(hidden) > 12 else ''}")
+    print()
+
+    # CLI groups whose verbs have no MCP presence at all, under either spelling.
+    groups = {}
+    for method, spellings in cli.items():
+      for group, verb in spellings:
+          # Spellings actually in use are inconsistent -- memory.recall is
+          # `memory_recall` but memory.search is `search_memory`, verb-first. A
+          # mechanical mapping cannot tell "absent" from "spelled backwards", which
+          # is itself the thing the registry fixes, so try both orders and do not
+          # count a reversed hit as missing.
+          flat = f"{group}_{verb}" if verb else group
+          rev = f"{verb}_{group}" if verb else group
+          seen = flat in disp or rev in disp or method.replace(".", "_") in disp or group in disp
+          groups.setdefault(group, []).append((method, seen))
+    missing_groups = {g: [m for m, s in v if not s] for g, v in groups.items()}
+    missing_groups = {g: v for g, v in missing_groups.items() if v}
+    total_missing = sum(len(v) for v in missing_groups.values())
+    print(f"CLI routes with no MCP counterpart: {total_missing} across {len(missing_groups)} groups")
+    for g in sorted(missing_groups)[:10]:
+        print(f"  {g:16s} {len(missing_groups[g]):3d}  e.g. {missing_groups[g][0]}")
+
+    # Methods reachable under more than one group name.
+    #
+    # Not a blocker for command_registry -- it keys on (group, verb), so both
+    # spellings register against one handler. This is a UI question: two names
+    # for one capability, which an operator reading the help cannot distinguish
+    # from two capabilities. Reported so the choice is deliberate.
+    aliased = {m: gs for m, gs in cli.items() if len({g for g, _ in gs}) > 1}
+    print(f"\nmethods reachable under more than one group: {len(aliased)}")
+    for method in sorted(aliased):
+        names = sorted({g for g, _ in aliased[method]})
+        print(f"  {method:28s} <- {', '.join(names)}")
+
+    # And groups whose method sets are the SAME set, which is the stronger
+    # statement: not an overlap, a second name for one capability.
+    by_group = {}
+    for method, spellings in cli.items():
+        for group, _ in spellings:
+            by_group.setdefault(group, set()).add(method)
+    names = sorted(by_group)
+    identical = [(a, b) for i, a in enumerate(names) for b in names[i + 1:]
+                 if by_group[a] and by_group[a] == by_group[b]]
+    print(f"groups whose method sets are identical: {len(identical)}")
+    for a, b in identical:
+        print(f"  {a} == {b}  ({len(by_group[a])} method(s))")
+
+    rc = 0
+    for group in args.require:
+        bad = missing_groups.get(group, [])
+        if bad:
+            print(f"\nFAIL: group '{group}' is required consistent, but these have no MCP "
+                  f"counterpart: {bad}")
+            rc = 1
+        else:
+            print(f"\nok: group '{group}' is consistent across surfaces")
+    return rc
+
+
+if __name__ == "__main__":
+    sys.exit(main())

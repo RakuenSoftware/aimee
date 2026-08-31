@@ -9,15 +9,24 @@ unbounded mechanism for downloaded text to bypass routing, policy, or user appro
 
 ## Public contracts
 
-The canonical contracts are
-`src/modules/skills/include/aimee/skills/skill.h` and
-`src/modules/skills/include/aimee/skills/skill_review.h`, implemented by `skill.c`, `skill_review.c`,
-and `skill_rollback.c` in `src/modules/skills`, with CLI orchestration in `src/cmd_skill.c`. Consumers
+The canonical contracts are `src/modules/skills/include/aimee/skills/skill.h` and the process wire API,
+implemented by `skill.c`, `skill_rollback.c`, and the process-only trigger policy in
+`skill_trigger_policy.c`, with CLI orchestration in `src/cmd_skill.c`. Consumers
 use the `aimee/skills` include namespace. The former singular source directory is retired without a
 forwarding API or parallel skill registry.
 
-`src/modules/skills/module.yaml` declares ownership of the three production sources above, both
-canonical public headers, two direct unit tests, and this document; the module has no private headers.
+The review-nudge and trigger-frontmatter decisions run in the supervised Go
+`aimee-module-skills` process from `server-go/modules/skills`. The C `module_adapter.c` and
+`skill_trigger_policy.c` remain wire/behavior parity fixtures. Production guardrails loads the bounded
+skill body through the filesystem resolver and requests its tool/subject trigger match through event
+`7682`; it has no local parser or fallback. An unavailable or malformed module reply produces the
+conservative advisory. Management, review orchestration, rollback, and injection continue through the
+existing C surfaces and remain scheduled for later migration batches. The obsolete local
+`skill_review_should_fire` implementation and duplicate test were removed because event `7681` already
+owns that decision and its C/Go parity coverage.
+
+`src/modules/skills/module.yaml` declares ownership of the C production and parity sources, the Go
+process handler and tests, canonical public/private headers, direct C tests, and this document.
 Its `ownership_complete: true` latch exhaustively checks module-local C and private-header files and
 requires this canonical document. Public-header and test entries are explicit ownership claims, but the
 completeness latch does not discover undeclared public headers or tests. Command, server, protocol, and
@@ -42,7 +51,8 @@ delegate execution, client integration installers, and capability autostub logic
 The filesystem-backed resolver is the required provider and searches project then user scopes according
 to `skill_path`; absence of a named skill is a normal lookup miss. Evaluation or proposal generation may
 use other modules, but core readiness requires deterministic parsing, linting, bounded loading, and
-injection even when no optional plugin or web GUI is present.
+injection even when no optional plugin or web GUI is present. Server readiness also requires the
+supervised skills identity, which serves both declared skills event kinds on the local bus.
 
 ## Configuration and activation
 
@@ -54,14 +64,54 @@ underlying contracts, and GUI controls must be hidden when their actual consumer
 
 ## Surfaces
 
-The primary user surface is `aimee skill` with list, show, lint, eval, create, edit, patch, archive,
-export, import, rollback, lifecycle, autostub, pin, and unpin verbs. Project `.aimee/skills`, user skill
+The primary user surface is `aimee skill` with list, show, lint, eval, `eval-fixtures`, the opt-in
+`eval-exec` pilot, create, edit, patch, archive, export, import, rollback, lifecycle, autostub, pin,
+and unpin verbs. Project `.aimee/skills`, user skill
 directories, delegate prompt injection, session briefings, and review payloads are also supported
 surfaces with bounded content and stable precedence.
 
+`eval` and `eval-fixtures` score the existing stored baseline/treatment fixtures. `eval-exec` instead
+loads operator-held cases from `.aimee/skill-evals/<name>/*.json`, makes balanced tool-free baseline
+and treatment calls through one frozen non-CLI model route, and reports the skill, case-set, policy,
+and trial-manifest digests. It is deliberately a pilot: it attributes tokens, latency, and known
+provider cost, fails inconclusive on route drift, unknown cost, denied effects, runner failure, or
+budget excess, and does not feed promotion automatically.
+
+```mermaid
+flowchart TB
+    SKILL[locally resolved and approved SKILL.md] --> HASH[skill digest]
+    CASES[operator-held cases<br/>.aimee/skill-evals/name/*.json] --> SAFE[path containment, regular-file,<br/>count, and size checks]
+    SAFE --> CASEHASH[ordered case-set digest]
+    POLICY[fixed read-only, tool-free policy] --> POLICYHASH[policy digest]
+    ROUTE[frozen agent route, repeats,<br/>token cap, delta, and cost budgets] --> MANIFEST[trial manifest digest]
+    HASH --> MANIFEST
+    CASEHASH --> MANIFEST
+    POLICYHASH --> MANIFEST
+    MANIFEST --> ORDER[balanced AB / BA ordering<br/>for every case and repeat]
+    ORDER --> BASE[baseline: fixed policy only]
+    ORDER --> TREAT[treatment: fixed policy + skill]
+    BASE --> RUN[one tool-free agent_generate route]
+    TREAT --> RUN
+    RUN --> GUARD{route stable, known cost,<br/>no tool/effect attempt,<br/>within token and cost budgets?}
+    GUARD -->|no| INC[inconclusive / fail closed]
+    GUARD -->|yes| GRADE[deterministic compliance<br/>and violation checks]
+    GRADE --> AGG[paired improvements, regressions,<br/>usage, latency, cost, and delta]
+    AGG --> PASS{baseline violates every pair,<br/>treatment complies every pair,<br/>no regression, minimum delta met?}
+    PASS -->|yes| REPORT[pass report with all digests]
+    PASS -->|no| FAIL[failed trial]
+    REPORT -. operator review only .-> NOPROMO[no automatic promotion]
+```
+
+The baseline is intentionally required to exhibit the targeted violation. A
+case the base route already solves cannot manufacture a skill win, and a skill
+with no measured effect cannot pass. Every run reports enough identity to compare
+only trials with the same skill bytes, case bytes, policy, route, ordering
+contract, and budgets.
+
 ## Data and migrations
 
-Skill bodies and support files are filesystem data; usage, state, snapshots, and review records use
+Skill bodies, support files, and operator-held executable-eval cases are filesystem data; usage,
+state, snapshots, and review records use
 sidecars or repository databases according to the current implementation. Canonical source ownership
 under `src/modules/skills` does not change project-over-user precedence, archive behavior, size limits,
 or rollback snapshot interpretation.
@@ -83,14 +133,15 @@ changes derived from learning or uncovered tools.
 ## Tests and failure behavior
 
 The descriptor owns `test_skill.c`, which covers discovery, loading, validation, management, injection,
-lifecycle, rollback, and telemetry, and `test_skill_review.c`, which covers the review predicate and
-poison checks through the management contract. Invalid names, oversized content, unsafe support paths,
-failed lint/evaluation, and write errors fail closed; a missing requested skill leaves the base prompt
-usable rather than inventing instructions.
+lifecycle, rollback, telemetry, poison checks, and trigger-policy fixtures. The shared C process-handler
+test and Go skills tests cover both event stages and malformed wire input. Invalid names, oversized
+content, unsafe support paths, failed lint/evaluation, and write errors fail closed; a missing requested
+skill leaves the base prompt usable rather than inventing instructions. Trigger transport/decode failure
+emits the conservative advisory instead of becoming a silent non-match.
 
 ## Operational diagnostics
 
-Use `aimee skill list|show|lint|eval`, review records, and lifecycle result counts to diagnose
+Use `aimee skill list|show|lint|eval-fixtures|eval-exec`, review records, and lifecycle result counts to diagnose
 precedence, malformed content, stale state, or failed automation. Diagnostics should include the resolved
 source class and safe path context while avoiding logging full private skill bodies or injected secrets.
 

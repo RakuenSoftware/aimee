@@ -3,6 +3,8 @@ package bus
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
+	"sync"
 
 	"golang.org/x/sys/unix"
 )
@@ -40,6 +42,32 @@ var (
 	ErrPayload = errors.New("bus: payload too large for inline budget")
 )
 
+// String names the refusal, so a log line says which of the four it was.
+//
+// The host distinguishes four and they call for different things: a policy
+// refusal means no grant admits this principal or its executable does not
+// match; a version refusal means the two ends disagree about the protocol;
+// no-slot means the host is full and it is worth retrying. A bare "attach
+// denied" for all of them sends a reader to the grant file even when the grant
+// was never the problem, which src/tests/test_plugin_grant_provisioning.c names
+// as the reason that test exists.
+func (s AttachStatus) String() string {
+	switch s {
+	case AttachOK:
+		return "ok"
+	case AttachDeniedPolicy:
+		return "denied by grant policy: no grant admits this principal, or the " +
+			"grant's executable= does not match the running binary"
+	case AttachDeniedVersion:
+		return "denied on protocol version"
+	case AttachDeniedNoSlot:
+		return "denied: the host has no free slot"
+	case AttachProtocol:
+		return "protocol error"
+	}
+	return fmt.Sprintf("unknown attach status %d", uint32(s))
+}
+
 // Client is an attached bus client. It holds the mapped regions and, after
 // attach, never touches the socket again.
 type Client struct {
@@ -58,6 +86,9 @@ type Client struct {
 	qpMem   []byte
 
 	pendingRead bool
+
+	// emitMu serialises writers to the single-producer outbound ring. See emit.
+	emitMu sync.Mutex
 }
 
 // Event is a received event; Payload points into the shared inbound slot and is
@@ -106,7 +137,7 @@ func AttachAs(sock int, principalClass uint32, principalRef uint32) (*Client, er
 	status := AttachStatus(binary.LittleEndian.Uint32(replyBuf[4:]))
 	if status != AttachOK {
 		closeAll()
-		return &Client{Status: status}, ErrDenied
+		return &Client{Status: status}, fmt.Errorf("%w: %s", ErrDenied, status)
 	}
 	if len(fds) != 3 {
 		closeAll()
@@ -189,6 +220,22 @@ func (c *Client) emit(flags uint16, kind uint32, corr uint64, payload []byte) er
 	if c.control == nil {
 		return ErrProtocol
 	}
+	// The outbound ring is SINGLE-PRODUCER: ProduceBegin reads head, the caller
+	// writes that slot, and ProduceCommit stores head+1. Two goroutines emitting
+	// at once both get the same slot, one overwrites the other, and head
+	// advances twice -- so a message is silently lost and a second is delivered
+	// twice.
+	//
+	// That is not hypothetical. A module process serves its stages from its own
+	// loop, which emits replies, while anything else holding the client -- a
+	// sidecar speaking a second protocol on the one attachment -- emits too. The
+	// symptom was applies that left the caller without error and never arrived,
+	// which reads as a provider that is up and ignoring writes.
+	//
+	// Serialised here rather than in each caller, because the invariant belongs
+	// to the ring and every current and future emitter has to honour it.
+	c.emitMu.Lock()
+	defer c.emitMu.Unlock()
 	if len(payload) > 0 &&
 		(uint32(len(payload)) > c.inlineBudget || HdrLen+len(payload) > int(c.slotSize)) {
 		return ErrPayload

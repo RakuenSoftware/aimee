@@ -5,11 +5,103 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #include "aimee_home.h"
 #include <aimee/delegates/delegate_backend_docker.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+
+/* The isolation verdict, faked.
+ *
+ * These cases are about the backend's create/start/resume behaviour, not about
+ * what a network report means -- that is judged against the module. The fake
+ * records what it was asked and answers "isolated" so the flow proceeds; a case
+ * that needs a refusal sets g_fake_isolation_refuse. */
+static int g_fake_isolation_refuse;
+static int g_fake_isolation_calls;
+static char g_fake_isolation_report[4096];
+static int g_fake_isolation_probe_failed;
+
+static int fake_isolation(const char *report, int probe_failed, int require_isolation, int *refuse,
+                          int *warn, int *is_error, char *reason, size_t reason_cap)
+{
+   (void)require_isolation;
+   g_fake_isolation_calls++;
+   snprintf(g_fake_isolation_report, sizeof(g_fake_isolation_report), "%s", report ? report : "");
+   g_fake_isolation_probe_failed = probe_failed;
+   *refuse = g_fake_isolation_refuse;
+   *warn = 0;
+   *is_error = g_fake_isolation_refuse;
+   if (reason && reason_cap)
+      snprintf(reason, reason_cap, "%s", g_fake_isolation_refuse ? "fake breach" : "");
+   return 0;
+}
+
+/* ── the module's answer, faked ─────────────────────────────────────────────
+ *
+ * The backend no longer decides the container's shape. What it still does, and
+ * what these tests are now for, is DISCOVERY: resolving the workspace, reading
+ * the gitlink, deriving the repo root, verifying the backlink, and handing all
+ * of that over as a spec.
+ *
+ * So this provider records the spec it was given -- that is the backend's
+ * actual output -- and returns a minimal argv so the create/start/resume flow
+ * still runs. What goes INTO the argv (--network none, the mount layering, the
+ * environment, the container name) is the module's rule and is tested against
+ * the module, not through a fake of it. */
+static aimee_delegates_launch_spec_t g_last_launch;
+static char g_last_repo[4096], g_last_worktree[4096];
+static char g_last_gitdir[4096], g_last_scratch[4096];
+static char g_last_socket_host[4096], g_last_user[64], g_last_table[4096];
+static int g_launch_calls;
+
+static void copy_field(char *dst, size_t cap, const char *src)
+{
+   snprintf(dst, cap, "%s", src ? src : "");
+}
+
+static int fake_launch_args(const aimee_delegates_launch_spec_t *spec, char *name_out,
+                            size_t name_cap, const char **argv_out, size_t argv_cap,
+                            size_t *arg_len_out, uint8_t *buf, size_t buf_cap)
+{
+   g_launch_calls++;
+   g_last_launch = *spec;
+   copy_field(g_last_repo, sizeof(g_last_repo), spec->repo_root);
+   copy_field(g_last_worktree, sizeof(g_last_worktree), spec->worktree);
+   copy_field(g_last_gitdir, sizeof(g_last_gitdir), spec->gitdir);
+   copy_field(g_last_scratch, sizeof(g_last_scratch), spec->scratch_dir);
+   copy_field(g_last_socket_host, sizeof(g_last_socket_host), spec->parent_socket_host);
+   copy_field(g_last_user, sizeof(g_last_user), spec->run_as_user);
+   copy_field(g_last_table, sizeof(g_last_table), spec->mount_table);
+
+   /* The name the module would return: prefix + task id, as ContainerName does
+    * for a task with no mounts. The tests only need it to be stable. */
+   snprintf(name_out, name_cap, "aimee-delegate-%s", spec->task_id ? spec->task_id : "");
+
+   /* A minimal but real create command, written into the caller's buffer the
+    * way a decoded response would be. */
+   const char *args[] = {"create",    "--name", name_out,
+                         "--network", "none",   spec->image ? spec->image : "ubuntu:22.04"};
+   size_t argc = sizeof(args) / sizeof(args[0]);
+   if (argc > argv_cap)
+      return -1;
+   size_t at = 0;
+   for (size_t i = 0; i < argc; i++)
+   {
+      size_t n = strlen(args[i]);
+      if (at + n + 1 > buf_cap)
+         return -1;
+      memcpy(buf + at, args[i], n);
+      argv_out[i] = (const char *)(buf + at);
+      arg_len_out[i] = n;
+      at += n + 1;
+   }
+   return (int)argc;
+}
 
 /* Forward decls — definitions live further down with the rest of the
  * fixture-using cases; forward refs let us call them from earlier
@@ -17,6 +109,101 @@
 static const char *write_fake_docker_fixture(void);
 static void teardown_fake_docker(void);
 static int fake_container_exists(const char *container_name);
+static void init_fixture_config(delegate_backend_config_t *cfg);
+static int fake_acquire_count(void);
+static int fake_helper_args_contain(const char *needle);
+
+static char g_fixture_workspace[256];
+static char g_fixture_home[256];
+static char g_fixture_egress[256];
+
+/* The C backend owns fact discovery and process handoff only.  Its unit fixture
+ * therefore supplies a fake Go helper: it records the facts, returns the
+ * deterministic verified-container name, and leaves lifecycle/posture behavior
+ * to the Go module's tests. */
+static void setup_fake_egress_fixture(void)
+{
+   if (!g_fixture_workspace[0])
+   {
+      snprintf(g_fixture_workspace, sizeof(g_fixture_workspace), "%s/aimee-egress-workspace-%d",
+               platform_tmpdir(), (int)getpid());
+      assert(mkdir(g_fixture_workspace, 0700) == 0);
+      char gitdir[320];
+      snprintf(gitdir, sizeof(gitdir), "%s/.git", g_fixture_workspace);
+      assert(mkdir(gitdir, 0700) == 0);
+
+      snprintf(g_fixture_home, sizeof(g_fixture_home), "%s/aimee-egress-home-%d", platform_tmpdir(),
+               (int)getpid());
+      assert(mkdir(g_fixture_home, 0700) == 0);
+      char socket_path[320];
+      snprintf(socket_path, sizeof(socket_path), "%s/aimee-http.sock", g_fixture_home);
+      int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+      assert(fd >= 0);
+      struct sockaddr_un address = {0};
+      address.sun_family = AF_UNIX;
+      assert(strlen(socket_path) < sizeof(address.sun_path));
+      snprintf(address.sun_path, sizeof(address.sun_path), "%s", socket_path);
+      assert(bind(fd, (struct sockaddr *)&address, sizeof(address)) == 0);
+      close(fd);
+      setenv("AIMEE_HOME", g_fixture_home, 1);
+   }
+
+   snprintf(g_fixture_egress, sizeof(g_fixture_egress), "/tmp/aimee-fake-egress-%d.sh",
+            (int)getpid());
+   FILE *helper = fopen(g_fixture_egress, "w");
+   assert(helper != NULL);
+   fprintf(helper,
+           "#!/bin/bash\n"
+           "STATE_DIR=/tmp/aimee-fake-docker-state-%d\n"
+           "printf '%%s\\n' \"$@\" > \"$STATE_DIR/helper.argv\"\n"
+           "[ \"$AIMEE_FAKE_EGRESS_FAIL\" = 1 ] && exit 1\n"
+           "task=\n"
+           "while [ $# -gt 0 ]; do\n"
+           "  if [ \"$1\" = --task ]; then task=$2; shift 2; continue; fi\n"
+           "  shift\n"
+           "done\n"
+           "[ -n \"$task\" ] || exit 2\n"
+           "count=0; [ -f \"$STATE_DIR/acquire.count\" ] && read -r count < "
+           "\"$STATE_DIR/acquire.count\"\n"
+           "printf '%%s\\n' \"$((count + 1))\" > \"$STATE_DIR/acquire.count\"\n"
+           "name=aimee-delegate-$task\n"
+           "touch \"$STATE_DIR/$name.exists\"\n"
+           "printf '%%s\\n' \"$name\"\n",
+           (int)getpid());
+   fclose(helper);
+   assert(chmod(g_fixture_egress, 0700) == 0);
+   setenv("AIMEE_DELEGATE_EGRESS_BIN", g_fixture_egress, 1);
+   /* Tests may themselves run in a container. This maps /tmp facts into the
+    * fake daemon namespace without changing them. */
+   setenv("AIMEE_FAKE_DOCKER_INSPECT_MOUNTS", "/tmp\t/tmp\\n", 1);
+}
+
+static void init_fixture_config(delegate_backend_config_t *cfg)
+{
+   assert(cfg != NULL);
+   setup_fake_egress_fixture();
+   cfg->workspace = g_fixture_workspace;
+}
+
+static void test_translate_named_volume_socket_path(void)
+{
+   char out[512];
+   const char *mounts = "/var/lib/aimee\t/var/lib/docker/volumes/aimee_home/_data\n"
+                        "/var/lib/aimee-workspaces\t/srv/aimee/workspaces\n";
+   assert(delegate_backend_docker_translate_mount_path("/var/lib/aimee/aimee-http.sock", mounts,
+                                                       out, sizeof(out)) == 1);
+   assert(strcmp(out, "/var/lib/docker/volumes/aimee_home/_data/aimee-http.sock") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/opt/aimee/aimee-http.sock", mounts, out,
+                                                       sizeof(out)) == 0);
+   assert(strcmp(out, "/opt/aimee/aimee-http.sock") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/var/lib/aimee-other/socket", mounts, out,
+                                                       sizeof(out)) == 0);
+   assert(strcmp(out, "/var/lib/aimee-other/socket") == 0);
+   assert(delegate_backend_docker_translate_mount_path("/opt/aimee/socket", "/\t/srv/root\n", out,
+                                                       sizeof(out)) == 1);
+   assert(strcmp(out, "/srv/root/opt/aimee/socket") == 0);
+   printf("  PASS: test_translate_named_volume_socket_path\n");
+}
 
 static void test_register_puts_docker_in_registry(void)
 {
@@ -38,6 +225,8 @@ static void test_file_ops_reject_null_state(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    char *out = (char *)0x1;
    assert(b->read_file(b, NULL, "x", 0, 0, &out) == -1);
@@ -49,24 +238,15 @@ static void test_file_ops_reject_null_state(void)
    printf("  PASS: test_file_ops_reject_null_state\n");
 }
 
-/* Override AIMEE_DOCKER_WORKDIR so file ops resolve under a writable
- * /tmp anchor instead of the real /workspace path (which would need
- * root). Combined with the fake-docker fixture's exec mode that runs
- * commands locally, this lets file-op tests round-trip through bash
- * without a real container. */
+/* The fake Docker exec runs locally, while the fixture worktree is mounted
+ * path-identically just like production. */
 static void setup_docker_fileio_state(delegate_backend_t *b, const char *task_id, void **state_out)
 {
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
-   /* Anchor the in-container WORKDIR under /tmp for the duration of
-    * the test. mkdir is idempotent; the per-pid suffix avoids cross-
-    * test pollution. */
-   char workdir[256];
-   snprintf(workdir, sizeof(workdir), "/tmp/aimee-docker-workdir-%d", (int)getpid());
-   mkdir(workdir, 0700);
-   setenv("AIMEE_DOCKER_WORKDIR", workdir, 1);
-
+   setup_fake_egress_fixture();
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    assert(b->acquire(b, task_id, &cfg, state_out) == 0);
 }
 
@@ -75,17 +255,15 @@ static void teardown_docker_fileio_state(delegate_backend_t *b, void *state)
    if (state)
       b->release(b, state, 0);
    teardown_fake_docker();
-   char rm[512];
-   snprintf(rm, sizeof(rm), "rm -rf /tmp/aimee-docker-workdir-%d", (int)getpid());
-   (void)system(rm);
    unsetenv("AIMEE_DOCKER_BIN");
-   unsetenv("AIMEE_DOCKER_WORKDIR");
 }
 
 static void test_docker_write_then_read_roundtrip(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-fileio-1", &state);
@@ -101,6 +279,57 @@ static void test_docker_write_then_read_roundtrip(void)
    printf("  PASS: test_docker_write_then_read_roundtrip\n");
 }
 
+/* A file read must return the file, and nothing after it.
+ *
+ * docker_exec writes the captured output into a caller-allocated buffer and
+ * docker_read_file measures it with strlen(). If the terminator goes at the END
+ * OF THE BUFFER rather than the end of the output, everything between is
+ * whatever the allocator last left there -- so strlen() walks past the file into
+ * heap garbage and the delegate is handed its own file with plausible-looking
+ * bytes appended.
+ *
+ * That read correctly for as long as the buffers were fresh zeroed pages, which
+ * is why it survived: the bug needs a dirty arena to show. This dirties one on
+ * purpose, the way any real allocation before the read would. */
+static void test_read_file_returns_only_the_file(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_backend_t *b = delegate_backend_docker_get();
+   void *state = NULL;
+   setup_docker_fileio_state(b, "task-dirty-1", &state);
+
+   /* Dirty the arena with a recognisable pattern and release it, so the read
+    * buffer below is very likely to be handed the same memory. */
+   for (int i = 0; i < 4; i++)
+   {
+      size_t n = 1u << 18;
+      char *scratch = malloc(n);
+      assert(scratch != NULL);
+      memset(scratch, 'X', n - 1);
+      scratch[n - 1] = '\0';
+      free(scratch);
+   }
+
+   assert(b->write_file(b, state, "exact.txt", "nine char") == 0);
+   char *content = NULL;
+   assert(b->read_file(b, state, "exact.txt", 0, 0, &content) == 0);
+   assert(content != NULL);
+   assert(strlen(content) == 9);
+   assert(strcmp(content, "nine char") == 0);
+   free(content);
+
+   /* An EMPTY file must come back empty, not as whatever was in the buffer. */
+   assert(b->write_file(b, state, "empty.txt", "") == 0);
+   content = NULL;
+   assert(b->read_file(b, state, "empty.txt", 0, 0, &content) == 0);
+   assert(content != NULL && content[0] == '\0');
+   free(content);
+
+   teardown_docker_fileio_state(b, state);
+   printf("  PASS: test_read_file_returns_only_the_file\n");
+}
+
 /* The native file tools (tool_read_file/tool_write_file) resolve to an ABSOLUTE
  * in-workspace path via the thread cwd before calling the provider. The worktree is
  * bind-mounted path-identically, so that path is valid in-container and MUST be accepted
@@ -110,24 +339,24 @@ static void test_docker_absolute_in_workspace_path_accepted(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-abs-1", &state);
 
-   char workdir[256];
-   snprintf(workdir, sizeof(workdir), "/tmp/aimee-docker-workdir-%d", (int)getpid());
    char abs[512];
 
    /* Read back a relative-written file via its ABSOLUTE in-workspace path. */
    assert(b->write_file(b, state, "note.txt", "abs read\n") == 0);
-   snprintf(abs, sizeof(abs), "%s/note.txt", workdir);
+   snprintf(abs, sizeof(abs), "%s/note.txt", g_fixture_workspace);
    char *content = NULL;
    assert(b->read_file(b, state, abs, 0, 0, &content) == 0);
    assert(content != NULL && strcmp(content, "abs read\n") == 0);
    free(content);
 
    /* Write via an ABSOLUTE in-workspace path, then read it back relatively. */
-   snprintf(abs, sizeof(abs), "%s/note2.txt", workdir);
+   snprintf(abs, sizeof(abs), "%s/note2.txt", g_fixture_workspace);
    assert(b->write_file(b, state, abs, "abs write\n") == 0);
    content = NULL;
    assert(b->read_file(b, state, "note2.txt", 0, 0, &content) == 0);
@@ -138,7 +367,7 @@ static void test_docker_absolute_in_workspace_path_accepted(void)
     * including a sibling that merely shares the workdir prefix. */
    assert(b->write_file(b, state, "/tmp/outside-escape.txt", "x") == -1);
    char sibling[320];
-   snprintf(sibling, sizeof(sibling), "%s-evil/x.txt", workdir);
+   snprintf(sibling, sizeof(sibling), "%s-evil/x.txt", g_fixture_workspace);
    assert(b->write_file(b, state, sibling, "x") == -1);
 
    teardown_docker_fileio_state(b, state);
@@ -149,6 +378,8 @@ static void test_docker_path_validation_rejects_escapes(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-fileio-2", &state);
@@ -168,6 +399,8 @@ static void test_docker_list_dir_returns_entries(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    void *state = NULL;
    setup_docker_fileio_state(b, "task-list-1", &state);
@@ -225,6 +458,9 @@ static const char *write_fake_docker_fixture(void)
            "    ;;\n"
            "  create)\n"
            "    printf '%%s\\n' \"$@\" > \"$STATE_DIR/create.argv\"\n"
+           "    count=0; [ -f \"$STATE_DIR/create.count\" ] && read -r count < "
+           "\"$STATE_DIR/create.count\"\n"
+           "    printf '%%s\\n' \"$((count + 1))\" > \"$STATE_DIR/create.count\"\n"
            "    shift\n"
            "    name=\"\"\n"
            "    while [ $# -gt 0 ]; do\n"
@@ -251,6 +487,18 @@ static const char *write_fake_docker_fixture(void)
            "    rm -f \"$STATE_DIR/$name.exists\"\n"
            "    exit 0\n"
            "    ;;\n"
+           "  inspect)\n"
+           "    name=\"${@: -1}\"\n"
+           "    if [[ \"$name\" = aimee-delegate-* ]] && "
+           "[ -n \"$AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS\" ]; then\n"
+           "      printf '%%b' \"$AIMEE_FAKE_DOCKER_SANDBOX_MOUNTS\"\n"
+           "    elif [ -n \"$AIMEE_FAKE_DOCKER_INSPECT_MOUNTS\" ]; then\n"
+           "      printf '%%b' \"$AIMEE_FAKE_DOCKER_INSPECT_MOUNTS\"\n"
+           "    else\n"
+           "      printf 'none=;\\n'\n"
+           "    fi\n"
+           "    exit 0\n"
+           "    ;;\n"
            "  exec)\n"
            "    # docker exec -i <name> bash -c <cmd>; LAST argv is the\n"
            "    # b64-wrapped command. Run it locally via bash.\n"
@@ -273,6 +521,7 @@ static void teardown_fake_docker(void)
    snprintf(rm, sizeof(rm), "rm -rf /tmp/aimee-fake-docker-state-%d /tmp/aimee-fake-docker-%d.sh",
             (int)getpid(), (int)getpid());
    (void)system(rm);
+   unsetenv("AIMEE_DELEGATE_EGRESS_BIN");
 }
 
 static int fake_container_exists(const char *container_name)
@@ -322,62 +571,87 @@ static void test_remove_orphans_accepts_only_container_ids(void)
    printf("  PASS: test_remove_orphans_accepts_only_container_ids\n");
 }
 
-/* Did the last `docker create` argv (captured by the fixture) contain `needle`? */
-static int create_argv_has(const char *needle)
+static int fake_acquire_count(void)
 {
    char p[512];
-   snprintf(p, sizeof(p), "/tmp/aimee-fake-docker-state-%d/create.argv", (int)getpid());
+   snprintf(p, sizeof(p), "/tmp/aimee-fake-docker-state-%d/acquire.count", (int)getpid());
    FILE *f = fopen(p, "r");
    if (!f)
       return 0;
-   char buf[8192];
-   size_t got = fread(buf, 1, sizeof(buf) - 1, f);
+   int count = 0;
+   (void)fscanf(f, "%d", &count);
    fclose(f);
-   buf[got] = '\0';
-   return strstr(buf, needle) != NULL;
+   return count;
+}
+
+static int fake_helper_args_contain(const char *needle)
+{
+   char p[512];
+   snprintf(p, sizeof(p), "/tmp/aimee-fake-docker-state-%d/helper.argv", (int)getpid());
+   FILE *f = fopen(p, "r");
+   if (!f)
+      return 0;
+   char buf[16384];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+   return needle && strstr(buf, needle) != NULL;
+}
+
+/* A non-zero helper result means the Go module could not create/resume and
+ * verify the sandbox. C must propagate that as a hard refusal, never fall back. */
+static void test_acquire_refuses_when_egress_helper_refuses(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
+   setenv("AIMEE_FAKE_EGRESS_FAIL", "1", 1);
+   void *state = NULL;
+   assert(b->acquire(b, "task-iso-refuse", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
+   assert(state == NULL);
+   unsetenv("AIMEE_FAKE_EGRESS_FAIL");
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_acquire_refuses_when_egress_helper_refuses\n");
 }
 
 static void test_acquire_creates_and_starts_container(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
-   /* Slice 6: the backend binds aimee-server's UDS only when it exists on disk.
-    * Point aimee_home at a temp dir and plant a socket file there so the create
-    * argv includes the socket channel. (stat() only checks existence — a plain
-    * file stands in for the UDS.) */
-   char tmphome[] = "/tmp/aimee-deleg-sock-XXXXXX";
-   char sockpath[512] = "";
-   assert(mkdtemp(tmphome) != NULL);
-   setenv("AIMEE_HOME", tmphome, 1);
-   snprintf(sockpath, sizeof(sockpath), "%s/aimee-http.sock", tmphome);
-   FILE *sf = fopen(sockpath, "w");
-   assert(sf != NULL);
-   fclose(sf);
-
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    cfg.image = "ubuntu:22.04";
    void *state = NULL;
    assert(b->acquire(b, "task-acq-1", &cfg, &state) == 0);
    assert(state != NULL);
-   /* The fixture's "create" handler should have touched the .exists
-    * flag for the canonical container name. */
    assert(fake_container_exists("aimee-delegate-task-acq-1"));
+   assert(fake_helper_args_contain("--socket-source"));
+   assert(fake_helper_args_contain("aimee-http.sock"));
+   assert(fake_helper_args_contain("--worktree"));
+   assert(fake_helper_args_contain(g_fixture_workspace));
+   assert(fake_helper_args_contain("--writes-allowed"));
+   assert(fake_helper_args_contain("ubuntu:22.04"));
 
-   /* Sandbox slice 6: the container is created with no IP network, and the docker
-    * socket is NEVER bind-mounted in (that would be host-root for the delegate). */
-   assert(create_argv_has("--network") && create_argv_has("none"));
-   assert(!create_argv_has("docker.sock"));
-   /* The delegate's ONE outward channel: aimee-server's UDS is bound in and the
-    * in-container `aimee` CLI is pointed at it (so `aimee git_commit` etc. work). */
-   assert(create_argv_has("aimee-http.sock"));
-   assert(create_argv_has("AIMEE_API_ENDPOINT=unix:/run/aimee/aimee-http.sock"));
-   unlink(sockpath);
-   unsetenv("AIMEE_HOME");
-   rmdir(tmphome);
+   /* Resume is also delegated to Go and therefore invokes the helper again. */
+   b->release(b, state, 1);
+   assert(fake_acquire_count() == 1);
+   state = NULL;
+   assert(b->acquire(b, "task-acq-1", &cfg, &state) == 0);
+   assert(fake_acquire_count() == 2);
 
    /* release(hibernate=0) → docker rm -f → flag removed. */
    b->release(b, state, 0);
@@ -385,18 +659,20 @@ static void test_acquire_creates_and_starts_container(void)
 
    teardown_fake_docker();
    unsetenv("AIMEE_DOCKER_BIN");
-   printf("  PASS: test_acquire_creates_and_starts_container\n");
+   printf("  PASS: test_acquire_hands_facts_to_go_helper\n");
 }
 
 static void test_release_hibernate_keeps_container(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
-
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    void *state = NULL;
    assert(b->acquire(b, "task-hib-1", &cfg, &state) == 0);
    assert(fake_container_exists("aimee-delegate-task-hib-1"));
@@ -421,11 +697,14 @@ static void test_docker_exec_runs_through_fake(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    void *state = NULL;
    assert(b->acquire(b, "task-exec-1", &cfg, &state) == 0);
 
@@ -445,11 +724,14 @@ static void test_docker_exec_propagates_nonzero_exit(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    void *state = NULL;
    assert(b->acquire(b, "task-exec-2", &cfg, &state) == 0);
 
@@ -464,24 +746,60 @@ static void test_docker_exec_propagates_nonzero_exit(void)
    printf("  PASS: test_docker_exec_propagates_nonzero_exit\n");
 }
 
-static void test_docker_exec_set_cwd_prefixes_subsequent_calls(void)
+static void test_docker_exec_timeout_kills_inner_command(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
 
    delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
+   void *state = NULL;
+   assert(b->acquire(b, "task-exec-timeout", &cfg, &state) == 0);
+
+   char sentinel[256];
+   assert(snprintf(sentinel, sizeof(sentinel), "/tmp/aimee-docker-timeout-%d", (int)getpid()) <
+          (int)sizeof(sentinel));
+   unlink(sentinel);
+   char command[512];
+   assert(snprintf(command, sizeof(command), "sleep 2; : > %s", sentinel) < (int)sizeof(command));
+   char out[256] = {0}, err[256] = {0};
+   delegate_exec_result_t r = {0, 0, out, sizeof(out), err, sizeof(err)};
+   assert(b->exec(b, state, command, 500, &r) == 0);
+   assert(r.exit_code != 0);
+   assert(r.latency_ms < 1500);
+   usleep(750000);
+   assert(access(sentinel, F_OK) != 0);
+
+   b->release(b, state, 0);
+   teardown_fake_docker();
+   unsetenv("AIMEE_DOCKER_BIN");
+   printf("  PASS: test_docker_exec_timeout_kills_inner_command\n");
+}
+
+static void test_docker_exec_set_cwd_prefixes_subsequent_calls(void)
+{
+   delegate_backend_reset_for_test();
+   delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
+   delegate_backend_t *b = delegate_backend_docker_get();
+   const char *fixture = write_fake_docker_fixture();
+   setenv("AIMEE_DOCKER_BIN", fixture, 1);
+
+   delegate_backend_config_t cfg = {0};
+   init_fixture_config(&cfg);
    void *state = NULL;
    assert(b->acquire(b, "task-exec-cwd", &cfg, &state) == 0);
 
-   /* Default get_cwd reflects the container's WORKDIR (or the
-    * AIMEE_DOCKER_WORKDIR override if set; this test leaves it
-    * unset so it lands on the production default). */
+   /* Default get_cwd is the mounted source worktree. */
    char *cwd = NULL;
    assert(b->get_cwd(b, state, &cwd) == 0);
-   assert(strcmp(cwd, "/workspace") == 0);
+   assert(strcmp(cwd, g_fixture_workspace) == 0);
    free(cwd);
 
    /* set_cwd to /tmp and exec pwd → "/tmp\n". */
@@ -501,44 +819,16 @@ static void test_acquire_rejects_invalid_args(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    /* Empty task_id rejected. */
    void *state = (void *)0x1;
-   assert(b->acquire(b, "", NULL, &state) == -1);
+   assert(b->acquire(b, "", NULL, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    assert(state == NULL);
    /* NULL state_out rejected. */
-   assert(b->acquire(b, "task", NULL, NULL) == -1);
+   assert(b->acquire(b, "task", NULL, NULL) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    printf("  PASS: test_acquire_rejects_invalid_args\n");
-}
-
-static void test_container_name_basic(void)
-{
-   char name[128] = {0};
-   assert(delegate_backend_docker_container_name("task-abc-123", name, sizeof(name)) == 0);
-   assert(strcmp(name, "aimee-delegate-task-abc-123") == 0);
-   printf("  PASS: test_container_name_basic\n");
-}
-
-static void test_container_name_sanitises_invalid_chars(void)
-{
-   /* Spaces, slashes, colons all replaced with '_'; alnum + _.- kept. */
-   char name[128] = {0};
-   assert(delegate_backend_docker_container_name("foo bar:baz/qux.v1-2", name, sizeof(name)) == 0);
-   assert(strcmp(name, "aimee-delegate-foo_bar_baz_qux.v1-2") == 0);
-   printf("  PASS: test_container_name_sanitises_invalid_chars\n");
-}
-
-static void test_container_name_rejects_invalid(void)
-{
-   char name[128] = {0};
-   assert(delegate_backend_docker_container_name(NULL, name, sizeof(name)) == -1);
-   assert(delegate_backend_docker_container_name("", name, sizeof(name)) == -1);
-   assert(delegate_backend_docker_container_name("task", NULL, 128) == -1);
-   assert(delegate_backend_docker_container_name("task", name, 0) == -1);
-   /* Buffer too small. */
-   char tiny[8];
-   assert(delegate_backend_docker_container_name("very-long-task", tiny, sizeof(tiny)) == -1);
-   printf("  PASS: test_container_name_rejects_invalid\n");
 }
 
 static void test_build_exec_command_basic(void)
@@ -582,35 +872,18 @@ static void test_build_exec_command_rejects_invalid(void)
    printf("  PASS: test_build_exec_command_rejects_invalid\n");
 }
 
-/* The create argv the fake docker was invoked with (NULL if it never ran).
- * Needed to assert WHAT gets mounted: the caller's tree, or a scratch dir. */
-static char *read_fake_docker_create_argv(void)
-{
-   char path[256];
-   snprintf(path, sizeof(path), "/tmp/aimee-fake-docker-state-%d/create.argv", (int)getpid());
-   FILE *f = fopen(path, "r");
-   if (!f)
-      return NULL;
-   char *buf = calloc(1, 8192);
-   if (buf)
-      (void)!fread(buf, 1, 8191, f);
-   fclose(f);
-   return buf;
-}
-
-/* cfg.workspace: mount the caller's tree AS the workspace.
- *
- * Without it the backend mints an empty scratch dir under $XDG_CACHE_HOME and
- * mounts THAT — which is exactly why a delegate could not read its own subject:
- * it opens the file named in its task and finds nothing, then reasons about code
- * it cannot see. This is the difference between a sandbox and a blindfold. */
+/* cfg.workspace mounts the caller's complete source tree. No empty-workspace
+ * fallback exists. */
 static void test_docker_mounts_caller_workspace(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
+   setup_fake_egress_fixture();
 
    /* A real git checkout: the backend refuses to bind-mount anything that is not
     * one, because the caller derives the path from a session cwd. */
@@ -626,31 +899,27 @@ static void test_docker_mounts_caller_workspace(void)
    void *state = NULL;
    assert(b->acquire(b, "task-ws-1", &cfg, &state) == 0);
    assert(state != NULL);
-   /* The docker create argv must carry `-v <tree>:<workdir>` — the tree itself,
-    * not a scratch dir. The fixture records the argv it was called with. */
-   char *log = read_fake_docker_create_argv();
-   assert(log != NULL);
-   assert(strstr(log, tree) != NULL);
-   /* Must run as the server's uid:gid: root-owned files in the user's checkout
+   assert(fake_helper_args_contain("--worktree"));
+   assert(fake_helper_args_contain(tree));
+   assert(fake_helper_args_contain("--repo-root"));
+   /* Must hand Go the server's uid:gid: root-owned files in the user's checkout
     * would be unremovable by them and make git refuse the tree entirely. */
-   assert(strstr(log, "--user") != NULL);
    char uidgid[64];
    snprintf(uidgid, sizeof(uidgid), "%u:%u", (unsigned)getuid(), (unsigned)getgid());
-   assert(strstr(log, uidgid) != NULL);
-   free(log);
+   assert(fake_helper_args_contain(uidgid));
    b->release(b, state, 0);
 
-   /* read-only mode must reach the docker argv as :ro — the mount is where the
-    * isolation is enforced, not the guard above it. */
+   /* read-only reaches the module as writes_allowed=0. Whether that renders as
+    * `:ro` is the module's rule -- but a caller that asked for read-only and a
+    * module told it may write is the mount losing its enforcement, so the flag
+    * itself is pinned here. */
    delegate_backend_config_t rocfg = {0};
    rocfg.workspace = tree;
    rocfg.workspace_read_only = 1;
    void *rostate = NULL;
    assert(b->acquire(b, "task-ws-ro", &rocfg, &rostate) == 0);
-   char *rolog = read_fake_docker_create_argv();
-   assert(rolog != NULL);
-   assert(strstr(rolog, ":ro") != NULL);
-   free(rolog);
+   assert(!fake_helper_args_contain("--writes-allowed"));
+   assert(fake_helper_args_contain(tree));
    b->release(b, rostate, 0);
 
    char rm[512];
@@ -663,24 +932,27 @@ static void test_docker_mounts_caller_workspace(void)
 
 /* A workspace path that does not exist must be REFUSED, not created.
  *
- * The scratch path is ours to mkdir; a caller naming a directory is naming
- * something it already has. Creating it on their behalf turns a typo into an
+ * A caller naming a directory is naming something it already has. Creating it
+ * on their behalf turns a typo into an
  * empty workspace that looks like it worked — and an empty tree reads to a
  * delegate as "the code is missing", which is a far worse lie than an error. */
 static void test_docker_refuses_a_missing_workspace(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
+   setup_fake_egress_fixture();
 
    char missing[256];
    snprintf(missing, sizeof(missing), "/tmp/aimee-ws-does-not-exist-%d", (int)getpid());
    delegate_backend_config_t cfg = {0};
    cfg.workspace = missing;
    void *state = NULL;
-   assert(b->acquire(b, "task-ws-2", &cfg, &state) == -1);
+   assert(b->acquire(b, "task-ws-2", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    assert(state == NULL);
    /* And it must not have created it as a side effect. */
    struct stat st;
@@ -694,7 +966,7 @@ static void test_docker_refuses_a_missing_workspace(void)
    fputs("x", f);
    fclose(f);
    cfg.workspace = afile;
-   assert(b->acquire(b, "task-ws-3", &cfg, &state) == -1);
+   assert(b->acquire(b, "task-ws-3", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    unlink(afile);
 
    teardown_fake_docker();
@@ -708,9 +980,12 @@ static void test_docker_workspace_validation_refusals(void)
 {
    delegate_backend_reset_for_test();
    delegate_backend_register_docker();
+   delegate_register_launch_args_provider(fake_launch_args);
+   delegate_register_isolation_provider(fake_isolation);
    delegate_backend_t *b = delegate_backend_docker_get();
    const char *fixture = write_fake_docker_fixture();
    setenv("AIMEE_DOCKER_BIN", fixture, 1);
+   setup_fake_egress_fixture();
    delegate_backend_config_t cfg = {0};
    void *state = NULL;
    char base[256];
@@ -726,7 +1001,7 @@ static void test_docker_workspace_validation_refusals(void)
    snprintf(plain, sizeof(plain), "%s/plain", base);
    mkdir(plain, 0700);
    cfg.workspace = plain;
-   assert(b->acquire(b, "task-val-1", &cfg, &state) == -1);
+   assert(b->acquire(b, "task-val-1", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
    assert(state == NULL);
 
    /* A LINKED worktree is now MOUNTED, not refused: the repo goes in read-only at
@@ -756,23 +1031,16 @@ static void test_docker_workspace_validation_refusals(void)
    cfg.workspace_read_only = 0;
    assert(b->acquire(b, "task-wt", &cfg, &state) == 0);
    {
-      char *l = read_fake_docker_create_argv();
-      assert(l != NULL);
-      /* the repo mounted READ-ONLY at its own path — the gitlink target */
-      char m_repo[700];
-      snprintf(m_repo, sizeof(m_repo), "%s:%s:ro", repo, repo);
-      assert(strstr(l, m_repo) != NULL);
-      /* the worktree writable, nested over it */
-      char m_wt[900];
-      snprintf(m_wt, sizeof(m_wt), "%s:%s", wt2, wt2);
-      assert(strstr(l, m_wt) != NULL);
-      /* the per-worktree gitdir writable — this is where git status writes its index */
-      char m_gd[1100];
-      snprintf(m_gd, sizeof(m_gd), "%s:%s", wtdir, wtdir);
-      assert(strstr(l, m_gd) != NULL);
-      /* and the workdir is the worktree, not /workspace */
-      assert(strstr(l, wt2) != NULL);
-      free(l);
+      /* A LINKED worktree: the .git file's `gitdir:` pointer is followed, and the
+       * repo root is derived from it. Getting any of these three wrong is how a
+       * delegate ends up with a broken git inside a container that looks fine --
+       * so what the backend discovered is asserted here. How they are LAYERED
+       * (repo read-only beneath, worktree and gitdir writable over it) is the
+       * module's rule and is tested against the module. */
+      assert(fake_helper_args_contain(wt2));
+      assert(fake_helper_args_contain(repo));
+      assert(fake_helper_args_contain(wtdir));
+      assert(fake_helper_args_contain("--writes-allowed"));
    }
    b->release(b, state, 0);
 
@@ -788,7 +1056,7 @@ static void test_docker_workspace_validation_refusals(void)
    fputs("gitdir: ../relative/path\n", fb);
    fclose(fb);
    cfg.workspace = wtbad;
-   assert(b->acquire(b, "task-wtbad", &cfg, &state) == -1);
+   assert(b->acquire(b, "task-wtbad", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
 
    /* A symlink to a valid checkout must not slip past canonicalization: stat()
     * follows symlinks and so does the daemon, so the mount could land somewhere
@@ -804,10 +1072,11 @@ static void test_docker_workspace_validation_refusals(void)
    assert(symlink(realrepo, link) == 0);
    cfg.workspace = link;
    assert(b->acquire(b, "task-val-3", &cfg, &state) == 0);
-   char *log = read_fake_docker_create_argv();
-   assert(log != NULL);
-   assert(strstr(log, realrepo) != NULL); /* the resolved path */
-   free(log);
+   /* The RESOLVED path is what is handed over, never the link: the checks ran
+    * against the canonical path, and mounting the link instead would mount
+    * something the checks never saw. */
+   assert(fake_helper_args_contain(realrepo));
+   assert(!fake_helper_args_contain(link));
    b->release(b, state, 0);
 
    /* A DISJOINT linked worktree — one that lives OUTSIDE its repo root, as a WFE
@@ -839,18 +1108,14 @@ static void test_docker_workspace_validation_refusals(void)
    cfg.workspace_read_only = 0;
    assert(b->acquire(b, "task-disjoint", &cfg, &state) == 0);
    {
-      char *l = read_fake_docker_create_argv();
-      assert(l != NULL);
-      char m_repo[700];
-      snprintf(m_repo, sizeof(m_repo), "%s:%s:ro", drepo, drepo);
-      assert(strstr(l, m_repo) != NULL); /* repo read-only at its own path */
-      char m_wt[700];
-      snprintf(m_wt, sizeof(m_wt), "%s:%s", dwt, dwt);
-      assert(strstr(l, m_wt) != NULL); /* worktree writable — a separate, non-nested mount */
-      char m_gd[900];
-      snprintf(m_gd, sizeof(m_gd), "%s:%s", dwtadmin, dwtadmin);
-      assert(strstr(l, m_gd) != NULL); /* per-worktree gitdir writable */
-      free(l);
+      /* A DISJOINT worktree is accepted only because its two-way link checked
+       * out, and all three paths are discovered here -- the repo from the
+       * gitlink, the worktree as given, the gitdir from the pointer. Whether
+       * they are then mounted nested or as separate binds is the module's rule,
+       * and does not change what the backend had to find. */
+      assert(fake_helper_args_contain(dwt));
+      assert(fake_helper_args_contain(drepo));
+      assert(fake_helper_args_contain(dwtadmin));
    }
    b->release(b, state, 0);
 
@@ -862,7 +1127,7 @@ static void test_docker_workspace_validation_refusals(void)
    fprintf(dbk2, "%s/somewhere-else/.git\n", base);
    fclose(dbk2);
    cfg.workspace = dwt;
-   assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == -1);
+   assert(b->acquire(b, "task-disjoint-bad", &cfg, &state) == DELEGATE_ACQUIRE_REFUSED_ISOLATION);
 
    snprintf(cmd, sizeof(cmd), "rm -rf %s", base);
    (void)system(cmd);
@@ -929,25 +1194,45 @@ int main(void)
    printf("delegate_backend_docker:\n");
    test_register_puts_docker_in_registry();
    test_file_ops_reject_null_state();
-   test_container_name_basic();
-   test_container_name_sanitises_invalid_chars();
-   test_container_name_rejects_invalid();
+   test_translate_named_volume_socket_path();
    test_build_exec_command_basic();
    test_build_exec_command_handles_special_chars();
    test_build_exec_command_rejects_invalid();
    test_acquire_creates_and_starts_container();
+   test_acquire_refuses_when_egress_helper_refuses();
    test_release_hibernate_keeps_container();
    test_docker_exec_runs_through_fake();
    test_docker_exec_propagates_nonzero_exit();
+   test_docker_exec_timeout_kills_inner_command();
    test_docker_exec_set_cwd_prefixes_subsequent_calls();
    test_acquire_rejects_invalid_args();
    test_docker_write_then_read_roundtrip();
+   test_read_file_returns_only_the_file();
    test_docker_absolute_in_workspace_path_accepted();
    test_docker_path_validation_rejects_escapes();
    test_docker_list_dir_returns_entries();
    test_docker_mounts_caller_workspace();
    test_docker_refuses_a_missing_workspace();
    test_docker_workspace_validation_refusals();
+   if (g_fixture_workspace[0])
+   {
+      char gitdir[320], socket_path[320];
+      const char *files[] = {"a.txt",     "b.txt",    "empty.txt", "exact.txt",
+                             "hello.txt", "note.txt", "note2.txt"};
+      for (size_t i = 0; i < sizeof(files) / sizeof(files[0]); i++)
+      {
+         char path[320];
+         snprintf(path, sizeof(path), "%s/%s", g_fixture_workspace, files[i]);
+         unlink(path);
+      }
+      snprintf(gitdir, sizeof(gitdir), "%s/.git", g_fixture_workspace);
+      snprintf(socket_path, sizeof(socket_path), "%s/aimee-http.sock", g_fixture_home);
+      unlink(socket_path);
+      rmdir(gitdir);
+      rmdir(g_fixture_workspace);
+      rmdir(g_fixture_home);
+      unlink(g_fixture_egress);
+   }
    printf("ok\n");
    return 0;
 }

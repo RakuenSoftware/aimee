@@ -13,9 +13,31 @@
 
 static const char *g_context_mode = "observe";
 static int g_context_calls = 0;
-static int g_facts_enabled = 0;
 static int g_facts_calls = 0;
+static int g_temporal_enabled = 0;
+static int g_temporal_calls = 0;
 static kb_client_result_status_t g_context_result = KB_CLIENT_RESULT_OK;
+
+int config_present(void)
+{
+   return 0;
+}
+int config_integrity_enabled(void)
+{
+   return 1;
+}
+int config_integrity_dry_run(void)
+{
+   return 0;
+}
+void obs_bus_emit_durable_event(const char *event_type, const char *subject, const char *verdict,
+                                const char *detail)
+{
+   (void)event_type;
+   (void)subject;
+   (void)verdict;
+   (void)detail;
+}
 
 /* The kb-backed builder (ingress_preinject_build) is out of scope here; these
  * stubs satisfy the linker so the test links only the pure helpers without
@@ -33,14 +55,20 @@ char *kb_client_memory_facts(const char *query)
    g_facts_calls++;
    return strdup("- global preference: never substitute for project evidence\n");
 }
-
-/* Typed-facts gate stub: off, so the builder's facts path stays inert here
- * (kb_client_memory_facts above already returns NULL). ingress_preinject.c gained
- * this call with the typed_facts feature; the test link needs the symbol. */
-int kb_client_typed_facts_enabled(void)
+char *kb_client_memory_assemble_typed_context(const char *query)
 {
-   return g_facts_enabled;
+   (void)query;
+   g_temporal_calls++;
+   return g_temporal_enabled ? strdup("<memory_data trust=\"untrusted\">assertion</memory_data>\n"
+                                      "<approved_procedures authority=\"reviewed\">procedure"
+                                      "</approved_procedures>")
+                             : NULL;
 }
+
+/* There is no typed-facts gate to stub any more: the layer is unconditional, so
+ * kb_client_memory_facts above is called whenever there is an active scope. The
+ * g_facts_enabled flag that used to drive the stub is gone with it -- a test
+ * switch for an option that does not exist would suggest one still does. */
 int ingress_preinject_resolve_active_scope(char *workspace, size_t workspace_len, char *project,
                                            size_t project_len)
 {
@@ -86,10 +114,16 @@ kb_client_result_status_t kb_client_last_result_status(void)
 {
    return g_context_result;
 }
+/* When set, memory recall returns nothing -- the shape of both a quiet turn and
+ * an outage, which is exactly the pair the degraded-recall counter separates. */
+static int g_memory_returns_none = 0;
+
 int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t *out, int max)
 {
    (void)query;
    (void)limit;
+   if (g_memory_returns_none)
+      return 0;
    if (!out || max <= 0)
       return 0;
    memset(out, 0, sizeof(out[0]) * (size_t)max);
@@ -109,7 +143,7 @@ int kb_client_memory_diagnose(const char *query, int limit, memory_diagnostic_t 
    out[1].parts.total = 0.44;
    return 2;
 }
-/* Drives the compression lever in the build test below (config_load stub). */
+/* Drives the compression lever in the build test below (legacy_config_read stub). */
 static int g_test_compress = 0;
 
 int kb_client_index_code_search(const char *query, const char *project, code_search_hit_t *out,
@@ -137,23 +171,7 @@ int kb_client_index_code_search(const char *query, const char *project, code_sea
    }
    return 1;
 }
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->ingress_preinject_enabled = 1;
-      cfg->ingress_preinject_assembly_budget = 1200;
-      cfg->ingress_compress_enabled = g_test_compress;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the memory module. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. Values mirror exactly what the stub above writes into the struct —
+/* Accessor stubs mirror the desired fixture values —
  * preinject on, budget 1200, compress tracking g_test_compress, and the two
  * fields the stub leaves zeroed — so no assertion changes meaning. */
 int config_ingress_preinject_enabled(void)
@@ -241,10 +259,14 @@ int kb_client_evidence_merge_retrieval_event(const char *turn_id, const char *ro
    (void)n;
    return 0;
 }
+static int g_random_failure;
+
 /* Stub: deterministic but varying-per-call, so the mint-uniqueness assertion
  * holds without linking the platform layer into this pure unit test. */
 int platform_random_bytes(void *buf, size_t len)
 {
+   if (g_random_failure)
+      return -1;
    static unsigned char ctr = 0;
    unsigned char *p = (unsigned char *)buf;
    for (size_t i = 0; i < len; i++)
@@ -259,15 +281,38 @@ static int test_confidence_provider(double score, const char **confidence)
    return 0;
 }
 
+static int failing_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   (void)confidence;
+   return -1;
+}
+
+static int invalid_confidence_provider(double score, const char **confidence)
+{
+   (void)score;
+   *confidence = "unknown";
+   return 0;
+}
+
 static void test_confidence_tiers(void)
 {
+   const char *confidence = "stale";
+   ingress_preinject_register_confidence_provider(NULL);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(failing_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+   ingress_preinject_register_confidence_provider(invalid_confidence_provider);
+   assert(ingress_preinject_confidence(0.9, &confidence) == -1 && confidence == NULL);
+
    ingress_preinject_register_confidence_provider(test_confidence_provider);
-   assert(strcmp(ingress_preinject_confidence(0.9), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.66), "high") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.5), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.33), "medium") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.1), "low") == 0);
-   assert(strcmp(ingress_preinject_confidence(0.0), "low") == 0);
+   assert(ingress_preinject_confidence(0.9, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.66, &confidence) == 0 && strcmp(confidence, "high") == 0);
+   assert(ingress_preinject_confidence(0.5, &confidence) == 0 && strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.33, &confidence) == 0 &&
+          strcmp(confidence, "medium") == 0);
+   assert(ingress_preinject_confidence(0.1, &confidence) == 0 && strcmp(confidence, "low") == 0);
+   assert(ingress_preinject_confidence(0.0, &confidence) == 0 && strcmp(confidence, "low") == 0);
    printf("confidence_tiers OK\n");
 }
 
@@ -281,14 +326,19 @@ static void test_format_envelope(void)
    assert(e != NULL);
    assert(strstr(e, "<aimee-context confidence=\"high\">") == e); /* opens at start */
    assert(strstr(e, "src/a.c::f") != NULL);
-   assert(strstr(e, "explore-with: find_symbol") != NULL);
+   /* The per-turn envelope carries RETRIEVAL ONLY. The standing guidance moved to
+    * a session-start injection on the IR (ir_stage_memory): it used to ride in
+    * here, which meant aimee only told an agent to use aimee's tools once aimee
+    * had already retrieved something -- so on an unindexed repo the agent was told
+    * nothing. Guidance is not per-turn and not conditional on recall. */
+   assert(strstr(e, "explore-with: ") == NULL);
+   assert(strstr(e, "fix-scope: ") == NULL);
    assert(strstr(e, "</aimee-context>") != NULL);
    free(e);
 
-   /* Missing confidence defaults to low. */
-   char *e2 = ingress_preinject_format_envelope("x", NULL);
-   assert(e2 && strstr(e2, "confidence=\"low\"") != NULL);
-   free(e2);
+   /* Confidence must come from the supervised memory stage. */
+   assert(ingress_preinject_format_envelope("x", NULL) == NULL);
+   assert(ingress_preinject_format_envelope("x", "unknown") == NULL);
    printf("format_envelope OK\n");
 }
 
@@ -353,7 +403,6 @@ static void test_task_context_mode_and_first_turn_gate(void)
    ingress_preinject_task_state_reset();
    ingress_preinject_set_session_id("session-task-1");
    g_context_calls = 0;
-   g_facts_enabled = 1;
    g_facts_calls = 0;
    g_context_mode = "on";
    g_context_result = KB_CLIENT_RESULT_OK;
@@ -390,9 +439,58 @@ static void test_task_context_mode_and_first_turn_gate(void)
    assert(g_context_calls == 3);
 
    ingress_preinject_set_session_id(NULL);
-   g_facts_enabled = 0;
    g_context_mode = "observe";
    printf("task_context_mode_and_first_turn_gate OK\n");
+}
+
+/* An empty recall and an unreachable knowledge service produce the SAME envelope
+ * -- no memory previews either way -- so nothing downstream can tell them apart.
+ * That is how an agent ends up reporting that a symbol does not exist when it
+ * merely could not look. Assert the counter moves on the outage and stays put on
+ * the quiet turn; the envelope itself must be identical in both cases, because
+ * those bytes are a cache prefix and must not change during an outage. */
+static void test_recall_unavailable_is_counted_apart_from_empty(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-degraded");
+   g_context_mode = "off"; /* isolate the memory layer from the task-context path */
+   g_memory_returns_none = 1;
+
+   /* Quiet turn: recall reached the service and it had nothing. Not a failure. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   long long before_quiet = ingress_preinject_recall_unavailable_total();
+   char *quiet = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_quiet);
+
+   /* Outage: same empty result, different cause. This must be counted. */
+   g_context_result = KB_CLIENT_RESULT_UNAVAILABLE;
+   char *outage = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_quiet + 1);
+
+   /* The envelope is unchanged by the outage: whatever the quiet turn produced,
+    * the degraded turn produces byte-for-byte. The signal is the counter and the
+    * log line, never the provider-visible request. */
+   if (quiet == NULL)
+      assert(outage == NULL);
+   else
+   {
+      assert(outage != NULL);
+      assert(strcmp(quiet, outage) == 0);
+   }
+   free(quiet);
+   free(outage);
+
+   /* Recovery does not keep counting. */
+   g_context_result = KB_CLIENT_RESULT_OK;
+   long long before_recovery = ingress_preinject_recall_unavailable_total();
+   char *recovered = ingress_preinject_build("what did we decide about retries", 0);
+   assert(ingress_preinject_recall_unavailable_total() == before_recovery);
+   free(recovered);
+
+   g_memory_returns_none = 0;
+   g_context_mode = "observe";
+   ingress_preinject_set_session_id(NULL);
+   printf("  ok    memory recall: outage counted apart from an empty result\n");
 }
 
 static void test_unavailable_task_context_retries_after_recovery(void)
@@ -534,7 +632,8 @@ static void test_budgeted_build_uses_memory_previews(void)
    assert(strstr(env, "memory:101") != NULL);
    assert(strstr(env, "Use the deploy matrix.") != NULL);
    assert(strstr(env, "context-budget:") != NULL);
-   assert(strstr(env, "memory_get") != NULL);
+   /* "memory_get" used to appear only as part of the explore-with line, which is
+    * no longer in the per-turn envelope -- see the golden below. */
    assert(strstr(env, "Fallback preview from content.") != NULL);
 
    /* P0 byte-equivalence anchor: the Envelope IR refactor must reproduce the
@@ -552,14 +651,72 @@ static void test_budgeted_build_uses_memory_previews(void)
        "    > Use the deploy matrix.\n"
        "  - memory:102 fallback [L2/policy score=0.440 headline_missing=true]\n"
        "    > Fallback preview from content.\n"
-       "context-budget: used_bytes=342 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
-       "explore-with: find_symbol, lsp_references, ast_grep_search, index command=hybrid, "
-       "get_context_block, "
-       "memory_get\n"
+       /* The typed-fact block is UNCONDITIONAL now. It used to sit behind
+        * kb_client_typed_facts_enabled(), which this file stubbed to 0 for this
+        * scenario, so the golden was captured without it. That gate is retired --
+        * facts depend only on an active scope -- so the section is part of every
+        * envelope the builder produces and belongs in the byte anchor. The
+        * used_bytes figure moves with it (342 -> 417). */
+       "\n"
+       "## Known facts\n"
+       "- global preference: never substitute for project evidence\n"
+       "context-budget: used_bytes=417 budget_bytes=1200 omitted_count=0 headline_missing_count=1\n"
+       /* explore-with / fix-scope USED TO BE HERE. They moved to a session-start
+        * injection on the IR (ir_stage_memory), because riding the per-turn
+        * retrieval envelope meant aimee only told an agent to use aimee's tools
+        * once it had already retrieved something -- on an unindexed repo the agent
+        * got no guidance at all and reached for shell. They are also no longer
+        * repeated every turn, which is what these bytes were charging for. */
        "</aimee-context>";
    assert(strcmp(env, GOLDEN) == 0);
    free(env);
    printf("budgeted_build_uses_memory_previews OK\n");
+}
+
+static void test_default_temporal_context_injection(void)
+{
+   g_temporal_enabled = 1;
+   g_temporal_calls = 0;
+   g_context_mode = "observe";
+   char *env = ingress_preinject_build("recover the deployment", 0);
+   assert(env != NULL);
+   assert(strstr(env, "recommended (temporal learning):") != NULL);
+   assert(strstr(env, "<memory_data trust=\"untrusted\">assertion</memory_data>") != NULL);
+   assert(strstr(env, "<approved_procedures authority=\"reviewed\">") != NULL);
+   assert(g_temporal_calls == 1);
+   free(env);
+
+   /* The repository default is strict code-context mode. Temporal learning is
+    * an independently labelled and scope-filtered channel, so strict mode must
+    * not silently turn the default back off. */
+   ingress_preinject_task_state_reset();
+   ingress_preinject_set_session_id("session-temporal-strict");
+   g_context_mode = "on";
+   env = ingress_preinject_build("recover the strict deployment", 0);
+   assert(env != NULL);
+   assert(strstr(env, "recommended (task-conditioned code") != NULL);
+   assert(strstr(env, "recommended (temporal learning):") != NULL);
+   assert(g_temporal_calls == 2);
+   free(env);
+
+   /* The existing request-level ingress opt-out remains an instant rollback. */
+   assert(ingress_preinject_build("recover the deployment", 1) == NULL);
+   assert(g_temporal_calls == 2);
+   ingress_preinject_set_session_id(NULL);
+   g_context_mode = "observe";
+   g_temporal_enabled = 0;
+   printf("default_temporal_context_injection OK\n");
+}
+
+static void test_build_requires_confidence_provider(void)
+{
+   ingress_preinject_task_state_reset();
+   ingress_preinject_register_confidence_provider(NULL);
+   char *env = ingress_preinject_build("deploy matrix", 0);
+   assert(env == NULL);
+   ingress_preinject_register_confidence_provider(test_confidence_provider);
+   ingress_preinject_task_state_reset();
+   printf("build_requires_confidence_provider OK\n");
 }
 
 /* P0 Envelope IR: the renderer reproduces the old inline rendering — group
@@ -637,8 +794,8 @@ static void test_turn_id_mint_and_thread_local(void)
 {
    /* mint produces a canonical 8-4-4-4-12 UUID. */
    char a[40], b[40];
-   ingress_preinject_mint_turn_id(a, sizeof(a));
-   ingress_preinject_mint_turn_id(b, sizeof(b));
+   assert(ingress_preinject_mint_turn_id(a, sizeof(a)) == 0);
+   assert(ingress_preinject_mint_turn_id(b, sizeof(b)) == 0);
    assert(strlen(a) == 36);
    assert(a[8] == '-' && a[13] == '-' && a[18] == '-' && a[23] == '-');
    for (int i = 0; a[i]; i++)
@@ -647,6 +804,12 @@ static void test_turn_id_mint_and_thread_local(void)
       assert(c == '-' || (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
    }
    assert(strcmp(a, b) != 0); /* random — two mints differ */
+
+   g_random_failure = 1;
+   strcpy(a, "must-be-cleared");
+   assert(ingress_preinject_mint_turn_id(a, sizeof(a)) != 0);
+   assert(a[0] == '\0');
+   g_random_failure = 0;
 
    /* the thread-local set/get round-trips and clears on NULL/"" */
    assert(ingress_preinject_turn_id()[0] == '\0'); /* unset by default */
@@ -712,23 +875,17 @@ int main(void)
    test_format_task_context_strict_contract();
    test_task_context_mode_and_first_turn_gate();
    test_unavailable_task_context_retries_after_recovery();
+   test_recall_unavailable_is_counted_apart_from_empty();
    test_format_code_block();
    test_query_from_messages();
    test_apply();
    test_append();
    test_render_block();
    test_budgeted_build_uses_memory_previews();
+   test_default_temporal_context_injection();
+   test_build_requires_confidence_provider();
    test_turn_id_mint_and_thread_local();
    test_compress_code_fold();
    printf("all tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

@@ -20,13 +20,14 @@
 #include "kb_reflection.h"
 #include "kb_service.h"
 #include "config.h"
-#include "db2/db2.h"
-#include "db2/kb_service_backend.h"
-#include "db2/kb_maintenance.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/kb_maintenance.h"
 #include "kb_blob_reconcile.h"
-#include "db2/kb_runtime_state.h"
+#include "modules/db2/c/kb_runtime_state.h"
 #include "log.h"
 #include "cJSON.h"
+#include "util.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -267,6 +268,11 @@ int kb_service_init(kb_service_ctx_t *ctx)
    ctx->start_time = (long)time(NULL);
 
    g_kb_ctx = ctx;
+
+   /* DB2 owns canonical-index argv construction; the KB service owns process
+    * execution. Install this once at the service entry point, before either
+    * HTTP routing or ingest-worker startup can initiate a local scan. */
+   canonical_index_set_exec_capture(safe_exec_capture);
 
    /* Reset any jobs left running from a previous crash so this process's
     * ingest workers can claim them again. */

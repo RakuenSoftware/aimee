@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { toDashData, fmtDuration, fmtCompact, fmtUsd } from './Dashboard';
+import { toDashData, fmtDuration, fmtCompact, fmtUsd, loadLayout } from './Dashboard';
 import live from './__fixtures__/dashboard-all.json';
 
 /**
@@ -10,7 +10,7 @@ import live from './__fixtures__/dashboard-all.json';
  * live under `tier_kinds`, `agents` is the provider-config roster (not a live
  * presence feed), and `onboard` is an `{error}` stub on the server-hosted
  * webchat. Earlier the transform silently coerced these to empty, so the
- * Memory and Agents panels rendered blank even though the server had data.
+ * Memory and Models panels rendered blank even though the server had data.
  *
  * These tests feed `toDashData` the REAL captured payload and assert the
  * panels receive populated, correctly-shaped rows.
@@ -31,7 +31,7 @@ describe('toDashData — server payload contract', () => {
     expect(total).toBeGreaterThan(0);
   });
 
-  it('populates Agents from the config roster shape (provider/model/roles/enabled)', () => {
+  it('populates Models from the config roster shape (provider/model/roles/enabled)', () => {
     expect(d.agents.length).toBeGreaterThan(0);
     const a = d.agents[0];
     expect(a.name).toBeTruthy();
@@ -136,5 +136,39 @@ describe('formatters', () => {
     expect(fmtUsd(0)).toBe('$0.00');
     expect(fmtUsd(0.001)).toBe('<$0.01');
     expect(fmtUsd(4.21)).toBe('$4.21');
+  });
+});
+
+/**
+ * A saved layout is filtered against the panel registry, so an id that was
+ * renamed is otherwise dropped silently and the user loses a panel they had
+ * chosen. The roster panel was 'agents' before it became 'models', and every
+ * existing browser has 'agents' persisted.
+ */
+describe('loadLayout — saved panel ids survive a rename', () => {
+  const withStoredLayout = (value: string | null, run: () => void) => {
+    const store = { getItem: (k: string) => (k === 'aimee_dash_layout_v1' ? value : null) };
+    (globalThis as unknown as { localStorage: unknown }).localStorage = store;
+    try {
+      run();
+    } finally {
+      delete (globalThis as unknown as { localStorage?: unknown }).localStorage;
+    }
+  };
+
+  it("maps a stored 'agents' id onto the renamed 'models' panel", () => {
+    withStoredLayout(JSON.stringify(['readiness', 'agents', 'metrics']), () => {
+      const layout = loadLayout();
+      expect(layout).toContain('models');
+      expect(layout).not.toContain('agents');
+      // The rest of the user's chosen order is untouched.
+      expect(layout).toEqual(['readiness', 'models', 'metrics']);
+    });
+  });
+
+  it('still drops ids that match no panel at all', () => {
+    withStoredLayout(JSON.stringify(['readiness', 'no-such-panel']), () => {
+      expect(loadLayout()).toEqual(['readiness']);
+    });
   });
 });

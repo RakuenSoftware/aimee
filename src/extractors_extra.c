@@ -812,20 +812,73 @@ static int is_js_keyword(const char *s)
 
 /* Scan a line for identifier( patterns, extracting function calls.
  * Works for C-family syntax. */
+/* Is the quote at `q` the start of an f-string? Look back over the prefix letters
+ * (f, r, b, u, in any order/case) that may precede it. Only meaningful for Python;
+ * every other language passes fstrings=0 and keeps the old skip-everything rule. */
+static int is_fstring_quote(const char *line, const char *q)
+{
+   const char *s = q;
+   while (s > line && (isalpha((unsigned char)s[-1]) || s[-1] == '_'))
+      s--;
+   for (const char *c = s; c < q; c++)
+      if (*c == 'f' || *c == 'F')
+         return 1;
+   return 0;
+}
+
 static void scan_calls_in_line(const char *line, int lineno, call_ctx_t *cc,
-                               int (*is_kw)(const char *))
+                               int (*is_kw)(const char *), int fstrings)
 {
    const char *p = line;
    while (*p)
    {
-      /* Skip string literals */
+      /* Skip string literals -- EXCEPT an f-string's interpolations, which are code.
+       * `f"report-{end_of_month(d)}.csv"` is a real call site, and skipping the whole
+       * literal dropped it from the caller index entirely: the benchmark fixture's
+       * month_report_path vanished while its two plain-call siblings survived. Triple
+       * quotes are still skipped wholesale, as they were before. */
       if (*p == '"' || *p == '\'')
       {
          char q = *p++;
+         int interp = fstrings && is_fstring_quote(line, p - 1);
          while (*p && *p != q)
          {
             if (*p == '\\' && p[1])
-               p++;
+            {
+               p += 2;
+               continue;
+            }
+            if (interp && *p == '{')
+            {
+               if (p[1] == '{') /* {{ is a literal brace, not an interpolation */
+               {
+                  p += 2;
+                  continue;
+               }
+               /* Scan the interpolation body as code. It cannot contain the closing
+                * quote, so bounding the recursion at `q` keeps it inside the literal. */
+               const char *start = ++p;
+               int depth = 1;
+               while (*p && *p != q && depth > 0)
+               {
+                  if (*p == '{')
+                     depth++;
+                  else if (*p == '}' && --depth == 0)
+                     break;
+                  p++;
+               }
+               size_t len = (size_t)(p - start);
+               char body[512];
+               if (len > 0 && len < sizeof(body))
+               {
+                  memcpy(body, start, len);
+                  body[len] = '\0';
+                  scan_calls_in_line(body, lineno, cc, is_kw, fstrings);
+               }
+               if (*p == '}')
+                  p++;
+               continue;
+            }
             p++;
          }
          if (*p)
@@ -948,7 +1001,7 @@ void c_call_line(const char *line, int lineno, void *ctx)
    }
 
    /* Extract calls from this line */
-   scan_calls_in_line(line, lineno, cc, is_c_keyword);
+   scan_calls_in_line(line, lineno, cc, is_c_keyword, 0);
 }
 
 /* Python call extractor: tracks current function via def lines */
@@ -965,10 +1018,22 @@ void py_call_line(const char *line, int lineno, void *ctx)
    {
       char name[128];
       if (extract_ident(p + 4, name, sizeof(name)))
+      {
          snprintf(cc->current_func, sizeof(cc->current_func), "%s", name);
+         /* Scan from the parameter list, not the whole line. `def target(d):` matches
+          * the identifier-then-paren rule, so scanning it emitted target as a caller
+          * of itself -- a definition reported as a call site, on every Python function
+          * in the corpus. Starting at '(' still picks up calls in default arguments. */
+         const char *paren = strchr(p + 4, '(');
+         if (paren)
+         {
+            scan_calls_in_line(paren, lineno, cc, is_py_keyword, 1);
+            return;
+         }
+      }
    }
 
-   scan_calls_in_line(line, lineno, cc, is_py_keyword);
+   scan_calls_in_line(line, lineno, cc, is_py_keyword, 1);
 }
 
 /* JS/TS call extractor */
@@ -1017,7 +1082,7 @@ void js_call_line(const char *line, int lineno, void *ctx)
       }
    }
 
-   scan_calls_in_line(line, lineno, cc, is_js_keyword);
+   scan_calls_in_line(line, lineno, cc, is_js_keyword, 0);
 }
 
 /* Go call extractor */
@@ -1076,12 +1141,12 @@ void go_call_line(const char *line, int lineno, void *ctx)
       }
    }
 
-   scan_calls_in_line(line, lineno, cc, is_c_keyword);
+   scan_calls_in_line(line, lineno, cc, is_c_keyword, 0);
 }
 
 /* Generic call extractor for other languages */
 void generic_call_line(const char *line, int lineno, void *ctx)
 {
    call_ctx_t *cc = (call_ctx_t *)ctx;
-   scan_calls_in_line(line, lineno, cc, is_c_keyword);
+   scan_calls_in_line(line, lineno, cc, is_c_keyword, 0);
 }

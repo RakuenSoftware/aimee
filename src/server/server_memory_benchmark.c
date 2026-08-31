@@ -10,8 +10,10 @@
  * corpus against the LIVE store the way the server reaches it: per query through
  * kb_client_memory_find_facts_ex(), which forwards the arm's
  * graph_code_fusion_state to aimee-kb, where the graph-code fusion rerank runs.
- * Recall/MRR/nDCG reuse the shared ir_* scorers; latency is measured around the
- * kb RPC (so it includes the kb hop, as the latency-budget AC requires).
+ * Recall/MRR/nDCG and latency summaries are requested from the separately
+ * supervised benchmarks process over the event bus. Raw latency is measured
+ * around the kb RPC so it includes the kb hop, as the latency-budget AC
+ * requires.
  *
  * Split into its own file so server_state.c stays under the 2000-line cap. */
 #include "aimee.h"
@@ -19,7 +21,8 @@
 #include "json_fluent.h"
 #include "cJSON.h"
 #include "kb_client.h"  /* kb_client_memory_find_facts_ex, memory_t */
-#include "agent_eval.h" /* mem_eval_* corpus loader + ir_* scorers */
+#include "agent_eval.h" /* mem_eval_* corpus loader */
+#include "module_stage_adapters.h"
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -32,25 +35,6 @@ static int send_and_free(server_conn_t *conn, cJSON *resp)
 static double bench_elapsed_ms(const struct timespec *a, const struct timespec *b)
 {
    return (double)(b->tv_sec - a->tv_sec) * 1000.0 + (double)(b->tv_nsec - a->tv_nsec) / 1.0e6;
-}
-
-static int bench_cmp_double(const void *a, const void *b)
-{
-   double x = *(const double *)a, y = *(const double *)b;
-   return (x > y) - (x < y);
-}
-
-/* Nearest-rank percentile over a sorted ascending array (n > 0). */
-static double bench_percentile(const double *sorted, int n, double pct)
-{
-   if (n <= 0)
-      return 0.0;
-   int idx = (int)(pct / 100.0 * (double)(n - 1) + 0.5);
-   if (idx < 0)
-      idx = 0;
-   if (idx >= n)
-      idx = n - 1;
-   return sorted[idx];
 }
 
 static void bench_add_metrics(cJSON *resp, double mrr, double ndcg5, double ndcg10, double recall5,
@@ -66,33 +50,30 @@ static void bench_add_metrics(cJSON *resp, double mrr, double ndcg5, double ndcg
    cJSON_AddItemToObject(resp, "metrics", metrics);
 }
 
-static void bench_add_latency(cJSON *resp, const double *latencies, int n_lat)
+static void bench_add_latency(cJSON *resp, const aimee_benchmarks_latency_summary_t *summary)
 {
-   if (n_lat <= 0)
-      return;
-   double *sorted = calloc((size_t)n_lat, sizeof(*sorted));
-   if (!sorted)
-      return;
-   memcpy(sorted, latencies, (size_t)n_lat * sizeof(*sorted));
-   qsort(sorted, (size_t)n_lat, sizeof(double), bench_cmp_double);
-
    cJSON *lat = cJSON_CreateObject();
-   jo_add_num(lat, "p50_ms", bench_percentile(sorted, n_lat, 50.0));
-   jo_add_num(lat, "p95_ms", bench_percentile(sorted, n_lat, 95.0));
-   jo_add_num(lat, "p99_ms", bench_percentile(sorted, n_lat, 99.0));
-   jo_add_num(lat, "min_ms", sorted[0]);
-   jo_add_num(lat, "max_ms", sorted[n_lat - 1]);
-   jo_add_i64(lat, "queries", n_lat);
+   jo_add_num(lat, "p50_ms", summary->p50_ms);
+   jo_add_num(lat, "p95_ms", summary->p95_ms);
+   jo_add_num(lat, "p99_ms", summary->p99_ms);
+   jo_add_num(lat, "min_ms", summary->min_ms);
+   jo_add_num(lat, "max_ms", summary->max_ms);
+   jo_add_i64(lat, "queries", summary->queries);
    cJSON_AddItemToObject(resp, "latency", lat);
-   free(sorted);
 }
 
-static int bench_run_live_cases(server_conn_t *conn, const char *suite, mem_eval_case_t *cases,
-                                int n_cases, const char *fstate, cJSON *resp)
+static int bench_run_live_cases(const char *suite, mem_eval_case_t *cases, int n_cases,
+                                const char *fstate, cJSON *resp, const char **error_out)
 {
+   if (error_out)
+      *error_out = NULL;
    double *latencies = calloc((size_t)n_cases, sizeof(double));
    if (!latencies)
-      return server_send_error(conn, "out of memory", NULL);
+   {
+      if (error_out)
+         *error_out = "out of memory";
+      return -1;
+   }
 
    double total_mrr = 0, total_ndcg5 = 0, total_ndcg10 = 0, total_recall5 = 0, total_recall10 = 0;
    int labelled = 0, errors = 0, n_lat = 0;
@@ -118,23 +99,39 @@ static int bench_run_live_cases(server_conn_t *conn, const char *suite, mem_eval
       for (int i = 0; i < n_results && i < 20; i++)
          retrieved[i] = results[i].id;
 
-      total_mrr += ir_mrr(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected);
-      total_ndcg5 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 5);
-      total_ndcg10 +=
-          ir_ndcg_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 10);
-      total_recall5 +=
-          ir_recall_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 5);
-      total_recall10 +=
-          ir_recall_at_k(retrieved, n_results, cases[c].expected_ids, cases[c].n_expected, 10);
+      aimee_benchmarks_ir_scores_t at5, at10;
+      if (server_module_benchmark_score(retrieved, (uint32_t)n_results, cases[c].expected_ids,
+                                        (uint32_t)cases[c].n_expected, 5, &at5) != 0 ||
+          server_module_benchmark_score(retrieved, (uint32_t)n_results, cases[c].expected_ids,
+                                        (uint32_t)cases[c].n_expected, 10, &at10) != 0)
+      {
+         free(latencies);
+         if (error_out)
+            *error_out = "benchmarks scoring module unavailable or returned an invalid response";
+         return -1;
+      }
+      total_mrr += at5.mrr;
+      total_ndcg5 += at5.ndcg;
+      total_ndcg10 += at10.ndcg;
+      total_recall5 += at5.recall;
+      total_recall10 += at10.recall;
    }
 
    if (n_lat == 0)
    {
       free(latencies);
-      return server_send_error(
-          conn, "all benchmark queries failed (is aimee-kb reachable for memory.find_facts?)",
-          NULL);
+      if (error_out)
+         *error_out = "all benchmark queries failed (is aimee-kb reachable for memory.find_facts?)";
+      return -1;
+   }
+
+   aimee_benchmarks_latency_summary_t latency_summary;
+   if (server_module_benchmark_latency(latencies, (uint32_t)n_lat, &latency_summary) != 0)
+   {
+      free(latencies);
+      if (error_out)
+         *error_out = "benchmarks latency module unavailable or returned an invalid response";
+      return -1;
    }
 
    jo_add_str(resp, "suite", suite);
@@ -143,7 +140,7 @@ static int bench_run_live_cases(server_conn_t *conn, const char *suite, mem_eval
    jo_add_i64(resp, "errors", errors);
    bench_add_metrics(resp, total_mrr / n_cases, total_ndcg5 / n_cases, total_ndcg10 / n_cases,
                      total_recall5 / n_cases, total_recall10 / n_cases, n_cases);
-   bench_add_latency(resp, latencies, n_lat);
+   bench_add_latency(resp, &latency_summary);
    free(latencies);
    return 0;
 }
@@ -194,12 +191,13 @@ static int bench_live_eval_corpus(server_conn_t *conn, const char *suite, const 
 
    cJSON *resp = jo_ok();
    jo_add_str(resp, "corpus", basis[0] ? basis : "live-memory-eval-corpus");
-   int rc = bench_run_live_cases(conn, suite, cases, n_cases, fstate, resp);
+   const char *error = NULL;
+   int rc = bench_run_live_cases(suite, cases, n_cases, fstate, resp, &error);
    free(cases);
    if (rc != 0)
    {
       cJSON_Delete(resp);
-      return rc;
+      return server_send_error(conn, error ? error : "benchmark scoring failed", NULL);
    }
    return send_and_free(conn, resp);
 }
@@ -261,12 +259,13 @@ static int bench_code_graph_fusion(server_conn_t *conn, cJSON *req)
    jo_add_str(resp, "fusion_state", fstate);
    jo_add_i64(resp, "utility_scoring", utility);
    jo_add_i64(resp, "code_projection", projection);
-   int rc = bench_run_live_cases(conn, suite, cases, n_cases, fstate, resp);
+   const char *error = NULL;
+   int rc = bench_run_live_cases(suite, cases, n_cases, fstate, resp, &error);
    free(cases);
    if (rc != 0)
    {
       cJSON_Delete(resp);
-      return rc;
+      return server_send_error(conn, error ? error : "benchmark scoring failed", NULL);
    }
 
    return send_and_free(conn, resp);

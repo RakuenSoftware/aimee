@@ -1,7 +1,11 @@
 # P7 external WORM witness and full kill matrix
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** implemented and validated on branch `rewrite/go-server-wfe` (through
-  `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). E1, E2, and E3 are all delivered — the
+  `ecbfbc35`); merged to `testing` via PR #1930 (2026-07-24). E1, E2, and E3 are all delivered. The
   P2b release gate flip is live (`kb_egress_release_allowed()` returns
   `witness_release_gate_open()`). Validated end-to-end on a fresh CT103 env: witness
   unit suite, integration gate (producer/emit/tamper/recovery/canary), the E3 kill
@@ -10,20 +14,20 @@
   clean roundtable review approved the core diff.
 - **Depends on:** P7-reseal D1, D2a, D2b, D3a, D3b (merged), P3a WORM ledger, and
   the existing kb audit chain.
-- **Enables:** the last open P7 line item — `external WORM delivery + full kill
-  matrix` — and therefore P2b production org egress.
+- **Enables:** the last open P7 line item. `external WORM delivery + full kill
+  matrix`, and therefore P2b production org egress.
 
 ## Why this is the remaining P7 scope
 
 Everything P7 has landed so far makes evidence *correct inside PostgreSQL*. The
-kb audit chain (`kb_audit_event`, `src/db2/kb_audit_worm.c`) is hash-chained and
+kb audit chain (`kb_audit_event`, `src/modules/db2/c/kb_audit_worm.c`) is hash-chained and
 trigger-protected; the reseal outbox (`kb_vault_rewrap_worm`) has deterministic
 event IDs and exact replay checks; D3b added the atomic primary open event
 (`kb_vault_open_event`) with a full row hash.
 
 None of that is durability of evidence. A sufficiently privileged PostgreSQL
 actor can rewrite the chain and the outbox together, which is exactly the threat
-the hardened-vault proposal names in §6. D3b said so explicitly — neither a
+the hardened-vault proposal names in §6. D3b said so explicitly, neither a
 successful local outbox append nor the primary hash chain may be described as
 external WORM delivery, and external witnessing remained a later release gate.
 
@@ -40,14 +44,14 @@ ends by flipping a production release gate. Reviewing that as one change repeats
 the mistake the reseal split was created to avoid. Delivery is fail-closed and
 ordered:
 
-1. **E1 — witness record, signed checkpoint, export form, and evidence log.**
+1. **E1, witness record, signed checkpoint, export form, and evidence log.**
    Canonical witness record encoding and per-entry evidence digest, the signed
    Merkle checkpoint format with per-shard inclusion proofs, the deterministic
    exported rendering, evidence grouping by admission dispatch key, and the
    durable evidence log plus per-`(tenant, provider)` shard counter rows created
    by DML upsert (no runtime DDL). No admission caller, no emission, no
    production invocation.
-2. **E2 — atomic witness append, emission, and continuous verification.** The
+2. **E2, atomic witness append, emission, and continuous verification.** The
    witness append and shard advance committed *in the same transaction* as the
    source event (see the atomicity invariant), checkpoint cadence ("every N
    entries or T seconds, whichever first"), log/OTLP emission of records,
@@ -56,10 +60,10 @@ ordered:
    offline verifier tool, and boot fail-closed for any key-holding kb whose
    chain verification is off. **E2 does not touch
    `kb_egress_release_allowed()`.**
-3. **E3 — full kill matrix, then the release-gate flip.** The exhaustive
+3. **E3, full kill matrix, then the release-gate flip.** The exhaustive
    CT103/CT260 restart and signal-level kill matrix across every P7 durable
-   boundary — the reseal boundaries D3b enumerated plus the new evidence-append,
-   shard-advance, checkpoint, and emission boundaries — with raw-key canary scans
+   boundary, the reseal boundaries D3b enumerated plus the new evidence-append,
+   shard-advance, checkpoint, and emission boundaries, with raw-key canary scans
    over database, files, logs, and crash artifacts. Only after that matrix passes
    does E3 make `kb_egress_release_allowed()` return a real answer.
 
@@ -73,14 +77,14 @@ in the slice that earns it.
 Each slice gets its own reviewed plan, adversarial branch review, target
 validation, and merge:
 
-- E1 — `tiered-llm-p7-witness-e1-record-checkpoint-evidence-log.plan.md`
-- E2 — `tiered-llm-p7-witness-e2-append-emission-verification.plan.md`
-- E3 — `tiered-llm-p7-witness-e3-kill-matrix-and-release.plan.md`
+- E1, `tiered-llm-p7-witness-e1-record-checkpoint-evidence-log.plan.md`
+- E2, `tiered-llm-p7-witness-e2-append-emission-verification.plan.md`
+- E3, `tiered-llm-p7-witness-e3-kill-matrix-and-release.plan.md`
 
 E1 and E2 were originally split so that the acknowledgement rules could be proven
 before any budget depended on them. There is no acknowledgement and no budget
 (see below), so that split had nothing left to protect. The compensating control
-is that E1 still ships **no caller** — nothing emits, nothing gates, and the
+is that E1 still ships **no caller**. Nothing emits, nothing gates, and the
 release gate stays closed until E2.
 
 ## Witness architecture: tamper-evident chain on aimee, exported everywhere
@@ -99,8 +103,8 @@ them precisely matters more than stating them impressively:
   no dependency on any collector.
 - **Consistent tampering and clean rollback are detectable only by comparison,
   and only for evidence that actually reached a collector before the compromise.**
-  A privileged actor who rewrites every local artifact coherently — chain, shard
-  heads, Merkle state, checkpoint sequence — leaves nothing locally wrong. What
+  A privileged actor who rewrites every local artifact coherently, chain, shard
+  heads, Merkle state, checkpoint sequence, leaves nothing locally wrong. What
   exposes it is the contradiction with copies already on hosts the attacker
   cannot reach backwards in time to amend. Evidence that never left the host
   before compromise has no external anchor and is not covered.
@@ -116,7 +120,7 @@ takeover. The two compose: the witness chain establishes that the local history
 is false and from which point, and the replayable bus stream supplies the true
 activity over that window.
 
-No slice may claim the witness export alone rebuilds the original event history —
+No slice may claim the witness export alone rebuilds the original event history,
 hashes cannot be inverted, and only the fields actually exported are readable
 from it. Records do carry the non-secret identifying fields an operator needs to
 act on a detection (request id, principal, `provider:cred`), because §6 requires
@@ -126,7 +130,7 @@ bus, and slices must cite it rather than overstating what the chain provides.
 **All evidence bytes ride the log/OTLP path. Metrics carry numbers only.**
 Records, signed checkpoints, and inclusion proofs are emitted as log/OTLP events.
 The Prometheus surface (`GET /v1/metrics`, behind org-admin auth or the
-constant-time scrape token — `src/kb/http/kb_http_telemetry.c`,
+constant-time scrape token, `src/kb/http/kb_http_telemetry.c`,
 `src/headers/kb_http_telemetry.h`) carries only numeric health signals: current
 checkpoint sequence, evidence count, emission backlog, and verification-failure
 counters.
@@ -137,7 +141,7 @@ Prometheus data model. Samples are numeric values plus labels: carrying changing
 roots, signatures, and sequence numbers as labels mints a new time series per
 checkpoint (unbounded cardinality), while packing bytes into numeric samples
 risks float64 precision loss. Exposition is also a sampled snapshot, so
-checkpoints produced between scrapes would simply be missed — and a missed
+checkpoints produced between scrapes would simply be missed, and a missed
 checkpoint breaks predecessor-linked verification for every consumer that
 retained the ones on either side of it. Metrics are a health surface, not an
 evidence transport.
@@ -146,8 +150,8 @@ evidence transport.
 existed because evidence sat in a local outbox *waiting* to reach an off-host
 sink that was authoritative; the bound capped how many key uses could occur while
 their only durable copy was still local. That is not this architecture. Evidence
-is durably committed on aimee-kb before the key is used — the existing P7
-admission rule — and export is redundancy on top of a copy that already exists.
+is durably committed on aimee-kb before the key is used. The existing P7
+admission rule, and export is redundancy on top of a copy that already exists.
 There is no in-flight-sole-copy window for a budget to bound, and with no
 confirmation protocol there is no event that could release a reserved slot, so a
 budget would only ever deadlock.
@@ -181,13 +185,13 @@ because those copies are already gone from the host's reach.
   supports incident *triage*.
 - **Emit everything, gate nothing on it.** All evidence is *emitted*; whether a
   downstream service retained it is not observable from aimee and must never be
-  claimed. Alerts fire on what is actually measurable locally — emission backlog
-  depth and failed OTLP sends — never on "a collector is down," which a design
+  claimed. Alerts fire on what is actually measurable locally, emission backlog
+  depth and failed OTLP sends, never on "a collector is down," which a design
   with no consumer registry cannot know. There is no delivery receipt, no
   watermark, no consumer registry, and no unwitnessed budget.
 - **The witness append is atomic with the source event, on every path.** The
   witness row and its shard-head advance commit in the *same transaction* as the
-  source event — for the admission append that gates key attachment, for reseal
+  source event, for the admission append that gates key attachment, for reseal
   rewrap events, and for D3b open events alike. A separate or asynchronous append
   would let a crash between them drop exactly the row an attacker wants missing.
   E2 therefore wires the witness call into the reseal orchestrator and the D3b
@@ -195,7 +199,7 @@ because those copies are already gone from the host's reach.
   this. It is an E2 release prerequisite, not something E3's kill matrix
   discovers. **A future slice that adds a fourth source ledger inherits this
   obligation**, and a CI gate asserts that every source discriminator the witness
-  record accepts has a wired-in transactional call site — the "outbox" naming
+  record accepts has a wired-in transactional call site. The "outbox" naming
   trap that hid the reseal transaction shape will otherwise recur.
 - **Comparison is operator-driven, and the docs say so.** No automated
   cross-consumer comparator is in scope. What this umbrella guarantees is that
@@ -223,7 +227,7 @@ because those copies are already gone from the host's reach.
   state. Nothing load-bearing lives in instance-local memory or on an instance's
   disk, because autoscale teardown destroys it.
 - **The hot path is bounded; checkpoint cost is off it and explicitly capped.** A
-  shard advance writes two rows — the evidence record and the shard head — and
+  shard advance writes two rows (the evidence record and the shard head) and
   touches no tree state. Checkpoint generation builds a depth-64 sparse Merkle
   tree by scanning the shard-head table once per cadence, bounded by a documented
   maximum shard count with a typed failure above it. The scan is stated, not
@@ -245,11 +249,11 @@ every copy already exported to every downstream service, in a mutually consisten
 way, without access to those hosts. Exported copies cannot be reached backwards
 in time.
 
-The forthcoming event-bus work raises that bar substantially rather than
+The forthcoming event-bus work raises that bar rather than
 marginally. Activity is recorded and replayable across services, so a forgery
 must additionally stay consistent with that stream. The attacker would need
 simultaneous control of the user's machine, aimee-server, and aimee-kb, including
-the bus itself, holding all of it mutually consistent — and consistent with what
+the bus itself, holding all of it mutually consistent, and consistent with what
 downstream collectors already hold. Short of that, the record remains replayable
 up to the moment of full takeover. This assurance argument does not depend on any
 single service being trustworthy, which is the point.
@@ -277,8 +281,8 @@ already beyond the attacker's reach. No slice may claim the residual is zero.
   documented shard ceiling completes within its deadline; append-only rules
   reject update/delete/truncate on every new table.
 - **CT260 real daemon:** the E3 kill matrix against a real aimee-kb process, real
-  PG17, swtpm, and a log/OTLP consumer **configured to durably retain the stream**
-  — proving that a rewritten local chain is caught by comparison against
+  PG17, swtpm, and a log/OTLP consumer **configured to durably retain the stream**,
+proving that a rewritten local chain is caught by comparison against
   previously emitted copies. The retention configuration is part of the gate: run
   with a consumer that drops or samples and the comparison result proves nothing,
   because the copies it would compare against were never kept. A gate that can be

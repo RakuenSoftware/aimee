@@ -7,7 +7,7 @@
 /* agent_eval_load_tasks() is implemented in posix/agent_eval.c (POSIX) and
  * windows/agent_eval.c (Windows stub). */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent_eval.h"
 #include "agent_eval_internal.h"
 #include "agent_config.h"
@@ -15,15 +15,144 @@
 #include "config.h"
 #include "memory.h"
 #include "cJSON.h"
+#include "aimee_sha256.h"
 #include <ctype.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
+#include <sys/utsname.h>
 
 static const char *const k_ablation_presets[] = {
     "full", "no_rescue", "no_respond", "no_sampling", "no_normalize", "no_retry", "bare", NULL};
+
+static void eval_hardware_profile(char out[AGENT_EVAL_HARDWARE_LEN])
+{
+   const char *pinned = getenv("AIMEE_BENCHMARK_HARDWARE_PROFILE");
+   if (pinned && pinned[0])
+   {
+      snprintf(out, AGENT_EVAL_HARDWARE_LEN, "%s", pinned);
+      return;
+   }
+   struct utsname u;
+   long cpus = sysconf(_SC_NPROCESSORS_ONLN);
+   if (uname(&u) == 0)
+      snprintf(out, AGENT_EVAL_HARDWARE_LEN, "%s/%s/cpus=%ld", u.sysname, u.machine,
+               cpus > 0 ? cpus : 0);
+   else
+      snprintf(out, AGENT_EVAL_HARDWARE_LEN, "unknown/cpus=%ld", cpus > 0 ? cpus : 0);
+}
+
+int agent_eval_manifest_build(const char *suite, const eval_task_t *tasks, int task_count,
+                              const char *agent_name, unsigned int seed, agent_eval_manifest_t *out)
+{
+   if (!out || !tasks || task_count <= 0 || !agent_name || !agent_name[0])
+      return -1;
+   memset(out, 0, sizeof(*out));
+   cJSON *dataset = cJSON_CreateObject();
+   cJSON *items = dataset ? cJSON_AddArrayToObject(dataset, "tasks") : NULL;
+   if (!dataset || !items)
+   {
+      cJSON_Delete(dataset);
+      return -1;
+   }
+   cJSON_AddStringToObject(dataset, "suite", suite ? suite : "");
+   for (int i = 0; i < task_count; i++)
+   {
+      cJSON *item = cJSON_CreateObject();
+      if (!item)
+      {
+         cJSON_Delete(dataset);
+         return -1;
+      }
+      cJSON_AddStringToObject(item, "name", tasks[i].name);
+      cJSON_AddStringToObject(item, "prompt", tasks[i].prompt);
+      cJSON_AddStringToObject(item, "role", tasks[i].role);
+      cJSON_AddStringToObject(item, "success_check_type", tasks[i].success_check_type);
+      cJSON_AddStringToObject(item, "success_check_value", tasks[i].success_check_value);
+      cJSON_AddNumberToObject(item, "max_turns", tasks[i].max_turns);
+      cJSON_AddNumberToObject(item, "max_latency_ms", tasks[i].max_latency_ms);
+      cJSON_AddItemToArray(items, item);
+   }
+   char *dataset_wire = cJSON_PrintUnformatted(dataset);
+   cJSON_Delete(dataset);
+   if (!dataset_wire ||
+       aimee_sha256_hex(dataset_wire, strlen(dataset_wire), out->dataset_hash) != 0)
+   {
+      free(dataset_wire);
+      memset(out, 0, sizeof(*out));
+      return -1;
+   }
+   free(dataset_wire);
+
+   cJSON *target = cJSON_CreateObject();
+   if (!target)
+      return -1;
+   cJSON_AddStringToObject(target, "aimee_version", AIMEE_VERSION);
+   cJSON_AddStringToObject(target, "agent", agent_name);
+   char *target_wire = cJSON_PrintUnformatted(target);
+   cJSON_Delete(target);
+   if (!target_wire || aimee_sha256_hex(target_wire, strlen(target_wire), out->target_hash) != 0)
+   {
+      free(target_wire);
+      memset(out, 0, sizeof(*out));
+      return -1;
+   }
+   free(target_wire);
+   snprintf(out->harness_version, sizeof(out->harness_version), "2");
+   eval_hardware_profile(out->hardware_profile);
+   out->seed = (int)seed;
+   return 0;
+}
+
+agent_eval_comparability_t agent_eval_manifest_compare(const agent_eval_manifest_t *left,
+                                                       const agent_eval_manifest_t *right,
+                                                       agent_eval_comparison_kind_t kind,
+                                                       const char **reason_out)
+{
+   if (reason_out)
+      *reason_out = "comparable";
+   if (!left || !right || !left->dataset_hash[0] || !right->dataset_hash[0] ||
+       !left->target_hash[0] || !right->target_hash[0] || !left->harness_version[0] ||
+       !right->harness_version[0])
+   {
+      if (reason_out)
+         *reason_out = "missing_manifest_identity";
+      return AGENT_EVAL_COMPARABILITY_UNKNOWN;
+   }
+#define EVAL_REQUIRE_EQUAL(field, reason)                                                          \
+   do                                                                                              \
+   {                                                                                               \
+      if (strcmp(left->field, right->field) != 0)                                                  \
+      {                                                                                            \
+         if (reason_out)                                                                           \
+            *reason_out = reason;                                                                  \
+         return AGENT_EVAL_INCOMPARABLE;                                                           \
+      }                                                                                            \
+   } while (0)
+   EVAL_REQUIRE_EQUAL(dataset_hash, "dataset_changed");
+   EVAL_REQUIRE_EQUAL(target_hash, "target_changed");
+   EVAL_REQUIRE_EQUAL(harness_version, "harness_changed");
+   if (left->seed != right->seed)
+   {
+      if (reason_out)
+         *reason_out = "seed_changed";
+      return AGENT_EVAL_INCOMPARABLE;
+   }
+   if (kind == AGENT_EVAL_COMPARE_LATENCY)
+   {
+      if (!left->hardware_profile[0] || !right->hardware_profile[0])
+      {
+         if (reason_out)
+            *reason_out = "missing_hardware_profile";
+         return AGENT_EVAL_COMPARABILITY_UNKNOWN;
+      }
+      EVAL_REQUIRE_EQUAL(hardware_profile, "hardware_changed");
+   }
+#undef EVAL_REQUIRE_EQUAL
+   return AGENT_EVAL_COMPARABLE;
+}
 
 int agent_eval_ablation_preset(const char *preset, agent_ablation_flags_t *out)
 {
@@ -101,10 +230,14 @@ static double eval_tool_success_rate(const agent_result_t *result, int failures)
 }
 
 static void eval_store_result(const char *suite, const eval_task_t *task,
+                              const eval_task_t *all_tasks, int task_count,
                               const agent_result_t *result, int passed, const char *ablation,
                               unsigned int seed)
 {
    int tool_failures = eval_tool_failures(result, passed);
+   agent_eval_manifest_t manifest;
+   int have_manifest = agent_eval_manifest_build(suite, all_tasks, task_count, result->agent_name,
+                                                 seed, &manifest) == 0;
    db1_eval_result_row_t row = {
        .suite = suite,
        .task_name = task->name,
@@ -120,10 +253,10 @@ static void eval_store_result(const char *suite, const eval_task_t *task,
        .latency_ms = result->latency_ms,
        .response = result->response,
        .error = result->error[0] ? result->error : NULL,
-       .dataset_hash = "",
-       .target_hash = "",
-       .harness_version = "1",
-       .hardware_profile = "",
+       .dataset_hash = have_manifest ? manifest.dataset_hash : "",
+       .target_hash = have_manifest ? manifest.target_hash : "",
+       .harness_version = have_manifest ? manifest.harness_version : "",
+       .hardware_profile = have_manifest ? manifest.hardware_profile : "",
        .seed = (int)seed,
    };
    (void)db1_eval_result_insert(&row);
@@ -255,7 +388,8 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
                passed = 0;
             int tool_failures = eval_tool_failures(&ar, passed);
 
-            eval_store_result(suite_name, &tasks[i], &ar, passed, preset, seed + (unsigned int)run);
+            eval_store_result(suite_name, &tasks[i], tasks, task_count, &ar, passed, preset,
+                              seed + (unsigned int)run);
 
             /* Emit hard-negative artefact on failure */
             if (!passed)
@@ -348,49 +482,25 @@ int eval_feedback_loop(void)
       }
    }
 
-   /* Reinforce rules that correlate with recent successes */
-   db1_eval_passed_task_t passes[20];
-   int n_pass = db1_eval_passed_tasks_recent(passes, 20);
-   for (int p = 0; p < n_pass; p++)
-   {
-      const char *task_name = passes[p].task_name;
-      if (!task_name || !task_name[0])
-         continue;
-
-      rule_t rules[32];
-      int rcount = db2_rules_list(rules, 32);
-      for (int i = 0; i < rcount; i++)
-      {
-         char title_copy[256];
-         snprintf(title_copy, sizeof(title_copy), "%s", rules[i].title);
-
-         char *saveptr = NULL;
-         char *word = strtok_r(title_copy, " \t", &saveptr);
-         int matched = 0;
-         int total = 0;
-
-         while (word)
-         {
-            if (strlen(word) > 3)
-            {
-               total++;
-               if (strcasestr(task_name, word))
-                  matched++;
-            }
-            word = strtok_r(NULL, " \t", &saveptr);
-         }
-
-         /* Successful task correlated with rule: small reinforcement */
-         if (total > 0 && matched * 2 >= total && rules[i].weight < 100)
-         {
-            int new_weight = rules[i].weight + 5;
-            if (new_weight > 100)
-               new_weight = 100;
-            db2_rules_update_weight(rules[i].id, new_weight);
-            adjustments++;
-         }
-      }
-   }
+   /* The success direction used to live here, and it was incoherent: a rule
+    * whose title words overlapped a FAILED task was bumped +10, and a rule
+    * whose title words overlapped a PASSED task was bumped +5. The same rule,
+    * on opposite outcomes, moved the same way. Word overlap is not evidence of
+    * contribution in either direction, but at least the failure direction
+    * carries a defensible reading -- "this rule is about something that is
+    * going wrong, surface it more". Rewarding a rule for being mentioned near
+    * a success is a pure ratchet: every rule drifts to weight 100 and the
+    * ordering it exists to provide is gone.
+    *
+    * Removing it is not the whole fix. A rule's real contribution needs a
+    * counterfactual -- the same task run with and without it -- which is what
+    * learning_attribution_* measures for CAPABILITIES from the ablation grid
+    * the harness already produces. There is no equivalent grid per rule yet,
+    * so the honest position is to stop manufacturing the signal rather than to
+    * keep a wrong one until a right one exists.
+    *
+    * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md
+    * (S2). */
 
    /* Also process agent_outcomes: failures and errors reinforce rules */
    db2_agent_outcome_failure_t outcome_fails[20];

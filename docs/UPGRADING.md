@@ -1,6 +1,6 @@
 # Upgrading from v0.2.192
 
-There is no route back. 0.3.0 rewrites storage, credentials, and remote identity, and a 0.2 server
+There is no route back. 0.4.0 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade
 command. Take the backup before step one, not after the first thing goes wrong.
 
@@ -16,13 +16,13 @@ Several of those are cases where a fresh install came up healthy and silently di
 
 1. Stop starting new workflows and wait for active writes to finish.
 2. Run `aimee audit checkpoint` and `aimee audit verify`.
-3. Back up the server config directory, DB1, workflow store, vault custody, TLS state, and audit
-   witness material.
+3. Dump DB1 with `pg_dump`; it includes workflow rows. Also back up the server config directory,
+   vault custody, TLS state, and audit witness material.
 4. Dump DB2 with `pg_dump` or the KB export helper.
 5. Export old `work_queue` rows if you need them; the upgrade removes those tables.
 6. Record current compose files, image digests, environment, external endpoints, and volume names.
 
-Do not rely on a raw copy of a live SQLite main file. Take a consistent backup with its WAL state.
+Use database-native consistent dumps. Copying a live database data file is not a backup.
 
 ## The combined image is gone, and the new stack will not adopt your old database
 
@@ -45,7 +45,7 @@ Do not rely on a raw copy of a live SQLite main file. Take a consistent backup w
 
 ## This upgrade is one-way, by design
 
-0.3.0 does not preserve backwards compatibility, and that includes the image itself: once a server
+0.4.0 does not preserve backwards compatibility, and that includes the image itself: once a server
 volume has been booted by this release, an older image will not start on it again. It crash-loops
 with:
 
@@ -139,6 +139,141 @@ ready. Successful enrollment atomically saves the mTLS certificate and private k
 token, and it validates the stored identity against the connection string's CA pin on every restart.
 Startup logs name the missing input when a deployment remains read-only.
 
+Each Aimee mTLS identity must now carry exactly one extended-key-usage role: `serverAuth` for a
+listener or `clientAuth` for an outbound peer. Certificates with no EKU, `anyExtendedKeyUsage`, or
+both roles are rejected. Reissue any older broad-purpose certificate before upgrading. Keep every
+connection pair on distinct key material and rotate each pair independently; in particular,
+aimee-server's thinclient-facing server certificate must not be reused as its KB client identity.
+
+Stage this upgrade by issuing both role-specific identities before switching the new binaries over.
+Keep the previous certificate/key bundles intact until both new handshakes and one authenticated
+request have succeeded. A rollback restores each old certificate and its matching private key as a
+pair; do not move either new identity into the other role to make a rollback connect. The new release
+fails closed when the counterpart identity is absent, so partial certificate installation is a
+startup/configuration error rather than a bearer-only fallback.
+
+Every networked Aimee hop now applies three independent checks on ordinary requests: the verified
+pair-specific mTLS identity, the current rotating connection bearer, and an enrolled application
+identity. On server-to-KB traffic these are configured with `AIMEE_KB_CLIENT_BEARER_TOKEN` plus
+either `AIMEE_KB_CLIENT_OIDC_TOKEN`, the
+`AIMEE_KB_CLIENT_PAM_USERNAME`/`AIMEE_KB_CLIENT_PAM_PASSWORD` pair, or the managed stack's distinct
+`AIMEE_KB_SERVICE_IDENTITY_TOKEN`. The managed token has the canonical
+`scope:service:aimee-server:<secret>` form and must be sealed into both the server and KB Vaults;
+the wizard does this automatically and rotates it independently from the connection bearer. OIDC
+mode does not fall back to the managed token or PAM when its federation is unavailable. On
+thinclient-to-server content traffic, a caller identity
+JWT occupies `Authorization` while the independent rotating connection bearer is carried in
+`x-api-key`; a verified client certificate no longer bypasses that bearer check.
+
+The same managed identity one-shot enrolls the `aimee-server` application identity and the
+appliance administrator into the owner's default KB team. This enrollment is idempotent across
+redeploys. Additional host accounts are not silently granted shared knowledge access; an operator
+must add their explicit KB team membership before their content reads can resolve.
+
+Those server-to-KB values are first-boot inputs: bootstrap seals them into Vault, removes them from
+the process environment, and the client reads the current Vault values for every request so bearer,
+managed-service-token, OIDC-token, and PAM-password rotation takes effect on an existing pooled TLS
+connection.
+Changing `AIMEE_KB_CLIENT_PAM_USERNAME` is an identity migration, not password rotation: provision
+that PAM account on the KB and rotate the matching `service:<name>` certificate enrollment in the
+same staged change.
+
+Caller context is distinct from those service-connection checks. A KB-signed OIDC caller token is
+forwarded unchanged and cryptographically verified again by aimee-kb with token type, issuer,
+server audience, team and certificate-bound JWKS pinned. A host/PAM caller is asserted by the
+triple-authenticated aimee-server channel. This is the explicit compromise: a compromised server can
+name a host account, but it cannot forge an OIDC caller, and it cannot grant either caller a team or
+project because membership remains KB-owned and is intersected with the enrolled server scope. A new
+per-request mint would ask the KB to trust the same host assertion at mint time, so it would add a
+round trip and audit artefact without changing that authority.
+
+The local CLI remains on the OS-authenticated Unix-socket boundary and is resolved to its host
+account before any KB content request; an unresolved uid is refused. Physical host takeover is not a
+separate Aimee protocol threat. Browser and MCP identity continue to terminate at aimee-server and
+use the same server-to-KB path. Caller-less ingest, re-embed, curator and code-index work uses a
+closed-name, project-bound maintenance scope. Durable queues are read only far enough to claim work
+and learn its project; content transactions then admit only that project's attributed rows and end
+before any embedder, model, or sidecar call. The scope does not impersonate a user or add a network
+credential. This release declares the content readers ready after live two-user/two-team coverage,
+but applying the schema does not enable content RLS.
+
+The attribution is deliberately numeric and explicit because tenancy-project names are unique only
+inside a team. On the KB host, list the tenancy project ids and bind each existing code-index project
+that owns documents or file-index rows:
+
+```bash
+aimee-kb project list [team-id]
+aimee-kb project attribute <code-index-project> <kb-project-id>
+```
+
+Re-running `project attribute` replaces the prior binding atomically. It is an org-admin operation;
+both exact projects must already exist, and no name-based fallback is attempted.
+
+Before enabling, the following query must return no rows. Embeddings must agree with their owning
+chunk, regions and table cells inherit through their foreign-key chain, and assets must still have a
+matching document. If pgvector is intentionally unavailable, omit the two embedding arms because
+those optional relations do not exist.
+
+```bash
+psql "$AIMEE_DB2_URL" -c "
+  SELECT 'kb_documents' AS source, d.project, count(*) AS rows
+    FROM kb_documents d LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY d.project
+  UNION ALL
+  SELECT 'kb_file_index', f.project, count(*)
+    FROM kb_file_index f LEFT JOIN projects p ON p.name=f.project
+   WHERE p.kb_project IS NULL GROUP BY f.project
+  UNION ALL
+  SELECT 'kb_embeddings', e.project, count(*)
+    FROM kb_embeddings e
+    LEFT JOIN kb_documents d ON d.id=e.point_id AND d.project=e.project
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY e.project
+  UNION ALL
+  SELECT 'kb_pdf_embeddings', e.project, count(*)
+    FROM kb_pdf_embeddings e
+    LEFT JOIN kb_documents d ON d.id=e.point_id AND d.project=e.project
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY e.project
+  UNION ALL
+  SELECT 'kb_doc_regions', coalesce(d.project,'<missing chunk>'), count(*)
+    FROM kb_doc_regions r LEFT JOIN kb_documents d ON d.id=r.chunk_id
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY d.project
+  UNION ALL
+  SELECT 'kb_table_cells',
+         coalesce(d.project,CASE WHEN r.id IS NULL THEN '<missing region>' ELSE '<missing chunk>' END),
+         count(*)
+    FROM kb_table_cells c LEFT JOIN kb_doc_regions r ON r.id=c.region_id
+    LEFT JOIN kb_documents d ON d.id=r.chunk_id LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL
+   GROUP BY coalesce(d.project,
+                     CASE WHEN r.id IS NULL THEN '<missing region>' ELSE '<missing chunk>' END)
+  UNION ALL
+  SELECT 'kb_doc_assets', a.project, count(*)
+    FROM kb_doc_assets a
+    LEFT JOIN kb_documents d ON d.project=a.project AND d.generation=a.generation
+                            AND d.file_path=a.document_key
+    LEFT JOIN projects p ON p.name=d.project
+   WHERE p.kb_project IS NULL GROUP BY a.project;"
+```
+
+Then enable the policies as a deliberate operator act:
+
+```bash
+psql "$AIMEE_DB2_URL" -c "select kb_content_scope_enable();"
+```
+
+The function refuses unless the release readiness marker is present and every content-bearing
+project and child row is attributed consistently. It atomically enables documents, file index,
+general/PDF embeddings, document regions, table cells, and document assets. To roll back enforcement
+without changing attribution, call
+`select kb_content_scope_disable();`.
+
+Re-run `kb_content_scope_enable()` after this upgrade even when document/file-index scope was already
+enabled. The call is idempotent and brings the newly covered vector and structured-document tables
+under the same operator-controlled switch.
+
 Grants are keyed by server, team, and exact authenticated subject:
 
 | Subject | Form |
@@ -148,14 +283,25 @@ Grants are keyed by server, team, and exact authenticated subject:
 | mTLS identity | `cert:<issuer>:<serial>` |
 | local single-org operator | `owner` |
 
-Grant through the local Unix socket. These routes are never exposed to a remote bearer:
+Grants are administered **against aimee-kb**, not through aimee-server. The
+server used to proxy this over its local Unix socket; that proxy was removed,
+because proxying it meant aimee-server holding an administrative identity on
+aimee-kb, which a single-tenant data-plane service should not have. Server-side dispatch went with
+it and no longer works. Legacy `aimee kb grant …` grammar may still appear in generated help, but
+it is not an administrative transport.
 
 ```bash
-aimee kb grant set --server <server-id> --team <team-id> --subject <subject> --tier data
-aimee kb grant show --server <server-id> --team <team-id> --subject <subject>
-aimee kb grant list --server <server-id> --team <team-id> --include-revoked
-aimee kb grant revoke --server <server-id> --team <team-id> --subject <subject>
+# on aimee-kb, as a principal with admin or team-lead authority IN the target team
+POST /v1/write-tier-grants/set     {"server_id": "...", "team_id": N,
+                                    "subject": "...", "tier": "data"}
+POST /v1/write-tier-grants/revoke  {"server_id": "...", "team_id": N, "subject": "..."}
+GET  /v1/write-tier-grants?server_id=...&team_id=N[&include_revoked=1][&subject=...]
 ```
+
+The acting identity comes from authentication, never from the request body, and
+the DB layer's `SECURITY DEFINER` check is the authority. A caller that is not a
+member of the named team is refused with exactly that reason; the `(server,
+team)` pair must also be registered.
 
 `data` permits memory, document, and index writes. `full` also permits agent, delegate, runner, and
 workspace control. The first grant uses the local `owner` operator context with team `0`; the
@@ -194,8 +340,8 @@ the `embedding_*` spelling while the code had already moved on, so the file and 
 setting could disagree. They are one name now, which means the old file keys are
 dead: re-set them.
 
-Deleted outright, because the container they configured is retired and the
-`aimee-kb` image variant now encodes that choice: `llm_embed_backend`,
+Deleted outright, because role placement and model-specific synthesis sidecars replace the generic
+container controls: `llm_embed_backend`,
 `llm_synth_backend`, `llm_synth_host`, `llm_synth_gpu`, `llm_synth_tier`,
 `AIMEE_LLM_SYNTH_MODE`, `AIMEE_LLM_SYNTH_URL`, `AIMEE_LLM_SYNTH_TIER`. A config
 still carrying `kb.curator.tier_b.*` is not an error: the key is ignored and
@@ -286,7 +432,7 @@ deliberate bumping.
 ## Bundled synthesis weights are baked into the image
 
 The weights ship inside the `aimee-llm-*` images, at a quant chosen per model:
-7.46 GB for E4B at UD-Q6_K_XL, 2.97 GB for E2B at UD-Q4_K_XL. The container downloads nothing at any point: an image either has its model
+7.46 GB for E4B at UD-Q6_K_XL, 2.62 GB for E2B at qat-UD-Q4_K_XL. The container downloads nothing at any point: an image either has its model
 or it does not, and `docker pull` is the one download, with the registry's retry and
 resume behind it.
 

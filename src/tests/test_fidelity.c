@@ -6,10 +6,10 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/fidelity.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/fidelity.h"
 
 static int64_t count_kind(void *conn, const char *kind)
 {
@@ -88,15 +88,31 @@ int main(void)
    assert(count_kind(conn, "retrieval_attribution") == 0);
    printf("  attributions stored non-scored (fidelity-judge), demotion-inert OK\n");
 
-   /* malformed payload on a present row → -1 (distinct from a real all-zeros report) */
+   /* malformed payload on a present row → -1 (distinct from a real all-zeros report).
+    *
+    * The two engines guard this at different layers. artifacts.payload is JSONB on
+    * Postgres, so the malformed text never reaches a row at all -- the column type
+    * refuses the INSERT, which is the stronger guarantee. Under the sqlite shim the
+    * column is TEXT and the bad payload lands, so the reader's own parse guard is
+    * what has to catch it. Assert whichever layer is actually load-bearing here. */
    {
       char e[256] = "";
-      assert(aimee_pg_exec(conn,
-                           "INSERT INTO artifacts (id, kind, turn_id, payload)"
-                           " VALUES ('bad1','fidelity_report','tbad','{not json')",
-                           e, sizeof e) == 0);
-      assert(db2_fidelity_report_by_turn("tbad", NULL, 0, NULL, NULL, NULL) == -1);
-      printf("  malformed report payload returns -1 OK\n");
+      int inserted = aimee_pg_exec(conn,
+                                   "INSERT INTO artifacts (id, kind, turn_id, payload)"
+                                   " VALUES ('bad1','fidelity_report','tbad','{not json')",
+                                   e, sizeof e);
+      if (aimee_pg_is_shim())
+      {
+         assert(inserted == 0);
+         assert(db2_fidelity_report_by_turn("tbad", NULL, 0, NULL, NULL, NULL) == -1);
+         printf("  malformed report payload returns -1 OK\n");
+      }
+      else
+      {
+         assert(inserted != 0); /* JSONB refused it */
+         assert(db2_fidelity_report_by_turn("tbad", NULL, 0, NULL, NULL, NULL) == 0);
+         printf("  malformed report payload refused by the JSONB column OK\n");
+      }
    }
 
    /* COEXISTENCE: a fidelity_report shares turn_id 't3' with a retrieval_event

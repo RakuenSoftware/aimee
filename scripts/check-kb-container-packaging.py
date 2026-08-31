@@ -19,7 +19,15 @@ except ImportError:  # pragma: no cover - fail-closed packaging prerequisite
 REQUIRED_DOCKERFILE_PATTERNS = {
     "named-build-stage": r"(?im)^FROM\s+\S+\s+AS\s+build\b",
     "builds-aimee-kb": r"make\s+-C\s+src\s+\.\./aimee-kb",
+    "builds-aimee-kb-worm": r"make\s+-C\s+src[^\n]*\.\./aimee-kb-worm",
     "copies-aimee-kb": r"COPY\s+--from=build\s+/src/aimee-kb\s+/usr/local/bin/aimee-kb",
+    "copies-aimee-kb-worm": (
+        r"COPY\s+--from=build\s+/src/aimee-kb-worm\s+/usr/local/bin/aimee-kb-worm"
+    ),
+    # SQLite belongs only to the separately linked WORM worker. check-linking
+    # independently rejects SQLite linkage in the aimee-kb service binary.
+    "sqlite-worm-build-dependency": r"\blibsqlite3-dev\b",
+    "sqlite-worm-runtime-dependency": r"\blibsqlite3-0\b",
     "aimee-home-env": r"(?m)^ENV\s+AIMEE_HOME=/var/lib/aimee\b",
     # DB2 ships IN the image so an unconfigured deployment has a working vector
     # store without pulling a third-party database image at runtime.
@@ -37,7 +45,6 @@ REQUIRED_DOCKERFILE_PATTERNS = {
 
 FORBIDDEN_DOCKERFILE_PATTERNS = {
     "server-binary": r"aimee-server",
-    "sqlite-package": r"sqlite3|libsqlite3",
     "db1-reference": r"\bDB1\b|db1/",
     # A baked URL makes an unconfigured install silently depend on a sibling
     # container instead of starting the PostgreSQL shipped inside aimee-kb.
@@ -79,10 +86,14 @@ KB_MTLS_ENV = {
     "AIMEE_KB_MTLS_HOST": "aimee-kb",
     "AIMEE_KB_MTLS_PORT": "8745",
 }
+CONTROL_WEB_CRED_MOUNT = (
+    "${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro"
+)
 
 REQUIRED_DOCKERIGNORE_ENTRIES = {
     ".git",
     ".aimee",
+    ".env",
     "build",
     "src/build",
     "frontend/node_modules",
@@ -311,6 +322,52 @@ def kb_publication_failures(text: str) -> list[str]:
     return failures
 
 
+def control_web_idle_health_failures(text: str) -> list[str]:
+    """Keep optional control-web first boot consistent with Compose health.
+
+    With no console credential, the process intentionally stays alive without a
+    listener. Once a credential file exists, health must probe the real TLS SPA.
+    """
+    if yaml is None:
+        return ["PyYAML is required to validate control-web Compose health"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-control-web") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return ["missing aimee-control-web service"]
+
+    failures: list[str] = []
+    environment = service.get("environment")
+    if not isinstance(environment, dict):
+        return ["aimee-control-web environment must use parsed mapping form"]
+    if environment.get("AIMEE_CONTROL_WEB_ENABLED") != "${AIMEE_CONTROL_WEB_ENABLED:-1}":
+        failures.append("aimee-control-web enable flag must be operator-overridable")
+    if environment.get("CONTROL_WEB_CRED_FILE") != "/run/control-web/console.cred":
+        failures.append("aimee-control-web credential path changed unexpectedly")
+    volumes = service.get("volumes")
+    if not isinstance(volumes, list) or CONTROL_WEB_CRED_MOUNT not in volumes:
+        failures.append("aimee-control-web must mount the credential parent directory read-only")
+
+    healthcheck = service.get("healthcheck")
+    test = healthcheck.get("test") if isinstance(healthcheck, dict) else None
+    if not isinstance(test, list) or len(test) != 2 or test[0] != "CMD-SHELL":
+        failures.append("aimee-control-web healthcheck must use one bounded shell decision")
+        return failures
+    command = str(test[1])
+    required = {
+        "disabled-state handling": "AIMEE_CONTROL_WEB_ENABLED",
+        "credential-file handling": 'if [ ! -f "$${CONTROL_WEB_CRED_FILE}" ]',
+        "live TLS probe": "curl -fsSk https://127.0.0.1:8744/",
+    }
+    for name, marker in required.items():
+        if marker not in command:
+            failures.append(f"aimee-control-web healthcheck missing {name}")
+    return failures
+
+
 def server_identity_failures(text: str, managed: bool = False) -> list[str]:
     """Validate the opt-in server identity contract in a release Compose file.
 
@@ -368,6 +425,65 @@ def kb_mtls_failures(text: str) -> list[str]:
         for name, expected in KB_MTLS_ENV.items()
         if str(environment.get(name, "")) != expected
     ]
+
+
+def split_kb_identity_failures(text: str) -> list[str]:
+    """Keep the no-Docker-socket profile on the authenticated mTLS path."""
+    if yaml is None:
+        return ["PyYAML is required to validate the effective Compose model"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    if not isinstance(services, dict):
+        return ["missing services mapping"]
+    kb = services.get("aimee-kb")
+    server = services.get("aimee-server")
+    identity = services.get("aimee-server-identity")
+    if not all(isinstance(service, dict) for service in (kb, server, identity)):
+        return ["split stack requires KB, server, and server-identity services"]
+
+    failures: list[str] = []
+    kb_env = kb.get("environment")
+    if not isinstance(kb_env, dict) or kb_env.get("AIMEE_KB_HTTP_BIND") != "":
+        failures.append("KB must override the image's public HTTP bind with an empty value")
+    if kb.get("ports"):
+        failures.append("KB plain HTTP listener must not be published")
+    server_env = server.get("environment")
+    if not isinstance(server_env, dict) or "AIMEE_KB_API_URL" in server_env:
+        failures.append("server must not retain a cleartext KB fallback URL")
+
+    server_dep = server.get("depends_on")
+    identity_dep = server_dep.get("aimee-server-identity") if isinstance(server_dep, dict) else None
+    if not isinstance(identity_dep, dict) or identity_dep.get("condition") != "service_completed_successfully":
+        failures.append("server must wait for successful KB client identity installation")
+    helper_dep = identity.get("depends_on")
+    kb_dep = helper_dep.get("aimee-kb") if isinstance(helper_dep, dict) else None
+    if not isinstance(kb_dep, dict) or kb_dep.get("condition") != "service_healthy":
+        failures.append("server identity helper must wait for a healthy KB")
+    command = identity.get("command")
+    if not isinstance(command, list) or not all(
+        required in command
+        for required in (
+            "managed-server-identity",
+            "install",
+            "--host=aimee-kb",
+            "--port=8745",
+            "--member=root",
+        )
+    ):
+        failures.append(
+            "server identity helper command must install for aimee-kb:8745 and enroll root"
+        )
+    helper_volumes = identity.get("volumes")
+    for required in (
+        "aimee-kb-home:/var/lib/aimee",
+        "aimee-server-home:/var/lib/aimee-server",
+    ):
+        if not isinstance(helper_volumes, list) or required not in helper_volumes:
+            failures.append(f"server identity helper missing {required}")
+    return failures
 
 
 def server_default_config_failures(text: str) -> list[str]:
@@ -481,6 +597,30 @@ SHIPPED_COMPOSE_FILES = (
 )
 
 
+def bundled_embedder_default_failures(text: str) -> list[str]:
+    """Keep an image carrying A25M paired with an explicit A25M selection."""
+    if yaml is None:
+        return ["PyYAML is required to validate bundled embedder defaults"]
+    try:
+        model = yaml.load(text, Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"invalid Compose YAML: {exc.__class__.__name__}"]
+    services = model.get("services") if isinstance(model, dict) else None
+    service = services.get("aimee-kb") if isinstance(services, dict) else None
+    if not isinstance(service, dict):
+        return []
+    image = str(service.get("image", ""))
+    if "aimee-kb-a25m:" not in image:
+        return []
+    environment = service.get("environment")
+    selected = environment.get("EMBEDDER_MODEL") if isinstance(environment, dict) else None
+    if selected != "${EMBEDDER_MODEL:-bekko-a25m}":
+        return [
+            "defaults to aimee-kb-a25m but does not default EMBEDDER_MODEL to bekko-a25m"
+        ]
+    return []
+
+
 def empty_key_failures(text: str) -> list[str]:
     """Catch a service key that is present but null.
 
@@ -516,7 +656,10 @@ def check(root: Path) -> list[str]:
     for rel in SHIPPED_COMPOSE_FILES:
         path = root / rel
         if path.exists():
-            for failure in empty_key_failures(read(path)):
+            text = read(path)
+            for failure in empty_key_failures(text):
+                failures.append(f"{rel} {failure}")
+            for failure in bundled_embedder_default_failures(text):
                 failures.append(f"{rel} {failure}")
     dockerfile = root / "Dockerfile"
     compose = root / "compose.yaml"
@@ -580,6 +723,8 @@ def check(root: Path) -> list[str]:
             failures.append(f"compose.yaml contains forbidden {name}")
         for failure in kb_publication_failures(text):
             failures.append(f"compose.yaml {failure}")
+        for failure in control_web_idle_health_failures(text):
+            failures.append(f"compose.yaml {failure}")
 
     if not server_compose.exists():
         failures.append("missing compose.server.yaml")
@@ -598,6 +743,16 @@ def check(root: Path) -> list[str]:
             failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
         for failure in managed_kb_llm_contract_failures(managed_text):
             failures.append(f"deploy/container/aimee-managed.compose.yaml {failure}")
+
+    split_compose = root / "deploy" / "compose" / "aimee.yaml"
+    if not split_compose.exists():
+        failures.append("missing deploy/compose/aimee.yaml")
+    else:
+        split_text = read(split_compose)
+        for failure in kb_mtls_failures(split_text):
+            failures.append(f"deploy/compose/aimee.yaml {failure}")
+        for failure in split_kb_identity_failures(split_text):
+            failures.append(f"deploy/compose/aimee.yaml {failure}")
 
     if not dockerignore.exists():
         failures.append("missing .dockerignore")
@@ -624,6 +779,10 @@ def plant_test() -> int:
         expected = {
             "Dockerfile missing named-build-stage",
             "Dockerfile missing copies-aimee-kb",
+            "Dockerfile missing builds-aimee-kb-worm",
+            "Dockerfile missing copies-aimee-kb-worm",
+            "Dockerfile missing sqlite-worm-build-dependency",
+            "Dockerfile missing sqlite-worm-runtime-dependency",
             "Dockerfile missing aimee-home-env",
             "Dockerfile missing db2-embedded-engine",
             "Dockerfile missing runtime-user",
@@ -650,13 +809,16 @@ def plant_test() -> int:
             "\n".join(
                 [
                     "FROM debian AS build",
-                    "RUN make -C src ../aimee-kb",
+                    "RUN apt-get install -y libsqlite3-dev",
+                    "RUN make -C src ../aimee-kb ../aimee-kb-worm",
                     "FROM debian",
                     "RUN apt-get install -y \\",
                     "        postgresql-${PG_MAJOR}-pgvector \\",
+                    "        libsqlite3-0 \\",
                     "        python3",
                     "ENV AIMEE_HOME=/var/lib/aimee",
                     "COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb",
+                    "COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm",
                     "COPY scripts/embed-remote.py /opt/aimee/scripts/",
                     "COPY deploy/container/aimee.yaml /var/lib/aimee/.config/aimee/aimee.yaml",
                     "USER aimee",
@@ -676,15 +838,31 @@ def plant_test() -> int:
                     "    build:",
                     "      context: .",
                     "      dockerfile: Dockerfile",
+                    "    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}",
                     "    environment:",
                     "      AIMEE_HOME: /var/lib/aimee",
                     "      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}",
+                    "      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}",
                     "      AIMEE_KB_MTLS_HOST: aimee-kb",
                     '      AIMEE_KB_MTLS_PORT: "8745"',
                     "    ports:",
                     '      - "127.0.0.1:8741:8741"',
                     "    healthcheck:",
                     '      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]',
+                    "  aimee-control-web:",
+                    "    environment:",
+                    "      AIMEE_CONTROL_WEB_ENABLED: ${AIMEE_CONTROL_WEB_ENABLED:-1}",
+                    "      CONTROL_WEB_CRED_FILE: /run/control-web/console.cred",
+                    "    volumes:",
+                    "      - ${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro",
+                    "    healthcheck:",
+                    "      test:",
+                    "        - CMD-SHELL",
+                    "        - >-",
+                    "          enabled=$$(printf '%s' \"$${AIMEE_CONTROL_WEB_ENABLED:-1}\" | tr '[:upper:]' '[:lower:]');",
+                    "          case \"$$enabled\" in 0|false|no|off) exit 0;; esac;",
+                    "          if [ ! -f \"$${CONTROL_WEB_CRED_FILE}\" ]; then exit 0; fi;",
+                    "          curl -fsSk https://127.0.0.1:8744/",
                     "",
                 ]
             ),
@@ -736,6 +914,34 @@ def plant_test() -> int:
             "      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}\n",
             encoding="utf-8",
         )
+        (root / "deploy/compose").mkdir(parents=True)
+        (root / "deploy/compose/aimee.yaml").write_text(
+            "services:\n"
+            "  aimee-kb:\n"
+            "    environment:\n"
+            '      AIMEE_KB_HTTP_BIND: ""\n'
+            "      AIMEE_KB_MTLS_HOST: aimee-kb\n"
+            '      AIMEE_KB_MTLS_PORT: "8745"\n'
+            "  aimee-server:\n"
+            "    environment: {}\n"
+            "    depends_on:\n"
+            "      aimee-server-identity:\n"
+            "        condition: service_completed_successfully\n"
+            "  aimee-server-identity:\n"
+            "    command:\n"
+            "      - managed-server-identity\n"
+            "      - install\n"
+            "      - --host=aimee-kb\n"
+            "      - --port=8745\n"
+            "      - --member=root\n"
+            "    depends_on:\n"
+            "      aimee-kb:\n"
+            "        condition: service_healthy\n"
+            "    volumes:\n"
+            "      - aimee-kb-home:/var/lib/aimee\n"
+            "      - aimee-server-home:/var/lib/aimee-server\n",
+            encoding="utf-8",
+        )
         (root / "deploy/container/aimee-server-remote-writes.yaml").write_text(
             'aimee:\n  api:\n    remote_writes: "off"\n', encoding="utf-8"
         )
@@ -755,6 +961,21 @@ def plant_test() -> int:
             for item in found:
                 print(f"  found: {item}", file=sys.stderr)
             return 1
+
+        control_compose = read(root / "compose.yaml")
+        for marker in (
+            "      AIMEE_CONTROL_WEB_ENABLED: ${AIMEE_CONTROL_WEB_ENABLED:-1}\n",
+            "      - ${CONTROL_WEB_CRED_DIR:-./control-web-secrets}:/run/control-web:ro\n",
+            '          if [ ! -f \"$${CONTROL_WEB_CRED_FILE}\" ]; then exit 0; fi;\n',
+            "          curl -fsSk https://127.0.0.1:8744/\n",
+        ):
+            planted = control_compose.replace(marker, "", 1)
+            if planted == control_compose or not control_web_idle_health_failures(planted):
+                print(
+                    f"kb-container-packaging plant: missed control-web health marker {marker!r}",
+                    file=sys.stderr,
+                )
+                return 1
 
         identity_compose = read(root / "compose.server-managed.yaml")
         for marker in (
@@ -784,6 +1005,30 @@ def plant_test() -> int:
                     file=sys.stderr,
                 )
                 return 1
+
+        split_text = read(root / "deploy/compose/aimee.yaml")
+        split_plants = (
+            split_text.replace('      AIMEE_KB_HTTP_BIND: ""\n', "", 1),
+            split_text.replace("    environment: {}\n", "    environment:\n"
+                               "      AIMEE_KB_API_URL: http://aimee-kb:8741\n", 1),
+            split_text.replace("        condition: service_completed_successfully\n",
+                               "        condition: service_started\n", 1),
+            split_text.replace("      - --host=aimee-kb\n", "", 1),
+            split_text.replace("      - --member=root\n", "", 1),
+            split_text.replace("      - aimee-server-home:/var/lib/aimee-server\n", "", 1),
+        )
+        for planted in split_plants:
+            if not split_kb_identity_failures(planted):
+                print("kb-container-packaging plant: missed split mTLS contract", file=sys.stderr)
+                return 1
+        published_split = split_text.replace(
+            "    environment:\n      AIMEE_KB_HTTP_BIND:",
+            '    ports: ["8741:8741"]\n    environment:\n      AIMEE_KB_HTTP_BIND:',
+            1,
+        )
+        if not split_kb_identity_failures(published_split):
+            print("kb-container-packaging plant: missed published split KB", file=sys.stderr)
+            return 1
 
         # The sidecar may exist, but not ungated and not without the kb ordering it
         # depends on. Planting a bare service definition exercises both.
@@ -876,6 +1121,17 @@ def plant_test() -> int:
             '      - "127.0.0.1:8741:8741"\n      - $KB_PORT:8741',
         ]
         safe_compose = read(root / "compose.server.yaml")
+        missing_embedder_default = safe_compose.replace(
+            "EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}",
+            "EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}",
+            1,
+        )
+        if missing_embedder_default == safe_compose:
+            print("kb-container-packaging plant: embedder-default mutation did not apply", file=sys.stderr)
+            return 1
+        if not bundled_embedder_default_failures(missing_embedder_default):
+            print("kb-container-packaging plant: missed empty bundled embedder selection", file=sys.stderr)
+            return 1
         for bad in bad_publications:
             planted = safe_compose.replace('      - "127.0.0.1:8741:8741"', bad)
             if planted == safe_compose:

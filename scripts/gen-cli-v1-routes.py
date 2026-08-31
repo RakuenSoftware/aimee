@@ -1,7 +1,13 @@
 #!/usr/bin/env python3
-"""Generate the thin client's method -> first-class /v1 route map from the /v1
-route descriptor, so the client calls dedicated REST endpoints instead of
-tunnelling through the retired generic dispatch endpoint.
+"""Extract the method -> first-class /v1 route map from the /v1 route descriptor.
+
+NOTE: this no longer generates a table into the thin client. The client fetches
+the map from the server at runtime (GET /v1/cli/manifest), so there is no second
+copy to keep in step and nothing here writes into src/cli_v1_routes*.c any more.
+What survives is the extraction: scripts/check-cli-v1-routes.py calls this with
+--stdout to learn which methods the server routes, so it can still catch a
+command that is dispatchable but unroutable. Kept as an extractor, not a
+generator.
 
 Source of truth: docs/gen/v1-route-descriptor.json — the canonical extract of the
 server's g_v1_routes[] table (produced by scripts/gen-v1-route-descriptor.py,
@@ -51,13 +57,30 @@ OPTIONAL_ROUTE_GUARDS = {
 
 
 def _routes(handler):
-    """(op, verb, path) for the RM_EXACT routes dispatched by `handler`, keyed by
-    op (first wins; op is unique) and sorted by op."""
+    """(op, verb, path) for the RM_EXACT routes dispatched by `handler`, one route
+    per op, sorted by op.
+
+    An op may be reachable under more than one path when a route is renamed and
+    the old spelling is kept as an alias. The descriptor is sorted by PATH, so
+    "first wins" would hand the client whichever alias sorts earliest -- e.g.
+    /v1/agent/list over /v1/model/list for model.list, pointing the thin client
+    at the deprecated spelling and breaking it the day the alias is dropped.
+    Prefer the path whose first segment matches the op's own namespace; fall back
+    to first-seen when nothing matches (ops whose route is not named after them).
+    """
     doc = json.loads(DESCRIPTOR.read_text(encoding="utf-8"))
     seen = {}
     for r in doc["routes"]:
-        if r["match"] == "exact" and r["handler"] == handler and r["op"]:
-            seen.setdefault(r["op"], (r["verb"], r["path"]))
+        if r["match"] != "exact" or r["handler"] != handler or not r["op"]:
+            continue
+        op = r["op"]
+        candidate = (r["verb"], r["path"])
+        if op not in seen:
+            seen[op] = candidate
+            continue
+        namespace = op.split(".", 1)[0]
+        if r["path"].startswith(f"/v1/{namespace}/"):
+            seen[op] = candidate
     return sorted((op, v, p) for op, (v, p) in seen.items())
 
 

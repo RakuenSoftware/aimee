@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Guard that every command the thin client can route has a help entry.
 
-`aimee help <cmd>` is served from client_help[] (src/cli_help_data.h), which is a
-SEPARATE table from both the /v1 route map (src/cli_v1_routes.c) and the embedded
+`aimee help <cmd>` is served from the command catalogue
+(src/server/cli_command_defs_data.h), which the server sends to the client. It is a
+SEPARATE table from both the dispatch rows (src/server/cli_dispatch_defs_data.h) and the embedded
 command table (src/cmd_table.c). Nothing tied them together, so a command could
 route and execute perfectly while `aimee help <cmd>` answered "Unknown command:
 <cmd>" and `aimee help --all` never listed it. That is exactly what happened to
@@ -21,16 +22,25 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-ROUTES = ROOT / "src" / "cli_v1_routes.c"
-HELP = ROOT / "src" / "cli_help_data.h"
+# The dispatch rows moved to the server so they can be served to the client;
+# src/cli_v1_routes.c only #includes them now.
+ROUTES = ROOT / "src" / "server" / "cli_dispatch_defs_data.h"
+HELP = ROOT / "src" / "server" / "cli_command_defs_data.h"
 
 # Routed commands that still lack a client_help[] entry. Shrink this, never grow it.
 KNOWN_GAPS: set[str] = set()
 
 
 def main() -> int:
-    routed = set(re.findall(r'^\s*\{"([a-z0-9-]+)",\s*"', ROUTES.read_text(encoding="utf-8"), re.M))
-    helped = set(re.findall(r'\{"([a-z0-9-]+)",\s*"', HELP.read_text(encoding="utf-8")))
+    # The verb is quoted OR the bare token NULL, the latter meaning the group is
+    # itself the command (`aimee use`, `aimee presence`, `aimee git`). Requiring
+    # a quote exempted precisely those rows -- the commands MOST likely to want
+    # a help entry, since a bare group name is what an operator types first.
+    # A gate that silently skips part of its domain reads as coverage it does
+    # not have, which is the failure this whole script exists to prevent.
+    routed = set(re.findall(r'^\s*\{"([a-z0-9_-]+)"\s*,\s*(?:"|NULL)',
+                            ROUTES.read_text(encoding="utf-8"), re.M))
+    helped = set(re.findall(r'\{"([a-z0-9_-]+)",\s*"', HELP.read_text(encoding="utf-8")))
     if not routed or not helped:
         print("check-cli-help-coverage: FAIL — could not parse the route or help table; "
               "the patterns in this script have drifted from the source.")
@@ -42,7 +52,7 @@ def main() -> int:
               "`aimee help <cmd>` answers \"Unknown command\":")
         for name in sorted(missing):
             print(f"  {name}")
-        print("Add an entry to src/cli_help_data.h (see the `aux` entry for the shape).")
+        print("Add an entry to src/server/cli_command_defs_data.h (see `aux` for the shape).")
         return 1
 
     # A fixed gap must leave the list, or the list rots into a lie.

@@ -1,6 +1,6 @@
 # mTLS transport performance: rollout evidence
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`mtls-transport-performance.md`](../done/mtls-transport-performance.md)
 

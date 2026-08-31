@@ -1,6 +1,10 @@
 # Per-query grouping key for supervised ranking
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
@@ -18,17 +22,17 @@ Supervised ranking needs training rows of the form
 `src/kb/kb_ranker_fit.c:258-275` states this in-tree, as runtime diagnostics
 rather than commentary:
 
-- `missing_grouping_key` — "`feature_rows` has no retrieval_event_id/query
+- `missing_grouping_key`: "`feature_rows` has no retrieval_event_id/query
   column (PK is subject_id,subject_kind,feature_set_version; per-candidate
   upsert), so per-(query,candidate) training rows do not exist."
-- `subject_space_mismatch` — "ranker features are written on
+- `subject_space_mismatch`: "ranker features are written on
   `feature_rows.subject_kind='kb_document'` (the kb_hybrid code-search path);
   retrieval outcomes are attributed to 'memory' row ids on the memory-recall
-  surface — disjoint id spaces."
+  surface, disjoint id spaces."
 
 Two independent defects. The first is structural: the primary key
 `(subject_id, subject_kind, feature_set_version)` with a per-candidate upsert
-means a candidate has exactly one feature row across all queries — the second
+means a candidate has exactly one feature row across all queries, the second
 query overwrites the first's features. The second is a naming problem: outcomes
 and features are keyed in different id spaces, so the join is empty.
 
@@ -40,14 +44,13 @@ adding consumers makes visible. Anything describing the ranking stack as
 "calibrated and reusable" is overstating what the storage can currently support.
 
 What remains achievable without this: offline tuning of a small number of scalar
-parameters against a labeled fixture corpus — benchmark-driven hyperparameter
+parameters against a labeled fixture corpus, benchmark-driven hyperparameter
 search, which needs no per-query persistence because the corpus supplies the
 grouping.
 
 ## Direction
 
-1. Add a grouping dimension — a retrieval-event id, or an explicit query hash —
-   to the feature store, and include it in the primary key so features become
+1. Add a grouping dimension (a retrieval-event id, or an explicit query hash) to the feature store, and include it in the primary key so features become
    per-`(query, candidate)` rather than per-candidate.
 2. Unify the subject id space, or record the surface alongside the subject so
    features and outcomes join on a compound key rather than a bare row id. This

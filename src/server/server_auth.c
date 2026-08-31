@@ -1,11 +1,12 @@
 /* server_auth.c: authentication, capability tokens, and per-method capability checks */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "server.h"
 #include "log.h"
 #include "platform_process.h"
 #include "cJSON.h"
-#include "json_fluent.h" /* jo_ok */
+#include "json_fluent.h"     /* jo_ok */
+#include "request_context.h" /* request_context_caller_subject: the account ingress proved */
 #include <aimee/core/connection/auth.h>
 #include <sys/stat.h>
 #include <time.h>
@@ -28,21 +29,41 @@ const method_policy_t method_registry[] = {
     {"init.run", CAP_TOOL_EXECUTE, "initialize local stores"},
     {"launch.run", CAP_TOOL_EXECUTE, "launch session"},
     {"hud.status", CAP_SESSION_READ, "HUD status"},
-    {"agent.*", CAP_DELEGATE, "agent configuration"},
+    {"model.*", CAP_DELEGATE, "model roster configuration"},
     {"webchat.*", CAP_DASHBOARD_READ, "webchat client operation"},
     {"auth", 0, "authenticate"},
     /* Hooks */
     {"hooks.pre", CAP_TOOL_EXECUTE, "pre-tool hook"},
     {"hooks.post", CAP_TOOL_EXECUTE, "post-tool hook"},
     {"hooks.session_start", CAP_TOOL_EXECUTE, "session-start hook"},
+    {"hooks.session_end", CAP_TOOL_EXECUTE, "session-end hook"},
     /* Sessions (prefix) */
     {"session.*", CAP_SESSION_READ, "session operation"},
     {"trajectory.export", CAP_SESSION_READ, "trajectory export"},
     {"trajectory.batch", CAP_DELEGATE, "trajectory batch generation"},
     /* Memory (exact before prefix) */
     {"memory.store", CAP_MEMORY_WRITE, "store memory"},
-    {"memory.delete", CAP_MEMORY_WRITE, "delete a memory"},
+    /* Destructive: hard-deletes the row and its provenance, and the audit event
+     * carries only the id — the content is not recoverable afterwards. Graded
+     * memory:admin, not memory:write, for the same reason rules.delete is graded
+     * rules:admin below: writing and destroying are different privileges. */
+    {"memory.delete", CAP_MEMORY_ADMIN, "delete a memory"},
     {"memory.supersede", CAP_MEMORY_WRITE, "supersede a memory"},
+    /* update overwrites content with no prior value kept, so it is a write and
+     * must not fall through to the memory.* read prefix below. */
+    {"memory.update", CAP_MEMORY_WRITE, "update memory content"},
+    {"memory.reject", CAP_MEMORY_WRITE, "reject a memory"},
+    {"memory.restore", CAP_MEMORY_ADMIN, "restore a rejected memory"},
+    {"memory.review_list", CAP_MEMORY_READ, "review visible memories"},
+    /* Typed-fact corrections sit at WRITE, not the ADMIN tier memory.delete was
+     * just moved to, and for exactly the reason given there: writing and
+     * destroying are different privileges. None of these destroys anything.
+     * Retraction stamps superseded_at or sets the tombstone flag and the row is
+     * RETAINED and auditable either way, and unmerge flips an audit flag. They
+     * belong with the correcting write. */
+    {"facts.retract", CAP_MEMORY_WRITE, "retract a typed fact"},
+    {"entities.merge", CAP_MEMORY_WRITE, "merge two entities"},
+    {"entities.unmerge", CAP_MEMORY_WRITE, "reverse an entity merge"},
     {"memory.user_capture", CAP_MEMORY_WRITE, "capture per-user memory"},
     {"memory.*", CAP_MEMORY_READ, "memory operation"},
     /* Index (prefix) */
@@ -97,6 +118,8 @@ const method_policy_t method_registry[] = {
     {"roundtable.review", CAP_DELEGATE, "Go roundtable review transport"},
     {"dev.sweep", CAP_DELEGATE, "deepening sweep (spawns proposer delegates; analysis-only)"},
     {"delegate.status", CAP_DELEGATE, "delegate status"},
+    {"delegate.reservation.forget", CAP_DELEGATE, "release a delegate replay reservation"},
+    {"delegate.cancel_unassigned", CAP_DELEGATE, "cancel an unassigned delegate job"},
     /* Credential vault (WP-C.1): UDS-only in practice — the service layer refuses
      * any non-ATTEST_UDS_PEERCRED principal — but gated here as CAP_DELEGATE so a
      * scoped/read-only TCP bearer cannot even reach the route. */
@@ -119,6 +142,7 @@ const method_policy_t method_registry[] = {
     {"aux.config_show", CAP_SESSION_READ, "auxiliary model config"},
     {"config.show", CAP_SESSION_READ, "show configuration"},
     {"config.get", CAP_SESSION_READ, "read configuration value"},
+    {"config.deploy_env", CAP_SESSION_READ, "emit compose env for the backend record"},
     {"config.set", CAP_SESSION_ADMIN, "set configuration value"},
     {"pipeline.status", CAP_SESSION_READ, "roundtable authoring pipeline status"},
     {"pipeline.list", CAP_SESSION_READ, "list roundtable authoring pipelines"},
@@ -131,7 +155,7 @@ const method_policy_t method_registry[] = {
     {"delegate.sandbox_list", CAP_DELEGATE, "list delegate sandbox images"},
     {"delegate.sandbox_gc", CAP_DELEGATE, "prune delegate sandbox images"},
     {"episode.list", CAP_DELEGATE, "list delegation episodes"},
-    {"agent.episodes", CAP_DELEGATE, "agent episode history"},
+    {"model.episodes", CAP_DELEGATE, "agent episode history"},
     {"eval.*", CAP_DELEGATE, "eval harness"},
     {"chat.send_stream", CAP_CHAT, "chat stream"},
     {"chat.graceful_cancel", CAP_CHAT, "cancel an in-flight chat turn (owner-authz)"},
@@ -177,6 +201,7 @@ const method_policy_t method_registry[] = {
     {"kb.docs.push", CAP_INDEX_ADMIN, "push documents into the knowledge base (ingest)"},
     {"kb.ingest.status", CAP_INDEX_READ, "knowledge-base ingest status (read)"},
     {"kb.reembed", CAP_INDEX_ADMIN, "reset and re-embed the vector store (dim change)"},
+    {"kb.erase-subject", CAP_SESSION_ADMIN, "erase one subject's mutable content graph"},
     {"memory.embed", CAP_INDEX_ADMIN, "(re)generate memory embeddings"},
     /* Code index/graph rebuilds (mutating) — distinct from the index.* reads. */
     {"index.scan", CAP_INDEX_ADMIN, "scan / re-index the codebase"},
@@ -197,9 +222,9 @@ const method_policy_t method_registry[] = {
     {"provider.models", CAP_SESSION_READ, "provider models"},
     {"provider.quota", CAP_SESSION_READ, "provider quota"},
     {"provider.*", CAP_SESSION_ADMIN, "provider configuration"},
-    {"model.list", CAP_SESSION_READ, "list models"},
-    {"model.show", CAP_SESSION_READ, "show model"},
-    {"model.refresh", CAP_SESSION_ADMIN, "refresh model catalog"},
+    {"catalog.list", CAP_SESSION_READ, "list catalogued models"},
+    {"catalog.show", CAP_SESSION_READ, "show a catalogued model"},
+    {"catalog.refresh", CAP_SESSION_ADMIN, "refresh model catalog"},
     /* Identity: show/diff read; snapshot mutates. */
     {"identity.snapshot", CAP_SESSION_ADMIN, "snapshot identity"},
     {"identity.*", CAP_SESSION_READ, "identity query"},
@@ -274,14 +299,19 @@ int server_ct_equal(const char *a, const char *b)
 #include "platform_process.h"
 
 /* Generate a UUID using platform random */
-static void generate_uuid(char *buf, size_t len)
+static int generate_uuid(char *buf, size_t len)
 {
    unsigned char raw[16];
    if (platform_random_bytes(raw, sizeof(raw)) != 0)
-      memset(raw, 0, sizeof(raw));
+   {
+      if (buf && len)
+         buf[0] = '\0';
+      return -1;
+   }
    snprintf(buf, len, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
             raw[0], raw[1], raw[2], raw[3], raw[4], raw[5], raw[6], raw[7], raw[8], raw[9], raw[10],
             raw[11], raw[12], raw[13], raw[14], raw[15]);
+   return 0;
 }
 
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -293,7 +323,8 @@ int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Generate session ID (persisted in DB, not RAM) */
    char sid[64];
-   generate_uuid(sid, sizeof(sid));
+   if (generate_uuid(sid, sizeof(sid)) != 0)
+      return server_send_error(conn, "secure entropy unavailable; session not created", NULL);
 
    /* Build principal from peer UID */
    char principal[32];
@@ -422,11 +453,11 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *jsid = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : NULL;
    if (!sid || !sid[0])
-      return server_send_error(conn, "missing session_id", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "missing session_id", NULL);
 
    db1_server_session_t row;
    if (db1_server_session_get(sid, &row) != 0)
-      return server_send_error(conn, "session not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "session not found", NULL);
 
    cJSON *resp = jo_ok();
    cJSON *s = cJSON_CreateObject();
@@ -442,4 +473,27 @@ int handle_session_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddItemToObject(resp, "session", s);
 
    return server_send_ok(conn, resp);
+}
+
+/* --- Authenticated identity: who, not what-may-they-do. See server.h. --- */
+
+int server_account_is_person(const char *account)
+{
+   /* No re-verification here, deliberately. The channel, the session and the
+    * account were each verified once at message receipt; a request that failed
+    * any of them never reached a handler. This reads the result ingress already
+    * carried on the request -- checking it again at every surface would cost
+    * work to re-learn something already proven. */
+   return account && account[0] ? 1 : 0;
+}
+
+memory_authority_t server_account_memory_authority(const char *account)
+{
+   return server_account_is_person(account) ? MEMORY_AUTHORITY_USER : MEMORY_AUTHORITY_MODEL;
+}
+
+const char *server_request_account(void)
+{
+   const char *account = request_context_caller_subject();
+   return account ? account : "";
 }

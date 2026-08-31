@@ -1,7 +1,10 @@
 /* test_audit_worm.c: S0 WORM audit store — chain integrity, gap-free seq,
  * WORM triggers, cross-store determinism, and crypto tamper detection. */
 #include <assert.h>
+#include <dirent.h>
 #include <fcntl.h>
+#include <linux/fs.h> /* FS_IOC_GETFLAGS/SETFLAGS, FS_IMMUTABLE_FL */
+#include <sys/ioctl.h>
 #include <sqlite3.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,13 +13,82 @@
 
 #include <aimee/audit/audit_worm.h>
 #include "cJSON.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_dir[256];
 
 static void mk_tmpdir(void)
 {
-   snprintf(g_dir, sizeof g_dir, "/tmp/worm_test_XXXXXX");
+   snprintf(g_dir, sizeof g_dir, "%s/worm_test_XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_dir) != NULL);
+}
+
+/* audit_worm_seal() makes each sealed snapshot OS-immutable, which is the point
+ * of a WORM store -- and it means this test cannot simply leave its directory
+ * behind. Where the process holds CAP_LINUX_IMMUTABLE the seal really takes, and
+ * nothing (not even root) can unlink the file until FS_IMMUTABLE_FL is cleared:
+ * the suite's own tmpdir cleanup then fails with "Operation not permitted" and
+ * takes the whole run down with it. CI containers usually lack the capability,
+ * so the seal degrades to crypto-only there and the leak stays invisible until
+ * the suite runs somewhere privileged.
+ *
+ * Unseal what we sealed, then remove the directory. Best-effort throughout: a
+ * filesystem without the flag, or a process without the capability, never sealed
+ * anything in the first place. */
+static void unseal(const char *path)
+{
+   int fd = open(path, O_RDONLY);
+   if (fd < 0)
+      return;
+   int flags = 0;
+   if (ioctl(fd, FS_IOC_GETFLAGS, &flags) == 0 && (flags & FS_IMMUTABLE_FL))
+   {
+      flags &= ~FS_IMMUTABLE_FL;
+      (void)ioctl(fd, FS_IOC_SETFLAGS, &flags);
+   }
+   close(fd);
+}
+
+static void rm_tmpdir(void)
+{
+   if (!g_dir[0])
+      return;
+   DIR *d = opendir(g_dir);
+   if (d)
+   {
+      struct dirent *e;
+      while ((e = readdir(d)) != NULL)
+      {
+         if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0)
+            continue;
+         char child[512];
+         snprintf(child, sizeof child, "%s/%s", g_dir, e->d_name);
+         unseal(child);
+         if (remove(child) != 0)
+         {
+            /* A nested directory: the audit/ subdir the sealed snapshots live in. */
+            DIR *sub = opendir(child);
+            if (sub)
+            {
+               struct dirent *se;
+               while ((se = readdir(sub)) != NULL)
+               {
+                  if (strcmp(se->d_name, ".") == 0 || strcmp(se->d_name, "..") == 0)
+                     continue;
+                  char leaf[1024];
+                  snprintf(leaf, sizeof leaf, "%s/%s", child, se->d_name);
+                  unseal(leaf);
+                  (void)remove(leaf);
+               }
+               closedir(sub);
+               (void)rmdir(child);
+            }
+         }
+      }
+      closedir(d);
+   }
+   (void)rmdir(g_dir);
+   g_dir[0] = '\0';
 }
 
 static void db_path(char *out, size_t n)
@@ -60,8 +132,10 @@ static void test_worm_triggers_block_mutation(void)
    printf("  test_worm_triggers_block_mutation: ok\n");
 }
 
-/* Same inputs, two independent stores -> identical row_hash for seq=1. This is
- * the reproducibility the cross-engine (SQLite/Postgres) vectors rest on. */
+/* Same inputs, including the producer timestamp, in two independent stores ->
+ * identical row_hash for seq=1. This is the reproducibility the cross-engine
+ * (SQLite/Postgres) vectors rest on. Use the durable-producer seam so the test
+ * does not accidentally compare different wall-clock seconds. */
 static void test_cross_store_determinism(void)
 {
    char pa[300], pb[300];
@@ -73,8 +147,11 @@ static void test_cross_store_determinism(void)
    {
       const char *p = i == 0 ? pa : pb;
       assert(audit_worm_init_at(p) == 0);
-      assert(audit_worm_append("primary", "u1", "tool.read", "v1-fixed", "allow", "{\"x\":1}") ==
-             0);
+      long long seq = 0;
+      assert(audit_worm_append_idempotent("evt-fixed", "2026-01-02T03:04:05Z", "primary", "u1",
+                                          "tool.read", "v1-fixed", "allow", "{\"x\":1}",
+                                          &seq) == 0);
+      assert(seq == 1);
       audit_worm_close();
       sqlite3 *raw = NULL;
       assert(sqlite3_open(p, &raw) == SQLITE_OK);
@@ -122,6 +199,27 @@ static void test_tamper_detected_past_triggers(void)
    printf("  test_tamper_detected_past_triggers: ok (%s)\n", err);
 }
 
+static void test_timestamp_tamper_detected(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/ts.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_append("primary", "u1", "tool.read", "v1-1", "allow", "{}") == 0);
+   audit_worm_close();
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET ts='1999-01-01T00:00:00Z' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   assert(audit_worm_init_at(path) == 0);
+   char err[128];
+   assert(audit_worm_verify_chain(err, sizeof err) == -1);
+   audit_worm_close();
+   printf("  test_timestamp_tamper_detected: ok (%s)\n", err);
+}
+
 /* Checkpoints move verify from AMBER (uncheckpointed tail) to GREEN, and back to
  * AMBER once new rows land after the newest checkpoint. */
 static void test_checkpoint_and_verify_status(void)
@@ -146,6 +244,41 @@ static void test_checkpoint_and_verify_status(void)
    assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_AMBER);
    audit_worm_close();
    printf("  test_checkpoint_and_verify_status: ok\n");
+}
+
+/* Process admission is shared by the server and KB worker: a fresh store is
+ * accepted, an intact tail is checkpointed to GREEN, and offline tampering
+ * prevents startup before either process accepts work. */
+static void test_startup_verify_fails_closed(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/startup.db", g_dir);
+   setenv("AIMEE_HOME", g_dir, 1);
+   assert(audit_worm_init_at(path) == 0);
+   char err[160] = "";
+   long head = -1, ckpt = -1;
+   assert(audit_worm_startup_verify(err, sizeof err, &head, &ckpt) == 0);
+   assert(head == 0 && ckpt == 0);
+
+   assert(audit_worm_append("server", "startup", "server.ready", "", "ok", "{}") == 0);
+   assert(audit_worm_startup_verify(err, sizeof err, &head, &ckpt) == 0);
+   assert(head == 2 && ckpt == 2);
+   assert(audit_worm_verify(err, sizeof err, NULL, NULL) == AUDIT_WORM_VERIFY_GREEN);
+   audit_worm_close();
+
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET subject='offline-tamper' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_startup_verify(err, sizeof err, NULL, NULL) == -1);
+   assert(strstr(err, "seq 1") != NULL);
+   audit_worm_close();
+   printf("  test_startup_verify_fails_closed: ok (%s)\n", err);
 }
 
 /* A checkpoint is bound to the chain key: verifying against a different key (an
@@ -306,9 +439,44 @@ static void test_detail_capped(void)
    printf("  test_detail_capped: ok\n");
 }
 
-/* Cross-engine vector: the server (SQLite) store and the kb (Postgres) store hash
- * a row identically (both call audit_worm_row_hash). This literal is asserted in
- * test_kb_audit_worm.c too — the two must never drift. */
+/* A durable producer may retry after SQLite committed but before its delivery
+ * acknowledgement committed. The stable event id converges on the original
+ * row, while reusing an id for different evidence fails closed. */
+static void test_idempotent_outbox_delivery(void)
+{
+   char path[300];
+   snprintf(path, sizeof path, "%s/idempotent.db", g_dir);
+   assert(audit_worm_init_at(path) == 0);
+   long long first = 0, retry = 0;
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "q1", "ok", "{}", &first) == 0);
+   assert(first == 1);
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "q1", "ok", "{}", &retry) == 0);
+   assert(retry == first);
+   assert(audit_worm_count() == 1);
+   assert(audit_worm_append_idempotent("kb:41", "2026-08-26T01:02:03Z", "kb", "worker", "kb.query",
+                                       "DIFFERENT", "ok", "{}", NULL) == -1);
+   assert(audit_worm_count() == 1);
+   assert(audit_worm_verify_chain(NULL, 0) == 0);
+   audit_worm_close();
+
+   /* event_id is retry metadata, but it is still evidence-bound: bypassing the
+    * triggers to rewrite it must break verification. */
+   sqlite3 *raw = NULL;
+   assert(sqlite3_open(path, &raw) == SQLITE_OK);
+   assert(sqlite3_exec(raw,
+                       "DROP TRIGGER audit_event_no_update;"
+                       "UPDATE audit_event SET event_id='kb:forged' WHERE seq=1",
+                       NULL, NULL, NULL) == SQLITE_OK);
+   sqlite3_close(raw);
+   assert(audit_worm_init_at(path) == 0);
+   assert(audit_worm_verify_chain(NULL, 0) == -1);
+   audit_worm_close();
+   printf("  test_idempotent_outbox_delivery: ok\n");
+}
+
+/* Golden vector for ordinary rows in the shared server/KB SQLite implementation. */
 static void test_cross_engine_vector(void)
 {
    char h[65];
@@ -321,15 +489,19 @@ static void test_cross_engine_vector(void)
 int main(void)
 {
    mk_tmpdir();
+   assert(atexit(rm_tmpdir) == 0);
    test_cross_engine_vector();
    test_metric_snapshot();
    test_detail_capped();
+   test_idempotent_outbox_delivery();
    test_read_page();
    test_append_and_chain();
    test_worm_triggers_block_mutation();
    test_cross_store_determinism();
    test_tamper_detected_past_triggers();
+   test_timestamp_tamper_detected();
    test_checkpoint_and_verify_status();
+   test_startup_verify_fails_closed();
    test_checkpoint_bound_to_chain_key();
    test_seal_snapshot_verifies();
    test_sealed_snapshot_tamper_detected();

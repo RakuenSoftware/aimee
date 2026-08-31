@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -64,7 +65,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,6 +109,81 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	runner.release <- struct{}{}
 }
 
+func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	ctx := t.Context()
+	states := map[string]string{
+		"wi_accepted": "accepted",
+		"wi_rejected": "rejected",
+		"wi_stopped":  "stopped",
+		"wi_retry":    "accepted",
+		"wi_running":  "accepted",
+	}
+	for id, state := range states {
+		if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{
+			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
+			StartStage: "work", Mode: "autonomous",
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetWorktree(ctx, id, filepath.Join("/managed", id)); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Finish(ctx, id, "work", state, "done", "", 0); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	scheduler := NewScheduler(store, nil, 1, nil)
+	retryFails := true
+	calls := make(map[string]int)
+	scheduler.SetTerminalCleanup(func(_ context.Context, item db1.WorkItem) error {
+		calls[item.ID]++
+		if item.ID == "wi_retry" && retryFails {
+			return errors.New("temporary cleanup failure")
+		}
+		return nil
+	})
+	// A terminal transition can race the tail of its executing turn. Never remove
+	// that checkout until drive() has released it, even when all worker capacity is
+	// occupied.
+	scheduler.running["wi_running"] = struct{}{}
+	scheduler.fill(ctx)
+
+	for _, id := range []string{"wi_accepted", "wi_rejected", "wi_stopped"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree != "" || calls[id] != 1 {
+			t.Fatalf("terminal cleanup %s: item=%+v calls=%d err=%v", id, item, calls[id], err)
+		}
+	}
+	for _, id := range []string{"wi_retry", "wi_running"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree == "" {
+			t.Fatalf("premature cleanup %s: item=%+v err=%v", id, item, err)
+		}
+	}
+	if calls["wi_retry"] != 1 || calls["wi_running"] != 0 {
+		t.Fatalf("retry calls=%d running calls=%d", calls["wi_retry"], calls["wi_running"])
+	}
+
+	retryFails = false
+	delete(scheduler.running, "wi_running")
+	scheduler.fill(ctx)
+	for _, id := range []string{"wi_retry", "wi_running"} {
+		item, err := store.WorkItem(ctx, id)
+		if err != nil || item.Worktree != "" {
+			t.Fatalf("retry cleanup %s: item=%+v err=%v", id, item, err)
+		}
+	}
+	if calls["wi_retry"] != 2 || calls["wi_running"] != 1 {
+		t.Fatalf("retry calls=%d running calls=%d", calls["wi_retry"], calls["wi_running"])
+	}
+}
+
 // seedPerWorkflowItems writes a one-node "author.proposal" workflow and creates a
 // work item per id, returning a store + a blocking runner + a started scheduler.
 // Items whose ids share a prefix before the first "." belong to the same root
@@ -127,7 +203,7 @@ func seedPerWorkflowItems(t *testing.T, ids []string, global int) (*Scheduler, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +300,7 @@ func waitStarted(t *testing.T, started <-chan string) string {
 	}
 }
 
-func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testing.T) {
+func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *testing.T) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, "workflows")
 	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
@@ -238,7 +314,7 @@ func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -248,8 +324,11 @@ func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testin
 		t.Fatal(err)
 	}
 	reasons := map[string]string{
-		"wi_discussion": "roundtable_discussion",
-		"wi_chairman":   "roundtable_chairman",
+		"wi_discussion":         "roundtable_discussion",
+		"wi_chairman":           "roundtable_chairman",
+		"wi_capacity":           "panel_capacity",
+		"wi_capacity_deadline":  "panel_capacity_deadline",
+		"wi_execution_deadline": "panel_deadline",
 	}
 	for id := range reasons {
 		if err := artifacts.PutProposal(id, []byte("proposal")); err != nil {
@@ -267,11 +346,15 @@ func TestSchedulerRecoversRoundtablePhasePausesWithNewExecutionVersion(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	scheduler := NewScheduler(store, workflowEngine, 2, nil)
+	scheduler := NewScheduler(store, workflowEngine, len(reasons), nil)
+	scheduler.perWorkflow = len(reasons)
 	scheduler.pollEvery = 10 * time.Millisecond
 	scheduler.transientPauses = []transientPause{
 		{reason: "roundtable_discussion", backoff: time.Second},
 		{reason: "roundtable_chairman", backoff: time.Second},
+		{reason: "panel_capacity", backoff: time.Second},
+		{reason: "panel_capacity_deadline", backoff: time.Second},
+		{reason: "panel_deadline", backoff: time.Second},
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -312,7 +395,7 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -344,7 +427,7 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 }
 
 func TestSchedulerReconciliationCancelsRunningOrphan(t *testing.T) {
-	store, err := db1.Open(filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +469,7 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

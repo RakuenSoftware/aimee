@@ -1,6 +1,5 @@
 /* webuser_runtime.c — shared environment tmpfs runtime dir (fail-closed). */
 #include "webuser_runtime.h"
-#include "modules/workspace/workspace_scope.h" /* ws_scope_name_valid */
 
 #include <dirent.h>
 #include <errno.h>
@@ -22,6 +21,33 @@
 #endif
 
 #define WR_NAME_MAX 64
+
+static webuser_name_validator_fn g_name_validator;
+
+void webuser_runtime_register_name_validator(webuser_name_validator_fn validator)
+{
+   g_name_validator = validator;
+}
+
+/* Fail-closed, matching ws_scope_project_ref_valid: with no validator registered
+ * there is no local answer to fall back to, and this file's whole contract is to
+ * refuse rather than degrade. An unvalidated name would become a directory under
+ * the runtime dir.
+ *
+ * The separator is rejected here rather than delegated. Workspace's validator
+ * admits a reference, which is legitimately `owner/project`; a runtime dir name
+ * is a single component, and accepting a slash would let `webuser:a/b` name a
+ * path. With the separator excluded the delegated answer is exactly workspace's
+ * name rule, which is the part worth keeping in one place. */
+static int name_allowed(const char *name, size_t len)
+{
+   if (!g_name_validator || !name || len == 0 || len > WR_NAME_MAX)
+      return 0;
+   if (memchr(name, '/', len))
+      return 0;
+   int allowed = 0;
+   return g_name_validator(name, len, &allowed) == 0 && allowed;
+}
 
 int webuser_runtime_is_tmpfs(const char *path)
 {
@@ -46,7 +72,7 @@ static int principal_name(const char *principal, char *name, size_t cap)
       return -1;
    const char *u = principal + pl;
    size_t ul = strlen(u);
-   if (ul == 0 || ul >= cap || !ws_scope_name_valid(u))
+   if (ul == 0 || ul >= cap || !name_allowed(u, ul))
       return -1;
    memcpy(name, u, ul + 1);
    return 0;

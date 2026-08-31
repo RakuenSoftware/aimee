@@ -7,12 +7,30 @@ corpora, scoring, baselines, result aggregation, and benchmark cadence. It is no
 not own runtime agent assessment, production verification, routing/policy decisions, roundtable
 verification, workflow approval, memory behavior, or general telemetry.
 
+### Go process stages
+
+The supervised benchmarks process uses the shared pure-Go module runtime for two
+bounded deterministic stages. Its BIRQ/BIRS scoring contract accepts up to 32
+retrieved and relevant identifiers plus K, then returns the existing MRR, NDCG@K,
+and recall@K definitions. Its BLRQ/BLRS latency contract accepts up to 512
+non-negative finite measurements, then returns nearest-rank p50/p95/p99 plus the
+minimum and maximum. The C adapter is a wire-parity fixture. Dataset loading,
+benchmark execution, providers, scratch databases, raw timing capture, baselines,
+reporting, and result persistence remain in their current C and script owners
+while those boundaries are migrated. The production server's live
+`memory.benchmark` RPC sends every bounded result set and latency set through
+these event-bus stages and fails the run when the process is unavailable or
+returns invalid wire data; it has no local scoring or percentile fallback.
+Offline harnesses continue to use the module's C scoring primitives without
+requiring a daemon bus.
+
 ## Public contracts
 
-The module directory `src/modules/benchmarks/` owns four sources: `agent_eval.c` (shared eval
+The module directory `src/modules/benchmarks/` owns four production C sources: `agent_eval.c` (shared eval
 machinery: case scoring, latency buckets, temp-db bootstrap, progress files), `agent_eval_baseline.c`
 (regression baseline load/compare/save), `agent_eval_benchmarks.c` (LoCoMo and LongMemEval dataset
-runners), and `agent_eval_memory_support.c` (memory-retrieval eval support). Two module-root
+runners), and `agent_eval_memory_support.c` (memory-retrieval eval support), plus the process
+wire-parity fixture `module_adapter.c`. Two module-root
 headers: `agent_eval.h`, the public contract consumed by CLI, server, and test callers through
 `-Imodules/benchmarks`, and `agent_eval_internal.h`, the private seam shared across the four sources.
 This code was relocated from the former non-descriptor `src/modules/agent_eval/` directory, whose
@@ -28,7 +46,7 @@ smoke gates remain owned elsewhere and consume this module rather than belonging
 - `module-runtime`: supplies optional lifecycle, capability, and readiness contracts.
 - `routing`: selects benchmarked providers/arms without allowing benchmark code to change live routing.
 
-Consumers include developers, CI, `aimee agent eval`, `aimee memory benchmark`, `eval.run`, optimize
+Consumers include developers, CI, `aimee eval run`, `aimee memory benchmark`, `eval.run`, optimize
 comparison gates, dashboards, and research scripts. Runtime KB ranker promotion gates consume benchmark
 results but remain owned by learning/memory, not this optional harness module.
 
@@ -50,7 +68,7 @@ physical/build boundary; this slice documents the mismatch without changing it.
 
 ## Surfaces
 
-Surfaces include `aimee agent eval`, `eval.run`, `aimee memory benchmark`, `memory.benchmark`, optimize
+Surfaces include `aimee eval run`, `eval.run`, `aimee memory benchmark`, `memory.benchmark`, optimize
 run/compare, benchmark scripts, dataset provision/download scripts, baseline/result files, dashboard
 summaries, and `bench-smoke.yml`. Names may retain legacy `eval` compatibility during migration, but the
 module taxonomy and new ownership language use `benchmarks`.
@@ -79,9 +97,10 @@ module does not make per-request production decisions or participate in roundtab
 ## Tests and failure behavior
 
 Benchmark inventory/LLM tests, the extensive `benchmarks/tests` suites, agent/memory evaluation tests,
-server memory-benchmark tests, corpus validators, and smoke workflows cover current harnesses. Missing
-dataset/provider, invalid case, scratch-store failure, timeout, incomplete sample, or baseline mismatch
-must be explicit; skipped/incomparable cases cannot be silently scored as passes.
+server memory-benchmark process-parity and fail-closed tests, corpus validators, and smoke workflows
+cover current harnesses. Missing dataset/provider, scoring or latency process stage, invalid case,
+scratch-store failure, timeout, incomplete sample, or baseline mismatch must be explicit;
+skipped/incomparable cases cannot be silently scored as passes.
 
 ## Operational diagnostics
 

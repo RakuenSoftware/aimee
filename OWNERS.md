@@ -3,12 +3,18 @@
 Every durable store, wire contract, and policy boundary has one runtime owner. Shared helpers may
 serve several modules; they do not inherit authority over those modules.
 
+`@JBailes` is the current primary repository owner. Before a production promotion, Engineering
+Governance must assign and record a second qualified GitHub identity as backup/reviewer in the live
+ruleset. A boundary owner may author or advise a change, but the recorded approving reviewer must
+be a different identity. Quarterly ruleset/access exports are retained under
+`docs/compliance/CONTROL_EVIDENCE.md`; an absent backup or self-approval blocks promotion.
+
 | Area | Owner | Paths | Review focus |
 | --- | --- | --- | --- |
 | event bus | runtime core | `src/core/event_bus/`, `server-go/bus/` | wire vectors, ordering, backpressure, leases, admission, shutdown |
 | audit and governance | audit module | `src/modules/audit/` | completeness, PII bounds, WORM parity, witness behavior |
-| DB1 | server | `src/db1/` | migrations, transaction ownership, local privacy |
-| DB2 | KB | `src/db2/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
+| DB1 | `aimee` and `postgres` modules | `server-go/modules/aimee/`, `server-go/modules/postgres/`, `src/db1_client/` | domain schema, typed operations, pool and transaction ownership, local privacy |
+| DB2 | KB | `src/modules/db2/c/`, `src/kb/` | schema, scope, retrieval, pgvector, ingest |
 | workflow lifecycle | Go WFE | `server-go/internal/` | single writer, durable transition before dispatch, recovery, forge confinement |
 | tool execution | server tools/policy | tool and guardrail modules | schemas, capabilities, worktree/path checks, audit |
 | delegate sandbox | sandbox module | `src/modules/sandbox/`, delegate backends | mounts, network, credentials, packages, resource bounds |

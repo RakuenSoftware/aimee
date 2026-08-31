@@ -858,12 +858,54 @@ static cJSON *make_content_block_delta_input_json(int index, const char *partial
    return o;
 }
 
+/* Normalize the RAW provider stop reason into an ANTHROPIC stop_reason for the
+ * buffered replay. parsed_response_t.stop_reason is documented as the provider's own
+ * value "captured for the audit", so its dialect depends on the primary: Anthropic's
+ * own vocabulary on a native primary, an OpenAI-chat finish_reason, or a Responses
+ * status. It used to be emitted VERBATIM, which put e.g. "completed" (a Responses
+ * status) into an Anthropic message_delta -- observed live against a codex primary,
+ * and not a value any Anthropic client accepts.
+ *
+ * Only dialects we can RECOGNIZE are translated; anything else passes through. That
+ * way a native value is never mangled -- including one newer than this table, which
+ * a fixed allowlist would silently flatten to end_turn. The streaming path keeps its
+ * own map_stop_reason: there the input is always an OpenAI finish_reason, so its
+ * translate-everything default is correct and must not be widened. */
+static const char *replay_stop_reason(const char *raw)
+{
+   if (!raw || !raw[0])
+      return NULL;
+   /* OpenAI-chat finish_reason */
+   if (strcmp(raw, "tool_calls") == 0 || strcmp(raw, "function_call") == 0)
+      return "tool_use";
+   if (strcmp(raw, "length") == 0)
+      return "max_tokens";
+   if (strcmp(raw, "stop") == 0 || strcmp(raw, "content_filter") == 0)
+      return "end_turn";
+   /* Responses status */
+   if (strcmp(raw, "completed") == 0)
+      return "end_turn";
+   if (strcmp(raw, "incomplete") == 0)
+      return "max_tokens";
+   return raw; /* Anthropic-native (or an unrecognized value): leave it alone */
+}
+
+/* Every other replayed event carries its own `type`; message_stop was emitted as a
+ * bare {}, so the one event that tells a client the turn is over was the one event
+ * it could not identify. The streaming translator has always set it (xlate_finish). */
+static cJSON *make_message_stop(void)
+{
+   cJSON *o = cJSON_CreateObject();
+   cJSON_AddStringToObject(o, "type", "message_stop");
+   return o;
+}
+
 static cJSON *make_message_delta(const parsed_response_t *p, int n_calls)
 {
    cJSON *o = cJSON_CreateObject();
    cJSON *u;
-   const char *stop =
-       (p && p->stop_reason[0]) ? p->stop_reason : (n_calls > 0 ? "tool_use" : "end_turn");
+   const char *stop = (p && p->stop_reason[0]) ? replay_stop_reason(p->stop_reason)
+                                               : (n_calls > 0 ? "tool_use" : "end_turn");
    cJSON_AddStringToObject(o, "type", "message_delta");
    cJSON *delta = cJSON_AddObjectToObject(o, "delta");
    cJSON_AddStringToObject(delta, "stop_reason", stop);
@@ -917,5 +959,5 @@ void emit_message_as_sse(const parsed_response_t *parsed, const char *msg_id, co
    }
 
    replay_emit(emit, ctx, "message_delta", make_message_delta(parsed, n_calls));
-   replay_emit(emit, ctx, "message_stop", cJSON_CreateObject());
+   replay_emit(emit, ctx, "message_stop", make_message_stop());
 }

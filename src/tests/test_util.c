@@ -144,7 +144,44 @@ static void test_sanitize_utf8(void)
    assert(strcmp(malformed, "x?? ??? ????") == 0);
    assert(text_sanitize_utf8(NULL) == 0);
 
+   assert(text_is_valid_utf8("plain ASCII"));
+   assert(text_is_valid_utf8("caf\xc3\xa9 \xe2\x80\x94 \xf0\x9f\x98\x80"));
+   assert(text_is_valid_utf8(NULL));
+   assert(!text_is_valid_utf8("truncated \xc2"));
+   assert(!text_is_valid_utf8("overlong \xc0\xaf"));
+   assert(!text_is_valid_utf8("surrogate \xed\xa0\x80"));
+   assert(!text_is_valid_utf8("too-high \xf4\x90\x80\x80"));
+
    printf("  PASS: test_sanitize_utf8\n");
+}
+
+static void test_utf8_chunk_len(void)
+{
+   const char *source = "1234567\xe2\x80\x94 XYZ \xf0\x9f\x98\x80 done";
+   char rebuilt[64] = "";
+   size_t total = strlen(source);
+   size_t used = 0;
+
+   while (used < total)
+   {
+      size_t take = text_utf8_chunk_len(source + used, total - used, 8);
+      assert(take > 0 && take <= 8);
+      char chunk[9];
+      memcpy(chunk, source + used, take);
+      chunk[take] = '\0';
+      assert(text_is_valid_utf8(chunk));
+      strncat(rebuilt, chunk, sizeof(rebuilt) - strlen(rebuilt) - 1);
+      used += take;
+   }
+   assert(strcmp(rebuilt, source) == 0);
+
+   assert(text_utf8_chunk_len("ascii", 5, 80) == 5);
+   assert(text_utf8_chunk_len("\xf0\x9f\x98\x80!", 5, 4) == 4);
+   assert(text_utf8_chunk_len("\xf0\x9f\x98\x80!", 5, 3) == 0);
+   assert(text_utf8_chunk_len(NULL, 1, 8) == 0);
+   assert(text_utf8_chunk_len("x", 1, 0) == 0);
+
+   printf("  PASS: test_utf8_chunk_len\n");
 }
 
 static void test_normalize_key(void)
@@ -307,35 +344,35 @@ static void test_run_cmd_env(void)
 }
 #endif
 
-static void test_shell_escape(void)
+static void test_shell_quote(void)
 {
    char *out;
 
-   printf("test_shell_escape\n");
+   printf("test_shell_quote\n");
 
-   out = shell_escape("hello");
+   out = shell_quote("hello");
    assert(out != NULL);
-   assert(strcmp(out, "hello") == 0);
+   assert(strcmp(out, "'hello'") == 0);
    free(out);
 
-   out = shell_escape("it's");
+   out = shell_quote("it's");
    assert(out != NULL);
-   assert(strcmp(out, "it'\\''s") == 0);
+   assert(strcmp(out, "'it'\\''s'") == 0);
    free(out);
 
-   out = shell_escape(NULL);
+   out = shell_quote(NULL);
    assert(out != NULL);
-   assert(strcmp(out, "") == 0);
+   assert(strcmp(out, "''") == 0);
    free(out);
 }
 
-static void test_shell_escape_injection_payloads(void)
+static void test_shell_quote_injection_payloads(void)
 {
-   /* Verify shell_escape handles injection payloads correctly */
+   /* Verify shell_quote handles injection payloads correctly */
    char *e;
 
    /* Single quote injection: '; rm -rf / # */
-   e = shell_escape("'; rm -rf / #");
+   e = shell_quote("'; rm -rf / #");
    assert(e != NULL);
    assert(strstr(e, "rm -rf") != NULL); /* content preserved */
    assert(e[0] == '\'');                /* leading quote is escaped */
@@ -343,25 +380,25 @@ static void test_shell_escape_injection_payloads(void)
    free(e);
 
    /* Backtick injection */
-   e = shell_escape("`whoami`");
-   assert(strcmp(e, "`whoami`") == 0); /* backticks inside single quotes are safe */
+   e = shell_quote("`whoami`");
+   assert(strcmp(e, "'`whoami`'") == 0);
    free(e);
 
    /* Dollar expansion */
-   e = shell_escape("$(cat /etc/passwd)");
-   assert(strcmp(e, "$(cat /etc/passwd)") == 0); /* $ inside single quotes is literal */
+   e = shell_quote("$(cat /etc/passwd)");
+   assert(strcmp(e, "'$(cat /etc/passwd)'") == 0);
    free(e);
 
    /* Null input */
-   e = shell_escape(NULL);
+   e = shell_quote(NULL);
    assert(e != NULL);
-   assert(strcmp(e, "") == 0);
+   assert(strcmp(e, "''") == 0);
    free(e);
 
    /* Empty input */
-   e = shell_escape("");
+   e = shell_quote("");
    assert(e != NULL);
-   assert(strcmp(e, "") == 0);
+   assert(strcmp(e, "''") == 0);
    free(e);
 }
 
@@ -415,20 +452,106 @@ static void test_strip_ai_attribution(void)
    assert(strcmp(buf, "line one\nline two") == 0);
 }
 
+/* parse_utc_ts must read BOTH spellings, because one DB2 column holds both: C
+ * writes ISO via now_utc(), SQL writes the canonical text form via
+ * pg_now_text(), and which one a row carries depends on the code path that last
+ * touched it.
+ *
+ * The failure this guards is silent. Two copies of this parser used to exist
+ * with OPPOSITE assumptions -- db2/demotion.c matched only the space form,
+ * modules/memory/memory_conflict.c only the ISO form -- and each returned 0 for
+ * the spelling it did not know. 0 is not an error here, it is the epoch: a real
+ * and very old time. In demotion that fed a recency decay, so a memory used
+ * minutes ago scored as though it had never been used. Asserting the two
+ * spellings produce the SAME instant is the assertion that catches it; checking
+ * "did it parse" would pass against both broken copies. */
+static void test_parse_utc_ts_accepts_both_spellings(void)
+{
+   /* 2026-08-09T19:07:23Z == 1786302443 */
+   const time_t expect = 1786302443;
+   assert(parse_utc_ts("2026-08-09T19:07:23Z") == expect);
+   assert(parse_utc_ts("2026-08-09T19:07:23") == expect);
+   assert(parse_utc_ts("2026-08-09 19:07:23") == expect);
+   /* The two spellings are the same instant -- the property that was violated. */
+   assert(parse_utc_ts("2026-08-09 19:07:23") == parse_utc_ts("2026-08-09T19:07:23Z"));
+
+   /* A date alone is midnight, not a failure. */
+   assert(parse_utc_ts("2026-08-09") == 1786233600);
+
+   /* Unparseable input stays 0: callers document 0 as "unknown/ancient", so it
+    * must not become a plausible-looking date. */
+   assert(parse_utc_ts(NULL) == 0);
+   assert(parse_utc_ts("") == 0);
+   assert(parse_utc_ts("not a timestamp") == 0);
+   assert(parse_utc_ts("2026-13-40 99:99:99") == 0);
+   /* A separator that is neither 'T' nor ' ' is not one of our formats. */
+   assert(parse_utc_ts("2026-08-09X19:07:23") == 0);
+
+   printf("  parse_utc_ts accepts both stored spellings\n");
+}
+
+/* These stamps are UTC, and the parser must read them as UTC WHEREVER IT RUNS.
+ *
+ * Three call sites converted to this helper previously used mktime(), which
+ * interprets struct tm as LOCAL time. On a host that is not UTC the computed age
+ * was wrong by the whole offset -- cmd_doctor reported a project indexed minutes
+ * ago as stale, and kb freshness was off by the same amount. Nothing failed; the
+ * numbers were just wrong, and on a UTC build machine the bug is invisible.
+ *
+ * So pin the property that catches it: the same input must yield the same
+ * instant under a deliberately non-UTC TZ. With mktime this differs by 13 hours;
+ * with timegm it does not move at all. */
+static void test_parse_utc_ts_is_timezone_independent(void)
+{
+   const char *sample = "2026-08-09T19:07:23Z";
+   char *saved = getenv("TZ");
+   char saved_copy[64] = "";
+   if (saved)
+      snprintf(saved_copy, sizeof(saved_copy), "%s", saved);
+
+   setenv("TZ", "UTC", 1);
+   tzset();
+   time_t as_utc = parse_utc_ts(sample);
+
+   /* UTC+13, and a DST-observing zone so the offset is not a constant either. */
+   setenv("TZ", "Pacific/Auckland", 1);
+   tzset();
+   time_t as_nz = parse_utc_ts(sample);
+
+   setenv("TZ", "America/Los_Angeles", 1);
+   tzset();
+   time_t as_la = parse_utc_ts(sample);
+
+   if (saved_copy[0])
+      setenv("TZ", saved_copy, 1);
+   else
+      unsetenv("TZ");
+   tzset();
+
+   assert(as_utc == 1786302443);
+   assert(as_nz == as_utc);
+   assert(as_la == as_utc);
+
+   printf("  parse_utc_ts reads UTC regardless of host timezone\n");
+}
+
 int main(void)
 {
+   test_parse_utc_ts_accepts_both_spellings();
+   test_parse_utc_ts_is_timezone_independent();
    test_normalize_key();
    test_trigram_similarity();
    test_stem_word();
    test_is_likely_path();
    test_trim_partial_utf8();
    test_sanitize_utf8();
+   test_utf8_chunk_len();
    test_split_reasoning_prefix();
    test_shlex_split();
    test_split_camel_case();
    test_is_contradiction();
-   test_shell_escape();
-   test_shell_escape_injection_payloads();
+   test_shell_quote();
+   test_shell_quote_injection_payloads();
    test_strip_ai_attribution();
 #ifndef AIMEE_WINDOWS
    test_run_cmd();

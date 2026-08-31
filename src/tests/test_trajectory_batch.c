@@ -9,10 +9,11 @@
 #include "agent_eval.h"
 #include "agent_exec.h"
 #include "cJSON.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "trajectory.h"
+#include "support/store_module_fixture.h"
 
 int agent_eval_load_tasks(const char *suite_dir, eval_task_t *tasks, int max_tasks)
 {
@@ -50,13 +51,12 @@ static void write_text(const char *path, const char *text)
 
 static void test_batch_writes_one_trajectory_per_task(void)
 {
-   char db_path[] = "/tmp/test_trajectory_batch_XXXXXX.db";
+   char db_path[256];
+   snprintf(db_path, sizeof db_path, "%s/test_trajectory_batch_XXXXXX.db", platform_tmpdir());
    int fd = mkstemps(db_path, 3);
    if (fd >= 0)
       close(fd);
    platform_test_remove_sqlite(db_path);
-   assert(db1_init(db_path) == 0);
-
    char out_dir[256];
    snprintf(out_dir, sizeof(out_dir), "/tmp/aimee-traj-batch-%ld", (long)getpid());
    platform_mkdir_p(out_dir, 0700);
@@ -92,20 +92,19 @@ static void test_batch_writes_one_trajectory_per_task(void)
    cJSON_Delete(root);
    free(summary);
 
-   db1_shutdown();
    platform_test_remove_sqlite(db_path);
    printf("  PASS: test_batch_writes_one_trajectory_per_task\n");
 }
 
 static void test_batch_refuses_unresolved_secret_without_file(void)
 {
-   char db_path[] = "/tmp/test_trajectory_batch_secret_XXXXXX.db";
+   char db_path[256];
+   snprintf(db_path, sizeof db_path, "%s/test_trajectory_batch_secret_XXXXXX.db",
+            platform_tmpdir());
    int fd = mkstemps(db_path, 3);
    if (fd >= 0)
       close(fd);
    platform_test_remove_sqlite(db_path);
-   assert(db1_init(db_path) == 0);
-
    char out_dir[256];
    snprintf(out_dir, sizeof(out_dir), "/tmp/aimee-traj-batch-secret-%ld", (long)getpid());
    platform_test_rmrf(out_dir);
@@ -139,7 +138,6 @@ static void test_batch_refuses_unresolved_secret_without_file(void)
    cJSON_Delete(root);
    free(summary);
 
-   db1_shutdown();
    platform_test_remove_sqlite(db_path);
    platform_test_rmrf(out_dir);
    printf("  PASS: test_batch_refuses_unresolved_secret_without_file\n");
@@ -147,6 +145,13 @@ static void test_batch_refuses_unresolved_secret_without_file(void)
 
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    printf("trajectory_batch:\n");
    test_batch_writes_one_trajectory_per_task();
    test_batch_refuses_unresolved_secret_without_file();

@@ -5,15 +5,14 @@
 #endif
 /* agent_policy.c: validation, policy, trace, metrics, env, manifest, contract */
 #include "aimee.h"
-#include "db1.h"
-#include "db2/tool_registry.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/tool_registry.h"
 #include "agent.h"
 #include <aimee/tools/agent_tools.h>
 #include "kb_client.h"
 #include "headers/memory.h"
 #include "headers/agent_exec.h"
 #include "compact.h"
-#include "coord_closet.h"
 #include "computer_use.h"
 #include "config.h"
 #include "aimee/protocols/mcp/mcp_client_registry.h"
@@ -23,7 +22,6 @@
 #include "platform_path.h"
 #include "cJSON.h"
 #include "modules/git/git_verify.h"
-#include "headers/agent_policy_intercept.h"
 #include <ctype.h>
 #include <errno.h>
 #include <sys/stat.h>
@@ -53,77 +51,6 @@ static const char *tool_prompts_lookup_embedded(const char *name)
    return NULL;
 }
 
-/* --- Argument alias table --- */
-
-typedef struct
-{
-   const char *alias;
-   const char *canonical;
-} arg_alias_t;
-
-static const arg_alias_t g_arg_aliases[] = {
-    {"filepath", "path"},  {"file_path", "path"},  {"file", "path"}, {"filename", "path"},
-    {"file_name", "path"}, {"cmd", "command"},     {"dir", "path"},  {"directory", "path"},
-    {"q", "query"},        {"max", "max_results"}, {"cnt", "count"}, {"num", "count"},
-    {"msg", "message"},    {NULL, NULL},
-};
-
-/* Normalize argument names: resolve aliases, coerce "123" to 123 for integer
- * fields. Modifies args in-place. Returns the number of normalizations. */
-static int normalize_args(cJSON *args, cJSON *schema_props)
-{
-   if (!args || !cJSON_IsObject(args))
-      return 0;
-   int count = 0;
-
-   /* Alias resolution: rename aliased keys to canonical names */
-   for (const arg_alias_t *a = g_arg_aliases; a->alias; a++)
-   {
-      cJSON *field = cJSON_GetObjectItem(args, a->alias);
-      if (!field)
-         continue;
-      /* Only rename if the canonical name is not already present */
-      if (cJSON_GetObjectItem(args, a->canonical))
-         continue;
-      /* cJSON doesn't support key rename, so detach and re-add */
-      cJSON *detached = cJSON_DetachItemFromObject(args, a->alias);
-      if (detached)
-      {
-         cJSON_AddItemToObject(args, a->canonical, detached);
-         count++;
-      }
-   }
-
-   /* Type coercion: string "123" → integer 123 for integer fields */
-   if (schema_props && cJSON_IsObject(schema_props))
-   {
-      cJSON *prop = schema_props->child;
-      while (prop)
-      {
-         cJSON *field = cJSON_GetObjectItem(args, prop->string);
-         if (field && cJSON_IsString(field))
-         {
-            cJSON *type_spec = cJSON_GetObjectItem(prop, "type");
-            if (type_spec && cJSON_IsString(type_spec) &&
-                (strcmp(type_spec->valuestring, "integer") == 0 ||
-                 strcmp(type_spec->valuestring, "number") == 0))
-            {
-               const char *s = field->valuestring;
-               char *end = NULL;
-               long val = strtol(s, &end, 10);
-               if (end && *end == '\0' && s != end)
-               {
-                  cJSON_ReplaceItemInObject(args, prop->string, cJSON_CreateNumber(val));
-                  count++;
-               }
-            }
-         }
-         prop = prop->next;
-      }
-   }
-   return count;
-}
-
 static int validate_against_schema(const char *args_json, cJSON *schema, char *err_out,
                                    size_t err_len)
 {
@@ -137,8 +64,11 @@ static int validate_against_schema(const char *args_json, cJSON *schema, char *e
       return -1;
    }
 
+   /* No normalization here. Arguments arrive canonical (the agent loop rewrites
+    * them in place before any gate runs), so this judges the shape that will
+    * actually execute. Normalizing a private copy here -- which is what this
+    * used to do -- validated one shape and let another run. */
    cJSON *props = cJSON_GetObjectItem(schema, "properties");
-   normalize_args(args, props);
 
    cJSON *required = cJSON_GetObjectItem(schema, "required");
    if (required && cJSON_IsArray(required))
@@ -190,6 +120,25 @@ static int validate_against_schema(const char *args_json, cJSON *schema, char *e
             }
          }
          prop = prop->next;
+      }
+   }
+
+   /* Enforce additionalProperties ONLY when the schema says false. Standard
+    * JSON Schema semantics, so a tool author opts in and nothing that omits the
+    * keyword changes behaviour. Without this an undeclared key the model
+    * invented passed every gate and reached the handler. */
+   cJSON *additional = cJSON_GetObjectItem(schema, "additionalProperties");
+   if (additional && cJSON_IsFalse(additional) && props && cJSON_IsObject(props) &&
+       cJSON_IsObject(args))
+   {
+      for (cJSON *field = args->child; field; field = field->next)
+      {
+         if (field->string && !cJSON_GetObjectItem(props, field->string))
+         {
+            snprintf(err_out, err_len, "unknown field '%s'", field->string);
+            cJSON_Delete(args);
+            return -1;
+         }
       }
    }
 
@@ -856,154 +805,3 @@ char *agent_load_project_contract(const char *project_root)
 }
 
 /* --- Tool result compression (#4) --- */
-
-/* Build a compact_config_t from the application-level config_t.
- * Per-tool entries are stored as "tool_name=threshold" strings in config. */
-static void compact_cfg_from_app_config(compact_config_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   out->enabled = config_compact_enabled();
-   out->threshold = config_compact_threshold();
-   out->head_bytes = config_compact_head_bytes();
-   out->tail_bytes = config_compact_tail_bytes();
-
-   int count = config_compact_per_tool_count();
-   if (count > COMPACT_MAX_PER_TOOL)
-      count = COMPACT_MAX_PER_TOOL;
-
-   for (int i = 0; i < count; i++)
-   {
-      char tool[64];
-      int thresh = 0;
-      if (sscanf(config_compact_per_tool(i), "%63[^=]=%d", tool, &thresh) == 2)
-      {
-         snprintf(out->per_tool[i].tool, sizeof(out->per_tool[i].tool), "%s", tool);
-         out->per_tool[i].threshold = thresh;
-         out->per_tool_count++;
-      }
-   }
-}
-
-/* Eager tool-result seam: shrink via the shared compact_body() core using
- * application config, conserve identifiers in the Coordinate Closet, and bound
- * the result to the per-result cap. This is the ONLY writer of compacted bodies
- * into history; the economizer's lazy lever (context_compress_view) shares the
- * same compact_body() core but operates on deep copies at request assembly.
- * Falls back to the resolved per-result cap (agent_tool_output_cap_clamp;
- * default AGENT_TOOL_OUTPUT_MAX) so oversized results are always bounded even
- * if compaction produces a larger-than-expected summary (e.g. malformed JSON
- * that fails parsing).
- *
- * tool_name may be NULL to skip per-tool overrides. */
-char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *tool_name)
-{
-   if (!raw)
-      return strdup("");
-
-   /* Load application config and convert to compact_config_t */
-   compact_config_t cfg;
-   int loaded = config_present();
-   if (loaded)
-      compact_cfg_from_app_config(&cfg);
-   else
-      memset(&cfg, 0, sizeof(cfg)); /* use defaults on load failure */
-
-   /* Per-result model-visible cap (operator-configurable, default 32768).
-    * Resolved ONCE here so the closet budget and the hard cap below agree. */
-   size_t cap = agent_tool_output_cap_clamp(loaded ? config_tool_output_max_bytes() : 0);
-
-   /* Shrink via the single shared core. Size the buffer for the one strategy that
-    * can exceed raw_len (a JSON structural summary of a tiny body); every other
-    * path is <= raw_len, so this never truncates the shrink. The hard cap below is
-    * applied by THIS caller (per-seam policy), not the core. */
-   size_t out_cap = raw_len + COMPACT_JSON_SUMMARY_MAX + 1;
-   char *out = malloc(out_cap);
-   if (!out)
-      return strdup("");
-   size_t out_len = compact_body(raw, raw_len, tool_name, &cfg, out, out_cap);
-   int compacted = (out_len < raw_len);
-
-   /* Log compaction events for diagnostics */
-   if (compacted)
-      aimee_log(LOG_DEBUG, "compact", "tool=%s in=%llu out=%llu", tool_name ? tool_name : "(none)",
-                (unsigned long long)raw_len, (unsigned long long)out_len);
-
-   /* Fold §2 — Coordinate Closet: when the result was compacted, conserve the
-    * verbatim identifiers from the pre-truncation raw so they survive. Render the
-    * closet first (it is byte-bounded), then reserve room for it under the hard
-    * cap so the combined result still never exceeds the resolved per-result cap.
-    * Default-off; return-only wiring (no cross-turn persistence in P1). */
-   char *closet = NULL;
-   size_t closet_len = 0;
-   if (loaded && config_coord_closet_enabled() && compacted)
-   {
-      coord_set_t set;
-      coord_set_init(&set);
-      /* P1 return-only wiring: the closet conserves identifiers from THIS tool
-       * result (the compacted body may drop them, which is exactly what the closet
-       * guards against). The conserved values originate from the same tool result
-       * as the body — same trust level — so stamping them lane AGENT elevates no
-       * trust. Per-source lane assignment (user-pasted vs tool-origin) arrives with
-       * the transcript fold in P2, where coord_provenance_t already carries it. */
-      coord_provenance_t prov = {COORD_LANE_AGENT, -1, -1, -1};
-      coord_closet_nominate(raw, raw_len, &prov, &set);
-      /* Bound the closet budget so body + closet can never exceed the hard cap:
-       * closet <= cap - min-body, leaving room for the body. */
-      int hard_room = (int)cap - 256;
-      if (hard_room < 0)
-         hard_room = 0; /* tiny operator cap: no room for a closet */
-      int cb = config_coord_closet_budget_bytes();
-      if (cb > hard_room)
-         cb = hard_room;
-      /* Copy the denylist out of the accessor's thread-local buffer: ccfg.denylist
-       * is a borrowed pointer read after coord_closet_render() runs, and any other
-       * config_coord_closet_denylist() call in between would move the ground under
-       * it. */
-      char denylist[CONFIG_COPY_MAX];
-      config_coord_closet_denylist_copy(denylist, sizeof(denylist));
-      coord_closet_config_t ccfg = {
-          .enabled = 1,
-          .budget_bytes = cb,
-          .max_ratio_pct = config_coord_closet_max_ratio_pct(),
-          .denylist = denylist[0] ? denylist : NULL,
-      };
-      coord_evict_t why = COORD_EVICT_NONE;
-      closet = coord_closet_render(&set, &ccfg, raw_len, &why);
-      if (closet)
-         closet_len = strlen(closet);
-      /* Eviction is surfaced in the rendered text ("(partial — ... omitted)") and
-       * logged at WARNING so the loss is never silent. */
-      if (why == COORD_EVICT_FAIL)
-         aimee_log(LOG_WARN, "compact", "coord_closet partial (budget) tool=%s",
-                   tool_name ? tool_name : "(none)");
-      coord_set_free(&set);
-   }
-
-   /* Hard cap: ensure the result never exceeds the resolved per-result cap
-    * regardless of what the compaction summary produced. Reserve closet bytes
-    * inside the cap. */
-   size_t body_cap = cap;
-   if (closet_len > 0 && closet_len + 1 < cap)
-      body_cap = cap - closet_len - 1;
-   if (out_len > body_cap)
-   {
-      out[body_cap] = '\0';
-      out_len = body_cap;
-   }
-
-   if (closet_len > 0)
-   {
-      char *combined = malloc(out_len + 1 + closet_len + 1);
-      if (combined)
-      {
-         memcpy(combined, out, out_len);
-         combined[out_len] = '\n';
-         memcpy(combined + out_len + 1, closet, closet_len);
-         combined[out_len + 1 + closet_len] = '\0';
-         free(out);
-         out = combined;
-      }
-   }
-   free(closet);
-   return out;
-}

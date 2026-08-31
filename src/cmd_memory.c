@@ -10,7 +10,7 @@
 #include "session_compact.h"
 #include "agent_eval.h"
 #include "commands.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 #include "dogfood.h"
 #include "json_fluent.h"
@@ -209,6 +209,10 @@ static const subcmd_t memory_subcmds[] = {
      mem_ontology},
     {"approve", "Approve a memory for L3→L4 promotion (<id> [--note S] [--approver S])",
      mem_approve},
+    {"activation",
+     "Set retrieval activation for a memory (<id> [--sticky N] [--cooldown N] [--delay N]"
+     " [--suppress])",
+     mem_activation},
     {"op",
      "Typed mutation verb: store | update <id> <content> | supersede <old_id> <content> | "
      "forget <id> | affirm <id> | reject <id> [--reason S]",

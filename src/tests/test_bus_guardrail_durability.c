@@ -1,48 +1,102 @@
-/* test_bus_guardrail_durability.c: the second module on the bus — the
- * guardrail-semantic risk event — carried exactly once to its db1 sink.
+/* The guardrail event's durability across the bus, emitter half.
  *
- * gsem_record used to call db1_guardrail_event_insert directly; it now publishes
- * over the shared event bus, and the bus consumer performs the real insert. Same
- * all-or-nothing, load-bearing property as the audit row: every guardrail event
- * the bus accepts reaches db1 exactly once, and a graceful stop drains the
- * in-flight ones. This emits N events through the real bus, stops, and requires
- * the real db1 guardrail_events table to hold exactly N — proving the second
- * kind rides the same transport with the same guarantee.
+ * THE PROPERTY: every guardrail event the bus accepts reaches the store exactly
+ * once, and a graceful stop drains the ones in flight. Load-bearing -- it is
+ * what lets an operator read the guardrail history as fact rather than as a
+ * sample.
+ *
+ * WHY THIS FILE READS NOTHING BACK. The original did: it emitted N events and
+ * then called db1_guardrail_event_list() to check them. That worked while the
+ * store was an in-process SQLite database. It cannot work now, because the
+ * store is reached OVER THE BUS and obs_bus_stop() is half of the property --
+ * asking the store after the stop asks through a transport that was just torn
+ * down, and restarting it does not bring the module back.
+ *
+ * So this half stops at the boundary: emit, stop, and report what the BUS
+ * counted. test_bus_guardrail_durability.sh does the read-back straight out of
+ * PostgreSQL, which is the only place a verification of "it reached the store"
+ * can honestly live once the store is a separate process.
+ *
+ * Each event carries a unique identity (session_id "s<i>") and per-i field
+ * values, so the SQL side can prove EXACTLY-ONCE rather than merely a matching
+ * total -- a loss and a duplicate that net to N would pass a count and fail the
+ * identity check -- and that every field survived the wire.
  */
 #include <assert.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
-#include <aimee/audit/obs_bus.h> /* obs_bus_*, guardrail_event_t, db1_guardrail_event_* */
-#include "db1/db1.h"
+#include <aimee/audit/obs_bus.h>
+#include "platform_test_util.h"
 #include "server/obs_bus_adapter.h"
+#include "db1_client/guardrail_events.h"
+#include "support/store_module_fixture.h"
 
-#define N 2000
+/* The default is 2000, which is what makes the exactly-once claim worth
+ * something: a race that loses one event in a hundred is invisible at ten.
+ * AIMEE_TEST_GUARDRAIL_N lowers it for diagnosis, where watching five events
+ * cross is worth more than counting two thousand that did not. */
+#define N_DEFAULT 2000
 
 int main(void)
 {
-   printf("test_bus_guardrail_durability:\n");
+   /* LINE-BUFFERED, because this test can be killed. Piped or redirected, stdout
+    * is block-buffered by default, so a run that times out loses every line it
+    * printed -- which made three events look like total silence and sent the
+    * diagnosis after a deadlock that was not there. A test whose output is
+    * evidence has to emit that evidence as it goes. */
+   setvbuf(stdout, NULL, _IOLBF, 0);
 
-   char home[] = "/tmp/aimee-busgr-XXXXXX";
+   int n = N_DEFAULT;
+   {
+      const char *override = getenv("AIMEE_TEST_GUARDRAIL_N");
+      if (override && *override)
+      {
+         int parsed = atoi(override);
+         if (parsed > 0)
+            n = parsed;
+      }
+   }
+   printf("test_bus_guardrail_durability: %d event(s)\n", n);
+
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busgr-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");
       return 1;
    }
    setenv("AIMEE_HOME", home, 1);
-   if (db1_init(":memory:") != 0)
+
+   /* The sink goes on BEFORE the bus starts -- obs_bus refuses to be
+    * reconfigured once running, and the fixture is what starts it. */
+   if (server_obs_bus_configure() != 0)
    {
-      fprintf(stderr, "FAIL: db1 init\n");
+      fprintf(stderr, "FAIL: could not install the guardrail sink\n");
       return 1;
    }
-   assert(server_obs_bus_configure() == 0);
 
-   /* Each event carries a UNIQUE identity (session_id "s<i>") and per-i field
-    * values, so the read-back can prove exactly-once (a loss+dup that nets to N
-    * would fail the seen[] check) AND that every field round-tripped the wire. */
-   assert(obs_bus_start() == 0);
-   for (int i = 0; i < N; i++)
+   if (!store_module_fixture_available())
+      return 0; /* skipped, with the reason printed by the fixture */
+   store_module_fixture_start();
+
+   /* A store call from THIS thread, before any event is emitted.
+    *
+    * The diagnosis under test is that a call from the obs_bus CONSUMER thread
+    * cannot complete while a call from any other thread can. Comparing two test
+    * binaries suggested it; doing both in one process is what settles it,
+    * because everything else -- the bus, the modules, the database, the grants
+    * -- is then identical between the two calls. */
+   {
+      guardrail_event_counts_t probe;
+      int rc = db1_guardrail_event_counts_7d(&probe);
+      printf("  main-thread store call: rc=%d (0 means the store answered this thread)\n", rc);
+   }
+
+   for (int i = 0; i < n; i++)
    {
       guardrail_event_t e;
       memset(&e, 0, sizeof e);
@@ -60,82 +114,47 @@ int main(void)
       e.dry_run = i % 2;
       obs_bus_emit_guardrail(&e);
    }
-   obs_bus_stop(); /* drains every in-flight event to db1 */
+
+   /* A settle window, off by default.
+    *
+    * With it at zero every event is still queued when the stop begins, which is
+    * the harder half of the property and the one worth defaulting to. Setting
+    * it lets a diagnosis separate "the sink never reaches the store" from "the
+    * sink fails only during the stop" -- two failures that look identical from
+    * the counters alone. */
+   {
+      const char *settle = getenv("AIMEE_TEST_GUARDRAIL_SETTLE_MS");
+      int ms = settle && *settle ? atoi(settle) : 0;
+      if (ms > 0)
+      {
+         struct timespec pause = {ms / 1000, (long)(ms % 1000) * 1000000L};
+         nanosleep(&pause, NULL);
+      }
+   }
+
+   /* The other half of the property: a graceful stop drains what is in flight.
+    * Everything the bus accepted must be in the store by the time this
+    * returns. */
+   obs_bus_stop();
 
    uint64_t dropped = obs_bus_dropped();
    uint64_t written = obs_bus_written();
-   printf("  emitted %d, written %llu, dropped %llu\n", N, (unsigned long long)written,
+   printf("  emitted %d, written %llu, dropped %llu\n", n, (unsigned long long)written,
           (unsigned long long)dropped);
-   if (dropped != 0 || written != (uint64_t)N)
+
+   /* Machine-readable, for the shell half. It compares the store's row count
+    * against WRITTEN rather than against N, so a run where the bus legitimately
+    * dropped something still checks the claim that matters: what the bus
+    * accepted is what the store holds. */
+   printf("EMITTED=%d WRITTEN=%llu DROPPED=%llu\n", n, (unsigned long long)written,
+          (unsigned long long)dropped);
+
+   if (dropped != 0 || written != (uint64_t)n)
    {
       fprintf(stderr, "FAIL: written %llu dropped %llu, expected %d written / 0 dropped\n",
-              (unsigned long long)written, (unsigned long long)dropped, N);
+              (unsigned long long)written, (unsigned long long)dropped, n);
       return 1;
    }
-
-   /* The real db1 sink must hold exactly N rows — each identity once, every field
-    * matching what that identity emitted. */
-   guardrail_event_row_t *rows = calloc(N, sizeof *rows);
-   char *seen = calloc(N, 1);
-   assert(rows && seen);
-   int count = 0;
-   if (db1_guardrail_event_list(N, 0, rows, &count) != 0)
-   {
-      fprintf(stderr, "FAIL: db1_guardrail_event_list failed\n");
-      return 1;
-   }
-   if (count != N)
-   {
-      fprintf(stderr, "FAIL: db1 holds %d guardrail events, expected %d\n", count, N);
-      return 1;
-   }
-   for (int r = 0; r < count; r++)
-   {
-      if (rows[r].session_id[0] != 's')
-      {
-         fprintf(stderr, "FAIL: row %d has unexpected session_id '%s'\n", r, rows[r].session_id);
-         return 1;
-      }
-      int id = atoi(rows[r].session_id + 1);
-      if (id < 0 || id >= N || seen[id])
-      {
-         fprintf(stderr, "FAIL: exactly-once violated at id=%d (out-of-range or duplicate)\n", id);
-         return 1;
-      }
-      seen[id] = 1;
-      char etool[32], elab[32], eexpl[32];
-      snprintf(etool, sizeof etool, "Tool_%d", id % 5);
-      snprintf(elab, sizeof elab, "lab-%d", id % 5);
-      snprintf(eexpl, sizeof eexpl, "expl %d", id);
-      const char *efa = (id % 2) ? "block" : "allow";
-      if (strcmp(rows[r].tool_name, etool) != 0 || strcmp(rows[r].final_action, efa) != 0 ||
-          strcmp(rows[r].labels, elab) != 0 || strcmp(rows[r].explanation, eexpl) != 0 ||
-          rows[r].dry_run != (id % 2) || rows[r].overall_risk != (double)id)
-      {
-         fprintf(stderr,
-                 "FAIL: id=%d fields did not round-trip: tool=%s fa=%s lab=%s expl=%s "
-                 "dry=%d risk=%g\n",
-                 id, rows[r].tool_name, rows[r].final_action, rows[r].labels, rows[r].explanation,
-                 rows[r].dry_run, rows[r].overall_risk);
-         return 1;
-      }
-   }
-   int missing = 0;
-   for (int i = 0; i < N; i++)
-      if (!seen[i])
-         missing++;
-   if (missing)
-   {
-      fprintf(stderr, "FAIL: %d of %d identities missing from db1\n", missing, N);
-      return 1;
-   }
-   printf("  db1 guardrail_events: %d rows, each identity present exactly once with all fields "
-          "round-tripped\n",
-          count);
-
-   free(rows);
-   free(seen);
-   db1_shutdown();
-   printf("test_bus_guardrail_durability: OK (a second module rides the bus, exactly once)\n");
+   printf("test_bus_guardrail_durability: emitter OK (the SQL half verifies the store)\n");
    return 0;
 }

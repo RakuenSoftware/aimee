@@ -12,6 +12,8 @@
 #include <sys/stat.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include <aimee/delegates/module_api.h>
 
 int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prompt,
                                    delegate_prompt_plan_t *out)
@@ -52,100 +54,11 @@ int delegate_resolve_prompt_inputs(const char *cli_prompt, const char *file_prom
    return -1;
 }
 
-static void handoff_set_error(delegate_handoff_validation_t *out, const char *msg)
-{
-   if (!out)
-      return;
-   snprintf(out->error, sizeof(out->error), "%s", msg ? msg : "invalid handoff");
-   snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
-   out->needs_supervisor_review = 1;
-}
+static delegate_handoff_provider_fn g_handoff_provider;
 
-static int handoff_status_allowed(const char *status)
+void delegate_register_handoff_provider(delegate_handoff_provider_fn provider)
 {
-   return status && (strcmp(status, "done") == 0 || strcmp(status, "partial") == 0 ||
-                     strcmp(status, "blocked") == 0 || strcmp(status, "failed") == 0);
-}
-
-static int json_array_string_count(cJSON *arr)
-{
-   if (!cJSON_IsArray(arr))
-      return 0;
-   int count = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (cJSON_IsString(item) && item->valuestring[0])
-         count++;
-   }
-   return count;
-}
-
-static int json_array_entry_count(cJSON *arr)
-{
-   return cJSON_IsArray(arr) ? cJSON_GetArraySize(arr) : 0;
-}
-
-static int json_array_contains_string(cJSON *arr, const char *needle)
-{
-   if (!cJSON_IsArray(arr) || !needle || !needle[0])
-      return 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (cJSON_IsString(item) && strcmp(item->valuestring, needle) == 0)
-         return 1;
-   }
-   return 0;
-}
-
-static int handoff_passed_test_count(cJSON *tests)
-{
-   if (!cJSON_IsArray(tests))
-      return 0;
-   int passed = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, tests)
-   {
-      if (!cJSON_IsObject(item))
-         continue;
-      cJSON *status = cJSON_GetObjectItemCaseSensitive(item, "status");
-      if (cJSON_IsString(status) &&
-          (strcmp(status->valuestring, "passed") == 0 || strcmp(status->valuestring, "pass") == 0))
-         passed++;
-   }
-   return passed;
-}
-
-static int handoff_outside_owned_count(cJSON *changed, cJSON *outside, cJSON *owned)
-{
-   int count = json_array_string_count(outside);
-   if (!cJSON_IsArray(changed) || !cJSON_IsArray(owned) || cJSON_GetArraySize(owned) == 0)
-      return count;
-
-   cJSON *item;
-   cJSON_ArrayForEach(item, changed)
-   {
-      if (!cJSON_IsString(item) || !item->valuestring[0])
-         continue;
-      if (!json_array_contains_string(owned, item->valuestring) &&
-          !json_array_contains_string(outside, item->valuestring))
-         count++;
-   }
-   return count;
-}
-
-static int handoff_string_blank(const char *s)
-{
-   if (!s)
-      return 1;
-   while (*s)
-   {
-      if (*s != ' ' && *s != '\t' && *s != '\n' && *s != '\r')
-         return 0;
-      s++;
-   }
-   return 1;
+   g_handoff_provider = provider;
 }
 
 char *delegate_handoff_append_contract(const char *prompt, const char *packet_id)
@@ -195,6 +108,15 @@ char *delegate_handoff_repair_prompt(const char *previous_response, const char *
    return out;
 }
 
+/* Whether a delegate's report can be believed is the delegates module's rule.
+ * It was ~150 lines here -- schema and status admission, required-field shape,
+ * the passed-test count, and the two downgrades -- and it is stated once, in
+ * the module, now.
+ *
+ * Fails closed as NEEDS-REVIEW. With no answer the handoff is neither accepted
+ * nor silently dropped: it goes to a human. Treating an unanswerable check as
+ * "valid" would let an unverified delegate report through, which is the exact
+ * thing the two downgrades exist to prevent. */
 int delegate_handoff_validate_text(const char *text, const char *owned_files_json,
                                    int require_verification, delegate_handoff_validation_t *out)
 {
@@ -203,78 +125,14 @@ int delegate_handoff_validate_text(const char *text, const char *owned_files_jso
    memset(out, 0, sizeof(*out));
    snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
 
-   if (!text || !text[0])
+   if (!g_handoff_provider)
    {
-      handoff_set_error(out, "empty delegate handoff");
-      return -1;
-   }
-
-   cJSON *root = cJSON_Parse(text);
-   if (!cJSON_IsObject(root))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "handoff is not valid JSON object");
-      return -1;
-   }
-
-   cJSON *schema = cJSON_GetObjectItemCaseSensitive(root, "schema_version");
-   if (!cJSON_IsString(schema) || strcmp(schema->valuestring, "delegate_result_v1") != 0)
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "missing schema_version delegate_result_v1");
-      return -1;
-   }
-
-   cJSON *status = cJSON_GetObjectItemCaseSensitive(root, "status");
-   if (!cJSON_IsString(status) || !handoff_status_allowed(status->valuestring))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "invalid handoff status");
-      return -1;
-   }
-   snprintf(out->raw_status, sizeof(out->raw_status), "%s", status->valuestring);
-   snprintf(out->status, sizeof(out->status), "%s", status->valuestring);
-
-   cJSON *changed = cJSON_GetObjectItemCaseSensitive(root, "changed_files");
-   cJSON *tests = cJSON_GetObjectItemCaseSensitive(root, "tests");
-   cJSON *supervisor = cJSON_GetObjectItemCaseSensitive(root, "supervisor_actions");
-   cJSON *summary = cJSON_GetObjectItemCaseSensitive(root, "summary");
-   if (!cJSON_IsArray(changed) || !cJSON_IsArray(tests) ||
-       (supervisor && !cJSON_IsArray(supervisor)) || !cJSON_IsString(summary) ||
-       handoff_string_blank(summary->valuestring))
-   {
-      cJSON_Delete(root);
-      handoff_set_error(out, "handoff missing required fields");
-      return -1;
-   }
-
-   cJSON *commands = cJSON_GetObjectItemCaseSensitive(root, "commands_run");
-   cJSON *outside = cJSON_GetObjectItemCaseSensitive(root, "outside_ownership_touches");
-   out->changed_files_count = json_array_string_count(changed);
-   out->commands_run = json_array_entry_count(commands);
-   out->passed_tests = handoff_passed_test_count(tests);
-
-   cJSON *owned = owned_files_json && owned_files_json[0] ? cJSON_Parse(owned_files_json) : NULL;
-   out->outside_ownership_count = handoff_outside_owned_count(changed, outside, owned);
-   cJSON_Delete(owned);
-
-   out->valid = 1;
-   if (out->outside_ownership_count > 0)
-   {
-      snprintf(out->status, sizeof(out->status), "%s", "needs_supervisor_review");
-      snprintf(out->error, sizeof(out->error), "%s", "handoff touched files outside owned_files");
-      out->needs_supervisor_review = 1;
-   }
-   else if (strcmp(out->raw_status, "done") == 0 && require_verification && out->passed_tests == 0)
-   {
-      snprintf(out->status, sizeof(out->status), "%s", "partial");
       snprintf(out->error, sizeof(out->error), "%s",
-               "status=done without passed focused verification; downgraded to partial");
-      out->done_without_verification = 1;
+               "handoff cannot be validated (delegates module unavailable)");
+      out->needs_supervisor_review = 1;
+      return -1;
    }
-
-   cJSON_Delete(root);
-   return 0;
+   return g_handoff_provider(text, owned_files_json, require_verification, out);
 }
 
 void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_validation_t *v)
@@ -297,275 +155,29 @@ void delegate_handoff_add_validation_json(cJSON *obj, const delegate_handoff_val
 
 /* ---- Named-file drift detection ---- */
 
-static const char *const drift_src_exts[] = {
-    ".c",  ".h",    ".cpp", ".cc",   ".cxx",  ".py", ".js",  ".ts", ".go",   ".rs",  ".java", ".rb",
-    ".sh", ".yaml", ".yml", ".json", ".toml", ".md", ".sql", ".mk", ".conf", ".cfg", NULL};
+static delegate_paths_provider_fn g_paths_provider;
 
-static int drift_is_src_extension(const char *ext)
+void delegate_register_paths_provider(delegate_paths_provider_fn provider)
 {
-   for (int i = 0; drift_src_exts[i]; i++)
-      if (strcmp(ext, drift_src_exts[i]) == 0)
-         return 1;
-   return 0;
+   g_paths_provider = provider;
 }
 
-static int drift_path_char(char c)
-{
-   return isalnum((unsigned char)c) || c == '.' || c == '/' || c == '_' || c == '-';
-}
-
-static size_t drift_task_surface_len(const char *prompt)
-{
-   if (!prompt)
-      return 0;
-
-   size_t limit = strlen(prompt);
-   static const char *const markers[] = {
-       "\n\n# Prompt File\n",
-       "\n# Prompt File\n",
-       "\n\n---\n## Parent Worktree Diff Evidence\n",
-       "\n---\n## Parent Worktree Diff Evidence\n",
-       "\n\n---\n## Validation Evidence Bundle\n",
-       "\n---\n## Validation Evidence Bundle\n",
-       NULL,
-   };
-
-   for (int i = 0; markers[i]; i++)
-   {
-      const char *marker = strstr(prompt, markers[i]);
-      if (marker)
-      {
-         size_t pos = (size_t)(marker - prompt);
-         if (pos < limit)
-            limit = pos;
-      }
-   }
-
-   return limit;
-}
-
-/* Briefs commonly say things like "Do NOT touch src/agent_jobs.c" or
- * "skip src/foo.c — it is owned by another delegate". Treating those
- * negated mentions as required outputs leads to spurious "named file was
- * not created" warnings even on a successful run. We scan backwards from
- * the path token to the start of the current line looking for negation
- * cues; if any matches, the path is dropped. The heuristic is
- * intentionally conservative — false positives here just mean the
- * drift check skips a path it should have flagged, which is far less
- * noisy than the current false-negative pattern. */
-static int drift_path_is_negated(const char *prompt, const char *path_start)
-{
-   const char *line_start = path_start;
-   while (line_start > prompt && line_start[-1] != '\n')
-      line_start--;
-
-   size_t span = (size_t)(path_start - line_start);
-   if (span == 0)
-      return 0;
-
-   char buf[256];
-   if (span >= sizeof(buf))
-      span = sizeof(buf) - 1;
-   memcpy(buf, path_start - span, span);
-   buf[span] = '\0';
-   for (size_t i = 0; i < span; i++)
-      buf[i] = (char)tolower((unsigned char)buf[i]);
-
-   static const char *negations[] = {
-       "do not ",     "don't ",     "does not ",   "doesn't ",   "must not ",    "mustn't ",
-       "cannot ",     "can't ",     "should not ", "shouldn't ", "will not ",    "won't ",
-       "skip ",       "off-limits", "off limits",  "no touch",   "do not touch", "not touch",
-       "leave alone", "ignore ",    NULL};
-   for (int i = 0; negations[i]; i++)
-      if (strstr(buf, negations[i]))
-         return 1;
-
-   return 0;
-}
-
-/* Briefs frequently embed an illustrative JSON schema or example
- * (e.g. `"owned_files":["src/x.c"]`) to show a delegate the *shape* of its
- * output. Those quoted paths are documentation, not real output targets, and
- * scraping them produced spurious "named file was not created" failures. A path
- * is treated as such an example value when it is a double-quoted token whose
- * enclosing context is a JSON value position — the opening quote follows (past
- * whitespace) a '[', ',', or ':'. Prose instructions like `create "src/foo.c"`
- * are preserved because the char before the opening quote is a word/space, not a
- * JSON structural delimiter. Conservatively dropping here matches the rest of
- * this check: a missed flag is far quieter than a false failure. */
-static int drift_path_is_json_example_value(const char *prompt, const char *tok_start,
-                                            const char *tok_end)
-{
-   if (tok_start <= prompt || tok_start[-1] != '"')
-      return 0;
-   if (*tok_end != '"')
-      return 0;
-   const char *b = tok_start - 2; /* char before the opening quote */
-   while (b > prompt && (*b == ' ' || *b == '\t' || *b == '\n' || *b == '\r'))
-      b--;
-   if (b < prompt)
-      return 0;
-   return (*b == '[' || *b == ',' || *b == ':');
-}
-
+/* Which repo files a brief names as targets is the delegates module's rule, and
+ * it lives only there. The scan it replaced was long -- an extension table, a
+ * negation table, a JSON-example test and an evidence-section bound -- and a
+ * second copy of that would drift silently.
+ *
+ * Fails closed as EMPTY: with no answer, nothing is named, so the drift check
+ * raises no warning. That is the quiet direction. Guessing a path instead would
+ * tell an operator a successful run failed, which teaches them to ignore the
+ * check entirely. */
 int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT_PATH_MAX],
                                  int max_paths)
 {
-   if (!prompt || !paths || max_paths <= 0)
+   if (!prompt || !paths || max_paths <= 0 || !g_paths_provider)
       return 0;
-
-   int count = 0;
-   const char *p = prompt;
-   const char *end = prompt + drift_task_surface_len(prompt);
-
-   while (p < end && *p && count < max_paths)
-   {
-      if (!drift_path_char(*p))
-      {
-         p++;
-         continue;
-      }
-
-      const char *start = p;
-      while (p < end && drift_path_char(*p))
-         p++;
-      size_t len = (size_t)(p - start);
-      while (len > 0 && start[len - 1] == '.')
-         len--;
-      if (len == 0)
-         continue;
-      /* Skip angle-bracket system includes: `#include <sys/stat.h>` — the '<'
-       * immediately precedes the token, making it a system path, not a repo path. */
-      if (start > prompt && start[-1] == '<')
-         continue;
-
-      /* Skip paths the brief explicitly negates ("Do NOT touch X", "skip Y"). */
-      if (drift_path_is_negated(prompt, start))
-         continue;
-
-      /* Skip paths that are JSON string-values inside an illustrative example
-       * (e.g. a schema shown to the delegate), not real output targets. */
-      if (drift_path_is_json_example_value(prompt, start, p))
-         continue;
-
-      const char *path_start = start;
-      size_t path_len = len;
-      if (path_len > 2 && (path_start[0] == 'a' || path_start[0] == 'b') && path_start[1] == '/')
-      {
-         path_start += 2;
-         path_len -= 2;
-      }
-
-      /* Require at least one '/' to look like a path */
-      int has_slash = 0;
-      for (size_t i = 0; i < path_len; i++)
-      {
-         if (path_start[i] == '/')
-         {
-            has_slash = 1;
-            break;
-         }
-      }
-      if (!has_slash)
-         continue;
-
-      /* Require a known source extension */
-      const char *last_dot = NULL;
-      for (size_t i = 0; i < path_len; i++)
-         if (path_start[i] == '.')
-            last_dot = path_start + i;
-      if (!last_dot)
-         continue;
-
-      size_t ext_len = (size_t)((path_start + path_len) - last_dot);
-      if (ext_len == 0 || ext_len >= 16)
-         continue;
-      char ext[16];
-      memcpy(ext, last_dot, ext_len);
-      ext[ext_len] = '\0';
-      if (!drift_is_src_extension(ext))
-         continue;
-
-      /* Skip duplicates */
-      int dup = 0;
-      for (int i = 0; i < count; i++)
-      {
-         if (strlen(paths[i]) == path_len && memcmp(paths[i], path_start, path_len) == 0)
-         {
-            dup = 1;
-            break;
-         }
-      }
-      if (dup)
-         continue;
-
-      if (path_len < DELEGATE_DRIFT_PATH_MAX)
-      {
-         memcpy(paths[count], path_start, path_len);
-         paths[count][path_len] = '\0';
-         count++;
-      }
-   }
-
-   return count;
-}
-
-/* Returns 1 if prompt contains an explicit intent to create a new file. */
-static int has_create_intent(const char *prompt)
-{
-   /* Case-insensitive — capitalised verbs at sentence start ("Implement
-    * a foo …") were previously rejected by the literal strstr match,
-    * which surfaced as a false-positive 'no create intent found'
-    * pre-flight rejection. */
-   static const char *const create_keywords[] = {"create", "new file", "add file", "implement",
-                                                 "write",  "generate", NULL};
-   for (int i = 0; create_keywords[i]; i++)
-      if (str_contains_ci(prompt, create_keywords[i]))
-         return 1;
-   return 0;
-}
-
-int delegate_prompt_allows_writes(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return 1;
-
-   if (str_contains_ci(prompt, "do not edit files") ||
-       str_contains_ci(prompt, "do not modify anything") ||
-       str_contains_ci(prompt, "do not write files") ||
-       str_contains_ci(prompt, "do not change files") ||
-       str_contains_ci(prompt, "do not make changes") || str_contains_ci(prompt, "read-only") ||
-       str_contains_ci(prompt, "read only") || str_contains_ci(prompt, "inspect only") ||
-       str_contains_ci(prompt, "analysis only"))
-      return 0;
-
-   int scoped_no_write =
-       str_contains_ci(prompt, "do not edit") || str_contains_ci(prompt, "do not modify") ||
-       str_contains_ci(prompt, "do not write") || str_contains_ci(prompt, "do not change");
-   if (scoped_no_write)
-   {
-      static const char *const scoped_write_keywords[] = {
-          "create", "new file", "add ",   "add file", "implement ", "update",
-          "fix",    "refactor", "delete", "remove",   NULL};
-      int has_scoped_write_intent = 0;
-      for (int i = 0; scoped_write_keywords[i]; i++)
-         if (str_contains_ci(prompt, scoped_write_keywords[i]))
-         {
-            has_scoped_write_intent = 1;
-            break;
-         }
-      if (!has_scoped_write_intent)
-         return 0;
-   }
-
-   static const char *const write_keywords[] = {
-       "create",    "new file", "add file", "edit",   "modify", "update", "fix",
-       "implement", "write",    "refactor", "delete", "remove", NULL};
-   for (int i = 0; write_keywords[i]; i++)
-      if (str_contains_ci(prompt, write_keywords[i]))
-         return 1;
-
-   return 0;
+   int n = g_paths_provider(prompt, (unsigned)max_paths, &paths[0][0], DELEGATE_DRIFT_PATH_MAX);
+   return n > 0 ? n : 0;
 }
 
 /* Run git diff --name-only HEAD in wt_path; return heap-allocated output or NULL. */
@@ -618,33 +230,12 @@ static int drift_stat_named_path(const char *path, const char *base_path, struct
    return stat(full, st);
 }
 
-/* Return 1 if an absolute path does not resolve under the worktree root — i.e. a
- * referenced EXTERNAL path (another machine's file named by an scp target such as
- * `admin@host:/mnt/.../aimee.yaml`, or the `//host/...` residue of a URL) rather
- * than an in-worktree create target.  A delegate creates files inside its
- * worktree, never at an arbitrary absolute host path, so the pre-flight
- * create-intent guard must not hard-fail on these.  Relative paths always resolve
- * under the worktree and are never external. */
-static int drift_path_is_external(const char *path, const char *wt_path)
-{
-   if (!path || path[0] != '/')
-      return 0;
-   if (!wt_path || !wt_path[0])
-      return 1; /* absolute with no worktree root to anchor to */
-
-   size_t wlen = strlen(wt_path);
-   while (wlen > 0 && wt_path[wlen - 1] == '/')
-      wlen--;
-   if (strncmp(path, wt_path, wlen) != 0)
-      return 1; /* outside the worktree subtree */
-   /* Guard against prefix aliasing (wt=/a/b matching /a/bc): the char after the
-    * root must be a separator or end-of-string for the path to be truly under it. */
-   char after = path[wlen];
-   return (after != '\0' && after != '/');
-}
+/* Room for a set of named paths plus the brief and the reply. A request that
+ * does not fit is not judged rather than judged in part. */
+#define DRIFT_WIRE_CAP (256u * 1024u)
 
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, int role_is_write,
+                                    const char *response, const char *wt_path, int writes_allowed,
                                     char *errbuf, size_t errbuf_size)
 {
    if (!paths || path_count <= 0)
@@ -653,23 +244,28 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
    if (errbuf && errbuf_size > 0)
       errbuf[0] = '\0';
 
-   /* The delegate ROLE is the authoritative write-intent signal: only a
-    * write-capable role can be expected to CREATE a named file, so only it can
-    * hard-drift on one that is missing. A read/analysis delegate (WFE's
-    * understand/split/review, the judge) produces its artifact from its reply and
-    * modifies nothing, so a repo-relative path scraped out of reference content
-    * threaded into its prompt must never fail it. The prompt heuristic stays as a
-    * NARROWING override so an explicit "do not edit" still disables the hard-fail
-    * for a write role. */
-   int writes_allowed = role_is_write && delegate_prompt_allows_writes(prompt);
+   /* Everything below gathers FACTS. What they mean -- whether a missing file is
+    * a broken promise or a referenced one, whether an unmodified file is drift
+    * or context, and how hard to fail -- is the module's (stage 21). */
+   uint8_t *request = malloc(DRIFT_WIRE_CAP);
+   if (!request)
+      return 0;
 
-   int hard_drift = 0;
-   int soft_drift = 0;
+   unsigned flags = writes_allowed ? AIMEE_DELEGATES_DRIFT_WRITES_ALLOWED : 0u;
+   aimee_delegates_wire_t w;
+   aimee_delegates_drift_request_begin(&w, request, DRIFT_WIRE_CAP, flags, prompt ? prompt : "",
+                                       response ? response : "", wt_path ? wt_path : "");
 
    /* For the post-run git-diff path, fetch diff output once. */
    char *diff_out = NULL;
    if (response && wt_path && wt_path[0])
       diff_out = drift_git_diff(wt_path);
+
+   int sent = 0;
+   for (int i = 0; i < path_count; i++)
+      if (paths[i] && paths[i][0])
+         sent++;
+   aimee_delegates_wire_u32(&w, (uint32_t)sent);
 
    for (int i = 0; i < path_count; i++)
    {
@@ -678,151 +274,69 @@ int delegate_check_named_file_drift(const char *const *paths, int path_count, co
          continue;
 
       struct stat st;
-      int exists = (drift_stat_named_path(path, wt_path, &st) == 0);
+      unsigned path_flags = 0;
+      if (drift_stat_named_path(path, wt_path, &st) == 0)
+         path_flags |= AIMEE_DELEGATES_DRIFT_PATH_EXISTS;
+      if (diff_out && drift_in_diff(diff_out, path))
+         path_flags |= AIMEE_DELEGATES_DRIFT_PATH_IN_DIFF;
 
-      if (!response)
+      /* Ask the code index whether this is a real project file. Only pre-flight
+       * needs it, and only for a path that does not exist -- the index lookup is
+       * a network round trip, so it is not spent where the answer cannot matter.
+       *
+       * An EMPTY hit list is sent as empty and MEANS something: index down, or
+       * stem not indexed. The module treats that as ambiguous, which is how this
+       * behaved before it had a module. */
+      const char *hit_ptrs[8];
+      char hit_files[8][MAX_PATH_LEN];
+      int hit_count = 0;
+      if (!response && !(path_flags & AIMEE_DELEGATES_DRIFT_PATH_EXISTS) && prompt)
       {
-         /* Pre-flight: for nonexistent paths, require explicit create intent.
-          * Before hard-failing, confirm this is a real project file via the aimee
-          * index.  If the index is reachable, use the file's basename stem to find
-          * indexed symbols: if it has hits but none live in a file matching this
-          * path, the path was extracted from prompt examples (e.g. a system include)
-          * rather than naming a real project file — skip it silently. */
-         if (!exists && prompt)
+         const char *ibase = strrchr(path, '/');
+         ibase = ibase ? ibase + 1 : path;
+         char stem[128];
+         snprintf(stem, sizeof(stem), "%s", ibase);
+         char *idot = strrchr(stem, '.');
+         if (idot)
+            *idot = '\0';
+         if (stem[0])
          {
-            /* A path that can't be an in-worktree create target — an absolute
-             * host/scp/URL path outside the worktree — is a referenced external
-             * file, not an output.  Merely naming one (e.g. an ops/deploy brief
-             * that mentions admin@host:/mnt/.../aimee.yaml) must not hard-fail the
-             * delegate before it runs. */
-            if (drift_path_is_external(path, wt_path))
-               continue;
-
-            if (!writes_allowed)
-               continue;
-
-            const char *ibase = strrchr(path, '/');
-            ibase = ibase ? ibase + 1 : path;
-            char stem[128];
-            snprintf(stem, sizeof(stem), "%s", ibase);
-            char *idot = strrchr(stem, '.');
-            if (idot)
-               *idot = '\0';
-            if (stem[0])
+            term_hit_t idx_hits[8];
+            int nhits = kb_client_index_find(stem, idx_hits, 8);
+            for (int h = 0; h < nhits && h < 8; h++)
             {
-               term_hit_t idx_hits[8];
-               int nhits = kb_client_index_find(stem, idx_hits, 8);
-               if (nhits > 0)
-               {
-                  /* Index is reachable — check if any hit lives in this path. */
-                  int found = 0;
-                  size_t plen = strlen(path);
-                  for (int h = 0; h < nhits && !found; h++)
-                  {
-                     size_t flen = strlen(idx_hits[h].file_path);
-                     const char *tail = idx_hits[h].file_path + flen - plen;
-                     if (flen >= plen && strcmp(tail, path) == 0)
-                        found = 1;
-                  }
-                  if (!found)
-                     continue; /* not a project file — skip */
-               }
-               /* nhits == 0: index unreachable or stem not indexed; fall through
-                * to the create-intent check so existing behaviour is preserved. */
-            }
-
-            if (!has_create_intent(prompt))
-            {
-               if (errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' does not exist and no create intent found in prompt; "
-                           "use 'create', 'new file', or 'implement' to create it",
-                           path);
-               hard_drift = 1;
+               snprintf(hit_files[hit_count], sizeof(hit_files[0]), "%s", idx_hits[h].file_path);
+               hit_ptrs[hit_count] = hit_files[hit_count];
+               hit_count++;
             }
          }
       }
-      else if (wt_path && wt_path[0])
-      {
-         /* Post-run with worktree: use git diff as ground truth.
-          * A path in the diff was touched — no drift.
-          * A path not in diff that exists was context — soft warn only.
-          * A path not in diff that doesn't exist was never created — hard drift. */
-         if (drift_in_diff(diff_out, path))
-            continue;
 
-         if (exists)
-         {
-            /* Pre-existing context file the delegate didn't touch — soft drift. */
-            if (!soft_drift && errbuf && errbuf_size > 0)
-               snprintf(
-                   errbuf, errbuf_size,
-                   "named file '%s' was not modified by delegate (possible context-only reference)",
-                   path);
-            soft_drift = 1;
-         }
-         else
-         {
-            if (!writes_allowed)
-            {
-               if (!soft_drift && errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' was read-only context and was not created", path);
-               soft_drift = 1;
-               continue;
-            }
-
-            /* New file the delegate was supposed to create but didn't. */
-            if (errbuf && errbuf_size > 0)
-               snprintf(errbuf, errbuf_size, "named file '%s' was not created by delegate", path);
-            hard_drift = 1;
-         }
-      }
-      else
-      {
-         /* Post-run without worktree: fall back to response-text matching. */
-         if (!exists)
-            continue;
-
-         if (strstr(response, path))
-            continue;
-
-         const char *base = strrchr(path, '/');
-         base = base ? base + 1 : path;
-         if (strstr(response, base))
-         {
-            if (!soft_drift && errbuf && errbuf_size > 0)
-               snprintf(errbuf, errbuf_size,
-                        "named file '%s' matched only by basename '%s' in response (ambiguous)",
-                        path, base);
-            soft_drift = 1;
-         }
-         else
-         {
-            if (!writes_allowed)
-            {
-               if (!soft_drift && errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' was read-only context and not repeated in response",
-                           path);
-               soft_drift = 1;
-            }
-            else
-            {
-               if (errbuf && errbuf_size > 0)
-                  snprintf(errbuf, errbuf_size,
-                           "named file '%s' not found in delegate response (possible drift)", path);
-               hard_drift = 1;
-            }
-         }
-      }
+      aimee_delegates_drift_request_path(&w, path, path_flags, hit_ptrs, hit_count);
    }
-
    free(diff_out);
 
-   if (hard_drift)
+   if (w.overflow)
+   {
+      free(request);
+      LOG_WARN("delegate", "named-file drift check skipped: %d path(s) did not fit the request",
+               path_count);
+      return 0;
+   }
+
+   unsigned severity = AIMEE_DELEGATES_DRIFT_NONE;
+   char message[512] = "";
+   int rc = delegate_drift_judge(request, w.len, &severity, message, sizeof(message));
+   free(request);
+   if (rc != 0)
+      return 0;
+
+   if (message[0] && errbuf && errbuf_size > 0)
+      snprintf(errbuf, errbuf_size, "%s", message);
+
+   if (severity == AIMEE_DELEGATES_DRIFT_HARD)
       return -1;
-   if (soft_drift)
+   if (severity == AIMEE_DELEGATES_DRIFT_SOFT)
       return 1;
    return 0;
 }
@@ -1161,70 +675,6 @@ char *delegate_build_validation_bundle(const char *cwd)
    return bundle;
 }
 
-/* Guidance appended when the CALLER supplied the review target in the prompt
- * (--prompt-file / --prompt-stdin), e.g. a diff for an external code review. The
- * target is the provided content — NOT the delegate host's working directory, which
- * may be absent, on a different branch, or carry unrelated changes. For surrounding
- * context the reviewer may explore the DEFAULT BRANCH through aimee's own
- * index/memory (code_search, find_symbol, search_memory, search_docs). Those
- * services are useful positive context when available, but a failed, stale, or
- * empty lookup cannot prove absence. Returned string is heap-owned. */
-static char *delegate_build_provided_target_block(void)
-{
-   return strdup(
-       "\n\n---\n"
-       "## Review Target & Exploration\n"
-       "review_target: the diff / content provided in the prompt ABOVE is the sole subject of "
-       "this review. Base every finding on it.\n"
-       "no_local_worktree: do NOT run read_file/list_files/grep/git_diff/git_status against a "
-       "local checkout — this delegate has no such worktree for the target; that path is empty, "
-       "stale, or unrelated, and is not the review target.\n"
-       "explore_via_aimee: to inspect surrounding code, callers, or prior context on the DEFAULT "
-       "BRANCH, use aimee's own capabilities — code_search and find_symbol (branch-indexed code), "
-       "search_memory and search_docs (project memory/knowledge). When available and current, "
-       "positive results provide surrounding default-branch context; never assume the service is "
-       "available, complete, or fresh.\n"
-       "absence_claims: a no-match, unavailable, failed, stale, or incomplete code_search / "
-       "find_symbol / memory result is NOT proof that anything is absent. Assert absence only from "
-       "affirmative authoritative evidence that covers the relevant current source or complete "
-       "registration/call-site set. Otherwise omit the claim; uncertainty may be a non-blocking "
-       "suggestion, never a blocker. Never infer absence from an unreadable worktree.\n"
-       "---\n");
-}
-
-char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt, int target_provided)
-{
-   if (!role)
-      return owned_prompt;
-
-   const char *canonical_role = delegate_role_canonicalize(role);
-   int is_review_role = strcmp(canonical_role, "review") == 0 ||
-                        strcmp(canonical_role, "validate") == 0 ||
-                        strcmp(canonical_role, "diagnose") == 0;
-
-   /* Caller-supplied target (a diff via --prompt-file/--prompt-stdin) wins: the
-    * provided content is the review subject, so the host-cwd auto-diff bundle is
-    * suppressed (it would review the wrong tree) and the reviewer is pointed at
-    * aimee's branch-indexed capabilities for context instead of the filesystem. */
-   char *bundle = target_provided ? delegate_build_provided_target_block()
-                                  : (is_review_role ? delegate_build_validation_bundle(cwd) : NULL);
-   if (!bundle)
-      return owned_prompt;
-
-   const char *base = owned_prompt ? owned_prompt : (fallback_prompt ? fallback_prompt : "");
-   size_t cap = strlen(base) + strlen(bundle) + 1;
-   char *combined = malloc(cap);
-   if (combined)
-   {
-      snprintf(combined, cap, "%s%s", base, bundle);
-      free(owned_prompt);
-      owned_prompt = combined;
-   }
-   free(bundle);
-   return owned_prompt;
-}
-
 static void review_norm_line(const char *src, char *dst, size_t dst_sz)
 {
    if (!dst || dst_sz == 0)
@@ -1471,18 +921,6 @@ static int delegate_repo_has_uncommitted_changes(const char *repo_root)
    return dirty;
 }
 
-static int delegate_response_claims_missing_parent_diff(const char *response)
-{
-   if (!response || !response[0])
-      return 0;
-
-   return str_contains_ci(response, "no uncommitted diff exists") ||
-          str_contains_ci(response, "working tree is clean") ||
-          str_contains_ci(response, "there is nothing to review") ||
-          str_contains_ci(response, "cannot see the current diff") ||
-          str_contains_ci(response, "cannot verify the diff");
-}
-
 void delegate_apply_review_evidence_guard(const char *role, const char *repo_root, int *rc,
                                           agent_result_t *result, int target_provided)
 {
@@ -1490,20 +928,29 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
        !repo_root[0])
       return;
 
-   /* When the caller supplied the review target (a diff in the prompt), there is
-    * no host-cwd evidence to drift against — the provided content IS the evidence.
-    * Guarding against the local worktree here would penalize a correct review of
-    * the provided diff, so skip it. */
+   /* Which roles are guarded, which of them have their citations checked against
+    * the checkout, and what counts as claiming there was nothing to review, are
+    * the module's (stage 20). The two facts it cannot compute travel with the
+    * question: whether the target came in the prompt, and whether the worktree
+    * is dirty. */
+   unsigned flags = 0;
    if (target_provided)
+      flags |= AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED;
+   if (delegate_repo_has_uncommitted_changes(repo_root))
+      flags |= AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY;
+
+   unsigned verdict = 0;
+   char message[512] = "";
+   if (delegate_review_evidence_judge(role, result->response, flags, &verdict, message,
+                                      sizeof(message)) != 0)
+      return;
+   if (!(verdict & AIMEE_DELEGATES_REVIEW_GUARDED))
       return;
 
-   if (!role || (strcmp(role, "review") != 0 && strcmp(role, "validate") != 0 &&
-                 strcmp(role, "diagnose") != 0 && strcmp(role, "test") != 0 &&
-                 strcmp(role, "check") != 0 && strcmp(role, "inspect") != 0))
-      return;
-
-   if (strcmp(role, "review") == 0 || strcmp(role, "validate") == 0 || strcmp(role, "test") == 0 ||
-       strcmp(role, "check") == 0)
+   /* The snippet check reads the checkout, so it stays here. It runs FIRST: a
+    * citation that does not match the file is the more specific complaint, and
+    * reporting it beats reporting that the report contradicted `git status`. */
+   if (verdict & AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS)
    {
       char drift_err[512];
       if (delegate_check_review_evidence_drift(result->response, repo_root, drift_err,
@@ -1515,13 +962,10 @@ void delegate_apply_review_evidence_guard(const char *role, const char *repo_roo
       }
    }
 
-   if (delegate_repo_has_uncommitted_changes(repo_root) &&
-       delegate_response_claims_missing_parent_diff(result->response))
+   if (verdict & AIMEE_DELEGATES_REVIEW_CONTRADICTION)
    {
       *rc = -1;
-      snprintf(result->error, sizeof(result->error),
-               "delegate evidence drift: response claimed the parent diff was clean or missing "
-               "while the parent worktree has uncommitted changes");
+      snprintf(result->error, sizeof(result->error), "%s", message);
    }
 }
 
@@ -1722,14 +1166,65 @@ char *delegate_inject_graph_context(const char *prompt, const char *cwd)
    return out;
 }
 
-/* Nested delegate creation is denied at runtime; do not add a prompt block that
- * tells delegates to fan out work they cannot actually create. */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role)
+char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
+                                 delegate_root_kind_t kind)
 {
-   (void)via_name;
-   (void)tier_override;
-   (void)role;
-   return NULL;
+   if ((!shell_root || !shell_root[0]) && (!file_root || !file_root[0]))
+      return NULL;
+   const char *shell = shell_root && shell_root[0] ? shell_root : file_root;
+   const char *files = file_root && file_root[0] ? file_root : shell_root;
+
+   char buf[2048];
+   int pos = 0, rem = (int)sizeof(buf);
+   int w = snprintf(buf + pos, (size_t)rem, "\n\n## Working root\n");
+   if (w > 0 && w < rem)
+   {
+      pos += w;
+      rem -= w;
+   }
+
+   if (strcmp(shell, files) == 0)
+      w = snprintf(buf + pos, (size_t)rem, "You are working in `%s`.\n", shell);
+   else
+      /* Say it outright rather than let the delegate discover it by writing a
+       * file it can then never compile. */
+      w = snprintf(buf + pos, (size_t)rem,
+                   "WARNING: your two halves are in different places. Your shell runs in `%s`, "
+                   "but your file tools read and write `%s`. Anything you edit will NOT be "
+                   "visible to a command you run, so you cannot build or test your own changes. "
+                   "Treat this as a broken environment and report it rather than working around "
+                   "it.\n",
+                   shell, files);
+   if (w > 0 && w < rem)
+   {
+      pos += w;
+      rem -= w;
+   }
+
+   const char *what =
+       kind == DELEGATE_ROOT_RECONSTRUCTED
+           ? "This is NOT the caller's live tree. It is a server-side reconstruction of a "
+             "detached workspace, checked out at the last state synced by `aimee workspace "
+             "mirror-sync`, so it may be behind what the caller currently has. If what you find "
+             "contradicts the task description, suspect the tree is stale before concluding the "
+             "task is wrong.\n"
+           : NULL; /* the caller's own workspace: nothing surprising to declare */
+   if (what)
+   {
+      w = snprintf(buf + pos, (size_t)rem, "%s", what);
+      if (w > 0 && w < rem)
+      {
+         pos += w;
+         rem -= w;
+      }
+   }
+
+   buf[pos] = '\0';
+   char *out = malloc((size_t)(pos + 1));
+   if (!out)
+      return NULL;
+   memcpy(out, buf, (size_t)(pos + 1));
+   return out;
 }
 
 char *delegate_rewrite_prompt_cwd(const char *prompt, const char *cwd, const char *worktree_path,
@@ -1849,11 +1344,12 @@ const char *delegate_assemble_system_prompt(const char *in, const char *role, co
 char *delegate_prepend_parent_diff_evidence(const char *prompt, const char *role, int allows_writes,
                                             const char *cwd, const char *deleg_id)
 {
-   const char *canon_role = delegate_role_canonicalize(role);
-   int needs_diff_bundle = strcmp(canon_role, "validate") == 0 ||
-                           strcmp(canon_role, "review") == 0 ||
-                           strcmp(canon_role, "diagnose") == 0 || strcmp(canon_role, "test") == 0;
-   if (!needs_diff_bundle || allows_writes)
+   /* WHICH roles want the parent's diff is the module's (role policy). The two
+    * conditions the module deliberately does not fold in are composed here,
+    * because both are facts about this INVOCATION rather than the role: a
+    * delegate that may write is producing the diff, not reviewing one, and a
+    * caller-supplied review target is handled by the caller above. */
+   if (allows_writes || !delegate_role_needs_parent_diff(role))
       return NULL;
 
    char bundle_cwd_buf[MAX_PATH_LEN];

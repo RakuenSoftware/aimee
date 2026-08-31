@@ -3,6 +3,7 @@
 #include "aimee.h"
 #include "agent_exec.h"
 #include "cJSON.h"
+#include "provider_model_parse.h"
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -24,7 +25,7 @@ static int ollama_classify_body(model_provider_t *p, int http_status, const char
    return 0;
 }
 
-static int ollama_fetch_models(model_provider_t *p, char ***models_out, int *n_out)
+static int ollama_fetch_models(model_provider_t *p, provider_model_t **models_out, int *n_out)
 {
    (void)p;
    *models_out = NULL;
@@ -47,38 +48,12 @@ static int ollama_fetch_models(model_provider_t *p, char ***models_out, int *n_o
    if (!root)
       return -1;
 
-   cJSON *models = cJSON_GetObjectItem(root, "models");
-   if (!models || !cJSON_IsArray(models))
-   {
-      cJSON_Delete(root);
-      return -1;
-   }
-
-   int n = cJSON_GetArraySize(models);
-   char **arr = calloc((size_t)n, sizeof(char *));
-   if (!arr)
-   {
-      cJSON_Delete(root);
-      return -1;
-   }
-
-   int count = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, models)
-   {
-      cJSON *name = cJSON_GetObjectItem(item, "name");
-      if (name && cJSON_IsString(name) && name->valuestring)
-      {
-         arr[count] = strdup(name->valuestring);
-         if (arr[count])
-            count++;
-      }
-   }
-
+   /* This endpoint publishes ids only -- no context window, no output ceiling,
+    * no capabilities -- so every other field stays 0 = "not published" and the
+    * operator's declared values stand. */
+   int rc = provider_models_from_list_json(root, models_out, n_out);
    cJSON_Delete(root);
-   *models_out = arr;
-   *n_out = count;
-   return 0;
+   return rc;
 }
 
 model_provider_t ollama_provider = {

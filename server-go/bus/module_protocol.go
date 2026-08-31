@@ -10,7 +10,7 @@ const (
 	ModuleMessageMagic     uint32 = 0x444f4d41 // "AMOD", little-endian
 	ModuleMessageVersion   uint16 = 1
 	ModuleMessageHeaderLen        = 40
-	ModuleMessageMaxBody   uint32 = 1024 * 1024
+	ModuleMessageMaxBody   uint32 = 16 * 1024 * 1024
 )
 
 type ModuleOperation uint16

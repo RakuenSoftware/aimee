@@ -12,14 +12,13 @@
 #include "server_trigger.h"
 #include <dirent.h>
 #include "cJSON.h"
-#include "db1/db1_cron_jobs.h"
-#include "db1/db1_trigger.h"
-#include "db1/pipelines.h"
-#include "db1/wfe_store.h"
+#include "db1_client/db1_cron_jobs.h"
+#include "db1_client/db1_trigger.h"
+#include "db1_client/pipelines.h"
+#include "db1_client/wfe_store.h"
 #include "aimee_home.h"
 #include "log.h"
 #include "platform_random.h"
-#include <aimee/skills/skill_curator.h>
 #include "trigger_scheduler.h"
 #include "util.h"
 #include "gw_orch_workflows.h" /* trigger workflow dispatch via the orchestration seam */
@@ -253,8 +252,8 @@ static int schedule_matches(const char *expr, const struct tm *tm)
  * workspace = absolute repo path (required), pipeline_template = workflow name
  * (required), event = repo-relative proposal dir (default docs/proposals/pending),
  * schedule = git ref/branch (default auto-detected origin HEAD, then HEAD), and
- * mode = the filed work item's execution mode ("autonomous" default, or
- * "interactive" to park it for a human in the webchat). */
+ * mode = the filed work item's execution mode ("interactive" default; an
+ * explicit "autonomous" choice is required for hands-off execution). */
 typedef struct
 {
    char sha[41];
@@ -549,10 +548,16 @@ static int trigger_file_run(const trigger_rule_t *rule, const char *artifact_pat
                             char out_id[80])
 {
    out_id[0] = '\0';
+   if (wfe_autonomy_killed() && (!rule->mode[0] || strcmp(rule->mode, "interactive") != 0))
+   {
+      aimee_log(LOG_WARN, "trigger.sched", "%s: autonomy kill switch refused %s repo=%s",
+                rule->source, what, rule->workspace);
+      return -1;
+   }
    /* mode drives whether the autonomy scheduler advances the run hands-off
-    * ("autonomous", the default when the rule omits it) or the item parks for
+    * ("autonomous", only when explicitly requested) or the item parks for
     * a human to drive in the webchat ("interactive"). */
-   const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+   const char *mode = rule->mode[0] ? rule->mode : "interactive";
    trigger_wf_backing_t backing = {rule->workspace, mode, out_id, "", -1};
    gw_turn_capabilities_t caps = {&backing, NULL, trigger_dispatch_workflow};
    char turn_id[64];
@@ -662,7 +667,7 @@ static int trigger_proposal_artifact_path(const trigger_rule_t *rule, const char
       return found < 0 ? -1 : 0;
 
    db1_work_item_t wi;
-   const char *mode = rule->mode[0] ? rule->mode : "autonomous";
+   const char *mode = rule->mode[0] ? rule->mode : "interactive";
    if (db1_work_item_get(existing, &wi) != 1)
       return -1;
    if (strcmp(wi.workflow_name, rule->pipeline_template) == 0 && strcmp(wi.mode, mode) == 0)
@@ -1088,8 +1093,9 @@ static void trigger_scheduler_fire_rule(const trigger_rule_t *rule)
    }
    else
    {
-      unsigned int rnd = (unsigned int)time(NULL) ^ (unsigned int)clock();
-      snprintf(id, sizeof(id), "trig_%08x", rnd);
+      aimee_log(LOG_ERROR, "trigger.sched",
+                "secure entropy unavailable; scheduled trigger refused");
+      return;
    }
 
    /* Build task string */
@@ -1430,10 +1436,6 @@ static void sched_tick(void)
     * a trigger block file runs through the same plumbing as trigger_rules. */
    if (!go_wfe)
       sched_tick_armed(now, config_trigger_max_concurrent());
-
-   /* Skill curator: idle-guarded; safe to call on every tick. */
-   if (config_skills_curator_enabled())
-      skill_curator_maybe();
 }
 
 /* ------------------------------------------------------------------ */

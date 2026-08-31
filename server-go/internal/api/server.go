@@ -12,9 +12,8 @@ import (
 	"strings"
 	"sync"
 
-	appconfig "github.com/JBailes/aimee/server-go/internal/config"
+	appconfig "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
@@ -23,18 +22,14 @@ type Server struct {
 	artifacts       *wfe.ArtifactStore
 	workflowDir     string
 	workflows       *wfe.Registry
-	config          *appconfig.Store
+	config          appconfig.Service
 	mux             *http.ServeMux
 	notify          func()
 	cancel          func(string)
 	cleanupWorktree func(context.Context, db1.WorkItem) error
-	roundtable      interface {
-		Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
-	}
-	artifactHTTPClient *http.Client
-	triggerMu          sync.Mutex
-	triggerErrorsMu    sync.Mutex
-	triggerErrors      map[string]string
+	triggerMu       sync.Mutex
+	triggerErrorsMu sync.Mutex
+	triggerErrors   map[string]string
 }
 
 func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
@@ -76,7 +71,6 @@ func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*S
 	s.mux.HandleFunc("POST /v1/config/set", s.configSet)
 	s.mux.HandleFunc("POST /v1/trigger/fire", s.triggerFire)
 	s.mux.HandleFunc("POST /v1/dev/submit", s.devSubmit)
-	s.mux.HandleFunc("POST /v1/roundtable/review", s.roundtableReview)
 	return s, nil
 }
 
@@ -85,17 +79,7 @@ func (s *Server) SetSchedulerCancel(cancel func(string)) { s.cancel = cancel }
 func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) error) {
 	s.cleanupWorktree = cleanup
 }
-func (s *Server) SetConfigStore(store *appconfig.Store) { s.config = store }
-func (s *Server) SetRoundtableReviewer(reviewer interface {
-	Review(context.Context, roundtable.ReviewRequest) (roundtable.RunResult, error)
-}) {
-	s.roundtable = reviewer
-}
-
-func (s *Server) SetRoundtableArtifactHTTPClient(client *http.Client) {
-	s.artifactHTTPClient = client
-}
-
+func (s *Server) SetConfigStore(store appconfig.Service) { s.config = store }
 func (s *Server) workflowRegistry() (*wfe.Registry, error) {
 	if s.workflows != nil {
 		return s.workflows, nil
@@ -130,11 +114,121 @@ func (s *Server) health(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "service": "aimee-server", "implementation": "go"})
 }
 
+var errWorkflowAccessDenied = errors.New("workflow item belongs to another user")
+
+func workflowPrincipal(r *http.Request) string {
+	return strings.TrimSpace(r.Header.Get("X-Aimee-Webuser"))
+}
+
+// workflowOperator is a capability attested separately from the username by
+// the trusted runtime. A username is data, not a role: treating the literal
+// string "admin" as authority lets a non-bootstrap account collide with the
+// control-plane sentinel after the appliance administrator is renamed.
+func workflowOperator(r *http.Request) bool {
+	return r.Header.Get("X-Aimee-Workflow-Operator") == "true"
+}
+
+// rootSubmitter follows durable parent links instead of trusting child IDs or a
+// child row's submitter. Slice rows created by older engines did not copy the
+// submitter, but they still belong to the principal that admitted the root run.
+func (s *Server) rootSubmitter(ctx context.Context, item db1.WorkItem) (string, error) {
+	seen := make(map[string]struct{})
+	for {
+		if _, duplicate := seen[item.ID]; duplicate {
+			return "", errors.New("workflow parent cycle")
+		}
+		seen[item.ID] = struct{}{}
+		if item.ParentID == "" {
+			return item.Submitter, nil
+		}
+		parent, err := s.db.WorkItem(ctx, item.ParentID)
+		if err != nil {
+			return "", err
+		}
+		item = parent
+	}
+}
+
+func rootSubmitterFromList(item db1.WorkItem, byID map[string]db1.WorkItem) (string, bool) {
+	seen := make(map[string]struct{})
+	for {
+		if _, duplicate := seen[item.ID]; duplicate {
+			return "", false
+		}
+		seen[item.ID] = struct{}{}
+		if item.ParentID == "" {
+			return item.Submitter, true
+		}
+		parent, ok := byID[item.ParentID]
+		if !ok {
+			return "", false
+		}
+		item = parent
+	}
+}
+
+// authorizedWorkItem is the shared ownership boundary for detail, artifact,
+// timeline, and lifecycle endpoints. The trusted runtime attests the appliance
+// administrator as a separate capability. Human gates are operator-only; other
+// lifecycle actions allow the root owner or the operator.
+func (s *Server) authorizedWorkItem(r *http.Request, operatorOnly bool) (db1.WorkItem, error) {
+	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
+	if err != nil {
+		return db1.WorkItem{}, err
+	}
+	principal := workflowPrincipal(r)
+	if workflowOperator(r) {
+		return item, nil
+	}
+	if operatorOnly || principal == "" {
+		return db1.WorkItem{}, errWorkflowAccessDenied
+	}
+	owner, err := s.rootSubmitter(r.Context(), item)
+	if err != nil {
+		return db1.WorkItem{}, err
+	}
+	if owner == "" || owner != principal {
+		return db1.WorkItem{}, errWorkflowAccessDenied
+	}
+	return item, nil
+}
+
+func writeWorkItemAccessError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, errWorkflowAccessDenied):
+		writeError(w, http.StatusForbidden, errWorkflowAccessDenied)
+	case errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no rows"):
+		writeError(w, http.StatusNotFound, errors.New("work item not found"))
+	default:
+		writeError(w, http.StatusInternalServerError, err)
+	}
+}
+
 func (s *Server) items(w http.ResponseWriter, r *http.Request) {
+	all := r.URL.Path == "/v1/workflow/items/all"
+	if all && !workflowOperator(r) {
+		writeError(w, http.StatusForbidden, errors.New("operator access required"))
+		return
+	}
 	items, err := s.db.WorkItems(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
+	}
+	principal := workflowPrincipal(r)
+	if !all {
+		byID := make(map[string]db1.WorkItem, len(items))
+		for _, item := range items {
+			byID[item.ID] = item
+		}
+		visible := make([]db1.WorkItem, 0, len(items))
+		for _, item := range items {
+			owner, ok := rootSubmitterFromList(item, byID)
+			if ok && owner != "" && owner == principal {
+				visible = append(visible, item)
+			}
+		}
+		items = visible
 	}
 	if items == nil {
 		items = []db1.WorkItem{}
@@ -143,19 +237,19 @@ func (s *Server) items(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) item(w http.ResponseWriter, r *http.Request) {
-	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
+	item, err := s.authorizedWorkItem(r, false)
 	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) || strings.Contains(err.Error(), "no rows") {
-			writeError(w, http.StatusNotFound, errors.New("work item not found"))
-			return
-		}
-		writeError(w, http.StatusInternalServerError, err)
+		writeWorkItemAccessError(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, item)
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.authorizedWorkItem(r, false); err != nil {
+		writeWorkItemAccessError(w, err)
+		return
+	}
 	after, _ := strconv.ParseInt(r.URL.Query().Get("after"), 10, 64)
 	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 	if limit < 1 || limit > 200 {
@@ -177,9 +271,9 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) proposal(w http.ResponseWriter, r *http.Request) {
-	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
+	item, err := s.authorizedWorkItem(r, false)
 	if err != nil {
-		writeError(w, http.StatusNotFound, errors.New("work item not found"))
+		writeWorkItemAccessError(w, err)
 		return
 	}
 	content, err := s.artifacts.Proposal(item.ID)

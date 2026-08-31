@@ -9,10 +9,10 @@
 #include "cJSON.h"
 #include "config.h" /* require_aimee_git */
 #include "log.h"
-#include "wfe_binding.h"     /* db1_wfe_binding_get */
-#include "wfe_enforce.h"     /* the enforce dial */
-#include "wfe_native_gate.h" /* classifier + decision */
-#include "wfe_store.h"       /* db1_work_item_get (delivered==accepted) */
+#include "wfe_binding.h"          /* db1_wfe_binding_get */
+#include "wfe_enforce.h"          /* the enforce dial */
+#include "wfe_native_gate.h"      /* classifier + decision */
+#include "db1_client/wfe_store.h" /* db1_work_item_get (delivered==accepted) */
 
 int hook_send_blocked(server_conn_t *conn, const char *msg, const char *request_id)
 {
@@ -87,8 +87,9 @@ static int s2_decide(const char *sid, const char *tool_name, const char *tool_in
       snprintf(msg, msg_n,
                "aimee: delegates do not run git or gh directly — use aimee's git tools, which "
                "execute on aimee-server: git_status, git_log, git_diff_summary, git_branch, "
-               "git_commit, git_push, git_pr, git_verify. (Operator: require_aimee_git: false "
-               "in aimee.yaml opts out.)");
+               "git_add, git_commit, git_push, git_pr, git_verify, git_merge, git_rebase, "
+               "git_sync, git_cherry_pick, git_revert, git_switch. (Operator: "
+               "require_aimee_git: false in aimee.yaml opts out.)");
       return 2;
    }
 

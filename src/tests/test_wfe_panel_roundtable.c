@@ -13,6 +13,7 @@
 #include <unistd.h>
 
 #include "wfe_panel_roundtable.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *LENS[2] = {"security", "qa"};
 static const char *SEAT[2] = {"codex", "mimo"};
@@ -41,7 +42,8 @@ int main(void)
 {
    printf("wfe-panel-roundtable: ");
 
-   char dir[] = "/tmp/wfe-panel-rt-XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/wfe-panel-rt-XXXXXX", platform_tmpdir());
    assert(mkdtemp(dir) != NULL);
    char sub[600];
    snprintf(sub, sizeof sub, "%s/src", dir);

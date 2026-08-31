@@ -1,0 +1,136 @@
+package main
+
+import (
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+)
+
+// The validation record is a hand-transcribed copy of what the probe printed on
+// a container that no longer exists. That makes it the one artefact here with no
+// build to fail: the containers were destroyed under the cleanup rule, so the
+// run cannot be repeated to check the table, and a row dropped in transcription
+// stays dropped.
+//
+// It had already drifted. The probe made fifteen checks and the record claimed
+// fourteen, listing fourteen rows -- "take on an unknown session is refused" was
+// simply never copied across. Both landed in the SAME commit, so this was not a
+// doc left behind by later work; it was wrong the day it was written.
+//
+// So the record is asserted against the probe's source. This cannot re-run the
+// container and does not pretend to: it checks that the record DESCRIBES the
+// probe it claims to describe. A check added here without a row is a run whose
+// evidence is incomplete, which is the direction that matters -- a record that
+// under-claims is how a passing check goes missing.
+// ONE record, deliberately, and this is the note that keeps it that way.
+//
+// Widening this to docs/validation/*.md looks like free coverage: eighty-eight
+// records sit there and this guard would happily read all of them. It must not,
+// and the reason is the PREMISE rather than the behaviour. This check assumes a
+// record describes a probe whose checks can be counted, and measured rather than
+// assumed, that is true of ONE of the eighty-eight -- exactly this pair.
+//
+// So widening buys nothing and costs one of two ways. Fail on the other
+// eighty-seven and the guard is wrong about legitimate records; skip them and it
+// passes having compared nothing, eighty-seven times, while its summary line
+// grows more reassuring.
+//
+// A peer reached the same verdict about two of their guards for OPPOSITE
+// reasons, which is the part worth carrying: one would have misfired on 406 of
+// 442 files, and the other would have fired zero times and still been wrong,
+// because outside its directory the thing it checks ownership against does not
+// exist. Zero hits is not a licence. The question has to be asked per guard, and
+// the answers do not generalise.
+var validationRecord = filepath.Join("..", "..", "..", "..", "..",
+	"docs", "validation", "aimee-module-on-a-clean-container.md")
+
+func TestValidationRecordMatchesTheProbe(t *testing.T) {
+	source, err := os.ReadFile("main.go")
+	if err != nil {
+		t.Fatalf("read probe: %v", err)
+	}
+	record, err := os.ReadFile(validationRecord)
+	if err != nil {
+		t.Fatalf("read validation record: %v", err)
+	}
+
+	// Plain check names, which the record can be matched against by text.
+	names := regexp.MustCompile(`check\("([^"]*)"`).FindAllStringSubmatch(string(source), -1)
+	// Names built with fmt.Sprintf carry a kind number, so they are counted but
+	// not matched: the number is a property of the run, not of the source.
+	//
+	// Both counts read RAW SOURCE, comments included, while the name matching
+	// below reads only table rows. The asymmetry is deliberate, and the DIRECTION
+	// is what decides it: a `check(` written inside a comment would INFLATE the
+	// probe's count and mismatch the record, so it fails loudly. Stripping
+	// comments here would be guarding the safe direction.
+	//
+	// What remains is the tempting repair. Adding a row to silence that mismatch
+	// would put a result in the record for a check that never ran, which is the
+	// over-claiming direction. The failure is loud and its obvious fix is wrong,
+	// and that is worth knowing before meeting it at speed.
+	formatted := strings.Count(string(source), "check(fmt.Sprintf(")
+	rows := strings.Count(string(record), "| pass |")
+
+	// Zero on both sides is not agreement, it is an empty comparison. If the
+	// probe stopped using check() under that name, or the record lost its table,
+	// the counts would match at zero and the loop below would iterate over
+	// nothing.
+	if len(names)+formatted == 0 {
+		t.Fatal("found no check() calls in the probe; this test would then compare " +
+			"nothing and pass")
+	}
+	if rows == 0 {
+		t.Fatal("the validation record has no result rows; a record asserting nothing " +
+			"cannot be checked against a probe")
+	}
+
+	if got := len(names) + formatted; got != rows {
+		t.Errorf("probe makes %d checks; the record lists %d rows. A check with no "+
+			"row is a passing result missing from the evidence.\n"+
+			"DO NOT add a row to make these agree. That records a result for a check "+
+			"that never ran, against a container that no longer exists. Re-run the "+
+			"probe and record what the NEW run reported, or mark the record "+
+			"historical and start a fresh one.", got, rows)
+	}
+
+	// Matched against THE ROWS ONLY, not the whole document.
+	//
+	// This used to search the entire record, and the record quotes probe output
+	// verbatim in its prose. So a deleted row could be satisfied by the
+	// narrative ABOUT that row -- "send between two directory-known sessions"
+	// appears at line 115 as quoted output and at line 265 as the row, and
+	// searching the document finds it either way.
+	//
+	// A peer hit the same thing an hour ago from the other side: their scan
+	// counted a file as coupled to the store because it matched `db1_conn` in a
+	// comment that said the file does not link the store. Prose about a thing
+	// and the thing itself are not distinguishable to a text search, and the
+	// prose is usually the more quotable of the two.
+	var tableLines strings.Builder
+	for _, line := range strings.Split(string(record), "\n") {
+		if trimmed := strings.TrimSpace(line); strings.HasPrefix(trimmed, "|") {
+			tableLines.WriteString(strings.ToLower(line))
+			tableLines.WriteString("\n")
+		}
+	}
+	table := tableLines.String()
+	for _, n := range names {
+		// Match on a distinctive prefix: the record reworded some rows for
+		// prose, and pinning whole strings would fail on wording rather than on
+		// coverage.
+		head := n[1]
+		if len(head) > 24 {
+			head = head[:24]
+		}
+		if !strings.Contains(table, strings.ToLower(head)) {
+			t.Errorf("probe check %q has no ROW in the validation record. Prose "+
+				"quoting the check does not count: the table is the evidence.\n"+
+				"The row must come from a run that actually made this check, not "+
+				"from reading the probe's source and writing down what it would "+
+				"have said.", n[1])
+		}
+	}
+}

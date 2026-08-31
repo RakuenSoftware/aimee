@@ -203,7 +203,16 @@ static void tool_execute_worker(void *arg)
    int rc = pre_tool_check(tool, args, &state, config_guardrail_mode(), cwd, msg, sizeof(msg));
    session_state_save(&state, sid);
 
-   if (rc != 0)
+   /* 1 and 3 are ALLOW-with-rewrite verdicts, not refusals: 1 carries a rewritten
+    * path, 3 a rewritten command ("cd <worktree> && …"). Treating them as blocked
+    * refused every tool call the guardrail merely wanted to redirect into the
+    * session worktree — for rc==1 that is an ordinary Write/Edit, the common case.
+    *
+    * They are let through rather than applied here because dispatch_tool_call
+    * runs pre_tool_check again and applies both rewrites to the arguments it
+    * passes on; re-deriving them here would be a second copy of that logic, free
+    * to drift from the one that actually decides. */
+   if (rc != 0 && rc != 1 && rc != 3)
    {
       cJSON *resp = cJSON_CreateObject();
       cJSON_AddStringToObject(resp, "status", "blocked");
@@ -216,8 +225,13 @@ static void tool_execute_worker(void *arg)
       return;
    }
 
-   /* Execute tool */
+   /* Execute tool. External mutations require an authorization decision carried
+    * out-of-band from their model-supplied arguments. The local operator socket
+    * arrives with CAPS_ALL and is the trusted execution-policy boundary for this
+    * first-class API; capability-limited remote callers do not inherit it. */
+   agent_tools_set_effect_authorized(trusted_local);
    char *result = dispatch_tool_call(tool, args, timeout_ms);
+   agent_tools_set_effect_authorized(0);
 
    /* Clear thread-local CWD + the detached provider binding */
    run_cmd_set_cwd(NULL);
@@ -478,6 +492,10 @@ static void chat_stream_worker_pooled(void *arg)
       {
          cctx->turn_entry = cancel_entry; /* owner is set inside publish, under the lock */
          request_cancel = &cancel_entry->cancel;
+         (void)ti_turn_manifest_init(&cancel_entry->integrity, delta_turn, delta_session,
+                                     delta_session);
+         (void)ti_turn_transition(&cancel_entry->integrity, TI_TURN_CONTEXTUALIZED,
+                                  "async turn admitted");
       }
       else if (turn_registry_is_shutting_down())
       {
@@ -526,6 +544,14 @@ static void chat_stream_worker_pooled(void *arg)
       presence_turn_release(lock_session, lock_turn);
    else if (sid[0])
       presence_emit_turn_done(sid, turn_id); /* turn_done reaches the ring even on cancel */
+   if (cancel_entry)
+   {
+      ti_turn_state_t final_state =
+          turn_entry_cancelled(cancel_entry) ? TI_TURN_CANCELLED : TI_TURN_COMPLETED;
+      (void)ti_turn_transition(&cancel_entry->integrity, final_state,
+                               final_state == TI_TURN_CANCELLED ? "turn cancelled"
+                                                                : "turn worker returned");
+   }
    /* Clear the cancel-registry entry after the worker reaped its child and
     * turn_done was published. cancel_entry is a LOCAL pointer into the static
     * turn registry table (NOT into cctx, which the worker already freed), so
@@ -726,6 +752,64 @@ static int chat_stream_dispatch(server_ctx_t *ctx, compute_ctx_t *cctx)
    return 0;
 }
 
+/* How long an in-flight turn may go without a worker owning it before it is
+ * treated as abandoned.
+ *
+ * NOT a cap on turn length. A turn may legitimately run for hours — an agent
+ * loop is many provider calls and tool steps — and it keeps a registry entry
+ * for the whole of it, so age alone never reclaims anything. This bounds only
+ * the window between presence acquiring the lock (handler thread) and the
+ * pooled worker publishing its registry entry. That is a per-session pool with
+ * one turn in flight by construction, so the gap is milliseconds; two minutes
+ * is slack for a badly loaded box, not an estimate of normal. */
+#define PRESENCE_TURN_ORPHAN_GRACE_SECS 120
+
+/* A turn is released by whoever acquired it, which is right up until that party
+ * stops existing. Nothing then releases it: turn_in_flight was a bare flag, so
+ * a session whose worker died declined every later submit with presence_busy
+ * FOREVER — the operator's browser spinning on "Working…", and the only cure a
+ * server restart.
+ *
+ * The turn registry is the evidence. chat_stream_worker_pooled publishes an
+ * entry before the turn runs and clears it after, so "presence says a turn is
+ * in flight, and no worker owns it" is a leaked lock rather than a slow one.
+ * Require the grace period as well: the two disagree briefly and legitimately
+ * while a just-acquired turn is still queued for its pool thread.
+ *
+ * Returns the result of a single retry, or PRESENCE_TURN_BUSY unchanged when
+ * there was nothing to reclaim. Only one retry: if the reclaim raced a real
+ * holder and lost, the session is genuinely busy and saying so is correct. */
+static presence_turn_result_t retry_after_reclaiming_abandoned_turn(const char *session_id,
+                                                                    const char *attach_id,
+                                                                    int want_queue, int wait_ms,
+                                                                    char *turn_id, size_t id_n,
+                                                                    char *inflight, size_t infl_n)
+{
+   char stuck[64] = "";
+   long age = presence_turn_inflight_age(session_id, stuck, sizeof(stuck));
+   if (age < PRESENCE_TURN_ORPHAN_GRACE_SECS || !stuck[0])
+      return PRESENCE_TURN_BUSY;
+
+   /* Not under any presence lock: the registry mutex is a leaf and callers may
+    * not hold a presence lock across a registry call (turn_registry.h). */
+   turn_entry_t *owner = turn_registry_find(session_id);
+   if (owner && strcmp(owner->turn_id, stuck) == 0)
+      return PRESENCE_TURN_BUSY; /* a worker owns it; it is slow, not lost */
+
+   if (!presence_turn_reclaim(session_id, stuck))
+      return PRESENCE_TURN_BUSY; /* it finished under us — nothing was wrong */
+
+   LOG_WARN("chat",
+            "reclaimed abandoned turn %s on session %s: in flight %lds with no worker owning it; "
+            "the session was wedged and every submit was being declined",
+            stuck, session_id, age);
+
+   return want_queue ? presence_turn_acquire_wait(session_id, attach_id, wait_ms, turn_id, id_n,
+                                                  inflight, infl_n)
+                     : presence_turn_acquire(session_id, attach_id, 0, turn_id, id_n, inflight,
+                                             infl_n, NULL);
+}
+
 int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    cJSON *dispatch_req = req;
@@ -754,7 +838,9 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cctx)
       return server_send_error(conn, "out of memory", NULL);
 
-   /* Unified-presence turn arbitration (opt-in). When the request identifies
+   /* (see retry_after_reclaiming_abandoned_turn above)
+    *
+    * Unified-presence turn arbitration (opt-in). When the request identifies
     * its attachment and a presence exists for the session, serialize turns:
     * acquire the per-session turn lock before dispatch and decline with
     * presence_busy if another surface holds it. Requests without an attach_id
@@ -786,6 +872,9 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                      : presence_turn_acquire(sid, attach_id, 0, turn_id, sizeof(turn_id), inflight,
                                              sizeof(inflight), NULL);
       if (tr == PRESENCE_TURN_BUSY)
+         tr = retry_after_reclaiming_abandoned_turn(sid, attach_id, want_queue, wait_ms, turn_id,
+                                                    sizeof(turn_id), inflight, sizeof(inflight));
+      if (tr == PRESENCE_TURN_BUSY)
       {
          compute_ctx_free(cctx);
          char msg[160];
@@ -793,6 +882,12 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                   "presence_busy: a turn (%s) is already in flight for this "
                   "session",
                   inflight[0] ? inflight : "unknown");
+         /* Say so. The turn lock published nothing at all — not acquire, not
+          * release, not this decline — so a session that wedged left an
+          * operator with a browser spinning and a log that never mentions the
+          * turn holding it up. */
+         LOG_WARN("chat", "presence_busy: session %s declined; turn %s is in flight (%lds)", sid,
+                  inflight[0] ? inflight : "unknown", presence_turn_inflight_age(sid, NULL, 0));
          return server_send_error(conn, msg, NULL);
       }
       if (tr == PRESENCE_TURN_ACQUIRED)

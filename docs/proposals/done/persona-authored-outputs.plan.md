@@ -1,10 +1,15 @@
-# persona-authored-outputs — implementation plan
+# persona-authored-outputs: implementation plan
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Delivered scope archived 2026-07-26.
 
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
-> specification for work already delivered. Remaining work is tracked in
-> [`persona-authored-outputs-residual.md`](../pending/persona-authored-outputs-residual.md).
+> specification for work already delivered. The remaining work is restored as a
+> [Go-owned pending residual](../pending/persona-authored-outputs-residual.md) under
+> `response-composition`, with delegate evidence and separate effect authorization.
 
 Mechanics for [persona-authored-outputs.md](persona-authored-outputs.md).
 Section numbers follow that document's What items (B8 here covers its
@@ -12,7 +17,7 @@ items 8–9, the enforced tooling and the commit gate; B9 → item 10,
 B10 → item 11). Paths are under `src/` unless noted; workflow-engine files
 live in `src/workflow/`.
 
-## A1 — permission table and grant resolution
+## A1: permission table and grant resolution
 
 - New `delegate_role_permissions(role)` in `server/delegate_role.c`
   returning a bitmask (`PERM_READ|PERM_WRITE|PERM_EXECUTE`). The table is
@@ -29,14 +34,14 @@ live in `src/workflow/`.
   (`role_template_max_turns`, `role_templates.c:468`). Unknown token →
   template load error; absent/empty grant → the table row, else `[read]`.
 - Grants are resolved once at dispatch setup and carried with the
-  dispatch; gate sites read the carried grant — no file I/O in
+  dispatch; gate sites read the carried grant, no file I/O in
   `server_compute.c` / `agent_runtime.c` hot paths.
 - Migrate every `delegate_role_is_write()` caller, then delete it:
   `server_compute.c:1024,1167`, `agent_runtime.c:238,439,482`,
   `agent_fallback.c:92`, `server_http.c:207`, `agent_loop.c:249`,
   `cmd_agent_delegate.c:1715`.
 
-## A2 — capability from grant
+## A2: capability from grant
 
 - `agent_runtime.c:234-238`: `use_tools` gains "or the grant carries
   write|execute" alongside the name heuristic, so
@@ -51,10 +56,10 @@ live in `src/workflow/`.
   (`server/delegate_prompt.c:1188,1486,1840`) keep their review-family
   gate and additionally require a read-only grant: **read-only AND
   review-family**, never read-only alone. Keying purely off read-only
-  would drag every read dispatch — including B6's PR-text dispatch — into
+  would drag every read dispatch (including B6's PR-text dispatch) into
   the diff-evidence guard, whose drift check can fail the dispatch.
 
-## A3 — coverage matching
+## A3: coverage matching
 
 - Persona frontmatter: `requires: [read, ...]` parsed in `persona.c`
   `load_file()` (additive key, like `roles:` today); built-ins get values
@@ -63,7 +68,7 @@ live in `src/workflow/`.
 - A delegate agent's granted set = union of its advertised roles' grants
   (`roles[]`/`exec_roles[]`, `delegate_role.c:24`).
 - Workflow producing path: agent selection today does **no** persona/role
-  matching — `wfe_resolve_delegate` (`server/wfe_delegate_resolve.c:42`)
+  matching, `wfe_resolve_delegate` (`server/wfe_delegate_resolve.c:42`)
   resolves `$random`/named only, and `wfe_live_delegate_run` dispatches
   whatever it returns. Coverage enforcement lands at that selection point:
   the resolver (or the agent pick immediately after it) filters candidates
@@ -74,7 +79,7 @@ live in `src/workflow/`.
 - Workflow judge path: `wfe_live_judge_run`'s agent loop
   (`server/wfe_live_delegate.c:315-321`) is the one place that walks
   `pinfo.roles[]`/`agent_supports_persona` today. It migrates to the same
-  coverage predicate when `roles[]` retires — left as-is it would see
+  coverage predicate when `roles[]` retires, left as-is it would see
   `roles_count == 0`, choose no agent, and every judge dispatch would
   fail closed.
 - CLI path: `delegate_agent_supports_role` filtering gains the same
@@ -85,7 +90,7 @@ live in `src/workflow/`.
   (`cmd_agent_delegate.c`), now expressed as max grantable set
   (full→rwx, readonly→r, none→∅).
 
-## A4 — persona from context, grant through the provider
+## A4: persona from context, grant through the provider
 
 - `cmd_agent_delegate.c:630`: `--persona` no longer required; if present,
   warn "deprecated, ignored". Resolution: workflow node `persona:` param
@@ -103,10 +108,10 @@ live in `src/workflow/`.
   not advisory: tools are gated on `write|execute`, and the auto-commit
   block (`git add -A` + `git commit --no-verify`,
   `server/wfe_live_delegate.c:183-185`, unconditional today) is skipped
-  entirely when the grant lacks `write` — a read dispatch must not sweep
+  entirely when the grant lacks `write`. A read dispatch must not sweep
   pre-existing staged changes into a commit.
 
-## A5 — generated stance and prose re-authoring
+## A5: generated stance and prose re-authoring
 
 - `persona_compose_delegate_prompt()` (`persona.c:496`) gains the granted
   bitmask; emits the stance block from it. Callers threaded:
@@ -132,7 +137,7 @@ live in `src/workflow/`.
   legacy seed, re-seed it; hash mismatch → user-edited, leave it and log;
   `seed_version` current → skip.
 
-## B6 — pr.open text
+## B6: pr.open text
 
 - `exec_pr_open` (`workflow/wfe_blocks.c:1343`) pre-step: dispatch persona
   = node `persona:` param or `technical-writer`, grant `[read]`, prompt
@@ -146,23 +151,23 @@ live in `src/workflow/`.
   the authored text; on -1, retry once with (work-item, "") before
   returning `wfe_step_looped()`.
 
-## B7 — document persona
+## B7: document persona
 
 - `exec_document` (`workflow/wfe_blocks.c:1044`): persona =
   `node_str(node, "persona")`, default `engineer` (pattern:
   `wfe_blocks.c:965`). `config/workflows/build.yaml` document node gains
   `persona: technical-writer`.
 
-## B8 — enforced git tooling and the shared commit gate
+## B8: enforced git tooling and the shared commit gate
 
 - Enforcement config: new key `require_aimee_git` (default 1), the
   `require_aimee_memory` pattern exactly (`config.c:325` schema, `:734`
   default, `:1196` load). Operator opt-out in `aimee.yaml` only; no
   env-var bypass (same stance as `require_session_worktree`). The verb
   set is not a new list: both layers reuse the guardrails orchestrator's
-  tokenizing detectors — `bash_has_git_write`
+  tokenizing detectors, `bash_has_git_write`
   (`guardrails_orchestrator.c:243,342`; quote- and `git -C`-aware),
-  `bash_has_gh_pr_create` (`:406`), and the push gate (`:329`) — extended
+  `bash_has_gh_pr_create` (`:406`), and the push gate (`:329`), extended
   with `tag` and `stash` so every verb with a guarded MCP equivalent
   (`server_mcp.c:1392` table) is redirected to it. Read verbs
   (`status`, `log`, `diff`, …) pass untouched. The refusal is a redirect
@@ -183,7 +188,7 @@ live in `src/workflow/`.
   autonomous dispatches this proposal exists to fix.
 - Out of the gate by design: aimee-server's own subprocess git (the
   forge's push and `gh pr create`, `server/wfe_live_forge.c:289-303`;
-  `source.archive`'s chore commit on the run branch) — internal calls,
+  `source.archive`'s chore commit on the run branch), internal calls,
   not agent shells. The .md scopes the one-gate claim to agent-authored
   commits accordingly.
 - The shared commit gate: `handle_git_commit` (`mcp_git_write.c:53`) is
@@ -192,21 +197,21 @@ live in `src/workflow/`.
   in-process **with an explicit workdir**: today every git call inside it
   goes through `mcp_git_run`/`get_current_branch`, which key off the
   process-global `run_cmd_get_cwd()` (`mcp_git_query.c:84,289`). The
-  harness caller pins `run_cmd_set_cwd(workdir)` around the core — the
+  harness caller pins `run_cmd_set_cwd(workdir)` around the core. The
   exact pattern `wfe_live_verify_run` already uses for the same reason
-  (`server/wfe_live_delegate.c:218-227`) — so the gate commits in the
+  (`server/wfe_live_delegate.c:218-227`), so the gate commits in the
   per-work-item worktree, not the daemon checkout (whose branch could
   even be `main`, tripping the gate's own guard). The workflow harness
   commit (`server/wfe_live_delegate.c:183-185`, hardcoded
   `-m "aimee: autonomous delegate change"` today) then calls the core
   instead of raw `git_run`.
-- Persona authorship at the gate — skip-on-draft, agent-only: the
+- Persona authorship at the gate. Skip-on-draft, agent-only: the
   authoring pass runs only when (a) `commit_style_persona` is set and the
   persona has a voice, (b) the commit is agent-originated (MCP callers
   and the harness; a human operator's CLI commit passes through
   unchanged), and (c) no persona-styled draft accompanied the commit (a
   handoff-supplied `commit_message` from a styled producing dispatch is
-  committed as supplied — never a second authoring pass; the honest
+  committed as supplied, never a second authoring pass; the honest
   rationale for the style block is fallback quality, not gate cost). The
   pass dispatches the persona read-only over `git diff --cached` plus the
   caller's draft. Failure, no backend, empty reply, or a reply that
@@ -216,16 +221,14 @@ live in `src/workflow/`.
 - Re-entrancy of the nested pass: the MCP-side gate dispatches through
   the same in-process entry the workflow uses
   (`agent_execute_with_tools`, read-only agent config), and the gate
-  saves/restores the thread-local state the inner dispatch clobbers —
-  `run_cmd` cwd and the `g_write_capable` TLS (`agent_tools.c:58`) —
-  re-pinning the workdir before the final `git commit`. Recursion is
+  saves/restores the thread-local state the inner dispatch clobbers (`run_cmd` cwd and the `g_write_capable` TLS (`agent_tools.c:58`)) re-pinning the workdir before the final `git commit`. Recursion is
   bounded structurally: the authoring delegate is read-granted, so it has
   no `git_commit` tool and cannot re-enter the gate.
 - Draft channel for harness commits, discriminated by dispatch kind so
   artifact blocks keep raw text: committing dispatches (`implement`
   plain, fanout units, TDD, `document`) get the `delegate_result_v1`
   contract appended to their prompt; the contract gains a
-  `commit_message` field — `delegate_handoff_append_contract`
+  `commit_message` field, `delegate_handoff_append_contract`
   (`delegate_prompt.c:151`) adds it to the contract text (today:
   `schema_version, status, changed_files, tests, summary`, no message
   carrier), and the parser (`delegate_handoff_validate_text` →
@@ -238,11 +241,11 @@ live in `src/workflow/`.
   `res.response` verbatim.
 - Delegate self-commits route through the gate too: with
   `require_aimee_git` on, a delegate's own commit is an MCP `git_commit`
-  call, so its message gets the same persona pass — the round-4
+  call, so its message gets the same persona pass, the round-4
   best-effort caveat disappears.
 - Style block (draft quality, keeps the gate's pass cheap): producing
   dispatch prompts (`implement` plain `wfe_blocks.c:1011`, fanout units
-  `:888` — note the fixed `char prompt[1024]` there needs growth, TDD
+  `:888`. Note the fixed `char prompt[1024]` there needs growth, TDD
   RED/GREEN `:932,:969`, `document` `:1048`) append
   "## Commit message style" = `commit_style_persona`'s voice text when
   non-empty.
@@ -251,13 +254,13 @@ live in `src/workflow/`.
   `default_persona` at :842, :1076), descriptor `config_fields.c:22`
   pattern, save `config_save.c:356` pattern.
 - PR side of the gate: `handle_git_pr` (`mcp_git_pr.c:160`) gets the same
-  treatment as B6's `pr.open` — an absent/empty title or body is
+  treatment as B6's `pr.open`. An absent/empty title or body is
   persona-authored over the branch evidence before the create, with the
   same fail-open fallback. Note the create path today hard-rejects an
   empty title (`'title' parameter is required`, `mcp_git_pr.c:515`); that
   check relaxes to "author, then require".
 
-## B9 — voice field
+## B9: voice field
 
 - `persona_t` gains `voice_text`; `extract_section` list (`persona.c:407`)
   gains `## Voice`; `persona_install_defaults` writes it; built-in
@@ -265,7 +268,7 @@ live in `src/workflow/`.
   `PROMPT_TECH_WRITER_TEXT` (`prompts.c:466`) into a
   `prompt_persona_voice(mode)` accessor (NULL for personas without one).
 
-## B10 — validation
+## B10: validation
 
 - `wfe_def_validate` (`workflow/wfe_validate.c`): for `implement`,
   `document`, `pr.open` nodes with a `persona:` param, resolve against
@@ -291,9 +294,9 @@ live in `src/workflow/`.
 
 ## Sequencing
 
-1. A1 (permission table + gates) — mechanical; the table reproduces
+1. A1 (permission table + gates), mechanical; the table reproduces
    today's sets by construction.
-2. A2 (tool-enable from grant, injection gates) — behavior-affecting;
+2. A2 (tool-enable from grant, injection gates), behavior-affecting;
    guarded by the self-cancel invariant check above.
 3. A5 prose re-authoring + composer grant param, with A4's
    dispatch-persona/grant threading through the provider contract.

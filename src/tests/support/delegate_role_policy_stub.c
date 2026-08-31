@@ -15,21 +15,46 @@ static const char *test_delegate_policy_role(const char *role)
    return role;
 }
 
-int delegate_role_enable_tools_by_default(const char *role)
+/* Which roles want the parent worktree's diff. Like the rest of this harness
+ * this MIRRORS the module's list rather than asking it, because these tests link
+ * no bus; the list itself is pinned against the module in
+ * server-go/modules/delegates/rolepolicy_test.go. A test that cares about the
+ * distinction registers its own provider instead. */
+int delegate_role_needs_parent_diff(const char *role)
 {
    role = test_delegate_policy_role(role);
-   return role && (strcmp(role, "review") == 0 || strcmp(role, "search") == 0 ||
-                   strcmp(role, "execute") == 0 || strcmp(role, "diagnose") == 0 ||
-                   strcmp(role, "validate") == 0);
+   return role && (strcmp(role, "review") == 0 || strcmp(role, "validate") == 0 ||
+                   strcmp(role, "diagnose") == 0);
 }
 
-int delegate_role_auto_tools_for_invocation(const char *role, int max_turns, int explicit_tools)
+/* The shape of work a role does, as task_type_t. Mirrors the module's map for
+ * the same reason as the rest of this file; the map itself is pinned against
+ * the module in server-go/modules/delegates/rolepolicy_test.go. */
+int delegate_role_task_shape(const char *role)
+{
+   role = test_delegate_policy_role(role);
+   if (!role)
+      return 0; /* TASK_TYPE_GENERAL */
+   if (strcmp(role, "review") == 0)
+      return 4; /* TASK_TYPE_REVIEW */
+   if (strcmp(role, "diagnose") == 0)
+      return 1; /* TASK_TYPE_BUG_FIX */
+   if (strcmp(role, "refactor") == 0)
+      return 2; /* TASK_TYPE_REFACTOR */
+   if (strcmp(role, "code") == 0)
+      return 3; /* TASK_TYPE_FEATURE */
+   if (strcmp(role, "validate") == 0 || strcmp(role, "test") == 0)
+      return 5; /* TASK_TYPE_TEST */
+   return 0;
+}
+
+int delegate_auto_tools_for_invocation(int holds_tools, int max_turns, int explicit_tools)
 {
    if (explicit_tools)
       return 1;
    if (max_turns == 1)
       return 0;
-   return delegate_role_enable_tools_by_default(role);
+   return holds_tools;
 }
 
 const char *delegate_role_canonicalize(const char *role)

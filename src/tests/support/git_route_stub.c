@@ -14,6 +14,7 @@
 #include "modules/git/git_pr_api.h"
 #include "modules/git/git_project.h"
 #include "modules/git/git_ssh_agent.h"
+#include "modules/kb_client/kb_client.h"
 #include "index.h"
 #include "webuser_editor.h"
 #include "modules/workspace/workspace_scope.h"
@@ -81,6 +82,22 @@ int index_scan_project(const char *name, const char *root, int force)
    (void)root;
    (void)force;
    return 0;
+}
+
+int kb_client_is_live(void)
+{
+   return 0;
+}
+
+int kb_client_index_scan(const char *name, const char *root, int force,
+                         kb_client_index_scan_result_t *out)
+{
+   (void)name;
+   (void)root;
+   (void)force;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return -1;
 }
 
 int git_project_list(const char *principal, char out[][GIT_PROJECT_NAME_MAX], int max)

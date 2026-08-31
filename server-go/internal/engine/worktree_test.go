@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 )
 
 func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
@@ -29,7 +31,7 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	run("-C", repo, "remote", "add", "origin", repo)
 	run("-C", repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	run("-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,6 +61,78 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	}
 	if branch != "aimee/wi/wi_child" {
 		t.Fatalf("child branch=%s", branch)
+	}
+}
+
+func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
+	root := t.TempDir()
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.WorkItem{ID: "wi_missing", Repo: filepath.Join(root, "repo"),
+		Worktree: filepath.Join(root, "trees", "wi_missing")}
+	if err := manager.Cleanup(t.Context(), item); err != nil {
+		t.Fatalf("repeat cleanup of removed managed path: %v", err)
+	}
+
+	item.Worktree = filepath.Join(root, "outside-managed-root")
+	if err := manager.Cleanup(t.Context(), item); err == nil {
+		t.Fatal("missing path outside the managed root bypassed scope validation")
+	}
+}
+
+func TestCleanupRemovesOrphanedWorktreeWhenTheRepoIsGone(t *testing.T) {
+	// A deleted workspace leaves its worktrees behind. Every `git -C <repo>` then
+	// fails with "cannot change to <repo>", so Cleanup used to return an error
+	// forever and the work item never reached a terminal state -- observed on a
+	// live server retrying one item ~92 times a minute.
+	root := t.TempDir()
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	manager, err := NewWorktreeManager(store, filepath.Join(root, "trees"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The checkout exists; the repository it belonged to does not.
+	tree := filepath.Join(root, "trees", "wi_orphan")
+	if err := os.MkdirAll(tree, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tree, "file"), []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	item := db1.WorkItem{ID: "wi_orphan", Repo: filepath.Join(root, "repo-that-was-deleted"),
+		Worktree: tree}
+
+	if err := manager.Cleanup(t.Context(), item); err != nil {
+		t.Fatalf("cleanup with a missing repo must succeed, got: %v", err)
+	}
+	if _, err := os.Stat(tree); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("orphaned worktree still present after cleanup: %v", err)
+	}
+
+	// Scope validation still applies: a missing repo is not a licence to delete
+	// anything outside the managed root.
+	outside := filepath.Join(root, "outside-managed-root")
+	if err := os.MkdirAll(outside, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	item.Worktree = outside
+	if err := manager.Cleanup(t.Context(), item); err == nil {
+		t.Fatal("a missing repo bypassed managed-root scope validation")
+	}
+	if _, err := os.Stat(outside); err != nil {
+		t.Fatalf("path outside the managed root was removed: %v", err)
 	}
 }
 
@@ -98,7 +172,7 @@ func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
 	run("-C", path, "add", "implemented.txt")
 	run("-C", path, "commit", "-m", "implementation")
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,7 +242,7 @@ func TestEnsureMigratesLegacySliceWhenIdenticalTargetRefAlreadyExists(t *testing
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, legacy)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +304,7 @@ func TestEnsureRestoresDurableBranchFromIdenticalDelegateAlias(t *testing.T) {
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, alias)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +419,7 @@ func TestSliceWorktreeBranchesFromMergedRemoteFeatureTip(t *testing.T) {
 	run("-C", landed, "commit", "-m", "slice g0.0")
 	run("-C", landed, "push", "origin", feature)
 
-	store, err := db1.Open(filepath.Join(root, "db.sqlite"))
+	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

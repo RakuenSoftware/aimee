@@ -17,7 +17,17 @@
     "src/modules/benchmarks/agent_eval.c",
     "src/modules/benchmarks/agent_eval_baseline.c",
     "src/modules/benchmarks/agent_eval_benchmarks.c",
-    "src/modules/benchmarks/agent_eval_memory_support.c"
+    "src/modules/benchmarks/agent_eval_memory_support.c",
+    "src/modules/benchmarks/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/benchmarks/benchmarks.go"
+  ],
+  "go_tests": [
+    "server-go/modules/benchmarks/benchmarks_test.go"
+  ],
+  "public_headers": [
+    "src/modules/benchmarks/include/aimee/benchmarks/module_api.h"
   ],
   "private_headers": [
     "src/modules/benchmarks/agent_eval.h",

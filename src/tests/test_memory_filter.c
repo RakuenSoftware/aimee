@@ -4,10 +4,9 @@
 #include <string.h>
 #include <time.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "memory.h"
 #include "cJSON.h"
 
@@ -174,7 +173,6 @@ int main(void)
 {
    printf("memory_filter:\n");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    test_filter_scope_workspace();

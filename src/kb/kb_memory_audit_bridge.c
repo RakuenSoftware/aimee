@@ -10,8 +10,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "aimee.h"   /* prerequisites for memory.h (KIND_*, config_t, ...) */
-#include "memory.h"  /* memory_set_audit_hook */
+#include "aimee.h"  /* prerequisites for memory.h (KIND_*, legacy_config_record, ...) */
+#include "memory.h" /* memory_set_audit_hook */
 #include <aimee/audit/obs_bus.h> /* obs_bus_emit, obs_bus_key_fingerprint */
 
 /* memory_audit_hook_fn: publish one memory-mutation audit row over the KB's bus
@@ -34,8 +34,11 @@ static void on_memory_mutation(const char *op, int64_t id, const char *tier, con
    if (confidence > 0.0)
       snprintf(reason, sizeof reason, "conf=%.2f", confidence);
 
-   obs_bus_emit(session_id && session_id[0] ? session_id : "memory", op, "v1-", command,
-                tier ? tier : "", reason, "ok", (long long)id);
+   const char *actor = session_id && session_id[0] ? session_id : "memory";
+   if (obs_bus_commit_action(actor, op, "v1-", command, tier ? tier : "", reason, "ok",
+                             (long long)id) != 0)
+      fprintf(stderr, "audit: KB memory WORM commit failed for %s\n", op ? op : "");
+   obs_bus_emit(actor, op, "v1-", command, tier ? tier : "", reason, "ok", (long long)id);
 }
 
 void kb_memory_audit_bridge_install(void)

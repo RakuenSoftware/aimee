@@ -3,16 +3,17 @@
 #include "aimee.h"
 #include "agent_config.h"
 #include "commands.h"
-#include "db1.h"
-#include "db2/code_index.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/code_index.h"
 #include "config_database.h"
-#include "db2/memory_payload.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_query.h"
 #include "hardware_probe.h"
 #include "kb_client.h"
 #include "lifecycle.h"
 #include "provider_catalog.h"
 #include "shutdown_forensics.h"
+#include "runtime_secret.h"
 #include <aimee/workspace/workspace.h>
 #include "cJSON.h"
 #include <unistd.h>
@@ -54,12 +55,13 @@ static doctor_db2_session_t check_database(check_result_t *r)
 
    /* Open shared knowledge storage once for the doctor run. Later checks reuse
     * the same connection instead of closing it between probes. */
-   if (!config_db2_url()[0])
+   char db2_url[2048] = "";
+   if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge URL not configured");
       snprintf(r->remediation, sizeof(r->remediation),
-               "Set the shared knowledge connection URL in config");
+               "Store AIMEE_DB2_URL in the runtime secret store");
       return session;
    }
 
@@ -75,19 +77,21 @@ static doctor_db2_session_t check_database(check_result_t *r)
    else if ((db2_set_embedding_dim(config_embedder_dims_current()),
              db2_set_embedding_dim_pinned(config_embedder_dims_pinned_current()),
              db2_set_embedder_model_id(config_embedder_model()), /* unified-llm §2 drift guard */
-             db2_init(config_db2_url())) == 0)
+             db2_init(db2_url)) == 0)
    {
       session.ready = 1;
       session.owned = 1;
    }
    else
    {
+      runtime_secret_wipe(db2_url, sizeof(db2_url));
       r->status = CHECK_ERROR;
       snprintf(r->message, sizeof(r->message), "shared knowledge connection failed");
       snprintf(r->remediation, sizeof(r->remediation),
                "Verify the shared knowledge connection URL and service reachability");
       return session;
    }
+   runtime_secret_wipe(db2_url, sizeof(db2_url));
    int schema_ok = 0;
    int have_fuzzy_extension = 0;
    if (db2_health_probe(&schema_ok, &have_fuzzy_extension) != 0)
@@ -246,13 +250,12 @@ static void check_config(check_result_t *r)
 {
    r->name = "Config";
 
-   const char *path = config_default_path();
    struct stat st;
-   if (stat(path, &st) != 0)
+   if (!config_present())
    {
       r->status = CHECK_ERROR;
-      snprintf(r->message, sizeof(r->message), "not found");
-      snprintf(r->remediation, sizeof(r->remediation), "Run 'aimee init' to create config");
+      snprintf(r->message, sizeof(r->message), "module unavailable");
+      snprintf(r->remediation, sizeof(r->remediation), "Start the Aimee config module");
       return;
    }
 
@@ -524,15 +527,19 @@ static void check_index(check_result_t *r, int db2_ready)
    char ts_buf[64] = {0};
    db2_code_index_project_last_scan(ts_buf, sizeof(ts_buf));
 
-   /* Parse timestamp and check if older than 24h */
+   /* Parse timestamp and check if older than 24h.
+    *
+    * parse_utc_ts rather than a local strptime: it reads both spellings the tree
+    * stores (this one matched only ISO, so a pg_now_text() row read as no
+    * timestamp at all), and it converts as UTC. mktime() interpreted these UTC
+    * fields as LOCAL time, so the age was wrong by the host's offset -- on a
+    * UTC+13 box a freshly indexed project reported as stale. */
    int stale = 0;
    if (ts_buf[0])
    {
-      struct tm tm_parsed;
-      memset(&tm_parsed, 0, sizeof(tm_parsed));
-      if (strptime(ts_buf, "%Y-%m-%dT%H:%M:%S", &tm_parsed))
+      time_t indexed_time = parse_utc_ts(ts_buf);
+      if (indexed_time > 0)
       {
-         time_t indexed_time = mktime(&tm_parsed);
          time_t now = time(NULL);
          double hours = difftime(now, indexed_time) / 3600.0;
          if (hours > 24.0)
@@ -704,15 +711,11 @@ static void check_kb_maintenance(check_result_t *r, int kb_rc, const kb_health_t
       snprintf(r->message, sizeof(r->message), "maintenance enabled but has never run");
       return;
    }
-   /* Warn if last run was more than 48 hours ago */
-   struct tm t;
-   memset(&t, 0, sizeof(t));
-   if (sscanf(h->last_maintenance_at, "%d-%d-%d %d:%d:%d", &t.tm_year, &t.tm_mon, &t.tm_mday,
-              &t.tm_hour, &t.tm_min, &t.tm_sec) >= 3)
+   /* Warn if last run was more than 48 hours ago. Shared parser: this copy read
+    * only the space form, and mktime() treated a UTC stamp as local time. */
+   time_t then = parse_utc_ts(h->last_maintenance_at);
+   if (then > 0)
    {
-      t.tm_year -= 1900;
-      t.tm_mon -= 1;
-      time_t then = mktime(&t);
       time_t now = time(NULL);
       double hours_since = difftime(now, then) / 3600.0;
       if (hours_since > 48.0)

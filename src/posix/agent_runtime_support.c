@@ -60,9 +60,9 @@ int agent_ssh_setup(const agent_network_t *network, char *key_path_out, size_t k
    /* Authorize the key on the deploy host via existing SSH access.
     * Parse the deploy host from ssh_entry (e.g., "ssh -p 2222 deploy@host") */
    {
-      char *safe_pubkey = shell_escape(pubkey);
+      char *safe_pubkey = shell_quote(pubkey);
       char auth_script[8192];
-      snprintf(auth_script, sizeof(auth_script), "printf '%%s\\n' '%s' >> ~/.ssh/authorized_keys",
+      snprintf(auth_script, sizeof(auth_script), "printf '%%s\\n' %s >> ~/.ssh/authorized_keys",
                safe_pubkey);
       free(safe_pubkey);
       char *ssh_tokens[32];

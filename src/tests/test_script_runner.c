@@ -37,11 +37,6 @@ char *safe_strdup(const char *s)
    return out;
 }
 
-const char *config_default_path(void)
-{
-   return "/tmp/aimee-script-runner-no-config.yaml";
-}
-
 static cJSON *parse_json_or_die(const char *text)
 {
    cJSON *json = cJSON_Parse(text);

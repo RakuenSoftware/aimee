@@ -49,7 +49,7 @@ extern "C"
       int decl_count;
    } css_rule_t;
 
-   typedef struct
+   typedef struct css_stylesheet
    {
       css_rule_t *rules;
       int rule_count;

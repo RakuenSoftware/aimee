@@ -10,6 +10,7 @@
 #include "agent_config.h"
 #include "agent_tier_lint.h"
 #include "model_registry.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* Mirror agent_config.c so this test links only the registry, not the whole
  * agent-config layer. Kept behaviourally identical to the originals. */
@@ -57,7 +58,7 @@ static char g_tmp_home[256];
 
 static void seed_priced_catalog(void)
 {
-   snprintf(g_tmp_home, sizeof(g_tmp_home), "/tmp/test-tier-lint-XXXXXX");
+   snprintf(g_tmp_home, sizeof(g_tmp_home), "%s/test-tier-lint-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_tmp_home) != NULL);
 
    char dir[512], path[600];

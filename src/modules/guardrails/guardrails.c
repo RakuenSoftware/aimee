@@ -418,6 +418,17 @@ static int is_sensitive_exact(const char *filename)
    return policy_list_matches_exact(&g_policy.sensitive_exact, filename);
 }
 
+/* These conventional files document configuration without carrying live
+ * credentials.  A substring rule for `.env` must not make tracked templates
+ * impossible to maintain; real environment variants (for example .env.local
+ * and .env.production) remain sensitive. */
+static int is_env_template(const char *filename)
+{
+   return filename &&
+          (strcmp(filename, ".env.example") == 0 || strcmp(filename, ".env.sample") == 0 ||
+           strcmp(filename, ".env.template") == 0);
+}
+
 static int has_db_extension(const char *filename)
 {
    const char *dot = strrchr(filename, '.');
@@ -431,6 +442,8 @@ int is_sensitive_file(const char *path)
 {
    if (!path)
       return 0;
+   if (is_env_template(basename_of(path)))
+      return 0;
    guardrails_policy_ensure_loaded();
    return policy_list_matches_substring(&g_policy.sensitive_patterns, path);
 }
@@ -443,6 +456,9 @@ classification_t classify_path(const char *file_path)
    result.severity = SEV_GREEN;
 
    const char *fname = basename_of(file_path);
+
+   if (is_env_template(fname))
+      return result;
 
    /* Check exact matches first */
    if (is_sensitive_exact(fname))
@@ -597,14 +613,14 @@ char *normalize_path(const char *path, const char *cwd, char *buf, size_t buf_le
    return buf;
 }
 
-/* Shared filesystem path validation for all agent tool paths.
- * Resolves symlinks via realpath, rejects traversal, rejects sensitive paths.
- * Returns NULL on success, or a static error string on failure. */
-const char *guardrails_validate_file_path(const char *path, char *resolved_buf, size_t resolved_len)
+/* Sensitive-path check used after the workspace/session layer has authorized a
+ * path. This function does not grant workspace authority. */
+const char *guardrails_check_sensitive_path(const char *path, char *resolved_buf,
+                                            size_t resolved_len)
 {
    guardrails_policy_ensure_loaded();
 
-   if (!path || !path[0])
+   if (!path || !path[0] || !resolved_buf || resolved_len == 0)
       return "error: empty path";
    if (strstr(path, "/../") || strstr(path, "/..") == path + strlen(path) - 3)
       return "error: path traversal not allowed";
@@ -612,32 +628,48 @@ const char *guardrails_validate_file_path(const char *path, char *resolved_buf, 
    if (strncmp(path, "../", 3) == 0 || strcmp(path, "..") == 0)
       return "error: path traversal not allowed";
 
-   if (realpath(path, resolved_buf) == NULL)
+   char canonical[MAX_PATH_LEN];
+   if (realpath(path, canonical) == NULL)
    {
       /* For write, file may not exist yet -- resolve parent */
       char parent[MAX_PATH_LEN];
-      snprintf(parent, sizeof(parent), "%s", path);
+      if (snprintf(parent, sizeof(parent), "%s", path) >= (int)sizeof(parent))
+         return "error: path too long";
       char *last_slash = strrchr(parent, '/');
+      const char *basename = path;
       if (last_slash)
       {
+         basename = last_slash + 1;
          *last_slash = '\0';
-         if (realpath(parent, resolved_buf) == NULL)
-            return NULL; /* Let fopen handle the error */
+         if (!parent[0])
+            snprintf(parent, sizeof(parent), "/");
       }
       else
-         return NULL;
+         snprintf(parent, sizeof(parent), ".");
+      if (!basename[0] || realpath(parent, canonical) == NULL)
+         return "error: parent path cannot be resolved";
+      size_t used = strlen(canonical);
+      int n = snprintf(canonical + used, sizeof(canonical) - used, "%s%s",
+                       used > 0 && canonical[used - 1] == '/' ? "" : "/", basename);
+      if (n < 0 || (size_t)n >= sizeof(canonical) - used)
+         return "error: path too long";
    }
+
+   classification_t classification = classify_path(canonical);
+   if (classification.severity >= SEV_RED)
+      return "error: access to sensitive path denied";
 
    /* Check resolved path against sensitive deny list */
    for (int i = 0; i < g_policy.path_denies.count; i++)
    {
-      if (g_policy.path_denies.items[i] && strstr(resolved_buf, g_policy.path_denies.items[i]))
+      if (g_policy.path_denies.items[i] && strstr(canonical, g_policy.path_denies.items[i]))
          return "error: access to sensitive path denied";
    }
 
-   /* Check for symlink escape: resolved path should not point into a
-    * sensitive directory even if the original path looked benign.  Compare
-    * against the same deny list (already done above on the resolved path). */
+   size_t canonical_len = strlen(canonical);
+   if (canonical_len + 1 > resolved_len)
+      return "error: resolved path exceeds output buffer";
+   memcpy(resolved_buf, canonical, canonical_len + 1);
 
    return NULL;
 }

@@ -11,26 +11,25 @@
 
 #include "../headers/aimee.h"
 #include "../headers/agent_exec.h"
-#include "../db1/db.h"
-#include "../db1/db1.h"
-#include "../db2/db2.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../headers/tool_args_coerce.h"
+#include <aimee/tools/agent_tools.h>
+#include "db1_client/db1.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 /* --- helpers --- */
 
 static void setup_db(void)
 {
    db2_test_shim_close();
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 }
 
 static void teardown_db(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
 }
 
 /* --- tool_suggest --- */
@@ -187,38 +186,75 @@ static void test_validate_valid_bash(void)
    printf("  PASS: valid bash call returns 0\n");
 }
 
-/* --- alias normalization in tool_validate --- */
+/* --- alias resolution across the real pipeline ---------------------------
+ *
+ * Alias resolution moved OUT of tool_validate. It used to happen on a copy the
+ * validator discarded, so validation accepted {"filepath": ...} and the tool
+ * then received no `path` at all -- validation was more permissive than
+ * execution. It now happens once in the canonicalizer, before any gate, and
+ * these tests exercise that order rather than the validator alone. */
+
+/* What src/posix/agent_runtime.c does per call: canonicalize once, then let
+ * every gate judge the bytes that will actually execute. */
+static int canonicalize_then_validate(const char *tool, const char *raw, char *err, size_t err_len)
+{
+   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached(tool), raw);
+   int rc = tool_validate(tool, canonical ? canonical : raw, err, err_len);
+   free(canonical);
+   return rc;
+}
 
 static void test_validate_alias_filepath_normalized(void)
 {
    setup_db();
    char err[256] = {0};
-   /* 'filepath' is an alias for 'path'; validation should normalize and pass */
-   int rc = tool_validate("read_file", "{\"filepath\":\"/tmp/x\"}", err, sizeof(err));
+   const char *raw = "{\"filepath\":\"/tmp/x\"}";
+   int rc = canonicalize_then_validate("read_file", raw, err, sizeof(err));
    assert(rc == 0);
+
+   /* Load-bearing: the alias is resolved in the bytes that go on to execute,
+    * not merely inside the validator. */
+   char *canonical = tool_args_canonicalize_json(agent_tool_get_schema_cached("read_file"), raw);
+   assert(canonical != NULL);
+   assert(strstr(canonical, "\"path\"") != NULL);
+   assert(strstr(canonical, "filepath") == NULL);
+   free(canonical);
+
    teardown_db();
-   printf("  PASS: alias 'filepath' normalized to 'path' in validation\n");
+   printf("  PASS: alias 'filepath' resolves to 'path' before the gates\n");
 }
 
 static void test_validate_alias_file_normalized(void)
 {
    setup_db();
    char err[256] = {0};
-   int rc = tool_validate("read_file", "{\"file\":\"/tmp/x\"}", err, sizeof(err));
+   int rc = canonicalize_then_validate("read_file", "{\"file\":\"/tmp/x\"}", err, sizeof(err));
    assert(rc == 0);
    teardown_db();
-   printf("  PASS: alias 'file' normalized to 'path' in validation\n");
+   printf("  PASS: alias 'file' resolves to 'path' before the gates\n");
 }
 
 static void test_validate_alias_cmd_normalized(void)
 {
    setup_db();
    char err[256] = {0};
-   /* 'cmd' is an alias for 'command' */
-   int rc = tool_validate("bash", "{\"cmd\":\"ls\"}", err, sizeof(err));
+   int rc = canonicalize_then_validate("bash", "{\"cmd\":\"ls\"}", err, sizeof(err));
    assert(rc == 0);
    teardown_db();
-   printf("  PASS: alias 'cmd' normalized to 'command' in validation\n");
+   printf("  PASS: alias 'cmd' resolves to 'command' before the gates\n");
+}
+
+/* tool_validate itself is now pure: it judges, it does not rewrite. If it still
+ * normalized internally we would be back to validating one shape and running
+ * another, which is the defect the canonicalizer exists to close. */
+static void test_validate_does_not_rewrite_arguments(void)
+{
+   setup_db();
+   char err[256] = {0};
+   int rc = tool_validate("read_file", "{\"filepath\":\"/doc/a.txt\"}", err, sizeof(err));
+   assert(rc != 0); /* `path` is required and an un-canonicalized call lacks it */
+   teardown_db();
+   printf("  PASS: tool_validate judges without rewriting\n");
 }
 
 int main(void)
@@ -245,6 +281,7 @@ int main(void)
    test_validate_alias_filepath_normalized();
    test_validate_alias_file_normalized();
    test_validate_alias_cmd_normalized();
+   test_validate_does_not_rewrite_arguments();
 
    printf("All tool_validation tests passed.\n");
    return 0;

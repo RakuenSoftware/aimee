@@ -7,6 +7,19 @@ messages, use tools, and return auditable results. The module owns delegation pl
 provider drivers, execution backends, credentials, sandbox/workspace coordination, and lifecycle. It is
 not an optional extension and does not own roundtable policy, tools, vault, or workspace storage.
 
+### Go process stage
+
+The supervised `delegate-invocation` stage runs in the shared pure-Go module
+runtime. Its handler preserves the fixed DROL/DCAN role-normalization contract
+for old bus callers and adds a version-2 execution contract for the native WFE
+and roundtable. The latter selects a configured CLI agent and owns its bounded
+subprocess lifecycle entirely in Go; no agent-service HTTP call returns to the C
+daemon. Workflow lifecycle fields stay caller-side and never enter this wire.
+
+The C adapter remains a wire-parity fixture. The C daemon still hosts the event
+bus and external control surfaces, but it is not the producer used by Go
+workflows or module-to-module delegation.
+
 ## Public contracts
 
 Current canonical source under `src/modules/delegates` includes `delegate_driver`, routing, launch/plan,
@@ -16,15 +29,14 @@ orchestration. The main durable worker and HTTP/RPC orchestration still live in 
 root `cmd_agent_delegate.c` is an entry-point consumer. Remaining server/root implementations are relocation
 debt, not a second supported delegate engine.
 
-The descriptor declares this module's twenty-seven sources, twenty-one public headers, nineteen direct
-tests, and this document; it sets `ownership_complete: true`. `delegates` is the only module in
+The descriptor declares the module's C and Go sources, public headers, direct tests, and this document;
+it sets `ownership_complete: true`. `delegates` is the only module in
 the program whose headers all live under the canonical `src/modules/delegates/include/aimee/delegates/`
 tree, so it declares no `private_headers`: the module root holds no header, and an absent field is an
-empty declared set against an empty actual set. An earlier slice declared the panel and IR-rescue
-pieces (three sources and two tests), and this declaration completes the remaining twenty-four sources
-and the broader direct-test set. Make compiles all twenty-seven sources; CMake compiles twenty-three,
-omitting `aimee_ir_rescue.c`, `delegate_ephemeral_ws.c`, `delegate_sandbox_image.c`, and
-`gw_orch_delegates.c`. These server/KB-side units follow the same intentional thin-client boundary recorded
+empty declared set against an empty actual set. The empty ephemeral-checkout implementation is gone: a
+delegate must receive a full source worktree. The Go-owned sandbox specification, container lifecycle,
+and post-start posture verifier are declared alongside the remaining C integration surfaces. These
+server/KB-side units follow the same intentional thin-client boundary recorded
 for gateway, learning, workspace, vault, config, and git, though CMake reaches far more of this module
 than of those. `docs/validation/core-modularization-slice-52.md` records the declaration audit and
 `docs/validation/core-modularization-slice-53.md` the completeness audit; the two were split so the
@@ -96,6 +108,7 @@ is a dependency-design concern, not an exception to canonical include ownership.
 - `ir`: supplies canonical turn, response, tool-call, usage, and streaming structures.
 - `module-runtime`: supplies required lifecycle and extension contracts for delegation.
 - `routing`: selects eligible agents/providers/tiers and explains exclusions.
+- `sandbox`: supplies mandatory learned-toolchain and package-egress policy for every delegate.
 - `tools`: supplies the authorized capability catalog invoked by delegate turns.
 - `vault`: supplies scoped credentials without transferring ownership to delegate state.
 - `workspace`: supplies bounded filesystem/execution authority and lifecycle.
@@ -138,7 +151,9 @@ workspace authority, and credential reference without persisting live secret mat
 Delegates execute untrusted model output, so `execution-policy` governs every tool, command, filesystem
 operation, network request, credential use, and source write; each remains policy- and workspace-scoped. Environment stripping, sandbox
 binding, Git source authority, vault lookup, identity propagation, and audit are load-bearing. A local
-fallback must never silently escape a requested/required sandbox or tenant boundary.
+fallback must never escape the delegate sandbox or tenant boundary. Container create and resume are
+accepted only after the Go module proves no attached network, the exact requested mount modes, and a
+credentialless effective environment containing the sole bus endpoint.
 
 ## Supported journeys
 

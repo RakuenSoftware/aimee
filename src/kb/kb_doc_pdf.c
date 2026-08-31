@@ -6,12 +6,13 @@
 
 #include "cJSON.h"
 #include "config.h"
-#include "db2/kb_payload.h"
+#include "modules/db2/c/kb_payload.h"
 #include "kb_blob_store.h"
 #include "kb_doc_hash.h"
 #include "kb_ocr_sidecar.h"
 #include "kb_tsr_sidecar.h"
 #include "log.h"
+#include "integrity.h"
 
 #include <ctype.h>
 #include <errno.h>
@@ -1153,6 +1154,22 @@ int kb_doc_pdf_ingest(const char *project, const char *file_path, const char *fi
    {
       kb_pdf_free_chunks(chunks, n_chunks);
       return 0;
+   }
+
+   /* Converted and OCR PDFs join the same authority boundary as Markdown and
+    * watched repository documents. Classify extracted text, not opaque bytes,
+    * before the destructive re-ingest transaction. */
+   for (int i = 0; i < n_chunks; i++)
+   {
+      integrity_result_t gate;
+      if (integrity_ingress_decide(chunks[i].content ? chunks[i].content : "",
+                                   INTEGRITY_SOURCE_DOCUMENT, "pdf", 1, &gate))
+      {
+         LOG_WARN("integrity", "PDF ingest parked (%s): %s", integrity_verdict_name(gate.verdict),
+                  gate.match_category);
+         kb_pdf_free_chunks(chunks, n_chunks);
+         return -1;
+      }
    }
 
    /* Per-chunk source-region ids, retained across commit so the post-commit TSR pass can link

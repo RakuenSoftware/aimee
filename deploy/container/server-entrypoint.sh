@@ -79,6 +79,20 @@ fi
 . "$runtime_web_lib"
 webchat_migrate_legacy_credentials
 
+# Operator control over which optional modules attach to the bus. Resolved the
+# same way as the runtime-web helper: installed path first, then alongside this
+# script for a source checkout.
+optional_modules_lib=/usr/local/bin/optional-modules-lib.sh
+if [ ! -r "$optional_modules_lib" ]; then
+    entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    optional_modules_lib="$entrypoint_dir/optional-modules-lib.sh"
+fi
+[ -r "$optional_modules_lib" ] || {
+    printf '[server-entrypoint] fatal: optional-module helper is unavailable\n' >&2
+    exit 2
+}
+. "$optional_modules_lib"
+
 # An explicit Docker command is unrelated to normal server startup. It still
 # follows Vault ingestion above and receives a credential-free environment.
 if [ "$#" -gt 0 ]; then
@@ -103,6 +117,27 @@ case "$AIMEE_WFE_ENGINE" in
 esac
 export AIMEE_WFE_HTTP_SOCKET="${AIMEE_WFE_HTTP_SOCKET:-$AIMEE_HOME/aimee-wfe-http.sock}"
 export AIMEE_MODULE_BUS_SOCKET="${AIMEE_MODULE_BUS_SOCKET:-$AIMEE_HOME/server-module-bus.sock}"
+export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-server
+# THE STORE MODULE OPENS NO DATABASE, so this exports no path for it.
+#
+# It used to. `export AIMEE_DB1_PATH="$AIMEE_HOME/aimee.db"` lived here, naming a
+# SQLite file, from when the store was a C module that opened one. Nothing has
+# read that variable since the store became a Go module talking to the postgres
+# module over the bus -- so it was seeding a defaulted SQLite path into every
+# deployment for a module that could not have used it, and the comment above it
+# told an operator the module would "refuse to start" without it, which was no
+# longer true in either direction.
+#
+# What actually needs configuring is AIMEE_STORE_URL, the PostgreSQL DSN, and it
+# is read by the POSTGRES module (server-go/modules/postgres/health.go) rather
+# than by the store. It is deliberately NOT defaulted here: the reasoning in the
+# old comment was sound even though its subject was wrong, and it applies with
+# more force to a DSN. A guessed default would connect to a DIFFERENT, empty
+# database, and an empty store answers every read with "no such row" rather than
+# an error -- so it fails as silent data loss rather than as a startup failure.
+# Unset, the module says so and stops. An operator sets it in the environment
+# and it inherits; there is nothing for this script to do but stay out of the
+# way.
 MODULE_MANIFEST="${AIMEE_MODULE_MANIFEST:-/opt/aimee/module-grants/server.modules}"
 # Existing appliances may need to recover SQLite WAL state and refresh seeded
 # workflow definitions before the C resource socket appears.  A real upgraded
@@ -202,11 +237,140 @@ chown aimee:aimee "$AIMEE_HOME" "${AIMEE_WORKSPACES_DIR:-/var/lib/aimee-workspac
 # missing grants so an operator may tighten a persisted policy without the next
 # image start overwriting it.
 mkdir -p "$AIMEE_HOME/modules.d/server"
-for module_grant in /opt/aimee/module-grants/server/*.grant; do
+# Overridable ONLY so the seeding rules can be tested against a fixture
+# directory; production always uses the image path.
+AIMEE_MODULE_GRANT_SRC="${AIMEE_MODULE_GRANT_SRC:-/opt/aimee/module-grants/server}"
+
+# >>> module-grant-seeding (extracted by src/tests/test_module_grants.sh)
+# Telling a STALE IMAGE DEFAULT apart from an OPERATOR'S POLICY.
+#
+# Seeding deliberately never overwrites a persisted grant, so a module that
+# gains a stage cannot serve it until someone edits the file by hand — and the
+# failure is silent at the bus (the kind is simply refused). Blindly adopting
+# the shipped stage list would fix that by trampling deliberate policy, which is
+# a privilege expansion and strictly worse.
+#
+# The two cases are distinguishable if we record what the image wrote at seed
+# time: a file still byte-identical to what we seeded was never touched by an
+# operator, so replacing it restores an image default rather than overriding a
+# decision. Anything else keeps the warning and waits for a human.
+#
+# For pre-record installations, exact historical image defaults are also
+# recognisable: the module name, old stage list, and every non-stage policy line
+# must match a known transition. A nearby operator edit still fails that match
+# and remains untouched.
+# Recorded under .seeded/<name>, the same convention seed_managed_defaults uses
+# above. The policy loader selects entries by a ".grant" suffix, so this
+# subdirectory is skipped rather than parsed -- worth stating, because the loader
+# rejects the WHOLE directory on one bad entry.
+grant_seed_record() { printf '%s/.seeded/%s\n' "$(dirname "$1")" "$(basename "$1")"; }
+
+grant_record_seed() {
+    command -v sha256sum >/dev/null 2>&1 || return 0
+    _rec=$(grant_seed_record "$1")
+    mkdir -p "$(dirname "$_rec")" 2>/dev/null || return 0
+    sha256sum "$1" | cut -d' ' -f1 > "$_rec" 2>/dev/null || return 0
+    chmod 0600 "$_rec" 2>/dev/null || true
+}
+
+grant_untouched_since_seed() {
+    command -v sha256sum >/dev/null 2>&1 || return 1
+    _rec=$(grant_seed_record "$1")
+    [ -f "$_rec" ] || return 1
+    [ "$(sha256sum "$1" | cut -d' ' -f1)" = "$(cat "$_rec" 2>/dev/null)" ]
+}
+
+grant_known_historical_default() { # <persisted> <shipped>
+    _persisted=$1
+    _shipped=$2
+    # These modules originally shipped with one stage and later gained a second.
+    # Match the entire remaining policy so an operator change to identity,
+    # executable, or any other capability is never mistaken for an old image
+    # default.
+    _historical="$(basename "$_persisted"):$(grep '^serve=' "$_persisted" 2>/dev/null || true)"
+    case "$_historical" in
+        git.grant:serve=7425|skills.grant:serve=7681|roundtable.grant:serve=9473|benchmarks.grant:serve=10497) ;;
+        *) return 1 ;;
+    esac
+    [ "$(sed '/^serve=/d' "$_persisted")" = "$(sed '/^serve=/d' "$_shipped")" ]
+}
+
+for module_grant in "$AIMEE_MODULE_GRANT_SRC"/*.grant; do
     [ -f "$module_grant" ] || continue
     grant_target="$AIMEE_HOME/modules.d/server/$(basename "$module_grant")"
-    [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
+    if [ ! -e "$grant_target" ]; then
+        cp "$module_grant" "$grant_target"
+        grant_record_seed "$grant_target"
+        continue
+    fi
+    # A module that gains a stage in a new image cannot serve it under a grant
+    # persisted before that stage existed, and the failure is silent: the daemon
+    # simply reports the module as not serving that kind. Copying over the
+    # operator's file would defeat the whole point of seeding only what is
+    # missing, so say so instead and let them decide.
+    # No record yet but already byte-identical to what this image ships: adopt it
+    # as managed so a LATER image can refresh it. Existing installs come under
+    # management this way instead of staying unmanageable forever.
+    if [ ! -f "$(grant_seed_record "$grant_target")" ] && cmp -s "$module_grant" "$grant_target"; then
+        grant_record_seed "$grant_target"
+    fi
+    shipped_serve=$(grep '^serve=' "$module_grant" 2>/dev/null || true)
+    persisted_serve=$(grep '^serve=' "$grant_target" 2>/dev/null || true)
+    if [ "$shipped_serve" != "$persisted_serve" ]; then
+        # log() is not defined this early in the script, so match its format.
+        if grant_untouched_since_seed "$grant_target" ||
+           grant_known_historical_default "$grant_target" "$module_grant"; then
+            # Still exactly what this installation seeded, so the difference is
+            # image drift and adopting it overrides nobody.
+            printf '[server-entrypoint] %s grant is a known unmodified image default and this image ships %s; adopting it\n' \
+                "$(basename "$module_grant" .grant)" "${shipped_serve:-<none>}" >&2
+            cp "$module_grant" "$grant_target"
+            grant_record_seed "$grant_target"
+        else
+            printf '[server-entrypoint] warning: %s grant differs from this image\n' \
+                "$(basename "$module_grant" .grant)" >&2
+            printf '[server-entrypoint]   persisted: %s\n' "${persisted_serve:-<none>}" >&2
+            printf '[server-entrypoint]   shipped:   %s\n' "${shipped_serve:-<none>}" >&2
+            printf '[server-entrypoint]   this file was edited after seeding, so it is treated as operator policy\n' >&2
+            printf '[server-entrypoint]   stages only in the shipped grant are refused until %s is updated\n' \
+                "$grant_target" >&2
+        fi
+    fi
 done
+
+# Reconcile grants whose pinned executable this image does not ship.
+#
+# The loader realpath()s executable= and rejects the ENTIRE policy directory if
+# any single entry is unresolvable, so one stale grant is not a degraded module —
+# it is a daemon that will not boot. That is exactly what an upgrade produces:
+# seeding never overwrites a persisted grant, so a module that MOVED (workflows
+# is hosted by aimee-wfe now, not spawned as a multicall binary) or was REMOVED
+# leaves behind a grant pinning a path that no longer exists.
+#
+# A pinned path is an image fact, not an operator policy choice, so repairing it
+# does not override anyone's intent — whereas leaving it bricks the server. Where
+# the image still ships a grant for that module, adopt it; where it does not, the
+# module is gone and so is its grant. Both are logged, because silently rewriting
+# admission policy would be worse than the failure.
+for grant_target in "$AIMEE_HOME"/modules.d/server/*.grant; do
+    [ -f "$grant_target" ] || continue
+    pinned=$(sed -n 's/^executable=//p' "$grant_target" | head -1)
+    [ -n "$pinned" ] && [ ! -x "$pinned" ] || continue
+    shipped="$AIMEE_MODULE_GRANT_SRC/$(basename "$grant_target")"
+    if [ -f "$shipped" ]; then
+        printf '[server-entrypoint] %s grant pins %s, which this image does not ship; adopting the shipped grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        cp "$shipped" "$grant_target"
+        # Now byte-identical to the image default again, so a later stage change
+        # is recognisable as drift rather than as an operator edit.
+        grant_record_seed "$grant_target"
+    else
+        printf '[server-entrypoint] %s grant pins %s and this image ships no such module; removing the stale grant
+'             "$(basename "$grant_target" .grant)" "$pinned" >&2
+        rm -f "$grant_target" "$(grant_seed_record "$grant_target")"
+    fi
+done
+# <<< module-grant-seeding
 # The root entrypoint creates modules.d before dropping to the aimee user.  The
 # daemon must be able to traverse that 0700 parent in order to load the strict
 # grant policy; owning only its server child leaves the parent root-only and
@@ -243,7 +407,16 @@ done
 
 webchat_prepare
 
-log() { printf '[server-entrypoint] %s\n' "$*"; }
+# Diagnostics go to stderr. Two callers capture a helper's stdout as a VALUE
+# (`MODULE_MANIFEST="$(apply_optional_modules ...)"`), and those helpers report
+# through this function, so a log line on stdout is captured as part of the value.
+# When it was stdout, gating any optional module handed the module supervisor
+# "<diagnostic>\n<path>" as its manifest; the supervisor found no such file, called
+# it fatal, and exited — stopping EVERY module, which is the opposite of what
+# enabling one asks for. optional-modules-lib.sh documents this contract
+# ("Diagnostics go to stderr via log()") and module-supervisor.sh already honours
+# it. Docker captures both streams, so operators see these lines either way.
+log() { printf '[server-entrypoint] %s\n' "$*" >&2; }
 
 # Compose the one line an operator reads when the container comes down. Kept
 # pure (args in, string out, no globals) so it can be tested without a container.
@@ -375,8 +548,60 @@ log "starting aimee-server (socket=$SERVER_SOCK) as user aimee"
 rm -f "$AIMEE_HOME/aimee-http.sock" "$AIMEE_WFE_HTTP_SOCKET"
 runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-server --socket="$1"' sh "$SERVER_SOCK" &
 server_pid=$!
-runuser -u aimee -- module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
+# The shipped manifest is decided when the image is built and cannot know what
+# this operator wants running, so apply the operator's AIMEE_MODULE_<ID> choices
+# over it. This replaces a hard-coded roundtable-only branch that could enable a
+# module but never disable one; AIMEE_MODULE_ROUNDTABLE keeps working exactly as
+# before, and every other optional module now has the same control.
+#
+# roundtable remains the case that matters most: the daemon has no other
+# implementation of roundtable.review since the proxy was deleted, so with the
+# module absent the review route reports the module as not attached however the
+# operator configured the feature.
+MODULE_MANIFEST="$(apply_optional_modules server "$MODULE_MANIFEST" "$AIMEE_HOME")"
+runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
+    module-supervisor.sh server "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
 module_pid=$!
+
+# Wait for the resource-plane socket unconditionally. The server starts the bus,
+# the supervisor attaches the required Go config process, and only then can the
+# server finish startup and expose config routes.
+_wait=0
+while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
+    kill -0 "$server_pid" 2>/dev/null || break
+    _wait=$((_wait + 1))
+    sleep 0.1
+done
+if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
+    if kill -0 "$server_pid" 2>/dev/null; then
+        log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
+    else
+        log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
+    fi
+    shutdown
+    exit 1
+fi
+
+# Derive the managed compose `.env` through the live server config route. The
+# old pre-start one-shot had no daemon event bus and therefore could not reach
+# the extracted config process.
+DEPLOY_ENV_DIR="${AIMEE_DEPLOY_COMPOSE_DIR:-/opt/aimee/deploy}"
+if [ -d "$DEPLOY_ENV_DIR" ]; then
+    # The image ships the remote-only thin client.  It deliberately has no
+    # implicit co-located topology, so name the Unix socket the entrypoint just
+    # waited for instead of relying on the retired local default.
+    if runuser -u aimee -- env AIMEE_HOME="$AIMEE_HOME" \
+        AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock" \
+        aimee config deploy-env \
+        >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
+        chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"
+        log "wrote managed compose env ($DEPLOY_ENV_DIR/.env) from config"
+    else
+        rm -f "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        log "WARNING: could not derive $DEPLOY_ENV_DIR/.env; a manual 'docker compose up -d' may recreate the kb with the wrong image variant"
+    fi
+fi
 
 if [ "$AIMEE_WFE_ENGINE" = go ]; then
     if [ ! -x /usr/local/bin/aimee-wfe ]; then
@@ -384,34 +609,19 @@ if [ "$AIMEE_WFE_ENGINE" = go ]; then
         shutdown
         exit 1
     fi
-    # The C process is a temporary stateless agent resource plane. Wait for its
-    # HTTP socket, then put all WFE state/admission/execution on the Go socket.
-    _wait=0
-    while [ ! -S "$AIMEE_HOME/aimee-http.sock" ] && [ "$_wait" -lt "$WFE_SOCKET_WAIT_TENTHS" ]; do
-        kill -0 "$server_pid" 2>/dev/null || break
-        _wait=$((_wait + 1))
-        sleep 0.1
-    done
-    if ! kill -0 "$server_pid" 2>/dev/null || [ ! -S "$AIMEE_HOME/aimee-http.sock" ]; then
-        # Say which of the two it was and how long we waited. These fail for very
-        # different reasons -- a dead process means the server exited (its own log
-        # says why), while a live process with no socket means startup is blocked
-        # before it listens, typically on a dependency such as an unresponsive kb.
-        # The bare message sent me looking at the wrong one for some time.
-        if kill -0 "$server_pid" 2>/dev/null; then
-            log "fatal: aimee-server is running but never created $AIMEE_HOME/aimee-http.sock after $((_wait / 10))s"
-            log "  startup is blocked before the listener; check $AIMEE_HOME/server.log for the last"
-            log "  step reached, and whether a dependency (e.g. aimee-kb) is reachable"
-        else
-            log "fatal: aimee-server exited during startup after $((_wait / 10))s; see $AIMEE_HOME/server.log"
-        fi
-        shutdown
-        exit 1
-    fi
+    # The C daemon remains the host for the module bus, mTLS/MCP and external
+    # HTTP API. This particular Unix resource-plane socket is passed to the Go
+    # WFE only for credentialed forge operations; delegate execution uses the
+    # Go delegates process over the module bus.
     log "starting Go WFE control plane (socket=$AIMEE_WFE_HTTP_SOCKET)"
-    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; exec aimee-wfe --home "$1" --socket "$2" --config "$3" --workflow-dir "$4" --agent-service-socket "$5"' sh \
-        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/aimee.yaml" \
-        "$AIMEE_HOME/workflows" "$AIMEE_HOME/aimee-http.sock" &
+    # The WFE is the workflows bus principal: it serves the advance decision and
+    # the control stage the C resource plane calls. The module supervisor does
+    # not spawn a workflows process (the contract marks it hosted_by=wfe), because
+    # the bus denies a live duplicate of a principal. Pass the bus socket
+    # explicitly rather than relying on runuser's environment handling.
+    runuser -u aimee -- sh -c 'set -eu; ulimit -c 0 2>/dev/null || true; export AIMEE_MODULE_BUS_SOCKET="$5"; exec aimee-wfe --home "$1" --socket "$2" --workflow-dir "$3" --forge-service-socket "$4"' sh \
+        "$AIMEE_HOME" "$AIMEE_WFE_HTTP_SOCKET" "$AIMEE_HOME/workflows" \
+        "$AIMEE_HOME/aimee-http.sock" "$AIMEE_MODULE_BUS_SOCKET" &
     wfe_pid=$!
 
     # Start this only after the resource plane owns the current pid file.  On a

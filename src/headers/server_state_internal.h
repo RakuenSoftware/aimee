@@ -18,4 +18,11 @@ void ws_git_line(const char *const argv[], char *out, size_t outsz);
  * from its result. Returns 1 when the project is genuinely indexed, else 0. */
 int server_workspace_scan_indexed(int rc, int skipped, int inspected, int files);
 
+/* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
+ * instead of truncating them into a different row's integer primary key.
+ * Promoted from a server_state.c static so the typed-fact handlers in
+ * server_facts.c validate ids the same way rather than growing a second,
+ * subtly-different guard. 0 on success (*out filled), -1 on a bad id. */
+int memory_request_positive_id(cJSON *req, const char *field, int64_t *out);
+
 #endif /* SERVER_STATE_INTERNAL_H */

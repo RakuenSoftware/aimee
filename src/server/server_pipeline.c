@@ -26,7 +26,7 @@
 #include "local_operator.h"
 #include "model_registry.h"
 #include "platform_path.h" /* platform_mkdir_p */
-#include "util.h"          /* shell_escape */
+#include "util.h"          /* shell_quote */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -110,6 +110,9 @@ static void load_loop_cfg(const rtp_run_t *run, rtp_loop_cfg_t *out)
                                     : 2;
    out->max_phase_cost_usd = config_roundtable_pipeline_max_cost_usd();
    out->max_total_cost_usd = config_roundtable_pipeline_max_total_cost_usd();
+   /* Reviews are an integrity boundary.  An unavailable or unusable checker
+    * degrades to a human decision; it is never silently interpreted as assent. */
+   out->checker_failure_mode = RTP_CHECKER_DEGRADE;
 }
 
 static double phase_cost(const rtp_run_t *run, const char *phase)
@@ -165,20 +168,21 @@ static int maybe_ttl_abandon(int id, rtp_run_t *run);
 static void enter_gate(int id, int gate_no, int pr)
 {
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return;
-   rtp_gate_create(id, gate_no, pr, run.head_sha, NULL);
-   rtp_run_set_state(id, gate_no == 2 ? RTP_STATE_GATE2_PENDING : RTP_STATE_GATE1_PENDING, NULL);
+   db1_roundtable_gate_create(id, gate_no, pr, run.head_sha, NULL);
+   db1_roundtable_run_set_state(
+       id, gate_no == 2 ? RTP_STATE_GATE2_PENDING : RTP_STATE_GATE1_PENDING, NULL);
 
    int parked_releases = config_roundtable_pipeline_parked_releases_slot();
-   if (rtp_run_get(id, &run) == 0)
+   if (db1_roundtable_run_get(id, &run) == 0)
    {
       /* the chunk index is re-creatable from the retained origin, so dropping it
        * while parked leaks nothing (#34/#47); it re-derives on the next pass. */
       run.chunk_index_ref[0] = '\0';
       if (parked_releases)
          snprintf(run.admission_class, sizeof(run.admission_class), RTP_ADMIT_WAITING_HUMAN);
-      rtp_run_update(&run);
+      db1_roundtable_run_update(&run);
    }
 }
 
@@ -212,7 +216,7 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* v1 admission control: at most one active pipeline (section 1). Parked gates
     * may release the slot per roundtable.pipeline_parked_releases_slot. */
-   int active = rtp_run_count_active();
+   int active = db1_roundtable_run_count_active();
    if (active > 0)
       return server_send_error(
           conn, "pipeline: another pipeline is already active (one active run at a time)", NULL);
@@ -245,12 +249,13 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Branch/PR ownership guard (#48): even with the active slot free (parked
     * gate), a second run may not target a branch another non-terminal run owns. */
-   if (head_branch && head_branch[0] && rtp_run_branch_owner(repo_root, head_branch, 0) > 0)
+   if (head_branch && head_branch[0] &&
+       db1_roundtable_run_branch_owner(repo_root, head_branch, 0) > 0)
       return server_send_error(
           conn, "pipeline: head_branch is already owned by another active pipeline", NULL);
 
    int id = 0;
-   if (rtp_run_create(idea, done_bar, repo_root, base, &id) != 0 || id <= 0)
+   if (db1_roundtable_run_create(idea, done_bar, repo_root, base, &id) != 0 || id <= 0)
       return server_send_error(conn, "pipeline: could not create pipeline", NULL);
 
    /* seed the brief from the idea + any seed questions. When `questions` are
@@ -259,7 +264,7 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * is recorded (capped at RTP_MAX_BRIEF_QUESTIONS). Also capture repo/branch
     * state for the PR lifecycle (#2). */
    rtp_run_t run;
-   if (rtp_run_get(id, &run) == 0)
+   if (db1_roundtable_run_get(id, &run) == 0)
    {
       const char *seed = jo_str(req, "brief", NULL);
       cJSON *questions = cJSON_GetObjectItemCaseSensitive(req, "questions");
@@ -307,7 +312,7 @@ int handle_pipeline_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       const char *wt = jo_str(req, "worktree_path", NULL);
       if (wt && wt[0])
          snprintf(run.worktree_path, sizeof(run.worktree_path), "%s", wt);
-      rtp_run_update(&run);
+      db1_roundtable_run_update(&run);
    }
 
    cJSON *resp = jo_ok();
@@ -343,7 +348,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "usage: aimee pipeline status <id>", NULL);
 
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
 
    /* lazily enforce the unanswered-gate TTL when the run is observed (#47). */
@@ -351,7 +356,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    const char *phase = phase_for_state(run.state);
    rtp_pass_t latest;
-   int have = rtp_pass_latest(id, phase, &latest) == 0;
+   int have = db1_roundtable_pass_latest(id, phase, &latest) == 0;
 
    cJSON *resp = jo_ok();
    cJSON *dig = build_digest(&run, &latest, have);
@@ -361,7 +366,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (have)
    {
       rtp_attempt_t a;
-      int hav_a = rtp_attempt_current(latest.id, &a) == 0;
+      int hav_a = db1_roundtable_attempt_current(latest.id, &a) == 0;
       cJSON *p = cJSON_AddObjectToObject(resp, "latest_pass");
       cJSON_AddStringToObject(p, "status", latest.status);
       cJSON_AddStringToObject(p, "mode", latest.mode);
@@ -378,7 +383,7 @@ int handle_pipeline_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       int gate_no = (run.state[4] == '2') ? 2 : 1;
       rtp_gate_t g;
-      if (rtp_gate_get(id, gate_no, &g) == 0)
+      if (db1_roundtable_gate_get(id, gate_no, &g) == 0)
       {
          cJSON *gj = cJSON_AddObjectToObject(resp, "gate");
          cJSON_AddNumberToObject(gj, "gate_no", g.gate_no);
@@ -400,7 +405,7 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    rtp_run_t *rows = calloc(64, sizeof(*rows));
    if (!rows)
       return server_send_error(conn, "pipeline: out of memory", NULL);
-   int n = rtp_run_list(filter, rows, 64);
+   int n = db1_roundtable_run_list(filter, rows, 64);
    if (n < 0)
       n = 0;
    cJSON *resp = jo_ok();
@@ -426,10 +431,10 @@ int handle_pipeline_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 static void stop_inflight(int pipeline_id, const char *phase)
 {
    rtp_pass_t p;
-   if (rtp_pass_latest(pipeline_id, phase, &p) != 0)
+   if (db1_roundtable_pass_latest(pipeline_id, phase, &p) != 0)
       return;
    rtp_attempt_t a;
-   if (rtp_attempt_current(p.id, &a) != 0)
+   if (db1_roundtable_attempt_current(p.id, &a) != 0)
       return;
    if (strcmp(a.capture_status, RTP_CAP_PENDING) == 0 && a.run_id[0])
       openai_runs_store_request_cancel(a.run_id);
@@ -442,14 +447,14 @@ int handle_pipeline_cancel(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (id <= 0)
       return server_send_error(conn, "usage: aimee pipeline cancel <id>", NULL);
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
    if (is_terminal_state(run.state))
       return server_send_error(conn, "pipeline: already terminal", NULL);
 
    stop_inflight(id, RTP_PHASE_PROPOSAL);
    stop_inflight(id, RTP_PHASE_IMPL);
-   rtp_run_set_state(id, RTP_STATE_ABANDONED, NULL);
+   db1_roundtable_run_set_state(id, RTP_STATE_ABANDONED, NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "pipeline_id", id);
@@ -464,7 +469,7 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (id <= 0)
       return server_send_error(conn, "usage: aimee pipeline resume <id>", NULL);
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
    if (is_terminal_state(run.state))
       return server_send_error(conn, "pipeline: terminal, cannot resume", NULL);
@@ -495,15 +500,15 @@ int handle_pipeline_resume(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       repaired = 1;
    }
    if (repaired)
-      rtp_run_update(&run);
+      db1_roundtable_run_update(&run);
 
    /* a parked run can re-claim the active slot only if none is taken. */
    if (strcmp(run.admission_class, RTP_ADMIT_ACTIVE) != 0)
    {
-      if (rtp_run_count_active() > 0)
+      if (db1_roundtable_run_count_active() > 0)
          return server_send_error(conn, "pipeline: another pipeline holds the active slot", NULL);
       snprintf(run.admission_class, sizeof(run.admission_class), RTP_ADMIT_ACTIVE);
-      rtp_run_update(&run);
+      db1_roundtable_run_update(&run);
    }
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "pipeline_id", id);
@@ -552,7 +557,7 @@ const char *rtp_git_cwd(const rtp_run_t *run)
    return "";
 }
 
-/* Prepend `cd '<cwd>' && ` (escaped) when a checkout is recorded. */
+/* Prepend `cd <quoted-cwd> && ` when a checkout is recorded. */
 size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
 {
    const char *cwd = rtp_git_cwd(run);
@@ -561,8 +566,8 @@ size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
       buf[0] = '\0';
       return 0;
    }
-   char *e = shell_escape(cwd);
-   int n = snprintf(buf, cap, "cd '%s' && ", e ? e : cwd);
+   char *e = shell_quote(cwd);
+   int n = snprintf(buf, cap, "cd %s && ", e);
    free(e);
    return (n > 0 && (size_t)n < cap) ? (size_t)n : 0;
 }
@@ -570,10 +575,10 @@ size_t rtp_cd_prefix(const rtp_run_t *run, char *buf, size_t cap)
 /* `git rev-parse <ref>` in the recorded checkout. out is empty on failure. */
 int git_rev_parse(const rtp_run_t *run, const char *ref, char *out, size_t cap)
 {
-   char *eref = shell_escape(ref);
+   char *eref = shell_quote(ref);
    char cmd[RTP_PATH_LEN + 96];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse '%s' 2>/dev/null", eref ? eref : ref);
+   snprintf(cmd + p, sizeof(cmd) - p, "git rev-parse %s 2>/dev/null", eref);
    free(eref);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -600,10 +605,10 @@ static int git_head_sha(const rtp_run_t *run, char *out, size_t cap)
 static char *capture_diff(const rtp_run_t *run)
 {
    const char *base = run->base_branch[0] ? run->base_branch : "HEAD~1";
-   char *eb = shell_escape(base);
+   char *eb = shell_quote(base);
    char cmd[RTP_PATH_LEN + 128];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
-   snprintf(cmd + p, sizeof(cmd) - p, "git diff '%s'...HEAD 2>/dev/null", eb ? eb : base);
+   snprintf(cmd + p, sizeof(cmd) - p, "git diff %s...HEAD 2>/dev/null", eb);
    free(eb);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -645,20 +650,19 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
             "Roundtable authoring pipeline #%d (%s phase). Done-bar met; PR opened by the pipeline "
             "controller.",
             run->id, phase);
-   char *et = shell_escape(title);
-   char *eb = shell_escape(body);
-   char *ebase = shell_escape(run->base_branch[0] ? run->base_branch : "testing");
-   char *ehead = run->head_branch[0] ? shell_escape(run->head_branch) : NULL;
+   char *et = shell_quote(title);
+   char *eb = shell_quote(body);
+   char *ebase = shell_quote(run->base_branch[0] ? run->base_branch : "testing");
+   char *ehead = run->head_branch[0] ? shell_quote(run->head_branch) : NULL;
 
    char cmd[RTP_PATH_LEN + 1280];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
    if (ehead)
       snprintf(cmd + p, sizeof(cmd) - p,
-               "gh pr create --title '%s' --body '%s' --base '%s' --head '%s' 2>&1", et ? et : "",
-               eb ? eb : "", ebase ? ebase : "testing", ehead);
+               "gh pr create --title %s --body %s --base %s --head %s 2>&1", et, eb, ebase, ehead);
    else
-      snprintf(cmd + p, sizeof(cmd) - p, "gh pr create --title '%s' --body '%s' --base '%s' 2>&1",
-               et ? et : "", eb ? eb : "", ebase ? ebase : "testing");
+      snprintf(cmd + p, sizeof(cmd) - p, "gh pr create --title %s --body %s --base %s 2>&1", et, eb,
+               ebase);
    free(et);
    free(eb);
    free(ebase);
@@ -713,7 +717,7 @@ static int open_and_record_pr(rtp_run_t *run, const char *phase)
       snprintf(run->head_sha, sizeof(run->head_sha), "%s", sha);
    if (bsha[0])
       snprintf(run->base_sha, sizeof(run->base_sha), "%s", bsha);
-   rtp_run_update(run);
+   db1_roundtable_run_update(run);
    return 0;
 }
 
@@ -780,9 +784,9 @@ static char *read_pass_artifact(const rtp_run_t *run, int pass_id)
 static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, const char *mode,
                        const char *artifact, const char *artifact_hash)
 {
-   int pass_no = rtp_pass_max_no(run->id, phase) + 1;
+   int pass_no = db1_roundtable_pass_max_no(run->id, phase) + 1;
    int pass_id = 0;
-   if (rtp_pass_create(run->id, phase, mode, pass_no, artifact_hash, &pass_id) != 0)
+   if (db1_roundtable_pass_create(run->id, phase, mode, pass_no, artifact_hash, &pass_id) != 0)
       return server_send_error(conn, "pipeline: could not create pass", NULL);
 
    /* pin the pass to the content hash + persist the artifact for auto-retry. */
@@ -790,10 +794,10 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    rtp_chunk_hash(artifact ? artifact : "", artifact ? (int)strlen(artifact) : 0, ahash,
                   sizeof(ahash));
    rtp_pass_t pp;
-   if (rtp_pass_get(pass_id, &pp) == 0)
+   if (db1_roundtable_pass_get(pass_id, &pp) == 0)
    {
       snprintf(pp.artifact_hash, sizeof(pp.artifact_hash), "%s", ahash);
-      rtp_pass_update(&pp);
+      db1_roundtable_pass_update(&pp);
    }
    persist_pass_artifact(run, pass_id, artifact);
 
@@ -812,10 +816,10 @@ static int submit_pass(server_conn_t *conn, rtp_run_t *run, const char *phase, c
    {
       /* mark the pass failed so the loop doesn't wait forever on a non-submit. */
       rtp_pass_t p;
-      if (rtp_pass_get(pass_id, &p) == 0)
+      if (db1_roundtable_pass_get(pass_id, &p) == 0)
       {
          snprintf(p.status, sizeof(p.status), RTP_PASS_FAILED);
-         rtp_pass_update(&p);
+         db1_roundtable_pass_update(&p);
       }
       return server_send_error(conn, "pipeline: roundtable submission failed (ensemble enabled?)",
                                NULL);
@@ -854,9 +858,7 @@ static int resolve_panel(rtp_panel_t *out)
       if (ag)
       {
          parts[i].provider = ag->provider;
-         parts[i].context_tokens = ag->middleware.context_window > 0
-                                       ? ag->middleware.context_window
-                                       : model_context_window(ag->model);
+         parts[i].context_tokens = agent_declared_context_window(ag);
       }
       else
       {
@@ -894,12 +896,13 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
                              int chunk_index, int chunk_total, int span_offset, int span_len,
                              int omitted, int over_budget)
 {
-   int pass_no = rtp_pass_max_no(run->id, phase) + 1;
+   int pass_no = db1_roundtable_pass_max_no(run->id, phase) + 1;
    int pass_id = 0;
-   if (rtp_pass_create(run->id, phase, RTP_MODE_REVIEW, pass_no, artifact_hash, &pass_id) != 0)
+   if (db1_roundtable_pass_create(run->id, phase, RTP_MODE_REVIEW, pass_no, artifact_hash,
+                                  &pass_id) != 0)
       return -1;
    rtp_pass_t p;
-   if (rtp_pass_get(pass_id, &p) == 0)
+   if (db1_roundtable_pass_get(pass_id, &p) == 0)
    {
       p.is_chunked = 1;
       p.chunk_group = group;
@@ -909,7 +912,7 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
       p.chunk_len = span_len;
       p.chunk_omitted = omitted;
       p.chunk_over_budget = over_budget;
-      rtp_pass_update(&p);
+      db1_roundtable_pass_update(&p);
    }
    cJSON *body = cJSON_CreateObject();
    attach_prompt_brief(body, artifact, run->brief);
@@ -923,10 +926,10 @@ static int submit_chunk_pass(server_conn_t *conn, rtp_run_t *run, const char *ph
    free(bj);
    if (rc < 200 || rc >= 300)
    {
-      if (rtp_pass_get(pass_id, &p) == 0)
+      if (db1_roundtable_pass_get(pass_id, &p) == 0)
       {
          snprintf(p.status, sizeof(p.status), RTP_PASS_FAILED);
-         rtp_pass_update(&p);
+         db1_roundtable_pass_update(&p);
       }
       return -1;
    }
@@ -963,7 +966,7 @@ static int persist_origin(rtp_run_t *run, const char *phase, const char *artifac
       snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", origin_hash);
    }
    snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", origin_hash);
-   rtp_run_update(run);
+   db1_roundtable_run_update(run);
    return 0;
 }
 
@@ -994,7 +997,7 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
       return server_send_ok(conn, resp);
    }
    snprintf(latest->status, sizeof(latest->status), RTP_PASS_OPEN);
-   rtp_pass_update(latest);
+   db1_roundtable_pass_update(latest);
    cJSON *body = cJSON_CreateObject();
    attach_prompt_brief(body, a, run->brief);
    cJSON_AddStringToObject(body, "mode",
@@ -1023,17 +1026,15 @@ static int resubmit_same_pass(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *l
 static int create_worktree(const rtp_run_t *run, const char *branch, const char *wt,
                            const char *from_ref)
 {
-   char *erepo = shell_escape(run->repo_root);
-   char *ewt = shell_escape(wt);
-   char *ebr = shell_escape(branch);
-   char *efrom = (from_ref && from_ref[0]) ? shell_escape(from_ref) : NULL;
+   char *erepo = shell_quote(run->repo_root);
+   char *ewt = shell_quote(wt);
+   char *ebr = shell_quote(branch);
+   char *efrom = (from_ref && from_ref[0]) ? shell_quote(from_ref) : NULL;
    char cmd[RTP_PATH_LEN * 3 + 160];
    if (efrom)
-      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' '%s' 2>&1",
-               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt, efrom);
+      snprintf(cmd, sizeof(cmd), "git -C %s worktree add -B %s %s %s 2>&1", erepo, ebr, ewt, efrom);
    else
-      snprintf(cmd, sizeof(cmd), "git -C '%s' worktree add -B '%s' '%s' 2>&1",
-               erepo ? erepo : run->repo_root, ebr ? ebr : branch, ewt ? ewt : wt);
+      snprintf(cmd, sizeof(cmd), "git -C %s worktree add -B %s %s 2>&1", erepo, ebr, ewt);
    free(erepo);
    free(ewt);
    free(ebr);
@@ -1061,7 +1062,7 @@ static int prepare_proposal_workspace(rtp_run_t *run)
    if (create_worktree(run, run->head_branch, wt, NULL) != 0)
       return -1; /* do NOT fall back to repo_root — never touch the user checkout */
    snprintf(run->worktree_path, sizeof(run->worktree_path), "%s", wt);
-   rtp_run_update(run);
+   db1_roundtable_run_update(run);
    return 0;
 }
 
@@ -1072,12 +1073,12 @@ static int ref_contains_commit(const rtp_run_t *run, const char *ref, const char
 {
    if (!ref || !ref[0] || !sha || !sha[0])
       return 0;
-   char *erepo = shell_escape(run->repo_root);
-   char *eref = shell_escape(ref);
-   char *esha = shell_escape(sha);
+   char *erepo = shell_quote(run->repo_root);
+   char *eref = shell_quote(ref);
+   char *esha = shell_quote(sha);
    char cmd[RTP_PATH_LEN + 160];
-   snprintf(cmd, sizeof(cmd), "git -C '%s' merge-base --is-ancestor '%s' '%s' 2>/dev/null",
-            erepo ? erepo : run->repo_root, esha ? esha : sha, eref ? eref : ref);
+   snprintf(cmd, sizeof(cmd), "git -C %s merge-base --is-ancestor %s %s 2>/dev/null", erepo, esha,
+            eref);
    free(erepo);
    free(eref);
    free(esha);
@@ -1104,13 +1105,12 @@ int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
     * Use an explicit refspec — a plain `fetch <remote> <base>` only updates
     * FETCH_HEAD, not refs/remotes/<remote>/<base>, so the fallback could branch
     * from a stale origin/<base> (#2). */
-   char *erepo = shell_escape(run->repo_root);
-   char *erem = shell_escape(remote);
-   char *ebase = shell_escape(base);
+   char *erepo = shell_quote(run->repo_root);
+   char *erem = shell_quote(remote);
+   char *ebase = shell_quote(base);
    char fcmd[RTP_PATH_LEN + 256];
-   snprintf(fcmd, sizeof(fcmd), "git -C '%s' fetch '%s' '%s:refs/remotes/%s/%s' 2>&1",
-            erepo ? erepo : run->repo_root, erem ? erem : remote, ebase ? ebase : base,
-            erem ? erem : remote, ebase ? ebase : base);
+   snprintf(fcmd, sizeof(fcmd), "git -C %s fetch %s %s:refs/remotes/%s/%s 2>&1", erepo, erem, ebase,
+            erem, ebase);
    free(erepo);
    free(erem);
    free(ebase);
@@ -1159,7 +1159,7 @@ int prepare_impl_workspace(rtp_run_t *run, const char *merge_sha)
    run->base_sha[0] = '\0';
    run->impl_pr_number = 0;
    run->impl_pr_url[0] = '\0';
-   rtp_run_update(run);
+   db1_roundtable_run_update(run);
    return 0;
 }
 
@@ -1191,13 +1191,13 @@ static int write_proposal_file(rtp_run_t *run, const char *content, const char *
 
    /* commit on the dedicated branch BEFORE touching the ledger; an unchanged
     * file (re-review of the same content) is a no-op, not a failure. */
-   char *erel = shell_escape(rel);
+   char *erel = shell_quote(rel);
    char cmd[RTP_PATH_LEN * 2 + 320];
    size_t p = rtp_cd_prefix(run, cmd, sizeof(cmd));
    snprintf(cmd + p, sizeof(cmd) - p,
-            "git add '%s' && { git diff --cached --quiet -- '%s' || git commit -q -m 'roundtable "
+            "git add %s && { git diff --cached --quiet -- %s || git commit -q -m 'roundtable "
             "proposal #%d (skeleton/revision)'; } 2>&1",
-            erel ? erel : rel, erel ? erel : rel, run->id);
+            erel, erel, run->id);
    free(erel);
    int rc = 0;
    char *o = mcp_git_run(cmd, &rc);
@@ -1208,7 +1208,7 @@ static int write_proposal_file(rtp_run_t *run, const char *content, const char *
    /* commit succeeded -> the working file IS now the branch content: record it. */
    snprintf(run->proposal_ref, sizeof(run->proposal_ref), "%s", path);
    snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s", hash);
-   rtp_run_update(run);
+   db1_roundtable_run_update(run);
    return 0;
 }
 
@@ -1261,8 +1261,8 @@ static int draft_complete(server_conn_t *conn, rtp_run_t *run, rtp_pass_t *lates
       return server_send_ok(conn, resp);
    }
    snprintf(latest->status, sizeof(latest->status), RTP_PASS_DONE);
-   rtp_pass_update(latest);
-   rtp_run_set_state(run->id, RTP_STATE_PROPOSAL_REVIEW, RTP_PHASE_PROPOSAL);
+   db1_roundtable_pass_update(latest);
+   db1_roundtable_run_set_state(run->id, RTP_STATE_PROPOSAL_REVIEW, RTP_PHASE_PROPOSAL);
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "action", "drafted");
    cJSON_AddStringToObject(resp, "state", RTP_STATE_PROPOSAL_REVIEW);
@@ -1287,12 +1287,12 @@ static int maybe_ttl_abandon(int id, rtp_run_t *run)
       gate_no = 2;
    else
       return 0;
-   if (!rtp_gate_age_exceeds_hours(id, gate_no, config_roundtable_pipeline_gate_ttl_h()))
+   if (!db1_roundtable_gate_age_exceeds_hours(id, gate_no, config_roundtable_pipeline_gate_ttl_h()))
       return 0;
    stop_inflight(id, RTP_PHASE_PROPOSAL);
    stop_inflight(id, RTP_PHASE_IMPL);
-   rtp_run_set_state(id, RTP_STATE_ABANDONED, NULL);
-   rtp_run_get(id, run);
+   db1_roundtable_run_set_state(id, RTP_STATE_ABANDONED, NULL);
+   db1_roundtable_run_get(id, run);
    return 1;
 }
 
@@ -1305,9 +1305,12 @@ static int maybe_ttl_abandon(int id, rtp_run_t *run)
 static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char *phase,
                                  const char *artifact, int budget_bytes)
 {
+   /* Plan and select in one module round trip: the artifact can be 16 MiB and
+    * asking twice would carry it twice. */
    rtp_chunk_plan_t plan;
-   rtp_chunk_plan(artifact, budget_bytes, &plan);
-   int group = rtp_pass_max_group(run->id, phase) + 1;
+   rtp_assembly_t asm_unit;
+   rtp_chunk_plan_with_assembly(artifact, budget_bytes, budget_bytes, &plan, &asm_unit);
+   int group = db1_roundtable_pass_max_group(run->id, phase) + 1;
 
    /* Record the whole origin for chunk re-derivation (#34). For the PR phase the
     * origin is the diff (kept in an internal working file). For the proposal
@@ -1321,7 +1324,7 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
       snprintf(run->proposal_origin_hash, sizeof(run->proposal_origin_hash), "%s",
                plan.origin_hash);
       snprintf(run->chunk_index_ref, sizeof(run->chunk_index_ref), "origin:%s", plan.origin_hash);
-      rtp_run_update(run);
+      db1_roundtable_run_update(run);
    }
 
    int submitted = 0;
@@ -1342,8 +1345,7 @@ static int submit_chunked_review(server_conn_t *conn, rtp_run_t *run, const char
     * RETRIEVES the selected spans from the retained origin and concatenates them
     * into a self-contained inline unit (#32/#37), bounded by the smallest panel
     * budget. */
-   rtp_assembly_t asm_unit;
-   rtp_assembly_build(&plan, budget_bytes, &asm_unit);
+   /* asm_unit was filled by the same call that produced the plan. */
    size_t cap = (size_t)(budget_bytes > 0 ? budget_bytes : 4096) + 1024;
    char *synth = (char *)malloc(cap);
    int spass = -1;
@@ -1402,7 +1404,7 @@ static int decide_chunked_group(server_conn_t *conn, rtp_run_t *run, const char 
    /* any member still in flight -> wait. */
    /* (a member pass is open with a pending current attempt) */
    rtp_group_agg_t agg;
-   if (rtp_pass_group_agg(run->id, phase, group, &agg) != 0)
+   if (db1_roundtable_pass_group_agg(run->id, phase, group, &agg) != 0)
       return server_send_error(conn, "pipeline: could not aggregate chunk group", NULL);
 
    /* Each member is terminal once it is valid (done/synthesis_done) OR invalid;
@@ -1481,7 +1483,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "usage: aimee pipeline advance <id> [--artifact <text>]",
                                NULL);
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
    if (is_terminal_state(run.state))
       return server_send_error(conn, "pipeline: terminal", NULL);
@@ -1501,7 +1503,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       int gate_no = strcmp(run.state, RTP_STATE_GATE2_MERGE_PENDING) == 0 ? 2 : 1;
       rtp_gate_t gate;
-      if (rtp_gate_get(id, gate_no, &gate) != 0)
+      if (db1_roundtable_gate_get(id, gate_no, &gate) != 0)
          return server_send_error(conn, "pipeline: merge-pending but gate record missing", NULL);
       cJSON *resp = jo_ok();
       cJSON_AddStringToObject(resp, "action", "merge_reconcile");
@@ -1518,14 +1520,14 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(run.state, RTP_STATE_IMPLEMENTING) == 0 && !run.worktree_path[0])
    {
       rtp_gate_t g1;
-      const char *msha = (rtp_gate_get(id, 1, &g1) == 0) ? g1.merge_sha : "";
+      const char *msha = (db1_roundtable_gate_get(id, 1, &g1) == 0) ? g1.merge_sha : "";
       if (prepare_impl_workspace(&run, msha) != 0)
          return server_send_error(
              conn,
              "pipeline: implementation worktree missing and could not be rebuilt; supply a "
              "valid repo_root/remote via 'pipeline resume' and retry",
              NULL);
-      rtp_run_get(id, &run);
+      db1_roundtable_run_get(id, &run);
    }
 
    const char *phase = phase_for_state(run.state);
@@ -1536,7 +1538,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(artifact_hash, sizeof(artifact_hash), "%s", prov_hash);
 
    rtp_pass_t latest;
-   int have = rtp_pass_latest(id, phase, &latest) == 0;
+   int have = db1_roundtable_pass_latest(id, phase, &latest) == 0;
 
    /* A chunked-review group is the active review unit: aggregate it, unless the
     * caller supplied a new artifact (a revise -> re-chunk into a fresh group). */
@@ -1547,7 +1549,8 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (have && strcmp(latest.status, RTP_PASS_OPEN) == 0)
    {
       rtp_attempt_t a;
-      if (rtp_attempt_current(latest.id, &a) == 0 && strcmp(a.capture_status, RTP_CAP_PENDING) == 0)
+      if (db1_roundtable_attempt_current(latest.id, &a) == 0 &&
+          strcmp(a.capture_status, RTP_CAP_PENDING) == 0)
       {
          cJSON *resp = jo_ok();
          cJSON_AddStringToObject(resp, "action", "waiting");
@@ -1563,7 +1566,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          strcmp(artifact_hash, latest.artifact_hash) != 0))
    {
       rtp_attempt_t a;
-      int hav_a = rtp_attempt_current(latest.id, &a) == 0;
+      int hav_a = db1_roundtable_attempt_current(latest.id, &a) == 0;
 
       /* DRAFT completion is NOT a review done-bar (#1): a valid skeleton is
        * stored as the proposal working artifact and transitions drafting ->
@@ -1599,7 +1602,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       {
          /* mark pass done; open the gate (needs the PR opened first). */
          snprintf(latest.status, sizeof(latest.status), RTP_PASS_DONE);
-         rtp_pass_update(&latest);
+         db1_roundtable_pass_update(&latest);
          int pr = strcmp(phase, RTP_PHASE_IMPL) == 0 ? run.impl_pr_number : run.proposal_pr_number;
          if (pr <= 0)
          {
@@ -1621,7 +1624,7 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          }
          int gate_no = strcmp(phase, RTP_PHASE_IMPL) == 0 ? 2 : 1;
          enter_gate(id, gate_no, pr);
-         rtp_run_get(id, &run);
+         db1_roundtable_run_get(id, &run);
          cJSON *resp = jo_ok();
          cJSON_AddStringToObject(resp, "action", "gate_pending");
          cJSON_AddItemToObject(resp, "digest", build_digest(&run, &latest, 1));
@@ -1663,11 +1666,11 @@ int handle_pipeline_advance(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       /* nudge the state into the review phase if we're implementing and have a
        * diff to review. */
       if (strcmp(run.state, RTP_STATE_IMPLEMENTING) == 0 && artifact && artifact[0])
-         rtp_run_set_state(id, RTP_STATE_PR_REVIEW, RTP_PHASE_IMPL);
+         db1_roundtable_run_set_state(id, RTP_STATE_PR_REVIEW, RTP_PHASE_IMPL);
       else
          return server_send_error(
              conn, "pipeline: nothing to advance in this state without an artifact", NULL);
-      rtp_run_get(id, &run);
+      db1_roundtable_run_get(id, &run);
    }
    /* REVIEW with no supplied artifact: the controller obtains it itself rather
     * than requiring the caller to re-provide it. For the proposal phase that is
@@ -1781,7 +1784,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                NULL);
 
    rtp_run_t run;
-   if (rtp_run_get(id, &run) != 0)
+   if (db1_roundtable_run_get(id, &run) != 0)
       return server_send_error(conn, "pipeline: not found", NULL);
 
    /* Enforce the unanswered-gate TTL FIRST (#47), before authority/verdict: an
@@ -1816,7 +1819,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                NULL);
 
    rtp_gate_t gate;
-   if (rtp_gate_get(id, gate_no, &gate) != 0)
+   if (db1_roundtable_gate_get(id, gate_no, &gate) != 0)
       return server_send_error(conn, "pipeline: gate record missing", NULL);
 
    const char *reason = jo_str(req, "reason", "");
@@ -1831,10 +1834,10 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       /* Exactly-once (#55): atomically claim the transition out of the matching
        * *_pending state. A concurrent/duplicate `gate` that already moved the
        * run loses the CAS and is told so rather than re-resolving. */
-      if (rtp_run_cas_state(id, run.state, review_back) != 0)
+      if (db1_roundtable_run_cas_state(id, run.state, review_back) != 0)
          return server_send_error(conn, "pipeline: gate already resolved or resolving", NULL);
       snprintf(run.state, sizeof(run.state), "%s", review_back); /* keep struct consistent */
-      rtp_gate_update(&gate);
+      db1_roundtable_gate_update(&gate);
       /* fail reason -> brief, return to the review phase (#43 same PR). Reserve the
        * buffer tail so a near-full brief never silently truncates the human's
        * reason — the fail-return contract requires the reason reach the panel. */
@@ -1849,7 +1852,7 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
          snprintf(nb, sizeof(nb), "%.*s%s", room, run.brief, suffix);
          snprintf(run.brief, sizeof(run.brief), "%s", nb);
       }
-      rtp_run_update(&run); /* persists brief + the CAS'd state */
+      db1_roundtable_run_update(&run); /* persists brief + the CAS'd state */
       cJSON *resp = jo_ok();
       cJSON_AddStringToObject(resp, "verdict", "fail");
       cJSON_AddStringToObject(resp, "state", review_back);
@@ -1864,10 +1867,10 @@ int handle_pipeline_gate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * *_pending runs the merge; a racing duplicate gets "already resolving". */
    const char *merge_state =
        gate_no == 2 ? RTP_STATE_GATE2_MERGE_PENDING : RTP_STATE_GATE1_MERGE_PENDING;
-   if (rtp_run_cas_state(id, run.state, merge_state) != 0)
+   if (db1_roundtable_run_cas_state(id, run.state, merge_state) != 0)
       return server_send_error(conn, "pipeline: gate already resolved or resolving", NULL);
    snprintf(run.state, sizeof(run.state), "%s", merge_state); /* keep struct consistent */
-   rtp_gate_update(&gate);
+   db1_roundtable_gate_update(&gate);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "verdict", "pass");

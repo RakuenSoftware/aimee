@@ -1,8 +1,12 @@
 # Proposal: complete credential-vault consolidation
 
-- **State:** DONE — rev. 3 implemented across P1–P4 + a 2026-06-28 closeout (PRs #833/#834/#836/#837);
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Rev. 3 implemented across P1–P4 + a 2026-06-28 closeout (PRs #833/#834/#836/#837);
   see §Closeout. (rev. 3 history: R1+R2 reviewed → revised; fleet can only reliably review a doc this
-  size via one model — see §Review history; USER proposal-approval was gate 1.)
+  size via one model. See §Review history; USER proposal-approval was gate 1.)
 - **Status refreshed:** 2026-06-28
 - **Author:** JBailes
 - **Date:** 2026-06-14
@@ -16,7 +20,7 @@
 > **Revision note (R1).** Reviewed by a diverse delegate panel; security returned
 > **BLOCKED**, reviewer **CONCERNS** (architect/engineer lenses were lost to a provider
 > 429 + a reasoning-model stall and are owed in R2). Three convergent findings drove
-> rev. 2: (1) **server-principal writes were under-protected** — bare `/v1` bearer over
+> rev. 2: (1) **server-principal writes were under-protected**, bare `/v1` bearer over
 > plaintext `0.0.0.0:8740` could mint server-owned creds (trust-boundary collapse); rev. 2
 > gates them behind a dedicated capability + per-write audit + a transport requirement
 > (D2/D2b). (2) **Migration/retirement had no atomicity or rollback**; rev. 2 adds a
@@ -30,56 +34,56 @@
 > an absent `.vault/` is the *expected* pre-first-write state. §0 is re-confirmed below.
 >
 > **Revision note (R2).** rev. 2 re-reviewed; security **CONCERNS**, engineer **BLOCKED**;
-> the architect/reviewer lenses were lost again (mimo-2.5 context-capped on the larger doc —
+> the architect/reviewer lenses were lost again (mimo-2.5 context-capped on the larger doc,
 > see §Review history). Both seats converged on three *residual* gaps, now closed in rev. 3:
 > (B1) the `vault:write:server` capability had **no provisioning/revocation model** and D2b's
-> check was **IP-based** (tunnel-bypassable) — rev. 3 commits an operator-minted, UDS-only
+> check was **IP-based** (tunnel-bypassable), rev. 3 commits an operator-minted, UDS-only
 > grant + binds the transport check to **attested transport, not IP**, names the audit sink +
 > a key **fingerprint** (never the key), and bounds this proposal to **exactly one** capability
 > (D2/D2c). (B2) the `vault_only` **blast radius was not enumerated**, the per-agent state
-> machine lacked a **lock + a vault-level verifier**, and the agent set was hard-coded — rev. 3
+> machine lacked a **lock + a vault-level verifier**, and the agent set was hard-coded, rev. 3
 > adds a discovery step, a per-agent lock, a decrypt-roundtrip verifier, a **dry-run** that
 > lists every surface that would 401, and a hard cutover gate (WP-3/WP-4). (B3) the codex
 > "device-flow fallback" was a **misnomer on an unattended server** and lazy-migration lacked
-> atomicity — rev. 3 states plainly that a revoked refresh token raises an operator
+> atomicity, rev. 3 states plainly that a revoked refresh token raises an operator
 > "re-auth required" + an admin `codex reauth` command (no autonomous browser flow), makes the
 > migration **atomic (verify-then-scrub)**, and keys `oauth_tokens.c` by **(principal, service,
-> cred)** (WP-2). The R2 seats re-flagged the v0.2.58 banner — see §Evidence; stale prior-boot
+> cred)** (WP-2). The R2 seats re-flagged the v0.2.58 banner. See §Evidence; stale prior-boot
 > log line, now pinned.
 
-## Closeout (filed to done — 2026-06-28)
+## Closeout (filed to done: 2026-06-28)
 
 rev. 3 was USER-approved (gate 1) and implemented across P1–P4 (PRs #291/#294/#298/#305/#306,
 promoted in #311; codex vault-refresh #724). A 2026-06-28 closeout audit + roundtable review found
 six divergences from the written plan; the must-build set was completed and merged:
 
-- **D2/D2c** — every server-principal credential write **and** `vault:write:server` capability
+- **D2/D2c**: every server-principal credential write **and** `vault:write:server` capability
   grant/revoke now records to the dedicated append-only **0600 `audit.log`** sink (tamper-evidence +
   access separation) instead of the operator-readable general server log. **PR #833.**
-- **D13** — the `.server-master.key` rotation shipped as the **offline `aimee-server
+- **D13**: the `.server-master.key` rotation shipped as the **offline `aimee-server
   --rotate-master-key`** (re-wrap not re-encrypt; backup-before-mutate + restore-on-fail;
   server-stopped guard; symlink-safe copy; post-rewrap read-back verify) plus
   [`docs/runbooks/vault-master-key-rotation.md`](../../runbooks/vault-master-key-rotation.md).
   **PR #834.**
-- **D9** — `agent key import` gained **backup-before-scrub** (atomic 0600, `O_EXCL`/`O_NOFOLLOW`) +
+- **D9**: `agent key import` gained **backup-before-scrub** (atomic 0600, `O_EXCL`/`O_NOFOLLOW`) +
   a per-run lock. The heavier scaffolding (per-agent `NOT_STARTED→…→LEGACY_SCRUBBED` state machine,
   vault-level decrypt-roundtrip verifier, `vault status` migration-incomplete surfacing) is a
-  **tracked follow-up**: the roundtable agreed the decrypt-roundtrip verifier's rationale — defeating
-  a false-VERIFIED via a still-live `/v1/session/credentials` — is moot now that path is deleted, and
+  **tracked follow-up**: the roundtable agreed the decrypt-roundtrip verifier's rationale, defeating
+  a false-VERIFIED via a still-live `/v1/session/credentials`, is moot now that path is deleted, and
   backup-before-scrub covers the remaining durability failure mode. **PR #836.**
-- **D6** — codex refresh now distinguishes an IdP **`invalid_grant`** rejection (→ a persistent
+- **D6**: codex refresh now distinguishes an IdP **`invalid_grant`** rejection (→ a persistent
   `REAUTH_REQUIRED` vault marker + an explicit delegate error) from transient errors, with an
   operator-attended **`aimee codex reauth`** command (no autonomous browser flow). **PR #837.**
 
-**D10 — superseded (operator sign-off recorded).** The `vault_only` rollback flag + per-surface
+**D10, superseded (operator sign-off recorded).** The `vault_only` rollback flag + per-surface
 `--dry-run` + N-day cutover gate were a coexistence-management lever for the legacy client-push path.
 P4b **deleted that path outright** (D11, stronger than the planned opt-in read-fallback), so the flag
 has nothing left to gate; the intent (vault as the sole live source, provider `$ENV` as the one
 by-design fallback) is met more strongly by removal. **Operational note:** emergency rollback is now a
-code-revert + redeploy, not a runtime switch — a deliberate loss of a runtime blast-radius lever,
+code-revert + redeploy, not a runtime switch, a deliberate loss of a runtime blast-radius lever,
 accepted at closeout.
 
-**D12 — intentional carve-out.** The codex CLI owns and writes its own `~/.codex/auth.json`; aimee
+**D12, intentional carve-out.** The codex CLI owns and writes its own `~/.codex/auth.json`; aimee
 reuses it as the vault-bootstrap source and a last-resort fallback. The vault is the **top** resolution
 tier and the sole **aimee-managed** store, but codex's self-managed auth file is an **intentional
 external source**, not a vault miss. "Vault is the sole source" holds for every aimee-stored
@@ -95,7 +99,7 @@ agent-add→vault handler, and the vault-first use-path **already exist and are 
 paths:
 
 1. **The thin client never sends a literal key to the server vault.** `agent add --key`
-   stores the secret client-side and pushes it to server RAM per session — it does not
+   stores the secret client-side and pushes it to server RAM per session. It does not
    reach `vault_service_set*`. (Proven, §0.)
 2. **Codex (and the codex-style OAuth device flow) has no vault *write* path.** The token
    slots are read-only today; the device-setup writes only `codex-auth.json` on disk and
@@ -111,20 +115,20 @@ legacy-path retirement.
 ## §0 What already exists (verified against deployed `.254` v0.2.68 + `origin/testing`)
 
 - **Vault is built, merged, and LIVE.** The **running** server on `.254` reports
-  `{"version":"v0.2.68","service":"aimee-server"}` on `GET /v1/version` (authoritative —
-  not just the on-disk binary). Confirmed present in the deployed binary:
+  `{"version":"v0.2.68","service":"aimee-server"}` on `GET /v1/version` (authoritative,
+not just the on-disk binary). Confirmed present in the deployed binary:
   `.vault/.server-master.key`, `/v1/vault/set`, `codex_oauth_token`, `vault locked`, and
   the agent-add refusal string `could not store credential in the vault`. A live
   `aimee vault list` over TCP returns the vault-specific error "this connection has no
   attested local identity" (vault code present; the `uid:` path is TCP-refused by design).
-  `.vault/.server-master.key` does **not** exist on disk yet — *expected*: it is created on
+  `.vault/.server-master.key` does **not** exist on disk yet, *expected*: it is created on
   the first server-principal write, which is exactly what WP-1/WP-2 introduce. Modules:
   `src/server/vault_{crypto,kek_cache,principal,server_key,service}.c`, `vault_store.h`,
   `server_vault.c`.
 - **Autonomous decrypt works.** `vault_server_kek()` (`vault_server_key.c`) manages a 0600
   `<AIMEE_HOME>/.vault/.server-master.key` (atomic create + fsync) and the **server
-  principal** `VAULT_SERVER_PRINCIPAL "server"` decrypts without a human unlock —
-  `vault_service_set_server()` / `vault_service_get_server_principal()` (WP-C.4). User
+  principal** `VAULT_SERVER_PRINCIPAL "server"` decrypts without a human unlock,
+`vault_service_set_server()` / `vault_service_get_server_principal()` (WP-C.4). User
   principals (`uid:`/`webuser:`) get a `vault_store_set_dual` (user KEK + server KEK).
 - **The agent-add→vault handler exists** (`server_agent.c:~515`): a *literal* key on
   `/v1/agent/add` is stored via `vault_service_set(principal,…)` if the conn has a per-user
@@ -133,7 +137,7 @@ legacy-path retirement.
 - **The use-path reads the vault on the PRIMARY path.**
   `delegate_run_with_credential_retry` (`server_compute.c:1377`) calls
   `vault_service_inject_api_key`, which resolves **server-wrap → user-KEK → server
-  principal** — the last is an explicit fallback for "delegate creds pushed from a TCP thin
+  principal**. The last is an explicit fallback for "delegate creds pushed from a TCP thin
   client, which has no per-user principal." Cred slots: `VAULT_API_KEY_CRED "api_key"`,
   `VAULT_CODEX_TOKEN_CRED`, `VAULT_CODEX_ACCOUNT_CRED`.
 - **A generic OAuth token layer with refresh already vaults under the server principal.**
@@ -144,86 +148,86 @@ legacy-path retirement.
 
 ### The gaps (verified)
 
-- **G1 — client skew.** The deployed client (`aimee v0.2.51-94-gfb7615b`) implements the
+- **G1, client skew.** The deployed client (`aimee v0.2.51-94-gfb7615b`) implements the
   legacy client-held model: `cli_agent_keys.c` writes the literal key to
   `~/.config/aimee/agent-keys.json` and pushes it per-session to `/v1/session/credentials`
   (server RAM). It does **not** forward the literal key to `/v1/agent/add`. **Proven:**
   after `agent add glm --key …`, the key reappears in `agent-keys.json`; and a glm delegate
   fails with "Authentication parameter not received" once glm is scrubbed from
   `agent-keys.json` (the server vault is empty). So no API key ever reaches the vault.
-- **G2 — codex vault write gap.** `VAULT_CODEX_TOKEN_CRED` / `VAULT_CODEX_ACCOUNT_CRED` are
+- **G2, codex vault write gap.** `VAULT_CODEX_TOKEN_CRED` / `VAULT_CODEX_ACCOUNT_CRED` are
   **only read** (`delegate_credential_retry.c:31,35`), never written. The codex device-setup
   (`server_agent.c`) writes only `codex-auth.json`; there is no refresh. `.254` currently
   has **no** `codex-auth.json` (and no `~/.codex/auth.json`) → every codex call 401s.
-- **G3 — no client path to write a server-principal cred.** `aimee vault set` is the `uid:`
+- **G3. No client path to write a server-principal cred.** `aimee vault set` is the `uid:`
   path and is refused over TCP ("no attested local identity", parent D17). Server-principal
   writes happen only server-side today (agent-add + oauth flows). A migration affordance is
   needed.
-- **G4 — `agent setup` targets a local server.** In v0.2.51, `aimee agent setup codex`
+- **G4, `agent setup` targets a local server.** In v0.2.51, `aimee agent setup codex`
   fails "server unavailable" against a thin-client→remote deployment, so codex cannot be
   provisioned onto the remote through the client at all.
 
 ## Decisions / work packages
 
-### WP-1 — Client forwards delegate API keys into the server vault
+### WP-1: Client forwards delegate API keys into the server vault
 
 - **D1.** `agent add --key <literal>` **forwards the secret to the server** on
   `/v1/agent/add` so the deployed v0.2.68 handler vaults it under the resolved principal
   (server principal over TCP; `uid:`/`webuser:` where attested). The client **stops** writing
   literal keys to `agent-keys.json`. The `/v1/session/credentials` RAM push is kept only as a
   transitional fallback for not-yet-migrated agents (retired in WP-4).
-- **D2 — server-principal writes require a dedicated capability + audit (R1: was a
+- **D2, server-principal writes require a dedicated capability + audit (R1: was a
   blocker).** A *server-principal* cred is autonomously decryptable by every delegate, so
-  the power to write one must NOT be conferred by the bare `/v1` bearer alone — a single
+  the power to write one must NOT be conferred by the bare `/v1` bearer alone. A single
   leaked thin-client bearer would otherwise mint server-owned secrets that every delegate
   silently trusts. Server-principal writes therefore require a **dedicated capability**
   (e.g. `vault:write:server`) granted separately from the transport bearer, and **every**
-  write emits a **structured audit event** — `{caller_principal, transport, agent, cred,
-  action, ts}` — to a dedicated audit sink (not an INFO log line). Where the caller has an
+  write emits a **structured audit event**, `{caller_principal, transport, agent, cred,
+  action, ts}`, to a dedicated audit sink (not an INFO log line). Where the caller has an
   attested identity (UDS `uid:`/webchat `webuser:`), prefer scoping the write to that
   principal over the server principal. Bulk/off-hours server-principal writes are
   alert-worthy.
-- **D2b — transport binds to ATTESTED IDENTITY, not IP (R2: was IP-based).** WP-1 forwards
+- **D2b, transport binds to ATTESTED IDENTITY, not IP (R2: was IP-based).** WP-1 forwards
   plaintext API keys client→server. A server-principal write is **refused** unless the conn
   is `UDS_PEERCRED` or `WEBCHAT_TRUSTED` (the `attested_transport` enum already exists,
-  parent D10). A `TCP_BEARER` conn — even from loopback — is **denied** for server-principal
+  parent D10). A `TCP_BEARER` conn (even from loopback) is **denied** for server-principal
   writes, because an IP/loopback check is bypassable via SSH-tunnel / localhost-forward. If a
   TCP thin client must provision creds, it does so over **TLS + the `vault:write:server`
   capability**, or via a local UDS relay; cleartext key forwarding over a `TCP_BEARER` conn is
   never accepted. (Refusal returns the explicit 4xx of D11, with a remediation hint.)
-- **D2c — capability provisioning, bounded (R2: was undefined).** The `vault:write:server`
+- **D2c, capability provisioning, bounded (R2: was undefined).** The `vault:write:server`
   capability is **operator-minted on a UDS connection** (`aimee vault capability grant`,
   `peer_uid`-attested) and stored server-side in a 0600 grants record, separate from the
   transport bearer; it is **revocable** (`… revoke`) and listed (`… list`). A leaked bearer
   alone cannot write a server cred. **Scope bound (R2):** this proposal introduces **exactly
-  one** capability and one write path — a general capability/grant model (read, rotate,
+  one** capability and one write path. A general capability/grant model (read, rotate,
   locked-override) is explicitly **out of scope / future**, so we do not grow an unbounded
   authz subsystem here. **Audit sink:** every server-principal write appends to the existing
   dedicated `audit.log` (append-only, 0600, not readable by the delegate-execution principal)
   a record `{caller_principal, attested_transport, capability_id, agent, cred,
-  key_fingerprint(sha256, first 8 bytes — NEVER the key), action, ts}`; a `severity=high`
+  key_fingerprint(sha256, first 8 bytes, NEVER the key), action, ts}`; a `severity=high`
   tag on bulk/off-hours writes is grep-able for alerting.
-- **D3 — explicit migration affordance.** Add `aimee vault set --server <agent> <cred>
+- **D3, explicit migration affordance.** Add `aimee vault set --server <agent> <cred>
   <secret>` (and/or `aimee agent key import`) that forwards to a server route calling
   `vault_service_set_server`, so existing keys migrate without re-adding agents.
-- **D4 — ship the updated client to `.254`** (and any other thin clients). Confirm the
+- **D4. Ship the updated client to `.254`** (and any other thin clients). Confirm the
   client version delta does not regress the `uid:` UDS path.
 
-### WP-2 — Codex (and codex-style OAuth) vault-write + refresh
+### WP-2: Codex (and codex-style OAuth) vault-write + refresh
 
 R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existing
 `oauth_tokens.c` refresh layer**, so D5–D8 below are one coherent path, not parallel ones.
 
-- **D5 — codex device-setup writes the oauth_tokens schema.** On a successful device-code
+- **D5, codex device-setup writes the oauth_tokens schema.** On a successful device-code
   exchange the server writes, under `(VAULT_SERVER_PRINCIPAL, "codex", …)`: the
   `oauth_access_token`, `oauth_refresh_token`, and `oauth_expires_at` slots (the
   `oauth_tokens.c` schema), plus `VAULT_CODEX_ACCOUNT_CRED` (the ChatGPT-Account-ID, which
   is codex-specific and used to build the request header). No bespoke codex token slot.
-- **D6 — refresh via the shared layer; "fallback" is operator-attended, not autonomous
+- **D6, refresh via the shared layer; "fallback" is operator-attended, not autonomous
   (R2).** Codex token use goes through `oauth_token_get()`, which refreshes when
   `oauth_expires_at` is past: POST the OpenAI token endpoint with `grant_type=refresh_token`,
   the stored `refresh_token`, and client_id `app_EMoamEEZ73f0CkXaXp7hrann` (OpenAI's published
-  Codex CLI client_id — pin with a source link in the impl). On success re-vault the new
+  Codex CLI client_id, pin with a source link in the impl). On success re-vault the new
   access token + expiry (the refresh token rotates only if the response returns a new one).
   **Expiry handling, stated plainly:** access-token-expired → refresh. **refresh-token
   expired/revoked (refresh returns 400/401)** → the server **cannot** run a browser device
@@ -231,26 +235,25 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
   the delegate with an explicit "codex re-auth required" error, and the **operator** runs
   `aimee codex reauth` (the D7 remote device flow). Calling this a "fallback" in rev. 2 was
   misleading; it is a human-attended re-auth.
-- **D6b — `oauth_tokens.c` is keyed by `(principal, service, cred)` (R2).** The service name
+- **D6b, `oauth_tokens.c` is keyed by `(principal, service, cred)` (R2).** The service name
   (`codex`) is a **first-class key**, not a comment, so a second OAuth consumer cannot collide
   with codex. `VAULT_CODEX_ACCOUNT_CRED` remains the authoritative source for the
-  ChatGPT-Account-ID request header; the `oauth_*` slots are authoritative for the token —
-  the two never overlap.
-- **D7 — setup against the remote.** Fix `agent setup` so the device-code exchange +
+  ChatGPT-Account-ID request header; the `oauth_*` slots are authoritative for the token,
+the two never overlap.
+- **D7, setup against the remote.** Fix `agent setup` so the device-code exchange +
   vault-write run against the **configured remote** server, not a local one (closes G4).
-- **D8 — lazy-migrate `codex-auth.json` → vault, ATOMICALLY (R2).** On read, if the vault has
+- **D8, lazy-migrate `codex-auth.json` → vault, ATOMICALLY (R2).** On read, if the vault has
   no codex token but a disk `codex-auth.json` exists: write **all** slots
   (`oauth_access_token`, `oauth_refresh_token`, `oauth_expires_at`, account-id) to the vault,
   then **verify by decrypt-roundtrip** that every slot reads back, and **only then** scrub the
   disk file. A partial write (some slots written, some not) **rolls back** (or leaves the disk
-  copy intact) — never a scrubbed disk + an incomplete vault. Never delete the only copy.
+  copy intact), never a scrubbed disk + an incomplete vault. Never delete the only copy.
 
-### WP-3 — Migrate existing credentials into the vault (atomic, resumable, reversible)
+### WP-3: Migrate existing credentials into the vault (atomic, resumable, reversible)
 
-- **D9 — explicit, idempotent, per-agent-verified import.** Import the live keys —
-  the **discovered** agent set (R2: not a hard-coded list) — read `agents.json` +
+- **D9 (explicit, idempotent, per-agent-verified import.** Import the live keys) the **discovered** agent set (R2: not a hard-coded list). Read `agents.json` +
   `agent-keys.json` at run time so the state machine converges on the operator's actual
-  agents, not the `minimax/mistral/mimo-2.5/glm` snapshot named here — and codex (WP-2) into
+  agents, not the `minimax/mistral/mimo-2.5/glm` snapshot named here, and codex (WP-2) into
   the server vault via an **explicit operator command** (`aimee agent key import` /
   `vault set --server`), not silent auto-import (R1 fork-d). Each agent is a tracked unit
   with a state in **`NOT_STARTED → IMPORTED → VERIFIED → LEGACY_SCRUBBED`**:
@@ -271,9 +274,9 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
     line) report any agent not yet `LEGACY_SCRUBBED`, so an un-run import does not silently
     stall on the legacy path forever.
 
-### WP-4 — Retire the legacy paths (feature-flagged rollback, version-gated)
+### WP-4: Retire the legacy paths (feature-flagged rollback, version-gated)
 
-- **D10 — `vault_only` rollback flag, with an enumerated blast radius + dry-run + cutover
+- **D10, `vault_only` rollback flag, with an enumerated blast radius + dry-run + cutover
   gate (R2).** A server config flag `vault_only` governs whether legacy credential sources are
   accepted. `false` = vault-first with legacy fallback (resolution order: **vault → env-lease
   → agents.json `$ENV`**, made explicit per call, not just per agent); `true` = vault is the
@@ -287,17 +290,17 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
     surfaces would fail **before** the flip.
   - **Cutover gate (R2: not open-ended).** `vault_only` flips to `true` only when the gate is
     met: **0 legacy-path (`/v1/session/credentials` / `codex-auth.json`) successes in
-    `audit.log` for N days AND explicit operator sign-off** — not a vague "≥1 release." The
+    `audit.log` for N days AND explicit operator sign-off**, not a vague "≥1 release." The
     flag then remains as a kill-switch.
-- **D11 — retire the client `agent-keys.json` push** (`cli_agent_keys.c` +
+- **D11, retire the client `agent-keys.json` push** (`cli_agent_keys.c` +
   `/v1/session/credentials`). Per R1 fork-c: retire the **write** path; keep the
   `/v1/session/credentials` **read** path only as an **opt-in, audited** fallback for
   genuinely non-vaultable `$ENV`-ref agents, removed once no agent depends on it. Under
   `vault_only=true`, `POST /v1/session/credentials` from an old client returns an explicit
   **4xx with a clear error** (never silent accept-and-drop).
-- **D12 — retire the `codex-auth.json` disk read** as a **migration-only** read for one
+- **D12, retire the `codex-auth.json` disk read** as a **migration-only** read for one
   release (D8), then delete. Vault becomes the sole codex source.
-- **D13 — operational completeness (R1).** Before WP-4 flips `vault_only=true`: document and
+- **D13, operational completeness (R1).** Before WP-4 flips `vault_only=true`: document and
   test a **`.server-master.key` rotation** procedure (re-wrap, not re-encrypt); define
   **`agent add --key` upsert/rotation semantics** on an already-vaulted agent (overwrite +
   audit, not silent duplicate); and verify the **fail-closed-on-locked** path with the
@@ -305,7 +308,7 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
 
 ## Non-goals
 
-- Direct-TCP per-user (`uid:`) vault — stays future work (parent D17). Shared delegate keys
+- Direct-TCP per-user (`uid:`) vault, stays future work (parent D17). Shared delegate keys
   belong to the **server principal** by design.
 - No HSM/external KMS; the master key is the server-held `.server-master.key`.
 - No webchat changes beyond the already-built `webuser:` path.
@@ -339,16 +342,16 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
   resolution chain); a partial `codex-auth.json` migration rolls back (no scrubbed-disk +
   incomplete-vault); two concurrent imports of one agent are serialized by the lock.
 
-## Forks — decided in R1
+## Forks: decided in R1
 
-1. **Server-principal write authz (D2)** — the `/v1` bearer is **not** sufficient. Require a
+1. **Server-principal write authz (D2)**: the `/v1` bearer is **not** sufficient. Require a
    dedicated `vault:write:server` capability + per-write audit + a transport requirement
    (D2/D2b), scoped to an attested identity where one exists.
-2. **Codex token layer (D5–D8)** — **generalize codex onto `oauth_tokens.c`** (one refreshing
+2. **Codex token layer (D5–D8)**: **generalize codex onto `oauth_tokens.c`** (one refreshing
    OAuth layer with lazy migration), not a bespoke codex path.
-3. **`session_credentials` #186 (D11)** — retire the **write** path; keep the **read** path as
+3. **`session_credentials` #186 (D11)**: retire the **write** path; keep the **read** path as
    an opt-in, audited `$ENV`-ref fallback only, removed once unused.
-4. **Migration trigger (D9)** — **explicit operator import** with backup + per-agent verify,
+4. **Migration trigger (D9)**: **explicit operator import** with backup + per-agent verify,
    **not** silent auto-import (auto-import would push plaintext-at-rest keys onto the network
    from every workstation and create a self-service path on reinstall/new-user).
 
@@ -358,7 +361,7 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
   429, engineer (glm) to a reasoning-model stall. → rev. 2 (D2 capability + audit, migration
   state machine + `vault_only`, codex onto `oauth_tokens.c`, forks decided).
 - **R2** (rev. 2): security **CONCERNS**, engineer **BLOCKED**; architect + reviewer (mimo-2.5)
-  lost — the larger doc **exceeded mimo-2.5's context window** (`caps=tools, min_context=6049`).
+  lost, the larger doc **exceeded mimo-2.5's context window** (`caps=tools, min_context=6049`).
   → rev. 3 (capability provisioning/revocation + attested-transport-not-IP + audit fingerprint;
   blast-radius enumeration + dry-run + cutover gate + vault-level verifier + per-agent lock +
   discovery; codex device-flow-is-operator-attended + atomic migration + service-keyed schema).
@@ -370,14 +373,14 @@ R1 resolved the bespoke-vs-generic fork: **codex is generalized onto the existin
   [curator-llm-backend](./curator-llm-backend.md). Given that, rev. 3 goes to the **USER
   proposal-approval gate** rather than spinning further single-model rounds.
 
-## Evidence (premise pinning — re-flagged in R1 and R2)
+## Evidence (premise pinning: re-flagged in R1 and R2)
 
 Both rounds' sandboxed server-side reviewers flagged "server is v0.2.58 / no `.vault/`" because
 they cannot curl `/v1/version` (bash blocked, `verify` 401s) and read a **stale** `server.log`
-banner (`vv0.2.58`, dated 2026-06-13 — a *prior boot*; the append-only log survives redeploys).
+banner (`vv0.2.58`, dated 2026-06-13, a *prior boot*; the append-only log survives redeploys).
 The authoritative facts: `GET /v1/version` on the **running** process returns
 `{"version":"v0.2.68","service":"aimee-server"}`; the on-disk binary
 `/usr/local/bin/aimee-server` (built 2026-06-14 08:31) `--version` = `v0.2.68`; `aimee vault
 list` over TCP returns the vault-specific "no attested local identity" error (vault code is
-live). The absent `.vault/.server-master.key` is the **expected** pre-first-write state — it is
+live). The absent `.vault/.server-master.key` is the **expected** pre-first-write state. It is
 created by the first server-principal write this proposal introduces.

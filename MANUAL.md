@@ -20,8 +20,9 @@ operations. Exact command and config tables are generated from source:
 - `aimee-wfe` owns workflow definitions and lifecycle state.
 - `aimee-kb` owns durable memory, documents, the code graph, retrieval, curation, PostgreSQL, and
   pgvector.
-- Each KB owns its embedding and synthesis placements. A role can run inside that KB container or
-  use a remote endpoint; there is no separate inference service.
+- Each KB owns its embedding and synthesis placements. Embedding runs in the KB image or selected
+  embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar, and remote
+  synthesis uses the configured endpoint.
 - `aimee-runtime-web` serves the browser workspace.
 
 The server and KB each run a bounded shared-memory event bus. Governed actions, memory mutations,
@@ -72,6 +73,12 @@ The KB stores typed records with source, scope, confidence, freshness, and links
 Curation joins duplicates, records contradictions, and lets stale evidence decay. Recall mixes
 lexical, dense, graph, and recency signals, then may synthesize. A low-evidence query can
 abstain instead of inventing an answer.
+
+Recall reads the assertion store directly and returns current values. Assertions carry world time
+and belief time separately, so asking what a value was last March is a different query from asking
+what the KB believed last March, and the historical axis is opt-in. A failure or recovery seen in
+two independent sessions becomes an observation, which can raise a procedural proposal into the
+review queue. Nothing promotes itself.
 
 Working memory is session scratch:
 
@@ -311,11 +318,16 @@ users need a short-lived KB-signed identity token and a grant for the exact
 agent, delegate, runner, and workspace control.
 
 The server must know `AIMEE_SERVER_ID`, `AIMEE_SERVER_TEAM_ID`, and the root-owned
-`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. Grant changes are local-socket only:
+`AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE`. The legacy `aimee kb grant` grammar may still appear in
+client help, but server-side dispatch is removed. An administrator or team lead manages grants on
+the KB's authenticated `/v1/write-tier-grants` API. For example:
 
 ```bash
-aimee kb grant set --server <id> --team <n> --subject <subject> --tier data
-aimee kb grant list --server <id> --team <n>
+curl --fail-with-body --cacert "$KB_CA" --cert "$ADMIN_CERT" --key "$ADMIN_KEY" \
+  -H "Authorization: Bearer $AIMEE_KB_API_BEARER_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"server_id":"<id>","team_id":<n>,"subject":"<subject>","tier":"data"}' \
+  "$AIMEE_KB_SERVICE_URL/v1/write-tier-grants/set"
 ```
 
 `aimee.api.remote_writes` remains readable for compatibility but no longer authorizes user writes.
@@ -346,8 +358,10 @@ failure, preserve the store, and investigate before rotating or truncating anyth
 
 Before an upgrade, back up:
 
-- `~/.config/aimee/` including DB1, config, vault material, TLS state, and workflow files;
+- `~/.config/aimee/` including config, vault material, TLS state, and local workflow files;
+- the DB1 PostgreSQL database with `pg_dump` or the deployment's export procedure;
 - the KB PostgreSQL database with `pg_dump` or the container export helper;
+- the server and KB WORM SQLite stores using a consistent SQLite backup or seal;
 - any external witness or audit seal destination.
 
 Do not copy a live SQLite file without its WAL/SHM files or a consistent backup operation. Do not
@@ -365,6 +379,12 @@ aimee audit verify
 On a remote thin client, `aimee self-update --check` compares the client with its server. Where
 binary replacement is supported, `aimee self-update` downloads the matching release, verifies it,
 and swaps the executable without downgrading.
+
+Note: `aimee self-update --check` reports client and server build identifiers, but it cannot
+order or auto-install non-semver branch builds. `aimee self-update --version vX.Y.Z` installs a
+published semantic-version release and does not downgrade. Operators validating a `:testing` build
+must install or build the matching testing thin client separately when exercising client-local catalog
+behavior.
 
 Read [What's new](docs/WHATS_NEW.md) before changing deployment manifests.
 
@@ -393,7 +413,6 @@ deployments. Preserve the first error and the operation ID; later failures are o
 ~/.config/aimee/
   aimee.yaml           main configuration
   agents.json          agents and network inventory
-  aimee.db             DB1 SQLite
   remote.conf          thin-client target and trust state
   workflows/           workflow definitions
   captures/ or audit-* event capture and audit material
@@ -404,8 +423,9 @@ deployments. Preserve the first error and the operation ID; later failures are o
 <workspace>/aimee.workspace.yaml
 ```
 
-DB2 is PostgreSQL, not a file under the config directory. Workflow lifecycle rows belong to the Go
-control plane even when it shares the server container.
+DB1 and DB2 data lives outside the config directory in PostgreSQL. DB1 is served through the
+`aimee` and `postgres` modules; workflow lifecycle rows use that same store contract even though the
+Go control plane owns their behavior.
 
 ## Terms
 
@@ -414,7 +434,7 @@ control plane even when it shares the server container.
 | primary | the AI tool or model the user is working with |
 | delegate | a policy-controlled agent doing a bounded task |
 | persona | a named perspective and instruction set |
-| DB1 | local server SQLite state |
+| DB1 | local server PostgreSQL state served by the store modules |
 | DB2 | KB PostgreSQL and pgvector state |
 | event bus | intra-daemon typed shared-memory transport |
 | capture | ordered observational bus record; never automatic execution replay |

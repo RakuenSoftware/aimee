@@ -150,6 +150,20 @@ static void test_required_evidence_runtime_policy(void)
    assert(agent_required_evidence_keep_tools(1, 1) == 0);
    assert(agent_required_evidence_keep_tools(0, 0) == 0);
 
+   /* While turns remain, an unsatisfied evidence gate defers the final text
+    * turn so the delegate keeps trying to obtain its lookup. */
+   assert(agent_evidence_gate_defers_final_turn(1, 0, 0) == 1);
+   assert(agent_evidence_gate_defers_final_turn(1, 1, 0) == 0);
+   assert(agent_evidence_gate_defers_final_turn(0, 0, 0) == 0);
+
+   /* On the last usable turn it must not: a delegate whose tool calls never
+    * succeeded would otherwise be denied the final turn on every turn
+    * including this one, and return nothing at all rather than a verdict that
+    * records the missing evidence. */
+   assert(agent_evidence_gate_defers_final_turn(1, 0, 1) == 0);
+   assert(agent_evidence_gate_defers_final_turn(1, 1, 1) == 0);
+   assert(agent_evidence_gate_defers_final_turn(0, 0, 1) == 0);
+
    /* A provider ignoring tool_choice and returning prose is rejected. */
    assert(agent_required_evidence_reject_response(1, 0, 0, 0) == 1);
    /* A nominal tool response emptied by policy policing is also rejected. */

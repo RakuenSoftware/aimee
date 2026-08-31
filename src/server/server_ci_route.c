@@ -2,10 +2,10 @@
  * extracted from server_http_routes.c to keep that file under the line-count limit.
  * See server_http_internal.h for route_req_t / rh_dev_ci_event. */
 #include "server_http_internal.h"
-#include "server.h"        /* server_ct_equal */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify */
-#include "wfe_store.h"     /* db1_work_item_* / db1_lifecycle_event_* / by_pr_ref */
-#include "json_fluent.h"   /* jo_cstr */
+#include "server.h"               /* server_ct_equal */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify */
+#include "db1_client/wfe_store.h" /* db1_work_item_* / db1_lifecycle_event_* / by_pr_ref */
+#include "json_fluent.h"          /* jo_cstr */
 #include "runtime_secret.h"
 #include "cJSON.h"
 #include <openssl/hmac.h>

@@ -23,13 +23,15 @@ int agent_request_cancelled(void)
    return atomic_load(&g_request_cancelled);
 }
 
-/* http_retry_post_context records failover events via interaction_events.o ->
- * db1_conn; this test binary doesn't link db1. Stub it to NULL so recording
- * no-ops (the real path guards on a NULL connection). */
-void *db1_conn(void)
-{
-   return NULL;
-}
+/* http_retry_post_context records failover events, and this binary satisfies
+ * that at the call: tests/support/interaction_events_stub.c.
+ *
+ * It used to stub db1_conn to NULL instead, so the REAL recorder linked in and
+ * found no connection to write through. That worked only while the store was
+ * in-process. It is a bus client now, reaching a separate module, and there is
+ * no handle to withhold -- a NULL db1_conn would not have made recording inert,
+ * it would have left this test needing a running module to assert how backoff
+ * clamps. */
 
 /* --- progress callback (per-turn delegate heartbeat seam) --- */
 

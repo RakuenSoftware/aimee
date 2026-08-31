@@ -2,11 +2,11 @@
 #include "managed_server_identity_install.h"
 
 #include "managed_server_identity.h"
-#include "db2/db2.h"
-#include "db2/db2_tenant.h"
-#include "db2/membership.h"
-#include "db2/server_registry.h"
-#include "db2/team.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/membership.h"
+#include "modules/db2/c/server_registry.h"
+#include "modules/db2/c/team.h"
 #include "kb_identity.h"
 #include "kb_paths.h"
 
@@ -80,6 +80,26 @@ static int ensure_owner_membership(const kb_principal_t *owner, int64_t team_id)
       return -1;
    int rc = db2_membership_add(
        owner_key, team_id, db2_membership_default_team(owner_key, &existing_default) != 0, NULL);
+   if (rc != 0)
+   {
+      db2_tenant_scope_rollback();
+      return -1;
+   }
+   return db2_tenant_scope_commit();
+}
+
+static int ensure_principal_membership(const kb_principal_t *owner, const kb_principal_t *member,
+                                       int64_t team_id)
+{
+   char member_key[576];
+   if (!owner || !member || team_id < 1 ||
+       kb_identity_key(member, member_key, sizeof(member_key)) != 0 ||
+       db2_tenant_scope_begin(owner, 0) != 0)
+      return -1;
+   /* Every managed request names the registry-bound team explicitly, so these
+    * service/operator rows need no default-team side effect. The insert is
+    * idempotent, which makes deploy a membership repair operation too. */
+   int rc = db2_membership_add(member_key, team_id, 0, NULL);
    if (rc != 0)
    {
       db2_tenant_scope_rollback();
@@ -199,6 +219,21 @@ int kb_managed_server_identity_install(const kb_managed_server_identity_install_
        options->port > 65535 || (geteuid() != 0 && options->owner != geteuid()))
       return -1;
 
+   kb_principal_t service_member, operator_member;
+   memset(&service_member, 0, sizeof(service_member));
+   memset(&operator_member, 0, sizeof(operator_member));
+   static const char service_prefix[] = "service:";
+   const char *service_name = KB_SERVER_CLIENT_SCOPE;
+   if (strncmp(service_name, service_prefix, sizeof(service_prefix) - 1) != 0 ||
+       kb_principal_from_host_account(service_name + sizeof(service_prefix) - 1, &service_member) !=
+           0 ||
+       (options->member && options->member[0] &&
+        kb_principal_from_host_account(options->member, &operator_member) != 0))
+   {
+      fputs("managed-server-identity: invalid managed service or operator identity\n", stderr);
+      return -1;
+   }
+
    char identity_path[4096];
    int lock_fd = -1;
    if (paths_and_lock(options, identity_path, &lock_fd) != 0)
@@ -289,6 +324,19 @@ int kb_managed_server_identity_install(const kb_managed_server_identity_install_
     * existing default-team choice. */
    if (ensure_owner_membership(&owner, identity.team_id) != 0)
       goto done;
+   /* The registry team is KB-owned authority. Enroll the independently
+    * authenticated application identity and the appliance's current PAM
+    * operator here, rather than letting aimee-server manufacture membership on
+    * each content request. Without these rows a fresh wizard clone can ingest
+    * successfully but every search is denied by the service/caller intersection. */
+   if (ensure_principal_membership(&owner, &service_member, identity.team_id) != 0 ||
+       (operator_member.authenticated &&
+        ensure_principal_membership(&owner, &operator_member, identity.team_id) != 0))
+   {
+      fputs("managed-server-identity: could not enroll managed service/operator membership\n",
+            stderr);
+      goto done;
+   }
 
    if (strcmp(identity.state, "ready") != 0)
    {

@@ -5,13 +5,17 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "appliance_admin.h"
+#include "cli_command_defs.h"  /* the command catalogue served in the CLI manifest */
+#include "cli_dispatch_defs.h" /* cmd/verb -> method rows, served alongside it */
+#include "cli_marshal_defs.h"  /* which methods need no request body */
+#include "cli_argspec_defs.h"  /* how words after the command become fields */
 #include "server_http.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
-#include "modules/git/git_oauth_device.h"  /* GitLab/Gitea device-flow (relocated route handlers) */
+#include "modules/git/git_oauth_device.h" /* GitLab/Gitea device-flow (relocated route handlers) */
 #include "modules/git/git_oauth_github.h" /* GitHub device + web (redirect) flow (relocated handlers) */
 #include "modules/git/git_oauth_gh.h"     /* zero-config GitHub sign-in via the bundled gh CLI */
 #include "deploy_apply.h"       /* server-orchestrated container deploy (relocated handlers) */
@@ -23,9 +27,12 @@
 #include "roundtable_preset.h"
 #endif
 #include "role_templates.h"
+#include <aimee/delegates/delegate_launch_args.h>
 #include "util.h" /* safe_strdup, aimee_base64_* */
 #include "cli_session_pty.h"
 #include "aimee_home.h"
+#include "command_registry.h"
+#include "headers/module_commands.h"
 #include "config.h"
 #include "prompts.h"
 #include <aimee/delegates/delegate_role.h>
@@ -260,6 +267,44 @@ int route_role_template_show(const char *name, char *resp, int cap)
     * as a dedicated field (edited via the `max_turns:` frontmatter in `content`).
     * -1 = infinite, the default. */
    cJSON_AddNumberToObject(o, "max_turns", role_template_max_turns(name));
+
+   /* What this role may do, resolved the same way a delegate resolves it.
+    *
+    * Structural rather than left in `content`, because the interesting part is
+    * not what the operator WROTE but what it came to: a permission with nothing
+    * enforcing it, or a tool the set withholds, is invisible in the frontmatter
+    * and is exactly what someone reading this wants to know. Until now it went
+    * to a log line and nowhere else. */
+   {
+      delegate_permissions_t perms;
+      char *definition = role_template_frontmatter(NULL, name);
+      int rc = delegate_permissions_for_role(name, definition, &perms);
+      free(definition);
+
+      cJSON *p = cJSON_AddObjectToObject(o, "permissions");
+      /* A role whose permissions will not resolve holds NONE, and a delegate for
+         it is refused. Say so here rather than showing an empty set that reads
+         like a role which simply grants nothing. */
+      cJSON_AddBoolToObject(p, "resolved", rc == 0);
+      cJSON *held = cJSON_AddArrayToObject(p, "held");
+      for (int i = 0; rc == 0 && i < perms.count; i++)
+      {
+         cJSON *g = cJSON_CreateObject();
+         cJSON_AddStringToObject(g, "name", perms.grants[i].name);
+         cJSON_AddStringToObject(g, "enforced_at", perms.grants[i].enforced_at);
+         cJSON *scopes = cJSON_AddArrayToObject(g, "scopes");
+         for (int j = 0; j < perms.grants[i].scope_count; j++)
+            cJSON_AddItemToArray(scopes, cJSON_CreateString(perms.grants[i].scopes[j]));
+         cJSON_AddItemToArray(held, g);
+      }
+      cJSON *unenforced = cJSON_AddArrayToObject(p, "unenforced");
+      for (int i = 0; rc == 0 && i < perms.unenforced_count; i++)
+         cJSON_AddItemToArray(unenforced, cJSON_CreateString(perms.unenforced[i]));
+      cJSON *denied = cJSON_AddArrayToObject(p, "denied_tools");
+      for (int i = 0; rc == 0 && i < perms.denied_tool_count; i++)
+         cJSON_AddItemToArray(denied, cJSON_CreateString(perms.denied_tools[i]));
+   }
+
    free(raw);
    return emit(resp, cap, o);
 }
@@ -405,59 +450,9 @@ int route_roundtable_show(const char *name, char *resp, int cap)
  * their own appliance. Read the same records runtime-web's adminUsername() does,
  * in the same order, so the two layers cannot disagree — a mismatch would let the
  * browser offer an action the server then refuses. */
-static void roundtable_admin_webuser(char *out, size_t out_n)
-{
-   if (!out || !out_n)
-      return;
-   out[0] = '\0';
-   /* aimee_home() rather than config_default_dir(): the same directory (that
-    * wrapper just adds a /tmp fallback), but it does not drag the config module
-    * into every translation unit that links this file. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-   {
-      snprintf(out, out_n, "admin");
-      return;
-   }
-   const char *dirs[] = {"bootstrap-replaced", "bootstrap-user"};
-   for (size_t i = 0; i < sizeof(dirs) / sizeof(dirs[0]); i++)
-   {
-      char path[RT_PRESET_PATH_MAX];
-      snprintf(path, sizeof(path), "%s/webchat/%s", home, dirs[i]);
-      FILE *f = fopen(path, "r");
-      if (!f)
-         continue;
-      char line[256] = "";
-      if (!fgets(line, sizeof(line), f))
-      {
-         fclose(f);
-         continue;
-      }
-      fclose(f);
-      line[strcspn(line, "\r\n")] = '\0';
-      /* bootstrap-user is "<explicit|generated>:<name>"; bootstrap-replaced is a
-       * bare name. Take whatever follows the first ':' when one is present. */
-      const char *name = strchr(line, ':');
-      name = name ? name + 1 : line;
-      while (*name == ' ')
-         name++;
-      if (*name)
-      {
-         snprintf(out, out_n, "%s", name);
-         return;
-      }
-   }
-   /* No record at all: keep the previous behaviour rather than opening the gate. */
-   snprintf(out, out_n, "admin");
-}
-
 int route_roundtable_mutation_authorized(const char *principal)
 {
-   if (!principal || strncmp(principal, "webuser:", 8) != 0)
-      return 0;
-   char admin[128];
-   roundtable_admin_webuser(admin, sizeof(admin));
-   return admin[0] && strcmp(principal + 8, admin) == 0;
+   return appliance_admin_principal_authorized(principal);
 }
 
 int roundtable_policy_config_key(const char *key)
@@ -1121,4 +1116,201 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap)
    free(json);
    cJSON_Delete(root);
    return (n >= 0 && n < cap) ? 200 : err_json(resp, cap, 500, "response too large");
+}
+
+/* GET /v1/cli/manifest -- the method -> route map, read off the live registry.
+ *
+ * The thin client used to carry this map compiled in: 245 rows generated from
+ * g_v1_routes by scripts/gen-cli-v1-routes.py, with a lint check diffing the
+ * two. That kept the SOURCE TREE consistent with itself and could say nothing
+ * about a deployed client against a deployed server, which is the only pairing
+ * that exists at runtime. A client 324 commits behind its server could not
+ * reach anything added in between and reported "has no /v1 route" --
+ * indistinguishable from a typo. The static copy had also silently drifted: it
+ * was missing workspace.mirror-sync, a route the server had all along.
+ *
+ * `op` is the method the client asks for. `async` marks rows whose POST returns
+ * a run handle to poll rather than a final response -- the client must know
+ * that to drive the request and cannot infer it from the path.
+ *
+ * RM_PREFIX rows are omitted: their path carries an inline {id} the client
+ * substitutes, which is a different marshalling contract
+ * (cli_v1_pathid_route_for_method). Rows with no `op` are not
+ * method-addressable at all.
+ */
+/* POST /v1/commands/<group>.<verb> -- invoke a command from THE registry.
+ *
+ * Until this existed, aimee_command_register() had no consumer that could
+ * actually CALL anything: neither aimee_command_find_method nor a command's own
+ * handler had a production caller, so a registered command appeared in listings
+ * and could not be invoked from any surface. That is worse than not appearing --
+ * command_registry.h's whole point is that a listed capability is a reachable one.
+ *
+ * The body is the command's argument object, passed to its handler unchanged;
+ * shaping it is the surface's job, not the handler's. */
+int rh_command_invoke(const route_req_t *rq, char *resp, int cap)
+{
+   if (!rq->id || !rq->id[0])
+      return err_json(resp, cap, 400, "missing command method");
+
+   /* A plugin instance may have attached since the last refresh; converge before
+    * deciding a command does not exist. */
+   aimee_module_commands_refresh(2000);
+
+   const aimee_command_t *cmd = aimee_command_find_method(rq->id);
+   if (!cmd || !cmd->fn)
+      return err_json(resp, cap, 404, "no such command");
+   if (!(cmd->surfaces & AIMEE_SURFACE_RPC))
+      return err_json(resp, cap, 404, "command is not on the RPC surface");
+
+   cJSON *args = NULL;
+   if (rq->body && rq->body_len > 0)
+   {
+      args = cJSON_ParseWithLength(rq->body, (size_t)rq->body_len);
+      if (!args)
+         return err_json(resp, cap, 400, "invalid JSON body");
+   }
+
+   cJSON *result = cmd->fn(args, cmd->ud);
+   cJSON_Delete(args);
+   if (!result)
+      return err_json(resp, cap, 502, "command handler failed");
+
+   cJSON *root = cJSON_CreateObject();
+   if (!root)
+   {
+      cJSON_Delete(result);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   cJSON_AddStringToObject(root, "status", "ok");
+   cJSON_AddItemToObject(root, "result", result);
+   return emit(resp, cap, root);
+}
+
+int rh_cli_manifest(const route_req_t *rq, char *resp, int cap)
+{
+   (void)rq;
+   cJSON *root = cJSON_CreateObject();
+   cJSON *routes = cJSON_CreateArray();
+   if (!root || !routes)
+   {
+      cJSON_Delete(root);
+      cJSON_Delete(routes);
+      return err_json(resp, cap, 500, "out of memory");
+   }
+   for (int i = 0; g_v1_routes[i].verb; i++)
+   {
+      const http_route_t *e = &g_v1_routes[i];
+      if (!e->op || !e->op[0] || e->kind != RM_EXACT)
+         continue;
+      if (e->handler != rh_dispatch_op && e->handler != rh_dispatch_op_async)
+         continue;
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         continue;
+      cJSON_AddStringToObject(row, "op", e->op);
+      cJSON_AddStringToObject(row, "verb", e->verb);
+      cJSON_AddStringToObject(row, "path", e->path);
+      if (e->handler == rh_dispatch_op_async)
+         cJSON_AddBoolToObject(row, "async", 1);
+      cJSON_AddItemToArray(routes, row);
+   }
+   /* Commands a MODULE declared, which no compiled route table can know.
+    *
+    * A plugin module hosts one MCP server or pluggy plugin and declares its
+    * tools over the bus; those commands exist only while that instance is
+    * attached, so they cannot come from g_v1_routes. Refreshing here rather
+    * than at boot is what lets an instance that started after the daemon show
+    * up without a restart -- the TTL keeps that from costing a bus round trip
+    * per attached instance on every request.
+    *
+    * They are added to the SAME `routes` array on purpose: a client already
+    * knows how to read it, and the whole point of the command registry is that
+    * one declaration reaches every surface. A dynamic row that collides with a
+    * static one is skipped, so a plugin can never shadow a built-in route. */
+   aimee_module_commands_refresh(2000);
+   for (size_t i = 0; i < aimee_command_count(); i++)
+   {
+      const aimee_command_t *c = aimee_command_at(i);
+      if (!c || !(c->surfaces & AIMEE_SURFACE_RPC))
+         continue;
+      char op[192];
+      snprintf(op, sizeof op, "%s.%s", c->group, c->verb);
+      int shadowed = 0;
+      cJSON *existing = NULL;
+      cJSON_ArrayForEach(existing, routes)
+      {
+         const cJSON *existing_op = cJSON_GetObjectItemCaseSensitive(existing, "op");
+         if (cJSON_IsString(existing_op) && strcmp(existing_op->valuestring, op) == 0)
+         {
+            shadowed = 1;
+            break;
+         }
+      }
+      if (shadowed)
+         continue;
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         continue;
+      cJSON_AddStringToObject(row, "op", op);
+      cJSON_AddStringToObject(row, "verb", "POST");
+      /* The FULL path, not the prefix. An earlier draft advertised the bare
+       * "/v1/commands/" here, which is a route no client can reach -- exactly
+       * the "listed but unroutable" failure the registry exists to remove. */
+      char path[224];
+      snprintf(path, sizeof path, "/v1/commands/%s", op);
+      cJSON_AddStringToObject(row, "path", path);
+      cJSON_AddBoolToObject(row, "module", 1);
+      if (c->summary && c->summary[0])
+         cJSON_AddStringToObject(row, "summary", c->summary);
+      cJSON_AddItemToArray(routes, row);
+   }
+
+   /* Bumped only when the SHAPE of this document changes. A client that does
+    * not recognise the version must say so rather than guess at the rows. */
+   cJSON_AddNumberToObject(root, "manifest_version", 1);
+   cJSON_AddStringToObject(root, "server_version", AIMEE_VERSION);
+   cJSON_AddItemToObject(root, "routes", routes);
+   /* The catalogue a human is shown. `routes` says how to ADDRESS a method;
+    * this says what exists and what it is for. Both answer "what can I do?",
+    * so both ride one document and one round trip. Absent rather than empty if
+    * it cannot be built: a client that gets no catalogue falls back to its
+    * bootstrap list and says so, which beats rendering an empty command list as
+    * though the server had none. */
+   cJSON *commands = cli_command_defs_to_json();
+   if (commands)
+      cJSON_AddItemToObject(root, "commands", commands);
+   /* How the words a user types become a method. `routes` says how to ADDRESS a
+    * method and `commands` says what exists; without this the client can render
+    * a new command in help and still not be able to invoke it. */
+   cJSON *dispatch = cli_dispatch_defs_to_json();
+   if (dispatch)
+      cJSON_AddItemToObject(root, "dispatch", dispatch);
+   /* The last link: a client that knows a command exists, how to address it and
+    * how to reach it still refuses to send anything unless it knows what body
+    * to build. "Takes no arguments" is the part of that which is pure data;
+    * the argument specs are the part that describes how words become fields.
+    * Both are `marshal` rows — one list, distinguished by whether `args` is
+    * the string "none" or an object — so a client reads one thing rather than
+    * learning where to look for each kind. */
+   cJSON *marshal = cli_marshal_defs_to_json();
+   if (marshal)
+   {
+      cJSON *specs = cli_argspec_defs_to_json();
+      /* Detached one at a time rather than moved wholesale: cJSON has no
+       * splice, and re-parenting the array's children by hand is how lists get
+       * silently truncated. */
+      while (specs && cJSON_GetArraySize(specs) > 0)
+         cJSON_AddItemToArray(marshal, cJSON_DetachItemFromArray(specs, 0));
+      cJSON_Delete(specs);
+      cJSON_AddItemToObject(root, "marshal", marshal);
+   }
+
+   char *s = cJSON_PrintUnformatted(root);
+   int n = s ? snprintf(resp, (size_t)cap, "%s", s) : -1;
+   free(s);
+   cJSON_Delete(root);
+   if (n <= 0 || n >= cap)
+      return err_json(resp, cap, 500, "cli manifest too large");
+   return 200;
 }

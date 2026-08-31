@@ -3,10 +3,11 @@
  * Serves /v1/health, /v1/version, /v1/capabilities on a plain TCP port.
  * Runs in a background pthread; disabled when port == 0. */
 #include "aimee.h"
+#include "command_registry.h"
 #include "config.h"
-#include "config_database.h" /* §2c: config_resolve_embedder_dims / is_pinned */
-#include "db2_pool.h"        /* db2_pool_stats — health reports pool starvation */
-#include "lifecycle.h"       /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
+#include "config_database.h"        /* §2c: config_resolve_embedder_dims / is_pinned */
+#include "modules/db2/c/db2_pool.h" /* db2_pool_stats — health reports pool starvation */
+#include "lifecycle.h"              /* §2c: db2_dim_change_reset / db2_probe_embedder_dim */
 #include "kb_curator_queue.h"
 #include "kb_http.h"
 #include "kb_http_code.h"
@@ -20,8 +21,8 @@
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
 #include "kb_service_kb.h"
-#include "db2/kb_service_backend.h"
-#include "db2/canonical_index.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/canonical_index.h"
 #include "kb_enroll.h"
 #include "kb_pki.h"
 #include "kb_paths.h"
@@ -37,7 +38,7 @@
 #include "kb_http_rate.h"
 #include "kb_http_servers.h"
 #include "kb_http_telemetry.h"
-#include "db2/enrollments.h"
+#include "modules/db2/c/enrollments.h"
 #include "kb_verifier.h"
 #include "kb_auth_oidc.h"
 #include "kb_identity.h"
@@ -46,16 +47,16 @@
 #include "kb_http_grants.h"
 #include "kb_http_team.h"
 #include "kb/http/openapi_data.h"
-#include "db2/lifecycle.h"
-#include "db2/pgvec_kb_service.h"
-#include "db2/kb_vectors.h"
-#include "db2/kb_payload.h"
-#include "db2/vector_index_ops.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/corpus_jobs.h"
-#include "db2/code_index.h"
-#include "db2/pgvec_transport.h"
-#include "db2/sketch.h"
+#include "modules/db2/c/lifecycle.h"
+#include "modules/db2/c/pgvec_kb_service.h"
+#include "modules/db2/c/kb_vectors.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/corpus_jobs.h"
+#include "modules/db2/c/code_index.h"
+#include "modules/db2/c/pgvec_transport.h"
+#include "modules/db2/c/sketch.h"
 #include "kb.h"
 #include "kb_intel_payload.h"
 #include "kb/kb_login_throttle.h"
@@ -70,9 +71,7 @@
 extern kb_service_ctx_t *g_kb_ctx;
 int kb_dispatch_action_json(const char *action, const char *body, int body_len, char *out_buf,
                             int out_cap);
-
 /* ── response helpers ───────────────────────────────────────────────────── */
-
 void write_all(int fd, const char *buf, int len)
 {
    int sent = 0;
@@ -200,10 +199,7 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 
    if (strcmp(path, "/v1/capabilities") == 0)
    {
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"capabilities\":[\"memory\",\"search\",\"index\"],"
-               "\"version\":\"%s\"}",
-               AIMEE_VERSION);
+      kb_http_capabilities_json(out_buf, (size_t)out_cap, aimee_command_agent_surfaces_json());
       return 200;
    }
 
@@ -348,85 +344,6 @@ static int qparam(const char *qs, const char *key, char *out, size_t out_cap)
 }
 
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message);
-
-/* Extract a JSON string field value from body into out. */
-
-/* Resolve POST /v1/search scope before either the facet or ranked branch.
- * Omission is local/current, never all: a verified project credential can
- * supply current; otherwise the caller must provide a stable project id.
- * Cross-project search remains available only as explicit scope=all. */
-static int kb_search_project_scope(const char *body, char *project, size_t project_cap,
-                                   int *all_projects, char *out_buf, int out_cap)
-{
-   project[0] = '\0';
-   *all_projects = 0;
-   cJSON *root = cJSON_Parse(body ? body : "{}");
-   if (!root)
-      return json_body_error(out_buf, out_cap, 400, "invalid json");
-   const cJSON *jp = cJSON_GetObjectItemCaseSensitive(root, "project");
-   const cJSON *js = cJSON_GetObjectItemCaseSensitive(root, "scope");
-   const char *scope = cJSON_IsString(js) ? js->valuestring : "current";
-   if (js && !cJSON_IsString(js))
-   {
-      cJSON_Delete(root);
-      return json_body_error(out_buf, out_cap, 400, "scope must be current or all");
-   }
-   if (strcmp(scope, "current") != 0 && strcmp(scope, "all") != 0)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":{\"type\":\"invalid_scope\",\"message\":\"scope must be current or "
-               "all\"}}");
-      return 400;
-   }
-   if (cJSON_IsString(jp) && jp->valuestring[0])
-   {
-      if (strlen(jp->valuestring) >= project_cap)
-      {
-         cJSON_Delete(root);
-         return json_body_error(out_buf, out_cap, 400, "project id is too long");
-      }
-      snprintf(project, project_cap, "%s", jp->valuestring);
-   }
-
-   const char *verified_kind = NULL;
-   const char *verified_id = NULL;
-   int verified = kb_reqctx_verified_scope(&verified_kind, &verified_id);
-   if (strcmp(scope, "all") == 0)
-   {
-      cJSON_Delete(root);
-      if (verified)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":{\"type\":\"forbidden\",\"message\":\"a scoped credential "
-                  "cannot search all projects\"}}");
-         return 403;
-      }
-      *all_projects = 1;
-      return 0;
-   }
-
-   if (!project[0] && verified && strcmp(verified_kind, "project") == 0)
-      snprintf(project, project_cap, "%s", verified_id);
-   if (project[0] && verified && strcmp(verified_kind, "project") == 0 &&
-       strcmp(project, verified_id) != 0)
-   {
-      cJSON_Delete(root);
-      snprintf(out_buf, (size_t)out_cap,
-               "{\"error\":{\"type\":\"forbidden\",\"message\":\"project is outside the "
-               "verified credential scope\"}}");
-      return 403;
-   }
-   cJSON_Delete(root);
-   if (project[0])
-      return 0;
-   snprintf(out_buf, (size_t)out_cap,
-            "{\"error\":{\"type\":\"scope_required\",\"message\":\"no active project is "
-            "available; pass project or scope=all explicitly\"}}");
-   return 409;
-}
-
-/* Extract a JSON integer field from body. Returns default_val if not found. */
 
 static int json_body_error(char *out_buf, int out_cap, int status, const char *message)
 {
@@ -619,9 +536,11 @@ static void purge_fence_current(const char *project, char *out, size_t out_cap)
 }
 /* ── Phase 5 extended routing ────────────────────────────────────────────── */
 
-int kb_http_route_ex(const char *method, const char *path, const char *query_string,
-                     const char *auth_header, const char *bearer_token, const char *body,
-                     int body_len, char *out_buf, int out_cap)
+int kb_http_route_ex_context_impl(const char *method, const char *path, const char *query_string,
+                                  const char *auth_header, const char *bearer_token,
+                                  const char *body, int body_len,
+                                  const kb_principal_t *asserted_actor,
+                                  const kb_request_context_t *resolved, char *out_buf, int out_cap)
 {
    /* Credential bootstrap, both pre-auth: the login surface is how a caller with
     * no credential gets one (§3), and the enrollment token IS the credential.
@@ -643,7 +562,6 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       if (tk >= 0)
          return tk;
    }
-
    /* Auth + scope authorization via the pluggable Verifier seam (kb_verifier.h): the built-in
     * kb-token verifier validates the configured bearer (which may be self-describing
     * "scope:<kind>:<id>:<secret>") and yields the verified scope. Per verify-then-trust, the
@@ -727,19 +645,20 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          }
       }
 
-      /* console-admin containment: the web console's scope:console-admin bearer
-       * is authorized ONLY for its fixed route allowlist (kb_route_acl.c); every
-       * other route is a 403 regardless of scope target. Server-side enforcement,
-       * defence-in-depth with the console's own role gate. */
-      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0 &&
-          !kb_route_acl_console_admin_allows(method, path))
+      /* Event-bus control-web decisions are authoritative and fail closed. */
+      if (vr.scope_kind[0] && strcmp(vr.scope_kind, KB_SCOPE_KIND_CONSOLE_ADMIN) == 0)
       {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"forbidden: console-admin credential not permitted for %s %s\"}",
-                  method, path);
-         return 403;
+         int allowed = 0;
+         if (kb_route_acl_console_admin_authorize(method, path, &allowed) != 0)
+            return json_body_error(out_buf, out_cap, 503, "control-web authorization unavailable");
+         if (!allowed)
+            return json_body_error(out_buf, out_cap, 403,
+                                   "forbidden: console-admin credential not permitted");
       }
    }
+   if (kb_reqctx_apply_asserted(asserted_actor, resolved) != 0)
+      return json_body_error(out_buf, out_cap, 403,
+                             "caller context conflicts with credential identity");
    /* Tenancy routes (P1 slice 4): /v1/team*, /v1/project*. Reachable for any
     * authenticated caller; the org-admin capability for writes is enforced at the
     * DB layer (RLS write policies), and reads are RLS-scoped to the caller's teams.
@@ -1019,7 +938,10 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       return kb_dispatch_action_json(action, body, body_len, out_buf, out_cap);
    }
 
-   /* POST /v1/search */
+   int erasure_status =
+       kb_http_subject_erasure_route(method, path, body, !vr.scope_kind[0], out_buf, out_cap);
+   if (erasure_status >= 0)
+      return erasure_status;
    /* POST /v1/implements {"topic": "..."} — deep-curator doc<->code bridge. */
    if (strcmp(path, "/v1/implements") == 0)
    {
@@ -1196,8 +1118,8 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
 
       char project[256] = "";
       int all_projects = 0;
-      int scope_status =
-          kb_search_project_scope(body, project, sizeof(project), &all_projects, out_buf, out_cap);
+      int scope_status = kb_http_search_project_scope(body, project, sizeof(project), &all_projects,
+                                                      out_buf, out_cap);
       if (scope_status)
          return scope_status;
 
@@ -1238,6 +1160,13 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"search unavailable\"}");
          return 503;
+      }
+
+      int backend_status = kb_http_search_validate_backend(raw, out_buf, out_cap);
+      if (backend_status)
+      {
+         free(raw);
+         return backend_status;
       }
 
       char used_mode[64] = "rrf";
@@ -1600,49 +1529,41 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          return 503;
       }
 
-      kb_stats_t stats;
-      if (kb_build(kb_path, project, embed_cmd, force, &stats) != 0)
+      /* Queue it. Do not do it here.
+       *
+       * A build is a scan plus doc embedding plus code embedding, and its cost
+       * is a property of the corpus, not of the service being healthy: on a
+       * 3825-file checkout that is minutes of embedder time. Doing it inline
+       * made the caller hold an HTTP request open for the whole of it, and the
+       * first bound to expire anywhere in that chain turned a build that was
+       * progressing normally into a hard failure -- observed as
+       * "knowledge service /v1/code/build did not respond" with the embedder
+       * logging BrokenPipeError, after the kb dropped a connection whose embed
+       * batch had simply taken longer than the client's patience.
+       *
+       * Embedding is asynchronous by design. It completes when it completes,
+       * a second from now or a day from now, and nothing waits on it. The
+       * queue worker performs the SAME build -- doc vectors, canonical index,
+       * and code vectors -- so queueing loses no work.
+       *
+       * INTERACTIVE priority is what makes this safe to queue: an explicit
+       * build request jumps the periodic sweep instead of sitting behind it.
+       * Starvation behind the global backlog is what made someone inline this
+       * work in the first place; priority is the fix for that, not blocking. */
+      int queued =
+          db2_kb_ingest_queue_enqueue(project, kb_path, "", force, DB2_KB_INGEST_PRIO_INTERACTIVE);
+      if (queued < 0)
       {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"kb build failed\"}");
-         return 500;
-      }
-      /* Canonical code index scan (symbols/definitions), mirroring the async
-       * ingest worker so build and ingest produce the same index. */
-      int inspected = 0;
-      /* >= 0 is the scanned-file count (success); only a negative is an error. */
-      if (canonical_index_scan_project(project, kb_path, force, &inspected) < 0)
-      {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"canonical index scan failed\"}");
-         return 500;
-      }
-
-      /* A thin client pushes source into the canonical index because this KB
-       * process cannot see the client's path.  `kb build` used to stop after the
-       * inaccessible filesystem scan above and report a misleading all-zero
-       * success, leaving the requested project behind the global curator backlog.
-       * Finish this project from its canonical DB2 copy now: code vectors and
-       * prose/document vectors are part of a completed build, not eventual
-       * side-effects of unrelated background sweeps. */
-      kb_code_embed_result_t code_embed;
-      memset(&code_embed, 0, sizeof(code_embed));
-      if (kb_code_embed_refresh(project, "changed_files", NULL, 0, 0, 0, 0, &code_embed) != 0 ||
-          code_embed.embedded + code_embed.skipped_unchanged < code_embed.estimated_points)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"project code embedding refresh failed\"}");
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue build\"}");
          return 503;
       }
-      int doc_refreshed = kb_doc_refresh(project, embed_cmd, 200);
-      int doc_backfilled = kb_doc_embed_backfill(project, embed_cmd, 200);
-      if (doc_refreshed < 0 || doc_backfilled < 0)
-      {
-         snprintf(out_buf, (size_t)out_cap,
-                  "{\"error\":\"project document embedding refresh failed\"}");
-         return 503;
-      }
-      stats.embeddings_added += (int)code_embed.embedded + doc_refreshed + doc_backfilled;
-      db2_kb_runtime_state_set_now("last_ingest_at");
-      kb_http_write_build_stats(out_buf, out_cap, project, &stats);
+      /* No explicit wake: the workers park on a 2s timed wait and drain the
+       * queue, which is how /v1/code/scan already hands off. */
+      snprintf(out_buf, (size_t)out_cap,
+               "{\"status\":\"ok\",\"queued\":true,\"project\":\"%s\","
+               "\"files_indexed\":0,\"chunks_added\":0,\"embeddings_added\":0,"
+               "\"reason\":\"queued\"}",
+               project);
       return 200;
    }
 
@@ -1939,9 +1860,9 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          timeout = 0;
 
       db2_kb_service_async_queue_stats_t stats;
-      int rc =
-          db2_kb_service_async_queue_drain(embed_cmd, timeout, pgvec_kb_vector_collection_name(),
-                                           kb_http_vector_upsert_document, NULL, &stats);
+      int rc = db2_kb_service_async_queue_drain(session_id(), embed_cmd, timeout,
+                                                pgvec_kb_vector_collection_name(),
+                                                kb_http_vector_upsert_document, NULL, &stats);
       if (rc != 0)
       {
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"queue drain failed\"}");
@@ -1997,12 +1918,17 @@ int kb_http_route_ex(const char *method, const char *path, const char *query_str
          snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge store unavailable\"}");
          return 503;
       }
+      /* Repair queues for the same reason build does: it embeds, and embedding is
+       * asynchronous, full stop. An operator asking for a repair gets a durable
+       * commitment that it will happen, not an HTTP request held open across
+       * minutes of embedder time that reports failure the moment any bound in
+       * the chain expires. force=1 is preserved as the queued job's force flag. */
       kb_stats_t stats;
       memset(&stats, 0, sizeof(stats));
-      if (kb_build(kb_path, project, embed_cmd, 1, &stats) != 0)
+      if (db2_kb_ingest_queue_enqueue(project, kb_path, "", 1, DB2_KB_INGEST_PRIO_INTERACTIVE) < 0)
       {
-         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"knowledge repair failed\"}");
-         return 500;
+         snprintf(out_buf, (size_t)out_cap, "{\"error\":\"could not queue knowledge repair\"}");
+         return 503;
       }
       int pos = 0;
       pos = js_appendf(out_buf, pos, out_cap, "{\"status\":\"ok\",\"project\":\"");

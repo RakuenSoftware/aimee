@@ -20,9 +20,14 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+#include <aimee/audit/audit_worm.h>
+#include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/bus_host.h>
 #include <aimee/core/event_bus/bus_ring.h>
 #include <aimee/core/event_bus/bus_wire.h>
+
+#include "cJSON.h"
+#include "platform_test_util.h"
 
 static void must(int cond, const char *what)
 {
@@ -128,6 +133,10 @@ static bus_host_config_t cfg(void)
 static uint64_t g_seq[512];
 static uint32_t g_kind[512];
 static uint32_t g_n;
+static uint32_t g_loss_n;
+static bus_frame_t g_loss_frame;
+static uint8_t g_loss_payload[64];
+static uint32_t g_loss_payload_len;
 static void tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
 {
    (void)pl;
@@ -137,6 +146,41 @@ static void tap(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
    g_seq[g_n] = f->seq;
    g_kind[g_n] = f->event_kind;
    g_n++;
+}
+static void loss_sink(void *ctx, const bus_frame_t *f, const uint8_t *pl, uint32_t pn)
+{
+   (void)ctx;
+   must(pn <= sizeof g_loss_payload, "loss payload fits recorder");
+   g_loss_frame = *f;
+   g_loss_payload_len = pn;
+   if (pn)
+      memcpy(g_loss_payload, pl, pn);
+   g_loss_n++;
+   obs_bus_record_loss(NULL, f, pl, pn);
+}
+
+static int worm_count(const char *action)
+{
+   long total = 0;
+   cJSON *rows = audit_worm_read_page(0, 256, &total);
+   must(rows != NULL && total >= 0, "read WORM loss rows");
+   int count = 0;
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, rows)
+   {
+      const cJSON *value = cJSON_GetObjectItemCaseSensitive(row, "action");
+      if (cJSON_IsString(value) && strcmp(value->valuestring, action) == 0)
+         count++;
+   }
+   cJSON_Delete(rows);
+   return count;
+}
+
+static int worm_sink(const char *role, const char *principal, const char *action,
+                     const char *subject, const char *verdict, const char *detail, void *ctx)
+{
+   (void)ctx;
+   return audit_worm_append(role, principal, action, subject, verdict, detail);
 }
 static uint32_t tap_count_kind(uint32_t kind)
 {
@@ -162,7 +206,9 @@ static void test_block_holds_then_delivers(void)
    bus_host_t h;
    must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
    g_n = 0;
+   g_loss_n = 0;
    bus_host_set_tap(&h, tap, NULL);
+   bus_host_set_loss_sink(&h, loss_sink, NULL);
 
    client_t pub, obs;
    attach(&h, 1, &pub);
@@ -300,11 +346,14 @@ static void test_block_fanout_no_double_deliver(void)
 
 static void test_shed_emits_overflow(void)
 {
+   int worm_before = worm_count("bus.overflow");
    bus_host_config_t c = cfg();
    bus_host_t h;
    must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
    g_n = 0;
+   g_loss_n = 0;
    bus_host_set_tap(&h, tap, NULL);
+   bus_host_set_loss_sink(&h, loss_sink, NULL);
 
    client_t pub, obs;
    attach(&h, 1, &pub);
@@ -350,6 +399,14 @@ static void test_shed_emits_overflow(void)
    }
    must(data == lim, "the data allowance was delivered");
    must(overflow == 1, "exactly one overflow for the one shed event");
+   must(g_loss_n == 1 && g_loss_frame.event_kind == BUS_KIND_OVERFLOW,
+        "overflow escaped the capture-only tap through the loss sink");
+   must(g_loss_payload_len == sizeof(bus_overflow_t), "loss sink received typed overflow");
+   bus_overflow_t durable_overflow;
+   memcpy(&durable_overflow, g_loss_payload, sizeof durable_overflow);
+   must(durable_overflow.shed_kind == KIND_A && durable_overflow.dst_slot == obs.reply.handle_id,
+        "durable overflow names the lost kind and destination");
+   must(worm_count("bus.overflow") == worm_before + 1, "overflow reached the durable WORM ledger");
 
    detach(&pub);
    detach(&obs);
@@ -390,11 +447,14 @@ static void test_control_lost_when_reserve_exhausted(void)
 
 static void test_producer_reaped_tap_only(void)
 {
+   int worm_before = worm_count("bus.producer_reaped");
    bus_host_config_t c = cfg();
    bus_host_t h;
    must(bus_host_create(&h, &c, NULL, NULL) == BUS_HOST_OK, "host");
    g_n = 0;
+   g_loss_n = 0;
    bus_host_set_tap(&h, tap, NULL);
+   bus_host_set_loss_sink(&h, loss_sink, NULL);
 
    client_t pub, obs;
    attach(&h, 1, &pub);
@@ -417,6 +477,17 @@ static void test_producer_reaped_tap_only(void)
    must(!h.slots[pub.reply.handle_id].in_use, "producer reaped");
    must(tap_count_kind(BUS_KIND_PRODUCER_REAPED) == before + 1,
         "the discarded in-flight event was named to the tap as producer_reaped");
+   must(g_loss_n == 1 && g_loss_frame.event_kind == BUS_KIND_PRODUCER_REAPED,
+        "producer reap escaped the capture-only tap through the loss sink");
+   must(g_loss_payload_len == sizeof(bus_producer_reaped_t),
+        "loss sink received typed producer reap");
+   bus_producer_reaped_t durable_reap;
+   memcpy(&durable_reap, g_loss_payload, sizeof durable_reap);
+   must(durable_reap.lost_seq != 0 && durable_reap.lost_kind == KIND_A &&
+            durable_reap.src_slot == pub.reply.handle_id,
+        "durable reap names the lost sequence, kind, and producer");
+   must(worm_count("bus.producer_reaped") == worm_before + 1,
+        "producer reap reached the durable WORM ledger");
 
    detach(&pub);
    detach(&obs);
@@ -426,6 +497,12 @@ static void test_producer_reaped_tap_only(void)
 
 int main(void)
 {
+   char worm_path[512];
+   snprintf(worm_path, sizeof worm_path, "%s/aimee-bus-loss-%d.db", platform_tmpdir(),
+            (int)getpid());
+   unlink(worm_path);
+   must(audit_worm_init_at(worm_path) == 0, "initialize WORM loss ledger");
+   must(obs_bus_set_durable_sink(worm_sink, NULL) == 0, "install WORM loss sink");
    printf("test_bus_flow:\n");
    test_block_holds_then_delivers();
    test_block_is_per_producer();
@@ -433,6 +510,9 @@ int main(void)
    test_shed_emits_overflow();
    test_control_lost_when_reserve_exhausted();
    test_producer_reaped_tap_only();
+   must(audit_worm_verify_chain(NULL, 0) == 0, "loss ledger hash chain verifies");
+   audit_worm_close();
+   unlink(worm_path);
    printf("test_bus_flow: OK\n");
    return 0;
 }

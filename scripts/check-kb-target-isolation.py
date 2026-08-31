@@ -24,21 +24,22 @@ ALLOWED_TRANSPORT_SHIMS = {
 
 ALLOWED_AGENT_NAMED_SOURCES = {
     "kb_service_agent.c",
-    "db2/agent_hints.c",
-    "db2/agent_outcomes.c",
-    "db2/kb_service_backend_agent.c",
-    "db2/server_registry.c",
+    "modules/db2/c/agent_hints.c",
+    "modules/db2/c/agent_outcomes.c",
+    "kb/db2_adapters/kb_service_backend_agent.c",
+    "kb/db2_adapters/kb_service_backend_runtime.c",
+    "modules/db2/c/server_registry.c",
 }
 
 STATUS_AUTHORITY_ONLINE_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_custody.c",
-    "db2/management_status_key.c",
-    "db2/management_status_runtime.c",
+    "modules/db2/c/management_status_key.c",
+    "modules/db2/c/management_status_runtime.c",
 }
 
 STATUS_PROVISIONER_PRIVATE_SOURCES = {
     "kb/kb_mgmt_status_provision.c",
-    "db2/management_status_provision.c",
+    "modules/db2/c/management_status_provision.c",
 }
 
 STATUS_AUTHORITY_PRIVATE_SOURCES = (
@@ -137,7 +138,10 @@ def is_forbidden_source(src: str) -> bool:
 def check_makefile(makefile: Path) -> list[str]:
     violations: list[str] = []
 
-    source_vars = ("KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_PG_SRCS")
+    source_vars = (
+        "KB_SRCS", "KB_DATA_SRCS", "KB_CORE_SRCS", "DB2_SRCS", "DB2_PG_SRCS",
+        "DB2_HOST_ADAPTER_SRCS",
+    )
     for var in source_vars:
         for src in words(make_var(makefile, var)):
             if is_forbidden_source(src):
@@ -294,8 +298,8 @@ def plant_test() -> int:
         src_dir = root / "src"
         src_dir.mkdir(parents=True, exist_ok=True)
         (src_dir / "kb_main.c").write_text("/* plant */\n", encoding="utf-8")
-        (src_dir / "db1").mkdir(parents=True, exist_ok=True)
-        (src_dir / "db1" / "db.c").write_text("/* plant */\n", encoding="utf-8")
+        (src_dir / "modules" / "db1").mkdir(parents=True, exist_ok=True)
+        (src_dir / "modules" / "db1" / "db.c").write_text("/* plant */\n", encoding="utf-8")
         cmake = root / "CMakeLists.txt"
         cmake.write_text(
             'set(AIMEE_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")\n'

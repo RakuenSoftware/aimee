@@ -10,8 +10,7 @@
 
 #include "cJSON.h"
 #include "gateway_mutate_wire.h"
-#include "gw_mutate_stats.h"
-#include "msg_session_disable.h"
+#include "msg_session_key.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 
@@ -46,78 +45,46 @@ static void make_mutated(cJSON **container, gw_mutate_ctx_t *ctx, const char *sk
    ctx->mutated = 1;
    ctx->ttl_ms = 3600000;
    snprintf(ctx->skey, sizeof(ctx->skey), "%s", skey);
-   ctx->st.reduced = 1; /* provenance marked (post-replace) */
-   cJSON *pc = container_with("pristine");
-   ctx->pristine = cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(pc, "messages"), 1);
+   ctx->st.reduced = 1; /* provenance marked (post-swap) */
+   /* Stand in for the detached original the seam sets aside when it swaps the
+      reduced array in. Detached, not copied -- so this is simply an array the
+      ctx owns. */
+   cJSON *pc = container_with("original");
+   ctx->original = cJSON_DetachItemFromObjectCaseSensitive(pc, "messages");
    cJSON_Delete(pc);
 }
 
-static void test_4xx_restore_resend(void)
+/* The 4xx/5xx decision and the circuit breaker moved into the Go economizer
+ * module, where they are covered by breaker_test.go (including the round trip
+ * that proves a trip blocks the next reduction). A unit test cannot serve a bus
+ * stage, so what is pinned HERE is the half C kept: the FAIL-SAFE.
+ *
+ * With no module reachable the seam must do nothing at all rather than
+ * half-handle the turn. Inventing a resend would send a customer request twice;
+ * claiming a disable would record a breaker that was never set. Both are worse
+ * than leaving the failed turn exactly as dispatched. */
+static void test_post_status_is_inert_without_a_module(void)
 {
-   msg_session_reset();
-   gw_stat_reset();
    cJSON *c;
    gw_mutate_ctx_t ctx;
-   const char *skey = "0011223344556677";
-   make_mutated(&c, &ctx, skey);
+   make_mutated(&c, &ctx, "0011223344556677");
 
-   assert(strcmp(first_content(c), "reduced") == 0);
-   gw_post_action_t act = gw_buffered_after_status(c, "messages", 413, &ctx);
-   assert(act == GW_POST_RESEND);
-   assert(strcmp(first_content(c), "pristine") == 0); /* restored */
-   assert(msg_session_is_disabled(skey) == 1);        /* disabled */
-   assert(ctx.st.reduced == 0);                       /* provenance cleared */
-   assert(ctx.mutated == 0);                          /* no double handling */
-   assert(gw_stat_get(GW_STAT_4XX_RESTORE_RESEND) == 1);
-   assert(gw_stat_get_reason("session_disabled_set", "4xx") == 1);
-
-   gw_mutate_ctx_free(&ctx);
-   cJSON_Delete(c);
-}
-
-static void test_5xx_disable_no_resend(void)
-{
-   msg_session_reset();
-   gw_stat_reset();
-   cJSON *c;
-   gw_mutate_ctx_t ctx;
-   const char *skey = "8899aabbccddeeff";
-   make_mutated(&c, &ctx, skey);
-
-   gw_post_action_t act = gw_buffered_after_status(c, "messages", 503, &ctx);
-   assert(act == GW_POST_NONE);
-   assert(strcmp(first_content(c), "reduced") == 0); /* NOT restored — no resend */
-   assert(msg_session_is_disabled(skey) == 1);       /* disabled */
-   assert(ctx.st.reduced == 0);
-   assert(gw_stat_get(GW_STAT_5XX_DISABLE) == 1);
-   assert(gw_stat_get_reason("session_disabled_set", "5xx") == 1);
-
-   gw_mutate_ctx_free(&ctx);
-   cJSON_Delete(c);
-}
-
-static void test_2xx_and_nonmutated_noop(void)
-{
-   msg_session_reset();
-   gw_stat_reset();
-   cJSON *c;
-   gw_mutate_ctx_t ctx;
-   const char *skey = "1234567890abcdef";
-   make_mutated(&c, &ctx, skey);
-
-   /* 200: no state change, no disable, stays reduced */
-   assert(gw_buffered_after_status(c, "messages", 200, &ctx) == GW_POST_NONE);
-   assert(strcmp(first_content(c), "reduced") == 0);
-   assert(msg_session_is_disabled(skey) == 0);
+   assert(gw_buffered_after_status(c, "messages", 413, &ctx) == GW_POST_NONE);
+   assert(strcmp(first_content(c), "reduced") == 0); /* body left as dispatched */
+   assert(ctx.mutated == 1);                         /* the turn was not consumed */
+   /* Nothing to assert about counters here any more: C holds none. That the
+      module recorded nothing is proven where the counters live, by it never
+      being called. */
    gw_mutate_ctx_free(&ctx);
    cJSON_Delete(c);
 
-   /* a non-mutated request is entirely inert */
-   cJSON *c2 = container_with("reduced");
+   /* A 5xx is equally inert, and so is the streaming path. */
+   cJSON *c2;
    gw_mutate_ctx_t ctx2;
-   gw_mutate_ctx_init(&ctx2);
-   assert(gw_buffered_after_status(c2, "messages", 400, &ctx2) == GW_POST_NONE);
-   assert(msg_session_count() == 0);
+   make_mutated(&c2, &ctx2, "8899aabbccddeeff");
+   assert(gw_buffered_after_status(c2, "messages", 503, &ctx2) == GW_POST_NONE);
+   gw_stream_disable(&ctx2, "stream_invalid_request");
+   assert(ctx2.mutated == 1);
    gw_mutate_ctx_free(&ctx2);
    cJSON_Delete(c2);
 }
@@ -127,7 +94,6 @@ static void test_2xx_and_nonmutated_noop(void)
  * default-off + identity-less passthrough is what we pin here.) */
 static void test_dark_default_and_identityless(void)
 {
-   gw_stat_reset();
    cJSON *c = container_with("orig");
    gw_mutate_ctx_t ctx;
 
@@ -138,34 +104,6 @@ static void test_dark_default_and_identityless(void)
    assert(strcmp(first_content(c), "orig") == 0);
    gw_mutate_ctx_free(&ctx);
    cJSON_Delete(c);
-}
-
-static void test_stream_disable(void)
-{
-   msg_session_reset();
-   gw_stat_reset();
-   cJSON *c;
-   gw_mutate_ctx_t ctx;
-   const char *skey = "aabbccddeeff0011";
-   make_mutated(&c, &ctx, skey);
-   cJSON_Delete(c); /* streaming holds no restore need */
-
-   /* an invalid-request frame disables; a second call is idempotent (mutated flips off) */
-   gw_stream_disable(&ctx, "stream_invalid_request");
-   assert(msg_session_is_disabled(skey) == 1);
-   assert(ctx.st.reduced == 0);
-   assert(ctx.mutated == 0);
-   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
-   gw_stream_disable(&ctx, "stream_invalid_request"); /* no-op now */
-   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
-   gw_mutate_ctx_free(&ctx);
-
-   /* a non-mutated ctx never disables */
-   gw_mutate_ctx_t idle;
-   gw_mutate_ctx_init(&idle);
-   gw_stream_disable(&idle, "stream_invalid_request");
-   assert(gw_stat_get(GW_STAT_STREAM_ERROR_DISABLE) == 1);
-   gw_mutate_ctx_free(&idle);
 }
 
 static void test_stream_error_classify(void)
@@ -209,28 +147,6 @@ static void test_stream_error_classify(void)
    assert(gw_status_is_invalid_request(200) == 0);
 }
 
-static void test_token_delta_sampling(void)
-{
-   gw_stat_reset();
-   /* 1-in-100 deterministic sample: the 1st call (n=0) is sampled; the next 99 are not. */
-   gw_stat_record_token_delta(1000, 500);
-   assert(gw_stat_token_sample_count() == 1);
-   assert(gw_stat_token_baseline_sum() == 1000);
-   assert(gw_stat_token_reduced_sum() == 500);
-   for (int i = 0; i < 99; i++)
-      gw_stat_record_token_delta(2000, 1900);
-   assert(gw_stat_token_sample_count() == 1); /* none of n=1..99 sampled */
-   gw_stat_record_token_delta(4000, 1000);    /* n=100 -> sampled */
-   assert(gw_stat_token_sample_count() == 2);
-   assert(gw_stat_token_baseline_sum() == 5000);
-   assert(gw_stat_token_reduced_sum() == 1500);
-   /* the §6 monotone-reduction property: sampled reduced sum < baseline sum */
-   assert(gw_stat_token_reduced_sum() < gw_stat_token_baseline_sum());
-   /* negatives ignored */
-   gw_stat_record_token_delta(-1, 5);
-   assert(gw_stat_token_baseline_sum() == 5000);
-}
-
 static void test_no_behavior_change_when_off(void)
 {
    /* With gateway mutation off (economizer tier safe, the default in this test's HOME), the
@@ -252,46 +168,22 @@ static void test_no_behavior_change_when_off(void)
 
 static void test_upstream_provider_gate(void)
 {
-   /* Policy: gateway wire-mutation is OpenAI-only. An Anthropic upstream is ALWAYS excluded,
-    * regardless of the enable state, so its prompt-cached verbatim passthrough is never
-    * mutated. For a non-Anthropic upstream the helper simply mirrors the base enable gate
-    * (off under this test's default config HOME). */
-   assert(gw_mutate_upstream_ok(1) == 0);                      /* Anthropic: never mutate */
-   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: base gate */
+   /* Policy: the upstream's provider no longer decides. Anthropic was excluded while
+    * the gateway had no freeze boundary to keep a folded prefix byte-stable; now that
+    * it persists one per session, BOTH providers follow the same base enable gate.
+    * The gate that matters is the tier, not the vendor. */
+   assert(gw_mutate_upstream_ok(1) == gw_mutate_is_enabled()); /* Anthropic: base gate */
+   assert(gw_mutate_upstream_ok(0) == gw_mutate_is_enabled()); /* non-Anthropic: same */
    assert(gw_mutate_is_enabled() == 0);                        /* default config -> dark */
    assert(gw_mutate_upstream_ok(0) == 0);                      /* so both are off here */
-}
-
-/* gw_stat_to_json: the JSON the /v1/economizer/stats endpoint serves reflects the
- * live counters — flat counters, the sampled token_delta (+ derived pct_reduced), and
- * the {group:{reason:count}} breakdown. */
-static void test_stat_json(void)
-{
-   gw_stat_reset();
-   gw_stat_inc(GW_STAT_MUTATE_ATTEMPTED);
-   gw_stat_inc(GW_STAT_MUTATE_APPLIED);
-   gw_stat_inc_reason("session_disabled_set", "4xx");
-   gw_stat_record_token_delta(1000, 600); /* n=0 is sampled */
-
-   cJSON *o = cJSON_CreateObject();
-   gw_stat_to_json(o);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_attempted")) == 1);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(o, "gateway_mutate_applied")) == 1);
-   cJSON *td = cJSON_GetObjectItem(o, "token_delta");
-   assert(td);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "baseline_sum")) == 1000);
-   assert((int)cJSON_GetNumberValue(cJSON_GetObjectItem(td, "reduced_sum")) == 600);
-   assert(cJSON_GetNumberValue(cJSON_GetObjectItem(td, "pct_reduced")) == 40.0);
-   cJSON *sds = cJSON_GetObjectItem(cJSON_GetObjectItem(o, "reasons"), "session_disabled_set");
-   assert(sds && (int)cJSON_GetNumberValue(cJSON_GetObjectItem(sds, "4xx")) == 1);
-   cJSON_Delete(o);
+   assert(gw_mutate_upstream_ok(1) == 0);                      /* including Anthropic */
 }
 
 int main(void)
 {
    printf("gateway_mutate_wire: ");
-   /* Deterministic defaults for config_load (no aimee.yaml -> economizer safe -> gateway mutation
-    * off). */
+   /* Deterministic defaults for legacy_config_read (no aimee.yaml -> economizer safe -> gateway
+    * mutation off). */
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-gwwire-XXXXXX", platform_tmpdir());
    if (platform_mkdtemp(tmpdir))
@@ -300,16 +192,11 @@ int main(void)
       platform_unsetenv("AIMEE_HOME");
       platform_setenv("AIMEE_NO_CACHE", "1");
    }
-   test_4xx_restore_resend();
-   test_5xx_disable_no_resend();
-   test_2xx_and_nonmutated_noop();
+   test_post_status_is_inert_without_a_module();
    test_dark_default_and_identityless();
-   test_stream_disable();
    test_stream_error_classify();
-   test_token_delta_sampling();
    test_no_behavior_change_when_off();
    test_upstream_provider_gate();
-   test_stat_json();
    printf("ok\n");
    return 0;
 }

@@ -26,7 +26,7 @@
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "aimee.h"            /* KIND_COUNT, required by memory.h */
 #include "memory.h"           /* MEMORY_EMBED_TEST_FIXTURE */
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "../kb/kb_evidence_embed.h"
 
 /* ---- stub embedder ---------------------------------------------------- */

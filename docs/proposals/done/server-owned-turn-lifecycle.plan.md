@@ -1,5 +1,9 @@
 # Implementation plan: server-owned turn lifecycle (Phase 1)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Diff-level plan for the roundtable-approved design
 (`server-owned-turn-lifecycle.md`). All server-side work ships in **one PR**
 (WP-2 and WP-4 are interdependent). Webchat/SPA work (Step 8–9) may land in the
@@ -25,7 +29,7 @@ Steps 4–5 must compile/pass together (the loop loses its only interrupt in 5;
 4 provides the new one). Land 2 before 5 so the ring is the sink before the loop
 stops gating on `conn_alive`.
 
-## Step 1 — Ring schema + owner accessor
+## Step 1: Ring schema + owner accessor
 
 **`src/headers/presence.h` / `src/server/presence.c`**
 - Add `int presence_session_owner(const char *session_id, char *out, size_t n);`
@@ -33,9 +37,9 @@ stops gating on `conn_alive`.
   or 0 if unknown. Used by `chat.graceful_cancel` authz (Step 7).
 - No schema change to the ring itself; the new `turn_delta` `kind` values
   (`text`/`thinking`/`tool_call.<phase>`/`usage`) are carried in the existing
-  `data_json` payload — purely a producer/consumer convention (Steps 2, 9).
+  `data_json` payload, purely a producer/consumer convention (Steps 2, 9).
 
-## Step 2 — `stream_event` / `stream_event_usage` restructure (WP-1, fixes R3 blocker)
+## Step 2: `stream_event` / `stream_event_usage` restructure (WP-1, fixes R3 blocker)
 
 **`src/posix/server_compute.c:78` `stream_event`**
 - **Remove** the top `if (!cctx->conn_alive) return -1;` (`:80`).
@@ -59,8 +63,8 @@ stops gating on `conn_alive`.
   buffer is per-cctx mutable state and tool/usage events can be emitted
   concurrently (parallel tool execution). The whole body of `stream_event`,
   `stream_event_usage`, and `stream_flush_text` runs under the **existing
-  `cctx->write_mutex`** (`server_compute_impl.h:25`, already taken at `:93`) —
-  extended to cover the ring publish + buffer mutation, not just the socket
+  `cctx->write_mutex`** (`server_compute_impl.h:25`, already taken at `:93`),
+extended to cover the ring publish + buffer mutation, not just the socket
   write. This makes each emit atomic per cctx, so non-text events can never
   interleave ahead of buffered text. The mutex is per-cctx (not global), so
   distinct turns do not contend.
@@ -71,10 +75,10 @@ stops gating on `conn_alive`.
   `conn_alive`-guarded socket write.
 
 **Memory:** free `delta_buf` in the worker teardown paths (all
-`compute_ctx_free` sites already centralize cctx cleanup — add the buffer to
+`compute_ctx_free` sites already centralize cctx cleanup. Add the buffer to
 `compute_ctx_free`).
 
-## Step 3 — Always mirror to the ring (WP-1)
+## Step 3: Always mirror to the ring (WP-1)
 
 **`src/server/server_compute_async.c:440`**
 - Replace the `presence_attachment_count(delta_session) > 1` condition with
@@ -82,7 +86,7 @@ stops gating on `conn_alive`.
   presence-tracked turn (single or multi attach). Keep the `!locked` branch that
   copies session/turn id into `cctx`.
 
-## Step 4 — Per-turn cancel registry (WP-4)
+## Step 4: Per-turn cancel registry (WP-4)
 
 **New: `src/server/turn_registry.c` + `src/headers/turn_registry.h`**
 ```
@@ -106,13 +110,13 @@ int           turn_registry_sweep_dead(void);         // crash backstop
   keying on `session_id` is safe. `turn_id` is stored for observability and for
   matching the events stream. **Collision is a bug:** `turn_registry_publish`
   returns `NULL` if the slot is already `in_use`; `chat_stream_worker_pooled`
-  treats `NULL` as a hard error (logs, emits a turn error, does not dispatch) —
-  never a silent overwrite that would orphan a `child_pid`. A regression test
+  treats `NULL` as a hard error (logs, emits a turn error, does not dispatch),
+never a silent overwrite that would orphan a `child_pid`. A regression test
   covers the collision path.
 - **Cancel visibility:** `cancel` is `_Atomic int`; `turn_registry_cancel` does
   `atomic_store(&e->cancel, 1, seq_cst)`, readers `atomic_load`. No torn reads,
   no missed write; the hot-path reader needs no lock.
-- **Lock discipline:** the registry mutex is a **leaf** — never held while
+- **Lock discipline:** the registry mutex is a **leaf**. Never held while
   acquiring a presence or compute lock, and **no caller may hold a presence or
   compute lock across** any registry call. `turn_registry_cancel` /
   `_cancel_all` acquire the registry mutex, set the atomic flag(s) and read
@@ -130,13 +134,13 @@ int           turn_registry_sweep_dead(void);         // crash backstop
 **`src/server/server_compute_async.c` `chat_stream_worker_pooled`**
 - `turn_entry_t *e = turn_registry_publish(sid, turn_id);` immediately before the
   worker run (entry exists before any event can fire). If `e == NULL`
-  (collision — should be impossible under the turn lock): log, emit a turn error,
+  (collision, should be impossible under the turn lock): log, emit a turn error,
   skip dispatch. Record `e->owner = pthread_self()`. Pass `e` (or `sid`) to the
   worker so it caches the pointer.
 - After the worker returns and `presence_turn_release`/`turn_done`:
   `turn_registry_clear(e)`.
 
-## Step 5 — CLI read loop interruptible; remove disconnect-kill (WP-2 + WP-4)
+## Step 5: CLI read loop interruptible; remove disconnect-kill (WP-2 + WP-4)
 
 **`src/posix/server_compute.c` (fork at `:1113`, loop at `:1233`, kill at `:1353`)**
 - After fork in parent: `turn_registry_set_child(sid, pid);` and
@@ -187,7 +191,7 @@ int           turn_registry_sweep_dead(void);         // crash backstop
 - `conn_alive` is no longer read in this function except inside `stream_event`
   (Step 2).
 
-## Step 6 — In-process agent path (WP-4)
+## Step 6: In-process agent path (WP-4)
 
 **`src/posix/server_compute.c:544` `chat_stream_worker_agent` (and `_primary_session` `:638`)**
 - **Integration point (confirmed):** `agent_run_with_tools` (`agent_exec.h:46`)
@@ -205,7 +209,7 @@ int           turn_registry_sweep_dead(void);         // crash backstop
   contract (`agent_exec.h:267`) and `agent_shell`'s `volatile int *interrupted`
   (`agent_shell.h:36`). A WP-6 test cancels mid-tool-call.
 
-## Step 7 — Triggers (WP-4)
+## Step 7: Triggers (WP-4)
 
 **`src/server/server_session.c:37` `handle_session_close`**
 - Before `presence_session_close(sid)`: `turn_registry_cancel(sid);`
@@ -213,14 +217,14 @@ int           turn_registry_sweep_dead(void);         // crash backstop
 **`src/server/server.c:1706` `server_shutdown`** (runs in normal context after the
 signal handler set `g_ctx.running=0`; async-signal-safe by construction)
 - **Ordering (fixes use-after-close race):**
-  1. `turn_registry_cancel_all()` — set every turn's atomic cancel flag.
-  2. `server_compute_async_drain()` (`:1719`) — wait for workers to observe the
+  1. `turn_registry_cancel_all()`: set every turn's atomic cancel flag.
+  2. `server_compute_async_drain()` (`:1719`), wait for workers to observe the
      flag and exit. The `_Atomic` flag + the drain's existing condvar provide the
      visibility barrier; workers exit within one poll tick + reap bound.
   3. **Only then** close every active presence session.
   Presence sessions are **not** closed before the drain, so a still-running
   worker cannot emit onto a torn-down ring. (`presence_publish` is already a
-  no-op for an unknown session — `presence.h` — so even a late emit during the
+  no-op for an unknown session (`presence.h`) so even a late emit during the
   window is safe, but the ordering removes the window entirely.)
 
 **`src/server/server.c` method table (~`:1163`) + new handler**
@@ -231,7 +235,7 @@ signal handler set `g_ctx.running=0`; async-signal-safe by construction)
   `turn_registry_cancel(sid)` and OK. (Fixes the gateway `/stop`, currently a
   no-op.)
 
-## Step 8 — Webchat backend (WP-5)
+## Step 8: Webchat backend (WP-5)
 
 **`webchat/chat.go`**
 - `handleChatSend`: stop passing `r.Context()` as the turn lifeline. Start the
@@ -253,7 +257,7 @@ signal handler set `g_ctx.running=0`; async-signal-safe by construction)
 - Move `touchChatSession` to fire when the proxied stream yields `turn_started`
   (so cwd/title persist even if the browser left mid-turn).
 
-## Step 9 — SPA (WP-5)
+## Step 9: SPA (WP-5)
 
 **`frontend/src/pages/Chat.tsx`** (+ events client)
 - After `POST /api/chat/send` (202), render **only** from
@@ -265,7 +269,7 @@ signal handler set `g_ctx.running=0`; async-signal-safe by construction)
   render the persisted final result (history) for any completed turn, then
   resubscribe at the returned oldest-live cursor.
 
-## Step 10 — Tests + build (WP-6)
+## Step 10: Tests + build (WP-6)
 
 **C (`src/tests/`):**
 - Extend `test_presence.c`: single-attach turn publishes deltas; `conn_alive=0`
@@ -292,7 +296,7 @@ signal handler set `g_ctx.running=0`; async-signal-safe by construction)
 **Go (`webchat/`):**
 - `chat_test.go`: reconnect replays from cursor; observes `turn_done` for a turn
   completed while detached; `gap` → history fallback (fake events endpoint);
-  **202-then-events flow** — a client subscribing only after the 202 still
+  **202-then-events flow**, a client subscribing only after the 202 still
   receives `turn_started` from cursor 0.
 
 **Build & verify:**

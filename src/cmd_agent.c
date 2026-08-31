@@ -1,7 +1,7 @@
 /* cmd_agent.c: agent subcommand CLI (agent list/test/run/add/remove/setup/token) */
 #include "aimee.h"
 #include "util.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent.h"
 #include "agent_config.h"
 #include "agent_tier_lint.h" /* agent_resolved_price */
@@ -61,8 +61,7 @@ static void ag_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void ag_set_default_delegate_roles(agent_t *ag)
 {
-   ag_set_roles_csv(ag,
-                    "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   ag_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,search");
 }
 
 static int ag_looks_like_endpoint(const char *s)
@@ -389,7 +388,7 @@ static void ag_list(app_ctx_t *ctx, int argc, char **argv)
           * another vendor's API. Surfaced so the GUI can show provider+model. */
          cJSON_AddStringToObject(obj, "catalog_provider", agent_catalog_provider(ag));
          /* Canonical `provider:model` reference (the form model_capability_resolve_ref
-          * parses and `aimee model show` accepts) plus the catalog's human label,
+          * parses and `aimee catalog show` accepts) plus the catalog's human label,
           * so any surface that must name a SPECIFIC model — roundtable seats,
           * routing attribution, a picker — can show provider+model without
           * hand-maintained strings. display_name is omitted when the catalog has
@@ -734,7 +733,7 @@ static void ag_parallel(app_ctx_t *ctx, int argc, char **argv)
 
 static void ag_stats(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("agent stats: could not initialize DB1");
    const char *name = (argc >= 1) ? argv[0] : NULL;
    agent_stats_t stats[MAX_AGENTS];
@@ -805,6 +804,21 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             "alphanumeric or . _ -",
             argv[0]);
 
+   /* The endpoint is positional, so a flag typed where it belongs is silently
+    * ACCEPTED as the address: `agent add x --provider openai --endpoint URL` stored
+    * endpoint="--provider", saved, reported the agent ON, and exited 0. The failure
+    * surfaced only at `agent probe`, as "GET --provider/models returned -1".
+    *
+    * Only a leading '-' is refused. That is unambiguous evidence of a mis-parsed
+    * flag — no address starts with one — whereas demanding a scheme would reject
+    * host:port forms this command has never rejected before. */
+   if (!agent_endpoint_valid(argv[1]))
+      fatal("'%s' is not an endpoint — it looks like a flag in the endpoint's place.\n"
+            "  usage: aimee agent add <name> <endpoint> <model> [options]\n"
+            "  the first three arguments are positional, e.g.\n"
+            "    aimee agent add local http://127.0.0.1:8080/v1 my-model",
+            argv[1]);
+
    char old_model[MAX_MODEL_LEN] = {0};
    int was_empty = cfg->agent_count == 0;
    agent_t *ag = agent_find(cfg, argv[0]);
@@ -829,16 +843,19 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
    ag->max_parallel = AGENT_DEFAULT_MAX_PARALLEL;
    ag->enabled = 1;
 
+   int roles_specified = 0;
    for (int i = 3; i < argc; i++)
    {
       if (strcmp(argv[i], "--key") == 0 && i + 1 < argc)
       {
-         /* Preserve the verbatim reference (e.g. "$VAR") for save so a resolved
-          * secret is never written to agents.json; resolve a runtime copy.
-          * Mirrors agent_load_config. */
+         /* Store the verbatim reference (e.g. "$VAR") in BOTH fields and resolve
+          * nothing here. Mirrors agent_load_config, which no longer resolves
+          * either: a resolved secret must never be written to agents.json, and
+          * must never sit in the in-memory registry. agent_api_key_secret()
+          * resolves at the point of use. */
          const char *raw_key = argv[++i];
          snprintf(ag->api_key_disk, MAX_API_KEY_LEN, "%s", raw_key);
-         agent_expand_env(raw_key, ag->api_key, MAX_API_KEY_LEN);
+         snprintf(ag->api_key, MAX_API_KEY_LEN, "%s", raw_key);
       }
       else if (strcmp(argv[i], "--auth-cmd") == 0 && i + 1 < argc)
          snprintf(ag->auth_cmd, MAX_AUTH_CMD_LEN, "%s", argv[++i]);
@@ -847,7 +864,10 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
       else if (strcmp(argv[i], "--provider") == 0 && i + 1 < argc)
          snprintf(ag->provider, sizeof(ag->provider), "%s", argv[++i]);
       else if (strcmp(argv[i], "--roles") == 0 && i + 1 < argc)
+      {
+         roles_specified = 1;
          ag_set_roles_csv(ag, argv[++i]);
+      }
       else if (strcmp(argv[i], "--cost-tier") == 0 && i + 1 < argc)
          ag->cost_tier = atoi(argv[++i]);
       /* Price overrides ($/Mtok). Only meaningful when this deployment does not
@@ -861,6 +881,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-in", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-in 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_IN;
       }
       else if (strcmp(argv[i], "--price-out") == 0 && i + 1 < argc)
       {
@@ -869,6 +892,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-out", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-out 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_OUT;
       }
       else if (strcmp(argv[i], "--price-cached") == 0 && i + 1 < argc)
       {
@@ -877,6 +903,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
             ag_price_usage("--price-cached", argv[i]);
             return;
          }
+         /* Naming the flag is a declaration, including "--price-cached 0" for a
+          * free or subscription-priced seat. */
+         ag->declared |= AGENT_DECL_PRICE_CACHED;
       }
       else if (strcmp(argv[i], "--tools-enabled") == 0 || strcmp(argv[i], "--tools") == 0)
          ag->tools_enabled = 1;
@@ -886,9 +915,19 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag->max_parallel = atoi(argv[++i]);
       else if ((strcmp(argv[i], "--ctx") == 0 || strcmp(argv[i], "--context-window") == 0) &&
                i + 1 < argc)
+      {
          ag->middleware.context_window = atoi(argv[++i]);
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+      }
       else if (strcmp(argv[i], "--max-tokens") == 0 && i + 1 < argc)
          ag->max_tokens = atoi(argv[++i]);
+      /* The model's output ceiling, distinct from --max-tokens (what this
+       * deployment asks for per request). Declared, so 0 is a real value. */
+      else if (strcmp(argv[i], "--max-output") == 0 && i + 1 < argc)
+      {
+         ag->max_output = atoi(argv[++i]);
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+      }
       else if ((strcmp(argv[i], "--timeout-ms") == 0 || strcmp(argv[i], "--timeout") == 0) &&
                i + 1 < argc)
          ag->timeout_ms = atoi(argv[++i]);
@@ -896,8 +935,9 @@ static void ag_add(app_ctx_t *ctx, int argc, char **argv)
          ag_set_exec_roles_csv(ag, argv[++i]);
    }
 
-   /* Default roles if none specified */
-   if (ag->role_count == 0)
+   /* Preserve an explicitly empty --roles selection. Omission gets the small
+    * historical add default, which does not silently authorize review. */
+   if (!roles_specified)
    {
       snprintf(ag->roles[0], sizeof(ag->roles[0]), "summarize");
       snprintf(ag->roles[1], sizeof(ag->roles[1]), "format");
@@ -966,7 +1006,7 @@ static void ag_enable(app_ctx_t *ctx, int argc, char **argv)
  * auth/vault key (unlike `agent add`, which resets the whole record). Fixes the
  * config regression where capable coding delegates were left with just
  * summarize/format/draft. Omit the csv to SHOW the roles; `--reset` restores the
- * full default set. */
+ * default delegate set. Review is an explicit operator grant. */
 static void ag_roles(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
@@ -1129,7 +1169,7 @@ static void ag_local(app_ctx_t *ctx, int argc, char **argv)
    ag->max_parallel = slots;
    ag->middleware.context_window = context_window;
 
-   if (roles_arg && roles_arg[0])
+   if (roles_arg)
       ag_set_roles_csv(ag, roles_arg);
    else
       ag_set_default_delegate_roles(ag);
@@ -1144,7 +1184,7 @@ static void ag_local(app_ctx_t *ctx, int argc, char **argv)
    if (agent_save_config(cfg) != 0)
       fatal("could not save %s", agent_config_path());
    if (ag_set_model_concurrency(ag->model, ag->max_parallel) != 0)
-      fatal("could not update delegate concurrency in %s", config_default_path());
+      fatal("could not update delegate concurrency through the config module");
    if (old_model[0] && strcmp(old_model, ag->model) != 0)
       (void)ag_clear_model_concurrency_if_unused(cfg, old_model);
 
@@ -1351,7 +1391,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans list: could not initialize DB1");
       plan_t plans[20];
       int count = db1_execution_plan_list(plans, 20);
@@ -1364,7 +1404,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "show") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans show: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1402,7 +1442,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "verify") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans verify: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1418,7 +1458,7 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "replay") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("plans replay: could not initialize DB1");
       int pid = atoi(argv[1]);
       plan_t plan;
@@ -1436,478 +1476,9 @@ void cmd_plans(app_ctx_t *ctx, int argc, char **argv)
    }
 }
 
-/* --- cmd_eval --- */
-
-static void print_mem_eval_report(const char *title, const mem_eval_scores_t *scores,
-                                  const mem_eval_latency_t *latency)
-{
-   printf("%s (%d cases)\n", title, scores->n_cases);
-   printf("  MRR:       %.4f\n", scores->mrr);
-   printf("  NDCG@5:    %.4f\n", scores->ndcg_5);
-   printf("  NDCG@10:   %.4f\n", scores->ndcg_10);
-   printf("  Recall@5:  %.4f\n", scores->recall_5);
-   printf("  Recall@10: %.4f\n", scores->recall_10);
-   if (latency && latency->n_queries > 0)
-   {
-      printf("  Latency:   p50=%.3fms p95=%.3fms p99=%.3fms min=%.3fms max=%.3fms (%d queries)\n",
-             latency->p50_ms, latency->p95_ms, latency->p99_ms, latency->min_ms, latency->max_ms,
-             latency->n_queries);
-   }
-}
-
-static void print_mem_eval_qa_report(const char *title, const mem_eval_qa_scores_t *scores,
-                                     const mem_eval_latency_t *latency)
-{
-   printf("%s (%d cases)\n", title, scores->n_cases);
-   printf("  Accuracy:              %.4f\n", scores->accuracy);
-   printf("  Hallucination Rate:    %.4f\n", scores->hallucination_rate);
-   printf("  Exact Match:           %.4f\n", scores->exact_match);
-   printf("  Citation Coverage:     %.4f\n", scores->citation_coverage);
-   printf("  Citation Miss Rate:    %.4f\n", scores->citation_miss_rate);
-   printf("  Answered Cases:        %d\n", scores->answered_cases);
-   printf("  Judged Cases:          %d\n", scores->judged_cases);
-   printf("  Cited Answers:         %d\n", scores->cited_answers);
-   printf("  Uncited Answers:       %d\n", scores->uncited_answers);
-   printf("  Low-Confidence Answers:%d\n", scores->low_confidence_answers);
-   printf("  Avg Retrieved Tokens:  %.1f\n", scores->avg_retrieved_tokens);
-   printf("  Answer Tokens:         prompt=%d completion=%d\n", scores->total_answer_prompt_tokens,
-          scores->total_answer_completion_tokens);
-   printf("  Judge Tokens:          prompt=%d completion=%d\n", scores->total_judge_prompt_tokens,
-          scores->total_judge_completion_tokens);
-   if (latency && latency->n_queries > 0)
-   {
-      printf("  End-to-End Latency:    p50=%.3fms p95=%.3fms p99=%.3fms min=%.3fms max=%.3fms (%d "
-             "cases)\n",
-             latency->p50_ms, latency->p95_ms, latency->p99_ms, latency->min_ms, latency->max_ms,
-             latency->n_queries);
-   }
-}
-
-static int load_live_mem_eval_cases(mem_eval_case_t *cases, int max_cases, char *basis,
-                                    size_t basis_len)
-{
-   if (max_cases <= 0)
-   {
-      if (basis && basis_len > 0)
-         basis[0] = '\0';
-      return 0;
-   }
-
-   memory_t rows[100];
-   int row_cap = max_cases < (int)(sizeof(rows) / sizeof(rows[0]))
-                     ? max_cases
-                     : (int)(sizeof(rows) / sizeof(rows[0]));
-   int n_rows = kb_client_memory_load_eval_corpus(rows, row_cap, basis, basis_len);
-   if (n_rows <= 0)
-      return 0;
-
-   memset(cases, 0, (size_t)max_cases * sizeof(*cases));
-   int n_cases = 0;
-   for (int i = 0; i < n_rows && n_cases < max_cases; i++)
-   {
-      const char *key = rows[i].key;
-      const char *content = rows[i].content;
-      snprintf(cases[n_cases].query, sizeof(cases[n_cases].query), "%s",
-               (key && key[0]) ? key : (content ? content : ""));
-      if (!cases[n_cases].query[0])
-         continue;
-      cases[n_cases].expected_ids[0] = rows[i].id;
-      cases[n_cases].n_expected = 1;
-      n_cases++;
-   }
-   return n_cases;
-}
-
-void cmd_eval(app_ctx_t *ctx, int argc, char **argv)
-{
-   (void)ctx;
-
-   /* Eval Harness CLI (Feature 6) */
-   if (argc < 1)
-      fatal(
-          "usage: aimee eval run <suite_dir>|results [suite]|memory-retrieval|locomo|longmemeval");
-
-   if (strcmp(argv[0], "memory-retrieval") == 0)
-   {
-      /* Parse optional flags: --corpus <path>, --baseline <path>, --update-baseline */
-      const char *corpus_path = "tests/eval/memory_retrieval_corpus.json";
-      const char *baseline_path = "tests/eval/memory_retrieval_baseline.json";
-      int update_baseline = 0;
-      int corpus_explicit = 0;
-
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--corpus") == 0 && i + 1 < argc)
-         {
-            corpus_path = argv[++i];
-            corpus_explicit = 1;
-         }
-         else if (strcmp(argv[i], "--baseline") == 0 && i + 1 < argc)
-         {
-            baseline_path = argv[++i];
-         }
-         else if (strcmp(argv[i], "--update-baseline") == 0)
-         {
-            update_baseline = 1;
-         }
-      }
-
-      /* Try corpus-based eval first. */
-      static mem_eval_case_t corpus_cases[MEM_CORPUS_MAX_CASES];
-      int n_corpus = mem_eval_load_corpus(corpus_path, config_embedder_command_current(NULL),
-                                          corpus_cases, MEM_CORPUS_MAX_CASES);
-
-      if (n_corpus > 0)
-      {
-         mem_eval_scores_t scores;
-         mem_eval_latency_t latency;
-         mem_eval_run_with_latency(corpus_cases, n_corpus, &scores, &latency);
-
-         mem_eval_close_temp_db();
-
-         char title[1024];
-         snprintf(title, sizeof(title), "Memory Retrieval Evaluation — corpus: %s", corpus_path);
-         print_mem_eval_report(title, &scores, &latency);
-
-         if (update_baseline)
-         {
-            if (mem_eval_save_baseline(baseline_path, &scores, 5.0) == 0)
-               printf("Baseline updated: %s\n", baseline_path);
-            else
-               fprintf(stderr, "error: could not write baseline to %s\n", baseline_path);
-            return;
-         }
-
-         /* Regression check against baseline. */
-         mem_eval_scores_t baseline;
-         double threshold_pct = 5.0;
-         if (mem_eval_load_baseline(baseline_path, &baseline, &threshold_pct) == 0)
-         {
-            if (mem_eval_check_regression(&scores, &baseline, threshold_pct) != 0)
-            {
-               fprintf(stderr, "FAIL: memory retrieval regression detected vs %s\n", baseline_path);
-               exit(1);
-            }
-            printf("OK: no regression vs baseline (%s, threshold %.1f%%)\n", baseline_path,
-                   threshold_pct);
-         }
-         else
-         {
-            printf("note: no baseline found at %s (run with --update-baseline to create one)\n",
-                   baseline_path);
-         }
-
-         return;
-      }
-
-      if (corpus_explicit || access(corpus_path, R_OK) == 0)
-      {
-         fprintf(stderr, "error: could not load memory retrieval corpus %s\n", corpus_path);
-         exit(1);
-      }
-
-      /* Corpus not found in an installed/non-repo environment: fall back to live-DB mode. */
-      if (n_corpus < 0)
-         fprintf(stderr, "note: corpus not available at %s, using live database\n", corpus_path);
-
-      mem_eval_case_t cases[100];
-      char basis[64];
-      int n_cases = load_live_mem_eval_cases(cases, 100, basis, sizeof(basis));
-
-      if (n_cases == 0)
-      {
-         printf("No suitable memories in database. Add memories first.\n");
-         return;
-      }
-
-      mem_eval_scores_t scores;
-      mem_eval_latency_t latency;
-      mem_eval_run_with_latency(cases, n_cases, &scores, &latency);
-
-      char title[128];
-      snprintf(title, sizeof(title), "Memory Retrieval Evaluation — live DB (%s)",
-               basis[0] ? basis : "seeded");
-      print_mem_eval_report(title, &scores, &latency);
-
-      return;
-   }
-   else if (strcmp(argv[0], "locomo") == 0)
-   {
-      const char *dataset_path = "data/locomo/locomo10.json";
-      int report_misses = 0;
-      int misses_only = 0;
-      int max_misses = 20;
-      int miss_limit = 5;
-      int max_samples = 0; /* 0 = no cap */
-      const char *progress_path = NULL;
-      const char *miss_progress_path = NULL;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--dataset") == 0 && i + 1 < argc)
-            dataset_path = argv[++i];
-         else if (strcmp(argv[i], "--progress-jsonl") == 0 && i + 1 < argc)
-            progress_path = argv[++i];
-         else if (strcmp(argv[i], "--miss-progress-jsonl") == 0 && i + 1 < argc)
-            miss_progress_path = argv[++i];
-         else if (strcmp(argv[i], "--report-misses") == 0)
-            report_misses = 1;
-         else if (strcmp(argv[i], "--misses-only") == 0)
-            misses_only = 1;
-         else if (strcmp(argv[i], "--max-misses") == 0 && i + 1 < argc)
-            max_misses = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc)
-            miss_limit = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--max-samples") == 0 && i + 1 < argc)
-            max_samples = atoi(argv[++i]);
-      }
-
-      if (!misses_only)
-      {
-         mem_eval_scores_t scores;
-         mem_eval_scores_t support_scores;
-         mem_eval_latency_t latency;
-         mem_eval_latency_t support_latency;
-         int samples = 0;
-         int support_samples = 0;
-         if (mem_eval_run_locomo(dataset_path, max_samples, &scores, &latency, &samples,
-                                 progress_path) != 0)
-            fatal("LoCoMo eval failed for %s", dataset_path);
-         if (mem_eval_run_locomo_session_support(dataset_path, max_samples, &support_scores,
-                                                 &support_latency, &support_samples) != 0)
-         {
-            memset(&support_scores, 0, sizeof(support_scores));
-            memset(&support_latency, 0, sizeof(support_latency));
-         }
-
-         char title[1024];
-         snprintf(title, sizeof(title), "LoCoMo Retrieval Evaluation — %s (%d conversations)",
-                  dataset_path, samples);
-         print_mem_eval_report(title, &scores, &latency);
-         if (support_scores.n_cases > 0)
-         {
-            snprintf(title, sizeof(title),
-                     "LoCoMo Session-Support Retrieval — %s (%d conversations)", dataset_path,
-                     support_samples);
-            print_mem_eval_report(title, &support_scores, &support_latency);
-         }
-      }
-      if (report_misses)
-         (void)mem_eval_report_locomo_misses(dataset_path, max_samples, miss_limit, max_misses,
-                                             stdout, miss_progress_path);
-      return;
-   }
-   else if (strcmp(argv[0], "longmemeval") == 0)
-   {
-      const char *dataset_path = "data/longmemeval/longmemeval_s_cleaned.json";
-      int report_misses = 0;
-      int misses_only = 0;
-      int max_misses = 20;
-      int miss_limit = 5;
-      int max_cases = 0;
-      const char *progress_path = NULL;
-      const char *miss_progress_path = NULL;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--dataset") == 0 && i + 1 < argc)
-            dataset_path = argv[++i];
-         else if (strcmp(argv[i], "--progress-jsonl") == 0 && i + 1 < argc)
-            progress_path = argv[++i];
-         else if (strcmp(argv[i], "--miss-progress-jsonl") == 0 && i + 1 < argc)
-            miss_progress_path = argv[++i];
-         else if (strcmp(argv[i], "--report-misses") == 0)
-            report_misses = 1;
-         else if (strcmp(argv[i], "--misses-only") == 0)
-            misses_only = 1;
-         else if (strcmp(argv[i], "--max-misses") == 0 && i + 1 < argc)
-            max_misses = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--limit") == 0 && i + 1 < argc)
-            miss_limit = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--max-cases") == 0 && i + 1 < argc)
-            max_cases = atoi(argv[++i]);
-      }
-
-      if (!misses_only)
-      {
-         mem_eval_scores_t scores;
-         mem_eval_latency_t latency;
-         int cases = 0;
-         if (mem_eval_run_longmemeval(dataset_path, max_cases, &scores, &latency, &cases,
-                                      progress_path) != 0)
-            fatal("LongMemEval eval failed for %s", dataset_path);
-
-         char title[1024];
-         snprintf(title, sizeof(title), "LongMemEval Retrieval Evaluation — %s", dataset_path);
-         print_mem_eval_report(title, &scores, &latency);
-      }
-      if (report_misses)
-         (void)mem_eval_report_longmemeval_misses(dataset_path, max_cases, miss_limit, max_misses,
-                                                  stdout, miss_progress_path);
-      return;
-   }
-   else if (strcmp(argv[0], "locomo-qa") == 0)
-   {
-      const char *dataset_path = "data/locomo/locomo10.json";
-      int max_cases = 0;
-      int top_k = 10;
-      int token_budget = 2000;
-      int report_failures = 0;
-      int max_failures = 5;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--dataset") == 0 && i + 1 < argc)
-            dataset_path = argv[++i];
-         else if (strcmp(argv[i], "--max-cases") == 0 && i + 1 < argc)
-            max_cases = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--top-k") == 0 && i + 1 < argc)
-            top_k = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--token-budget") == 0 && i + 1 < argc)
-            token_budget = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--report-failures") == 0)
-            report_failures = 1;
-         else if (strcmp(argv[i], "--max-failures") == 0 && i + 1 < argc)
-            max_failures = atoi(argv[++i]);
-      }
-
-      mem_eval_qa_scores_t scores;
-      mem_eval_latency_t latency;
-      int samples = 0;
-      if (mem_eval_run_locomo_qa(dataset_path, max_cases, top_k, token_budget, &scores, &latency,
-                                 &samples) != 0)
-      {
-         fatal("LoCoMo QA eval failed for %s", dataset_path);
-      }
-
-      char title[1024];
-      snprintf(title, sizeof(title),
-               "LoCoMo QA Evaluation — %s (%d conversations, top_k=%d token_budget=%d)",
-               dataset_path, samples, top_k, token_budget);
-      print_mem_eval_qa_report(title, &scores, &latency);
-      if (report_failures)
-         (void)mem_eval_report_locomo_qa_failures(dataset_path, max_cases, top_k, token_budget,
-                                                  max_failures, stdout);
-      return;
-   }
-   else if (strcmp(argv[0], "longmemeval-qa") == 0)
-   {
-      const char *dataset_path = "data/longmemeval/longmemeval_s_cleaned.json";
-      int max_cases = 0;
-      int top_k = 10;
-      int token_budget = 2000;
-      int report_failures = 0;
-      int max_failures = 5;
-      for (int i = 1; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--dataset") == 0 && i + 1 < argc)
-            dataset_path = argv[++i];
-         else if (strcmp(argv[i], "--max-cases") == 0 && i + 1 < argc)
-            max_cases = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--top-k") == 0 && i + 1 < argc)
-            top_k = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--token-budget") == 0 && i + 1 < argc)
-            token_budget = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--report-failures") == 0)
-            report_failures = 1;
-         else if (strcmp(argv[i], "--max-failures") == 0 && i + 1 < argc)
-            max_failures = atoi(argv[++i]);
-      }
-
-      mem_eval_qa_scores_t scores;
-      mem_eval_latency_t latency;
-      int cases = 0;
-      if (mem_eval_run_longmemeval_qa(dataset_path, max_cases, top_k, token_budget, &scores,
-                                      &latency, &cases) != 0)
-      {
-         fatal("LongMemEval QA eval failed for %s", dataset_path);
-      }
-
-      char title[1024];
-      snprintf(title, sizeof(title),
-               "LongMemEval QA Evaluation — %s (%d cases, top_k=%d token_budget=%d)", dataset_path,
-               cases, top_k, token_budget);
-      print_mem_eval_qa_report(title, &scores, &latency);
-      if (report_failures)
-         (void)mem_eval_report_longmemeval_qa_failures(dataset_path, max_cases, top_k, token_budget,
-                                                       max_failures, stdout);
-      return;
-   }
-   else if (strcmp(argv[0], "run") == 0)
-   {
-      if (argc < 2)
-         fatal("usage: aimee eval run <suite_dir> [--ablation <preset|all>] [--runs N]");
-
-      agent_eval_run_options_t eval_opts;
-      memset(&eval_opts, 0, sizeof(eval_opts));
-      eval_opts.ablation = "full";
-      eval_opts.runs = 1;
-      eval_opts.seed = 42;
-      for (int i = 2; i < argc; i++)
-      {
-         if (strcmp(argv[i], "--ablation") == 0 && i + 1 < argc)
-            eval_opts.ablation = argv[++i];
-         else if (strcmp(argv[i], "--runs") == 0 && i + 1 < argc)
-            eval_opts.runs = atoi(argv[++i]);
-         else if (strcmp(argv[i], "--seed") == 0 && i + 1 < argc)
-            eval_opts.seed = (unsigned int)strtoul(argv[++i], NULL, 10);
-         else
-            fatal("usage: aimee eval run <suite_dir> [--ablation <preset|all>] [--runs N]");
-      }
-      if (eval_opts.runs <= 0)
-         eval_opts.runs = 1;
-      if (strcmp(eval_opts.ablation, "all") != 0)
-      {
-         agent_ablation_flags_t check_flags;
-         if (agent_eval_ablation_preset(eval_opts.ablation, &check_flags) != 0)
-            fatal("eval run: unknown ablation preset '%s'", eval_opts.ablation);
-      }
-
-      agent_config_t acfg;
-      if (agent_load_config(&acfg) != 0 || acfg.agent_count == 0)
-         fatal("no agents configured");
-
-      agent_http_init();
-      if (db1_init(config_db1_path()) != 0)
-         fatal("eval run: could not initialize DB1");
-      eval_result_t results[AGENT_MAX_EVAL_TASKS];
-      int passes =
-          agent_eval_run_with_options(&acfg, argv[1], &eval_opts, results, AGENT_MAX_EVAL_TASKS);
-
-      /* Load task count for reporting */
-      eval_task_t tasks[AGENT_MAX_EVAL_TASKS];
-      int total = agent_eval_load_tasks(argv[1], tasks, AGENT_MAX_EVAL_TASKS);
-      int preset_count = strcmp(eval_opts.ablation, "all") == 0 ? 7 : 1;
-      int rows = total * preset_count * eval_opts.runs;
-      if (rows > AGENT_MAX_EVAL_TASKS)
-         rows = AGENT_MAX_EVAL_TASKS;
-
-      printf("%-30s %-12s %-12s %-6s %-6s %-8s %-10s\n", "Task", "Agent", "Ablation", "Pass",
-             "Turns", "ToolOK", "Latency");
-      for (int i = 0; i < rows; i++)
-      {
-         printf("%-30s %-12s %-12s %-6s %-6d %-7.2f%% %-10dms\n", results[i].task_name,
-                results[i].agent_name, results[i].ablation, results[i].success ? "PASS" : "FAIL",
-                results[i].turns, results[i].tool_call_success_rate * 100.0, results[i].latency_ms);
-      }
-      printf("\n%d/%d passed.\n", passes, total * preset_count * eval_opts.runs);
-
-      agent_http_cleanup();
-   }
-   else if (strcmp(argv[0], "results") == 0)
-   {
-      if (db1_init(config_db1_path()) != 0)
-         fatal("eval results: could not initialize DB1");
-      const char *suite_filter = (argc >= 2) ? argv[1] : NULL;
-
-      db1_eval_display_row_t rows[50];
-      int nrows = db1_eval_results_list(suite_filter, rows, 50);
-      if (nrows > 0)
-      {
-         printf("%-15s %-25s %-12s %-12s %-6s %-6s %-6s %-10s %s\n", "Suite", "Task", "Agent",
-                "Ablation", "Pass", "Turns", "Tools", "Latency", "Time");
-         for (int i = 0; i < nrows; i++)
-            printf("%-15s %-25s %-12s %-12s %-6s %-6d %-6d %-10dms %s\n", rows[i].suite,
-                   rows[i].task_name, rows[i].agent_name, rows[i].ablation,
-                   rows[i].success ? "PASS" : "FAIL", rows[i].turns, rows[i].tool_calls,
-                   rows[i].latency_ms, rows[i].created_at);
-      }
-   }
-}
+/* cmd_eval moved to the benchmarks module (modules/benchmarks/agent_eval_suite_cli.c)
+ * and is reached through `aimee-server --eval`. Benchmarks are dev-only and
+ * server-side. The `run` and `results` subcommands were dropped rather than
+ * moved: they needed DB1 and the agent runtime, which the benchmarks module does
+ * not depend on, and they duplicated the live eval.run / eval.results server
+ * routes (server/server.c:1567-1568). */

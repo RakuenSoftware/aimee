@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 #include "kb_doc_hash.h"
+#include "kb_document_inspector.h"
 #include "kb_http_ingest.h"
 #include "config.h"
 #include "kb_doc_pdf.h"
@@ -30,6 +31,45 @@ typedef struct
 } stub_doc_t;
 
 static char g_last_content_hash[KB_DOC_HASH_HEX_LEN + 1];
+static kb_document_disposition_t g_inspection_disposition = KB_DOCUMENT_CLEAN;
+
+int kb_document_inspect(const char *filename, const char *bytes, int nbytes,
+                        kb_document_channel_report_t *report)
+{
+   memset(report, 0, sizeof(*report));
+   snprintf(report->format, sizeof(report->format), "%s",
+            strstr(filename, ".html") ? "html" : "plain");
+   kb_doc_content_hash(bytes, nbytes, report->raw_digest);
+   report->disposition = g_inspection_disposition;
+   if (g_inspection_disposition == KB_DOCUMENT_REVIEW ||
+       g_inspection_disposition == KB_DOCUMENT_REJECT)
+   {
+      report->hidden_spans = 1;
+      snprintf(report->first_hidden_digest, sizeof(report->first_hidden_digest), "%064d", 1);
+      snprintf(report->lexical_verdict, sizeof(report->lexical_verdict), "%s",
+               g_inspection_disposition == KB_DOCUMENT_REJECT ? "reject" : "accept");
+   }
+   return 0;
+}
+
+const char *kb_document_disposition_name(kb_document_disposition_t disposition)
+{
+   switch (disposition)
+   {
+   case KB_DOCUMENT_REVIEW:
+      return "review";
+   case KB_DOCUMENT_REJECT:
+      return "reject";
+   case KB_DOCUMENT_UNSUPPORTED:
+      return "unsupported";
+   case KB_DOCUMENT_RESOURCE_LIMIT:
+      return "resource_limit";
+   case KB_DOCUMENT_INVALID:
+      return "invalid";
+   default:
+      return "clean";
+   }
+}
 
 int64_t db2_kb_doc_write(const char *content_hash, const char *filename, const char *scope,
                          const char *converter, const char *converter_version,
@@ -122,34 +162,9 @@ const char *kb_ingest_detect_format(const char *filename)
 
 /* ── Stubs for the structured-PDF path (config + kb_doc_pdf) ─────────────── */
 
-static int g_pdf_flag = 0;
-int config_load(config_t *cfg)
+static void set_pdf_ingest_enabled(int enabled)
 {
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->kb_pdf_ingest_enabled = g_pdf_flag;
-   }
-   return 0;
-}
-
-/* The generated accessors read through this. Serve the same shape the
- * config_load stub above does, so both agree.
- *
- * Note this changes what the LINKER needs: with a config_load stub, LTO could
- * see kb_pdf_assets_enabled was always 0, fold the branch away, and drop the
- * call to kb_doc_pdf_render_assets entirely. An accessor is opaque, so that
- * branch now survives to link time and the symbol must exist -- hence the stub
- * below. It is never called; g_pdf_flag only enables the ingest path. */
-int config_field_read(size_t offset, size_t size, void *dst)
-{
-   if (!dst || size == 0)
-      return -1;
-   static config_t stub;
-   memset(&stub, 0, sizeof(stub));
-   stub.kb_pdf_ingest_enabled = g_pdf_flag;
-   memcpy(dst, (const char *)&stub + offset, size);
-   return 0;
+   assert(config_set_kb_pdf_ingest_enabled(enabled) == 0);
 }
 
 int kb_doc_pdf_render_assets(const char *project, const char *file_path,
@@ -227,7 +242,7 @@ static int build_pdf_body(char *body, size_t cap, int magic, const char *sclass)
 
 static void test_post_pdf_requires_sensitivity(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    char body[512];
    int n = build_pdf_body(body, sizeof(body), 1, NULL); /* no sensitivity_class */
@@ -240,7 +255,7 @@ static void test_post_pdf_requires_sensitivity(void)
 
 static void test_post_pdf_invalid_sensitivity(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    char body[512];
    int n = build_pdf_body(body, sizeof(body), 1, "secret"); /* not in the allowed set */
@@ -252,7 +267,7 @@ static void test_post_pdf_invalid_sensitivity(void)
 
 static void test_post_pdf_routed(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    g_ingest_class[0] = '\0';
    char body[512];
@@ -269,7 +284,7 @@ static void test_post_pdf_routed(void)
 
 static void test_post_pdf_flag_off_falls_through(void)
 {
-   g_pdf_flag = 0; /* structured PDF disabled */
+   set_pdf_ingest_enabled(0); /* structured PDF disabled */
    g_ingest_called = 0;
    g_last_content_hash[0] = '\0';
    char body[512];
@@ -283,7 +298,7 @@ static void test_post_pdf_flag_off_falls_through(void)
 
 static void test_post_pdf_magic_mismatch_rejected(void)
 {
-   g_pdf_flag = 1;
+   set_pdf_ingest_enabled(1);
    g_ingest_called = 0;
    g_last_content_hash[0] = '\0';
    char body[512];
@@ -319,6 +334,34 @@ static void test_post_docs_ok(void)
    assert(status == 201);
    assert(strstr(buf, "doc_id") != NULL);
    assert(strcmp(g_last_content_hash, expected_hash) == 0);
+}
+
+static void test_structural_disposition_stops_before_write(void)
+{
+   const char *boundary = "----InspectBoundary";
+   char body[512], buf[1024];
+   int body_len =
+       snprintf(body, sizeof(body),
+                "--%s\r\n"
+                "Content-Disposition: form-data; name=\"file\"; filename=\"test.html\"\r\n"
+                "Content-Type: text/html\r\n\r\n"
+                "<div hidden>draft</div>\r\n"
+                "--%s--\r\n",
+                boundary, boundary);
+   g_last_content_hash[0] = '\0';
+   setenv("AIMEE_KB_DOCUMENT_INSPECTION", "1", 1);
+   g_inspection_disposition = KB_DOCUMENT_REVIEW;
+   int status = handle_post_docs(body, body_len, buf, sizeof(buf));
+   assert(status == 422);
+   assert(strstr(buf, "document_review") != NULL);
+   assert(g_last_content_hash[0] == '\0');
+
+   g_inspection_disposition = KB_DOCUMENT_UNSUPPORTED;
+   status = handle_post_docs(body, body_len, buf, sizeof(buf));
+   assert(status == 415);
+   assert(g_last_content_hash[0] == '\0');
+   g_inspection_disposition = KB_DOCUMENT_CLEAN;
+   unsetenv("AIMEE_KB_DOCUMENT_INSPECTION");
 }
 
 static void test_post_docs_missing_file(void)
@@ -373,11 +416,13 @@ static void test_get_doc_not_found(void)
    assert(status == 404);
 }
 
-static void test_delete_doc_ok(void)
+static void test_delete_doc_requires_lifecycle_preview(void)
 {
    char buf[256];
    int status = handle_delete_doc("42", buf, sizeof(buf));
-   assert(status == 200);
+   assert(status == 409);
+   assert(strstr(buf, "document.preview_lifecycle") != NULL);
+   assert(strstr(buf, "purge") != NULL);
 }
 
 static void test_delete_doc_not_found(void)
@@ -398,15 +443,19 @@ static void test_get_review_ok(void)
 int main(void)
 {
    printf("kb_http_ingest: ");
+   assert(config_set_kb_pdf_ocr_enabled(0) == 0);
+   assert(config_set_kb_pdf_assets_enabled(0) == 0);
+   unsetenv("AIMEE_KB_DOCUMENT_INSPECTION");
 
    test_post_docs_ok();
+   test_structural_disposition_stops_before_write();
    test_post_docs_missing_file();
    test_post_docs_manifest_filters_present_hashes();
    test_post_docs_manifest_requires_docs_array();
    test_post_docs_manifest_db_error();
    test_get_doc_ok();
    test_get_doc_not_found();
-   test_delete_doc_ok();
+   test_delete_doc_requires_lifecycle_preview();
    test_delete_doc_not_found();
    test_get_review_ok();
    test_post_pdf_requires_sensitivity();

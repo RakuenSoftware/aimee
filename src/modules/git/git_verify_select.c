@@ -133,8 +133,8 @@ static void append_cmd_lines(dstr_t *out, const char *project_root, const char *
    char full[MAX_PATH_LEN + 256];
    if (project_root && project_root[0])
    {
-      char *esc_root = shell_escape(project_root);
-      snprintf(full, sizeof(full), "git -C '%s' %s", esc_root ? esc_root : "", cmd);
+      char *esc_root = shell_quote(project_root);
+      snprintf(full, sizeof(full), "git -C %s %s", esc_root, cmd);
       free(esc_root);
    }
    else
@@ -151,9 +151,8 @@ static char *changed_paths(const char *project_root, const char *baseline)
    dstr_t out;
    dstr_init(&out);
    char cmd[160];
-   char *esc_baseline = shell_escape(baseline);
-   snprintf(cmd, sizeof(cmd), "diff --name-only '%s' HEAD 2>/dev/null",
-            esc_baseline ? esc_baseline : "");
+   char *esc_baseline = shell_quote(baseline);
+   snprintf(cmd, sizeof(cmd), "diff --name-only %s HEAD 2>/dev/null", esc_baseline);
    free(esc_baseline);
    append_cmd_lines(&out, project_root, cmd);
    append_cmd_lines(&out, project_root, "diff --name-only HEAD 2>/dev/null");

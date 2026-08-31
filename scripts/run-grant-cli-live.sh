@@ -94,7 +94,7 @@ snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
 # The roles live at cluster scope, so they are created in the maintenance database first —
 # createdb -O below needs the owner role to already exist.
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/db2/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 # OWNED BY aimee_kb_owner. kb re-applies the schema at boot as that role, and it cannot
 # redefine objects owned by postgres ("must be owner of function pg_now_text") — so whoever
 # pre-applies has to be the same role kb will connect as. A real deployment's migrate step is
@@ -103,7 +103,7 @@ runuser -u postgres -- createdb -O aimee_kb_owner "$db" 2>/dev/null \
   || runuser -u postgres -- createdb "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/db2/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 # PostgreSQL 15+ stopped granting CREATE on schema public to non-owners, so the owner role
 # cannot apply the schema without this. A real deployment's migrate step holds the same
 # privilege; schema_roles.sql does not grant it because it does not know the database name.
@@ -222,9 +222,9 @@ out=$(G set --subject alice --server livesrv --team 990001 --tier data) || fail 
 # refused every call, so increment 5 was wired end to end and could not create a grant.
 [ "$(rows "SELECT granted_by FROM kb_write_tier_grant WHERE subject='alice'")" = "owner" ] \
   || fail "granted_by is not the authenticated operator"
-[ "$(rows "SELECT count(*) FROM kb_audit_event WHERE action='authz.write_tier.set'")" = "1" ] \
+[ "$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action='authz.write_tier.set'")" = "1" ] \
   || fail "no WORM audit row for the set"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox WHERE action='authz.write_tier.set' LIMIT 1")" = "owner" ] \
   || fail "the audit row does not name the operator as actor"
 echo "  row=data granted_by=owner, audited with actor=owner"
 
@@ -276,7 +276,7 @@ G revoke --subject alice --server livesrv --team 990001 >/dev/null || fail "revo
   || fail "revoked_at was not set"
 [ "$(rows "SELECT count(*) FROM kb_write_tier_grant WHERE subject='alice'")" = "1" ] \
   || fail "revocation did not retain exactly one row"
-[ "$(rows "SELECT actor_principal FROM kb_audit_event WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
+[ "$(rows "SELECT actor_principal FROM kb_audit_outbox WHERE action='authz.write_tier.revoke' LIMIT 1")" = "owner" ] \
   || fail "the revoke audit row does not name the operator"
 echo "  retained, revoked_at set, audited as owner"
 
@@ -303,9 +303,9 @@ G set --subject alice --server nosuchsrv --team 990001 --tier data >/dev/null 2>
 echo "  nothing written"
 
 step "the audit trail reconstructs the sequence"
-psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_event
-            WHERE action LIKE 'authz.write_tier%' ORDER BY seq" | sed 's/^/  /'
-n=$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")
+psqlt -c "SELECT action||' '||actor_principal||' '||subject FROM kb_audit_outbox
+            WHERE action LIKE 'authz.write_tier%' ORDER BY outbox_id" | sed 's/^/  /'
+n=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")
 [ "$n" -ge 7 ] || fail "expected at least 7 audit rows, found $n"
 
 step "PASSED"

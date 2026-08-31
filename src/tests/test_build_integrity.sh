@@ -29,7 +29,11 @@ for smoke_spec in \
     smoke_bootstrap_line=$(grep -nF \
         "scripts/aimee-compose-vault-bootstrap.sh -f \"\$bootstrap_compose\" $bootstrap_target" \
         "$smoke_script" | cut -d: -f1)
-    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | cut -d: -f1)
+    # The full-stack smoke intentionally has two staged `up` calls. Compare the
+    # bootstrap against the first one; passing both line numbers to `[` makes
+    # the integer comparison error and silently treats a broken ordering as OK.
+    smoke_up_line=$(grep -nF '"${DC[@]}" up -d --no-build' "$smoke_script" | \
+        head -1 | cut -d: -f1)
     if [ -z "$smoke_build_line" ] || [ -z "$smoke_bootstrap_line" ] || [ -z "$smoke_up_line" ] ||
        [ "$smoke_build_line" -ge "$smoke_bootstrap_line" ] ||
        [ "$smoke_bootstrap_line" -ge "$smoke_up_line" ] ||
@@ -197,6 +201,7 @@ printf 'reached-binary:%s\n' "${1:-none}"
 SH
 cat >"$kb_shared_dir/pgbin/pg_isready" <<'SH'
 #!/bin/sh
+printf '%s\n' "$*" >"$PG_ISREADY_LOG"
 exit 0
 SH
 cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
@@ -204,20 +209,29 @@ cat >"$kb_shared_dir/pgbin/initdb" <<'SH'
 echo "initdb-must-not-run" >&2
 exit 1
 SH
+cat >"$kb_shared_dir/bin/module-supervisor.sh" <<'SH'
+#!/bin/sh
+echo "module-supervisor-must-not-run" >&2
+exit 1
+SH
 chmod +x "$kb_shared_dir/bin/aimee-kb" "$kb_shared_dir/pgbin/pg_isready" \
-    "$kb_shared_dir/pgbin/initdb"
+    "$kb_shared_dir/pgbin/initdb" "$kb_shared_dir/bin/module-supervisor.sh"
 kb_shared_stderr="$kb_shared_dir/stderr.log"
+kb_shared_pg_isready="$kb_shared_dir/pg-isready.log"
 kb_shared_output=$(env -i PATH="$kb_shared_dir/bin:/usr/bin:/bin" \
     AIMEE_HOME="$kb_shared_dir/home" \
     AIMEE_DB2_PG_BIN="$kb_shared_dir/pgbin" \
+    PG_ISREADY_LOG="$kb_shared_pg_isready" \
     sh ../deploy/container/aimee-kb-entrypoint.sh \
     managed-server-identity 2>"$kb_shared_stderr" || true)
 rm -rf "$kb_entrypoint_test_dir"
 if [ "$kb_shared_output" = "reached-binary:managed-server-identity" ] &&
-    ! grep -q 'initdb-must-not-run' "$kb_shared_stderr"; then
-    pass "KB entrypoint reuses an already-running cluster instead of provisioning a second"
+    grep -q -- '--username=aimee' "$kb_shared_pg_isready" &&
+    grep -q -- '--dbname=postgres' "$kb_shared_pg_isready" &&
+    ! grep -Eq 'initdb-must-not-run|module-supervisor-must-not-run' "$kb_shared_stderr"; then
+    pass "KB one-shot reuses the running cluster with an explicit database identity"
 else
-    fail "KB entrypoint did not reuse the running cluster ($kb_shared_output, stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
+    fail "KB entrypoint did not reuse the running cluster cleanly ($kb_shared_output, pg_isready=$(tr '\n' ' ' <"$kb_shared_pg_isready"), stderr=$(tr '\n' ' ' <"$kb_shared_stderr"))"
 fi
 rm -rf "$kb_shared_dir"
 
@@ -240,6 +254,18 @@ if [ -n "$kb_pgctltimeout_line" ] && [ -n "$kb_pgctl_start_line" ] &&
     pass "KB entrypoint waits past pg_ctl's 60s default so crash recovery can finish"
 else
     fail "KB entrypoint must export PGCTLTIMEOUT>60 before starting the cluster (export=$kb_pgctltimeout_line, start=$kb_pgctl_start_line, default=$kb_pgctltimeout_default)"
+fi
+
+# An ordinary docker stop/restart must terminate the supervising shell after it
+# forwards the signal and must stop embedded PostgreSQL before Docker's timeout
+# escalates to SIGKILL. Merely trapping TERM without exiting returns to the
+# monitor loop and makes every routine restart depend on WAL recovery.
+if grep -qF 'shutdown_embedded() {' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'trap - EXIT HUP INT TERM' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF "trap 'shutdown_embedded; exit 0' HUP INT TERM" ../deploy/container/aimee-kb-entrypoint.sh; then
+    pass "KB entrypoint makes signal-driven embedded PostgreSQL shutdown terminal"
+else
+    fail "KB entrypoint can return to its monitor loop after Docker requests shutdown"
 fi
 
 # The export path starts the same cluster in a stopped container, so it is
@@ -331,12 +357,31 @@ else
     fail "server plane supervisor can deadlock on an exited zombie child"
 fi
 
+# The optional-module gate decides which processes attach to the bus. Both
+# entrypoints must ship it, and it must honour AIMEE_MODULE_<ID> in BOTH
+# directions -- an enable-only gate cannot turn anything off.
+if sh tests/test_optional_modules.sh > /dev/null 2>&1 &&
+   grep -qF 'apply_optional_modules server' ../deploy/container/server-entrypoint.sh &&
+   grep -qF 'apply_optional_modules kb' ../deploy/container/aimee-kb-entrypoint.sh &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile.server &&
+   grep -qF 'optional-modules-lib.sh' ../Dockerfile; then
+    pass "operator can enable and disable optional modules in both placements"
+else
+    fail "optional-module gate is missing, one-directional, or not shipped in an image"
+fi
+
 if grep -q 'go|c' ../deploy/container/server-entrypoint.sh ||
    grep -q 'wfe_autonomy_register();' server/server.c ||
    grep -q 'wfe_scheduler_init();' server/server.c; then
     fail "C WFE runtime ownership is still reachable"
 else
     pass "Go is the exclusive WFE runtime owner"
+fi
+
+if grep -qE 'aimee-wfe.*--config([ =]|$)' ../deploy/container/server-entrypoint.sh; then
+    fail "server entrypoint still passes the retired direct config-file flag to the Go WFE"
+else
+    pass "server entrypoint leaves WFE configuration behind the event-bus config module"
 fi
 
 if grep -qF '[ -d "$AIMEE_HOME/workflows" ] && chown -R aimee:aimee "$AIMEE_HOME/workflows"' \
@@ -378,7 +423,7 @@ fi
 server_verify_deps="build-essential clang-format-19 libcurl4-openssl-dev libpam0g-dev libp11-kit-dev libpq-dev libsqlite3-dev libssl-dev libzstd-dev pkg-config postgresql-client python3 python3-yaml ripgrep zlib1g-dev"
 missing_server_verify_deps=""
 for dep in $server_verify_deps; do
-    if ! awk -v dep="$dep" '/^FROM /{runtime=($0=="FROM debian:bookworm-slim"); found=0} runtime && index($0, dep){found=1} END{exit !found}' \
+    if ! awk -v dep="$dep" '/^FROM /{runtime=($0 ~ /^FROM debian:bookworm-slim(@sha256:[[:xdigit:]]+)?$/); found=0} runtime && index($0, dep){found=1} END{exit !found}' \
         ../Dockerfile.server; then
         missing_server_verify_deps="$missing_server_verify_deps $dep"
     fi
@@ -407,15 +452,37 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
+# The extracted-repository pins record which published core/module repository
+# commit each vendored mirror was cut from, which is a fact about a RELEASE. They
+# bind on `main` alone: every other branch is meant to carry vendored source
+# ahead of the lock, so running the check there only demands a lock refresh after
+# each edit under src/core|modules/**. Guard the placement in both directions --
+# absent from the every-branch gates, present in the workflow under a main-only
+# condition -- so neither half can drift back on its own.
+if ! sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
+     grep -qF 'python3 -I scripts/check_c_repository_lock.py' &&
+   ! grep '^LINT_CHECKS = ' Makefile | grep -qF 'repository-lock-check' &&
+   grep -B2 -F 'run: python3 -I scripts/check_c_repository_lock.py' \
+        ../.github/workflows/c-repositories.yml |
+     grep -qF "if: github.ref == 'refs/heads/main' || github.base_ref == 'main'"; then
+    pass "extracted-repository source pins are enforced for main alone"
+else
+    fail "extracted-repository source pins are enforced off main, or not on it"
+fi
+
 # Verification runs inside the server image, whose deployment posture is
 # expressed through AIMEE_* environment overrides. Those values are correct for
 # the live daemon but must not override config fixtures in repository unit tests.
-if sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-   grep -qF 'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL' &&
-   sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk |
-       grep -qF 'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'; then
+# Match in-shell rather than piping into grep -q. Under `set -o pipefail` such
+# a pipeline reports the SIGPIPE that grep's early exit sends back to its
+# writer, so the check starts failing purely because the recipe grew past a
+# 4KiB pipe block -- a false red that says nothing about the overrides.
+unit_tests_recipe=$(sed -n '/^unit-tests:/,/^$(TESTPREFIX)\/unit-test-util:/p' tests/Rules.mk)
+go_unit_tests_recipe=$(sed -n '/^go-unit-tests:/,/^verify-local:/p' Makefile)
+if [[ "$unit_tests_recipe" == *'unset AIMEE_HOME AIMEE_API_REMOTE_WRITES AIMEE_API_MTLS AIMEE_API_BEARER_TOKEN'* &&
+      "$unit_tests_recipe" == *'AIMEE_SERVER_HTTP_BIND AIMEE_WORKSPACES_DIR AIMEE_KB_API_URL'* &&
+      "$unit_tests_recipe" == *'AIMEE_KB_API_BEARER_TOKEN AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* &&
+      "$go_unit_tests_recipe" == *'unset AIMEE_WFE_ENGINE AIMEE_WFE_HTTP_SOCKET'* ]]; then
     pass "unit verification removes server deployment overrides"
 else
     fail "unit verification inherits server deployment overrides"
@@ -518,12 +585,14 @@ while IFS= read -r line; do
     fi
 done < tests/Rules.mk
 
-# 5. Every test target linking config.o must also link platform_random.o
+# 5. Every test target linking the retired, exact config.o token must also link
+# platform_random.o. Do not match client_config.o or config_client_contract.o:
+# those are event-bus callers and intentionally have no random dependency.
 # Join continuation lines, then check each target rule
 bad_targets=$(sed ':a; /\\$/N; s/\\\n//; ta' tests/Rules.mk | grep 'unit-test-' | while IFS= read -r rule; do
     target=$(echo "$rule" | cut -d: -f1 | tr -d ' ')
     deps=$(echo "$rule" | cut -d: -f2-)
-    if echo "$deps" | grep -q 'config\.o' && \
+    if echo "$deps" | grep -Eq '(^|[[:space:]])(\$\(OBJDIR\)/)?config\.o([[:space:]]|$)' && \
        ! echo "$deps" | grep -q 'platform_random\.o' && \
        ! echo "$deps" | grep -q 'TEST_CORE_OBJS\|TEST_DATA_OBJS\|CORE_OBJS\|PLATFORM_BASIC_OBJS'; then
         echo "$target"
@@ -687,12 +756,14 @@ check_updated_input_gate() {
     ' "$file"
 }
 
-if check_updated_input_gate ../src/cmd_hooks.c 'hook_client_supports_updated_input()' &&
-   check_updated_input_gate ../src/cli_main.c 'cli_hook_client_supports_updated_input()' &&
+if check_updated_input_gate ../src/cmd_hooks.c 'hook_client_supports_updated_input' &&
+   check_updated_input_gate ../src/cli_main.c 'cli_hook_client_supports_updated_input' &&
    grep -q 'hook_client_supports_updated_input' ../src/cmd_hooks.c &&
    grep -q 'cli_hook_client_supports_updated_input' ../src/cli_main.c &&
    grep -q 'strcmp(client, "claude") == 0' ../src/cmd_hooks.c &&
    grep -q 'strcmp(client, "claude") == 0' ../src/cli_main.c &&
+   grep -q 'strcmp(client, "codex") == 0' ../src/cmd_hooks.c &&
+   grep -q 'strcmp(client, "codex") == 0' ../src/cli_main.c &&
    grep -q 'emit_pretool_rewrite_unsupported_json' ../src/cmd_hooks.c &&
    grep -q 'emit_pretool_rewrite_unsupported_json' ../src/cli_main.c; then
     pass "PreToolUse updatedInput is gated to supported clients in all hook entry paths"
@@ -700,11 +771,11 @@ else
     fail "PreToolUse updatedInput client gating regression"
 fi
 
-if grep -q "if client_id == 'codex'" ../configure-hooks.sh &&
-   grep -q "return cmd + ' || true'" ../configure-hooks.sh; then
-    pass "Codex PreToolUse hook is advisory"
+if grep -q "return client_env_cmd(bin_path + ' hooks pre')" ../configure-hooks.sh &&
+   ! grep -q "return cmd + ' || true'" ../configure-hooks.sh; then
+    pass "Codex PreToolUse isolation hook is enforcing"
 else
-    fail "Codex PreToolUse hook may surface failed-hook noise"
+    fail "Codex PreToolUse isolation hook can be bypassed by shell success coercion"
 fi
 
 # 7b. Installer non-interactive prompts stay wrapped behind helper functions
@@ -1576,6 +1647,94 @@ else
     fail "curation must be enqueued after embedding, not during scan (scan=$scan_enqueues, embed=$embed_enqueues, gated=$embed_gated)"
 fi
 
+# A hook aimee never registers is not a guard. `aimee hooks` implements the
+# PreToolUse contract and require_aimee_git is ON by default, but the codex plugin
+# shipped no hooks file at all -- so across the benchmark's aimee cells the agent
+# made 98 shell `git` calls and zero calls to the aimee git tool. The manifest
+# entry and the emitted file must both exist, and must name the same path.
+hooks_decl=$(grep -c 'hooks/codex-hooks.json' ../src/client_integrations.c 2>/dev/null || true)
+hooks_cmd=$(grep -c '%s hooks' ../src/client_integrations.c 2>/dev/null || true)
+if [ "${hooks_decl:-0}" -ge 2 ] && [ "${hooks_cmd:-0}" -ge 1 ]; then
+    pass "codex plugin registers a PreToolUse hook and emits the file it declares"
+else
+    fail "codex plugin must declare hooks/codex-hooks.json in the manifest AND write it (decl=$hooks_decl cmd=$hooks_cmd)"
+fi
+
+# ── No co-located aimee-server ──────────────────────────────────────────────
+# aimee is a thin client against a REMOTE aimee-server running in its own
+# container. There is no co-located topology. The client used to fall back to
+# <aimee_home>/aimee-http.sock whenever no remote was configured, which meant a
+# stray locally-started server silently captured the client and every answer
+# described the wrong host. That failure is invisible at the call site -- the
+# command succeeds -- so it needs a build-time guard, not a runtime one.
+#
+# The rule enforced here: the client may reach a co-located server only when an
+# operator EXPLICITLY configures a unix: endpoint (which is how the CLI inside
+# the server's own container talks to it). Discovery and silent fallback are
+# banned.
+
+# 1. The /v1 transport must not construct a local socket path of its own.
+if grep -nE '"unix:%s/aimee-http\.sock"|/aimee-http\.sock"' cli_v1_routes_d.c >/dev/null 2>&1; then
+    fail "cli_v1_routes_d.c builds a co-located aimee-http.sock path; the /v1 transport must use the configured endpoint only"
+else
+    pass "/v1 transport has no co-located socket path"
+fi
+
+# 2. Liveness must be about the CONFIGURED server, not "any server on this box".
+if grep -nE 'cli_http_health_ok' -A6 posix/cli_client.c | grep -qE 'cli_http_sock_path'; then
+    fail "cli_http_health_ok probes the local UDS; liveness must target the configured endpoint"
+else
+    pass "liveness probe targets the configured endpoint"
+fi
+
+# 2b. The SAME rule on Windows. The checks above read posix/cli_client.c only,
+#     which is exactly how Windows kept both banned behaviours after the POSIX
+#     cutover: it still probed the well-known socket AND auto-spawned
+#     aimee-server.exe, while its own cli_start_server() told the user local
+#     servers were unsupported. A guard that names one platform does not enforce
+#     a rule; it enforces it there.
+#     Comment lines are skipped so the note recording WHY this is banned (which
+#     names the removed functions) does not trip its own guard.
+if grep -nE 'spawn_server|AIMEE_NO_AUTOSTART' windows/cli_client.c \
+        | grep -qvE '^[0-9]+: *(\*|/\*|//)'; then
+    fail "windows/cli_client.c can still start a local aimee-server; the CLI is a pure client on every platform"
+else
+    pass "windows client never starts a local aimee-server"
+fi
+
+# 2c. And the same rule everywhere else. The two checks above name two files,
+#     which is the very argument 2b makes against naming one platform: a guard
+#     bound to a path enforces the rule at that path. AIMEE_NO_AUTOSTART is now
+#     a dead name -- nothing reads it, because there is no autostart to
+#     suppress -- so any C source mentioning it again means the behaviour came
+#     back somewhere new. Tests are excluded: a harness may legitimately assert
+#     the name is absent.
+AUTOSTART_HITS=$(grep -rnE 'AIMEE_NO_AUTOSTART' --include='*.c' --include='*.h' . \
+        | grep -vE '/tests/' | grep -vE ':[0-9]+: *(\*|/\*|//)' || true)
+if [ -n "$AUTOSTART_HITS" ]; then
+    fail "AIMEE_NO_AUTOSTART is read again, so something starts a local server: $AUTOSTART_HITS"
+else
+    pass "no source suppresses an autostart, because there is none to suppress"
+fi
+
+if grep -nE 'cli_existing_server_for_method' -A12 windows/cli_client.c | grep -qE 'cli_default_socket_path'; then
+    fail "windows/cli_client.c still DISCOVERS a co-located server via the well-known socket; only an explicit AIMEE_SOCK is allowed"
+else
+    pass "windows client does not discover a co-located server"
+fi
+
+# 3. No user-facing message may tell an operator to start a server locally.
+#    This is how the anti-pattern spread: the advice appeared exactly when
+#    someone was stuck, and following it "fixed" the symptom.
+#    Comment lines are skipped so the note explaining WHY this is banned (which
+#    necessarily quotes the old advice) does not trip its own guard.
+if grep -nE 'systemctl --user start aimee-server|aimee server start' cli_main.c \
+        | grep -qvE '^[0-9]+: *(\*|/\*|//)'; then
+    fail "cli_main.c still advises starting a local aimee-server"
+else
+    pass "no remediation text advises a local aimee-server"
+fi
+
 if [ "$FAIL" = "0" ]; then
     if [ "$MODE" = "--build-variants" ]; then
         echo "All build variant checks passed."
@@ -1590,4 +1749,3 @@ else
     fi
     exit 1
 fi
-

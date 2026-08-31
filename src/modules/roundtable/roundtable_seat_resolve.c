@@ -21,7 +21,8 @@ rt_seat_resolve_t rt_resolve_seat_model(agent_config_t *cfg, const char *model, 
    {
       int idx = delegate_pick_for_role(cfg, role, used, nused);
       if (idx < 0)
-         return RT_SEAT_RANDOM_EXHAUSTED;
+         return agent_route_last_was_module_fault() ? RT_SEAT_ROUTING_UNAVAILABLE
+                                                    : RT_SEAT_RANDOM_EXHAUSTED;
       *out_idx = idx;
       return RT_SEAT_OK;
    }

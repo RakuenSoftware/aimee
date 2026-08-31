@@ -29,12 +29,13 @@
 #include <openssl/evp.h>
 #include <openssl/kdf.h>
 
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/db2/c/db_postgres.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "vault_witness_provider_fixture.h"
 
 #define MUST(cond, ...)                                                                            \
    do                                                                                              \
@@ -51,6 +52,7 @@
 /* vault_server_kek / the signer seed derivation live behind the signer; the KEK
  * accessor is declared in vault_server_key.h. */
 #include "modules/vault/vault_server_key.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static uint8_t g_stream[1 << 20];
 static size_t g_len;
@@ -157,13 +159,15 @@ static int64_t count_query(void *conn, const char *sql, const char *arg)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {
       printf("witness_canary_pg: SKIP (AIMEE_TEST_PG_URL unset)\n");
       return 0;
    }
-   char home[] = "/tmp/aimee-witness-canary-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-canary-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
    MUST(db2_init(url) == 0, "db2_init failed for %s", url);

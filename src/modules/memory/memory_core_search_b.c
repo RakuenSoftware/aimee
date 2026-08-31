@@ -1,11 +1,8 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
-#include "db2/memory_scope_query.h"
+#include "modules/db2/c/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -14,27 +11,29 @@
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
+
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -42,6 +41,54 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+
+static _Thread_local int s_recall_trace_capture;
+static _Thread_local memory_recall_rejection_t
+    s_recall_rejections[MEMORY_RECALL_TRACE_MAX_REJECTIONS];
+static _Thread_local int s_recall_rejection_count;
+
+void memory_recall_trace_capture_begin(void)
+{
+   s_recall_trace_capture = 1;
+   s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_capture_reset(void)
+{
+   if (s_recall_trace_capture)
+      s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_capture_end(void)
+{
+   s_recall_trace_capture = 0;
+   s_recall_rejection_count = 0;
+}
+
+void memory_recall_trace_reject(int64_t memory_id, const char *lane, const char *gate)
+{
+   if (!s_recall_trace_capture || memory_id <= 0 || !gate || !gate[0])
+      return;
+   for (int i = 0; i < s_recall_rejection_count; i++)
+      if (s_recall_rejections[i].memory_id == memory_id &&
+          strcmp(s_recall_rejections[i].gate, gate) == 0)
+         return;
+   if (s_recall_rejection_count >= MEMORY_RECALL_TRACE_MAX_REJECTIONS)
+      return;
+   memory_recall_rejection_t *r = &s_recall_rejections[s_recall_rejection_count++];
+   r->memory_id = memory_id;
+   snprintf(r->lane, sizeof(r->lane), "%s", lane && lane[0] ? lane : "candidate");
+   snprintf(r->gate, sizeof(r->gate), "%s", gate);
+}
+
+int memory_recall_trace_rejections(memory_recall_rejection_t *out, int max)
+{
+   if (!out || max <= 0 || !s_recall_trace_capture)
+      return 0;
+   int n = s_recall_rejection_count < max ? s_recall_rejection_count : max;
+   memcpy(out, s_recall_rejections, (size_t)n * sizeof(*out));
+   return n;
+}
 
 static double memory_temporal_bonus(int64_t memory_id, memory_query_intent_t intent,
                                     char qtokens[][64], int nq)
@@ -330,10 +377,12 @@ void memory_compute_score_parts(const char *raw_query, const char *norm_query,
     * fusion is off the hook is a no-op, graph_score stays 0, the term below adds
     * 0, and the score is byte-identical to the pre-fusion behaviour. */
    memory_fusion_expansions_apply(parts, m->id);
+   parts->outcome = db2_memory_outcome_adjustment(m->id);
+   parts->graph_weight = memory_env_weight("AIMEE_MEMORY_GRAPH_WEIGHT", 0.30);
    parts->total = parts->lexical + parts->coverage + parts->entity + parts->temporal +
                   parts->evidence + parts->semantic + parts->state + parts->intent +
                   parts->salience + parts->surprise + parts->pagerank +
-                  memory_env_weight("AIMEE_MEMORY_GRAPH_WEIGHT", 0.30) * parts->graph_score;
+                  parts->graph_weight * parts->graph_score + parts->outcome;
 }
 
 int memory_token_in_norm(const char *norm, const char *token)
@@ -640,6 +689,122 @@ static double memory_source_fusion_bonus(const memory_candidate_source_t *stats,
       break;
    }
    return bonus;
+}
+
+/* Lane names for the MEM_SOURCE_* bits, indexed by bit position. A NULL entry
+ * is an unnamed bit and is skipped rather than reported under a wrong name. */
+static const char *const memory_lane_names[] = {
+    "lexical",  /* MEM_SOURCE_LEXICAL  */
+    "alias",    /* MEM_SOURCE_ALIAS    */
+    "entity",   /* MEM_SOURCE_ENTITY   */
+    "summary",  /* MEM_SOURCE_SUMMARY  */
+    "event",    /* MEM_SOURCE_EVENT    */
+    "chunk",    /* MEM_SOURCE_CHUNK    */
+    "unit",     /* MEM_SOURCE_UNIT     */
+    "temporal", /* MEM_SOURCE_TEMPORAL */
+    "semantic", /* MEM_SOURCE_SEMANTIC */
+    "like",     /* MEM_SOURCE_LIKE     */
+    "code",     /* MEM_SOURCE_CODE     */
+    "graph"     /* MEM_SOURCE_GRAPH    */
+};
+
+#define MEMORY_LANE_COUNT ((int)(sizeof(memory_lane_names) / sizeof(memory_lane_names[0])))
+
+static unsigned int memory_lane_mask_for(const memory_candidate_source_t *stats, int stats_count,
+                                         int64_t memory_id)
+{
+   for (int i = 0; i < stats_count; i++)
+   {
+      if (stats[i].memory_id == memory_id)
+         return stats[i].source_mask;
+   }
+   return 0u;
+}
+
+/* Per-lane outcome accounting, recorded after ranking has fixed the order.
+ *
+ * The candidate collector already tags every row with the lane(s) that produced
+ * it (memory_note_candidate_sources), but that tagging was only ever consumed as
+ * a ranking input (memory_source_fusion_bonus). Nothing recorded whether a lane's
+ * contribution SURVIVED ranking, so a lane that produces candidates on every
+ * query and never places one in the served set is indistinguishable from a lane
+ * that carries the answer.
+ *
+ * This is measurement, not control: no lane is skipped, reordered, or truncated
+ * on the strength of these counters. It exists so that a decision to drop a lane
+ * can be made from evidence about this corpus, the way the reranker's removal
+ * was. Deciding sufficiency mid-collection would need the lanes to be ordered by
+ * expected yield relative to each other, and they are not.
+ *
+ * `served` is the count the caller is about to hand back; rows beyond it were
+ * ranked and dropped, and are counted only as candidates.
+ */
+void memory_record_lane_outcome_metrics(const memory_query_plan_t *plan, const memory_t *matches,
+                                        int served, const memory_candidate_source_t *source_stats,
+                                        int source_stats_count)
+{
+   char key[160];
+   int candidates[MEMORY_LANE_COUNT];
+   int wins[MEMORY_LANE_COUNT];
+   const char *route_name = plan ? memory_query_route_name(plan->route) : NULL;
+
+   if (!source_stats || source_stats_count <= 0)
+      return;
+   if (served < 0)
+      served = 0;
+
+   for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+   {
+      candidates[lane] = 0;
+      wins[lane] = 0;
+   }
+
+   for (int i = 0; i < source_stats_count; i++)
+   {
+      unsigned int mask = source_stats[i].source_mask;
+      for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+      {
+         if (mask & (1u << lane))
+            candidates[lane]++;
+      }
+   }
+
+   if (matches)
+   {
+      for (int i = 0; i < served; i++)
+      {
+         unsigned int mask = memory_lane_mask_for(source_stats, source_stats_count, matches[i].id);
+         for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+         {
+            if (mask & (1u << lane))
+               wins[lane]++;
+         }
+      }
+   }
+
+   for (int lane = 0; lane < MEMORY_LANE_COUNT; lane++)
+   {
+      if (!memory_lane_names[lane] || candidates[lane] == 0)
+         continue;
+      snprintf(key, sizeof(key), "memory.query.lane.%s.candidates", memory_lane_names[lane]);
+      memory_runtime_state_increment(key, candidates[lane]);
+      snprintf(key, sizeof(key), "memory.query.lane.%s.served", memory_lane_names[lane]);
+      memory_runtime_state_increment(key, wins[lane]);
+      /* A lane that contributed candidates and placed none is the shape worth
+       * counting on its own: summing served==0 across queries is what tells a
+       * lane apart from one that merely ranks low. */
+      if (wins[lane] == 0)
+      {
+         snprintf(key, sizeof(key), "memory.query.lane.%s.shutout", memory_lane_names[lane]);
+         memory_runtime_state_increment(key, 1);
+      }
+      if (route_name)
+      {
+         snprintf(key, sizeof(key), "memory.query.route.%s.lane.%s.served", route_name,
+                  memory_lane_names[lane]);
+         memory_runtime_state_increment(key, wins[lane]);
+      }
+   }
 }
 
 void memory_record_query_stage_metric(const memory_query_plan_t *plan, const char *stage_name)
@@ -994,7 +1159,10 @@ int memory_filter_scope(memory_t *matches, int count, const char *scope_type,
    for (int i = 0; i < count; i++)
    {
       if (!memory_scope_matches(matches[i].id, scope_type, scope_value))
+      {
+         memory_recall_trace_reject(matches[i].id, "candidate", "scope_boundary");
          continue;
+      }
       if (kept != i)
          matches[kept] = matches[i];
       kept++;
@@ -1022,23 +1190,24 @@ int memory_find_facts_lexical_fallback(const char *query, const char *scope_type
    if (fetch_limit > cap)
       fetch_limit = cap;
 
+   char norm_query[512];
+   char tokens[24][64];
+   normalize_key(query, norm_query, sizeof(norm_query));
+   int token_count = memory_split_tokens(norm_query, tokens, 24);
+
    int count = 0;
-   int got = memory_find_facts_like(query, fetch_limit, scratch, cap);
+   int got = db2_memory_find_facts_fts(norm_query, fetch_limit, scratch, cap);
    if (got < 0)
       return got;
    got = memory_filter_scope(scratch, got, scope_type, scope_value);
    for (int i = 0; i < got && count < limit; i++)
       count = memory_append_unique(out, count, max, &scratch[i]);
 
-   char norm_query[512];
-   char tokens[24][64];
-   normalize_key(query, norm_query, sizeof(norm_query));
-   int token_count = memory_split_tokens(norm_query, tokens, 24);
    for (int t = 0; t < token_count && count < limit; t++)
    {
-      if (!memory_is_signal_token(tokens[t]))
+      if (!memory_is_signal_token(tokens[t]) || strcmp(tokens[t], norm_query) == 0)
          continue;
-      got = memory_find_facts_like(tokens[t], fetch_limit, scratch, cap);
+      got = db2_memory_find_facts_fts(tokens[t], fetch_limit, scratch, cap);
       if (got < 0)
          return got;
       got = memory_filter_scope(scratch, got, scope_type, scope_value);
@@ -1046,13 +1215,55 @@ int memory_find_facts_lexical_fallback(const char *query, const char *scope_type
          count = memory_append_unique(out, count, max, &scratch[i]);
    }
 
+   /* FTS is word based. Preserve the historical substring behavior as a true
+    * last resort, paid only when the indexed query found nothing. */
+   if (count == 0)
+   {
+      got = memory_find_facts_like(query, fetch_limit, scratch, cap);
+      if (got < 0)
+         return got;
+      got = memory_filter_scope(scratch, got, scope_type, scope_value);
+      for (int i = 0; i < got && count < limit; i++)
+         count = memory_append_unique(out, count, max, &scratch[i]);
+      for (int t = 0; t < token_count && count < limit; t++)
+      {
+         if (!memory_is_signal_token(tokens[t]) || strcmp(tokens[t], norm_query) == 0)
+            continue;
+         got = memory_find_facts_like(tokens[t], fetch_limit, scratch, cap);
+         if (got < 0)
+            return got;
+         got = memory_filter_scope(scratch, got, scope_type, scope_value);
+         for (int i = 0; i < got && count < limit; i++)
+            count = memory_append_unique(out, count, max, &scratch[i]);
+      }
+   }
+
    return count;
+}
+
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void lexfb_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search.lexical", "the lexical fallback is unavailable: the relational store is "
+                                     "unreachable, so the fallback contributes nothing and cannot "
+                                     "rescue a thin vector result");
 }
 
 int memory_find_facts_visible_lexical_fallback(const char *query, const char *workspace,
                                                const char *project, int limit, memory_t *out,
                                                int max)
 {
+   if (!db2_conn())
+   {
+      lexfb_warn_store_unreachable();
+      return 0;
+   }
    if (!query || !query[0] || !out || max <= 0)
       return 0;
    if (limit <= 0)

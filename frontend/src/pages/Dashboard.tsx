@@ -341,7 +341,7 @@ const MEMORY_COLUMNS: Column<MemoryStat>[] = [
       <>
         {e(r.tier)}
         {r.functional_name ? (
-          <span style={{ color: '#aaa', marginLeft: '6px' }}>{e(r.functional_name)}</span>
+          <span style={{ color: 'var(--sg-text-pale)', marginLeft: '6px' }}>{e(r.functional_name)}</span>
         ) : null}
       </>
     ),
@@ -354,7 +354,7 @@ function MemoryPanel({ data }: { data: MemoryStat[] }) {
   return (
     <Panel title="Memory">
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>
+        <div style={{ padding: '12px', color: 'var(--sg-text-pale)', fontSize: '12px' }}>
           No memories recorded
         </div>
       ) : (
@@ -395,13 +395,13 @@ function CostPanel({ data }: { data: TokenAudit[] }) {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', padding: '8px 10px' }}>
-            <div style={{ padding: '8px', border: '1px solid #eee', borderRadius: '6px', background: '#fafafa' }}>
-              <div style={{ color: '#888', fontSize: '11px' }}>Total tokens</div>
-              <div style={{ color: '#333', fontSize: '18px', fontWeight: 600 }}>{fmtCompact(totalTokens)}</div>
+            <div style={{ padding: '8px', border: '1px solid var(--sg-border-light)', borderRadius: '6px', background: 'var(--sg-surface-alt)' }}>
+              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Total tokens</div>
+              <div style={{ color: 'var(--sg-text)', fontSize: '18px', fontWeight: 600 }}>{fmtCompact(totalTokens)}</div>
             </div>
-            <div style={{ padding: '8px', border: '1px solid #eee', borderRadius: '6px', background: '#fafafa' }}>
-              <div style={{ color: '#888', fontSize: '11px' }}>Realized cost</div>
-              <div style={{ color: '#333', fontSize: '18px', fontWeight: 600 }}>{fmtUsd(totalCost)}</div>
+            <div style={{ padding: '8px', border: '1px solid var(--sg-border-light)', borderRadius: '6px', background: 'var(--sg-surface-alt)' }}>
+              <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Realized cost</div>
+              <div style={{ color: 'var(--sg-text)', fontSize: '18px', fontWeight: 600 }}>{fmtUsd(totalCost)}</div>
             </div>
           </div>
           <div style={{ flex: 1, overflow: 'auto' }}>
@@ -419,14 +419,14 @@ const SESSION_COLUMNS: Column<Session>[] = [
   {
     key: 'cwd', label: 'Working dir', width: 140,
     render: s => (
-      <span style={{ display: 'block', color: '#999', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.cwd}>
+      <span style={{ display: 'block', color: 'var(--sg-text-hint)', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={s.cwd}>
         {e(shortenPath(s.cwd))}
       </span>
     ),
   },
   {
     key: 'last_active', label: 'Last active',
-    render: s => <span style={{ whiteSpace: 'nowrap', color: '#999' }}>{e((s.last_active || '').replace('T', ' ').slice(0, 16))}</span>,
+    render: s => <span style={{ whiteSpace: 'nowrap', color: 'var(--sg-text-hint)' }}>{e((s.last_active || '').replace('T', ' ').slice(0, 16))}</span>,
   },
 ];
 
@@ -449,13 +449,13 @@ function shortenPath(p: string): string {
 }
 
 function LspPanel({ data }: { data: LspStatus }) {
-  const statusColor = data.errors > 0 ? '#ff6b6b' : data.warnings > 0 ? '#ffd93d' : '#4caf50';
+  const statusColor = data.errors > 0 ? 'var(--sg-danger-light)' : data.warnings > 0 ? 'var(--sg-warning)' : 'var(--sg-success)';
   const statusLabel = data.errors > 0 ? 'Errors' : data.warnings > 0 ? 'Warnings' : 'Healthy';
 
   return (
     <Panel title="LSP Health" count={data.active_servers}>
       {data.active_servers === 0 ? (
-        <div style={{ padding: '16px', color: '#888', fontSize: '12px' }}>
+        <div style={{ padding: '16px', color: 'var(--sg-text-faint)', fontSize: '12px' }}>
           No active LSP servers
         </div>
       ) : (
@@ -467,18 +467,18 @@ function LspPanel({ data }: { data: LspStatus }) {
           <table style={{ fontSize: '12px', width: '100%', borderCollapse: 'collapse' }}>
             <tbody>
               <tr>
-                <td style={{ color: '#888', padding: '2px 8px 2px 0' }}>Active servers</td>
-                <td style={{ color: '#ccc', textAlign: 'right' }}>{data.active_servers}</td>
+                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>Active servers</td>
+                <td style={{ color: 'var(--sg-border-medium)', textAlign: 'right' }}>{data.active_servers}</td>
               </tr>
               <tr>
-                <td style={{ color: '#888', padding: '2px 8px 2px 0' }}>Errors</td>
-                <td style={{ color: data.errors > 0 ? '#ff6b6b' : '#ccc', textAlign: 'right', fontWeight: data.errors > 0 ? 600 : 400 }}>
+                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>Errors</td>
+                <td style={{ color: data.errors > 0 ? 'var(--sg-danger-light)' : 'var(--sg-border-medium)', textAlign: 'right', fontWeight: data.errors > 0 ? 600 : 400 }}>
                   {data.errors}
                 </td>
               </tr>
               <tr>
-                <td style={{ color: '#888', padding: '2px 8px 2px 0' }}>Warnings</td>
-                <td style={{ color: data.warnings > 0 ? '#ffd93d' : '#ccc', textAlign: 'right', fontWeight: data.warnings > 0 ? 600 : 400 }}>
+                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>Warnings</td>
+                <td style={{ color: data.warnings > 0 ? 'var(--sg-warning)' : 'var(--sg-border-medium)', textAlign: 'right', fontWeight: data.warnings > 0 ? 600 : 400 }}>
                   {data.warnings}
                 </td>
               </tr>
@@ -491,7 +491,7 @@ function LspPanel({ data }: { data: LspStatus }) {
 }
 
 function agentEnabledDot(enabled: boolean | undefined): string {
-  return enabled ? '#22c55e' : '#9ca3af';
+  return enabled ? 'var(--sg-success)' : 'var(--sg-text-hint)';
 }
 
 const AGENT_COLUMNS: Column<Agent>[] = [
@@ -516,12 +516,12 @@ const AGENT_COLUMNS: Column<Agent>[] = [
   },
 ];
 
-function AgentsPanel({ data }: { data: Agent[] }) {
+function ModelsPanel({ data }: { data: Agent[] }) {
   return (
-    <Panel title="Agents" count={data.length}>
+    <Panel title="Models" count={data.length}>
       {data.length === 0 ? (
-        <div style={{ padding: '12px', color: '#aaa', fontSize: '12px' }}>
-          No agents configured
+        <div style={{ padding: '12px', color: 'var(--sg-text-pale)', fontSize: '12px' }}>
+          No models configured
         </div>
       ) : (
         <DataTable columns={AGENT_COLUMNS} rows={data} rowKey={(_a, i) => i} />
@@ -534,7 +534,7 @@ function OnboardPanel({ data }: { data: OnboardReport | null }) {
   if (!data) {
     return (
       <Panel title="Readiness">
-        <div style={{ padding: '12px', fontSize: '12px', color: '#888' }}>
+        <div style={{ padding: '12px', fontSize: '12px', color: 'var(--sg-text-faint)' }}>
           Onboard report unavailable.
         </div>
       </Panel>
@@ -543,24 +543,24 @@ function OnboardPanel({ data }: { data: OnboardReport | null }) {
   const stepColor = (s: OnboardStep['status']): string => {
     switch (s) {
       case 'ok':
-        return '#4caf50';
+        return 'var(--sg-success)';
       case 'warn':
-        return '#f39c12';
+        return 'var(--sg-warning)';
       case 'error':
-        return '#ff6b6b';
+        return 'var(--sg-danger-light)';
       case 'skipped':
       default:
-        return '#aaa';
+        return 'var(--sg-text-pale)';
     }
   };
-  const readyColor = data.ready ? '#4caf50' : '#ff6b6b';
+  const readyColor = data.ready ? 'var(--sg-success)' : 'var(--sg-danger-light)';
   return (
     <Panel title="Readiness" count={data.ready ? 1 : 0}>
       <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '12px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ color: '#888' }}>Ready:</span>
+          <span style={{ color: 'var(--sg-text-faint)' }}>Ready:</span>
           <span style={{ color: readyColor, fontWeight: 600 }}>{data.ready ? 'yes' : 'no'}</span>
-          <span style={{ color: '#aaa', marginLeft: 'auto' }}>
+          <span style={{ color: 'var(--sg-text-pale)', marginLeft: 'auto' }}>
             {Math.round(data.elapsed_ms)}&thinsp;ms
           </span>
         </div>
@@ -568,11 +568,11 @@ function OnboardPanel({ data }: { data: OnboardReport | null }) {
           <tbody>
             {data.steps.map((s, i) => (
               <tr key={`${s.step}-${i}`}>
-                <td style={{ color: '#888', padding: '2px 8px 2px 0' }}>{e(s.step)}</td>
+                <td style={{ color: 'var(--sg-text-faint)', padding: '2px 8px 2px 0' }}>{e(s.step)}</td>
                 <td style={{ color: stepColor(s.status), textAlign: 'right', fontWeight: 600 }}>
                   {e(s.status)}
                   {(s.warnings || s.errors) ? (
-                    <span style={{ color: '#aaa', fontWeight: 400, marginLeft: '6px' }}>
+                    <span style={{ color: 'var(--sg-text-pale)', fontWeight: 400, marginLeft: '6px' }}>
                       (w={s.warnings ?? 0}, e={s.errors ?? 0})
                     </span>
                   ) : null}
@@ -583,16 +583,16 @@ function OnboardPanel({ data }: { data: OnboardReport | null }) {
         </table>
         {data.next_actions.length > 0 && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            <div style={{ color: '#888', fontSize: '11px' }}>Next actions</div>
+            <div style={{ color: 'var(--sg-text-faint)', fontSize: '11px' }}>Next actions</div>
             {data.next_actions.slice(0, 3).map((a, i) => (
               <div
                 key={`action-${i}`}
                 style={{
                   padding: '6px 8px',
                   borderRadius: '4px',
-                  background: data.ready ? '#f1f7f1' : '#fff3f3',
-                  border: `1px solid ${data.ready ? '#cfe2cf' : '#ffd2d2'}`,
-                  color: '#444',
+                  background: data.ready ? 'var(--sg-success-bg)' : 'var(--sg-danger-bg)',
+                  border: `1px solid ${data.ready ? 'var(--sg-success-bg)' : 'var(--sg-danger-bg)'}`,
+                  color: 'var(--sg-text-muted)',
                 }}
                 title={a}
               >
@@ -615,11 +615,11 @@ function BarRow({ label, value, max, right, color }: {
   const pct = max > 0 ? Math.max(2, Math.round((value / max) * 100)) : 0;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '3px 10px', fontSize: 12 }}>
-      <span style={{ width: 92, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: '#555' }} title={label}>{label}</span>
-      <div style={{ flex: 1, background: '#f0f0f0', borderRadius: 3, height: 10, overflow: 'hidden' }}>
+      <span style={{ width: 92, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--sg-text-muted)' }} title={label}>{label}</span>
+      <div style={{ flex: 1, background: 'var(--sg-surface-active)', borderRadius: 3, height: 10, overflow: 'hidden' }}>
         <div style={{ width: `${pct}%`, background: color, height: '100%' }} />
       </div>
-      <span style={{ width: 62, textAlign: 'right', color: '#666', fontVariantNumeric: 'tabular-nums' }}>{right}</span>
+      <span style={{ width: 62, textAlign: 'right', color: 'var(--sg-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{right}</span>
     </div>
   );
 }
@@ -637,14 +637,14 @@ function GuardrailPanel({ data }: { data: AuditSummary }) {
   };
   const max = Math.max(1, ...Object.values(counts));
   const colors: Record<string, string> = {
-    allow: '#22c55e', block: '#ef4444', rewrite: '#f59e0b', approval_required: '#3b82f6',
+    allow: 'var(--sg-success)', block: 'var(--sg-danger)', rewrite: 'var(--sg-warning)', approval_required: 'var(--sg-info)',
   };
   return (
     <Panel title="Guardrail Actions" count={data.total}>
       {data.total === 0 ? <EmptyState message="No tool-action audit yet" inline /> : (
         <div style={{ padding: '8px 0' }}>
           {Object.keys(counts).map(v => (
-            <BarRow key={v} label={v} value={counts[v]} max={max} right={String(counts[v])} color={colors[v] || '#888'} />
+            <BarRow key={v} label={v} value={counts[v]} max={max} right={String(counts[v])} color={colors[v] || 'var(--sg-text-faint)'} />
           ))}
         </div>
       )}
@@ -669,7 +669,7 @@ function SuccessByAgentPanel({ data }: { data: Delegation[] }) {
           {rows.map(([agent, c]) => {
             const rate = Math.round((c.ok / c.total) * 100);
             return <BarRow key={agent} label={agent} value={c.ok} max={max}
-              right={`${rate}% · ${c.total}`} color={rate >= 80 ? '#22c55e' : rate >= 50 ? '#f59e0b' : '#ef4444'} />;
+              right={`${rate}% · ${c.total}`} color={rate >= 80 ? 'var(--sg-success)' : rate >= 50 ? 'var(--sg-warning)' : 'var(--sg-danger)'} />;
           })}
         </div>
       )}
@@ -712,7 +712,7 @@ function TopToolsPanel({ data }: { data: Trace[] }) {
     <Panel title="Top Tools" count={rows.length}>
       {rows.length === 0 ? <EmptyState message="No tool calls traced" inline /> : (
         <div style={{ padding: '8px 0' }}>
-          {rows.map(([tool, n]) => <BarRow key={tool} label={tool} value={n} max={max} right={String(n)} color="#6366f1" />)}
+          {rows.map(([tool, n]) => <BarRow key={tool} label={tool} value={n} max={max} right={String(n)} color="var(--sg-purple)" />)}
         </div>
       )}
     </Panel>
@@ -732,7 +732,7 @@ function CostByAgentPanel({ data }: { data: TokenAudit[] }) {
     <Panel title="Tokens by Agent" count={rows.length}>
       {rows.length === 0 ? <EmptyState message="No spend recorded" inline /> : (
         <div style={{ padding: '8px 0' }}>
-          {rows.map(([agent, tok]) => <BarRow key={agent} label={agent} value={tok} max={max} right={fmtCompact(tok)} color="#0ea5e9" />)}
+          {rows.map(([agent, tok]) => <BarRow key={agent} label={agent} value={tok} max={max} right={fmtCompact(tok)} color="var(--sg-info)" />)}
         </div>
       )}
     </Panel>
@@ -750,16 +750,16 @@ function CachePanel({ data }: { data: TokenAudit[] }) {
     <Panel title="Cache Efficiency">
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10, fontSize: 12 }}>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-          <span style={{ fontSize: 30, fontWeight: 700, color: pct >= 50 ? '#22c55e' : pct >= 20 ? '#f59e0b' : '#888' }}>{pct}%</span>
-          <span style={{ color: '#888' }}>cache-read share of input</span>
+          <span style={{ fontSize: 30, fontWeight: 700, color: pct >= 50 ? 'var(--sg-success)' : pct >= 20 ? 'var(--sg-warning)' : 'var(--sg-text-faint)' }}>{pct}%</span>
+          <span style={{ color: 'var(--sg-text-faint)' }}>cache-read share of input</span>
         </div>
-        <div style={{ background: '#f0f0f0', borderRadius: 4, height: 12, overflow: 'hidden' }}>
-          <div style={{ width: `${pct}%`, background: '#22c55e', height: '100%' }} />
+        <div style={{ background: 'var(--sg-surface-active)', borderRadius: 4, height: 12, overflow: 'hidden' }}>
+          <div style={{ width: `${pct}%`, background: 'var(--sg-success)', height: '100%' }} />
         </div>
         <table style={{ fontSize: 12, width: '100%' }}><tbody>
-          <tr><td style={{ color: '#888' }}>Cache reads</td><td style={{ textAlign: 'right' }}>{fmtCompact(cacheRead)}</td></tr>
-          <tr><td style={{ color: '#888' }}>Cache writes</td><td style={{ textAlign: 'right' }}>{fmtCompact(cacheWrite)}</td></tr>
-          <tr><td style={{ color: '#888' }}>Fresh prompt</td><td style={{ textAlign: 'right' }}>{fmtCompact(prompt)}</td></tr>
+          <tr><td style={{ color: 'var(--sg-text-faint)' }}>Cache reads</td><td style={{ textAlign: 'right' }}>{fmtCompact(cacheRead)}</td></tr>
+          <tr><td style={{ color: 'var(--sg-text-faint)' }}>Cache writes</td><td style={{ textAlign: 'right' }}>{fmtCompact(cacheWrite)}</td></tr>
+          <tr><td style={{ color: 'var(--sg-text-faint)' }}>Fresh prompt</td><td style={{ textAlign: 'right' }}>{fmtCompact(prompt)}</td></tr>
         </tbody></table>
       </div>
     </Panel>
@@ -795,7 +795,7 @@ function ProviderMixPanel({ data }: { data: Agent[] }) {
     <Panel title="Provider Mix" count={rows.length}>
       {rows.length === 0 ? <EmptyState message="No agents" inline /> : (
         <div style={{ padding: '8px 0' }}>
-          {rows.map(([p, n]) => <BarRow key={p} label={p} value={n} max={max} right={String(n)} color="#8b5cf6" />)}
+          {rows.map(([p, n]) => <BarRow key={p} label={p} value={n} max={max} right={String(n)} color="var(--sg-purple)" />)}
         </div>
       )}
     </Panel>
@@ -819,7 +819,7 @@ function ConfidenceByRolePanel({ data }: { data: Delegation[] }) {
         <div style={{ padding: '8px 0' }}>
           {rows.map(r => (
             <BarRow key={r.role} label={r.role} value={r.avg} max={100}
-              right={`${r.avg}% · ${r.n}`} color={r.avg >= 70 ? '#22c55e' : r.avg >= 40 ? '#f59e0b' : '#ef4444'} />
+              right={`${r.avg}% · ${r.n}`} color={r.avg >= 70 ? 'var(--sg-success)' : r.avg >= 40 ? 'var(--sg-warning)' : 'var(--sg-danger)'} />
           ))}
         </div>
       )}
@@ -840,7 +840,7 @@ interface PanelDef {
 
 const PANELS: PanelDef[] = [
   { id: 'readiness',   title: 'Readiness',        defaultOn: true,  render: d => <OnboardPanel data={d.onboard} /> },
-  { id: 'agents',      title: 'Agents',           defaultOn: true,  render: d => <AgentsPanel data={d.agents} /> },
+  { id: 'models',      title: 'Models',           defaultOn: true,  render: d => <ModelsPanel data={d.agents} /> },
   { id: 'sessions',    title: 'Active Sessions',  defaultOn: true,  render: d => <SessionsPanel data={d.sessions} /> },
   { id: 'delegations', title: 'Delegations',      defaultOn: true,  render: d => <DelegationsPanel data={d.delegations} /> },
   { id: 'metrics',     title: 'Metrics',          defaultOn: true,  render: d => <MetricsPanel data={d.metrics} /> },
@@ -867,11 +867,16 @@ function defaultLayout(): string[] {
   return PANELS.filter(p => p.defaultOn).map(p => p.id);
 }
 
-function loadLayout(): string[] {
+/* Panel ids that have been renamed. A saved layout is filtered against PANELS,
+ * so without this map an id from before a rename is simply dropped and the user
+ * silently loses that panel from a layout they chose. */
+const RENAMED_PANEL_IDS: Record<string, string> = { agents: 'models' };
+
+export function loadLayout(): string[] {
   try {
     const raw = localStorage.getItem(LAYOUT_KEY);
     if (!raw) return defaultLayout();
-    const ids = JSON.parse(raw) as string[];
+    const ids = (JSON.parse(raw) as string[]).map(id => RENAMED_PANEL_IDS[id] ?? id);
     const valid = ids.filter(id => PANELS.some(p => p.id === id));
     return valid.length ? valid : defaultLayout();
   } catch {
@@ -902,9 +907,9 @@ function CustomizePopover({ layout, setLayout, onClose }: {
       <div onClick={onClose} style={{ position: 'fixed', inset: 0, zIndex: 20 }} />
       <div style={{
         position: 'absolute', top: 40, right: 12, zIndex: 21, width: 280, maxHeight: '70vh', overflow: 'auto',
-        background: '#fff', border: '1px solid #ddd', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', padding: 8,
+        background: 'var(--sg-surface)', border: '1px solid var(--sg-border-medium)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', padding: 8,
       }}>
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#555', padding: '4px 6px 8px' }}>Customize panels</div>
+        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--sg-text-muted)', padding: '4px 6px 8px' }}>Customize panels</div>
         {ordered.map(id => {
           const p = PANELS.find(x => x.id === id)!;
           const on = enabled.has(id);
@@ -912,7 +917,7 @@ function CustomizePopover({ layout, setLayout, onClose }: {
             <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '3px 6px', borderRadius: 4 }}
               title="Show or hide this panel on the dashboard.">
               <input type="checkbox" checked={on} onChange={() => toggle(id)} />
-              <span style={{ flex: 1, fontSize: 13, color: on ? '#333' : '#999' }}>{p.title}</span>
+              <span style={{ flex: 1, fontSize: 13, color: on ? 'var(--sg-text)' : 'var(--sg-text-hint)' }}>{p.title}</span>
               {on && (
                 <>
                   <Button size="sm" onClick={() => move(id, -1)} title="Move up" style={{ padding: '0 6px' }}>↑</Button>
@@ -966,16 +971,16 @@ export default function Dashboard() {
     // Fill the routed <main> EXACTLY (no negative-margin hack) so nothing overflows.
     <div style={{
       position: 'relative', height: '100%', width: '100%', boxSizing: 'border-box',
-      display: 'flex', flexDirection: 'column', overflow: 'hidden', background: '#f0f0f0',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden', background: 'var(--sg-surface-active)',
     }}>
       <div style={{
-        padding: '8px 16px', background: '#fafafa', borderBottom: '1px solid #e0e0e0',
+        padding: '8px 16px', background: 'var(--sg-surface-alt)', borderBottom: '1px solid var(--sg-border)',
         display: 'flex', alignItems: 'center', gap: 12, flexShrink: 0,
       }}>
-        <span style={{ fontSize: 14, fontWeight: 600, color: '#555' }}>Dashboard</span>
+        <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--sg-text-muted)' }}>Dashboard</span>
         <Button size="sm" onClick={load} title="Reload all dashboard data from the server.">Refresh</Button>
         <Button size="sm" onClick={() => setCustomizing(v => !v)} style={{ marginLeft: 'auto' }} title="Choose which panels are shown and reorder them.">⚙ Customize</Button>
-        {loading && <span style={{ fontSize: 12, color: '#aaa' }}>Loading…</span>}
+        {loading && <span style={{ fontSize: 12, color: 'var(--sg-text-pale)' }}>Loading…</span>}
       </div>
 
       {customizing && <CustomizePopover layout={layout} setLayout={setLayout} onClose={() => setCustomizing(false)} />}
@@ -985,7 +990,7 @@ export default function Dashboard() {
           scroll; many panels scroll vertically only. */}
       {data && (
         shown.length === 0 ? (
-          <div style={{ padding: 24, color: '#888', fontSize: 13 }}>
+          <div style={{ padding: 24, color: 'var(--sg-text-faint)', fontSize: 13 }}>
             No panels selected — click <b>⚙ Customize</b> to add some.
           </div>
         ) : (

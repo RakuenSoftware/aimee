@@ -223,24 +223,29 @@ class ModuleInventoryTest(unittest.TestCase):
         raw = BASELINE.read_text(encoding="utf-8")
         self.assertEqual(json.loads(raw), yaml.safe_load(raw))
 
+    # The expected counts come from the checker rather than a literal. A literal
+    # here is a second copy of the constant that nothing keeps in step: changing
+    # a module's activation class should require updating only the checker.
     def test_required_count_drift(self):
         data = self.changed()
         data["required"].append("unexpected-module")
+        expected = CHECKER_MODULE.REQUIRED_COUNT
         self.assert_failed(
             self.run_checker(data),
             "rule=required-count",
-            "REQUIRED_COUNT=18",
-            "actual 19",
+            f"REQUIRED_COUNT={expected}",
+            f"actual {expected + 1}",
         )
 
     def test_optional_count_drift(self):
         data = self.changed()
         data["optional"].pop()
+        expected = CHECKER_MODULE.OPTIONAL_COUNT
         self.assert_failed(
             self.run_checker(data),
             "rule=optional-count",
-            "OPTIONAL_COUNT=7",
-            "actual 6",
+            f"OPTIONAL_COUNT={expected}",
+            f"actual {expected - 1}",
         )
 
     def test_duplicate_id(self):
@@ -285,6 +290,74 @@ class ModuleInventoryTest(unittest.TestCase):
         data = self.changed()
         data["historical"] = ["git"]
         self.assert_failed(self.run_checker(data), "rule=structure", "unknown keys", "historical")
+
+    # --- the plugin principal-ref band ---
+    #
+    # Event kinds are carved from a ref as 4096 + ref*256 + stage, so a ref
+    # reserves a whole 256-kind block. A module handed a ref inside the band
+    # reserved for plugin instances would have its kinds land where a provisioned
+    # plugin may already be serving, and bus_host_serve_kind() binds one kind to
+    # exactly one slot -- the loser is denied at attach with nothing in its own
+    # log to say why. A live aimee-kb reproduced exactly that when the plugin
+    # range still sat at 11264, which is postgres's block.
+
+    def test_module_ref_inside_the_plugin_band_is_refused(self):
+        data = self.changed()
+        data["principal_refs"]["git"] = 200
+        self.assert_failed(self.run_checker(data), "rule=plugin-band", "git", "200")
+
+    def test_module_ref_just_below_the_band_is_allowed(self):
+        data = self.changed()
+        data["principal_refs"]["git"] = 199
+        self.assertEqual(self.run_checker(data).returncode, 0)
+
+    def test_duplicate_principal_refs_are_refused(self):
+        data = self.changed()
+        data["principal_refs"]["git"] = data["principal_refs"]["memory"]
+        self.assert_failed(self.run_checker(data), "rule=principal-ref", "share")
+
+    def test_retired_ref_still_assigned_is_refused(self):
+        data = self.changed()
+        data["retired_principal_refs"] = [data["principal_refs"]["git"]]
+        self.assert_failed(self.run_checker(data), "rule=principal-ref", "retired")
+
+    def test_missing_plugin_band_is_refused(self):
+        data = self.changed()
+        data.pop("plugin_principal_ref_band")
+        self.assert_failed(self.run_checker(data), "rule=structure", "missing keys")
+
+    def test_inverted_plugin_band_is_refused(self):
+        data = self.changed()
+        data["plugin_principal_ref_band"] = {"first": 456, "limit": 200}
+        self.assert_failed(self.run_checker(data), "rule=plugin-band", "first < limit")
+
+    # --- the DB3 provider band ---
+    #
+    # DB3 vector providers are dynamically provisioned exactly like plugin
+    # instances, and DB3Router keys them by principal. They need the same
+    # protection, so the band rule is generalised rather than duplicated.
+
+    def test_module_ref_inside_the_db3_band_is_refused(self):
+        data = self.changed()
+        data["principal_refs"]["git"] = 456
+        self.assert_failed(self.run_checker(data), "rule=plugin-band", "git", "456")
+
+    def test_missing_db3_band_is_refused(self):
+        data = self.changed()
+        data.pop("retired_principal_ref_band")
+        self.assert_failed(self.run_checker(data), "rule=structure", "missing keys")
+
+    def test_inverted_db3_band_is_refused(self):
+        data = self.changed()
+        data["retired_principal_ref_band"] = {"first": 512, "limit": 456}
+        self.assert_failed(self.run_checker(data), "rule=plugin-band", "first < limit")
+
+    def test_overlapping_bands_are_refused(self):
+        # Two dynamic allocators drawing from one range is the same defect as a
+        # module sitting inside a band.
+        data = self.changed()
+        data["retired_principal_ref_band"] = {"first": 400, "limit": 512}
+        self.assert_failed(self.run_checker(data), "rule=plugin-band", "overlaps")
 
 
 if __name__ == "__main__":

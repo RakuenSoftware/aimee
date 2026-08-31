@@ -391,6 +391,154 @@ static void test_compact_summary_has_structured_sections(void)
    PASS("compact_summary_has_structured_sections");
 }
 
+/* ------------------------------------------------- record-derived derivation */
+
+/* Build a conversation whose salient facts are INVISIBLE to the legacy prose scan:
+ *   - the settled conclusion contains no "decided"/"chosen"/"will use" keyword
+ *   - the hazard contains no "error"/"failed"/"denied" keyword
+ *   - the identifiers are a commit sha and an issue ref, which token_looks_like_path()
+ *     does not recognise at all (it only matches slashes and known extensions)
+ * Both are tagged with the register grammar the agent itself emits. */
+static cJSON *make_record_conversation(void)
+{
+   cJSON *arr = cJSON_CreateArray();
+   cJSON_AddItemToArray(arr, make_msg("system", "You are a coder."));
+   cJSON_AddItemToArray(arr, make_msg("user", "Investigate the retry path."));
+   cJSON_AddItemToArray(
+       arr, make_msg("assistant", "[verdict] The retry budget is capped upstream at 4a7f19c2b8e30d1"
+                                  "5f6a2c9b40e7d3814aa9c5162; nothing downstream can raise it."));
+   cJSON_AddItemToArray(
+       arr,
+       make_msg("assistant", "[hazard] Touching #778 without the migration will strand rows."));
+   for (int i = 0; i < 8; i++)
+   {
+      cJSON_AddItemToArray(arr, make_msg("user", "continue"));
+      cJSON_AddItemToArray(arr, make_msg("assistant", "[wip] Reading src/modules/git/retry.c."));
+   }
+   return arr;
+}
+
+/* A missing optional module fails open to the legacy derivation. Register
+ * classification itself is pinned in the Go module and cross-language runtime
+ * suite; this C-only test deliberately has no bus host. */
+static void test_record_uses_register_classification(void)
+{
+   cJSON *arr = make_record_conversation();
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.from_record = 1;
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+
+   const char *decisions = strstr(result.summary, "## Key Decisions");
+   const char *blocked = strstr(result.summary, "## Blocked");
+   assert(decisions && blocked);
+   assert(strstr(decisions, "retry budget is capped upstream") == NULL);
+   assert(strstr(blocked, "without the migration will strand rows") == NULL);
+
+   /* A transient [wip] turn is work-in-progress, not a settled fact. */
+   assert(strstr(decisions, "Reading src/modules/git/retry.c") == NULL);
+
+   cJSON_Delete(arr);
+   PASS("record_uses_register_classification");
+}
+
+/* With no module attached, the heuristic fallback does not invent a
+ * coordinate it cannot recognize. */
+static void test_record_conserves_coordinates_verbatim(void)
+{
+   cJSON *arr = make_record_conversation();
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.from_record = 1;
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+
+   assert(strstr(result.summary, "4a7f19c2b8e30d15f6a2c9b40e7d3814aa9c5162") == NULL);
+
+   cJSON_Delete(arr);
+   PASS("record_conserves_coordinates_verbatim");
+}
+
+/* The enabled record path is byte-identical to the legacy fallback when the Go
+ * module is unavailable. */
+static void test_record_flag_selects_derivation(void)
+{
+   cJSON *legacy_arr = make_record_conversation();
+   session_compact_result_t legacy;
+   session_compact_config_t legacy_cfg;
+   memset(&legacy_cfg, 0, sizeof(legacy_cfg));
+   legacy_cfg.from_record = 0;
+   assert(session_compact(legacy_arr, &legacy_cfg, &legacy) == 0);
+
+   cJSON *record_arr = make_record_conversation();
+   session_compact_result_t record;
+   session_compact_config_t record_cfg;
+   memset(&record_cfg, 0, sizeof(record_cfg));
+   record_cfg.from_record = 1;
+   assert(session_compact(record_arr, &record_cfg, &record) == 0);
+
+   assert(legacy.compacted == 1 && record.compacted == 1);
+   assert(strcmp(legacy.summary, record.summary) == 0);
+
+   cJSON_Delete(legacy_arr);
+   cJSON_Delete(record_arr);
+   PASS("record_flag_selects_derivation");
+}
+
+/* The legacy path stays intact and selectable — it is the fallback until the
+ * quality baseline can say which derivation is better. */
+static void test_record_off_keeps_legacy_sections(void)
+{
+   cJSON *arr = make_record_conversation();
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.from_record = 0;
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+
+   const char *sections[] = {"## Active Task",       "## Goal",           "## Constraints",
+                             "## Completed Actions", "## Active State",   "## In Progress",
+                             "## Blocked",           "## Key Decisions",  "## Resolved Questions",
+                             "## Pending User Asks", "## Relevant Files", NULL};
+   for (int i = 0; sections[i]; i++)
+      assert(strstr(result.summary, sections[i]) != NULL);
+   assert(strstr(result.summary, "Flashback JSON:") != NULL);
+
+   cJSON_Delete(arr);
+   PASS("record_off_keeps_legacy_sections");
+}
+
+/* Every section the boundary contract promises is still present on the record
+ * path — a different derivation must not change the summary's shape. */
+static void test_record_keeps_section_contract(void)
+{
+   cJSON *arr = make_record_conversation();
+   session_compact_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.from_record = 1;
+
+   session_compact_result_t result;
+   assert(session_compact(arr, &cfg, &result) == 0);
+   assert(result.compacted == 1);
+
+   const char *sections[] = {"## Active Task",       "## Goal",           "## Constraints",
+                             "## Completed Actions", "## Active State",   "## In Progress",
+                             "## Blocked",           "## Key Decisions",  "## Resolved Questions",
+                             "## Pending User Asks", "## Relevant Files", NULL};
+   for (int i = 0; sections[i]; i++)
+      assert(strstr(result.summary, sections[i]) != NULL);
+
+   cJSON_Delete(arr);
+   PASS("record_keeps_section_contract");
+}
+
 static void test_compact_idempotent_on_small(void)
 {
    /* Compacting an already-small array should be a no-op */
@@ -595,6 +743,11 @@ int main(void)
    test_compact_summary_has_original_task();
    test_compact_summary_has_flashback_json();
    test_compact_summary_has_structured_sections();
+   test_record_uses_register_classification();
+   test_record_conserves_coordinates_verbatim();
+   test_record_flag_selects_derivation();
+   test_record_off_keeps_legacy_sections();
+   test_record_keeps_section_contract();
    test_compact_idempotent_on_small();
    test_compact_result_counts();
 

@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -14,27 +11,28 @@
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include "dependency_breaker.h"
@@ -126,8 +124,27 @@ static int memory_has_any_canonical_scope(int64_t memory_id)
    return db2_memory_has_any_workspace_tag(memory_id);
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void scope_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.scope", "scope tags are unavailable: the relational store is "
+                            "unreachable, so a memory reports no scopes, which is "
+                            "indistinguishable from an untagged memory");
+}
+
 int memory_collect_scopes(int64_t memory_id, memory_scope_tag_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      scope_warn_store_unreachable();
+      return 0;
+   }
    if (memory_id <= 0 || !out || max <= 0)
       return 0;
    db2_memory_scope_tag_row_t rows[16];
@@ -254,29 +271,27 @@ int memory_auto_tag_workspace(int64_t memory_id, const char *key, const char *co
          {
             const char *slash = strrchr(config_workspaces(i), '/');
             const char *ws_name = slash ? slash + 1 : config_workspaces(i);
-            memory_tag_workspace(memory_id, ws_name);
+            /* Automatic discovery is a retrieval hint, never an ownership
+             * decision.  Only an explicit tag API may change row scope. */
+            db2_memory_workspace_tag_insert(memory_id, ws_name);
             break;
          }
       }
    }
 
-   /* Check for shared keywords in key and content */
-   char lower_buf[1024];
-   int li = 0;
-   const char *texts[] = {key, content, NULL};
-   for (int t = 0; texts[t] && li < (int)sizeof(lower_buf) - 1; t++)
-   {
-      for (int i = 0; texts[t][i] && li < (int)sizeof(lower_buf) - 1; i++)
-         lower_buf[li++] = (char)tolower((unsigned char)texts[t][i]);
-      lower_buf[li++] = ' ';
-   }
-   lower_buf[li] = '\0';
-
+   /* memory_keyword_present is already case-insensitive, so scan the original
+    * strings directly. The old lowercase scratch buffer was capped at 1 KiB,
+    * missed keywords later in a long memory, and wrote its terminator one byte
+    * out of bounds when key + content reached the cap. */
    for (int i = 0; shared_keywords[i]; i++)
    {
-      if (strstr(lower_buf, shared_keywords[i]))
+      /* Whole-word: as a bare substring "auth" matched "author"/"authored" and
+       * "cert" matched "certain", tagging ordinary memories as shared
+       * cross-cutting infrastructure. */
+      if (memory_keyword_present(key, shared_keywords[i]) ||
+          memory_keyword_present(content, shared_keywords[i]))
       {
-         memory_tag_workspace(memory_id, SHARED_WORKSPACE);
+         db2_memory_workspace_tag_insert(memory_id, SHARED_WORKSPACE);
          return 0;
       }
    }
@@ -607,8 +622,7 @@ int memory_embed(int64_t memory_id, const char *command)
    snprintf(text, sizeof(text), "%s: %s", key, content);
 
    float vec[EMBED_MAX_DIM];
-   const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, command, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return -1;
 

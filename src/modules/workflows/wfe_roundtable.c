@@ -10,7 +10,7 @@
 #include "cJSON.h"
 #include "log.h"  /* degraded-gate WARN carries wfe_gate_decide's reason */
 #include "util.h" /* safe_exec_capture — compute the change-under-review diff */
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 #include "wfe_def.h"
 #include "wfe_engine.h"
 #include "wfe_iface.h"
@@ -201,7 +201,16 @@ static wfe_step_result_t exec_roundtable(wfe_ctx *ctx, const wfe_node_t *node)
             off += snprintf(agg + off, sizeof agg - (size_t)off, "\n## %s\n%s\n",
                             verdicts[i].persona[0] ? verdicts[i].persona : "reviewer",
                             verdicts[i].feedback);
-      wfe_feedback_write(wi, agg);
+      /* A blind retry is worse than a visible pause: without the blockers the
+       * next author/implement/split pass simply reproduces the rejected work.
+       * Fail the runner handoff closed when its durable feedback cannot be
+       * written, so an operator can repair storage instead of burning rounds. */
+      if (wfe_feedback_write(wi, agg) != 0)
+      {
+         aimee_log(LOG_WARN, "wfe-gate", "%s: could not persist requested-change feedback",
+                   node->id);
+         return wfe_step_pending(WFE_PAUSE_PANEL_UNREACHABLE);
+      }
       return wfe_step_looped();
    }
    case WFE_GATE_DEGRADED:

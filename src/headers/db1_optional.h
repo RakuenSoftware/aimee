@@ -7,7 +7,7 @@
 #ifndef DEC_DB1_OPTIONAL_H
 #define DEC_DB1_OPTIONAL_H 1
 
-#include "db1.h"
+#include "db1_client/db1.h"
 
 #if defined(AIMEE_DB1_DISABLED)
 #define db1_agent_log_list_delegation_patterns                ((int (*)())0)
@@ -24,10 +24,11 @@
 #define db1_context_snapshot_count_memories_with_min_samples  ((int (*)())0)
 #define db1_context_snapshot_has_memory                       ((int (*)())0)
 #define db1_context_snapshot_insert                           ((int (*)())0)
+#define db1_context_snapshot_insert_turn                      ((int (*)())0)
+#define db1_context_snapshot_activation                       ((int (*)())0)
 #define db1_context_snapshot_list_memory_ids_with_min_samples ((int (*)())0)
 #define db1_context_snapshot_list_sessions_for_memory         ((int (*)())0)
 #define db1_decision_record                                   ((int (*)())0)
-#define db1_default_path                                      ((const char *(*)())0)
 #define db1_maintenance_state_load                            ((int (*)())0)
 #define db1_maintenance_state_save                            ((int (*)())0)
 #define db1_runtime_state_add_int                             ((int (*)())0)
@@ -63,10 +64,11 @@
 #pragma weak db1_context_snapshot_count_memories_with_min_samples
 #pragma weak db1_context_snapshot_has_memory
 #pragma weak db1_context_snapshot_insert
+#pragma weak db1_context_snapshot_insert_turn
+#pragma weak db1_context_snapshot_activation
 #pragma weak db1_context_snapshot_list_memory_ids_with_min_samples
 #pragma weak db1_context_snapshot_list_sessions_for_memory
 #pragma weak db1_decision_record
-#pragma weak db1_default_path
 #pragma weak db1_maintenance_state_load
 #pragma weak db1_maintenance_state_save
 #pragma weak db1_runtime_state_add_int

@@ -18,12 +18,14 @@
 #include "runtime_secret.h"
 #include <openssl/crypto.h>
 #include <assert.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_root[256]; /* test sandbox: <root>/home is AIMEE_HOME */
 static char g_home[320];
@@ -111,12 +113,66 @@ static void test_forge_env_source(void)
    printf("  PASS: test_forge_env_source\n");
 }
 
+/* The post-first-boot seal is the only way to provision the forge token into a
+ * deployment that came up without AIMEE_FORGE_TOKEN. It reads the secret from
+ * stdin and must land in the same server-principal slot the first-boot path
+ * writes, because that is the only slot git_forge_vault_server_token reads. */
+static void seal_from_stdin(const char *payload, const char *cred, int expect_ok)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof(path), "%s/aimee-forge-seal-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   assert(write(fd, payload, strlen(payload)) == (ssize_t)strlen(payload));
+   assert(lseek(fd, 0, SEEK_SET) == 0);
+   int saved = dup(STDIN_FILENO);
+   assert(saved >= 0);
+   assert(dup2(fd, STDIN_FILENO) >= 0);
+   int rc = vault_env_seal_forge_credential(cred);
+   assert(dup2(saved, STDIN_FILENO) >= 0);
+   close(saved);
+   close(fd);
+   unlink(path);
+   assert(expect_ok ? rc == 0 : rc != 0);
+}
+
+static void test_forge_stdin_seal(void)
+{
+   char token[128];
+
+   /* A token piped with `echo` carries a trailing newline. Sealing it verbatim
+    * would corrupt every Authorization header built from it, so it is stripped. */
+   seal_from_stdin("ghs-sealed-EPSILON\n", "forge_token", 1);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-sealed-EPSILON") == 0);
+
+   /* Re-sealing replaces the value, so a rotated token does not need a redeploy. */
+   seal_from_stdin("ghs-rotated-ZETA", "forge_token", 1);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-rotated-ZETA") == 0);
+
+   /* The name allowlist is closed, and an all-whitespace payload is not a
+    * credential — neither may overwrite the good value above. */
+   seal_from_stdin("irrelevant", "author_name", 0);
+   seal_from_stdin("irrelevant", "../../etc/shadow", 0);
+   seal_from_stdin("\n\n", "forge_token", 0);
+   assert(vault_service_get_server_principal("git", "forge_token", token, sizeof(token)) ==
+          VAULT_OK);
+   assert(strcmp(token, "ghs-rotated-ZETA") == 0);
+
+   memset(token, 0, sizeof(token));
+   printf("  PASS: test_forge_stdin_seal\n");
+}
+
 static void test_generic_env_source(void)
 {
    setenv("AIMEE_DB2_URL", "postgresql://user:db-password@db/aimee", 1);
    setenv("AIMEE_VAULT_PKCS11_PIN", "vaulted-hsm-pin", 1);
+   setenv("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server", 1);
    assert(vault_env_has_credential_environment() == 1);
-   assert(vault_env_bootstrap_init() == 2);
+   assert(vault_env_bootstrap_init() == 3);
    assert(vault_env_has_credential_environment() == 0);
    assert(getenv("AIMEE_DB2_URL") == NULL);
    assert(getenv("AIMEE_VAULT_PKCS11_PIN") == NULL);
@@ -126,6 +182,9 @@ static void test_generic_env_source(void)
    runtime_secret_wipe(value, sizeof(value));
    assert(runtime_secret_get("AIMEE_VAULT_PKCS11_PIN", value, sizeof(value)) == 1);
    assert(strcmp(value, "vaulted-hsm-pin") == 0);
+   runtime_secret_wipe(value, sizeof(value));
+   assert(runtime_secret_get("AIMEE_KB_CLIENT_PAM_USERNAME", value, sizeof(value)) == 1);
+   assert(strcmp(value, "aimee-server") == 0);
    runtime_secret_wipe(value, sizeof(value));
    printf("  PASS: test_generic_env_source\n");
 }
@@ -363,9 +422,61 @@ static void test_no_plaintext_at_rest(void)
    printf("  PASS: test_no_plaintext_at_rest\n");
 }
 
+/* Remove every credential-shaped variable this process INHERITED, before any
+ * test runs.
+ *
+ * Several assertions here are global -- vault_env_has_credential_environment()
+ * answers "is there ANY credential left in the environment", not "is mine gone".
+ * That makes them a property of the whole environment, so a single unrelated
+ * variable in the developer's shell fails the test no matter how correct the
+ * code under test is. It bit exactly that way: a harness-injected
+ * CLAUDE_CODE_MESSAGING_TOKEN matches the `_TOKEN` suffix rule, so the scrub
+ * assertion could never pass locally while CI, with no such variable, stayed
+ * green.
+ *
+ * Deliberately reusing vault_env_name_is_any_credential() rather than
+ * re-listing the patterns: the point is to clear precisely what the predicate
+ * under test counts, so the two cannot drift apart and reopen this.
+ *
+ * environ is rebuilt by unsetenv(), so collect the names first and only then
+ * remove them -- unsetting mid-walk skips entries. */
+#define TEST_ENV_NAME_MAX 128 /* mirrors ENV_NAME_MAX, private to the module */
+
+static void scrub_inherited_credential_env(void)
+{
+   extern char **environ;
+   char names[64][TEST_ENV_NAME_MAX];
+   int n = 0;
+
+   for (char **entry = environ; *entry && n < (int)(sizeof(names) / sizeof(names[0])); entry++)
+   {
+      const char *eq = strchr(*entry, '=');
+      if (!eq || eq == *entry)
+         continue;
+      size_t len = (size_t)(eq - *entry);
+      if (len >= TEST_ENV_NAME_MAX)
+         continue;
+      memcpy(names[n], *entry, len);
+      names[n][len] = '\0';
+      if (vault_env_name_is_any_credential(names[n]))
+         n++;
+   }
+
+   for (int i = 0; i < n; i++)
+      unsetenv(names[i]);
+}
+
 int main(void)
 {
-   snprintf(g_root, sizeof(g_root), "/tmp/aimee-vaultboot-test-%d", (int)getpid());
+   scrub_inherited_credential_env();
+   assert(vault_env_egress_parent_path_ok("/usr/local/libexec/aimee-modules/aimee-module-egress"));
+   assert(!vault_env_egress_parent_path_ok(
+       "/usr/local/libexec/aimee-modules/aimee-module-egress-evil"));
+   assert(!vault_env_egress_parent_path_ok("/tmp/aimee-module-egress"));
+   assert(vault_env_egress_parent_attest() != 0);
+   assert(vault_env_print_egress_credential("AIMEE_MCP_712_TOKEN") != 0);
+
+   snprintf(g_root, sizeof(g_root), "%s/aimee-vaultboot-test-%d", platform_tmpdir(), (int)getpid());
    snprintf(g_home, sizeof(g_home), "%s/home", g_root);
    char mk[700];
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", g_root, g_home);
@@ -377,6 +488,7 @@ int main(void)
    test_idempotent_and_overwrite();
    test_env_source();
    test_forge_env_source();
+   test_forge_stdin_seal();
    test_generic_env_source();
    test_server_tls_key_first_boot_source();
    test_management_tls_key_first_boot_sources();

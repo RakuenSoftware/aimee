@@ -1,0 +1,19 @@
+groups:
+  - name: aimee-tap
+    rules:
+      - alert: AimeeTapExceptions
+        expr: sum(increase(aimee_tap_exceptions_total[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aimee event-bus tap reported an exception
+          description: Overflow, producer reaping, or invalid frames occurred in the last five minutes.
+      - alert: AimeeTelemetryMissing
+        expr: absent(aimee_tap_events_total)
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: Aimee tap telemetry is absent
+          description: No tap event series has reached Prometheus for ten minutes.

@@ -7,7 +7,7 @@
 #include "json_fluent.h" /* jo_ok */
 #include "cmd_memory_internal.h"
 #include "cmd_review.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_query.h"
 #include "platform_process.h"
 #include "tasks_compose.h"
 #include "kb.h"
@@ -42,7 +42,10 @@ void mem_store(app_ctx_t *ctx, int argc, char **argv)
    const char *scope_value = cmd_memory_scope_value(&opts);
 
    memory_t mem;
-   if (kb_client_memory_insert(tier, kind, key, content, 1.0, session, &mem) != 0)
+   /* `aimee memory store` is the user typing a note at their own terminal, so the
+    * row records the user provenance and facts mined from it may be Class A. */
+   if (kb_client_memory_insert_as(tier, kind, key, content, "", 1.0, session, MEMORY_AUTHORITY_USER,
+                                  &mem) != 0)
       fatal("failed to store memory (key=%s, tier=%s) — check stderr for details", key, tier);
 
    /* Apply explicit workspace tag if provided */
@@ -117,6 +120,36 @@ void mem_approve(app_ctx_t *ctx, int argc, char **argv)
       printf("Approved memory %lld (%s) for L4 promotion on next maintain cycle.\n", (long long)id,
              mem.kind[0] ? mem.kind : "fact");
    }
+}
+
+void mem_activation(app_ctx_t *ctx, int argc, char **argv)
+{
+   if (argc < 1)
+      fatal("memory activation requires an id");
+   int64_t id = atoll(argv[0]);
+   opt_parsed_t opts;
+   opt_parse(argc - 1, argv + 1, NULL, &opts);
+   int sticky = opt_get_int(&opts, "sticky", 2);
+   int cooldown = opt_get_int(&opts, "cooldown", 1);
+   int delay = opt_get_int(&opts, "delay", 0);
+   int suppressed = opt_get_flag(&opts, "suppress") ? 1 : 0;
+   if (sticky < 0 || cooldown < 0 || delay < 0)
+      fatal("memory activation turn counts must be non-negative");
+   if (memory_activation_policy_set(id, sticky, cooldown, delay, suppressed) != 0)
+      fatal("failed to update activation policy for memory %lld", (long long)id);
+   if (ctx->json_output)
+   {
+      cJSON *j = cJSON_CreateObject();
+      cJSON_AddNumberToObject(j, "memory_id", (double)id);
+      cJSON_AddNumberToObject(j, "sticky_turns", sticky);
+      cJSON_AddNumberToObject(j, "cooldown_turns", cooldown);
+      cJSON_AddNumberToObject(j, "delay_turns", delay);
+      cJSON_AddBoolToObject(j, "suppressed", suppressed);
+      emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
+   }
+   else
+      printf("Memory %lld activation: sticky=%d cooldown=%d delay=%d suppressed=%s\n",
+             (long long)id, sticky, cooldown, delay, suppressed ? "yes" : "no");
 }
 
 void mem_list(app_ctx_t *ctx, int argc, char **argv)
@@ -678,6 +711,16 @@ void mem_health(app_ctx_t *ctx, int argc, char **argv)
       cJSON_AddNumberToObject(j, "total_promotions", health.total_promotions);
       cJSON_AddNumberToObject(j, "total_demotions", health.total_demotions);
       cJSON_AddNumberToObject(j, "total_expirations", health.total_expirations);
+      cJSON *lag = cJSON_AddObjectToObject(j, "write_to_readable_lag");
+      cJSON_AddNumberToObject(lag, "samples", (double)health.write_to_readable_samples);
+      if (health.write_to_readable_samples > 0)
+      {
+         cJSON_AddNumberToObject(lag, "p50_secs", health.write_to_readable_p50_secs);
+         cJSON_AddNumberToObject(lag, "p95_secs", health.write_to_readable_p95_secs);
+         cJSON_AddNumberToObject(lag, "p99_secs", health.write_to_readable_p99_secs);
+      }
+      else
+         cJSON_AddStringToObject(lag, "state", "unmeasured");
       emit_json_ctx(j, ctx->json_fields, ctx->response_profile);
    }
    else
@@ -691,6 +734,12 @@ void mem_health(app_ctx_t *ctx, int argc, char **argv)
              health.total_demotions);
       printf("  Staleness:          %.1f%% of L2 facts unused in 30+ days\n",
              health.staleness * 100);
+      if (health.write_to_readable_samples > 0)
+         printf("  Write-to-readable:  p50=%.3fs p95=%.3fs p99=%.3fs (%lld samples)\n",
+                health.write_to_readable_p50_secs, health.write_to_readable_p95_secs,
+                health.write_to_readable_p99_secs, (long long)health.write_to_readable_samples);
+      else
+         printf("  Write-to-readable:  unmeasured\n");
       printf("  Expirations:        %d\n", health.total_expirations);
    }
 }

@@ -2,11 +2,58 @@ package wfe
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestWatchDirectoryTriggerParamsAreValidatedWhenWorkflowIsSaved(t *testing.T) {
+	definition := func(params string) []byte {
+		return []byte(fmt.Sprintf(`
+name: watcher
+start: watch
+nodes:
+  - id: watch
+    block: trigger.watch-dir
+    params:
+%s
+`, params))
+	}
+
+	for _, tc := range []struct {
+		name, params, want string
+	}{
+		{"workspace-type", "      workspace: 12", `param "workspace" must be a string`},
+		{"workspace-relative", "      workspace: repos/demo", "absolute server path"},
+		{"directory-type", "      dir: 12", `param "dir" must be a string`},
+		{"directory-traversal", "      dir: ../private", "confined repository-relative directory"},
+		{"directory-backslash", `      dir: 'docs\\private'`, "confined repository-relative directory"},
+		{"ref-option", "      ref: --all", "start with '-'"},
+		{"mode", "      mode: manual", "autonomous or interactive"},
+		{"spend-negative", "      max_spend_usd: -1", "finite and non-negative"},
+		{"spend-type", "      max_spend_usd: lots", "finite and non-negative"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseDefinition(definition(tc.params))
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error=%v, want %q", err, tc.want)
+			}
+		})
+	}
+
+	for _, params := range []string{
+		"      workspace: /srv/repos/demo\n      dir: docs/proposals/pending\n      ref: testing\n      mode: interactive\n      max_spend_usd: 1.5",
+		// A definition without a workspace is intentionally saved but disarmed;
+		// the operator can fill it in later without an invalid workflow blocking boot.
+		"      dir: docs/proposals/pending",
+	} {
+		if _, err := ParseDefinition(definition(params)); err != nil {
+			t.Fatalf("valid watch trigger rejected: %v", err)
+		}
+	}
+}
 
 func TestCurrentBuildWorkflowParses(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "config", "workflows", "build.yaml")

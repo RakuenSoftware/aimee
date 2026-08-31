@@ -19,9 +19,7 @@
 #include "modules/git/git_verify.h"
 #include <aimee/skills/skill.h>
 #include "kb_client.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "kb_reasoning.h"
-#endif
 #include "log.h"
 #include "platform_path.h"
 #include "slop_detect.h"
@@ -57,20 +55,12 @@ static int is_script_tool(const char *tool)
 static int guardrails_anti_pattern_check(const char *file_path, const char *command,
                                          anti_pattern_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return kb_client_anti_pattern_check(file_path, command, out, max);
-#else
    return db2_anti_pattern_check(file_path, command, out, max);
-#endif
 }
 
 static void guardrails_anti_pattern_bump(int64_t id)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)kb_client_anti_pattern_bump(id);
-#else
    (void)db2_anti_pattern_bump(id);
-#endif
 }
 
 static int is_subagent_tool(const char *tool)
@@ -1056,8 +1046,11 @@ static int skill_dispatch_trigger_advisory(session_state_t *state, const char *p
    if (!config_skills_dispatch_advisory() || *sent_flag)
       return 0;
 
-   if (!skill_trigger_matches(project_root, skill_name, tool_name, subject))
+   int trigger_match = skill_trigger_matches(project_root, skill_name, tool_name, subject);
+   if (trigger_match == 0)
       return 0;
+   if (trigger_match < 0)
+      LOG_WARN("guardrails", "skills trigger module unavailable; emitting conservative advisory");
 
    *sent_flag = 1;
    state->dirty = 1;
@@ -1700,7 +1693,6 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
       /* Shadow precedent lookup via graph reasoning layer (Phase 1 — log only).
        * Runs when no direct anti-pattern hit was found to check for related cases.
        * Only active when DB2 is available (KB binary context). */
-#if !defined(AIMEE_DB2_DISABLED)
       if (ap_count == 0)
       {
          if (config_reasoning_datalog_command()[0] && file_str)
@@ -1716,7 +1708,6 @@ int pre_tool_check_inner(const char *tool_name, const char *input_json, session_
             kb_reasoning_result_free(&res);
          }
       }
-#endif
    }
 
    /* Drift check (warn only) */

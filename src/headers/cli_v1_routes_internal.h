@@ -16,8 +16,12 @@ typedef struct
       const char *value;
    } flags[V1_MAX_FLAGS];
    int flag_count;
-} rpc_opts_t;
+} cli_args_t;
 int cli_v1_args_request_json(int argc, char **argv);
+int cli_agent_probe_response_is_failure(cJSON *resp);
+int cli_index_investigate_response_is_failure(cJSON *resp);
+void cli_ws_project_identity(const char *remote, const char *bearer, const char *abs_root,
+                             char *out, size_t out_len);
 void __attribute__((unused)) cli_v1_sleep_ms(int ms);
 const char *cli_v1_run_failure_reason(cJSON *result, cJSON *snapshot);
 int git_verify_response_is_failure(cJSON *resp);
@@ -32,6 +36,15 @@ cJSON *marshal_config_set(int argc, char **argv);
 cJSON *marshal_coord_job_start(int argc, char **argv);
 cJSON *marshal_coord_jobs_list(int argc, char **argv);
 cJSON *marshal_curator_contradictions(int argc, char **argv);
+/* The eval.* family lives in cli_v1_routes_f.c. */
+cJSON *marshal_eval_candidates(int argc, char **argv);
+cJSON *marshal_learning_approaches(int argc, char **argv);
+cJSON *marshal_learning_attribution(int argc, char **argv);
+cJSON *marshal_learning_resolve(int argc, char **argv);
+cJSON *marshal_learning_fate(int argc, char **argv);
+cJSON *marshal_eval_candidates_update(int argc, char **argv);
+cJSON *marshal_eval_results(int argc, char **argv);
+cJSON *marshal_eval_run(int argc, char **argv);
 cJSON *marshal_curator_topic(const char *method, int argc, char **argv);
 cJSON *marshal_delegate(int argc, char **argv);
 cJSON *marshal_delegate_aggregate(int argc, char **argv);
@@ -40,12 +53,18 @@ cJSON *marshal_delegate_log(int argc, char **argv);
 cJSON *marshal_roundtable_review(int argc, char **argv);
 cJSON *marshal_delegate_status(int argc, char **argv);
 cJSON *marshal_index_blast_radius(int argc, char **argv);
+cJSON *marshal_index_ast_grep(int argc, char **argv);
+cJSON *marshal_tool_call(int argc, char **argv);
 cJSON *marshal_index_deps(int argc, char **argv);
 cJSON *marshal_index_find(int argc, char **argv);
 cJSON *marshal_index_find_callers(int argc, char **argv);
 cJSON *marshal_index_list(int argc, char **argv);
 cJSON *marshal_index_scan(int argc, char **argv);
+cJSON *marshal_index_verify(int argc, char **argv);
 cJSON *marshal_index_structure(int argc, char **argv);
+cJSON *marshal_index_span(int argc, char **argv);
+cJSON *marshal_index_investigate(int argc, char **argv);
+cJSON *marshal_index_hybrid(int argc, char **argv);
 cJSON *marshal_insights_overview(int argc, char **argv);
 cJSON *marshal_job_id_request(const char *method, int argc, char **argv);
 cJSON *marshal_jobs_list(int argc, char **argv);
@@ -53,11 +72,15 @@ cJSON *marshal_kb_build(int argc, char **argv);
 cJSON *marshal_kb_docs_push(int argc, char **argv);
 cJSON *marshal_kb_ingest(int argc, char **argv);
 cJSON *marshal_kb_reembed(int argc, char **argv);
+cJSON *marshal_kb_erase_subject(int argc, char **argv);
 cJSON *marshal_memory_embed(int argc, char **argv);
 cJSON *marshal_kb_search(int argc, char **argv);
 cJSON *marshal_kb_status(int argc, char **argv);
 cJSON *marshal_kb_update(int argc, char **argv);
 cJSON *marshal_mcp_recheck(int argc, char **argv);
+cJSON *marshal_tool_call(int argc, char **argv);
+cJSON *marshal_workspace_add(int argc, char **argv);
+cJSON *marshal_workspace_prepare(int argc, char **argv);
 cJSON *marshal_memory_benchmark(int argc, char **argv);
 cJSON *marshal_memory_get(int argc, char **argv);
 cJSON *marshal_memory_delete(int argc, char **argv);
@@ -86,6 +109,9 @@ cJSON *marshal_request(const char *method, int argc, char **argv);
  * Reading it CLEARS it, so a stale flag cannot suppress the generic message on a later
  * command in the same process. */
 void marshal_request_note_reported(void);
+/* The same flag, read without clearing: marshal_request consults it to tell a
+ * served spec's own refusal from a spec it could not interpret. */
+int marshal_request_peek_reported(void);
 int marshal_request_take_reported(void);
 cJSON *marshal_rules_delete(int argc, char **argv);
 cJSON *marshal_session_attach(int argc, char **argv);
@@ -146,9 +172,19 @@ void pt_print_delegate(const char *method, cJSON *resp);
 void pt_print_delegate_launch(const char *method, cJSON *resp);
 void pt_print_delegate_log(const char *method, cJSON *resp);
 void pt_print_roundtable_review(const char *method, cJSON *resp);
+/* 1 when the response carries no review artifact, so the caller's exit status
+ * reports "no review happened" rather than success. Defined beside the printer
+ * because both answer the same question about the same response. */
+int roundtable_review_response_is_failure(cJSON *resp);
 void pt_print_delegate_status(const char *method, cJSON *resp);
 void pt_print_dogfood_report(const char *method, cJSON *resp);
 void pt_print_dogfood_tag(const char *method, cJSON *resp);
+void pt_print_eval_candidates(const char *method, cJSON *resp);
+void pt_print_learning_approaches(const char *method, cJSON *resp);
+void pt_print_learning_attribution(const char *method, cJSON *resp);
+void pt_print_learning_resolve(const char *method, cJSON *resp);
+void pt_print_learning_fate(const char *method, cJSON *resp);
+void pt_print_eval_candidates_update(const char *method, cJSON *resp);
 void pt_print_eval_results(const char *method, cJSON *resp);
 void pt_print_eval_run(const char *method, cJSON *resp);
 void pt_print_get_help(const char *method, cJSON *resp);
@@ -164,7 +200,11 @@ void pt_print_index_find(const char *method, cJSON *resp);
 void pt_print_index_find_callers(const char *method, cJSON *resp);
 void pt_print_index_list(const char *method, cJSON *resp);
 void pt_print_index_scan(const char *method, cJSON *resp);
+void pt_print_index_verify(const char *method, cJSON *resp);
 void pt_print_index_structure(const char *method, cJSON *resp);
+void pt_print_index_span(const char *method, cJSON *resp);
+void pt_print_index_investigate(const char *method, cJSON *resp);
+void pt_print_index_hybrid(const char *method, cJSON *resp);
 void pt_print_init_run(const char *method, cJSON *resp);
 void pt_print_insights_overview(const char *method, cJSON *resp);
 void pt_print_job_cancel(const char *method, cJSON *resp);
@@ -236,8 +276,28 @@ void pt_print_workspace_list(const char *method, cJSON *resp);
 void pt_print_workspace_mirror_sync(const char *method, cJSON *resp);
 void pt_print_workspace_remove(const char *method, cJSON *resp);
 void pt_print_worktree_gc(const char *method, cJSON *resp);
-const char *rpc_get(const rpc_opts_t *opts, const char *name);
-int rpc_get_int(const rpc_opts_t *opts, const char *name, int def);
-int rpc_has_flag(const rpc_opts_t *opts, const char *name);
-void rpc_parse(int argc, char **argv, const char **bool_flags, rpc_opts_t *out);
+const char *cli_args_get(const cli_args_t *opts, const char *name);
+int cli_args_get_int(const cli_args_t *opts, const char *name, int def);
+int cli_args_has_flag(const cli_args_t *opts, const char *name);
+void cli_args_parse(int argc, char **argv, const char **bool_flags, cli_args_t *out);
+
+/* The largest /v1 request body the server will accept, mirrored client-side so
+ * the CLI can refuse an oversized request itself. A body over this is dropped by
+ * the listener before it is parsed, which the client can otherwise only report as
+ * "could not reach the endpoint" — blaming a server that is up and answering.
+ *
+ * Mirrored rather than included because headers/server.h pulls in the server's
+ * own dependency chain, which the CLI does not build against.
+ * test_cli_v1_body_cap_matches_server pins these equal to SHTTP_MAX_BODY /
+ * SHTTP_MAX_ROUNDTABLE_BODY. */
+#define CLI_V1_MAX_BODY (4 * 1024 * 1024)
+
+/* Keep in step with ROUNDTABLE_MAX_ARTIFACT / SHTTP_MAX_ROUNDTABLE_BODY in
+ * headers/server.h (2x the artifact); test_cli_v1_body_cap_matches_server pins
+ * them equal. CLI_V1_MAX_ROUNDTABLE_ARTIFACT is what the three artifact reads in
+ * marshal_roundtable_review pass to marshal_read_*_limited -- it was written out
+ * as a bare 16MB literal at each of them. */
+#define CLI_V1_MAX_ROUNDTABLE_ARTIFACT (8 * 1024 * 1024)
+#define CLI_V1_MAX_ROUNDTABLE_BODY     (2 * CLI_V1_MAX_ROUNDTABLE_ARTIFACT)
+
 #endif

@@ -28,6 +28,8 @@
 #   COMPOSE_FILE    compose file(s), space-separated (default compose.yaml);
 #                   list several to layer an override (e.g. remap host ports)
 #   WAIT_SECONDS    health wait budget on --up   (default 300)
+#   REQUEST_TIMEOUT_SECONDS       ordinary API request budget (default 15)
+#   FUSION_REQUEST_TIMEOUT_SECONDS cold fusion request budget (default 60)
 #
 # Exit code: 0 = all checks passed, non-zero = first failure.
 
@@ -36,6 +38,17 @@ set -euo pipefail
 KB_URL="${KB_URL:-http://localhost:8741}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
+REQUEST_TIMEOUT_SECONDS="${REQUEST_TIMEOUT_SECONDS:-15}"
+FUSION_REQUEST_TIMEOUT_SECONDS="${FUSION_REQUEST_TIMEOUT_SECONDS:-60}"
+
+# The container deliberately refuses to expose its HTTP listener on 0.0.0.0
+# without an API bearer.  Give this disposable topology a test-only value before
+# the Vault bootstrap helper runs, then authenticate every request that crosses
+# the published port.  Operators can still override it to exercise a chosen
+# first-boot credential.
+: "${AIMEE_KB_API_BEARER_TOKEN:=aimee-kb-docker-smoke-bearer}"
+export AIMEE_KB_API_BEARER_TOKEN
+AUTH=(-H "Authorization: Bearer ${AIMEE_KB_API_BEARER_TOKEN}")
 
 # The kb embeds in-container from weights baked into the image, so there is no tier
 # to pick and nothing to download. Select the bundled model (the image pre-selects
@@ -62,6 +75,13 @@ for arg in "$@"; do
   esac
 done
 
+# A fresh smoke stack owns its own project. Without an explicit name the Vault
+# bootstrap helper discovers every running project that used the same Compose
+# filename and refuses an otherwise isolated run on a shared Docker host.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-kb-$$"
+fi
+
 # Run from the repo root (this script lives in scripts/).
 cd "$(dirname "$0")/.."
 
@@ -79,8 +99,9 @@ FAIL=0
 check() {
   # check <name> <expected-substring> <curl-args...>
   local name="$1" expect="$2"; shift 2
-  local body
-  if body="$(curl -fsS --max-time 15 "$@" 2>/dev/null)" && [[ "$body" == *"$expect"* ]]; then
+  local body timeout="${CHECK_TIMEOUT_SECONDS:-$REQUEST_TIMEOUT_SECONDS}"
+  if body="$(curl -fsS --max-time "$timeout" "${AUTH[@]}" "$@" 2>/dev/null)" &&
+     [[ "$body" == *"$expect"* ]]; then
     green  "  PASS  $name"
     PASS=$((PASS + 1))
   else
@@ -126,6 +147,28 @@ if [[ "$DO_UP" == 1 ]]; then
     fi
     sleep 3
   done
+
+  # control-web ships enabled but has no credential on a fresh scripted stack.
+  # Its supported first-boot behavior is to idle without a listener, so Compose
+  # must report that state healthy instead of poisoning the default topology.
+  bold "==> Waiting for credential-free control-web idle health"
+  control_deadline=$((SECONDS + 90))
+  while true; do
+    control_state="$("${DC[@]}" ps --format '{{.Service}} {{.Health}}' 2>/dev/null | awk '$1=="aimee-control-web"{print $2}')"
+    [[ "$control_state" == "healthy" ]] && {
+      green "  PASS  control-web credential-free idle is healthy"
+      PASS=$((PASS + 1))
+      break
+    }
+    if (( SECONDS >= control_deadline )); then
+      red "  FAIL  control-web credential-free idle is ${control_state:-unknown}, want healthy"
+      "${DC[@]}" ps -a
+      "${DC[@]}" logs --tail=40 aimee-control-web || true
+      FAIL=$((FAIL + 1))
+      break
+    fi
+    sleep 3
+  done
 fi
 
 bold "==> Exercising the kb /v1 surface at ${KB_URL}"
@@ -147,6 +190,7 @@ check "POST /v1/search"           '"hits"'     -X POST -H 'content-type: applica
 # unless the container has a 64 MB stack ulimit — a regression the /v1/search
 # check above does NOT catch. curl -fsS fails here if the kb crashed, so this
 # guards the ulimit fix. An empty "facts" array on a fresh DB is a pass.
+CHECK_TIMEOUT_SECONDS="$FUSION_REQUEST_TIMEOUT_SECONDS" \
 check "POST memory.find_facts (fusion)" '"facts"' -X POST -H 'content-type: application/json' \
                                                -d '{"query":"docker smoke test","limit":3,"graph_code_fusion_state":"on"}' \
                                                "${KB_URL}/v1/actions/memory.find_facts"
@@ -180,6 +224,11 @@ read_kb_env() {
     for p in /proc/[0-9]*; do
       [ -r "$p/comm" ] || continue
       if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        # The live HTTP daemon is the process started with --http-port. A
+        # short-lived KB helper can remain as a zombie with the same comm and
+        # an empty cmdline; /proc iteration can encounter that PID first.
+        cmdline=$(tr "\0" " " < "$p/cmdline" 2>/dev/null || true)
+        case " $cmdline " in *" --http-port=8741 "*) ;; *) continue ;; esac
         tr "\0" "\n" < "$p/environ" 2>/dev/null | sed -n "s/^'"$1"'=//p" | head -1
         return 0
       fi
@@ -196,6 +245,8 @@ if [[ -z "$emb_url" ]]; then
     for p in /proc/[0-9]*; do
       [ -r "$p/comm" ] || continue
       if [ "$(cat "$p/comm" 2>/dev/null)" = "aimee-kb" ]; then
+        cmdline=$(tr "\0" " " < "$p/cmdline" 2>/dev/null || true)
+        case " $cmdline " in *" --http-port=8741 "*) ;; *) continue ;; esac
         tr "\0" "\n" < "$p/environ" 2>/dev/null | grep -E "EMBEDDER|EMBEDDING" || echo "          (none)"
         return 0
       fi

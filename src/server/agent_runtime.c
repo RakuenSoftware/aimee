@@ -2,16 +2,17 @@
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
-#include "db1.h"
-#include "db1/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
+#include "db1_client/db1.h"
+#include "db1_client/delegations.h" /* db1_delegation_spawn_is_stopped — admission cancel poll */
 #include <aimee/delegates/delegate_role.h>
-#include <aimee/skills/skill_review.h>
+#include <aimee/delegates/delegate_launch_args.h>
+#include "role_templates.h"
 #include "provider_catalog.h"
-#include "db2/agent_hints.h"
-#include "db2/agent_outcomes.h"
-#include "db2/memory_query.h"
-#include "db2/rules.h"
-#include "db2/tasks.h"
+#include "modules/db2/c/agent_hints.h"
+#include "modules/db2/c/agent_outcomes.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/rules.h"
+#include "modules/db2/c/tasks.h"
 #include "kb_client.h"
 #include "agent.h"
 #include "agent_protocol.h"
@@ -20,6 +21,7 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_tunnel.h"
 #include "config.h"
+#include "config_client.h"
 #include <aimee/delegates/delegate_driver.h>
 #include "http_retry.h"
 #include "log.h"
@@ -35,6 +37,40 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
+
+int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg)
+{
+   if (!cfg || cfg->tool_loop_timeout_ms_cap <= 0 || cfg->tool_loop_deadline_ms <= 0)
+      return 0;
+   struct timespec now;
+   if (clock_gettime(CLOCK_MONOTONIC, &now) != 0)
+      return cfg->tool_loop_timeout_ms_cap;
+   int64_t now_ms = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000;
+   int64_t remaining = cfg->tool_loop_deadline_ms - now_ms;
+   if (remaining <= 0)
+      return -1;
+   if (remaining > INT_MAX)
+      return INT_MAX;
+   return (int)remaining;
+}
+
+static int agent_apply_request_tool_loop_cap(const agent_config_t *cfg, agent_t *agent,
+                                             agent_result_t *out)
+{
+   int remaining = agent_request_tool_loop_remaining_ms(cfg);
+   if (remaining < 0)
+   {
+      if (out)
+         snprintf(out->error, sizeof(out->error),
+                  "tool loop total timeout exceeded across delegate retry/fallback attempts");
+      return -1;
+   }
+   if (remaining > 0 &&
+       (agent->tool_loop_timeout_ms_cap <= 0 || agent->tool_loop_timeout_ms_cap > remaining))
+      agent->tool_loop_timeout_ms_cap = remaining;
+   return 0;
+}
 void agent_store_feedback(const agent_result_t *result, const char *role,
                           const char *prompt_summary);
 const char *delegation_active_id(void);
@@ -133,21 +169,22 @@ static void record_outcome(const char *agent_name, const char *role, const agent
 
 extern const char *delegation_active_id(void);
 
-/* Apply config -> the admission controller, re-applying only when the config file changes
- * (the acquire runs per turn, so this stays a cheap stat() on the hot path). Guarantees the
- * controller is configured before the first acquire, and picks up hot-reloaded limits. */
+/* Apply config -> the admission controller from the module's version contract.
+ * The acquire runs per turn, so the cheap version call avoids filesystem
+ * coupling while still picking up every committed module mutation. */
 static void admission_ensure_configured(void)
 {
-   static long long applied_mtime = -1;
+   static int configured;
    static pthread_mutex_t mu = PTHREAD_MUTEX_INITIALIZER;
-   const char *path = config_default_path();
-   struct stat st;
-   long long mtime = (path && stat(path, &st) == 0)
-                         ? (long long)st.st_mtime * 1000000000LL + (long long)st.st_mtim.tv_nsec
-                         : 0;
+   int changed = config_client_changed();
    pthread_mutex_lock(&mu);
-   if (mtime != applied_mtime)
+   if (!configured || changed > 0)
    {
+      if (changed > 0 && config_client_refresh() != 0)
+      {
+         pthread_mutex_unlock(&mu);
+         return;
+      }
       int global_max = config_maximum_total_concurrent_agent_sessions() > 0
                            ? config_maximum_total_concurrent_agent_sessions()
                            : AGENT_ADMISSION_DEFAULT_GLOBAL_MAX;
@@ -165,7 +202,7 @@ static void admission_ensure_configured(void)
          n++;
       }
       agent_admission_configure(global_max, default_model, overrides, n);
-      applied_mtime = mtime;
+      configured = 1;
    }
    pthread_mutex_unlock(&mu);
 }
@@ -361,6 +398,8 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
                                         : (agent_uses_provider_cli(ag) ||
                                            (ag->tools_enabled && agent_is_exec_role(ag, role)));
       agent_apply_runtime_config(ag);
+      if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
+         break;
       ag->ablation = cfg->ablation;
       ag->write_capable = use_tools && delegate_role_is_write(role) ? 1 : 0;
 
@@ -424,7 +463,7 @@ int agent_run_ex(agent_config_t *cfg, const char *role, const char *system_promp
    }
 
    if (!out->error[0])
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
    return -1;
 }
 
@@ -526,6 +565,8 @@ int agent_run_named(agent_config_t *cfg, const char *name, const char *role,
     * tables (keyed by agent name), so siblings still see each other's signals. */
    agent_t local = *src;
    agent_apply_runtime_config(&local);
+   if (agent_apply_request_tool_loop_cap(cfg, &local, out) != 0)
+      return -1;
    local.ablation = cfg->ablation;
    local.write_capable = 0; /* ensemble references answer a prompt; no write tools */
 
@@ -561,6 +602,8 @@ int agent_run_named_with_tools(agent_config_t *cfg, const char *name, const char
 
    agent_t local = *src; /* clone before mutating — see agent_run_named */
    agent_apply_runtime_config(&local);
+   if (agent_apply_request_tool_loop_cap(cfg, &local, out) != 0)
+      return -1;
    local.require_initial_tool_call = tl_require_initial_tool_call;
    local.ablation = cfg->ablation;
    /* write_capable stays 0: this exists for REVIEWERS, and a reviewer that can edit
@@ -599,14 +642,67 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
    agent_t *ag = agent_route(cfg, role);
    if (!ag)
    {
-      snprintf(out->error, sizeof(out->error), "no agent available for role '%s'", role);
+      agent_route_failure_message(role, out->error, sizeof(out->error));
       return -1;
    }
    agent_apply_runtime_config(ag);
+   if (agent_apply_request_tool_loop_cap(cfg, ag, out) != 0)
+      return -1;
    ag->ablation = cfg->ablation;
-   ag->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
+   /* What this run may do, resolved once here and read from here on: the write
+    * gate below, the tool allowlist, the dispatch guard and the system prompt
+    * all take THIS answer rather than asking about the role again.
+    *
+    * A run with no role is not a delegate and is not confined. Resolving an
+    * empty role would return an empty set and silently strip an operator's own
+    * session of tools it has always had. */
+   if (role && role[0])
+   {
+      /* Thread-local because the denied-tool list is BORROWED for the length of
+         the run: the tool filter and dispatch both read it, and a copy would be
+         a second answer to keep in step. One run per thread, so one set. */
+      static _Thread_local delegate_permissions_t perms;
+      static _Thread_local const char *denied[DELEGATE_PERM_TOOL_MAX];
 
-   char *hint = (agent_tools_role_current_code_only(role) || agent_uses_mistral_delegate_path(ag))
+      char *definition = role_template_frontmatter(NULL, role);
+      int perms_rc = delegate_permissions_for_role(role, definition, &perms);
+      free(definition);
+      if (perms_rc != 0)
+      {
+         /* Holding nothing is not the same as being confined. The carriers below
+            would withhold shell and knowledge writes, but the denied-tool list
+            arrives EMPTY on failure, so the tool filter would go on offering
+            write_file and the git-write tools: confined in two places and open in
+            the third. A run whose permissions cannot be established does not run,
+            which is what the delegate path does with the same failure. */
+         snprintf(out->error, sizeof(out->error),
+                  "refusing to run: the permissions for role '%s' could not be resolved, so it "
+                  "holds none. Check the role template's `permissions:` block.",
+                  role);
+         return -1;
+      }
+      agent_tools_knowledge_write_set(
+          delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_KNOWLEDGE_WRITE));
+      agent_tools_shell_set(delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_SHELL));
+      for (int i = 0; i < perms.denied_tool_count; i++)
+         denied[i] = perms.denied_tools[i];
+      agent_tools_denied_set(denied, perms.denied_tool_count);
+      ag->write_capable =
+          enforce_writes && delegate_permissions_has(&perms, AIMEE_DELEGATES_PERM_REPO_WRITE) ? 1
+                                                                                              : 0;
+   }
+   else
+   {
+      /* Stated, not left over. These carriers outlive a run, so a turn that
+         inherits them from the delegate before it would be confined by a
+         permission nobody withheld from IT. Every run sets its own posture. */
+      agent_tools_knowledge_write_set(1);
+      agent_tools_shell_set(1);
+      agent_tools_denied_set(NULL, 0);
+      ag->write_capable = enforce_writes ? 1 : 0;
+   }
+
+   char *hint = (!agent_tools_knowledge_write_allowed() || agent_uses_mistral_delegate_path(ag))
                     ? NULL
                     : kb_client_agent_hint_consume(role, user_prompt);
    const char *effective_prompt = user_prompt;
@@ -647,6 +743,8 @@ static int agent_run_with_tools_internal(agent_config_t *cfg, const char *role,
             aimee_log(LOG_DEBUG, "agent", "skipping DOWN agent '%s' in fallback", fb->name);
             continue;
          }
+         if (agent_apply_request_tool_loop_cap(cfg, fb, out) != 0)
+            break;
          fb->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          free(out->response);
@@ -856,6 +954,39 @@ static void parse_response_openai(cJSON *root, agent_result_t *out)
    agent_free_parsed_response(&parsed);
 }
 
+/* Read a Responses-API `usage` object: the two flat counters AND the cached-input
+ * detail.
+ *
+ * The chat-completions wire reaches `agent_result_t` through the canonical IR
+ * parser, which already carries cached tokens across. The Responses wire does
+ * not -- it is hand-parsed here, in three places that each read exactly
+ * input_tokens and output_tokens. `cached_tokens` lives one level down, in the
+ * `input_tokens_details` sibling, so reading only the flat pair loses it with no
+ * error: cache_read_tokens simply stays 0, which is indistinguishable from a
+ * real cache miss.
+ *
+ * Factored out rather than patched in triplicate because three copies is how the
+ * field came to be missing from all three in the first place. */
+static void read_responses_usage(cJSON *usage, agent_result_t *out)
+{
+   if (!usage)
+      return;
+   cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
+   cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
+   if (it && cJSON_IsNumber(it))
+      out->prompt_tokens = it->valueint;
+   if (ot && cJSON_IsNumber(ot))
+      out->completion_tokens = ot->valueint;
+
+   cJSON *details = cJSON_GetObjectItem(usage, "input_tokens_details");
+   if (details && cJSON_IsObject(details))
+   {
+      cJSON *cached = cJSON_GetObjectItem(details, "cached_tokens");
+      if (cached && cJSON_IsNumber(cached))
+         out->cache_read_tokens = cached->valueint;
+   }
+}
+
 static void parse_response_object(cJSON *root, agent_result_t *out)
 {
    /* Responses API: output[].content[].text where type == "output_text" */
@@ -895,17 +1026,7 @@ static void parse_response_object(cJSON *root, agent_result_t *out)
       }
    }
 
-   /* Responses API usage: input_tokens, output_tokens */
-   cJSON *usage = cJSON_GetObjectItem(root, "usage");
-   if (usage)
-   {
-      cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-      cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-      if (it && cJSON_IsNumber(it))
-         out->prompt_tokens = it->valueint;
-      if (ot && cJSON_IsNumber(ot))
-         out->completion_tokens = ot->valueint;
-   }
+   read_responses_usage(cJSON_GetObjectItem(root, "usage"), out);
 }
 
 /* Parse SSE stream body for the Responses API.
@@ -976,16 +1097,7 @@ static void parse_response_responses(const char *body, agent_result_t *out)
                cJSON *resp = cJSON_GetObjectItem(ev, "response");
                if (resp)
                {
-                  cJSON *usage = cJSON_GetObjectItem(resp, "usage");
-                  if (usage)
-                  {
-                     cJSON *it = cJSON_GetObjectItem(usage, "input_tokens");
-                     cJSON *ot = cJSON_GetObjectItem(usage, "output_tokens");
-                     if (it && cJSON_IsNumber(it))
-                        out->prompt_tokens = it->valueint;
-                     if (ot && cJSON_IsNumber(ot))
-                        out->completion_tokens = ot->valueint;
-                  }
+                  read_responses_usage(cJSON_GetObjectItem(resp, "usage"), out);
                }
                cJSON_Delete(ev);
             }
@@ -1064,6 +1176,14 @@ static void parse_response_anthropic(cJSON *root, agent_result_t *out)
          out->prompt_tokens = it->valueint;
       if (ot && cJSON_IsNumber(ot))
          out->completion_tokens = ot->valueint;
+      /* Anthropic spells cached input as two FLAT siblings, not a details
+       * object, so this cannot share the Responses reader above. */
+      cJSON *cr = cJSON_GetObjectItem(usage, "cache_read_input_tokens");
+      if (cr && cJSON_IsNumber(cr))
+         out->cache_read_tokens = cr->valueint;
+      cJSON *cw = cJSON_GetObjectItem(usage, "cache_creation_input_tokens");
+      if (cw && cJSON_IsNumber(cw))
+         out->cache_write_tokens = cw->valueint;
    }
 
    /* Prefer the provider-reported model over the served alias set at entry. */
@@ -1110,6 +1230,16 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
                   int max_tokens, double temperature, agent_result_t *out)
 {
    memset(out, 0, sizeof(*out));
+   /* A refused route arrives here as NULL, and the three reads below would fault
+    * on it. Routing can now refuse (a routing-module outage is not silently
+    * replaced by a local pick), so callers that used to be handed an agent by
+    * luck reach this with nothing. Say so instead of dying. */
+   if (!agent)
+   {
+      snprintf(out->error, sizeof(out->error), "%s",
+               "no agent was selected for this run; refusing to execute without one");
+      return -1;
+   }
    snprintf(out->agent_name, MAX_AGENT_NAME, "%s", agent->name);
    snprintf(out->model, MAX_MODEL_LEN, "%s", agent->model);
    snprintf(out->served_model, MAX_MODEL_LEN, "%s", agent->model);
@@ -1276,68 +1406,7 @@ int agent_execute(const agent_t *agent, const char *system_prompt, const char *u
    return out->success ? 0 : -1;
 }
 
-/* --- Task type classification --- */
-
-typedef struct
-{
-   const char *word;
-   task_type_t type;
-} task_keyword_t;
-
-static const task_keyword_t task_keywords[] = {
-    {"fix", TASK_TYPE_BUG_FIX},         {"bug", TASK_TYPE_BUG_FIX},
-    {"error", TASK_TYPE_BUG_FIX},       {"crash", TASK_TYPE_BUG_FIX},
-    {"fail", TASK_TYPE_BUG_FIX},        {"broken", TASK_TYPE_BUG_FIX},
-    {"regression", TASK_TYPE_BUG_FIX},  {"refactor", TASK_TYPE_REFACTOR},
-    {"rename", TASK_TYPE_REFACTOR},     {"extract", TASK_TYPE_REFACTOR},
-    {"reorganize", TASK_TYPE_REFACTOR}, {"clean", TASK_TYPE_REFACTOR},
-    {"add", TASK_TYPE_FEATURE},         {"implement", TASK_TYPE_FEATURE},
-    {"create", TASK_TYPE_FEATURE},      {"new", TASK_TYPE_FEATURE},
-    {"build", TASK_TYPE_FEATURE},       {"support", TASK_TYPE_FEATURE},
-    {"review", TASK_TYPE_REVIEW},       {"check", TASK_TYPE_REVIEW},
-    {"audit", TASK_TYPE_REVIEW},        {"verify", TASK_TYPE_REVIEW},
-    {"validate", TASK_TYPE_REVIEW},     {"test", TASK_TYPE_TEST},
-    {"coverage", TASK_TYPE_TEST},       {"assert", TASK_TYPE_TEST},
-    {"spec", TASK_TYPE_TEST},           {NULL, TASK_TYPE_GENERAL}};
-
-task_type_t task_type_classify(const char *prompt)
-{
-   if (!prompt || !prompt[0])
-      return TASK_TYPE_GENERAL;
-
-   /* Lowercase copy for matching */
-   char lower[512];
-   size_t len = strlen(prompt);
-   if (len >= sizeof(lower))
-      len = sizeof(lower) - 1;
-   for (size_t i = 0; i < len; i++)
-      lower[i] = (char)((prompt[i] >= 'A' && prompt[i] <= 'Z') ? prompt[i] + 32 : prompt[i]);
-   lower[len] = '\0';
-
-   /* Scan for keyword matches (first match wins) */
-   for (int i = 0; task_keywords[i].word; i++)
-   {
-      const char *kw = task_keywords[i].word;
-      size_t kwlen = strlen(kw);
-      const char *p = lower;
-      while ((p = strstr(p, kw)) != NULL)
-      {
-         /* Check word boundary: must be at start or after non-alpha */
-         int at_start = (p == lower) || (*(p - 1) == ' ' || *(p - 1) == '\t' || *(p - 1) == '-' ||
-                                         *(p - 1) == '_' || *(p - 1) == '/');
-         /* Check end boundary: must be at end or before non-alpha */
-         char after = p[kwlen];
-         int at_end = (after == '\0' || after == ' ' || after == '\t' || after == '-' ||
-                       after == '_' || after == '/' || after == '.' || after == ',' ||
-                       after == 'e' || after == 'i' || after == 's');
-         if (at_start && at_end)
-            return task_keywords[i].type;
-         p += kwlen;
-      }
-   }
-
-   return TASK_TYPE_GENERAL;
-}
+/* --- Task type --- */
 
 const char *task_type_name(task_type_t type)
 {
@@ -1444,11 +1513,58 @@ static const char *agent_context_cwd(char *buf, size_t buf_len)
 
 /* --- Relevance-scored context (#3) --- */
 
+/* The opening instruction an agent runs under.
+ *
+ * A review's deliverable is its verdict, not an edit, so it must not be told to
+ * always answer with a tool call. That instruction is written for agents that
+ * act on a workspace; given to a reviewer it forbids exactly the final message
+ * the caller is waiting for, and the reviewer spends its whole turn budget
+ * calling tools and is killed with "max turns exhausted without final
+ * response". Tools stay available -- a reviewer may need evidence -- but
+ * gathering it is optional and answering is mandatory. */
+task_type_t agent_task_type_for_role(const char *role)
+{
+   int shape = delegate_role_task_shape(role);
+   if (shape < 0 || shape >= TASK_TYPE_COUNT)
+      return TASK_TYPE_GENERAL;
+   return (task_type_t)shape;
+}
+
+const char *agent_exec_instructions(task_type_t task_type)
+{
+   if (task_type == TASK_TYPE_REVIEW)
+      return "You are a review agent. Judge the supplied artifact and report your verdict.\n"
+             "IMPORTANT: your final message IS the deliverable. Return it as plain text in "
+             "exactly the format the task requests, and do not end your turn with a tool "
+             "call.\n"
+             "The tools are available for evidence only, and only when the artifact alone "
+             "cannot settle a question; a complete artifact usually can. Treat current "
+             "source as the file-content authority when it differs from indexed snippets.\n"
+             "Your turn budget is small and shared with nothing else. Look something up only "
+             "when the answer would change your verdict, and stop looking as soon as it "
+             "would not. If a lookup does not settle a point -- the file is absent, the "
+             "workspace is not the one the artifact came from, the search returns nothing -- "
+             "that is not a reason to keep searching: record the uncertainty in your verdict "
+             "and answer. A review that never returns is worth less than one that answers "
+             "with a stated gap.\n";
+   return "You are an execution agent. Complete the task using the provided tools.\n"
+          "IMPORTANT: Always invoke tools (bash, read_file, write_file, list_files) to act. "
+          "Never write shell commands or code as plain text — call the tool instead.\n"
+          "Use Aimee index/search tools for discovery. Treat current source as the "
+          "file-content authority when it differs from indexed snippets.\n";
+}
+
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context)
 {
-   /* Classify the task type from the prompt */
-   task_type_t task_type = task_type_classify(custom_prompt);
+   return agent_build_exec_context_for_role(agent, network, NULL, custom_prompt, skip_kb_context);
+}
+
+char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context)
+{
+   task_type_t task_type = agent_task_type_for_role(role);
    if (task_type != TASK_TYPE_GENERAL)
       aimee_log(LOG_DEBUG, "agent_context", "context assembly: task_type=%s",
                 task_type_name(task_type));
@@ -1484,14 +1600,18 @@ char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *n
    int skip_kb_client =
        skip_kb_context || (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
 
-   ctx_appendf(buf, cap, &pos,
-               "You are an execution agent. Complete the task using the provided tools.\n"
-               "IMPORTANT: Always invoke tools (bash, read_file, write_file, "
-               "list_files) to act. Never write shell commands or code as plain "
-               "text — call the tool instead.\n"
-               "Use Aimee index/search tools for discovery. Treat current source as the "
-               "file-content authority when it differs from indexed snippets.\n");
+   ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
+
+   /* Turn registers (fold §6): ask for the tags the record path already knows how to
+    * read. Gated on the same flag that turns on the fold's skeleton annotation, because
+    * both are the same feature — the grammar is either in use end to end or it is not.
+    * Default-off, so no agent's behaviour changes until someone enables it to measure. */
+   {
+      const char *registers = prompt_turn_registers_text(config_fold_register_enabled());
+      if (registers)
+         ctx_appendf(buf, cap, &pos, "%s", registers);
+   }
 
    char cwd_buf[MAX_PATH_LEN];
    const char *cwd = agent_context_cwd(cwd_buf, sizeof(cwd_buf));

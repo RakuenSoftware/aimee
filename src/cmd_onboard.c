@@ -35,7 +35,10 @@ static int onboard_default_memory_insert(const char *tier, const char *kind, con
                                          const char *content, double confidence,
                                          const char *session_id, memory_t *out)
 {
-   return kb_client_memory_insert(tier, kind, key, content, confidence, session_id, out);
+   /* The onboarding wizard records the user's own answers, so the rows carry the
+    * user provenance — this is the one bulk path where that is true. */
+   return kb_client_memory_insert_as(tier, kind, key, content, "", confidence, session_id,
+                                     MEMORY_AUTHORITY_USER, out);
 }
 
 static int onboard_default_memory_get(int64_t id, memory_t *out)

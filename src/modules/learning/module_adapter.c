@@ -1,12 +1,11 @@
 #include <aimee/core/event_bus/module_runtime.h>
 #include <aimee/learning/module_api.h>
+#include "learning_signal_policy.h"
 
-#include <string.h>
-
-aimee_module_status_t aimee_module_handler(
-    const aimee_module_invocation_t *invocation, const uint8_t *request_body,
-    uint32_t request_len, uint8_t *response_body, uint32_t response_capacity,
-    uint32_t *response_len, void *user_data)
+aimee_module_status_t aimee_module_handler(const aimee_module_invocation_t *invocation,
+                                           const uint8_t *request_body, uint32_t request_len,
+                                           uint8_t *response_body, uint32_t response_capacity,
+                                           uint32_t *response_len, void *user_data)
 {
    (void)user_data;
    char signal[AIMEE_LEARNING_SIGNAL_MAX + 1];
@@ -17,15 +16,8 @@ aimee_module_status_t aimee_module_handler(
    if (aimee_module_invocation_cancelled(invocation))
       return AIMEE_MODULE_STATUS_CANCELLED;
    uint32_t mask = 0;
-   if (strcmp(signal, "thumb_up") == 0 || strcmp(signal, "thumb_down") == 0)
-      mask = AIMEE_LEARNING_SINK_RERANKER;
-   else if (strcmp(signal, "correction") == 0)
-      mask = AIMEE_LEARNING_SINK_RERANKER | AIMEE_LEARNING_SINK_SUPERSEDE |
-             AIMEE_LEARNING_SINK_RULE;
-   else if (strcmp(signal, "preference_statement") == 0 || strcmp(signal, "mark_rule") == 0)
-      mask = AIMEE_LEARNING_SINK_RULE;
-   else if (strcmp(signal, "workflow_repetition") == 0)
-      mask = AIMEE_LEARNING_SINK_WORKFLOW;
+   if (learning_signal_policy_sink_mask(signal, &mask) != 0)
+      return AIMEE_MODULE_STATUS_INTERNAL;
    aimee_learning_put_u32(response_body, AIMEE_LEARNING_RESPONSE_MAGIC);
    aimee_learning_put_u32(response_body + 4, mask);
    *response_len = AIMEE_LEARNING_RESPONSE_LEN;

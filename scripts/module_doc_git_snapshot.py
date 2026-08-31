@@ -35,7 +35,13 @@ MAX_ORIGIN_BYTES = 512
 MAX_ORIGINS_BYTES = 8_192
 MAX_OUTPUT_BYTES = 65_536
 MAX_TREE_ENTRIES = 100_000
-MAX_TREE_SCAN_SECONDS = 0.1
+# A stuck-filesystem backstop, NOT a performance budget -- see _tree_bytes. Sized so
+# only a filesystem that has stopped answering can reach it; MAX_TREE_ENTRIES is what
+# actually bounds a large tree, and it does so deterministically.
+MAX_TREE_SCAN_SECONDS = 30.0
+# Read the clock once per this many entries. Per-file, the syscall was a measurable
+# share of the scan it was supposed to be policing.
+TREE_SCAN_CLOCK_INTERVAL = 1024
 MIN_DISK_BYTES = 1_048_576
 MAX_DISK_BYTES = 8_589_934_592
 DEFAULT_DISK_BYTES = 536_870_912
@@ -96,13 +102,33 @@ def _sanitize(raw: bytes) -> str:
 
 
 def _tree_bytes(root: Path) -> int:
+    """Total size of every regular file under `root`, with the scan itself bounded.
+
+    MAX_TREE_ENTRIES is the real bound and it is DETERMINISTIC: the same tree gives
+    the same verdict on every machine. The clock is only a backstop for a filesystem
+    that has stopped answering, where the entry count would never advance.
+
+    Which is why the clock must not be tight. At 0.1s, checked once per file, a
+    contended CI runner failed this on a fixture tree of a few dozen files -- and it
+    surfaces as `rule=snapshot-disk`, a CONTRACT violation, so a scheduling hiccup on
+    a shared runner reads as "this snapshot broke the rules". Observed twice on
+    2026-08-09, on two unrelated branches, while the same tree passed locally and on
+    the integration tip. A budget that a healthy tree can miss is not measuring the
+    tree.
+
+    So the clock is now generous enough that only a genuinely stuck filesystem trips
+    it, and it is read once per block of entries rather than once per file: at 0.1s
+    the per-file time.monotonic() was itself part of what made the scan slow.
+    """
     total = 0
     entries = 0
     deadline = time.monotonic() + MAX_TREE_SCAN_SECONDS
     for directory, _, files in os.walk(root):
         for name in files:
             entries += 1
-            if entries > MAX_TREE_ENTRIES or time.monotonic() >= deadline:
+            if entries > MAX_TREE_ENTRIES:
+                contract.fail("snapshot-disk", "snapshot tree scan exceeds its budget")
+            if entries % TREE_SCAN_CLOCK_INTERVAL == 0 and time.monotonic() >= deadline:
                 contract.fail("snapshot-disk", "snapshot tree scan exceeds its budget")
             with suppress(OSError):
                 total += (Path(directory) / name).stat().st_size

@@ -16,10 +16,10 @@
 #include "cJSON.h"
 #include "log.h"
 #include "memory.h"
-#include "db2/artifacts.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/pgvec_transport.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/pgvec_transport.h"
 
 #include <stdint.h>
 #include <stdlib.h>

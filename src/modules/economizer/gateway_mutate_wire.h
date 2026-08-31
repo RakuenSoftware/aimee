@@ -10,8 +10,8 @@
 #ifndef DEC_GATEWAY_MUTATE_WIRE_H
 #define DEC_GATEWAY_MUTATE_WIRE_H 1
 
-#include "economizer.h"
-#include "msg_session_disable.h"
+#include "gateway_mutate.h"
+#include "msg_session_key.h"
 #include <cJSON.h>
 
 #ifdef __cplusplus
@@ -27,29 +27,35 @@ extern "C"
       int have_key;  /* a per-identity session key was resolvable */
       int mutated;   /* the reduced payload was actually installed + dispatched */
       char skey[MSG_SESSION_KEY_LEN];
-      cJSON *pristine;   /* owned deep copy of the original array (NULL once restored/freed) */
-      reduce_state_t st; /* provenance marker owner */
-      int ttl_ms;        /* disable-window TTL resolved from config */
+      /* The request's ORIGINAL array, detached from the container when the
+       * reduced one was swapped in, and owned here until it is either swapped
+       * back or freed. NULL whenever no swap happened -- which is every path
+       * where the module did not answer or answered unusably, because those
+       * leave the container untouched. Detached, never copied. */
+      cJSON *original;
+      gw_provenance_t st; /* provenance marker owner */
+      int ttl_ms;         /* disable-window TTL resolved from config */
    } gw_mutate_ctx_t;
 
    void gw_mutate_ctx_init(gw_mutate_ctx_t *ctx);
    void gw_mutate_ctx_free(gw_mutate_ctx_t *ctx);
 
-   /* Cheap (mtime-cached config_load) check of econ_gateway_mutate_on, so a caller can
+   /* Cheap (mtime-cached legacy_config_read) check of econ_gateway_mutate_on, so a caller can
     * skip the system-prompt flattening + the mutate attempt entirely on the default-
     * OFF hot path. gw_buffered_mutate re-checks internally (defense in depth). */
    int gw_mutate_is_enabled(void);
 
-   /* Provider-gated enable: gateway wire-mutation is OpenAI-only. Returns true only when
-    * the serving upstream is NOT Anthropic AND gw_mutate_is_enabled(). An Anthropic upstream
-    * is a byte-verbatim prompt-cached passthrough, so it is reduced (if at all) at the
-    * pre-economize seam, never by mutating the live wire. `upstream_is_anthropic` is the
-    * caller's driver_is_anthropic()/parity signal. */
+   /* Enable gate, now provider-agnostic: returns gw_mutate_is_enabled() for every
+    * upstream. Anthropic was excluded while the gateway kept no state and therefore
+    * re-folded from cold every turn, moving the prefix each time; with a per-session
+    * freeze the prefix moves once and then holds, so the vendor is no longer the
+    * deciding factor. `upstream_is_anthropic` is retained for the callers' existing
+    * driver_is_anthropic()/parity signal and for a future provider-specific rule.  */
    int gw_mutate_upstream_ok(int upstream_is_anthropic);
 
    /* Pre-send: under the aggressive-tier live mutation, resolve the session key from the thread-
     * local request identity; if the session is not disabled, snapshot container[key],
-    * run the compress-only economizer, and — when gw_should_apply passes — replace
+    * run the compress-only economizer, and — when the module's verdict allows — replace
     * container[key] with the reduced array (marking provenance) so the provider body
     * is built from it. On any bypass/disable/no-key the container is left byte-intact.
     * Records the mutate/hard_bypass/session-blocked counters. No-op (dark) when the
@@ -111,7 +117,7 @@ extern "C"
     * a deliberate no-op; non-zero => hard bypass, out->messages NULL). No-op rc=1 when
     * `messages` is not a cJSON array or `out` is NULL. */
    int gw_economizer_measure(cJSON *messages, const char *system_prompt, const char *model,
-                             int retained_msgs, reduce_result_t *out);
+                             int retained_msgs, gw_reduce_report_t *out);
 
 #ifdef __cplusplus
 }

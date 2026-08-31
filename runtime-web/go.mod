@@ -1,6 +1,6 @@
 module github.com/JBailes/aimee/runtime-web
 
-go 1.25.0
+go 1.26.7
 
 require (
 	github.com/RakuenSoftware/smoothgui/auth v0.2.3

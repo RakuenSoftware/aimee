@@ -51,7 +51,7 @@ ARG LLAMACPP_VERSION=b10218
 # file, so a `-type f` copy takes the real file and leaves behind the name the
 # binary actually asks for. That fails as "cannot open shared object file" at first
 # run; the --version check in the final stage is what surfaces it at build time.
-FROM debian:trixie-slim AS llamacpp
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS llamacpp
 ARG LLAMACPP_VERSION
 # THE CLONE RETRIES. Same reason as the other fetches in this tree: a forge 502/503
 # failed image builds three separate times in one evening, each time on whichever
@@ -101,7 +101,7 @@ RUN set -eux; \
 # THE USER DOWNLOADS NOTHING. This fetch happens in CI. The cache is committed into
 # the image, the entrypoint runs --offline, and the snapshot revision is pinned in
 # the baked path, so the model cannot change under a deployment.
-FROM debian:trixie-slim AS modelcache
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS modelcache
 ARG AIMEE_SYNTHESIS_MODEL
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates libcurl4t64 libgomp1 \
@@ -151,7 +151,7 @@ RUN set -eux; \
     du -sh /cache
 
 # ---- runtime --------------------------------------------------------------------
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 ARG AIMEE_SYNTHESIS_MODEL
 ARG LLAMACPP_VERSION
 

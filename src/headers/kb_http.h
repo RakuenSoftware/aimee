@@ -10,9 +10,20 @@
  * Authorization: Bearer <token>; unauthenticated requests get 401. */
 #pragma once
 
+#include "kb_identity.h"
+
+typedef enum
+{
+   KB_HTTP_START_OK = 0,
+   KB_HTTP_START_ERROR = -1,
+   KB_HTTP_START_ADDRESS_IN_USE = -2,
+   KB_HTTP_START_UNSAFE_BIND = -3
+} kb_http_start_result_t;
+
 /* Start the HTTP listener thread on the given port.
- * bearer_token may be NULL or empty to disable auth.
- * Returns 0 on success, -1 on error. */
+ * bearer_token may be NULL or empty to disable auth on the loopback listener.
+ * A non-loopback listener without a bearer fails with
+ * KB_HTTP_START_UNSAFE_BIND. */
 int kb_http_start(int port, const char *bearer_token);
 
 /* Signal the listener thread to stop and wait for it to exit. */
@@ -22,6 +33,10 @@ void kb_http_stop(void);
  * from Vault as SHA-256 hex. Empty/NULL disables the token
  * path (those routes are then org-admin only). Call once before kb_http_start. */
 void kb_http_set_telemetry_token(const char *hash);
+
+/* Disable telemetry scrape/ingest routes unless an explicit observability
+ * listener was configured for this process. */
+void kb_http_set_telemetry_enabled(int enabled);
 
 /* Route a single HTTP request and write the response into out_buf (null-
  * terminated). Returns the HTTP status code.
@@ -36,3 +51,22 @@ int kb_http_route(const char *method, const char *path, const char *auth_header,
 int kb_http_route_ex(const char *method, const char *path, const char *query_string,
                      const char *auth_header, const char *bearer_token, const char *body,
                      int body_len, char *out_buf, int out_cap);
+
+/* Route with a canonical caller asserted by the fully authenticated service
+ * transport. If the request credential also identifies an actor, both identities
+ * must match. This entry point is not for the ordinary HTTP listener. */
+int kb_http_route_ex_with_actor(const char *method, const char *path, const char *query_string,
+                                const char *auth_header, const char *bearer_token, const char *body,
+                                int body_len, const kb_principal_t *asserted_actor, char *out_buf,
+                                int out_cap);
+
+/* Route a content request with its already KB-resolved service+caller context. */
+int kb_http_route_ex_with_context(const char *method, const char *path, const char *query_string,
+                                  const char *auth_header, const char *bearer_token,
+                                  const char *body, int body_len,
+                                  const kb_request_context_t *resolved, char *out_buf, int out_cap);
+
+/* True only for routes that read tenant-owned KB content. The mTLS ingress uses
+ * this boundary to resolve service+caller membership and open a tenant scope;
+ * management, health, ingest, and maintenance routes remain outside it. */
+int kb_http_is_content_read(const char *method, const char *path);

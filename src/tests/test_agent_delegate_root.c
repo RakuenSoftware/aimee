@@ -6,7 +6,9 @@
 #include <unistd.h>
 #include <pthread.h>
 
-#include "db1.h"
+#include "db1_client/db1.h"
+#include "support/store_module_fixture.h"
+#include "db1_client/agent_jobs.h"
 #include "agent_tasks.h"
 #include <aimee/tools/agent_tools.h>
 #include "modules/workspace/workspace_provider.h"
@@ -17,6 +19,11 @@
 
 void test_cancelled_durable_job_blocks_tool_dispatch(void)
 {
+   /* main() has already started the fixture when a database was named; this
+      only decides whether the store-backed body below can run at all. */
+   if (!store_module_fixture_available())
+      return;
+
    db1_shutdown();
    assert(db1_init(":memory:") == 0);
 
@@ -203,6 +210,11 @@ static void *cancel_job_soon(void *arg)
 
 void test_delegate_bash_cancel_kills_running_tool(void)
 {
+   /* main() has already started the fixture when a database was named; this
+      only decides whether the store-backed body below can run at all. */
+   if (!store_module_fixture_available())
+      return;
+
    db1_shutdown();
    assert(db1_init(":memory:") == 0);
 
@@ -346,7 +358,10 @@ void test_parent_write_guard_allows_workspace_file_ops(void)
    json = cJSON_Parse(result);
    assert(json != NULL);
    ec = cJSON_GetObjectItem(json, "exit_code");
-   assert(ec && ec->valueint == -1);
+   /* The lexical preflight reports -1; kernels with the filesystem sandbox
+    * available may instead launch the command and have the kernel deny it with
+    * a conventional nonzero exit. Both are valid enforcement points. */
+   assert(ec && ec->valueint != 0);
    cJSON_Delete(json);
    free(result);
    assert(access(outside, F_OK) != 0);
@@ -464,6 +479,7 @@ void test_detached_dead_channel_reports_clear_error(void)
  * bash/execute_script were the hole. The spy stands in for the container: if either
  * tool still forked locally, the spy would never be called. */
 static int g_sbx_exec_called;
+static int g_sbx_timeout_ms;
 static char *g_sbx_exec_cmd;
 static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const char *cmd,
                                         int *exit_code)
@@ -477,14 +493,23 @@ static char *sandbox_capture_exec_shell(const workspace_provider_t *p, const cha
    return strdup("SANDBOX-STDOUT-MARKER");
 }
 
+static char *sandbox_capture_exec_shell_timeout(const workspace_provider_t *p, const char *cmd,
+                                                int timeout_ms, int *exit_code)
+{
+   g_sbx_timeout_ms = timeout_ms;
+   return sandbox_capture_exec_shell(p, cmd, exit_code);
+}
+
 void test_container_bash_runs_in_sandbox(void)
 {
    workspace_provider_t mock;
    memset(&mock, 0, sizeof(mock));
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
+   mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
+   g_sbx_timeout_ms = -1;
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
@@ -493,6 +518,7 @@ void test_container_bash_runs_in_sandbox(void)
 
    /* Routed INTO the container (spy hit), carrying our command. */
    assert(g_sbx_exec_called == 1);
+   assert(g_sbx_timeout_ms == 5000);
    assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
    cJSON *j = cJSON_Parse(result);
    assert(j);
@@ -511,8 +537,10 @@ void test_container_execute_script_runs_in_sandbox(void)
    memset(&mock, 0, sizeof(mock));
    mock.kind = WS_PROVIDER_CONTAINER;
    mock.exec_shell = sandbox_capture_exec_shell;
+   mock.exec_shell_timeout = sandbox_capture_exec_shell_timeout;
    workspace_provider_set_active(&mock);
    g_sbx_exec_called = 0;
+   g_sbx_timeout_ms = -1;
    free(g_sbx_exec_cmd);
    g_sbx_exec_cmd = NULL;
 
@@ -521,20 +549,23 @@ void test_container_execute_script_runs_in_sandbox(void)
     * turns carry the repository/worktree root in their thread-local cwd. Give
     * this routing test the same context so it tests the container seam rather
     * than being rejected earlier for running from a source subdirectory. */
-   char sandbox_root[] = "/tmp/aimee-container-route.XXXXXX";
+   char sandbox_root[256];
+   snprintf(sandbox_root, sizeof sandbox_root, "%s/aimee-container-route.XXXXXX",
+            platform_tmpdir());
    assert(mkdtemp(sandbox_root) != NULL);
    char sandbox_cwd[MAX_PATH_LEN];
    assert(snprintf(sandbox_cwd, sizeof(sandbox_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
                    sandbox_root) < (int)sizeof(sandbox_cwd));
    assert(platform_mkdir_p(sandbox_cwd, 0700) == 0 || access(sandbox_cwd, F_OK) == 0);
    run_cmd_set_cwd(sandbox_cwd);
-   char *result =
-       dispatch_tool_call("execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\"}", 5000);
+   char *result = dispatch_tool_call(
+       "execute_script", "{\"language\":\"bash\",\"body\":\"echo hi\",\"timeout_secs\":7}", 5000);
    run_cmd_set_cwd(NULL);
    workspace_provider_clear_active();
    platform_test_rmrf(sandbox_root);
 
    assert(g_sbx_exec_called == 1);
+   assert(g_sbx_timeout_ms == 7000);
    assert(g_sbx_exec_cmd && strstr(g_sbx_exec_cmd, "echo hi"));
    /* Fed over a quoted heredoc so the body needs no escaping. */
    assert(strstr(g_sbx_exec_cmd, "AIMEE_SCRIPT_EOF"));

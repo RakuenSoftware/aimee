@@ -18,7 +18,24 @@ repository preserves its descriptor-owned sources, headers, tests, and docs,
 and builds a separate Linux process against only the host-free event-bus client
 target. Its generated grant is executable/UID/principal-bound and starts with no
 event capabilities; capabilities are added only with the corresponding stable
-event schema.
+event schema. A C module may also declare non-owned `header_dependencies` needed
+by a transitional standalone build. Those inputs must be sorted, normalized,
+real header files outside the module's own tree; the exporter copies them at
+canonical paths without adding them to `owned_files`, records the complete
+materialized set as `repository_files`, and includes that set in the source
+digest.
+
+Container builds use the same descriptor contract through a two-step runtime
+bundle. `export_c_repositories.py --runtime-bundle <directory>` writes generated
+process mains, grants, placement lists, and `c-build.json`. Then
+`build_c_module_runtime_bundle.py` compiles each C process from its generated
+main, every descriptor-owned C source, the canonical event-bus client sources,
+and its declared include roots, header dependencies, pkg-config packages, and
+system libraries. Header dependencies are admitted as build inputs but never
+passed to the compiler as translation units. The
+manifest is data rather than a shell fragment: paths and dependency tokens are
+validated before they become compiler arguments, and no module source is
+concatenated into the generated main.
 
 `dependencies/aimee-repositories.lock.json` records repository URLs, semantic
 versions, exact commits, stable principal identities, and source digests.
@@ -26,3 +43,16 @@ versions, exact commits, stable principal identities, and source digests.
 mirror drifts from its external repository pin. The vendored mirrors remain in
 the main repository during behavioral migration so existing builds do not
 silently switch implementations.
+
+The pins bind on `main` only. They describe a release: which published
+repository commit each vendored mirror was cut from. So the check runs in the
+`c-repository-pins` workflow for pushes to `main` and for pull requests into
+`main`, and nowhere else. `testing` and the branches feeding it are the
+integration tip: their vendored source is expected to run ahead of any published
+repository commit, and enforcing the lock there would only demand a refresh
+after every edit under `src/core/**` or `src/modules/**`. For that reason
+`repository-lock-check` is not part of `make lint` or `make verify-local`; run
+`make repository-lock-check` when you want it. Refresh the pins with
+`python3 scripts/export_c_repositories.py --refresh-lock-root <repository-set>`
+as part of cutting a release, before opening the `testing` → `main` pull
+request.

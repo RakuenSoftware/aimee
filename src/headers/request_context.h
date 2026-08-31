@@ -22,6 +22,7 @@
 #define DEC_REQUEST_CONTEXT_H 1
 
 #include <stddef.h>
+#include "kb_identity_token.h"
 
 typedef enum
 {
@@ -38,14 +39,20 @@ typedef struct
    char idempotency_key[128]; /* Idempotency-Key header, empty if absent */
    char session_key[128];     /* X-Aimee-Session-Key — per-session boundary, empty if absent */
    char principal[128];       /* account/tenant boundary; empty = anonymous */
-   char source[64];           /* turn-origin tag for token_audit, empty = default */
-   long peer_uid;             /* UDS peer uid (SO_PEERCRED), -1 if unknown */
+   char caller_subject[577];  /* canonical KB caller context; distinct from vault principal */
+   char caller_authorization[KB_IDENTITY_TOKEN_WIRE_MAX + 1]; /* verified caller JWT */
+   char source[64]; /* turn-origin tag for token_audit, empty = default */
+   long peer_uid;   /* UDS peer uid (SO_PEERCRED), -1 if unknown */
    req_transport_t transport;
    unsigned int capabilities; /* route capability/scope bits for this connection */
    int trusted;               /* 1 = principal/source headers may be honoured */
    int compress_disabled;     /* X-Aimee-Compress: 0 — per-request opt-out of ingress
                                * envelope compression (ingress-compression P1b §1.4/B1).
                                * 0 = honor config; never forces compression on. */
+   int aimee_tool_calls;      /* cumulative calls observed in this API transcript */
+   int aimee_redundant_tool_calls;
+   char aimee_intervention[40];
+   char aimee_tool_transport[16];
 } request_context_t;
 
 /* Set the active request context for the current thread (shallow copy). Pass
@@ -67,8 +74,28 @@ const char *request_context_idempotency_key(void);
  * context / untrusted. Never returns NULL. */
 const char *request_context_principal(void);
 
+/* Canonical caller context for the authenticated server-to-KB request, or ""
+ * when this request has no end-user caller (for example background work). */
+const char *request_context_caller_subject(void);
+
+/* The original KB-signed data-plane identity token after aimee-server has
+ * verified it, or "" for a PAM/host caller. The KB verifies this token again;
+ * a subject string is never accepted as proof of an OIDC caller. */
+const char *request_context_caller_authorization(void);
+
 /* Internal server-authoritative replacement after a verified mTLS serial has
  * resolved to a durable user grant. Client headers never call this seam. */
 void request_context_override_principal(const char *principal);
+
+/* Server-authoritative replacement after ingress authentication. */
+void request_context_override_caller_subject(const char *subject);
+
+/* Server-authoritative installation of the already verified caller JWT. */
+void request_context_override_caller_authorization(const char *jwt);
+
+/* Attach model-neutral session observations to the active ingress request so
+ * the normal token-audit row records cost and intervention separately. */
+void request_context_note_aimee_session(int tool_calls, int redundant_tool_calls,
+                                        const char *intervention, const char *tool_transport);
 
 #endif /* DEC_REQUEST_CONTEXT_H */

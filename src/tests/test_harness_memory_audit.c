@@ -6,10 +6,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 int main(void)
 {
-   char tmpl[] = "/tmp/hmem_audit_test_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/hmem_audit_test_XXXXXX", platform_tmpdir());
    char *home = mkdtemp(tmpl);
    assert(home);
    setenv("AIMEE_HOME", home, 1);

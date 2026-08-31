@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from '../setup/configApi';
-import { visibleSteps, isRestartKey, helpFor, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
+import { visibleSteps, isRestartKey, helpFor, ownsPrimaryAction, APPLIANCE_HIDDEN_STEPS, type WizardKbMode } from '../setup/wizardSteps';
 import { completedSteps, computeReadiness, type StepId } from '../setup/readiness';
-import { fetchAppliance, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
+import { fetchAppliance, fetchGitIdentityReady, fetchHostCount, fetchProjectCount, fetchSetupAccountReady } from '../setup/setupSignals';
 import { setDismissed, notifySetupUpdated } from '../setup/setupState';
 import CreateAccount from '../setup/CreateAccount';
 import PrimaryChooser from '../setup/PrimaryChooser';
@@ -13,6 +13,7 @@ import SharedStore from '../setup/SharedStore';
 import DeployPanel from '../setup/DeployPanel';
 import ConnectHosts from '../setup/ConnectHosts';
 import ConnectWorkspace from '../setup/ConnectWorkspace';
+import GitIdentity from '../setup/GitIdentity';
 import type { KbMode } from '../setup/deployTopology';
 
 /* First-run setup wizard. A modal over the app that walks the operator through the
@@ -58,6 +59,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   const [hostsConnected, setHostsConnected] = useState(0);
   const [projectCount, setProjectCount] = useState(0);
   const [accountReady, setAccountReady] = useState(false);
+  const [gitIdentityReady, setGitIdentityReady] = useState(false);
   // The all-in-one appliance bakes the KB + LLM + store, so its wizard drops the
   // infra steps. Detected from a webchat signal (AIMEE_WIZARD_APPLIANCE).
   const [appliance, setAppliance] = useState(false);
@@ -90,11 +92,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     setDoneAtOpen(new Set());
     Promise.all([
       loadConfig(), fetchHostCount(), fetchProjectCount(), fetchSetupAccountReady(), fetchAppliance(),
-    ]).then(([c, hosts, projects, account, appl]) => {
+      fetchGitIdentityReady(),
+    ]).then(([c, hosts, projects, account, appl, identity]) => {
       setCfg(c);
       setHostsConnected(hosts);
       setProjectCount(projects);
       setAccountReady(account);
+      setGitIdentityReady(identity);
       setAppliance(appl);
       const d: Record<string, string> = {};
       for (const s of visibleSteps(String(c.kb_mode) === 'remote' ? 'remote' : 'local')) {
@@ -104,7 +108,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         }
       }
       setDraft(d);
-      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts });
+      const done = completedSteps(c, { accountReady: account, projectCount: projects, hostsConnected: hosts, gitIdentityReady: identity });
       setDoneAtOpen(done);
       setBooted(true);
     });
@@ -121,8 +125,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
   }, [open, close]);
 
   const readiness = useMemo(
-    () => computeReadiness(cfg, { accountReady, projectCount, hostsConnected }),
-    [cfg, accountReady, projectCount, hostsConnected],
+    () => computeReadiness(cfg, { accountReady, projectCount, hostsConnected, gitIdentityReady }),
+    [cfg, accountReady, projectCount, hostsConnected, gitIdentityReady],
   );
 
   if (!open) return null;
@@ -233,13 +237,13 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
     display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16,
   };
   const card: React.CSSProperties = {
-    width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: '#fff',
-    borderRadius: 12, border: '1px solid #dde', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
-    padding: '20px 22px', fontFamily: 'system-ui', color: '#233',
+    width: 'min(560px, 100%)', maxHeight: '86vh', overflow: 'auto', background: 'var(--sg-surface)',
+    borderRadius: 12, border: '1px solid var(--sg-border-medium)', boxShadow: '0 12px 40px rgba(0,0,0,0.3)',
+    padding: '20px 22px', fontFamily: 'system-ui', color: 'var(--sg-text)',
   };
   const input: React.CSSProperties = {
     width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-    border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+    border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
   };
 
   const stepNum = safeIdx + 1;
@@ -250,14 +254,14 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
           <strong style={{ fontSize: 17 }}>Set up this instance</strong>
           <button aria-label="Close setup" title="Close" onClick={close}
-            style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
+            style={{ background: 'none', border: 'none', color: 'var(--sg-text-hint)', cursor: 'pointer', fontSize: 20, lineHeight: 1 }}>×</button>
         </div>
 
         {!booted ? (
-          <div style={{ fontSize: 13, color: '#667', padding: '10px 0' }}>Loading…</div>
+          <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '10px 0' }}>Loading…</div>
         ) : showSummary || !step ? (
           <div>
-            <p style={{ fontSize: 13, color: '#556', margin: '4px 0 12px' }}>
+            <p style={{ fontSize: 13, color: 'var(--sg-text-muted)', margin: '4px 0 12px' }}>
               {readiness.ready ? 'Everything required is configured. 🎉' : 'Here’s what’s left:'}
             </p>
             <div style={{ display: 'grid', gap: 6, marginBottom: 14 }}>
@@ -267,12 +271,12 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 <div key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13 }}>
                   <span aria-hidden>{s.ok ? '✅' : s.optional ? '⚪' : '⛔'}</span>
                   <span style={{ fontWeight: 600, textTransform: 'capitalize', minWidth: 92 }}>{id.replace(/_/g, ' ')}</span>
-                  <span style={{ color: '#667' }}>{s.detail}{s.optional && !s.ok ? ' (optional)' : ''}</span>
+                  <span style={{ color: 'var(--sg-text-secondary)' }}>{s.detail}{s.optional && !s.ok ? ' (optional)' : ''}</span>
                 </div>
               ))}
             </div>
             {pendingRestart.length > 0 && (
-              <div style={{ fontSize: 12.5, color: '#8a5a00', background: '#fff6e6', border: '1px solid #f0d8a8', borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>
+              <div style={{ fontSize: 12.5, color: 'var(--sg-warning-dark)', background: 'var(--sg-warning-bg)', border: '1px solid var(--sg-warning-border)', borderRadius: 6, padding: '8px 10px', marginBottom: 14 }}>
                 ⏳ Restart required for: {pendingRestart.map(humanize).join(', ')} — these take effect after the server restarts.
               </div>
             )}
@@ -289,9 +293,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
           </div>
         ) : (
           <div>
-            <div style={{ fontSize: 12, color: '#8899aa', marginBottom: 4 }}>Step {stepNum} of {total}</div>
+            <div style={{ fontSize: 12, color: 'var(--sg-text-faint)', marginBottom: 4 }}>Step {stepNum} of {total}</div>
             <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 10 }}>
-              {step.title}{step.optional ? <span style={{ color: '#9aa', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
+              {step.title}{step.optional ? <span style={{ color: 'var(--sg-text-hint)', fontWeight: 400, fontSize: 12 }}> · optional</span> : null}
             </div>
 
             {step.kind === 'account' ? (
@@ -304,6 +308,8 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
               <DeployTopology onSaved={handleDeploySaved} />
             ) : step.kind === 'db2' ? (
               <SharedStore onSaved={handleDb2Saved} />
+            ) : step.kind === 'git_identity' ? (
+              <GitIdentity onSaved={() => { setGitIdentityReady(true); notifySetupUpdated(); advance(); }} onSkip={advance} />
             ) : step.kind === 'connection' ? (
               <ConnectHosts onDone={advance} onHostsChanged={setHostsConnected} />
             ) : step.kind === 'workspace' ? (
@@ -314,9 +320,9 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                   <label key={key} style={{ display: 'block' }}>
                     <div style={{ fontSize: 12.5, fontWeight: 600, marginBottom: 3 }}>
                       {humanize(key)}
-                      {isRestartKey(key) ? <span style={{ color: '#8a5a00', fontWeight: 400 }}> · needs restart</span> : null}
+                      {isRestartKey(key) ? <span style={{ color: 'var(--sg-warning-dark)', fontWeight: 400 }}> · needs restart</span> : null}
                     </div>
-                    {helpFor(key) && <div style={{ fontSize: 11.5, color: '#778', marginBottom: 4, lineHeight: 1.4 }}>{helpFor(key)}</div>}
+                    {helpFor(key) && <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4, lineHeight: 1.4 }}>{helpFor(key)}</div>}
                     <input
                       style={input}
                       value={draft[key] ?? ''}
@@ -337,7 +343,7 @@ export default function SetupWizard({ open, onClose }: { open: boolean; onClose:
                 {step.optional && <Button variant="default" onClick={advance}>Skip</Button>}
                 {step.keys.length > 0 ? (
                   <Button variant="primary" disabled={saving} onClick={saveStep}>{saving ? 'Saving…' : 'Save & continue'}</Button>
-                ) : step.kind === 'account' || step.kind === 'chooser' || step.kind === 'kb' || step.kind === 'deploy' || step.kind === 'db2' || step.kind === 'connection' || step.kind === 'workspace' ? (
+                ) : ownsPrimaryAction(step) ? (
                   // Bespoke steps own their own primary action (they call advance()).
                   null
                 ) : (

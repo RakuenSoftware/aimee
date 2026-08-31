@@ -19,13 +19,12 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "modules/memory/memory_ontology.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 /* ---- structural: type layout ---- */
 
@@ -63,8 +62,11 @@ static void test_total_equals_component_sum(void)
    memset(&d, 0, sizeof(d));
    assert(memory_explain_match("docker deployment", m.id, &d) == 0);
 
-   /* parts.confidence must be populated post-ranking for display */
-   assert(d.parts.confidence > 0.9);
+   /* parts.confidence must be populated post-ranking for display. Model-authored
+    * memories are durably capped at 0.8, so this also checks that the displayed
+    * value is the persisted post-provenance value rather than the requested
+    * pre-cap 0.95. */
+   assert(d.parts.confidence > 0.79 && d.parts.confidence < 0.81);
 
    /* parts.total must equal the sum of ranking signals — no confidence term */
    double component_sum = d.parts.lexical + d.parts.coverage + d.parts.entity + d.parts.temporal +
@@ -83,7 +85,6 @@ int main(void)
 {
    printf("memory_ranker_boundary:\n");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
 
    test_ranker_input_type_is_narrow();

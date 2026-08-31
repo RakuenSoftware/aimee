@@ -6,9 +6,21 @@ on:
   push:
     branches: [main, testing, feature/core-modularization]
   pull_request:
-    branches: [main, testing, feature/core-modularization, 'aimee/feat/**']
-    # Slice sub-PRs target aimee/feat/<work-item-id>; include them so each slice
-    # must pass the same complete gate as the final feature PR.
+    branches: [main, testing, feature/core-modularization, 'aimee/feat/**', 'agent/**']
+    # NOTE this filter matches the BASE branch, so anything missing from it does
+    # not get a weaker gate — it gets NO gate, and merges with zero checks
+    # recorded. That is not hypothetical: PRs based on agent/<topic> integration
+    # branches ran no CI at all and merged a broken build.
+    #
+    # Slice sub-PRs target aimee/feat/<work-item-id>; agent/<topic> branches are
+    # used the same way, as integration bases that sub-PRs stack onto before the
+    # whole thing reaches testing. Both are included so every sub-PR passes the
+    # same complete gate as the final feature PR.
+    #
+    # Adding 'agent/**' here does NOT double-run anything: a PR FROM agent/x INTO
+    # testing already matched on its base. This only adds PRs whose base is an
+    # agent branch, which previously matched nothing.
+    #
     # `edited` re-runs the gate when a PR title/body is edited after open, so
     # attribution can't be added post-hoc without failing CI.
     types: [opened, synchronize, reopened, edited]
@@ -25,17 +37,82 @@ permissions:
   contents: read
 
 jobs:
+  secure-development-gates:
+    name: Static analysis and secret scanning
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          # Gitleaks scans commit history, so a one-commit checkout is not enough.
+          fetch-depth: 0
+      - name: Install native analyzers
+        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy
+      - name: Run mandatory native static analysis
+        working-directory: src
+        run: make static-analysis STATIC_ANALYSIS_STRICT=1
+      - name: Scan the complete Git history for secrets
+        env:
+          GITLEAKS_VERSION: 8.30.1
+          GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --location --silent --show-error --retry 3 \
+            --output "$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          printf '%s  %s\n' "$GITLEAKS_SHA256" "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
+          "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose --log-opts=HEAD .
+
+  sanitizer-gate:
+    name: Address and undefined-behavior sanitizers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install native build dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q gcc make libsqlite3-dev libcurl4-openssl-dev \
+            libpam0g-dev libssl-dev libp11-kit-dev libpq-dev
+      - name: Run the complete native test registry under ASan and UBSan
+        working-directory: src
+        env:
+          ASAN_OPTIONS: detect_leaks=1:halt_on_error=1
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
+        run: make sanitizers
+
   # Keep the workflow itself unfiltered: GitHub leaves required checks pending
   # when an entire workflow is skipped by a path filter. Job-level skips report
   # success, so required checks remain mergeable for documentation-only PRs.
   change-scope:
     runs-on: ubuntu-latest
+    # No job here had a timeout, so a hung one ran until GitHub's 6-hour
+    # default. That is not hypothetical: five jobs on one run sat in_progress
+    # for three hours, `lint` stuck the whole time on "Install clang-format" --
+    # an apt-mirror hang with nothing to do with the change under test -- and
+    # would have held the PR for three more.
+    #
+    # 30 minutes is ~4.5x the slowest job measured across three green runs on
+    # `testing`:
+    #
+    #     6m33s  e2e-docker (T2)      2m59s  build-integrity
+    #     6m01s  e2e-docker (T1)      2m25s  lint
+    #     5m16s  unit-tests (1/2)     0m04s  change-scope
+    #
+    # Deliberately uniform and deliberately generous. Tuning each job to its own
+    # runtime is how module-inventory's descriptor-envelope ended up cancelled
+    # at 5m16s against a 5m cap, passing or failing on runner weather. This
+    # bounds a HANG; it is not a performance budget.
+    timeout-minutes: 30
     outputs:
       docs_only: ${{ steps.classify.outputs.docs_only }}
       # Separate from docs_only on purpose: see the documentation step below.
       docs_changed: ${{ steps.classify.outputs.docs_changed }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
@@ -95,9 +172,10 @@ jobs:
     # Scans only the PR's NEW commits (base..head), so existing history is
     # grandfathered while any newly introduced trailer fails the PR.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     if: github.event_name == 'pull_request'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
       - name: Reject AI co-authorship trailers in new commits
@@ -109,8 +187,29 @@ jobs:
         run: |
           range="${BASE_SHA}..${HEAD_SHA}"
           # Match the actual trailer forms only (anchored), not prose that happens
-          # to mention them: a "co-authored-by:" line, or the markdown-link
-          # "Generated with [Claude Code]"/"[Codex ...]" attribution line.
+          # to mention them: a co-authorship trailer line, or the markdown-link
+          # generated-with attribution line.
+          #
+          # Every alternative is line-anchored, which the generated-with one was
+          # NOT until now -- so a commit message describing this check tripped
+          # it, which is exactly how this was found. Anchoring costs nothing:
+          # both are trailer lines by construction, and the leading
+          # [[:space:]]* still allows an indented one.
+          #
+          # Session back-links are the same thing wearing a different hat, and
+          # they were getting through: assistant harnesses append a
+          # "<tool>-Session: <url>" trailer, or a bare session permalink on its
+          # own line, and neither matches the two forms above. A PR landed here
+          # carrying one in all three commits AND the body before this was
+          # widened. The URL alternative is anchored to the session path rather
+          # than the bare host so that citing a docs page is still fine, and the
+          # trailer alternative is line-anchored so prose naming the trailer (a
+          # commit that FIXES this check, for instance) does not trip it.
+          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
+          export ATTRIBUTION_RE
           # Immutable commits that entered testing carrying a trailer. They are
           # grandfathered only for the testing -> main integration PR; exact SHAs
           # keep the exception from hiding descendants or any newly introduced
@@ -131,13 +230,16 @@ jobs:
               if [ "$BASE_REF" = main ] && [ "$HEAD_REF" = testing ]; then
                 case "$commit" in
                   9f327867cd62a14e50e9a41af9b871fc7792e4bd|003255217a10a8559e47bf0b6fedeb2c0faa6cce|\
-                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc)
+                  d173e054353a1069bd07a307477ad281a3d39d59|0b694e1970eab860b503b433bb69f708fc445abc|\
+                  d978a2d05356b6f6d8821f4230da5f1de9fe71c0|59d5d9e419fd64326961c5ce8086c43abc09a797|\
+                  af58300e9fd16858ad3195748f4da50bbdcd0e3c|ef9c722bab2b149dadd0fd13c3d3478a4cfda5cf|\
+                  41fe8fbae98386cc9c2895810d284bcf902f8c8e)
                     continue
                     ;;
                 esac
               fi
               git show -s --format='%H%n%B' "$commit" \
-                | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true
+                | grep -inE "$ATTRIBUTION_RE" || true
             done
           )
           if [ -n "$hits" ]; then
@@ -151,8 +253,14 @@ jobs:
           PR_TITLE: ${{ github.event.pull_request.title }}
           PR_BODY: ${{ github.event.pull_request.body }}
         run: |
+          # Same set as the commit scan above; kept in step with it deliberately,
+          # because a body-only session link is the easy way for one to land.
+          ATTRIBUTION_RE='^[[:space:]]*co-authored-by:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*generated with \[(claude|codex)'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*(claude|codex|chatgpt|copilot)-session:'
+          ATTRIBUTION_RE="$ATTRIBUTION_RE"'|^[[:space:]]*https?://[^[:space:]]*/(code/)?session[_/-]'
           hits=$(printf '%s\n%s\n' "$PR_TITLE" "$PR_BODY" \
-                 | grep -inE '^[[:space:]]*co-authored-by:|generated with \[(claude|codex)' || true)
+                 | grep -inE "$ATTRIBUTION_RE" || true)
           if [ -n "$hits" ]; then
             echo "::error::The PR title/body carries AI attribution; remove it (standing directive)."
             echo "$hits"
@@ -164,8 +272,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -183,8 +292,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q clang-format-19 ripgrep
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q clang-format-19 ripgrep; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Check formatting
         if: needs.change-scope.outputs.docs_only != 'true'
         run: cd src && make lint
@@ -199,6 +308,12 @@ jobs:
       # be trusted to check.
       - name: Test the CI change classifier
         run: python3 -I scripts/tests/test_ci_change_scope.py
+
+      # This controls whether multi-gigabyte release images are rebuilt or their
+      # existing manifest is reused.  Run its contract test unconditionally: a
+      # docs-only change can still expose drift in the workflow or Dockerfile inputs.
+      - name: Test the testing-image publication planner
+        run: python3 -I scripts/tests/test_publish_testing_plan.py
 
       # docs_CHANGED, not docs_only. Gated on docs_only, this never ran for a pull
       # request that touched documentation AND anything else -- which is most of them,
@@ -221,12 +336,76 @@ jobs:
           make -C src docs-gen-check
           git diff --check
 
+  # Go unit tests, which until now ran in NO job that a pull request into testing
+  # could reach.
+  #
+  # The only CI invocation of `go test` over server-go is in c-repository-pins,
+  # and that workflow says so plainly: "main ONLY, on both triggers... Nothing
+  # here runs for a branch or a PR targeting testing." The `go-unit-tests` make
+  # target exists and covers all three Go modules, but its only caller is
+  # `verify-local`, a developer target that no workflow runs. So every Go package
+  # in server-go, runtime-web and control-web -- the bus, every Go module, the
+  # storage wire -- was gated by nothing on the ordinary PR path, and passed only
+  # because people ran it by hand.
+  #
+  # It uses the make target rather than a list of packages here. A list is the
+  # failure this job exists to fix, one level up: c-repository-pins enumerates
+  # `./bus ./modules/... ./cmd/aimee-module`, so a new top-level Go package in
+  # server-go falls outside it silently. `go-unit-tests` discovers module dirs by
+  # wildcard and runs `./...` in each, so a new package is covered by
+  # construction rather than by somebody remembering.
+  go-unit-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # Pinned from go.mod for the same reason the integration harness pins it:
+      # relying on whatever toolchain the runner image ships means the coverage
+      # can disappear with an image bump while the job stays green.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      # runtime-web reaches PAM through an indirect cgo dependency, so `go test`
+      # needs the header even though no Go file in the tree includes it. Without
+      # this the job fails at BUILD, not at a test -- which reads as a broken
+      # module rather than a missing package. Only this one header is missing:
+      # gcc and make are preinstalled, and no other Go module here uses cgo.
+      - name: Install dependencies
+        run: |
+          # Same apt hardening as the sibling jobs: runner images preinstall
+          # third-party repos that intermittently serve bad metadata and fail
+          # `apt-get update` hard, though nothing we install comes from them.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q libpam0g-dev
+      - name: Go unit tests
+        run: |
+          # Populate all module caches with bounded retries before tests fan out.
+          # A proxy HTTP/2 reset otherwise fails whichever package first needs the
+          # missing zip, even though the source and dependency graph are valid.
+          for module in control-web runtime-web server-go; do
+            for attempt in 1 2 3 4 5; do
+              (cd "$module" && GOPROXY='https://proxy.golang.org|direct' go mod download) && break
+              test "$attempt" -lt 5 || exit 1
+              sleep $((attempt * 5))
+            done
+          done
+          GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
+      - name: Reject reachable Go vulnerabilities
+        run: make -C src go-vulncheck GOVULNCHECK="$(go env GOPATH)/bin/govulncheck"
+
   build:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -243,24 +422,64 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev curl
       - name: Build
-        run: cd src && make -j$(nproc) all server
+        run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
+      - name: Verify binary hardening
+        run: cd src && make hardening-check
       - name: Skill lint
         run: |
-          sock=/tmp/aimee-ci-skill-lint.sock
-          rm -f "$sock"
-          AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee-server --socket="$sock" &
+          app_home=$(mktemp -d)
+          sock="$app_home/aimee-ci-skill-lint.sock"
+          cp deploy/container/aimee-server.yaml "$app_home/aimee.yaml"
+          python3 scripts/export_c_repositories.py --runtime-bundle src/build/obj/module-bundle >/dev/null
+          mkdir -p "$app_home/modules.d/server"
+          sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
+            src/build/obj/module-bundle/grants/server/config.grant \
+            >"$app_home/modules.d/server/config.grant"
+          AIMEE_HOME="$app_home" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
+            ./aimee-server --socket="$sock" &
           pid=$!
-          trap 'kill "$pid" 2>/dev/null || true' EXIT
-          for i in $(seq 1 50); do
-            [ -S "$sock" ] && break
+          module_pid=
+          trap 'kill "$pid" ${module_pid:-} 2>/dev/null || true; rm -rf "$app_home"' EXIT
+          for i in $(seq 1 100); do
+            [ -S "$app_home/server-module-bus.sock" ] && break
+            kill -0 "$pid" 2>/dev/null || { wait "$pid"; exit 1; }
             sleep 0.1
           done
-          AIMEE_SOCK="$sock" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee skill lint --all
+          test -S "$app_home/server-module-bus.sock"
+          AIMEE_HOME="$app_home" src/build/obj/aimee-module-config \
+            "$app_home/server-module-bus.sock" &
+          module_pid=$!
+          # A socket node appears as soon as bind(2) succeeds, before the HTTP
+          # accept loop is necessarily serving requests. Wait for the endpoint
+          # this test actually needs instead of racing the first client request.
+          http_ready=0
+          for i in $(seq 1 300); do
+            if curl --fail --silent --noproxy '*' --unix-socket "$app_home/aimee-http.sock" \
+              http://localhost/v1/cli/manifest >/dev/null 2>&1; then
+              http_ready=1
+              break
+            fi
+            kill -0 "$pid" 2>/dev/null || { wait "$pid"; exit 1; }
+            sleep 0.1
+          done
+          test "$http_ready" -eq 1
+          # Skill routes are workspace-scoped. Register this checkout explicitly
+          # without indexing it; the lint itself is the operation under test.
+          AIMEE_HOME="$app_home" AIMEE_SOCK="$sock" \
+            AIMEE_API_ENDPOINT="unix:$app_home/aimee-http.sock" \
+            ./aimee workspace add "$PWD" --no-scan >/dev/null
+          # The client only ever talks to an EXPLICITLY configured endpoint; it
+          # no longer discovers a co-located server. aimee-server publishes its
+          # /v1 socket under its config dir (config_default_dir()/aimee-http.sock),
+          # not next to --socket, so point at that.
+          AIMEE_HOME="$app_home" AIMEE_SOCK="$sock" \
+            AIMEE_API_ENDPOINT="unix:$app_home/aimee-http.sock" \
+            AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" ./aimee skill lint --all
       - name: Smoke test
         run: |
           ./aimee version
@@ -280,8 +499,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -298,8 +518,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Build integrity
@@ -317,6 +537,7 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     name: unit-tests (${{ matrix.label }}/2)
     strategy:
       fail-fast: false
@@ -336,9 +557,9 @@ jobs:
       CCACHE_BASEDIR: ${{ github.workspace }}
       CCACHE_NOHASHDIR: "true"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Restore compiler cache
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: ~/.cache/ccache
           key: unit-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
@@ -358,7 +579,7 @@ jobs:
         # Started manually rather than as a `services:` container: the runner pulls
         # service images with no retry, so a transient Docker Hub timeout fails the
         # whole required check (the unit-tests flake). Pull with backoff, then run.
-        # pgvector/pgvector (debian, not alpine) ships pgvector >= 0.7 (halfvec —
+        # pgvector/pgvector (debian, not alpine) ships pgvector >= 0.7 (vector types —
         # the unified embedding column type) and the contrib modules incl. pg_trgm
         # (the memories_code_fts trigram index); postgres:*-alpine shipped neither.
         run: |
@@ -380,8 +601,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make ccache \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make ccache \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client
       - name: Wait for Postgres
@@ -425,35 +646,227 @@ jobs:
             unit-tests
           ccache --show-stats
 
+  # The same unit-test binaries, linked against real libpq instead of the sqlite
+  # shim, so DB2's SQL is EXECUTED by the engine that runs it in production rather
+  # than TRANSLATED into another one.
+  #
+  # WHY THIS IS NOT REDUNDANT WITH unit-tests. The shim rewrites DB2's SQL to
+  # something sqlite accepts (tests/aimee_pg_sqlite_shim.c), so the places the two
+  # engines differ are exactly the places it cannot vouch for -- and each one that
+  # existed was a real defect the green suite reported as passing: confidence decay
+  # never ran (unary minus on an untyped parameter is ambiguous in Postgres), the
+  # bandit's posterior never moved (?3*?3 likewise), calibration dropped every
+  # high-confidence row (CAST(x AS INT) rounds in Postgres and truncates in sqlite),
+  # and every BOOLEAN column read back as false ("t" is not a number). None of those
+  # are visible from a sqlite run, by construction.
+  #
+  # Sharded independently from the sqlite suite: real-engine memory tests also
+  # exercise dependency backoff and can exceed one runner's wall-clock budget in
+  # a two-way partition. The aggregate `unit-tests` job still gates every shard,
+  # so repartitioning shortens the critical path without dropping coverage.
+  unit-test-shards-pg:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    name: unit-tests-pg (${{ matrix.label }}/3)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard_index: 0
+            label: 1
+          - shard_index: 1
+            label: 2
+          - shard_index: 2
+            label: 3
+    env:
+      # The template the per-process clones are copied from. Every test binary
+      # does CREATE DATABASE <template>_p<pid> TEMPLATE <template>, so this user
+      # needs CREATEDB and a connection to `postgres` -- both true for the image's
+      # bootstrap superuser.
+      AIMEE_TEST_DB2_TEMPLATE_URL: postgres://aimee:aimee@localhost:5432/aimee_test_tpl
+      # Make the content-scope proof exercise lazy DB2 pool connections as the
+      # production NOBYPASSRLS role, with a hermetic 768-dimensional embedder.
+      # Each test process receives its own disposable database clone.
+      AIMEE_TEST_PG_RUNTIME_POOL: "1"
+      AIMEE_TEST_EMBEDDING_COMMAND: ${{ github.workspace }}/scripts/test-embedding-fixture.py
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_NOHASHDIR: "true"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Restore compiler cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830
+        with:
+          path: ~/.cache/ccache
+          key: unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-${{ github.run_id }}
+          restore-keys: |
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-${{ hashFiles('src/Makefile', 'src/tests/Rules.mk') }}-
+            unit-pg-ccache-v1-${{ runner.os }}-${{ matrix.shard_index }}-
+      - name: Start Postgres (pgvector) with pull retry
+        # Same image and retry rationale as unit-tests: the runner pulls service
+        # images with no retry, so a transient Docker Hub timeout would fail a
+        # required check. max_connections is raised because each of the parallel
+        # test processes opens its own clone AND a 16-connection DB2 pool.
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-pg-tpl \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c max_connections=500 -c fsync=off -c full_page_writes=off \
+                   -c synchronous_commit=off
+      - name: Install dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make ccache \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 30); do
+            pg_isready -h localhost -p 5432 -U aimee && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"; docker logs aimee-pg-tpl || true; exit 1
+      - name: Unit tests (real Postgres)
+        run: |
+          # Same deterministic root-owned helpers the sqlite shards install: the
+          # trust-walk tests assert on ownership and mode, which runner image
+          # metadata does not guarantee.
+          sudo install -d -o root -g root -m 0755 /run/aimee-test-helpers
+          for helper in cat env yes true; do
+            sudo install -o root -g root -m 0755 "$(type -P "$helper")" \
+              "/run/aimee-test-helpers/$helper"
+          done
+          printf '%s\n' 'deterministic root-owned test fixture' | \
+            sudo tee /run/aimee-test-helpers/root-file >/dev/null
+          sudo chown root:root /run/aimee-test-helpers/root-file
+          sudo chmod 0644 /run/aimee-test-helpers/root-file
+          export AIMEE_TEST_TRUSTED_CAT=/run/aimee-test-helpers/cat
+          export AIMEE_TEST_TRUSTED_ENV=/run/aimee-test-helpers/env
+          export AIMEE_TEST_TRUSTED_YES=/run/aimee-test-helpers/yes
+          export AIMEE_TEST_TRUSTED_TRUE=/run/aimee-test-helpers/true
+          export AIMEE_TEST_TRUSTED_ROOT_FILE=/run/aimee-test-helpers/root-file
+          ccache --max-size=750M
+          ccache --zero-stats
+          cd src
+          # unit-tests-pg rebuilds the template and then runs the suite; the shard
+          # variables pass straight through to the inner `make unit-tests`.
+          make -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            UNIT_TEST_SHARD_COUNT=3 \
+            UNIT_TEST_SHARD_INDEX=${{ matrix.shard_index }} \
+            UNIT_TEST_SKIP_P1=1 \
+            unit-tests-pg
+          ccache --show-stats
+      - name: Postgres logs on failure
+        if: failure()
+        run: docker logs --tail 200 aimee-pg-tpl || true
+
+  db2-process-replay:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AIMEE_DB2_URL: postgres://aimee:aimee@127.0.0.1:5432/aimee_db2_process_ci
+      EMBEDDER_DIMS: "384"
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-db2-process-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee \
+            -e POSTGRES_DB=aimee_db2_process_ci -p 5432:5432 "$img"
+      - name: Install DB2 replay dependencies
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0
+          until timeout 240 sudo apt-get update -q; do
+            i=$((i+1))
+            [ "$i" -ge 5 ] && break
+            echo "apt-get update retry $i (transient repo failure)"
+            sleep $((i*4))
+          done
+          i=0; until timeout 240 sudo apt-get install -y -q gcc make pkg-config libssl-dev libpq-dev postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-db2-process-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-db2-process-pg || true
+          exit 1
+      - name: Replay packaged DB2 operations through the event bus
+        run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 db2-replay
+      - name: Verify durable schema effect
+        run: |
+          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"
+          test "$(psql -XAt "$AIMEE_DB2_URL" -c "select count(*) from information_schema.tables where table_schema=current_schema() and table_name in ('memories','kb_documents','kb_async_jobs')")" = "3"
+
   # Stable protected context for the sharded suite. It remains named
   # `unit-tests`, so branch protection needs no transition window, and it also
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, p1-rls-gate]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Confirm complete unit gate
         env:
           CHANGE_SCOPE_RESULT: ${{ needs.change-scope.result }}
           DOCS_ONLY: ${{ needs.change-scope.outputs.docs_only }}
           SHARDS_RESULT: ${{ needs.unit-test-shards.result }}
+          SHARDS_PG_RESULT: ${{ needs.unit-test-shards-pg.result }}
+          DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
+          GO_RESULT: ${{ needs.go-unit-tests.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
-            echo "Documentation-only change: unit shards and P1 gate skipped."
+            echo "Documentation-only change: unit shards (sqlite and Postgres) and P1 gate skipped."
             exit 0
           fi
           [ "$SHARDS_RESULT" = success ] || {
             echo "Unit-test shard result: $SHARDS_RESULT" >&2
             exit 1
           }
+          [ "$SHARDS_PG_RESULT" = success ] || {
+            echo "Unit-test (real Postgres) shard result: $SHARDS_PG_RESULT" >&2
+            exit 1
+          }
           [ "$P1_RESULT" = success ] || {
             echo "P1 RLS gate result: $P1_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards and the P1 RLS gate passed."
+          [ "$DB2_REPLAY_RESULT" = success ] || {
+            echo "DB2 process replay result: $DB2_REPLAY_RESULT" >&2
+            exit 1
+          }
+          # Folded in here rather than left as its own context so it BLOCKS.
+          # Branch protection requires this aggregate by name, so a job outside
+          # it runs, reports, and gates nothing -- which is the same as not
+          # running for anything that matters.
+          [ "$GO_RESULT" = success ] || {
+            echo "Go unit-test result: $GO_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, and the Go unit tests passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -495,8 +908,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         # Same image and retry rationale as unit-tests: the schema needs the vector
         # and pg_trgm extensions, which the runner's preinstalled Postgres does not
@@ -580,15 +994,16 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install dependencies
         # pkg-config, libzstd-dev and zlib1g-dev for the same reasons as the mint job:
         # PQ_CFLAGS comes from pkg-config, and L_KB links -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Start the identity provider
@@ -637,8 +1052,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -655,8 +1071,8 @@ jobs:
         # PQ_CFLAGS comes from pkg-config, and L_KB/L_SERVER link -lzstd -lz.
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -704,8 +1120,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -720,8 +1137,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates \
             libpam-modules passwd
@@ -760,8 +1177,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -776,8 +1194,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make pkg-config \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make pkg-config \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev postgresql-client libzstd-dev zlib1g-dev python3 curl ca-certificates
       - name: Wait for Postgres
@@ -839,8 +1257,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Start Postgres (pgvector) with pull retry
         run: |
           img=pgvector/pgvector:pg18
@@ -855,8 +1274,8 @@ jobs:
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
-          sudo apt-get install -y -q postgresql-client python3
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i"; sleep $((i*4)); done
+          i=0; until timeout 240 sudo apt-get install -y -q postgresql-client python3; do i=$((i+1)); [ "$i" -ge 3 ] && break; echo "apt-get install retry $i (mirror hung or failed)"; sleep $((i*5)); done
       - name: Wait for Postgres
         run: |
           for i in $(seq 1 40); do
@@ -870,12 +1289,118 @@ jobs:
         # cleaning up between runs.
         run: bash scripts/run-p1-rls-gate.sh postgres://aimee:aimee@127.0.0.1:5432/aimee_rls_ci
 
+  # The client/server integration harness. It was NOT gated, which is how it
+  # silently rotted: the co-location ban removed well-known-socket discovery, the
+  # harness had no explicitly configured endpoint, and every client assertion in
+  # it failed as "aimee-server unavailable" against a server running two lines
+  # away. Nothing noticed for as long as nothing ran it. An ungated harness is a
+  # harness that will be wrong when you next need it.
+  integration-tests:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_integration_ci
+      AIMEE_STORE_MIGRATION_URL: postgres://aimee_store_migrator:migrator-ci@127.0.0.1:5432/aimee_integration_ci
+      # The job owns an ephemeral database, so public is already its isolated
+      # schema and inherits the role grants provisioned below.
+      AIMEE_STORE_SCHEMA: public
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The harness builds the workflow control module, which is Go. The runner
+      # image happens to ship a toolchain, but the harness SKIPS its workflow
+      # section when it cannot find one -- so relying on the image would mean
+      # the whole /v1/workflow surface silently stops being covered the day
+      # that changes, with the job still green. Pin it instead.
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      # The store is a PostgreSQL module now, so a rig that stands a server up
+      # needs a database. Before the C store was retired this harness ran
+      # against a SQLite file it created itself and needed nothing; the store
+      # module now attaches, finds no backend, and declines to serve, which
+      # surfaces as every family reporting "DB1 <family> is unreachable" rather
+      # than as a missing database.
+      #
+      # Started with the same image and pull-retry as the sibling Postgres jobs:
+      # the runner pulls with no retry, so a transient Docker Hub timeout would
+      # fail a required check for a reason that has nothing to do with the code.
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-integration-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_integration_ci \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c fsync=off -c full_page_writes=off -c synchronous_commit=off
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-integration-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-integration-pg || true
+          exit 1
+      - name: Provision separate store authorities
+        run: |
+          docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
+            "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
+          docker exec aimee-integration-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_integration_ci -c \
+            "ALTER DATABASE aimee_integration_ci OWNER TO aimee_store_migrator; ALTER SCHEMA public OWNER TO aimee_store_migrator; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE aimee_integration_ci TO aimee_store_runtime; GRANT USAGE ON SCHEMA public TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;"
+      - name: Install dependencies
+        run: |
+          # Same transient-apt-mirror workaround the sibling jobs carry.
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
+            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+            libpq-dev postgresql-client
+      # actions/checkout leaves refs/remotes/origin/HEAD unset -- it clones
+      # shallow and detached, and never records which branch the remote calls
+      # default. aimee's git surface resolves a session's worktree base from
+      # exactly that ref, so the harness's MCP git_status call failed here and
+      # only here, reporting "aimee-server unavailable after retries" while the
+      # checks either side reached that same server happily. The real reason
+      # was on mcp-serve's stderr:
+      #
+      #   cannot resolve the session worktree base for '/home/runner/work/aimee/aimee'.
+      #   The default is the REMOTE default branch (origin/HEAD); it is unset
+      #   or unreachable here. Fix the remote (git remote set-head ...)
+      #
+      # So do what it says. Set it, rather than skipping the check: an
+      # environment missing a ref every real checkout has is a gap in the
+      # environment, not a capability aimee lacks. The fallback covers a runner
+      # that cannot reach the remote to ask.
+      - name: Give the checkout an origin/HEAD
+        run: |
+          set -eu
+          # `-a` asks the remote which branch is default and writes a symbolic
+          # ref to refs/remotes/origin/<that>. In this job that ref does not
+          # exist: the checkout is shallow and single-branch, so pointing
+          # origin/HEAD at it would leave the base just as unresolvable. Fetch
+          # the base first, then point at what is actually there.
+          base="${GITHUB_BASE_REF:-testing}"
+          git fetch --no-tags --depth=1 origin "$base"
+          git remote set-head origin "$base"
+          git symbolic-ref refs/remotes/origin/HEAD
+      - name: Client/server integration harness
+        run: cd src && make -j$(nproc) integration-tests
+
   init-migrate-service-test:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -892,12 +1417,15 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Init/migrate service routing smoke test
         run: cd src && make -j$(nproc) init-migrate-service-test
+
+      - name: Historical store volume upgrades in place
+        run: cd src && make postgres-store-upgrade-test
 
       # Cheap and image-free: the gate that decides whether a kb may start without an
       # embedder. Getting it wrong in either direction ships a broken deploy — too
@@ -906,12 +1434,27 @@ jobs:
       - name: KB entrypoint embedder gate
         run: cd src && make kb-entrypoint-test
 
+      # The managed deployment's identity must be reconstructible from config, not
+      # only from the running container's env. An unset AIMEE_KB_VARIANT resolves the
+      # kb image to the EMBEDDERLESS aimee-kb with no error anywhere, so a recreate
+      # (which every image upgrade performs) could silently drop a deployment's
+      # embedder. This asserts the .env is derived at start.
+      - name: Managed compose env derived from config
+        run: cd src && make deploy-compose-env-test
+
+      # `workflow list` prints names that `workflow show` must accept. Two
+      # commands in the same family disagreeing about what a name means is the
+      # kind of thing people work around silently rather than report.
+      - name: Workflow name resolution
+        run: cd src && make workflow-name-resolution-test
+
   windows-cmake:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Set up MinGW-w64
         shell: pwsh
@@ -943,7 +1486,8 @@ jobs:
           if (-not $bin -and (Test-Path $pacman)) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
+                mingw-w64-ucrt-x86_64-openssl
               if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
@@ -956,9 +1500,23 @@ jobs:
             }
           }
           if (-not $bin) { Write-Error "MinGW gcc.exe not found after install"; exit 1 }
+          $prefix = Split-Path $bin
+          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
+            $opensslPackage = if ($bin -like "*\ucrt64\*") {
+              "mingw-w64-ucrt-x86_64-openssl"
+            } else {
+              "mingw-w64-x86_64-openssl"
+            }
+            & $pacman -Sy --noconfirm --needed $opensslPackage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
+            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
+          }
           Write-Host "Using MinGW at $bin"
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Download SQLite amalgamation
         shell: powershell
@@ -975,7 +1533,8 @@ jobs:
 
       # Windows ships only the thin client (aimee.exe). aimee-server, aimee-kb,
       # aimee-gateway, and aimee-runtime-web are Linux/Docker components and are not
-      # built here, so the MinGW runner needs no libpq/zstd/OpenSSL.
+      # built here, so the MinGW runner needs no libpq/zstd. The thin client
+      # still links OpenSSL crypto for executable-artifact trust verification.
       - name: Build the thin client
         run: cmake --build build --parallel 2 --target aimee
 
@@ -1000,8 +1559,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Set up MinGW-w64
         shell: pwsh
         run: |
@@ -1024,7 +1584,8 @@ jobs:
           if (-not $bin -and (Test-Path $pacman)) {
             for ($i = 0; $i -lt 3 -and -not $bin; $i++) {
               & $pacman -Sy --noconfirm --needed `
-                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make
+                mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-make `
+                mingw-w64-ucrt-x86_64-openssl
               if ($LASTEXITCODE -ne 0) { Start-Sleep (15 * ($i + 1)) }
               $bin = Find-MingwBin
             }
@@ -1037,9 +1598,23 @@ jobs:
             }
           }
           if (-not $bin) { Write-Error "MinGW gcc.exe and mingw32-make.exe not found"; exit 1 }
+          $prefix = Split-Path $bin
+          if (-not (Test-Path "$prefix\include\openssl\evp.h") -and (Test-Path $pacman)) {
+            $opensslPackage = if ($bin -like "*\ucrt64\*") {
+              "mingw-w64-ucrt-x86_64-openssl"
+            } else {
+              "mingw-w64-x86_64-openssl"
+            }
+            & $pacman -Sy --noconfirm --needed $opensslPackage
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+          if (-not (Test-Path "$prefix\include\openssl\evp.h")) {
+            Write-Error "MinGW OpenSSL headers not found after install"; exit 1
+          }
           Write-Host "Using MinGW at $bin"
           & "$bin\gcc.exe" --version
           echo "$bin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          echo "OPENSSL_ROOT_DIR=$($prefix -replace '\\','/')" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
       - name: Download SQLite amalgamation
         shell: powershell
         run: |
@@ -1076,13 +1651,51 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # artifact_trust uses libcrypto. Homebrew on the arm64 runner provides
+      # only an arm64 bottle, so build the pinned source for both release
+      # architectures and combine the static archives before CMake configures.
+      - name: Build universal OpenSSL crypto
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/openssl-3.6.3.tar.gz"
+          curl --fail --location --retry 3 \
+            --output "$archive" \
+            https://github.com/openssl/openssl/releases/download/openssl-3.6.3/openssl-3.6.3.tar.gz
+          echo "243a86649cf6f23eeb6a2ff2456e09e5d77dd9018a54d3d96b0c6bdd6ba6c7f1  $archive" \
+            | shasum -a 256 --check
+          tar -xzf "$archive" -C "$RUNNER_TEMP"
+          source_dir="$RUNNER_TEMP/openssl-3.6.3"
+          for arch in arm64 x86_64; do
+            build_dir="$RUNNER_TEMP/openssl-$arch"
+            prefix="$RUNNER_TEMP/openssl-$arch-install"
+            cp -R "$source_dir" "$build_dir"
+            cd "$build_dir"
+            if [ "$arch" = arm64 ]; then
+              target=darwin64-arm64-cc
+            else
+              target=darwin64-x86_64-cc
+            fi
+            ./Configure "$target" no-shared no-tests --prefix="$prefix"
+            make --jobs 3 build_libs
+            make install_dev
+          done
+          universal="$RUNNER_TEMP/openssl-universal"
+          mkdir -p "$universal/lib"
+          cp -R "$RUNNER_TEMP/openssl-arm64-install/include" "$universal/include"
+          lipo -create \
+            "$RUNNER_TEMP/openssl-arm64-install/lib/libcrypto.a" \
+            "$RUNNER_TEMP/openssl-x86_64-install/lib/libcrypto.a" \
+            -output "$universal/lib/libcrypto.a"
+          echo "OPENSSL_ROOT_DIR=$universal" >> "$GITHUB_ENV"
+
       # macOS ships ONE universal (arm64 + x86_64) thin client, matching the
-      # release build. TLS uses Secure Transport (system frameworks, already
-      # universal), so the fat build needs no arch-specific brew libraries.
+      # release build. Secure Transport and the pinned libcrypto above both
+      # contain the two required slices.
       - name: Configure with CMake (universal arm64+x86_64)
-        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
+        run: cmake -B build -DAIMEE_THIN_CLIENT=ON -DWITH_PAM=OFF -DWITH_LIBSECRET=OFF -DWITH_UI=OFF -DWITH_TLS=ON -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR" -DCMAKE_OSX_ARCHITECTURES="arm64;x86_64"
       - name: Build the thin client
         run: |
           cmake --build build --parallel 3 --target aimee
@@ -1145,8 +1758,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"
@@ -1163,8 +1777,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev
       - name: Memory retrieval eval (corpus + regression check)
@@ -1181,8 +1795,15 @@ jobs:
     # One runner per topology so the deploy matrix runs in PARALLEL instead of
     # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
+    env:
+      # Test-only credentials required while Compose is parsed by Bake, before
+      # the topology smoke scripts have a chance to establish their environment.
+      AIMEE_STORE_ADMIN_PASSWORD: ci-e2e-admin-password-2878
+      AIMEE_STORE_MIGRATOR_PASSWORD: ci-e2e-migrator-password-2878
+      AIMEE_STORE_RUNTIME_PASSWORD: ci-e2e-runtime-password-2878
     strategy:
       fail-fast: false
       matrix:
@@ -1203,9 +1824,9 @@ jobs:
             images: aimee-server
     name: e2e-docker (${{ matrix.topology }})
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
       - name: Runner diagnostics
         run: |
           docker version --format '{{.Server.Version}}'
@@ -1241,12 +1862,26 @@ jobs:
             echo CACHE_FLAGS_EOF
           } >> "$GITHUB_OUTPUT"
       - name: Build topology images with persistent cache
-        uses: docker/bake-action@v7
+        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b
         with:
           source: .
           files: ${{ matrix.compose_file }}
           load: true
           set: ${{ steps.cache_flags.outputs.set }}
+      # The server topologies stand up a stock PostgreSQL for the store. Bake
+      # only loads the images the compose file BUILDS, so this one is pulled --
+      # and `up -d --no-build` would pull it inline with no retry, which is the
+      # transient-Docker-Hub failure every other pull in this file guards
+      # against. T1 is kb-only and runs no server, so it needs no store.
+      - name: Pre-pull the store database image with retry
+        if: matrix.topology != 'T1'
+        run: |
+          img=postgres:18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
       - name: Run Docker deploy topology ${{ matrix.topology }}
         # The aimee-server image builds webchat's SPA from its vendored
         # @rakuensoftware/smoothgui dependency — no npm token needed.
@@ -1271,17 +1906,59 @@ jobs:
     # bootstrap bearer must pin the cert, auto-rotate to a strong bearer, and
     # persist it on both sides; the consumed bootstrap must be dead afterwards.
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AIMEE_STORE_URL: postgres://aimee_store_runtime:runtime-ci@127.0.0.1:5432/aimee_adoption_ci
+      AIMEE_STORE_MIGRATION_URL: postgres://aimee_store_migrator:migrator-ci@127.0.0.1:5432/aimee_adoption_ci
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      # The store is a PostgreSQL module now, so a rig that stands a server up
+      # needs a database. Before the C store was retired this harness ran
+      # against a SQLite file it created itself and needed nothing; the store
+      # module now attaches, finds no backend, and declines to serve, which
+      # surfaces as every family reporting "DB1 <family> is unreachable" rather
+      # than as a missing database.
+      #
+      # Started with the same image and pull-retry as the sibling Postgres jobs:
+      # the runner pulls with no retry, so a transient Docker Hub timeout would
+      # fail a required check for a reason that has nothing to do with the code.
+      - name: Start Postgres (pgvector) with pull retry
+        run: |
+          img=pgvector/pgvector:pg18
+          for attempt in 1 2 3 4 5; do
+            docker pull "$img" && break
+            echo "docker pull $img failed (attempt $attempt/5); backing off"
+            sleep $((attempt * 10))
+          done
+          docker run -d --name aimee-adoption-pg \
+            -e POSTGRES_USER=aimee -e POSTGRES_PASSWORD=aimee -e POSTGRES_DB=aimee_adoption_ci \
+            -p 5432:5432 \
+            --health-cmd pg_isready --health-interval 5s --health-timeout 3s --health-retries 10 \
+            "$img" -c fsync=off -c full_page_writes=off -c synchronous_commit=off
+      - name: Wait for Postgres
+        run: |
+          for i in $(seq 1 40); do
+            docker exec aimee-adoption-pg pg_isready -U aimee >/dev/null 2>&1 && exit 0
+            sleep 2
+          done
+          echo "Postgres did not become ready in time"
+          docker logs aimee-adoption-pg || true
+          exit 1
+      - name: Provision separate store authorities
+        run: |
+          docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
+            "CREATE ROLE aimee_store_migrator LOGIN PASSWORD 'migrator-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION; CREATE ROLE aimee_store_runtime LOGIN PASSWORD 'runtime-ci' NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION;"
+          docker exec aimee-adoption-pg psql -v ON_ERROR_STOP=1 -U aimee -d aimee_adoption_ci -c \
+            "ALTER DATABASE aimee_adoption_ci OWNER TO aimee_store_migrator; ALTER SCHEMA public OWNER TO aimee_store_migrator; REVOKE CREATE ON SCHEMA public FROM PUBLIC; GRANT CONNECT ON DATABASE aimee_adoption_ci TO aimee_store_runtime; GRANT USAGE ON SCHEMA public TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime; ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;"
       - name: Install dependencies
         run: |
           # Same apt hygiene as the build jobs: drop flaky third-party repos,
           # retry update with backoff.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+            libpq-dev postgresql-client
       - name: Thin-client adoption E2E
         run: scripts/aimee-thinclient-adoption-e2e.sh
       - name: Server log on failure
@@ -1298,8 +1975,9 @@ jobs:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Runner diagnostics
         run: |
           gcc --version 2>/dev/null | head -1 || true
@@ -1312,8 +1990,8 @@ jobs:
           # hard — though none of our packages come from them. Drop them, then retry
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make git \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make git \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev libp11-kit-dev
       - name: Build + run the opt-in tree-sitter test
         run: |
@@ -1328,13 +2006,14 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
-          i=0; until sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          sudo apt-get install -y -q gcc make \
+          i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev softhsm2 opensc
       - name: Run the SoftHSM2 PKCS#11 custody gate (must not skip)

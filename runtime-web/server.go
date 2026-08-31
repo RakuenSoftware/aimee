@@ -131,27 +131,24 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/v1/completions", s.openAIProxyHandler("/v1/completions"))
 	mux.HandleFunc("/v1/responses", s.openAIProxyHandler("/v1/responses"))
 	mux.HandleFunc("/v1/embeddings", s.openAIProxyHandler("/v1/embeddings"))
+	// Memory Center uses the canonical /v1 spellings. These are browser-session
+	// routes, not the public bearer API: forward the authenticated webuser over
+	// the kernel-attested UDS boundary for scoping and audit attribution.
+	mux.HandleFunc("/v1/memory/review", s.requireAuth(s.memoryProxyHandler("/v1/memory/review")))
+	mux.HandleFunc("/v1/memory/reject", s.requireAuth(s.memoryProxyHandler("/v1/memory/reject")))
+	mux.HandleFunc("/v1/memory/restore", s.requireAuth(s.memoryProxyHandler("/v1/memory/restore")))
 
-	// SPA pages (session required → redirect to login)
+	// SPA pages (session required → redirect to login). Keep this list in sync
+	// with frontend/src/App.tsx: client-side navigation can hide a missing server
+	// route until a bookmark or hard refresh turns it into a 404.
 	mux.HandleFunc("/", s.requireAuth(s.handleRoot))
-	mux.HandleFunc("/chat", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/dashboard", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/logs", s.requireAuth(s.handleSPA))
-	// Workflow surfaces: "Edit Workflows" (the def/graph editor) and "Workflow
-	// Actions" (author → autonomous-run → status/history). Both are SPA routes so a
-	// hard refresh / direct link serves index.html and React Router takes over.
-	mux.HandleFunc("/edit-workflows", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/workflow-actions", s.requireAuth(s.handleSPA))
-	mux.HandleFunc("/projects", s.requireAuth(s.handleSPA))
-	// Code-graph visualization (§8): a read-only SPA page backed by the /api/graph/*
-	// proxies (which forward aimee-server's index_graph_* MCP tools).
-	mux.HandleFunc("/graph", s.requireAuth(s.handleSPA))
-	// Roundtable configuration tab (named presets: seats, models, personas, loop
-	// knobs). SPA route so a hard refresh / direct link serves index.html.
-	mux.HandleFunc("/roundtable", s.requireAuth(s.handleSPA))
-	// The Editor tab is a SPA page that embeds the in-app VSCode in an iframe, so
-	// the nav shell stays visible. The iframe's src is the /vscode proxy below.
-	mux.HandleFunc("/editor", s.requireAuth(s.handleSPA))
+	for _, path := range []string{
+		"/chat", "/dashboard", "/logs", "/edit-workflows", "/workflow-actions",
+		"/providers", "/models", "/agents", "/delegates", "/personas", "/roles",
+		"/roundtable", "/projects", "/graph", "/editor", "/memory", "/settings",
+	} {
+		mux.HandleFunc(path, s.requireAuth(s.handleSPA))
+	}
 	// In-app VSCode (code-server) reverse-proxy (WP-J): the iframe document and
 	// all its assets/WebSocket traffic go through /vscode -> aimee-server's
 	// per-user editor port. Not an /api path, so requireAuth redirects to /login
@@ -257,26 +254,28 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/deploy/apply", s.requireAuth(s.handleDeployApply))
 	mux.HandleFunc("/api/deploy/status", s.requireAuth(s.handleDeployStatus))
 	mux.HandleFunc("/api/setup/appliance", s.requireAuth(s.handleSetupAppliance))
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
+	mux.HandleFunc("/api/embedders", s.requireAuth(s.handleEmbedders))
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
+	// The wizard's embedder picker. Without this the topology step offers no bundled
+	// model and a new user cannot complete setup in the browser.
 	mux.HandleFunc("/api/auth/mode", s.handleAuthMode)
 	mux.HandleFunc("/api/setup/account", s.requireAuth(s.handleSetupAccount))
 
 	// Live endpoints backed by aimee-server socket
-	mux.HandleFunc("/api/agents", s.requireAuth(s.handleAgents))
 	mux.HandleFunc("/api/hosts", s.requireAuth(s.handleHosts))
-	mux.HandleFunc("GET /api/agents/stats", s.requireAuth(s.handleAgentStats))
-	mux.HandleFunc("POST /api/agents/add", s.requireAuth(s.handleAgentAdd))
-	mux.HandleFunc("POST /api/agents/remove", s.requireAuth(s.agentOpHandler("agent.remove")))
-	mux.HandleFunc("POST /api/agents/enable", s.requireAuth(s.agentOpHandler("agent.enable")))
-	mux.HandleFunc("POST /api/agents/disable", s.requireAuth(s.agentOpHandler("agent.disable")))
-	mux.HandleFunc("POST /api/agents/probe", s.requireAuth(s.agentOpHandler("agent.probe")))
-	mux.HandleFunc("POST /api/agents/roles", s.requireAuth(s.agentOpHandler("agent.roles")))
-	mux.HandleFunc("POST /api/agents/personas", s.requireAuth(s.agentOpHandler("agent.personas")))
-	mux.HandleFunc("POST /api/agents/set", s.requireAuth(s.agentOpHandler("agent.set")))
-	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
-	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
-	mux.HandleFunc("POST /api/agents/oauth/start", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_start", 180*time.Second)))
-	mux.HandleFunc("POST /api/agents/oauth/code", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_code", 30*time.Second)))
-	mux.HandleFunc("POST /api/agents/oauth/poll", s.requireAuth(s.cliOauthHandler("agent.cli_oauth_poll", 15*time.Second)))
+	// The model roster. A roster entry is one (endpoint, model) runtime target,
+	// so the tab and these routes are "models"; "/api/agents" is the pre-rename
+	// spelling, still served so an older GUI build keeps working.
+	s.registerModelRoutes(mux, "/api/models")
+	s.registerModelRoutes(mux, "/api/agents")
+	// Provider registry: the menu of providers and the models each one offers,
+	// backing the Providers tab. Read-only -- configuring a model still goes
+	// through agent.add/agent.set above.
+	mux.HandleFunc("GET /api/providers", s.requireAuth(s.handleProviderList))
+	mux.HandleFunc("POST /api/providers/models", s.requireAuth(s.handleProviderModels))
 	// Role registry (the shared vocabulary matched between personas and agents).
 	mux.HandleFunc("/api/roles", s.requireAuth(s.handleRoles))
 	mux.HandleFunc("/api/roles/", s.requireAuth(s.handleRoleItem))
@@ -389,7 +388,7 @@ func ensureTLSCertificate(cfg *config, vault webchatVaultStore) (tls.Certificate
 
 	certPEM, readErr := os.ReadFile(certPath)
 	if readErr == nil {
-		if pair, err := tls.X509KeyPair(certPEM, keyPEM); err == nil {
+		if pair, err := tls.X509KeyPair(certPEM, keyPEM); err == nil && certificateCoversCurrentSANs(certPEM) {
 			return pair, nil
 		}
 	}
@@ -404,6 +403,33 @@ func ensureTLSCertificate(cfg *config, vault webchatVaultStore) (tls.Certificate
 		return tls.Certificate{}, err
 	}
 	return tls.X509KeyPair(certPEM, keyPEM)
+}
+
+// certificateCoversCurrentSANs detects certificates minted by older runtime-web
+// builds (typically DNS:localhost only). The private key remains sealed in Vault;
+// only the public self-signed certificate is regenerated when the address set no
+// longer covers how this instance can be reached.
+func certificateCoversCurrentSANs(certPEM []byte) bool {
+	block, _ := pem.Decode(certPEM)
+	if block == nil || block.Type != "CERTIFICATE" {
+		return false
+	}
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil || time.Now().Before(cert.NotBefore) || time.Now().After(cert.NotAfter) {
+		return false
+	}
+	dnsNames, ipAddrs := certSANs()
+	for _, name := range dnsNames {
+		if cert.VerifyHostname(name) != nil {
+			return false
+		}
+	}
+	for _, ip := range ipAddrs {
+		if cert.VerifyHostname(ip.String()) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func wipeBytes(value []byte) {
@@ -437,8 +463,10 @@ func parseTLSPrivateKey(keyPEM []byte) (crypto.Signer, error) {
 // the usual warning) makes browsers refuse to register VSCode's service worker
 // ("An SSL certificate error occurred when fetching the script") so the editor's
 // webviews break. We include localhost, every non-loopback interface IP, the
-// hostname, and any operator-supplied AIMEE_WEBCHAT_TLS_SANS (comma-separated
-// IPs/DNS names) so an operator who trusts this cert gets a fully valid context.
+// hostname, and any operator-supplied AIMEE_TLS_EXTRA_SAN or
+// AIMEE_WEBCHAT_TLS_SANS entries so an operator who trusts this cert gets a
+// fully valid context. AIMEE_TLS_EXTRA_SAN is the public deployment setting and
+// accepts the same comma/space-separated DNS:/IP: syntax as the native server.
 func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 	dnsSeen := map[string]bool{}
 	ipSeen := map[string]bool{}
@@ -469,17 +497,27 @@ func certSANs() (dnsNames []string, ipAddrs []net.IP) {
 			}
 		}
 	}
-	// Operator override for names/IPs not derivable here (e.g. a reverse-proxy
-	// hostname): AIMEE_WEBCHAT_TLS_SANS="aimee.lan,10.0.0.5".
-	for _, s := range strings.Split(os.Getenv("AIMEE_WEBCHAT_TLS_SANS"), ",") {
-		s = strings.TrimSpace(s)
-		if s == "" {
-			continue
-		}
-		if ip := net.ParseIP(s); ip != nil {
-			addIP(ip)
-		} else {
-			addDNS(s)
+	// Operator overrides for names/IPs not derivable here (e.g. a reverse-proxy
+	// hostname). Keep the webchat-specific variable for compatibility, but honor
+	// the shared deployment setting used by Compose and SmoothNAS first.
+	for _, envName := range []string{"AIMEE_TLS_EXTRA_SAN", "AIMEE_WEBCHAT_TLS_SANS"} {
+		for _, s := range strings.FieldsFunc(os.Getenv(envName), func(r rune) bool {
+			return r == ',' || r == ' ' || r == '\t' || r == '\n' || r == '\r'
+		}) {
+			s = strings.TrimSpace(s)
+			if len(s) >= 4 && strings.EqualFold(s[:4], "DNS:") {
+				s = s[4:]
+			} else if len(s) >= 3 && strings.EqualFold(s[:3], "IP:") {
+				s = s[3:]
+			}
+			if s == "" {
+				continue
+			}
+			if ip := net.ParseIP(s); ip != nil {
+				addIP(ip)
+			} else {
+				addDNS(s)
+			}
 		}
 	}
 	return dnsNames, ipAddrs

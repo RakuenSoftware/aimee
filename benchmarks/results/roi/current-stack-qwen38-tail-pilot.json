@@ -1,0 +1,840 @@
+{
+  "budget": {
+    "budget_limit_usd": 0.0,
+    "expected_input_tokens_estimate": 41568,
+    "expected_output_tokens_estimate": 96,
+    "expected_spend_usd": 0.0,
+    "hard_input_token_cap": 786432,
+    "hard_maximum_spend_usd": 0.0,
+    "hard_output_token_cap": 384,
+    "pricing_contract": "operator-owned local endpoint; marginal provider rate explicitly configured"
+  },
+  "calls": [
+    {
+      "answer": "RBK-01-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:000:ops-handoff-01:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-01.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=01-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=01-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=01-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  01-00-00 \u27e6check\u27e7\n  01-01-00 \u27e6check\u27e7\n  01-02-00 \u27e6check\u27e7\n  01-03-00 \u27e6check\u27e7\n  01-04-00 \u27e6check\u27e7\n  01-05-00 \u27e6check\u27e7\n  01-00-01 \u27e6check\u27e7\n  01-01-01 \u27e6check\u27e7\n  01-02-01 \u27e6check\u27e7\n  01-03-01 \u27e6check\u27e7\n  01-04-01 \u27e6check\u27e7\n  01-05-01 \u27e6check\u27e7\n  01-00-02 \u27e6check\u27e7\n  01-01-02 \u27e6check\u27e7\n  01-02-02 \u27e6check\u27e7\n  01-03-02 \u27e6check\u27e7\n  01-04-02 \u27e6check\u27e7\n  01-05-02 \u27e6check\u27e7\n  01-00-03 \u27e6check\u27e7\n  01-01-03 \u27e6check\u27e7\n  01-02-03 \u27e6check\u27e7\n  01-03-03 \u27e6check\u27e7\n  01-04-03 \u27e6check\u27e7\n  01-05-03 \u27e6check\u27e7\n  01-00-04 \u27e6check\u27e7\n  01-01-04 \u27e6check\u27e7\n  01-02-04 \u27e6check\u27e7\n  01-03-04 \u27e6check\u27e7\n  01-04-04 \u27e6check\u27e7\n  01-05-04 \u27e6check\u27e7\n  01-00-05 \u27e6check\u27e7\n  01-01-05 \u27e6check\u27e7\n  01-02-05 \u27e6check\u27e7\n  01-03-05 \u27e6check\u27e7\n  01-04-05 \u27e6check\u27e7\n  01-05-05 \u27e6check\u27e7\n  01-00-06 \u27e6check\u27e7\n  01-01-06 \u27e6check\u27e7\n  01-02-06 \u27e6check\u27e7\n  01-03-06 \u27e6check\u27e7\n  01-04-06 \u27e6check\u27e7\n  01-05-06 \u27e6check\u27e7\n  01-00-07 \u27e6check\u27e7\n  01-01-07 \u27e6check\u27e7\n  01-02-07 \u27e6check\u27e7\n  01-03-07 \u27e6check\u27e7\n  01-04-07 \u27e6check\u27e7\n  01-05-07 \u27e6check\u27e7\n  01-00-08 \u27e6check\u27e7\n  01-01-08 \u27e6check\u27e7\n  01-02-08 \u27e6check\u27e7\n  01-03-08 \u27e6check\u27e7\n  01-04-08 \u27e6check\u27e7\n  01-05-08 \u27e6check\u27e7\n  01-00-09 \u27e6check\u27e7\n  01-01-09 \u27e6check\u27e7\n  01-02-09 \u27e6check\u27e7\n  01-03-09 \u27e6check\u27e7\n  01-04-09 \u27e6check\u27e7\n  01-05-09 \u27e6check\u27e7\n  01-00-10 \u27e6check\u27e7\n  01-01-10 \u27e6check\u27e7\n  01-02-10 \u27e6check\u27e7\n  01-03-10 \u27e6check\u27e7\n  01-04-10 \u27e6check\u27e7\n  01-05-10 \u27e6check\u27e7\n  01-00-11 \u27e6check\u27e7\n  01-01-11 \u27e6check\u27e7\n  01-02-11 \u27e6check\u27e7\n  01-03-11 \u27e6check\u27e7\n  01-04-11 \u27e6check\u27e7\n  01-05-11 \u27e6check\u27e7\n  01-00-12 \u27e6check\u27e7\n  01-01-12 \u27e6check\u27e7\n  01-02-12 \u27e6check\u27e7\n  01-03-12 \u27e6check\u27e7\n  01-04-12 \u27e6check\u27e7\n  01-05-12 \u27e6check\u27e7\n  01-00-13 \u27e6check\u27e7\n  01-01-13 \u27e6check\u27e7\n  01-02-13 \u27e6check\u27e7\n  01-03-13 \u27e6check\u27e7\n  01-04-13 \u27e6check\u27e7\n  01-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-01.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=01-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=01-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=01-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=01-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=01-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=01-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=01-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=01-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=01-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=01-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=01-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=01-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=01-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=01-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-01.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=01-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=01-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=01-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=01-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=01-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=01-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=01-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=01-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=01-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=01-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=01-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=01-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=01-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=01-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-01.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=01-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=01-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=01-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=01-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=01-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=01-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=01-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=01-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=01-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=01-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=01-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=01-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=01-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=01-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-01.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=01-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=01-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=01-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=01-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=01-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=01-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=01-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=01-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=01-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=01-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=01-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=01-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=01-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=01-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-01-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-01-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-Ww0kpWbjksAl05Ezm6ILuHUJyH5sgTnK",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "c80ad5edbbc1ac8fc9b1f174b7a1beedd8e0ad40c240fc6ca8ccba4eae384a86",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-01",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.682504916097969
+    },
+    {
+      "answer": "RBK-03-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:001:ops-handoff-03:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "263e8bc7d8b5190c5e14dabd462b54995e4eb6b647ccd38072afb880f9352246",
+        "input_sha256": "263e8bc7d8b5190c5e14dabd462b54995e4eb6b647ccd38072afb880f9352246",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-03-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-VHQ1ZjP4Af5qG9spDUrVlOz7ZAObC0g5",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "680dcba32b4a757b829bd4ce54d0203ab111afebd0e54a0dbd5491d0ab9a586b",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-03",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.350630077999085
+    },
+    {
+      "answer": "RBK-05-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:002:ops-handoff-05:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "0d97eeca5e606ea1a9a8e012c62ebf65d6f00b72c699f8fca5c8c6cbec834cf5",
+        "input_sha256": "0d97eeca5e606ea1a9a8e012c62ebf65d6f00b72c699f8fca5c8c6cbec834cf5",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-05-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-ZYtiNw1KvVe36OHGr0293AugtjPNLKzP",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "e4a53f3970bbe795e9268315c37bbd63584f105e2d6cc7a3203fc8d284ae20c3",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-05",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.361328819068149
+    },
+    {
+      "answer": "RBK-02-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:003:ops-handoff-02:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "9b6a673560391e153120e71088030344afd67fd3e764f4710bbad4cfe4cc9199",
+        "input_sha256": "9b6a673560391e153120e71088030344afd67fd3e764f4710bbad4cfe4cc9199",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-02-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-lAi7HtF3kgOZNsrSS9z0c8sCkkZ3nybF",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "4c76ea3a980264ec25cbeba14a603738a60ced2fa4cff874fd9df1254e0de5a8",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-02",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.383961738087237
+    },
+    {
+      "answer": "RBK-05-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:004:ops-handoff-05:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-05.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=05-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=05-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=05-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  05-00-00 \u27e6check\u27e7\n  05-01-00 \u27e6check\u27e7\n  05-02-00 \u27e6check\u27e7\n  05-03-00 \u27e6check\u27e7\n  05-04-00 \u27e6check\u27e7\n  05-05-00 \u27e6check\u27e7\n  05-00-01 \u27e6check\u27e7\n  05-01-01 \u27e6check\u27e7\n  05-02-01 \u27e6check\u27e7\n  05-03-01 \u27e6check\u27e7\n  05-04-01 \u27e6check\u27e7\n  05-05-01 \u27e6check\u27e7\n  05-00-02 \u27e6check\u27e7\n  05-01-02 \u27e6check\u27e7\n  05-02-02 \u27e6check\u27e7\n  05-03-02 \u27e6check\u27e7\n  05-04-02 \u27e6check\u27e7\n  05-05-02 \u27e6check\u27e7\n  05-00-03 \u27e6check\u27e7\n  05-01-03 \u27e6check\u27e7\n  05-02-03 \u27e6check\u27e7\n  05-03-03 \u27e6check\u27e7\n  05-04-03 \u27e6check\u27e7\n  05-05-03 \u27e6check\u27e7\n  05-00-04 \u27e6check\u27e7\n  05-01-04 \u27e6check\u27e7\n  05-02-04 \u27e6check\u27e7\n  05-03-04 \u27e6check\u27e7\n  05-04-04 \u27e6check\u27e7\n  05-05-04 \u27e6check\u27e7\n  05-00-05 \u27e6check\u27e7\n  05-01-05 \u27e6check\u27e7\n  05-02-05 \u27e6check\u27e7\n  05-03-05 \u27e6check\u27e7\n  05-04-05 \u27e6check\u27e7\n  05-05-05 \u27e6check\u27e7\n  05-00-06 \u27e6check\u27e7\n  05-01-06 \u27e6check\u27e7\n  05-02-06 \u27e6check\u27e7\n  05-03-06 \u27e6check\u27e7\n  05-04-06 \u27e6check\u27e7\n  05-05-06 \u27e6check\u27e7\n  05-00-07 \u27e6check\u27e7\n  05-01-07 \u27e6check\u27e7\n  05-02-07 \u27e6check\u27e7\n  05-03-07 \u27e6check\u27e7\n  05-04-07 \u27e6check\u27e7\n  05-05-07 \u27e6check\u27e7\n  05-00-08 \u27e6check\u27e7\n  05-01-08 \u27e6check\u27e7\n  05-02-08 \u27e6check\u27e7\n  05-03-08 \u27e6check\u27e7\n  05-04-08 \u27e6check\u27e7\n  05-05-08 \u27e6check\u27e7\n  05-00-09 \u27e6check\u27e7\n  05-01-09 \u27e6check\u27e7\n  05-02-09 \u27e6check\u27e7\n  05-03-09 \u27e6check\u27e7\n  05-04-09 \u27e6check\u27e7\n  05-05-09 \u27e6check\u27e7\n  05-00-10 \u27e6check\u27e7\n  05-01-10 \u27e6check\u27e7\n  05-02-10 \u27e6check\u27e7\n  05-03-10 \u27e6check\u27e7\n  05-04-10 \u27e6check\u27e7\n  05-05-10 \u27e6check\u27e7\n  05-00-11 \u27e6check\u27e7\n  05-01-11 \u27e6check\u27e7\n  05-02-11 \u27e6check\u27e7\n  05-03-11 \u27e6check\u27e7\n  05-04-11 \u27e6check\u27e7\n  05-05-11 \u27e6check\u27e7\n  05-00-12 \u27e6check\u27e7\n  05-01-12 \u27e6check\u27e7\n  05-02-12 \u27e6check\u27e7\n  05-03-12 \u27e6check\u27e7\n  05-04-12 \u27e6check\u27e7\n  05-05-12 \u27e6check\u27e7\n  05-00-13 \u27e6check\u27e7\n  05-01-13 \u27e6check\u27e7\n  05-02-13 \u27e6check\u27e7\n  05-03-13 \u27e6check\u27e7\n  05-04-13 \u27e6check\u27e7\n  05-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-05.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=05-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=05-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=05-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=05-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=05-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=05-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=05-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=05-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=05-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=05-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=05-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=05-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=05-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=05-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-05.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=05-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=05-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=05-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=05-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=05-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=05-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=05-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=05-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=05-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=05-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=05-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=05-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=05-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=05-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-05.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=05-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=05-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=05-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=05-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=05-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=05-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=05-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=05-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=05-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=05-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=05-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=05-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=05-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=05-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-05.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=05-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=05-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=05-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=05-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=05-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=05-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=05-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=05-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=05-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=05-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=05-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=05-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=05-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=05-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-05-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-05-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-P1tvlGl9tK39Qk4fNMYg146g6w7Xx6ma",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "04b7d4479ed3aa9730e6340bd23d78caf05fa6371cdf770bad3771a958e71671",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-05",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.779078411869705
+    },
+    {
+      "answer": "RBK-01-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:005:ops-handoff-01:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "90a226c124edfab721cdbc83cd4d452576eb0725fd2632c72ebb72757a256f0d",
+        "input_sha256": "90a226c124edfab721cdbc83cd4d452576eb0725fd2632c72ebb72757a256f0d",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-01-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-iX53zh7cQyBhxtL7gd8m3qKCiM5Ei0Df",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "71de4dbd6429fef41ba1369e0360bdfbb36c47f4b14c862c66abb1dda8d56689",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-01",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.294575100997463
+    },
+    {
+      "answer": "RBK-02-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:006:ops-handoff-02:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-02.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=02-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=02-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=02-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  02-00-00 \u27e6check\u27e7\n  02-01-00 \u27e6check\u27e7\n  02-02-00 \u27e6check\u27e7\n  02-03-00 \u27e6check\u27e7\n  02-04-00 \u27e6check\u27e7\n  02-05-00 \u27e6check\u27e7\n  02-00-01 \u27e6check\u27e7\n  02-01-01 \u27e6check\u27e7\n  02-02-01 \u27e6check\u27e7\n  02-03-01 \u27e6check\u27e7\n  02-04-01 \u27e6check\u27e7\n  02-05-01 \u27e6check\u27e7\n  02-00-02 \u27e6check\u27e7\n  02-01-02 \u27e6check\u27e7\n  02-02-02 \u27e6check\u27e7\n  02-03-02 \u27e6check\u27e7\n  02-04-02 \u27e6check\u27e7\n  02-05-02 \u27e6check\u27e7\n  02-00-03 \u27e6check\u27e7\n  02-01-03 \u27e6check\u27e7\n  02-02-03 \u27e6check\u27e7\n  02-03-03 \u27e6check\u27e7\n  02-04-03 \u27e6check\u27e7\n  02-05-03 \u27e6check\u27e7\n  02-00-04 \u27e6check\u27e7\n  02-01-04 \u27e6check\u27e7\n  02-02-04 \u27e6check\u27e7\n  02-03-04 \u27e6check\u27e7\n  02-04-04 \u27e6check\u27e7\n  02-05-04 \u27e6check\u27e7\n  02-00-05 \u27e6check\u27e7\n  02-01-05 \u27e6check\u27e7\n  02-02-05 \u27e6check\u27e7\n  02-03-05 \u27e6check\u27e7\n  02-04-05 \u27e6check\u27e7\n  02-05-05 \u27e6check\u27e7\n  02-00-06 \u27e6check\u27e7\n  02-01-06 \u27e6check\u27e7\n  02-02-06 \u27e6check\u27e7\n  02-03-06 \u27e6check\u27e7\n  02-04-06 \u27e6check\u27e7\n  02-05-06 \u27e6check\u27e7\n  02-00-07 \u27e6check\u27e7\n  02-01-07 \u27e6check\u27e7\n  02-02-07 \u27e6check\u27e7\n  02-03-07 \u27e6check\u27e7\n  02-04-07 \u27e6check\u27e7\n  02-05-07 \u27e6check\u27e7\n  02-00-08 \u27e6check\u27e7\n  02-01-08 \u27e6check\u27e7\n  02-02-08 \u27e6check\u27e7\n  02-03-08 \u27e6check\u27e7\n  02-04-08 \u27e6check\u27e7\n  02-05-08 \u27e6check\u27e7\n  02-00-09 \u27e6check\u27e7\n  02-01-09 \u27e6check\u27e7\n  02-02-09 \u27e6check\u27e7\n  02-03-09 \u27e6check\u27e7\n  02-04-09 \u27e6check\u27e7\n  02-05-09 \u27e6check\u27e7\n  02-00-10 \u27e6check\u27e7\n  02-01-10 \u27e6check\u27e7\n  02-02-10 \u27e6check\u27e7\n  02-03-10 \u27e6check\u27e7\n  02-04-10 \u27e6check\u27e7\n  02-05-10 \u27e6check\u27e7\n  02-00-11 \u27e6check\u27e7\n  02-01-11 \u27e6check\u27e7\n  02-02-11 \u27e6check\u27e7\n  02-03-11 \u27e6check\u27e7\n  02-04-11 \u27e6check\u27e7\n  02-05-11 \u27e6check\u27e7\n  02-00-12 \u27e6check\u27e7\n  02-01-12 \u27e6check\u27e7\n  02-02-12 \u27e6check\u27e7\n  02-03-12 \u27e6check\u27e7\n  02-04-12 \u27e6check\u27e7\n  02-05-12 \u27e6check\u27e7\n  02-00-13 \u27e6check\u27e7\n  02-01-13 \u27e6check\u27e7\n  02-02-13 \u27e6check\u27e7\n  02-03-13 \u27e6check\u27e7\n  02-04-13 \u27e6check\u27e7\n  02-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-02.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=02-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=02-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=02-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=02-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=02-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=02-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=02-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=02-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=02-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=02-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=02-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=02-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=02-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=02-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-02.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=02-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=02-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=02-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=02-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=02-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=02-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=02-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=02-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=02-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=02-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=02-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=02-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=02-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=02-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-02.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=02-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=02-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=02-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=02-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=02-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=02-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=02-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=02-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=02-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=02-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=02-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=02-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=02-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=02-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-02.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=02-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=02-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=02-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=02-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=02-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=02-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=02-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=02-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=02-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=02-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=02-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=02-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=02-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=02-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-02-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-02-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-7lLHEcXkXfkmcIfj45rvGjpqTzr5lAfq",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "5a738912b72af20ae8ad81b5da73f18f7c3261010849ed1c709935dffbfbf7c1",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-02",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.743560456903651
+    },
+    {
+      "answer": "RBK-00-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:007:ops-handoff-00:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=00-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=00-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=00-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  00-00-00 \u27e6check\u27e7\n  00-01-00 \u27e6check\u27e7\n  00-02-00 \u27e6check\u27e7\n  00-03-00 \u27e6check\u27e7\n  00-04-00 \u27e6check\u27e7\n  00-05-00 \u27e6check\u27e7\n  00-00-01 \u27e6check\u27e7\n  00-01-01 \u27e6check\u27e7\n  00-02-01 \u27e6check\u27e7\n  00-03-01 \u27e6check\u27e7\n  00-04-01 \u27e6check\u27e7\n  00-05-01 \u27e6check\u27e7\n  00-00-02 \u27e6check\u27e7\n  00-01-02 \u27e6check\u27e7\n  00-02-02 \u27e6check\u27e7\n  00-03-02 \u27e6check\u27e7\n  00-04-02 \u27e6check\u27e7\n  00-05-02 \u27e6check\u27e7\n  00-00-03 \u27e6check\u27e7\n  00-01-03 \u27e6check\u27e7\n  00-02-03 \u27e6check\u27e7\n  00-03-03 \u27e6check\u27e7\n  00-04-03 \u27e6check\u27e7\n  00-05-03 \u27e6check\u27e7\n  00-00-04 \u27e6check\u27e7\n  00-01-04 \u27e6check\u27e7\n  00-02-04 \u27e6check\u27e7\n  00-03-04 \u27e6check\u27e7\n  00-04-04 \u27e6check\u27e7\n  00-05-04 \u27e6check\u27e7\n  00-00-05 \u27e6check\u27e7\n  00-01-05 \u27e6check\u27e7\n  00-02-05 \u27e6check\u27e7\n  00-03-05 \u27e6check\u27e7\n  00-04-05 \u27e6check\u27e7\n  00-05-05 \u27e6check\u27e7\n  00-00-06 \u27e6check\u27e7\n  00-01-06 \u27e6check\u27e7\n  00-02-06 \u27e6check\u27e7\n  00-03-06 \u27e6check\u27e7\n  00-04-06 \u27e6check\u27e7\n  00-05-06 \u27e6check\u27e7\n  00-00-07 \u27e6check\u27e7\n  00-01-07 \u27e6check\u27e7\n  00-02-07 \u27e6check\u27e7\n  00-03-07 \u27e6check\u27e7\n  00-04-07 \u27e6check\u27e7\n  00-05-07 \u27e6check\u27e7\n  00-00-08 \u27e6check\u27e7\n  00-01-08 \u27e6check\u27e7\n  00-02-08 \u27e6check\u27e7\n  00-03-08 \u27e6check\u27e7\n  00-04-08 \u27e6check\u27e7\n  00-05-08 \u27e6check\u27e7\n  00-00-09 \u27e6check\u27e7\n  00-01-09 \u27e6check\u27e7\n  00-02-09 \u27e6check\u27e7\n  00-03-09 \u27e6check\u27e7\n  00-04-09 \u27e6check\u27e7\n  00-05-09 \u27e6check\u27e7\n  00-00-10 \u27e6check\u27e7\n  00-01-10 \u27e6check\u27e7\n  00-02-10 \u27e6check\u27e7\n  00-03-10 \u27e6check\u27e7\n  00-04-10 \u27e6check\u27e7\n  00-05-10 \u27e6check\u27e7\n  00-00-11 \u27e6check\u27e7\n  00-01-11 \u27e6check\u27e7\n  00-02-11 \u27e6check\u27e7\n  00-03-11 \u27e6check\u27e7\n  00-04-11 \u27e6check\u27e7\n  00-05-11 \u27e6check\u27e7\n  00-00-12 \u27e6check\u27e7\n  00-01-12 \u27e6check\u27e7\n  00-02-12 \u27e6check\u27e7\n  00-03-12 \u27e6check\u27e7\n  00-04-12 \u27e6check\u27e7\n  00-05-12 \u27e6check\u27e7\n  00-00-13 \u27e6check\u27e7\n  00-01-13 \u27e6check\u27e7\n  00-02-13 \u27e6check\u27e7\n  00-03-13 \u27e6check\u27e7\n  00-04-13 \u27e6check\u27e7\n  00-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=00-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=00-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=00-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=00-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=00-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=00-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=00-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=00-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=00-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=00-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=00-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=00-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=00-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=00-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-00-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-00-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-xmIH144IJnOT7AEXfTQIjrjX0n1wYd94",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "df37cca17281c64544678ffacbaa7fa516ce024afb7b8d18a2132b7bc5a69a19",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-00",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.761176627827808
+    },
+    {
+      "answer": "RBK-00-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:008:ops-handoff-00:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "4cafd512a754a71229b83ec34199ca56de495f094141cad0fe1727ad82cfeed4",
+        "input_sha256": "4cafd512a754a71229b83ec34199ca56de495f094141cad0fe1727ad82cfeed4",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-00-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-c7LXjbiFxb7FuhLaKDn1LN7bQT2PYLAQ",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "10d741bdaf603d915a880d7460a53ac9e66e014cf25582986b18b0191992eee0",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-00",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.346207884140313
+    },
+    {
+      "answer": "RBK-04-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:009:ops-handoff-04:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-04.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=04-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=04-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=04-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  04-00-00 \u27e6check\u27e7\n  04-01-00 \u27e6check\u27e7\n  04-02-00 \u27e6check\u27e7\n  04-03-00 \u27e6check\u27e7\n  04-04-00 \u27e6check\u27e7\n  04-05-00 \u27e6check\u27e7\n  04-00-01 \u27e6check\u27e7\n  04-01-01 \u27e6check\u27e7\n  04-02-01 \u27e6check\u27e7\n  04-03-01 \u27e6check\u27e7\n  04-04-01 \u27e6check\u27e7\n  04-05-01 \u27e6check\u27e7\n  04-00-02 \u27e6check\u27e7\n  04-01-02 \u27e6check\u27e7\n  04-02-02 \u27e6check\u27e7\n  04-03-02 \u27e6check\u27e7\n  04-04-02 \u27e6check\u27e7\n  04-05-02 \u27e6check\u27e7\n  04-00-03 \u27e6check\u27e7\n  04-01-03 \u27e6check\u27e7\n  04-02-03 \u27e6check\u27e7\n  04-03-03 \u27e6check\u27e7\n  04-04-03 \u27e6check\u27e7\n  04-05-03 \u27e6check\u27e7\n  04-00-04 \u27e6check\u27e7\n  04-01-04 \u27e6check\u27e7\n  04-02-04 \u27e6check\u27e7\n  04-03-04 \u27e6check\u27e7\n  04-04-04 \u27e6check\u27e7\n  04-05-04 \u27e6check\u27e7\n  04-00-05 \u27e6check\u27e7\n  04-01-05 \u27e6check\u27e7\n  04-02-05 \u27e6check\u27e7\n  04-03-05 \u27e6check\u27e7\n  04-04-05 \u27e6check\u27e7\n  04-05-05 \u27e6check\u27e7\n  04-00-06 \u27e6check\u27e7\n  04-01-06 \u27e6check\u27e7\n  04-02-06 \u27e6check\u27e7\n  04-03-06 \u27e6check\u27e7\n  04-04-06 \u27e6check\u27e7\n  04-05-06 \u27e6check\u27e7\n  04-00-07 \u27e6check\u27e7\n  04-01-07 \u27e6check\u27e7\n  04-02-07 \u27e6check\u27e7\n  04-03-07 \u27e6check\u27e7\n  04-04-07 \u27e6check\u27e7\n  04-05-07 \u27e6check\u27e7\n  04-00-08 \u27e6check\u27e7\n  04-01-08 \u27e6check\u27e7\n  04-02-08 \u27e6check\u27e7\n  04-03-08 \u27e6check\u27e7\n  04-04-08 \u27e6check\u27e7\n  04-05-08 \u27e6check\u27e7\n  04-00-09 \u27e6check\u27e7\n  04-01-09 \u27e6check\u27e7\n  04-02-09 \u27e6check\u27e7\n  04-03-09 \u27e6check\u27e7\n  04-04-09 \u27e6check\u27e7\n  04-05-09 \u27e6check\u27e7\n  04-00-10 \u27e6check\u27e7\n  04-01-10 \u27e6check\u27e7\n  04-02-10 \u27e6check\u27e7\n  04-03-10 \u27e6check\u27e7\n  04-04-10 \u27e6check\u27e7\n  04-05-10 \u27e6check\u27e7\n  04-00-11 \u27e6check\u27e7\n  04-01-11 \u27e6check\u27e7\n  04-02-11 \u27e6check\u27e7\n  04-03-11 \u27e6check\u27e7\n  04-04-11 \u27e6check\u27e7\n  04-05-11 \u27e6check\u27e7\n  04-00-12 \u27e6check\u27e7\n  04-01-12 \u27e6check\u27e7\n  04-02-12 \u27e6check\u27e7\n  04-03-12 \u27e6check\u27e7\n  04-04-12 \u27e6check\u27e7\n  04-05-12 \u27e6check\u27e7\n  04-00-13 \u27e6check\u27e7\n  04-01-13 \u27e6check\u27e7\n  04-02-13 \u27e6check\u27e7\n  04-03-13 \u27e6check\u27e7\n  04-04-13 \u27e6check\u27e7\n  04-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-04.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=04-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=04-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=04-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=04-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=04-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=04-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=04-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=04-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=04-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=04-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=04-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=04-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=04-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=04-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-04.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=04-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=04-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=04-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=04-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=04-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=04-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=04-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=04-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=04-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=04-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=04-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=04-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=04-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=04-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-04.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=04-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=04-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=04-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=04-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=04-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=04-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=04-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=04-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=04-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=04-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=04-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=04-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=04-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=04-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-04.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=04-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=04-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=04-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=04-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=04-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=04-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=04-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=04-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=04-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=04-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=04-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=04-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=04-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=04-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-04-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-04-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-OdTVCxdGEpAx3TIy4P0pWzjMbMnoiSYC",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "da376fade9523a1e2ebf0f4c0873d4be7abb6a9e21dbcd7bbb864fc33a26a7f5",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-04",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.806911393068731
+    },
+    {
+      "answer": "RBK-04-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:010:ops-handoff-04:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "forwarded_sha256": "a7d143bb18c35926f0aedb81be285f35f09d18594ad0f5bfd84f33b82573fd96",
+        "input_sha256": "a7d143bb18c35926f0aedb81be285f35f09d18594ad0f5bfd84f33b82573fd96",
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-04-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-a5hO9QSEPxQQDg4iPP9DsXLonlPRd0DN",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 4339,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 4352
+      },
+      "request_messages_sha256": "735ccd79455ce57ef2739caca0c41600c7957882aae7d8463b5c7c7dc9c105f8",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-04",
+      "usage": {
+        "input_tokens": 4339,
+        "output_tokens": 13,
+        "total_tokens": 4352
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 7.366498901043087
+    },
+    {
+      "answer": "RBK-03-7F39A2",
+      "call_id": "roi-pilot-a82427406ef64a54:011:ops-handoff-03:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 3475,
+        "epochs": 1,
+        "foldable_tokens": 2059,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-00-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-00-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-00-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 1 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-01-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-01-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-01-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 2 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-02-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-02-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-02-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 3 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-03-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-03-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-03-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 4 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-04-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-04-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-04-02 subsystem=queue status=he\u2026\nuser: Review deployment checkpoint 5 for service svc-03.\nassistant/wip: Checkpoint reviewed. The exact audit follows. check=03-05-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform check=03-05-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform check=03-05-02 subsystem=queue status=he\u2026\n\nCoordinate Closet (conserved from folded turns):\n  03-00-00 \u27e6check\u27e7\n  03-01-00 \u27e6check\u27e7\n  03-02-00 \u27e6check\u27e7\n  03-03-00 \u27e6check\u27e7\n  03-04-00 \u27e6check\u27e7\n  03-05-00 \u27e6check\u27e7\n  03-00-01 \u27e6check\u27e7\n  03-01-01 \u27e6check\u27e7\n  03-02-01 \u27e6check\u27e7\n  03-03-01 \u27e6check\u27e7\n  03-04-01 \u27e6check\u27e7\n  03-05-01 \u27e6check\u27e7\n  03-00-02 \u27e6check\u27e7\n  03-01-02 \u27e6check\u27e7\n  03-02-02 \u27e6check\u27e7\n  03-03-02 \u27e6check\u27e7\n  03-04-02 \u27e6check\u27e7\n  03-05-02 \u27e6check\u27e7\n  03-00-03 \u27e6check\u27e7\n  03-01-03 \u27e6check\u27e7\n  03-02-03 \u27e6check\u27e7\n  03-03-03 \u27e6check\u27e7\n  03-04-03 \u27e6check\u27e7\n  03-05-03 \u27e6check\u27e7\n  03-00-04 \u27e6check\u27e7\n  03-01-04 \u27e6check\u27e7\n  03-02-04 \u27e6check\u27e7\n  03-03-04 \u27e6check\u27e7\n  03-04-04 \u27e6check\u27e7\n  03-05-04 \u27e6check\u27e7\n  03-00-05 \u27e6check\u27e7\n  03-01-05 \u27e6check\u27e7\n  03-02-05 \u27e6check\u27e7\n  03-03-05 \u27e6check\u27e7\n  03-04-05 \u27e6check\u27e7\n  03-05-05 \u27e6check\u27e7\n  03-00-06 \u27e6check\u27e7\n  03-01-06 \u27e6check\u27e7\n  03-02-06 \u27e6check\u27e7\n  03-03-06 \u27e6check\u27e7\n  03-04-06 \u27e6check\u27e7\n  03-05-06 \u27e6check\u27e7\n  03-00-07 \u27e6check\u27e7\n  03-01-07 \u27e6check\u27e7\n  03-02-07 \u27e6check\u27e7\n  03-03-07 \u27e6check\u27e7\n  03-04-07 \u27e6check\u27e7\n  03-05-07 \u27e6check\u27e7\n  03-00-08 \u27e6check\u27e7\n  03-01-08 \u27e6check\u27e7\n  03-02-08 \u27e6check\u27e7\n  03-03-08 \u27e6check\u27e7\n  03-04-08 \u27e6check\u27e7\n  03-05-08 \u27e6check\u27e7\n  03-00-09 \u27e6check\u27e7\n  03-01-09 \u27e6check\u27e7\n  03-02-09 \u27e6check\u27e7\n  03-03-09 \u27e6check\u27e7\n  03-04-09 \u27e6check\u27e7\n  03-05-09 \u27e6check\u27e7\n  03-00-10 \u27e6check\u27e7\n  03-01-10 \u27e6check\u27e7\n  03-02-10 \u27e6check\u27e7\n  03-03-10 \u27e6check\u27e7\n  03-04-10 \u27e6check\u27e7\n  03-05-10 \u27e6check\u27e7\n  03-00-11 \u27e6check\u27e7\n  03-01-11 \u27e6check\u27e7\n  03-02-11 \u27e6check\u27e7\n  03-03-11 \u27e6check\u27e7\n  03-04-11 \u27e6check\u27e7\n  03-05-11 \u27e6check\u27e7\n  03-00-12 \u27e6check\u27e7\n  03-01-12 \u27e6check\u27e7\n  03-02-12 \u27e6check\u27e7\n  03-03-12 \u27e6check\u27e7\n  03-04-12 \u27e6check\u27e7\n  03-05-12 \u27e6check\u27e7\n  03-00-13 \u27e6check\u27e7\n  03-01-13 \u27e6check\u27e7\n  03-02-13 \u27e6check\u27e7\n  03-03-13 \u27e6check\u27e7\n  03-04-13 \u27e6check\u27e7\n  03-05-13 \u27e6check\u27e7\n  20 \u27e6latency_ms\u27e7\n  21 \u27e6latency_ms\u27e7\n  22 \u27e6latency_ms\u27e7\n  23 \u27e6latency_ms\u27e7\n  24 \u27e6latency_ms\u27e7\n  25 \u27e6latency_ms\u27e7\n  26 \u27e6latency_ms\u27e7\n  27 \u27e6latency_ms\u27e7\n  28 \u27e6latency_ms\u27e7\n  29 \u27e6latency_ms\u27e7\n  30 \u27e6latency_ms\u27e7\n  31 \u27e6latency_ms\u27e7\n  32 \u27e6latency_ms\u27e7\n  33 \u27e6latency_ms\u27e7\n  0 \u27e6retries\u27e7\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-03.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=03-06-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=03-06-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=03-06-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=03-06-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=03-06-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=03-06-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=03-06-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=03-06-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=03-06-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=03-06-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=03-06-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=03-06-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=03-06-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=03-06-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-03.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=03-07-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=03-07-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=03-07-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=03-07-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=03-07-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=03-07-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=03-07-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=03-07-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=03-07-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=03-07-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=03-07-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=03-07-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=03-07-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=03-07-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-03.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=03-08-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=03-08-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=03-08-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=03-08-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=03-08-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=03-08-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=03-08-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=03-08-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=03-08-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=03-08-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=03-08-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=03-08-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=03-08-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=03-08-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-03.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\ncheck=03-09-00 subsystem=queue status=healthy latency_ms=20 retries=0 owner=platform\ncheck=03-09-01 subsystem=queue status=healthy latency_ms=21 retries=0 owner=platform\ncheck=03-09-02 subsystem=queue status=healthy latency_ms=22 retries=0 owner=platform\ncheck=03-09-03 subsystem=queue status=healthy latency_ms=23 retries=0 owner=platform\ncheck=03-09-04 subsystem=queue status=healthy latency_ms=24 retries=0 owner=platform\ncheck=03-09-05 subsystem=queue status=healthy latency_ms=25 retries=0 owner=platform\ncheck=03-09-06 subsystem=queue status=healthy latency_ms=26 retries=0 owner=platform\ncheck=03-09-07 subsystem=queue status=healthy latency_ms=27 retries=0 owner=platform\ncheck=03-09-08 subsystem=queue status=healthy latency_ms=28 retries=0 owner=platform\ncheck=03-09-09 subsystem=queue status=healthy latency_ms=29 retries=0 owner=platform\ncheck=03-09-10 subsystem=queue status=healthy latency_ms=30 retries=0 owner=platform\ncheck=03-09-11 subsystem=queue status=healthy latency_ms=31 retries=0 owner=platform\ncheck=03-09-12 subsystem=queue status=healthy latency_ms=32 retries=0 owner=platform\ncheck=03-09-13 subsystem=queue status=healthy latency_ms=33 retries=0 owner=platform\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-03-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2600,
+        "removed_tokens": 875,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-03-7F39A2",
+      "marginal_provider_cost_usd": 0.0,
+      "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+      "provider": "llama.cpp-local",
+      "provider_response_id": "chatcmpl-lvIzMMaEadYUk6s4TiaT8IHL2QLYEFOx",
+      "raw_provider_usage": {
+        "completion_tokens": 13,
+        "prompt_tokens": 3968,
+        "prompt_tokens_details": {
+          "cached_tokens": 27
+        },
+        "total_tokens": 3981
+      },
+      "request_messages_sha256": "67eeb0edad704ddb85da6b94693b1aac9cc12ab4660fb918b78bc8e9c122da83",
+      "resolved": true,
+      "run_id": "roi-pilot-a82427406ef64a54",
+      "task_id": "ops-handoff-03",
+      "usage": {
+        "input_tokens": 3968,
+        "output_tokens": 13,
+        "total_tokens": 3981
+      },
+      "usage_reconciled": true,
+      "wall_seconds": 6.7969644239638
+    }
+  ],
+  "chat_template_kwargs": {
+    "enable_thinking": false
+  },
+  "claim_status": "pilot_only",
+  "commit": "f29dc522ae345d74de664492a11fd77609933e8c",
+  "created_at": "2026-08-26T21:14:50.801001+00:00",
+  "execution_path": "production Go economizer handler in-process; direct local Qwen provider",
+  "fact_position": "tail",
+  "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+  "model_catalog": {
+    "data": [
+      {
+        "aliases": [
+          "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf"
+        ],
+        "created": 1787778806,
+        "id": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+        "meta": {
+          "ftype": "Q4_K - Small",
+          "n_ctx": 65536,
+          "n_ctx_train": 262144,
+          "n_embd": 5120,
+          "n_params": 27320697856,
+          "n_vocab": 248320,
+          "size": 17912397824,
+          "vocab_type": 2
+        },
+        "object": "model",
+        "owned_by": "llamacpp",
+        "tags": []
+      }
+    ],
+    "models": [
+      {
+        "capabilities": [
+          "completion"
+        ],
+        "description": "",
+        "details": {
+          "families": [
+            ""
+          ],
+          "family": "",
+          "format": "gguf",
+          "parameter_size": "",
+          "parent_model": "",
+          "quantization_level": ""
+        },
+        "digest": "",
+        "model": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+        "modified_at": "",
+        "name": "/mnt/media/storage/models/hf/manual/unsloth-Qwen3.8-27B-GGUF-f1bfb127c64f7072bdd2cad55f258b9c8b2910fe/Qwen3.8-27B-UD-Q4_K_XL.gguf",
+        "parameters": "",
+        "size": "",
+        "tags": [
+          ""
+        ],
+        "type": "model"
+      }
+    ],
+    "object": "list"
+  },
+  "run_id": "roi-pilot-a82427406ef64a54",
+  "schema_version": 1,
+  "seed": 20260826,
+  "summary": {
+    "all_calls_reconciled": true,
+    "by_condition": {
+      "full": {
+        "calls": 6,
+        "input_tokens": 23808,
+        "output_tokens": 78,
+        "resolution_rate": 1.0,
+        "resolved": 6,
+        "tokens_per_resolved_task": 3981.0,
+        "total_tokens": 23886
+      },
+      "off": {
+        "calls": 6,
+        "input_tokens": 26034,
+        "output_tokens": 78,
+        "resolution_rate": 1.0,
+        "resolved": 6,
+        "tokens_per_resolved_task": 4352.0,
+        "total_tokens": 26112
+      }
+    },
+    "paired_total_token_delta": -2226,
+    "paired_total_token_reduction_pct": 8.524816176470589,
+    "quality_gate_equal_resolved": true,
+    "unique_provider_response_ids": true
+  },
+  "task_corpus_sha256": "b8c90ce12227c6a31e533e9bc931b0be05ee63e2b34e314d52297f5aeeac7ebb",
+  "wall_seconds": 84.68254798697308
+}

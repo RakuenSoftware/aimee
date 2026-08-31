@@ -10,8 +10,8 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2/artifacts.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_synthesize.h"
 
 void *(db2_conn)(void);
@@ -105,6 +105,9 @@ static void test_restore_fragment_record(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_synthesize"))
+      return 0;
+
    test_gated_empty();
    test_pick_seeded();
    test_restore_fragment_record();

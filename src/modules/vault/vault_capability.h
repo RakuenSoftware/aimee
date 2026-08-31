@@ -46,6 +46,24 @@ extern "C"
     * holds vault:write:server. The single source of truth for the gate. */
    int vault_capability_server_write_allowed(attested_transport_t transport, const char *principal);
 
+   /* May this connection ENUMERATE the shared store's credential names (never
+    * values)? Narrower than the write gate in what it protects and wider in who it
+    * admits, deliberately:
+    *
+    * A local UDS peer, the root-owned webchat hop, and the operator's own native-TLS
+    * bearer are all HOST-LOCAL authority — the browser GUI lists credentials on an
+    * ordinary page load, and making that wait on a per-user grant minted only over
+    * UDS would mean an operator shelling into the host for every webuser before the
+    * page renders at all.
+    *
+    * ATTEST_MTLS_CLIENT is the exception and still needs vault:write:server. A
+    * client cert is a NETWORK credential issued to arbitrary remote machines; that
+    * is the population enumeration must not be open to by default. Possessing one is
+    * what reaches /v1, not what opens the credential store.
+    *
+    * ATTEST_TCP_BEARER and un-attested are refused (D2b), as everywhere here. */
+   int vault_capability_server_read_allowed(attested_transport_t transport, const char *principal);
+
    /* May a connection with this attested transport seal an agent's OWN api key into
     * the shared server vault (`agent add`/`agent set --key`)? A delegate defined in
     * agents.json is SHARED server config whose key resolves from the server vault at

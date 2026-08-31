@@ -30,15 +30,27 @@ typedef struct
    int reviewer_findings_blocking;
    char verdict[32];
    char recommendation[256];
+   /* Rendered by the module alongside the verdict, so a caption cannot drift
+    * from the verdict it captions. */
+   char verdict_label[64];
+   char cost_model_label[64];
 } delegate_economics_report_t;
+
+/* The economics rule lives in the delegates module
+ * (server-go/modules/delegates/economics.go). This is the seam the C side calls
+ * through; with no provider registered the report stays empty and the verdict
+ * stays "unclear", which is what the rule itself says about a run it cannot
+ * judge. */
+typedef void (*delegate_economics_provider_fn)(const db1_coord_task_t *tasks, int task_count,
+                                               const agent_config_t *cfg,
+                                               delegate_economics_report_t *out);
+void delegate_register_economics_provider(delegate_economics_provider_fn provider);
 
 void delegate_economics_build_report(const db1_coord_job_t *job, const db1_coord_task_t *tasks,
                                      int task_count, const agent_config_t *cfg,
                                      delegate_economics_report_t *out);
 void delegate_economics_add_json(cJSON *obj, const delegate_economics_report_t *report);
 
-const char *delegate_economics_cost_model_label(void);
-const char *delegate_economics_verdict_text(const char *verdict);
 int delegate_economics_is_tier0_heavy(const delegate_economics_report_t *report);
 
 void delegate_economics_add_agent_result_json(cJSON *obj, const agent_config_t *cfg,

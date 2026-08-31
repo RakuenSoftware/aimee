@@ -17,6 +17,7 @@
 #include <aimee/audit/audit_replay.h>
 #include "cJSON.h"
 #include "log.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define ROWS 50
 
@@ -24,7 +25,8 @@ int main(void)
 {
    printf("test_bus_audit_replay_tool:\n");
 
-   char home[] = "/tmp/aimee-busreplaytool-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busreplaytool-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

@@ -1,15 +1,61 @@
-/* test_git_pr_ci_grade.c -- the pure CI aggregation the live forge's gate.ci
- * trusts: check runs first (any failed/cancelled -> FAILURE beats pending; any
- * queued/in-progress -> PENDING; all green-ish -> SUCCESS), legacy combined
- * status only when no check runs exist, and NONE when neither reports. */
+/* test_git_pr_ci_grade.c -- the C half of the CI gate.
+ *
+ * The aggregation itself moved to the git module
+ * (server-go/modules/git/ci_grade.go) and its rules are pinned there, by cases
+ * ported one-for-one from the suite this file used to carry. What is left in C,
+ * and therefore what this file covers, is:
+ *
+ *   - the ruling: which verdicts permit a merge;
+ *   - the wire: that a verdict NAME from the module maps onto the right
+ *     git_pr_ci_t, and that anything unrecognised or unreachable becomes ERROR
+ *     rather than NONE -- NONE permits merge, so a garbled or missing answer
+ *     must never be able to reach it;
+ *   - the conflict predicate, which never left C.
+ */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
 
 #include "modules/git/git_pr_api.h"
 
-#define RUNS(x)     "{\"total_count\":9,\"check_runs\":[" x "]}"
-#define RUN(st, co) "{\"status\":\"" st "\",\"conclusion\":" co "}"
+#include <aimee/audit/obs_bus.h>
+
+/* Bus stub: this test is about the C side's handling of a reply, not about
+ * transport, and the grading rules are proven in Go. */
+static int g_available = 1;
+static const char *g_reply = "{\"verdict\":\"success\"}";
+static aimee_module_call_result_t g_result = AIMEE_MODULE_CALL_OK;
+
+int obs_bus_module_available(uint32_t event_kind)
+{
+   (void)event_kind;
+   return g_available;
+}
+
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)event_kind, (void)stage_id, (void)trace_id, (void)deadline_ns, (void)request_body,
+       (void)request_len, (void)cancelled, (void)cancel_context;
+   if (g_result != AIMEE_MODULE_CALL_OK)
+      return g_result;
+   size_t n = strlen(g_reply);
+   assert(n <= response_capacity);
+   memcpy(response_body, g_reply, n);
+   *response_len = (uint32_t)n;
+   return AIMEE_MODULE_CALL_OK;
+}
+
+static git_pr_ci_t grade_with(const char *reply)
+{
+   g_available = 1;
+   g_result = AIMEE_MODULE_CALL_OK;
+   g_reply = reply;
+   return git_pr_ci_grade_json("{\"check_runs\":[]}", NULL);
+}
 
 int main(void)
 {
@@ -21,44 +67,28 @@ int main(void)
    assert(strstr(GIT_PR_SQUASH_MERGE_JSON, "\"merge_method\":\"squash\"") != NULL);
    assert(strstr(GIT_PR_SQUASH_MERGE_JSON, "\"commit_message\":\"\"") != NULL);
 
-   /* all completed successfully (neutral/skipped count as green) */
-   assert(git_pr_ci_grade_json(RUNS(RUN("completed", "\"success\"") "," RUN(
-                                   "completed", "\"neutral\"") "," RUN("completed", "\"skipped\"")),
-                               NULL) == GIT_PR_CI_SUCCESS);
-   /* one still running -> pending */
-   assert(git_pr_ci_grade_json(RUNS(RUN("completed", "\"success\"") "," RUN("in_progress", "null")),
-                               NULL) == GIT_PR_CI_PENDING);
-   /* a failure wins even while others still run */
-   assert(git_pr_ci_grade_json(RUNS(RUN("in_progress", "null") "," RUN("completed", "\"failure\"")),
-                               NULL) == GIT_PR_CI_FAILURE);
-   /* cancelled / timed_out block too */
-   assert(git_pr_ci_grade_json(RUNS(RUN("completed", "\"cancelled\"")), NULL) == GIT_PR_CI_FAILURE);
-   /* completed with null conclusion is not a pass */
-   assert(git_pr_ci_grade_json(RUNS(RUN("completed", "null")), NULL) == GIT_PR_CI_PENDING);
+   /* --- the verdict name maps onto the enum --- */
+   assert(grade_with("{\"verdict\":\"success\"}") == GIT_PR_CI_SUCCESS);
+   assert(grade_with("{\"verdict\":\"pending\"}") == GIT_PR_CI_PENDING);
+   assert(grade_with("{\"verdict\":\"failure\"}") == GIT_PR_CI_FAILURE);
+   assert(grade_with("{\"verdict\":\"none\"}") == GIT_PR_CI_NONE);
+   assert(grade_with("{\"verdict\":\"error\"}") == GIT_PR_CI_ERROR);
 
-   /* no check runs: the combined status decides */
-   const char *empty = "{\"total_count\":0,\"check_runs\":[]}";
-   assert(git_pr_ci_grade_json(empty, "{\"state\":\"success\",\"statuses\":[{}]}") ==
-          GIT_PR_CI_SUCCESS);
-   assert(git_pr_ci_grade_json(empty, "{\"state\":\"pending\",\"statuses\":[{}]}") ==
-          GIT_PR_CI_PENDING);
-   assert(git_pr_ci_grade_json(empty, "{\"state\":\"failure\",\"statuses\":[{}]}") ==
-          GIT_PR_CI_FAILURE);
-   /* combined status with ZERO statuses is "pending" by GitHub convention but
-    * means "no CI at all" -> NONE (the gate parks rather than waiting forever) */
-   assert(git_pr_ci_grade_json(empty, "{\"state\":\"pending\",\"statuses\":[]}") == GIT_PR_CI_NONE);
-   /* nothing anywhere -> NONE */
-   assert(git_pr_ci_grade_json(empty, NULL) == GIT_PR_CI_NONE);
-   assert(git_pr_ci_grade_json(NULL, NULL) == GIT_PR_CI_NONE);
+   /* --- anything we cannot read is ERROR, never NONE ---
+    * NONE permits merge, so it must not be reachable from a reply we failed to
+    * understand, a module that answered with the wrong shape, or one that did
+    * not answer at all. */
+   assert(grade_with("{\"verdict\":\"something-new\"}") == GIT_PR_CI_ERROR);
+   assert(grade_with("{\"verdict\":42}") == GIT_PR_CI_ERROR);
+   assert(grade_with("{}") == GIT_PR_CI_ERROR);
+   assert(grade_with("not json") == GIT_PR_CI_ERROR);
 
-   /* A payload we cannot read is ERROR, never NONE. NONE means "the forge reported
-    * no CI", which git_pr_ci_permits_merge() lets through -- so it must not be
-    * reachable from "we failed to parse the answer", or a garbled body would merge. */
-   assert(git_pr_ci_grade_json("not json", "also not json") == GIT_PR_CI_ERROR);
-   assert(git_pr_ci_grade_json(empty, "not json") == GIT_PR_CI_ERROR);
-   /* parsed, but not the payload we asked for (e.g. an API error object) */
-   assert(git_pr_ci_grade_json("{\"message\":\"Not Found\"}", NULL) == GIT_PR_CI_ERROR);
-   assert(git_pr_ci_grade_json(empty, "{\"message\":\"Not Found\"}") == GIT_PR_CI_ERROR);
+   g_available = 0; /* module not attached */
+   assert(git_pr_ci_grade_json("{\"check_runs\":[]}", NULL) == GIT_PR_CI_ERROR);
+   g_available = 1;
+   g_result = AIMEE_MODULE_CALL_DEADLINE_EXCEEDED; /* module too slow */
+   assert(git_pr_ci_grade_json("{\"check_runs\":[]}", NULL) == GIT_PR_CI_ERROR);
+   g_result = AIMEE_MODULE_CALL_OK;
 
    /* --- the merge ruling: only green, or genuinely no CI at all --- */
    assert(git_pr_ci_permits_merge(GIT_PR_CI_SUCCESS));
@@ -66,33 +96,14 @@ int main(void)
    assert(!git_pr_ci_permits_merge(GIT_PR_CI_PENDING));
    assert(!git_pr_ci_permits_merge(GIT_PR_CI_FAILURE));
    assert(!git_pr_ci_permits_merge(GIT_PR_CI_ERROR)); /* unknown is never pass */
-   /* end to end: a malformed payload must not reach a merge */
-   assert(!git_pr_ci_permits_merge(git_pr_ci_grade_json("not json", "also not json")));
+   /* end to end: an unreadable answer must not reach a merge */
+   assert(!git_pr_ci_permits_merge(grade_with("not json")));
 
-   /* --- terminal conflict vs retryable lost race (both arrive as 405/409) ---
-    * A content conflict is identical on every retry, so it must be terminal; a
-    * moved head/base is a lost race a retry wins. Getting this wrong in the
-    * retryable direction wedges a run forever (observed: 15 attempts over 3
-    * hours); getting it wrong in the terminal direction kills a run that would
-    * have merged. Hence the predicate fails SAFE toward retry. */
-   assert(git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): Pull Request has merge "
-                                       "conflicts"));
-   assert(git_pr_merge_err_is_conflict("merge conflict"));           /* minimal phrasing */
-   assert(git_pr_merge_err_is_conflict("MERGE CONFLICTS DETECTED")); /* case-insensitive */
-
-   /* Lost races must stay retryable — these are the messages a retry wins. */
-   assert(!git_pr_merge_err_is_conflict(
-       "github API (pr merge, HTTP 409): Head branch was modified. Review and try the merge "
-       "again."));
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): Base branch was "
-                                        "modified. Review and try the merge again."));
-   /* The bare word must NOT terminate: HTTP 409 is named "Conflict", so a
-    * lost-race message can carry it with no content conflict involved. */
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 409): Conflict"));
-   /* Unrecognised / empty degrade to retry, never to a terminal kill. */
-   assert(!git_pr_merge_err_is_conflict("github API (pr merge, HTTP 405): failed"));
-   assert(!git_pr_merge_err_is_conflict(""));
-   assert(!git_pr_merge_err_is_conflict(NULL));
+   /* The terminal-conflict vs retryable-lost-race classification moved into the
+    * git module with the merge itself. Its cases — including the ones that must
+    * NOT terminate, which is the direction that wedged a run for 15 attempts
+    * over 3 hours — are pinned in
+    * server-go/modules/git: TestMergeConflictClassificationFailsSafeTowardRetry. */
 
    printf("ok\n");
    return 0;

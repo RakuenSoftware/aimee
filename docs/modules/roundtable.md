@@ -7,6 +7,16 @@ behavior, roundtable-specific review/verification, iterative authoring pipelines
 panel findings. It is not a workflow engine, generic router, delegate runtime, benchmark authority, or
 replacement for core `response-composition`.
 
+### Go process stage
+
+The supervised roundtable process uses the shared pure-Go module runtime for its
+deterministic post-deliberation verification rubric. The RTGR/RTGD wire contract
+maps replay status, factuality, and claimed severity to the existing
+keep/cap/degrade/reject decision without a model call. The C adapter remains a
+wire-parity fixture. Panel execution, seat resolution, providers, chair logic,
+capture, pipelines, and active workflow composition remain in their current C
+or existing Go owners while their process boundaries are migrated.
+
 ## Public contracts
 
 Current contracts include delegate ensemble execution, preset seat resolution,
@@ -19,8 +29,9 @@ Provider-neutral request/options and aggregate-result types, registration and in
 release dispatch live in the required delegates module's `panel_provider.h`. Required consumers use those
 facades and never include optional roundtable execution headers. The private `roundtable_types.h` provides
 compatibility aliases, while the private `delegate_ensemble.h` declares optional implementation entry
-points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects either private header
-outside the roundtable owner and its tests, with no allowlist.
+points and compatibility types. `scripts/check_panel_contract_boundary.py` rejects new private-header
+consumers and exact-ratchets the remaining provider/roster and composition migration debt. Removing an
+existing consumer also fails until the ratchet is reduced in the same change.
 Private `ROUNDTABLE_MAX_REVIEW_ITEMS` and `ROUNDTABLE_MAX_QUESTIONS` aliases mirror the canonical
 `AIMEE_PANEL_MAX_*` bounds for legacy implementation code; new code uses the IR names directly.
 
@@ -63,6 +74,14 @@ and pipeline state. A compiled route or saved preset is not proof of an executab
   fallback reads `AIMEE_MODULE_ROUNDTABLE`; it accepts case-insensitive `1`, `true`, `on`, and
   `yes`, or `0`, `false`, `off`, and `no`. Missing, empty, whitespace-padded, or unknown values
   fail closed to disabled. An explicit config value always wins over the environment.
+- The same control decides whether `aimee-module-roundtable` is launched. Reviews run in that
+  module process over the event bus, and since the private HTTP proxy was deleted the daemon has
+  no other implementation of `roundtable.review`, so with the module absent the route reports it
+  as not attached however the feature is configured. The shipped module manifest is fixed when the
+  image is built and cannot know what an operator enabled, so the container entrypoint consults
+  `AIMEE_MODULE_ROUNDTABLE` at startup and adds the module when it is set. Containers must pass
+  that variable through; a compose deployment that only sets it in `.env` does not reach the
+  container.
 
 Configuration covers reference seats/models, consensus rounds/turns, personas, chair behavior, cost and
 token bounds, pipeline passes/attempts/gates, capture, and named presets. The aggregate and roundtable
@@ -107,12 +126,15 @@ executable discovery surfaces do not advertise unavailable functionality.
 State includes named JSON presets, DB1 ensemble/session records, panel assignments and contributions,
 round/pass/attempt/gate state, captured prompts/results, costs, verdicts, and pipeline worktrees/artifacts.
 Filesystem paths under `$AIMEE_HOME/roundtables` and `roundtable_pipeline` are physical providers.
+
 Omitted Make builds retain the historical roundtable table declarations in the shared DB1 schema solely
 to preserve schema initialization, migration, and downgrade compatibility for existing databases. The
 declarations are dormant: the roundtable persistence implementation is not compiled and no live
 roundtable data provider is created. Removing those declarations requires a separate, versioned
 data-migration decision.
+
 Migrations must preserve attribution, ordering, resumability, verdict identity, and redacted evidence.
+
 The roundtable provider allocates the `aimee_panel_result_t.artifact` returned by a successful call and
 supplies the matching release callback. The caller must release the result exactly once through the
 delegates-owned `aimee_panel_result_release` facade, which dispatches that callback, before the provider is

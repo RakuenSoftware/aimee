@@ -1,5 +1,9 @@
 # P5-D1 console fleet and OIDC-preserving proxy
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered; plan review converged in jobs 8902–8903 after the audience/`azp`,
   vault-compensation, canonical-team, and response-overflow corrections. Adversarial branch
   review then drove the durable mutation-result acknowledgement protocol described below.

@@ -4,20 +4,20 @@
 #include "aimee.h"
 #include "util.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "db1_optional.h"
-#include "db2/memory_health.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/fact_lifecycle.h" /* §5 fact-class lifecycle jobs */
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/kb_payload.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include <aimee/audit/obs_bus.h>
 #include "kb.h"
 #include "log.h"
-#endif
 #include "memory.h"
-#if !defined(AIMEE_DB2_DISABLED)
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
-#include <aimee/workspace/workspace.h>
-#endif
 #include <ctype.h>
 #include <limits.h>
 #include <math.h>
@@ -27,60 +27,44 @@
 #include <time.h>
 #include <unistd.h>
 
-#if defined(AIMEE_DB2_DISABLED)
-/* Memory health, effectiveness, and maintenance writes are DB2-owned. Server
- * code should route these operations through aimee-kb RPCs. */
-int memory_compute_effectiveness(void)
+/* --- Quiet-lane detection --- */
+
+/* Background work does not raise its hand when it dies. A maintenance cycle that
+ * promotes, demotes and expires NOTHING looks exactly like a healthy cycle with
+ * nothing to do -- "no output" and "nothing to do" are indistinguishable unless
+ * something asks whether there was work waiting. Every ingredient for that
+ * question was already recorded (per-cycle counters here, lifecycle_state counts
+ * next door); nothing drew the conclusion.
+ *
+ * The predicate is deliberately two-sided: zero output WITH a backlog is the
+ * signal, zero output with an empty backlog is a healthy idle system and must
+ * stay silent, or the alarm trains operators to ignore it.
+ *
+ * Process-local: this tracks the run of consecutive quiet cycles within one
+ * daemon lifetime, which is the window in which a wedged lane matters. A restart
+ * legitimately resets it -- the lane gets a fresh chance to prove itself. */
+#define MEMORY_QUIET_CYCLES_ALARM 3
+
+static int g_memory_quiet_cycles = 0;
+
+int memory_quiet_cycles(void)
 {
-   return 0;
+   return g_memory_quiet_cycles;
 }
 
-int memory_demote_low_effectiveness(void)
+/* Returns 1 when this cycle should alarm. Separated from the logging so the rule
+ * is testable without a database or a log sink: it is pure over its inputs. */
+int memory_quiet_lane_alarm(int changes, int64_t pending, int consecutive_quiet)
 {
-   return 0;
+   if (changes > 0)
+      return 0; /* the lane produced output; nothing to say */
+   if (pending <= 0)
+      return 0; /* quiet because there was nothing to do -- healthy */
+   return consecutive_quiet >= MEMORY_QUIET_CYCLES_ALARM;
 }
 
-int memory_effectiveness_stats(effectiveness_stats_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_enforce_retention(void)
-{
-   return 0;
-}
-
-int memory_run_maintenance(int *promoted, int *demoted, int *expired)
-{
-   if (promoted)
-      *promoted = 0;
-   if (demoted)
-      *demoted = 0;
-   if (expired)
-      *expired = 0;
-   return 0;
-}
-
-void memory_record_health(int promotions, int demotions, int expirations)
-{
-   (void)promotions;
-   (void)demotions;
-   (void)expirations;
-}
-
-void memory_prune_health(void)
-{
-}
-
-int memory_query_health(memory_health_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-#else
+/* Fold this cycle's outcome into the quiet-run counter and alarm if the lane has
+ * been silent while work was waiting. Called once per maintenance cycle. */
 
 static int mh_is_within_days(const char *s, int days)
 {
@@ -234,9 +218,22 @@ int memory_effectiveness_stats(effectiveness_stats_t *out)
 
 int memory_enforce_retention(void)
 {
-   int total = 0;
-   total += db2_memory_health_delete_by_sensitivity("restricted", RETENTION_RESTRICTED_DAYS);
-   total += db2_memory_health_delete_by_sensitivity("sensitive", RETENTION_SENSITIVE_DAYS);
+   int sensitive = 0;
+   sensitive += db2_memory_health_delete_by_sensitivity("restricted", RETENTION_RESTRICTED_DAYS);
+   sensitive += db2_memory_health_delete_by_sensitivity("sensitive", RETENTION_SENSITIVE_DAYS);
+   int memories = db2_memory_health_delete_older_than(90);
+   int documents = db2_kb_documents_delete_older_than(90);
+   int total = sensitive + memories + documents;
+   if (total > 0)
+   {
+      char detail[192];
+      snprintf(detail, sizeof(detail),
+               "{\"policy_revision\":\"data-governance-v1\",\"memory\":%d,"
+               "\"documents\":%d,\"sensitivity_early\":%d}",
+               memories, documents, sensitive);
+      obs_bus_emit_durable_event("content.retention.completed", "scheduled-reaper", "allow",
+                                 detail);
+   }
    return total;
 }
 
@@ -244,8 +241,22 @@ int memory_enforce_retention(void)
  * This is the "Sleep Cycle" that creates high-density milestones. */
 static int memory_consolidate_l1_chains(void)
 {
-   db2_memory_l1_cluster_row_t clusters[64];
-   int cluster_count = db2_memory_l1_session_clusters("workflow_learning", 5, clusters, 64);
+   enum
+   {
+      CONSOLIDATE_CLUSTER_CAP = 64,
+      CONSOLIDATE_SOURCE_CAP = 256
+   };
+   db2_memory_l1_cluster_row_t clusters[CONSOLIDATE_CLUSTER_CAP + 1];
+   int cluster_count = db2_memory_l1_session_clusters("workflow_learning", 5, clusters,
+                                                      CONSOLIDATE_CLUSTER_CAP + 1);
+   if (cluster_count > CONSOLIDATE_CLUSTER_CAP)
+   {
+      LOG_WARN("memory.health",
+               "L1 consolidation cluster batch truncated at %d; remaining clusters defer to "
+               "the next maintenance pass",
+               CONSOLIDATE_CLUSTER_CAP);
+      cluster_count = CONSOLIDATE_CLUSTER_CAP;
+   }
 
    int consolidated = 0;
    for (int i = 0; i < cluster_count; i++)
@@ -263,8 +274,26 @@ static int memory_consolidate_l1_chains(void)
       if (recent_count < 5)
          continue;
 
-      db2_memory_content_row_t cs[256];
-      int cn = db2_memory_l1_session_content(session_id, cs, 256);
+      db2_memory_content_row_t cs[CONSOLIDATE_SOURCE_CAP + 1];
+      int cn = db2_memory_l1_session_content(session_id, cs, CONSOLIDATE_SOURCE_CAP + 1);
+      if (cn <= 0 || cn > CONSOLIDATE_SOURCE_CAP)
+      {
+         if (cn > CONSOLIDATE_SOURCE_CAP)
+            LOG_WARN("memory.health",
+                     "L1 consolidation refused for session %.96s: source cap %d reached",
+                     session_id, CONSOLIDATE_SOURCE_CAP);
+         continue;
+      }
+      int64_t source_ids[CONSOLIDATE_SOURCE_CAP];
+      for (int j = 0; j < cn; j++)
+         source_ids[j] = cs[j].id;
+      if (!memory_derived_sources_allowed(source_ids, cn))
+      {
+         LOG_WARN("memory.health",
+                  "L1 consolidation refused for session %.96s by recursive lineage gate",
+                  session_id);
+         continue;
+      }
       char summary[2048] = "";
       int pos = 0;
       for (int j = 0; j < cn; j++)
@@ -289,14 +318,60 @@ static int memory_consolidate_l1_chains(void)
                   summary);
 
          memory_t mem;
+         int milestone_existed = db2_memory_key_exists(key) == 1;
          if (memory_insert(TIER_L2, KIND_FACT, key, content, 0.8, session_id, &mem) == 0)
          {
+            int lineage_ok = 1;
+            for (int j = 0; j < cn; j++)
+            {
+               char ref[48];
+               snprintf(ref, sizeof(ref), "memory:%lld", (long long)source_ids[j]);
+               if (memory_lineage_insert("memory", mem.id, "memory", ref, 0.8) < 0)
+               {
+                  lineage_ok = 0;
+                  break;
+               }
+            }
+            if (!lineage_ok)
+            {
+               if (!milestone_existed)
+                  (void)memory_delete(mem.id);
+               LOG_WARN("memory.health",
+                        "L1 consolidation lineage write failed for derived memory %lld",
+                        (long long)mem.id);
+               continue;
+            }
             consolidated++;
             add_provenance(mem.id, session_id, "consolidate", "L1 chain distillation");
          }
       }
    }
    return consolidated;
+}
+
+static void memory_note_cycle_output(int promoted, int demoted, int expired)
+{
+   int changes = promoted + demoted + expired;
+   if (changes > 0)
+   {
+      g_memory_quiet_cycles = 0;
+      return;
+   }
+   g_memory_quiet_cycles++;
+
+   memory_lifecycle_counts_t counts;
+   memset(&counts, 0, sizeof(counts));
+   if (memory_lifecycle_counts(&counts) != 0)
+      return; /* cannot establish a backlog: do not guess, and do not alarm */
+
+   if (!memory_quiet_lane_alarm(changes, counts.pending, g_memory_quiet_cycles))
+      return;
+
+   LOG_WARN("memory.health",
+            "maintenance has produced NO changes for %d consecutive cycles while %lld memories "
+            "are pending: the lane is not idle, it is not progressing. Check the maintenance "
+            "worker and its dependencies (db2, embedder) rather than assuming there was no work.",
+            g_memory_quiet_cycles, (long long)counts.pending);
 }
 
 int memory_run_maintenance(int *promoted, int *demoted, int *expired)
@@ -323,11 +398,31 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
       if (n > 0)
          p += n;
    }
+   /* §5 fact-class lifecycle. Both jobs were written and tested but never
+    * scheduled, which inverted the layer's central promise: Class C speculation
+    * accumulated permanently and Class B never earned durability no matter how
+    * often it was confirmed. They belong in the same cycle as the prose-memory
+    * promote/expire jobs and report through the same counters.
+    *
+    * Never gated on the old typed_facts_enabled master flag -- and that flag is
+    * now retired, so the question is moot. Both are no-ops on an empty semantic
+    * population. */
+   {
+      int n = db2_fact_promote_durable(config_memory_typed_facts_promote_threshold());
+      if (n > 0)
+         p += n;
+   }
+
    int d = memory_demote();
    d += memory_demote_from_failures();
    d += memory_demote_low_effectiveness();
    int e = memory_expire();
    e += memory_enforce_retention();
+   {
+      int n = db2_fact_expire_speculative(config_memory_typed_facts_speculative_ttl_days());
+      if (n > 0)
+         e += n;
+   }
 
    if (promoted)
       *promoted = p;
@@ -351,6 +446,11 @@ int memory_run_maintenance(int *promoted, int *demoted, int *expired)
 
    /* Record health metrics for this maintenance cycle */
    memory_record_health(p, d, e);
+
+   /* Separate "produced nothing because there was nothing to do" from "produced
+    * nothing while work was waiting". Only the second is a fault, and until now
+    * neither was reported. */
+   memory_note_cycle_output(p, d, e);
 
    /* Prune old health and contradiction_log rows (90-day retention) */
    memory_prune_health();
@@ -412,7 +512,21 @@ int memory_query_health(memory_health_t *out)
    if (c.l2_total > 0)
       out->staleness = (double)c.l2_stale_30_days / c.l2_total;
 
+   /* This belongs on the ordinary health surface, not only the vector repair
+    * diagnostic: it is the user-visible interval in which a durable write is
+    * not yet recallable. No landed samples is represented by zero samples and
+    * -1 percentile sentinels, never by a misleading zero-second lag. */
+   out->write_to_readable_p50_secs = -1.0;
+   out->write_to_readable_p95_secs = -1.0;
+   out->write_to_readable_p99_secs = -1.0;
+   db2_vector_index_ops_summary_t vector_health;
+   if (db2_vector_index_ops_summary(1, &vector_health) == 0 && vector_health.lag_samples > 0)
+   {
+      out->write_to_readable_samples = vector_health.lag_samples;
+      out->write_to_readable_p50_secs = vector_health.lag_p50_secs;
+      out->write_to_readable_p95_secs = vector_health.lag_p95_secs;
+      out->write_to_readable_p99_secs = vector_health.lag_p99_secs;
+   }
+
    return 0;
 }
-
-#endif

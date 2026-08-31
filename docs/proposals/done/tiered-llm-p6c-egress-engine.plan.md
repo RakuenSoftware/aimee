@@ -1,6 +1,10 @@
-# P6c-egress engine slice — pure signed requests and response-to-IR
+# P6c-egress engine slice: pure signed requests and response-to-IR
 
-**State:** done — merged delivery unit of P6c-egress.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+**State:** done, merged delivery unit of P6c-egress.
 
 This slice replaces the unsafe fixed-buffer `kb_bedrock_egress` scaffold with a pure,
 owned request/response engine. It composes the already-delivered authoritative catalog

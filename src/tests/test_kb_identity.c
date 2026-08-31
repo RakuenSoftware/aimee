@@ -56,6 +56,16 @@ static void test_identity_key(void)
 
    /* Owner: no issuer -> owner principal, key "owner" */
    CHECK(kb_principal_from_verify(&v, "", &p) == 0 && p.kind == KB_PRIN_OWNER, "owner principal");
+   char empty_issuer[256] = "";
+   char owner_subject[256] = "owner";
+   char provider_key[32];
+   CHECK(kb_identity_key_from_fields(KB_PRIN_OWNER, empty_issuer, owner_subject, 1, provider_key,
+                                     sizeof(provider_key)) == 0 &&
+             strcmp(provider_key, "owner") == 0,
+         "DB2 identity adapter derives owner key");
+   CHECK(kb_identity_key_from_fields(KB_PRIN_OWNER, empty_issuer, owner_subject, 0, provider_key,
+                                     sizeof(provider_key)) == -1,
+         "DB2 identity adapter rejects unauthenticated fields");
    CHECK(kb_identity_key(&p, key, sizeof(key)) == 0 && strcmp(key, "owner") == 0, "owner key");
 
    /* Cert: cert:<issuer>:<normalized serial>; CN is a label, not the key */
@@ -65,6 +75,30 @@ static void test_identity_key(void)
    CHECK(kb_identity_key(&p, key, sizeof(key)) == 0 && strcmp(key, "cert:CN=aimee-ca:a1b") == 0,
          "cert identity key uses normalized serial, not CN");
    CHECK(strcmp(p.label, "server-7") == 0, "cert CN kept only as label");
+}
+
+static void test_identity_key_parse(void)
+{
+   static const char *valid[] = {"owner", "aimee", "oidc:https%3A//idp.example:sub%3A42",
+                                 "cert:CN=aimee-ca:a1b"};
+   for (size_t i = 0; i < sizeof(valid) / sizeof(valid[0]); ++i)
+   {
+      kb_principal_t p;
+      char roundtrip[600];
+      CHECK(kb_principal_from_identity_key(valid[i], &p) == 0 && p.authenticated,
+            "canonical identity parses");
+      CHECK(kb_identity_key(&p, roundtrip, sizeof(roundtrip)) == 0 &&
+                strcmp(roundtrip, valid[i]) == 0,
+            "parsed identity round-trips exactly");
+   }
+   static const char *invalid[] = {"",           "uid:1000",   "webuser:alice", "oidc:x",
+                                   "oidc:a:b:c", "oidc:a:%2f", "cert:a:XYZ",    "owner:extra"};
+   for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); ++i)
+   {
+      kb_principal_t p;
+      CHECK(kb_principal_from_identity_key(invalid[i], &p) == -1 && !p.authenticated,
+            "non-canonical asserted identity rejected");
+   }
 }
 
 static void test_unauthenticated_rejected(void)
@@ -138,6 +172,7 @@ int main(void)
 {
    test_serial_normalize();
    test_identity_key();
+   test_identity_key_parse();
    test_unauthenticated_rejected();
    test_no_collision();
    test_overlong_rejected();

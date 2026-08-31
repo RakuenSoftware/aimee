@@ -16,7 +16,7 @@
 #include "vault_capability.h" /* vault_agent_key_server_seal_allowed (agent-key server-vault gate) */
 #include "server_cli_oauth.h"     /* server-hosted OAuth CLI agent setup */
 #include "provider_cli_adapter.h" /* provider_cli_adapter_get: declared CLI caps */
-#include "config.h"               /* config_load / config_t */
+#include "config.h"               /* legacy_config_read / legacy_config_record */
 #include <errno.h>
 #include <pthread.h>
 #include <string.h>
@@ -110,9 +110,8 @@ static void server_agent_set_exec_roles_csv(agent_t *ag, const char *csv)
 
 static void server_agent_default_roles(agent_t *ag)
 {
-   server_agent_set_roles_csv(ag,
-                              "code,review,explain,refactor,draft,execute,summarize,format,reason,"
-                              "search");
+   server_agent_set_roles_csv(ag, "code,explain,refactor,draft,execute,summarize,format,reason,"
+                                  "search");
 }
 
 static int server_agent_looks_endpoint(const char *s)
@@ -468,6 +467,40 @@ static cJSON *server_agent_to_json(const agent_t *ag)
       cJSON_AddNumberToObject(obj, "active_delegates", active);
    if (ag->middleware.context_window > 0)
       cJSON_AddNumberToObject(obj, "context_window", ag->middleware.context_window);
+
+   /* Per-model limits, and WHERE EACH ONE CAME FROM.
+    *
+    * The raw value alone is not enough for an operator surface: a window the
+    * catalog guessed and a window the operator typed look identical once
+    * rendered, which is exactly how a stale figure went unquestioned. The
+    * effective_* fields are what the fleet actually uses; the *_source fields
+    * say whether that is the operator's own number ("declared"), something a
+    * provider or catalog supplied ("resolved"), or nobody's ("unknown").
+    *
+    * Emitted unconditionally, including 0, because "unknown" is a state a UI
+    * must be able to show. Absent would be indistinguishable from zero. */
+   {
+      int eff_ctx = agent_declared_context_window(ag);
+      int eff_out = agent_declared_max_output(ag);
+      cJSON_AddNumberToObject(obj, "effective_context_window", eff_ctx);
+      cJSON_AddNumberToObject(obj, "effective_max_output", eff_out);
+      cJSON_AddStringToObject(
+          obj, "context_window_source",
+          ag->middleware.context_window > 0 ? "declared" : (eff_ctx > 0 ? "resolved" : "unknown"));
+      cJSON_AddStringToObject(obj, "max_output_source",
+                              ag->max_output > 0 ? "declared"
+                                                 : (eff_out > 0 ? "resolved" : "unknown"));
+      if (ag->max_output > 0)
+         cJSON_AddNumberToObject(obj, "max_output", ag->max_output);
+      /* The declared mask itself, so a form can tell "the operator set this to
+       * 0" (a free seat) from "the operator never said" -- the one distinction
+       * a bare number cannot carry. */
+      cJSON_AddBoolToObject(obj, "price_in_declared", (ag->declared & AGENT_DECL_PRICE_IN) != 0);
+      cJSON_AddBoolToObject(obj, "price_out_declared", (ag->declared & AGENT_DECL_PRICE_OUT) != 0);
+      cJSON_AddBoolToObject(obj, "price_cached_declared",
+                            (ag->declared & AGENT_DECL_PRICE_CACHED) != 0);
+   }
+
    cJSON *roles = cJSON_CreateArray();
    for (int j = 0; j < ag->role_count; j++)
       cJSON_AddItemToArray(roles, cJSON_CreateString(ag->roles[j]));
@@ -527,10 +560,11 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
        * (unreadable, malformed, truncated) is a real fault and names the file. */
       const char *path = agent_config_path();
       if (path && access(path, F_OK) != 0)
-         return server_send_error(conn,
-                                  "no agents are configured yet: choose a provider in the setup "
-                                  "wizard, or run `aimee provider list --available`",
-                                  NULL);
+         return server_send_error_kind(
+             conn, SERVER_ERR_NOT_FOUND,
+             "no agents are configured yet: choose a provider in the setup "
+             "wizard, or run `aimee provider list --available`",
+             NULL);
       /* The file is there and the load still failed: unreadable, malformed, or
        * truncated. Deliberately no strerror() — reaching here means access() SUCCEEDED,
        * so errno carries nothing about this failure and printing it invents a cause. */
@@ -539,7 +573,7 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                "agent configuration at %s exists but could not be loaded; "
                "check that it is readable and valid JSON",
                path ? path : "?");
-      return server_send_error(conn, msg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, msg, NULL);
    }
    cJSON *resp = jo_ok();
    cJSON *arr = cJSON_CreateArray();
@@ -553,6 +587,7 @@ int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * that fallback — the webchat agent selector defaults its selection to this. */
    const agent_t *primary = agent_default_primary(&cfg);
    cJSON_AddStringToObject(resp, "default_agent", primary ? primary->name : "");
+   cJSON_AddStringToObject(resp, "default_delegate", cfg.default_delegate);
    /* Whether at least one configured agent is enabled AND routable as a delegate
     * right now. Lets a caller (e.g. the client-setup sub-agent-ban gate) decide
     * with ONE round-trip whether redirecting sub-agents to `aimee delegate` is
@@ -667,13 +702,29 @@ int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   static const char *bool_flags[] = {"tools",   "tools-enabled", "no-tools",
-                                      "default", "disabled",      NULL};
+   static const char *bool_flags[] = {
+       "tools", "tools-enabled", "no-tools", "default", "delegate-default", "disabled", NULL};
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 3)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "usage: agent add <name> <endpoint> <model>", NULL);
+
+   /* The first three arguments are positional, so a flag typed in the endpoint's place
+    * is silently stored AS the endpoint: `agent add x --provider openai --endpoint URL`
+    * saved endpoint="--provider", reported the agent ON, and returned success. Nothing
+    * said otherwise until `agent probe` reported
+    * "GET --provider/models returned -1".
+    *
+    * Only a leading '-' is refused: unambiguous evidence of a mis-parsed flag, since no
+    * address begins with one. Demanding a scheme would reject host:port forms this
+    * command has always accepted. */
+   if (!agent_endpoint_valid(argv[1]))
+      return server_send_error_kind(
+          conn, SERVER_ERR_INVALID_ARGUMENT,
+          "the endpoint looks like a flag; the first three arguments are positional: "
+          "agent add <name> <endpoint> <model>",
+          NULL);
 
    opt_parsed_t opts;
    opt_parse(argc - 3, argv + 3, bool_flags, &opts);
@@ -788,16 +839,15 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    }
 
    const char *roles = opt_get(&opts, "roles");
-   if (roles && roles[0])
+   if (roles)
       server_agent_set_roles_csv(ag, roles);
    else
-      /* Default to the FULL capable role set, matching the client-side default
-       * (cmd_agent.c ag_set_default_delegate_roles). A capable coding delegate
-       * must not be silently crippled to summarize/format/draft when added
-       * without an explicit --roles: that regression left mistral/minimax/glm/
-       * codex unable to take `code`/`execute` work. */
-      server_agent_set_roles_csv(
-          ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      /* An omitted role list gets the general delegate roles, but `review` is
+       * deliberately opt-in. Reviewers participate in merge gates, so merely
+       * registering a capable coding model must never authorize it to review.
+       * An explicitly empty --roles value is also meaningful and is preserved
+       * by the branch above instead of being expanded into hidden privileges. */
+      server_agent_default_roles(ag);
 
    const char *exec_roles = opt_get(&opts, "exec-roles");
    if (exec_roles && exec_roles[0])
@@ -813,6 +863,57 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->timeout_ms = opt_get_int(&opts, "timeout-ms", opt_get_int(&opts, "timeout", ag->timeout_ms));
    ag->middleware.context_window =
        opt_get_int(&opts, "ctx", opt_get_int(&opts, "context-window", 0));
+
+   /* Declared per-model values. NAMING THE OPTION IS THE DECLARATION -- the bit
+    * comes from opt_has(), not from the value being non-zero, so "--price-in 0"
+    * states that a seat is free instead of reading as "unset". Without this the
+    * server could accept a declaration the config layer would then drop on its
+    * next save, and an operator's 0 would silently become "ask the catalog".
+    *
+    * Absent options clear their bit, matching this handler's existing
+    * reset-the-record semantics: agent.add/set describe the agent's whole
+    * desired state, so an omitted field is "no longer declared". */
+   ag->declared = 0;
+   /* CAPACITIES declare only a usable number. Unlike a price, a 0 window is not
+    * a statement -- it is the absence of one -- and the existing edit form
+    * always sends "--context-window 0" for an unset field, so keying the bit on
+    * presence alone would write an explicit 0 into every config it touched and
+    * assert a declaration nobody made. */
+   if (ag->middleware.context_window > 0)
+      ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+   ag->max_output = opt_get_int(&opts, "max-output", 0);
+   if (ag->max_output > 0)
+      ag->declared |= AGENT_DECL_MAX_OUTPUT;
+   {
+      static const struct
+      {
+         const char *opt;
+         size_t offset;
+         unsigned bit;
+      } price_opts[] = {
+          {"price-in", offsetof(agent_t, price_in_per_mtok), AGENT_DECL_PRICE_IN},
+          {"price-out", offsetof(agent_t, price_out_per_mtok), AGENT_DECL_PRICE_OUT},
+          {"price-cached", offsetof(agent_t, price_cached_per_mtok), AGENT_DECL_PRICE_CACHED},
+      };
+      for (size_t i = 0; i < sizeof(price_opts) / sizeof(price_opts[0]); ++i)
+      {
+         double *slot = (double *)((char *)ag + price_opts[i].offset);
+         const char *raw = opt_get(&opts, price_opts[i].opt);
+         if (!raw || !raw[0])
+         {
+            *slot = 0.0;
+            continue;
+         }
+         char *end = NULL;
+         double v = strtod(raw, &end);
+         /* A price that does not parse, is negative, or is not finite must not
+          * be accepted as 0 -- that would assert "free" from a typo. */
+         if (end == raw || (end && *end) || !(v >= 0.0) || v != v || v > 1e12)
+            continue;
+         *slot = v;
+         ag->declared |= price_opts[i].bit;
+      }
+   }
 
    /* Primary-only: a flagged agent is never a delegation target (replaces the
     * former global claude_cli_delegate_enabled opt-in with a per-agent choice).
@@ -830,6 +931,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (opt_has(&opts, "default") || cfg.agent_count == 1 || !cfg.default_agent[0])
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -846,7 +949,8 @@ int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   static const char *bool_flags[] = {"default", "no-probe", "no-tools", "no-fallback", NULL};
+   static const char *bool_flags[] = {"default",  "delegate-default", "no-probe",
+                                      "no-tools", "no-fallback",      NULL};
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    opt_parsed_t opts;
@@ -875,7 +979,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!name || !name[0])
       name = "local";
    if (!endpoint_arg || !endpoint_arg[0])
-      return server_send_error(conn, "agent.local requires endpoint", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "model.local requires endpoint", NULL);
 
    char endpoint[MAX_ENDPOINT_LEN];
    server_agent_normalize_endpoint(endpoint_arg, endpoint, sizeof(endpoint));
@@ -905,7 +1010,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                      sizeof(slot_probe_msg));
    }
    if (!model[0])
-      return server_send_error(conn, "agent.local could not determine model; pass --model", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "model.local could not determine model; pass --model", NULL);
    if (slots <= 0 && detected_slots > 0)
       slots = detected_slots;
    if (slots <= 0)
@@ -940,7 +1046,7 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    ag->max_turns = opt_get_int(&opts, "max-turns", -1);
    ag->max_parallel = slots;
    ag->middleware.context_window = context_window;
-   if (roles_arg && roles_arg[0])
+   if (roles_arg)
       server_agent_set_roles_csv(ag, roles_arg);
    else
       server_agent_default_roles(ag);
@@ -948,6 +1054,8 @@ int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       server_agent_set_exec_roles_csv(ag, exec_roles_arg);
    if (opt_has(&opts, "default") || cfg.agent_count == 1 || !cfg.default_agent[0])
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
    if (!opt_has(&opts, "no-fallback"))
       server_agent_ensure_fallback(&cfg, ag->name);
 
@@ -974,7 +1082,7 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.remove requires name", NULL);
+      return server_send_error(conn, "model.remove requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1003,6 +1111,8 @@ int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (strcmp(cfg.default_agent, removed) == 0)
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s",
                cfg.agent_count > 0 ? cfg.agents[0].name : "");
+   if (strcmp(cfg.default_delegate, removed) == 0)
+      cfg.default_delegate[0] = '\0';
 
    /* Removing the last delegate legitimately empties the registry, which the
     * deletion guard would otherwise refuse. */
@@ -1054,7 +1164,7 @@ static int handle_agent_set_enabled(server_ctx_t *ctx, server_conn_t *conn, cJSO
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
       return server_send_error(
-          conn, enabled ? "agent.enable requires name" : "agent.disable requires name", NULL);
+          conn, enabled ? "model.enable requires name" : "model.disable requires name", NULL);
 
    cJSON *resp = NULL;
    if (agent_set_enabled_commit(argv[0], enabled, &resp) != 0)
@@ -1074,15 +1184,15 @@ int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* Surgically update ONLY an agent's roles, preserving endpoint/model/provider/
  * auth/vault key (unlike agent.add, which resets the record). argv[0]=name,
- * optional argv[1]=comma-separated roles, or `--reset` for the full default
- * capable set. Omitting argv[1] REPORTS the current roles and writes nothing. */
+ * optional argv[1]=comma-separated roles, or `--reset` for the default delegate
+ * set. Omitting argv[1] REPORTS the current roles and writes nothing. */
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.roles requires name", NULL);
+      return server_send_error(conn, "model.roles requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1100,8 +1210,7 @@ int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_ok(conn, server_agent_read_json(ag));
 
    if (strcmp(argv[1], "--reset") == 0)
-      server_agent_set_roles_csv(
-          ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      server_agent_default_roles(ag);
    else
       server_agent_set_roles_csv(ag, argv[1]);
 
@@ -1123,7 +1232,7 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.personas requires name", NULL);
+      return server_send_error(conn, "model.personas requires name", NULL);
 
    agent_config_t cfg;
    if (agent_load_config(&cfg) != 0)
@@ -1154,7 +1263,8 @@ int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * record). Backs the Web GUI's per-agent Edit modal. Args are CLI-style:
  *   set <name> [--model M] [--endpoint E] [--provider P] [--cost-tier N]
  *       [--max-turns N] [--max-parallel N] [--context-window N] [--tools on|off]
- *       [--roles csv] [--personas csv] [--enabled true|false] [--key K] [--default]
+ *       [--roles csv] [--personas csv] [--enabled true|false] [--key K]
+ *       [--default] [--delegate-default]
  * A flag that is absent leaves that field untouched. */
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1162,14 +1272,12 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    char *argv[SERVER_AGENT_MAX_ARGS];
    int argc = server_agent_args(req, argv, (int)(sizeof(argv) / sizeof(argv[0])));
    if (argc < 1 || !argv[0][0])
-      return server_send_error(conn, "agent.set requires name", NULL);
+      return server_send_error(conn, "model.set requires name", NULL);
    /* Value --flags are present iff opt_get returns non-NULL — that presence check
-    * is what makes the patch surgical. `--default` is the one BOOL flag: when
-    * given it promotes this agent to the global primary (default_agent), the same
-    * effect `agent add --default` has, but without resetting the record — the only
-    * way to make an already-registered agent (e.g. a cli-oauth subscription
-    * agent) the primary. */
-   static const char *bool_flags[] = {"default", NULL};
+    * is what makes the patch surgical. The two BOOL flags select independent
+    * preferences: --default promotes the user-facing primary, while
+    * --delegate-default selects the preferred unpinned worker. */
+   static const char *bool_flags[] = {"default", "delegate-default", NULL};
    opt_parsed_t opts;
    opt_parse(argc - 1, argv + 1, bool_flags, &opts);
 
@@ -1196,8 +1304,67 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       ag->max_turns = atoi(v);
    if ((v = opt_get(&opts, "max-parallel")) != NULL)
       ag->max_parallel = atoi(v);
+   /* Declared per-model values, under this handler's PATCH semantics: an option
+    * that is absent changes nothing, while an option that is present and empty
+    * (or a non-positive capacity) WITHDRAWS the declaration. The withdraw case
+    * is load-bearing -- the operator clearing a field in the UI has to be able
+    * to say "I no longer state this", and with patch semantics an omitted
+    * option cannot express that.
+    *
+    * A capacity declares only a usable number: there is no zero-token window,
+    * so 0 means "unset it", not "this model holds nothing". */
    if ((v = opt_get(&opts, "context-window")) != NULL || (v = opt_get(&opts, "ctx")) != NULL)
-      ag->middleware.context_window = atoi(v);
+   {
+      int n = atoi(v);
+      ag->middleware.context_window = n > 0 ? n : 0;
+      if (n > 0)
+         ag->declared |= AGENT_DECL_CONTEXT_WINDOW;
+      else
+         ag->declared &= ~(unsigned)AGENT_DECL_CONTEXT_WINDOW;
+   }
+   if ((v = opt_get(&opts, "max-output")) != NULL)
+   {
+      int n = atoi(v);
+      ag->max_output = n > 0 ? n : 0;
+      if (n > 0)
+         ag->declared |= AGENT_DECL_MAX_OUTPUT;
+      else
+         ag->declared &= ~(unsigned)AGENT_DECL_MAX_OUTPUT;
+   }
+   {
+      static const struct
+      {
+         const char *opt;
+         size_t offset;
+         unsigned bit;
+      } price_opts[] = {
+          {"price-in", offsetof(agent_t, price_in_per_mtok), AGENT_DECL_PRICE_IN},
+          {"price-out", offsetof(agent_t, price_out_per_mtok), AGENT_DECL_PRICE_OUT},
+          {"price-cached", offsetof(agent_t, price_cached_per_mtok), AGENT_DECL_PRICE_CACHED},
+      };
+      for (size_t i = 0; i < sizeof(price_opts) / sizeof(price_opts[0]); ++i)
+      {
+         const char *raw = opt_get(&opts, price_opts[i].opt);
+         if (!raw)
+            continue; /* absent: patch semantics, leave the declaration alone */
+         double *slot = (double *)((char *)ag + price_opts[i].offset);
+         if (!raw[0])
+         {
+            *slot = 0.0;
+            ag->declared &= ~(unsigned)price_opts[i].bit;
+            continue; /* present and empty: withdraw */
+         }
+         char *end = NULL;
+         double parsed = strtod(raw, &end);
+         /* Unparseable, negative or non-finite is IGNORED, never taken as 0: a
+          * typo must not assert that a model is free. Unlike the empty string,
+          * which is a deliberate withdrawal, this leaves the prior value. */
+         if (end == raw || (end && *end) || !(parsed >= 0.0) || parsed != parsed || parsed > 1e12)
+            continue;
+         *slot = parsed;
+         ag->declared |= price_opts[i].bit;
+      }
+   }
    if ((v = opt_get(&opts, "tools")) != NULL)
    {
       ag->tools_enabled = (strcmp(v, "on") == 0 || strcmp(v, "true") == 0 || strcmp(v, "1") == 0);
@@ -1208,9 +1375,10 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if ((v = opt_get(&opts, "primary-only")) != NULL)
       ag->primary_only = (strcmp(v, "true") == 0 || strcmp(v, "1") == 0 || strcmp(v, "on") == 0);
    if ((v = opt_get(&opts, "roles")) != NULL)
-      server_agent_set_roles_csv(
-          ag,
-          v[0] ? v : "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+      /* Empty is an explicit empty selection from the GUI, not a request to
+       * grant every default role. In particular it must not manufacture review
+       * authorization after the operator unchecks review. */
+      server_agent_set_roles_csv(ag, v);
    if ((v = opt_get(&opts, "personas")) != NULL)
       server_agent_set_personas_csv(ag, v[0] ? v : "all");
 
@@ -1245,6 +1413,8 @@ int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (opt_has(&opts, "default"))
       snprintf(cfg.default_agent, sizeof(cfg.default_agent), "%s", ag->name);
+   if (opt_has(&opts, "delegate-default"))
+      snprintf(cfg.default_delegate, sizeof(cfg.default_delegate), "%s", ag->name);
 
    if (agent_save_config(&cfg) != 0)
       return server_send_error(conn, "could not save agents.json", NULL);
@@ -1268,7 +1438,7 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    opt_parse(argc, argv, bool_flags, &opts);
    const char *name = opt_pos(&opts, 0);
    if (!name || !name[0])
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "agent.probe requires name",
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "model.probe requires name",
                                     NULL);
 
    agent_config_t cfg;
@@ -1390,8 +1560,8 @@ int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return server_send_ok(conn, resp);
 }
 
-static const char *sagent_provider_cli_roles[] = {"code",     "review", "explain",
-                                                  "refactor", "draft",  "execute"};
+static const char *sagent_provider_cli_roles[] = {"code", "explain", "refactor", "draft",
+                                                  "execute"};
 
 static void sagent_configure_tmux_cli_agent(agent_t *ag, const char *name, const char *provider,
                                             const char *cli_kind, const char *cli_cmd,
@@ -1443,7 +1613,7 @@ int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
    return server_send_error(
-       conn, "agent.setup is retired (use: openai, anthropic, codex-oauth, claude-oauth)", NULL);
+       conn, "model.setup is retired (use: openai, anthropic, codex-oauth, claude-oauth)", NULL);
 }
 
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -1451,7 +1621,7 @@ int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    (void)req;
    return server_send_error(
-       conn, "agent.setup_poll is retired (use: openai, anthropic, codex-oauth, claude-oauth)",
+       conn, "model.setup_poll is retired (use: openai, anthropic, codex-oauth, claude-oauth)",
        NULL);
 }
 
@@ -1545,10 +1715,9 @@ static void sagent_configure_http_codex_agent(agent_t *ag, const char *name)
     * Pin the real gpt-5-codex window explicitly (the middleware field capability
     * routing and the agent listing both read). */
    ag->middleware.context_window = 272000;
-   /* Full capable delegate role set (matches `agent add` default): a coding
-    * delegate must take code/execute work, not just summarize/format/draft. */
-   server_agent_set_roles_csv(
-       ag, "code,review,explain,refactor,draft,execute,summarize,format,reason,search");
+   /* General delegate roles (matches `agent add` default). Review remains an
+    * explicit operator grant, including for subscription-backed agents. */
+   server_agent_default_roles(ag);
 }
 
 /* Register the now-authenticated vendor: codex as a direct-HTTP `chatgpt` agent

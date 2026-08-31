@@ -4,10 +4,12 @@
  * the response. All policy + crypto lives below in vault_service. */
 #include "server.h" /* server_conn_t, server_send_*, handle_vault_* decls */
 #include "vault_service.h"
-#include "vault_store.h"      /* legacy actor-vault existence check */
-#include "vault_crypto.h"     /* VAULT_ROOT_KEY_LEN */
-#include "vault_capability.h" /* vault:write:server gate (D2c) */
-#include "log.h"              /* audit_log dedicated 0600 audit sink (D2/D2c) */
+#include "vault_store.h"        /* legacy actor-vault existence check */
+#include "vault_crypto.h"       /* VAULT_ROOT_KEY_LEN */
+#include "vault_capability.h"   /* vault:write:server gate (D2c) */
+#include "log.h"                /* audit_log dedicated 0600 audit sink (D2/D2c) */
+#include "vault_audit_bridge.h" /* publish server-principal writes onto the audit bus */
+#include "appliance_admin.h"
 #include "cJSON.h"
 #include <openssl/crypto.h>
 #include <openssl/sha.h>
@@ -76,10 +78,26 @@ static int hex_decode(const char *hex, uint8_t *out, size_t n)
 int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-   vault_status_t st = VAULT_OK;
-   uint8_t legacy_salt[VAULT_SALT_LEN];
-   int has_legacy_vault = vault_store_salt_readonly(conn->vault_principal, legacy_salt) == 0;
-   OPENSSL_cleanse(legacy_salt, sizeof(legacy_salt));
+   /* No legacy actor vault means there is nothing to unlock: the environment
+    * vault needs no unlock, and vault_service_unlock_password would MINT a new
+    * per-actor vault on first use (vault_store_get_or_create_salt), which the
+    * shared-environment model does not want.
+    *
+    * Answered here with an early return, not by gating the unlock calls below.
+    * The credentials are verified INSIDE vault_service_unlock*, so any path that
+    * skips those calls and still reaches the success tail authenticates nobody —
+    * this route would answer {"status":"ok"} to any password. Returning before
+    * `st` exists makes that state unreachable rather than dependent on how `st`
+    * happens to be initialised. */
+   {
+      uint8_t legacy_salt[VAULT_SALT_LEN];
+      int has_legacy_vault = vault_store_salt_readonly(conn->vault_principal, legacy_salt) == 0;
+      OPENSSL_cleanse(legacy_salt, sizeof(legacy_salt));
+      if (!has_legacy_vault)
+         return vault_send_status_error(conn, VAULT_NO_ENTRY);
+   }
+
+   vault_status_t st;
 
    /* A webchat-asserted webuser principal unlocks with its login password
     * (scrypt KEK, WP-C.2); a kernel-attested uid: peer unlocks with its 32-byte
@@ -90,10 +108,9 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       cJSON *jpw = cJSON_GetObjectItemCaseSensitive(req, "password");
       if (!cJSON_IsString(jpw))
          return server_send_error(conn, "vault: missing password", NULL);
-      if (has_legacy_vault)
-         st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
-                                            (const uint8_t *)jpw->valuestring,
-                                            strlen(jpw->valuestring), time(NULL));
+      st = vault_service_unlock_password(conn->vault_principal, conn->attested_transport,
+                                         (const uint8_t *)jpw->valuestring,
+                                         strlen(jpw->valuestring), time(NULL));
       /* Best-effort scrub of the request-body copy of the password. */
       OPENSSL_cleanse(jpw->valuestring, strlen(jpw->valuestring));
    }
@@ -105,9 +122,8 @@ int handle_vault_unlock(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       uint8_t root_key[VAULT_ROOT_KEY_LEN];
       if (hex_decode(jrk->valuestring, root_key, sizeof(root_key)) != 0)
          return server_send_error(conn, "vault: root_key_hex must be 64 hex chars", NULL);
-      if (has_legacy_vault)
-         st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
-                                   sizeof(root_key), time(NULL));
+      st = vault_service_unlock(conn->vault_principal, conn->attested_transport, root_key,
+                                sizeof(root_key), time(NULL));
       OPENSSL_cleanse(root_key, sizeof(root_key));
    }
    if (st != VAULT_OK)
@@ -164,13 +180,19 @@ static void vault_cred_fingerprint(const char *secret, char *out, size_t out_len
 }
 
 /* True iff the connection is an attested transport — local UDS, trusted webchat,
- * or native-TLS+bearer — never a plaintext TCP bearer. The D2b precondition for
- * any server-principal write. */
+ * native-TLS+bearer, or a verified mTLS client — never a plaintext TCP bearer.
+ * The D2b precondition for any server-principal write: TLS on the connection is
+ * mandatory for every network path here, and mTLS is the stronger form of it.
+ *
+ * Must stay in step with vault_capability_server_write_allowed(); omitting
+ * ATTEST_MTLS_CLIENT here made this function report "unattested" for the strongest
+ * identity the server accepts, so the refusal named the wrong reason. */
 static int vault_conn_is_attested(const server_conn_t *conn)
 {
    return conn && (conn->attested_transport == ATTEST_UDS_PEERCRED ||
                    conn->attested_transport == ATTEST_WEBCHAT_TRUSTED ||
-                   conn->attested_transport == ATTEST_TLS_BEARER);
+                   conn->attested_transport == ATTEST_TLS_BEARER ||
+                   conn->attested_transport == ATTEST_MTLS_CLIENT);
 }
 
 void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
@@ -196,12 +218,19 @@ void vault_audit_server_write(const server_conn_t *conn, const char *agent, cons
       transport = "unknown";
       break;
    }
+   const char *principal = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)";
+
    /* D2/D2c: server-principal writes go to the dedicated append-only 0600 audit
     * sink (audit_log), NOT the operator-readable general server log — preserving
     * tamper-evidence + access separation. Never logs the key (fingerprint only). */
-   audit_log("VAULT_SERVER_WRITE", "by=%s transport=%s agent=%s cred=%s fp=%s",
-             (conn && conn->vault_principal[0]) ? conn->vault_principal : "(server)", transport,
-             agent ? agent : "?", cred ? cred : "?", fp);
+   audit_log("VAULT_SERVER_WRITE", "by=%s transport=%s agent=%s cred=%s fp=%s", principal,
+             transport, agent ? agent : "?", cred ? cred : "?", fp);
+
+   /* ...and onto the audit event bus, so this write joins the same ordered tap,
+    * capture/replay stream, and WORM ledger as every vault ACCESS row. Without
+    * this the highest-privilege vault op — storing a client-supplied secret under
+    * the server principal — was the only one absent from the replayable trail. */
+   vault_audit_bridge_server_write(principal, agent, cred, fp, transport);
 }
 
 /* POST /v1/vault/set_server — store a CLIENT-SUPPLIED credential under the
@@ -218,11 +247,24 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (!cJSON_IsString(ja) || !cJSON_IsString(jc) || !cJSON_IsString(js))
       return server_send_error(conn, "vault: set_server requires agent, cred, secret", NULL);
 
-   if (!vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal))
+   int allowed =
+       vault_capability_server_write_allowed(conn->attested_transport, conn->vault_principal);
+   /* The browser setup wizard configures shared appliance credentials. Its
+    * authenticated appliance administrator is already the sole webuser allowed
+    * to mutate global execution policy, and there is no safe browser route that
+    * can mint the otherwise UDS-only grant. Admit exactly that principal over the
+    * kernel-attested webchat hop; every other webuser still needs an explicit
+    * vault:write:server grant. */
+   if (!allowed && conn->attested_transport == ATTEST_WEBCHAT_TRUSTED)
+      allowed = appliance_admin_principal_authorized(conn->vault_principal);
+
+   if (!allowed)
    {
       if (!vault_conn_is_attested(conn))
-         return server_send_error(
-             conn, "vault: server-principal write requires an attested (UDS/webchat) connection",
+         return server_send_error_kind(
+             conn, SERVER_ERR_PERMISSION_DENIED,
+             "vault: server-principal write requires an attested connection (local UDS, trusted "
+             "webchat, or TLS/mTLS) — a plaintext TCP bearer is never accepted",
              NULL);
       /* Name the caller's resolved principal so the operator grants the RIGHT one
        * — a UDS peer is `uid:<N>`, not the unix username, which is a common
@@ -233,7 +275,7 @@ int handle_vault_set_server(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                "vault: caller (principal %s) lacks the vault:write:server capability "
                "(grant it over UDS with `aimee vault capability grant %s`)",
                who, who);
-      return server_send_error(conn, msg, NULL);
+      return server_send_error_kind(conn, SERVER_ERR_PERMISSION_DENIED, msg, NULL);
    }
 
    vault_status_t st = vault_service_set_server(ja->valuestring, jc->valuestring, js->valuestring);
@@ -309,12 +351,43 @@ int handle_vault_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
    (void)req;
+   /* Enumeration previously took no gate beyond the route capability, and
+    * CAP_DELEGATE is inside CAPS_AUTHENTICATED — the LOWER of the two mTLS tiers —
+    * so any unrevoked client cert listed every server credential name.
+    *
+    * The read gate, not the write one: host-local authority (UDS, the root-owned
+    * webchat hop, the operator's own TLS bearer) enumerates without a grant, so the
+    * browser GUI's credential page keeps working with no operator action. A client
+    * cert — a network credential on arbitrary remote machines — still needs the
+    * grant. See vault_capability_server_read_allowed. */
+   if (!vault_capability_server_read_allowed(conn->attested_transport, conn->vault_principal))
+   {
+      if (!vault_conn_is_attested(conn))
+         return server_send_error(
+             conn,
+             "vault: listing shared credentials requires an attested connection (local UDS, "
+             "trusted webchat, or TLS/mTLS) — a plaintext TCP bearer is never accepted",
+             NULL);
+      char msg[256];
+      const char *who = (conn && conn->vault_principal[0]) ? conn->vault_principal : "(unknown)";
+      snprintf(msg, sizeof(msg),
+               "vault: listing shared credentials requires vault:write:server for %s — an "
+               "operator grants it locally with `aimee vault capability grant %s`",
+               who, who);
+      return server_send_error(conn, msg, NULL);
+   }
+
    vault_store_entry_t entries[64];
    int count = 0;
    vault_status_t st = vault_service_list(VAULT_SERVER_PRINCIPAL, entries,
                                           (int)(sizeof(entries) / sizeof(entries[0])), &count);
    if (st != VAULT_OK)
       return vault_send_status_error(conn, st);
+   /* As with delete: the underlying row is attributed to the server vault, so the
+    * human who enumerated the shared credential names would otherwise appear in no
+    * audit record at all. Enumeration of credential names is a real disclosure
+    * event, so it gets an attributed row like the mutations do. */
+   vault_audit_bridge_server_list(conn->vault_principal, count);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)
@@ -351,6 +424,11 @@ int handle_vault_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return vault_send_status_error(conn, st);
    audit_log("VAULT_SERVER_DELETE", "by=%s agent=%s cred=%s", conn->vault_principal,
              ja->valuestring, jc->valuestring);
+   /* ...and onto the bus. The vault_service row for this delete is attributed to
+    * VAULT_SERVER_PRINCIPAL (the vault the credential lives in), so it cannot answer
+    * WHO deleted it — that identity existed only in the audit_log line above, i.e.
+    * in a local file with no ordered tap, capture/replay, or WORM ledger. */
+   vault_audit_bridge_server_delete(conn->vault_principal, ja->valuestring, jc->valuestring);
 
    cJSON *resp = cJSON_CreateObject();
    if (!resp)

@@ -34,7 +34,7 @@
 
 #include <aimee/core/event_bus/module_client.h>
 
-#include "guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
+#include "db1_client/guardrail_events.h" /* guardrail_event_t — a second event kind on this bus */
 
 #ifdef __cplusplus
 extern "C"
@@ -47,8 +47,9 @@ extern "C"
  *   KIND_ACTION    (3000) — the governed-action audit row  -> the audit ledger
  *   KIND_GUARDRAIL (3001) — the guardrail-semantic risk event -> db1 guardrail_events
  * Shared so writers and the replay reader (audit_replay.c) agree on them. */
-#define OBS_BUS_KIND_ACTION    3000
-#define OBS_BUS_KIND_GUARDRAIL 3001
+#define OBS_BUS_KIND_ACTION     3000
+#define OBS_BUS_KIND_GUARDRAIL  3001
+#define OBS_BUS_KIND_DURABILITY 3002
 
    /* Optional daemon-owned sink for the server-only guardrail event kind. The
     * shared runtime always carries ACTION events; aimee-server installs this
@@ -58,10 +59,48 @@ extern "C"
     * its sink. */
    typedef int (*obs_bus_guardrail_sink_fn)(const guardrail_event_t *event, void *ctx);
 
+   /* Per-daemon WORM adapter. aimee-server installs its SQLite append and
+    * aimee-kb installs its PostgreSQL append; obs_bus remains storage-neutral. */
+   typedef int (*obs_bus_durable_sink_fn)(const char *actor_role, const char *actor_principal,
+                                          const char *action, const char *subject,
+                                          const char *verdict, const char *detail, void *ctx);
+
+   typedef struct
+   {
+      int capture_ok;
+      const char *reason; /* ok, not_started, no_home, open_failed, write_failed, sink_broken */
+      char session_id[128];
+      uint64_t last_seq;
+   } obs_bus_capture_health_t;
+
    /* Configure the optional guardrail sink before the bus starts. Passing NULL
     * selects the action-only profile used by aimee-kb. Reconfiguration while the
     * bus is running is refused with -1; otherwise returns 0. */
    int obs_bus_set_guardrail_sink(obs_bus_guardrail_sink_fn sink, void *ctx);
+
+   /* Configure the service's WORM append before start. Reconfiguration while
+    * running is refused. */
+   int obs_bus_set_durable_sink(obs_bus_durable_sink_fn sink, void *ctx);
+
+   /* Called on the consumer thread each time the bus goes idle, before it naps.
+    * A durable sink that holds a per-thread resource uses this to let go of it
+    * between bursts: aimee-kb's WORM append lazily leases a pooled DB2
+    * connection, and without this hook that lease is held for the life of the
+    * process, because the consumer thread never ends a unit of work. obs_bus
+    * stays storage-neutral -- it only says "idle now" and the adapter decides
+    * what that costs. Optional; leaving it unset is a no-op. */
+   typedef void (*obs_bus_sink_idle_fn)(void *ctx);
+   int obs_bus_set_sink_idle_hook(obs_bus_sink_idle_fn hook, void *ctx);
+
+   /* Commit one action-class record synchronously to the daemon's WORM sink.
+    * This is the durability edge for security-relevant bridges whose ordinary
+    * ACTION event is intentionally asynchronous.  Returns 0 only after the
+    * service-specific sink has accepted the row; a missing sink is failure.
+    * Fields are bounded and content-free under the same contract as
+    * obs_bus_emit(). */
+   int obs_bus_commit_action(const char *actor, const char *tool, const char *args_hash,
+                             const char *command, const char *mode, const char *reason_code,
+                             const char *verdict, long long task_id);
 
    /* Configure the daemon's authenticated local module endpoint before start.
     * `socket_path` and `policy_dir` must be absolute. The policy directory holds
@@ -83,11 +122,20 @@ extern "C"
     * response validation remain in aimee-core-c. The optional cancellation
     * callback is also combined with daemon shutdown, so stop cannot strand a
     * caller. */
-   aimee_module_call_result_t obs_bus_module_call(
-       uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
-       const void *request_body, uint32_t request_len, void *response_body,
-       uint32_t response_capacity, uint32_t *response_len, aimee_module_cancelled_fn cancelled,
-       void *cancel_context);
+   aimee_module_call_result_t
+   obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id,
+                       uint64_t deadline_ns, const void *request_body, uint32_t request_len,
+                       void *response_body, uint32_t response_capacity, uint32_t *response_len,
+                       aimee_module_cancelled_fn cancelled, void *cancel_context);
+
+   /* Highest number of module calls that have held a client at the same time.
+    *
+    * Serialization here is not a throughput matter: while every caller shared
+    * one client, a long stage could block the very callback it was waiting on.
+    * This high-water mark is how that condition is observable at all -- from
+    * outside, a call that is waiting for a client is indistinguishable from one
+    * that is doing work. */
+   int obs_bus_module_peak_concurrency(void);
 
    /* Return nonzero only while a live local process is attached and registered
     * to serve event_kind. Intended for daemon readiness sampling; no network I/O
@@ -110,6 +158,26 @@ extern "C"
     * the emit site is gone. Safe to call from any thread; a no-op (logged) if the
     * bus is not running. */
    void obs_bus_emit_guardrail(const guardrail_event_t *e);
+
+   /* Publish one bounded, PII-safe durability record. This is the common emitter
+    * used by ledger-classified module decisions and rare core bus controls. */
+   void obs_bus_emit_durable_event(const char *action, const char *subject, const char *verdict,
+                                   const char *detail);
+
+   /* Loss callback installed on the C host. Public so the host-to-ledger edge
+    * can be tested with an independently constructed full/reaped bus. Ordinary
+    * callers should use obs_bus_emit_durable_event instead. */
+   void obs_bus_record_loss(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                            uint32_t payload_len);
+
+   /* Snapshot capture health without I/O. A false result always carries the
+    * first-class reason and the last sequence known to have reached capture. */
+   void obs_bus_capture_health(obs_bus_capture_health_t *out);
+
+   /* Test-only deterministic fault injection for the four capture failure
+    * classes. Call before start with NULL, "no_home", "open_failed",
+    * "write_failed", or "sink_broken". */
+   int obs_bus_test_capture_fault(const char *reason);
 
    /* Block until the consumer has written every event emitted so far to its sink
     * (the ledger / db1), WITHOUT stopping the bus. For a caller that emits and then

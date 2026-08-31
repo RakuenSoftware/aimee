@@ -5,11 +5,11 @@
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
 #include "modules/vault/vault_server_key.h"
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_tenant.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_key_use.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_key_use.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>
@@ -114,7 +114,7 @@ int main(void)
 
    assert(db2_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
-   assert(scalar("SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND "
+   assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND "
                  "subject='team:970713|bedrock|primary'") == 1);
    assert(db2_tenant_scope_commit() == 0);
 
@@ -143,7 +143,7 @@ int main(void)
    assert(callback_calls == 1);
    assert(db2_tenant_scope_begin(&caller, team_id) == 0);
    assert(scalar("SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970713") == 1);
-   assert(scalar("SELECT count(*) FROM kb_audit_event WHERE detail LIKE '%AKIA_TEST%'") == 0);
+   assert(scalar("SELECT count(*) FROM kb_audit_outbox WHERE detail LIKE '%AKIA_TEST%'") == 0);
    assert(db2_tenant_scope_commit() == 0);
 
    OPENSSL_cleanse(kek, sizeof(kek));

@@ -4,7 +4,7 @@
  * accessors are stubbed: db2_tenant_require_pg() returns early on the shim, so no
  * accessor is ever reached; the stubs exist only to satisfy the linker. */
 
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "team.h"
 #include "project.h"
 #include "membership.h"
@@ -119,6 +119,26 @@ int main(void)
    int64_t teams[4];
 
    REQUIRES_PG(db2_tenant_require_pg(), "db2_tenant_require_pg");
+   REQUIRES_PG(db2_maintenance_scope_begin(DB2_MAINTENANCE_INGEST, "p"),
+               "db2_maintenance_scope_begin");
+
+   /* Worker wiring is deliberately inert on the SQLite backend: there is no
+    * content RLS to satisfy, so the thread-local job survives only long enough
+    * to tell begin_current that no transaction is needed. */
+   if (db2_maintenance_job_enter(DB2_MAINTENANCE_INGEST, "p") != 0 ||
+       !db2_maintenance_job_active() || db2_maintenance_scope_begin_current() != 0 ||
+       db2_maintenance_context_apply_current() != 0 ||
+       db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, "p") != DB2_ERR_MAINTENANCE_INVALID)
+   {
+      printf("FAIL: maintenance job context is not inert and non-nestable on shim\n");
+      fails++;
+   }
+   db2_maintenance_job_leave();
+   if (db2_maintenance_job_active())
+   {
+      printf("FAIL: maintenance job context survived leave\n");
+      fails++;
+   }
 
    /* Every tenant-scoped entry across all five modules must hard-fail. */
    REQUIRES_PG(db2_team_create("t", "op", &id), "db2_team_create");
@@ -129,6 +149,7 @@ int main(void)
    REQUIRES_PG(db2_project_create(1, "p", "team-open", "op", &id), "db2_project_create");
    REQUIRES_PG(db2_project_list(1, NULL, 0), "db2_project_list");
    REQUIRES_PG(db2_project_get(1, NULL), "db2_project_get");
+   REQUIRES_PG(db2_project_attribute_code("p", 1), "db2_project_attribute_code");
 
    REQUIRES_PG(db2_membership_add("k", 1, 0, &id), "db2_membership_add");
    REQUIRES_PG(db2_membership_remove("k", 1), "db2_membership_remove");

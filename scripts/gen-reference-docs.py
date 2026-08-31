@@ -3,16 +3,19 @@
 
 Two committed outputs (regenerate with `make -C src docs-gen`):
   docs/gen/cli-commands.md  : every `aimee` CLI command + subcommands, from the
-                               client help table (src/cli_help_data.h).
-  docs/gen/configuration.md : every config key: the `aimee config get/set`
-                               scalar allowlist (src/modules/config/config_fields.c) plus the
-                               config-file (JSON) sections parsed by src/config*.c.
+                               command catalogue the server serves
+                               (src/server/cli_command_defs_data.h).
+  docs/gen/configuration.md : every config key from the metadata shipped by the
+                               external pure-Go config module.
 
 The point is completeness: these are derived from the same tables the binary
 uses, so they cannot silently drift from the implementation the way hand-written
 lists do.
 """
 import re
+import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -20,7 +23,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SRC = ROOT / "src"
 GEN = ROOT / "docs" / "gen"
 
-# ─── CLI commands (src/cli_help_data.h) ──────────────────────────────────────
+# ─── CLI commands (src/server/cli_command_defs_data.h) ───────────────────────
 # Each entry: {"name", "description", CLIENT_TIER_X, hidden_flag, subcmd_or_NULL}
 # where subcmd is a (possibly multi-line, concatenated) C string of lines like
 #   "  sub   description\n"
@@ -35,32 +38,56 @@ def _c_strings(blob):
     return s.replace("\\n", "\n").replace("\\t", "\t").replace('\\"', '"')
 
 
+_CLI_ROWS_TEXT = None  # plant-test override; None means read the real file
+
+
 def parse_cli_commands():
-    text = (SRC / "cli_help_data.h").read_text(encoding="utf-8")
+    text = (_CLI_ROWS_TEXT if _CLI_ROWS_TEXT is not None
+            else (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8"))
     # Each entry begins with {"<name>", and ends at the matching `},` at the
     # entry's top level. Split on the entry-start sentinel instead of brace
     # counting (the subcmd strings contain no braces).
     entries = []
     # normalize: drop the file's leading comment
     body = text[text.index('{"'):]
+    # Strip block comments BETWEEN entries. A chunk is matched from its start,
+    # so a comment in front of an entry made the match fail -- and the failure
+    # was a `continue`, so the entry vanished from the docs and the "Total
+    # commands" line counted the survivors and looked right. Adding an ordinary
+    # explanatory comment above a row silently deleted that command's reference
+    # page.
+    body = re.sub(r"/\*.*?\*/", "", body, flags=re.S)
     # split into entries on `},\n` boundaries that precede a new `{"`
     raw = re.split(r'\},\s*(?=\{")', body)
+    skipped = []
     for chunk in raw:
-        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*CLIENT_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
+        m = re.match(r'\s*\{\s*"([^"]+)"\s*,\s*"((?:[^"\\]|\\.)*)"\s*,\s*AIMEE_CMD_TIER_(\w+)\s*,\s*(\d+)\s*,\s*(.*)$',
                      chunk, re.S)
         if not m:
+            # The table's NULL sentinel is the one chunk that legitimately does
+            # not parse. Anything else is a row this generator could not read,
+            # and dropping it silently is how a command loses its documentation
+            # without anyone being told.
+            if chunk.strip() and not re.match(r'\s*\{\s*NULL', chunk):
+                skipped.append(chunk.strip()[:120])
             continue
         name, desc, tier, hidden, rest = m.groups()
         subs = None if rest.strip().startswith("NULL") else _c_strings(rest).strip("\n")
         entries.append({"name": name, "desc": desc, "tier": tier,
                         "hidden": hidden == "1", "subs": subs})
+    if skipped:
+        raise SystemExit(
+            "gen-reference-docs: could not parse "
+            f"{len(skipped)} command row(s); they would have been dropped from "
+            "the reference silently:\n  "
+            + "\n  ".join(skipped))
     return entries
 
 
 def render_cli(entries):
     out = ["# CLI Command Reference",
            "",
-           "> Auto-generated from `src/cli_help_data.h` by `scripts/gen-reference-docs.py`.",
+           "> Auto-generated from `src/server/cli_command_defs_data.h` by `scripts/gen-reference-docs.py`.",
            "> Do not edit by hand; run `make -C src docs-gen` to regenerate.",
            "",
            "`aimee` is a thin client: each command either runs a small local "
@@ -89,10 +116,17 @@ def render_cli(entries):
                 out.append(e["subs"])
                 out.append("```")
                 out.append("")
+            if e["name"] == "kb":
+                out.append(
+                    "> `kb grant set`, `show`, `list`, and `revoke` remain in legacy help grammar, "
+                    "but server-side dispatch was removed in 0.4.0. Manage grants directly through "
+                    "the KB `/v1/write-tier-grants` API."
+                )
+                out.append("")
     return "\n".join(out).rstrip() + "\n"
 
 
-# ─── Config: CLI-settable scalars (src/modules/config/config_fields.c) ───────────────────────
+# ─── Config: metadata owned by the external pure-Go module ────────────────
 
 CFG_TYPE = {"CFG_STRING": "string", "CFG_BOOL": "bool", "CFG_INT": "int", "CFG_FLOAT": "float",
             "CFG_ECON_TIER": "string (off\\|safe\\|aggressive)"}
@@ -118,23 +152,16 @@ CFG_KEY_DESC = {
     "verify_role": "Delegate role used for cross-verification.",
     "wfe_proposals_autoscan_enabled": "Automatically scan watched proposal directories; off requires explicit trigger.fire.",
 
-    "aimee_with_llamacpp": "Whether THIS IMAGE bundles llama.cpp (\"1\" on the "
-    "aimee-kb-*-llm variants). Set by the Dockerfile, not by an operator: it is a fact "
-    "about the running image, and the setup wizard reads it to decide whether the local "
-    "synthesis models can be offered at all.",
-    "synthesis_endpoint": "The ONE synthesis endpoint, remote or loopback. Empty means "
-    "synthesis is off, which is supported - embedding, search, recall and indexing "
-    "never call it. On a *-llm image the container entrypoint sets this to loopback "
-    "itself after starting the bundled model.",
-    "synthesis_model": "Synthesis model. On a *-llm image this selects the bundled model "
-    "to fetch and serve (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model "
-    "label sent to the configured endpoint.",
+    "aimee_with_llamacpp": "Compatibility image flag. Managed 0.4.0 profiles deploy a "
+    "model-specific synthesis sidecar instead of bundling a generic llama.cpp gateway.",
+    "synthesis_endpoint": "OpenAI-compatible synthesis endpoint. Empty disables synthesis; "
+    "managed local profiles supply the model-specific sidecar endpoint over mTLS.",
+    "synthesis_model": "Model identity requested from the synthesis endpoint. A managed local "
+    "sidecar fixes the model family selected by its image.",
     "synthesis_api_key": "Bearer token for the synthesis endpoint (blank for a keyless "
     "or loopback endpoint).",
     "synthesis_thinking": "Let the synthesis model think before answering (default on). "
-    "It measured positive-to-neutral everywhere it was tried. Global rather than "
-    "per-stage, and the operator's call: turn it off only for a model that reasons past "
-    "its output budget without answering.",
+    "The measured effect was positive-to-neutral; the setting applies to every synthesis stage.",
 
     "kb_curator_cross_repo_graph_enabled": "Resolve and maintain cross-repository dependency edges.",
     "kb_curator_custom_stages": "JSON definitions that recompose vetted curator operations with bounded budgets.",
@@ -157,6 +184,14 @@ CFG_KEY_DESC = {
     "cache_aware_rewrite_enabled": "Rewrite prompts to align with the provider's prompt cache.",
     "cache_min_chars": "Minimum prompt size (chars) before cache-shaping applies.",
     "cache_shaping_enabled": "Enable prompt cache-shaping.",
+    "extended_thinking_enabled": (
+        "Ask for extended thinking on aimee's OWN Anthropic requests (default off). "
+        "Sends the adaptive thinking config, and only to a model whose capabilities "
+        "report that it accepts it. A model nobody has reported that for is left "
+        "alone rather than sent a shape the provider would reject. Off by default "
+        "because thinking tokens are billed: enabling it changes spend, not just "
+        "visibility."
+    ),
     "delegate_graph_context_enabled": "Prepend a structural code-graph context block (callers/dependencies of files a delegate task references) to the delegate prompt (advisory, fail-open, default off).",
     "memory_md_retire": "Retire the agent file-memory surface into aimee (default on): a Write under ~/.claude/projects/<slug>/memory/<name>.md is intercepted into aimee's db1 and the .md is never materialized; session-start skips .md hydration. Set false for the legacy re-materialized .md mirrors.",
     "claude_model": "Default Claude model (empty = CLI default).",
@@ -165,9 +200,9 @@ CFG_KEY_DESC = {
     "cost_reward_enabled": "Factor token cost into the reward signal.",
     "cost_reward_lambda_pct": "Cost-penalty weight (percent) in the reward.",
     "cost_reward_ref_usd_milli": "Reference cost (USD-milli) normalizing the cost reward.",
-    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, slash commands) into detected AI-tool user configs: Claude Code (~/.claude), Gemini, Copilot, Codex. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
+    "client_integrations_enabled": "Auto-register aimee (MCP server, hooks, and lifecycle adapters) into detected AI-tool user configs: Claude Code (~/.claude), Codex, OpenCode, Hermes, Gemini, and Copilot. Default-ON; set false, or export AIMEE_NO_CLIENT_INTEGRATIONS, to keep aimee out of every tool's global config and wire a single project by hand.",
     "cross_verify": "Enable cross-model verification of outputs.",
-    "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-ON). When off, the forge provider is not registered and every forge op fails closed, so an autonomous run can never open or merge a real PR. Even on, each op re-checks this flag and the merge-target rail.",
+    "wfe_live_forge_enabled": "Gate for the autonomous live forge (default-OFF). Enable it explicitly only for approved autonomous workflows. When off, the forge provider is not registered and every forge op fails closed; even when on, each operation re-checks this flag and the merge-target rail.",
     "css_style_graph_enabled": "Enable the CSS migration assistant's style-graph write path during indexing.",
     "code_cochange_git_enabled": "Mine git history at `index scan` time into co_edited edges (files that change together in a commit), which blast radius already reads. Incremental and idempotent via a per-project HEAD marker; bulk commits (>25 code files) are skipped. Default on.",
     "css_render_command": "Render backend for the #4-full computed-style oracle: a command reading {html,css} JSON on stdin and writing a computed-style snapshot JSON on stdout (run an isolated headless-browser sidecar).",
@@ -223,8 +258,8 @@ CFG_KEY_DESC = {
     "clamped to (0, 32768]. Set it lower to bound the bytes a single tool result adds to the "
     "prompt + history; the context-economizer (aggressive tier) compresses older results to keep "
     "history bounded.",
-    "require_session_worktree": "Fail closed on mutating ops outside an aimee-managed worktree "
-    "(session-isolation guard; default off).",
+    "require_session_worktree": "Fail closed on mutating ops outside this session's isolated worktree "
+    "(session-isolation guard; default on).",
     "subagent_ban_enabled": "Prevent provider-native sub-agent tools when an aimee delegate is "
     "available, and install the matching client guardrails (default on).",
     "require_aimee_memory": "Block agent writes to external file-based agent-memory stores "
@@ -235,31 +270,15 @@ CFG_KEY_DESC = {
     "aimee-server where the forge credential stays in-process; delegates are also spawned "
     "without git/gh credentials. Note the env strip also drops SSH_AUTH_SOCK (no agent-backed "
     "SSH to any host) and neuters the global/system git config (default on).",
-    "delegate_sandbox": "Run a delegate's shell and file ops INSIDE its own container "
-    "(via the `docker` delegate backend) instead of in-process in aimee-server. On by "
-    "default; set `delegate_sandbox: false` to opt out, and a delegate's `bash`/read/write/"
-    "list then run with aimee-server's filesystem and environment. This is not yet a full "
-    "sandbox on its own: the container still has a network, so `require_aimee_git` and the "
-    "credential strip remain the live boundary. The delegate image must carry whatever the "
-    "work needs (a toolchain, or `verify` fails). The server logs OFF/INERT/ARMED at boot, "
-    "probing `docker version`. Check it because an unreachable daemon means every delegate "
-    "runs on the host; set `delegate_sandbox_require_isolation` to refuse rather than fall "
-    "back to un-isolated host execution.",
-    "delegate_sandbox_package_access": "Runtime package-access policy for a `--network none` "
-    "delegate sandbox. aimee always performs and logs the fetch (the delegate holds no outside "
-    "socket); this selects how much: `proxy` (default) proxies package-manager fetches to any "
-    "host through aimee for out-of-the-box functionality; `off` no runtime proxy "
-    "(build-time installs + learned pre-bake only); `gated` host-allowlisted registries, "
-    "off-allowlist requires human approval; `governance` allowlist from a governance provider, "
-    "off-allowlist refused. Only meaningful when `delegate_sandbox` is on.",
-    "delegate_sandbox_require_isolation": "Fail-closed guard for the `--network none` delegate "
-    "sandbox (default off; only meaningful when `delegate_sandbox` is on). aimee always passes "
-    "`--network none`, but some runtimes ignore it and give the sandbox real egress, defeating the "
-    "package-access proxy. After the container starts aimee asks the host daemon whether a network "
-    "with an IP is attached and always logs an error on a breach; when this is set, sandboxing is "
-    "mandatory. aimee refuses to run the delegate at all (rather than fall back to un-isolated "
-    "in-process host execution) on any failure to isolate: a breach, an unverifiable probe, docker "
-    "being unavailable, or a failed acquire.",
+    "delegate_sandbox_package_access": "Runtime package access for a `--network none` delegate. "
+    "The delegate has no outside socket: the Go egress module proxies only its immutable package "
+    "registry allowlist, pins the validated numeric destination, and logs the transfer. `proxy` "
+    "(default) enables that narrow path; `off` permits only build-time/pre-baked packages. Legacy "
+    "`gated` and `governance` values cannot widen the live proxy allowlist.",
+    "delegate_sandbox_require_isolation": "Deprecated compatibility key. Its value is ignored: "
+    "every delegate is created with no network, its complete network/mount/environment posture is "
+    "verified after every start or resume, and any breach or unverifiable fact destroys the "
+    "container and refuses the delegation. There is no host fallback.",
     "delegate_sandbox_learn_packages": "Learned toolchain for delegate sandboxes (default on). "
     "aimee captures the apt packages a delegate installs inside its `--network none` sandbox, "
     "records them per project (git root), and pre-bakes the learned set into that project's next "
@@ -292,10 +311,20 @@ CFG_KEY_DESC = {
     "kb_api_http_port": "HTTP port the aimee-kb API listens on.",
     "kb_evidence_emit_enabled": "Emit evidence records from KB ingest.",
     "kb_fusion_mode": "KB retrieval fusion mode: rrf (default), static_alpha, or dynamic_alpha.",
-    "session_worktree_base": "What a new primary session's branch+worktree is cut from. Order: configured -> "
-                              "remote default -> main -> master. Values: remote_default (default), "
-                              "local_default, current (opt-in only, never a fallback), or an explicit "
-                              "ref. Env: AIMEE_SESSION_WORKTREE_BASE.",
+    "session_worktree_base": "What a new primary session's branch+worktree is cut from. "
+                              "remote_default (default) performs a bounded fetch and pins the "
+                              "remote's current HEAD; fetch failure stops session start. An explicit "
+                              "feature/release ref is preserved and receives the fetched default tip "
+                              "when needed. local_default and current are explicit offline/stale "
+                              "overrides. Env: AIMEE_SESSION_WORKTREE_BASE.",
+    "pr_base_mode": "What a PR opened from a session targets. feature (default): the session's "
+                    "durable feature branch aimee/feat/<slug>, so a feature's slices accumulate on "
+                    "one branch and reach the default branch through a single reviewed PR. "
+                    "default_branch: every PR aims at the repo's default branch. Any other value "
+                    "fails closed rather than guessing a base.",
+    "feature_auto_promote": "When every PR on a feature branch has merged, automatically open the "
+                            "feature -> default-branch PR as a draft (default on). Off leaves "
+                            "promotion to an explicit action.",
     "kb_fusion_static_alpha": "Lexical/dense blend weight (0-1) for the static_alpha fusion mode.",
     "kb_pdf_ingest_enabled": "Route PDF uploads through the structured geometry extractor "
     "(kb_doc_pdf) instead of plain pdftotext (default off).",
@@ -338,6 +367,7 @@ CFG_KEY_DESC = {
     "memory_abstain_gate": "Confidence gate for memory abstention.",
     "memory_bm25_weight": "BM25 (lexical) weight in hybrid memory recall.",
     "memory_chunk_min_confidence": "Minimum confidence to keep a memory chunk.",
+    "memory_decompose_heuristic_enabled": "Run the heuristic (non-LLM) sub-query expansion during candidate generation.",
     "memory_coref_mode": "Coreference-resolution mode for memory.",
     "memory_coref_window": "Coreference lookback window.",
     "memory_fetch_budget_base": "Base token budget for memory fetch.",
@@ -438,30 +468,48 @@ SECTION_DESC = {
 }
 
 
+_CONFIG_METADATA = None
+
+
+def _config_metadata():
+    """Load documentation metadata from the pinned config module dependency."""
+    global _CONFIG_METADATA
+    if _CONFIG_METADATA is not None:
+        return _CONFIG_METADATA
+    override = os.environ.get("AIMEE_CONFIG_MODULE_DIR")
+    if override:
+        metadata_path = (Path(override) / "server-go" / "modules" /
+                         "config" / "metadata.json")
+    else:
+        # Listing a module with `go list -m` may legitimately return an empty
+        # Dir until its zip has already been downloaded.  Resolve the package
+        # instead: package loading downloads the pinned dependency and returns
+        # the exact directory containing the metadata we consume.
+        result = subprocess.run(
+            ["go", "list", "-mod=mod", "-f", "{{.Dir}}",
+             "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"],
+            cwd=ROOT / "server-go", check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        )
+        resolved = result.stdout.strip()
+        if not resolved:
+            raise SystemExit(
+                "gen-reference-docs: pinned config module was not downloaded "
+                "and go list returned no module directory"
+            )
+        metadata_path = Path(resolved) / "metadata.json"
+    try:
+        _CONFIG_METADATA = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"gen-reference-docs: cannot read config module metadata: {exc}")
+    if _CONFIG_METADATA.get("version") != 1:
+        raise SystemExit("gen-reference-docs: unsupported config module metadata version")
+    return _CONFIG_METADATA
+
+
 def parse_config_fields():
-    # Each entry is `{"<key>", offsetof(...), <size>, <flag>, CFG_<TYPE>}`. The
-    # offsetof/sizeof macros embed commas, so match the key (first string before
-    # offsetof) and the type (CFG_* before the closing brace) positionally: they
-    # are 1:1 in source order.
-    text = (SRC / "modules" / "config" / "config_fields.c").read_text(encoding="utf-8")
-    # Bound to the config_fields[] initializer, then parse each `{...}` entry as a
-    # unit (split on `},`) so the key and its CFG_* type are paired within one
-    # entry: robust to CFG_* uses in helper functions below the table.
-    start = text.index("config_fields[] = {")
-    text = text[start:text.index("\n};", start)]
-    fields, seen = [], set()
-    for chunk in text.split("},"):
-        km = re.search(r'"([a-z0-9_]+)"\s*,\s*offsetof', chunk)
-        tm = re.search(r'(CFG_\w+)', chunk)
-        if km and tm and km.group(1) not in seen:  # a key may be registered twice
-            seen.add(km.group(1))
-            # Surface group (config_field_group_t): FGROUP_RUNTIME (default) is the
-            # everyday user surface; FGROUP_DEPLOY/ADVANCED/DEV are settable but filed
-            # off the presented "CLI-settable keys" count into their own subsections.
-            gm = re.search(r'(FGROUP_\w+)', chunk)
-            group = gm.group(1) if gm else "FGROUP_RUNTIME"
-            fields.append((km.group(1), CFG_TYPE.get(tm.group(1), tm.group(1)), group))
-    return fields
+    return [(field["key"], field["type"], field["group"])
+            for field in _config_metadata()["fields"]]
 
 
 # ─── Config: config-file (JSON) sections (src/config*.c) ──────────────────────
@@ -478,43 +526,17 @@ FOREACH_RE = re.compile(r'cJSON_ArrayForEach\(\s*(\w+)\s*,\s*(\w+)\s*\)')
 
 
 def parse_config_sections():
-    sections = {}   # section name -> sorted set of keys
-    flat = set()    # top-level scalar keys read straight off root
-    for cfile in sorted((SRC / "modules" / "config").glob("config*.c")):
-        text = cfile.read_text(encoding="utf-8")
-        var_to_section = {}
-        for m in ASSIGN_RE.finditer(text):
-            var, sect = m.group(1), m.group(2)
-            if var == "root":
-                continue
-            var_to_section[var] = sect
-        # array iteration: the loop var inherits the array's section
-        for m in FOREACH_RE.finditer(text):
-            item, arr = m.group(1), m.group(2)
-            if arr in var_to_section:
-                var_to_section[item] = var_to_section[arr]
-        # collect child keys per section-var
-        used_as_parent = set()
-        for m in CHILD_RE.finditer(text):
-            parent, key = m.group(1), m.group(2)
-            used_as_parent.add(parent)
-            if parent in var_to_section:
-                sections.setdefault(var_to_section[parent], set()).add(key)
-        # a (root,"X") whose var is never used as a parent is a flat top key
-        for var, sect in var_to_section.items():
-            if var not in used_as_parent:
-                flat.add(sect)
-    # don't double-list a name that is both a section and a stray flat read
-    flat -= set(sections)
-    return sections, flat
+    metadata = _config_metadata()
+    return ({name: set(keys) for name, keys in metadata["sections"].items()},
+            set(metadata["flat"]))
 
 
 def render_config(fields, sections, flat):
     out = ["# Configuration Reference",
            "",
            "> Auto-generated from the canonical source tables by "
-           "`scripts/gen-reference-docs.py`: config keys from `src/modules/config/config_fields.c` + "
-           "`src/config*.c`, env vars scanned from `getenv()` in `src/`, and the "
+           "`scripts/gen-reference-docs.py`: config keys from the pinned pure-Go config "
+           "module, env vars scanned from `getenv()` in `src/`, and the "
            "workflow catalog from `server-go/internal/wfe/catalog.go`. Do not edit by hand; run "
            "`make -C src docs-gen` to regenerate.",
            "",
@@ -529,7 +551,7 @@ def render_config(fields, sections, flat):
            "CLI commands + flags are documented separately in "
            "[`cli-commands.md`](cli-commands.md).",
            "",
-           "Configuration lives in the per-`AIMEE_HOME` config store. Scalar keys "
+           "Configuration lives in the per-`AIMEE_HOME` config store; DB1 lives in PostgreSQL. Scalar keys "
            "in the table below are settable from the CLI:",
            "",
            "```",
@@ -587,7 +609,7 @@ def render_config(fields, sections, flat):
     out.append(f"## Config-file sections ({len(sections)})")
     out.append("")
     out.append("Set in the config JSON as `{\"<section>\": {\"<key>\": ...}}`. Keys "
-               "are derived from the section parsers in `src/config*.c`; a key shown "
+               "are derived from the external config module metadata; a key shown "
                "as a bare name that is itself a nested object is noted in the section "
                "description (see *Coverage & limitations*).")
     out.append("")
@@ -632,6 +654,8 @@ ENV_RE = re.compile(r'(?:getenv|copy_env)\(\s*"(AIMEE_[A-Z0-9_]+)"')
 # name; the name must still appear as a literal at the call site.
 ENV_BY_NAME_RE = re.compile(
     r'config_sidecar_endpoint\([^;]*?"(AIMEE_[A-Z0-9_]+)"', re.S)
+ENV_PAIR_BY_NAME_RE = re.compile(
+    r'service_env_or_generic\(\s*"(AIMEE_[A-Z0-9_]+)"\s*,\s*"(AIMEE_[A-Z0-9_]+)"', re.S)
 
 # Credential names consumed by the generic first-boot sealer are intentionally
 # not read through individual getenv() calls. Keep their deployment contract in
@@ -661,7 +685,8 @@ ENV_GROUP_ORDER = [
 
 ENV_DESC = {
     # Paths & assets
-    "AIMEE_HOME": ("Paths & assets", "Root of the per-user state/config store (config, DB1, `workflows/`, keys). Overrides the platform default."),
+    "AIMEE_HOME": ("Paths & assets", "Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory."),
+    "AIMEE_CAPTURE_DIR": ("Paths & assets", "Directory for best-effort event-bus capture sessions. Defaults to `AIMEE_HOME`; capture failure is exposed in health and recorded in the WORM ledger."),
     "AIMEE_INSTALL_PREFIX": ("Paths & assets", "Install prefix used to locate bundled assets and plugins."),
     "AIMEE_BUNDLED_SKILLS_DIR": ("Paths & assets", "Override directory for the bundled skills."),
     "AIMEE_TOOLSETS_CONFIG": ("Paths & assets", "Path to a toolsets config file (overrides the default tool allowlists)."),
@@ -682,7 +707,6 @@ ENV_DESC = {
     "AIMEE_TUI_SESSION": ("Client & session", "Identifies the TUI session."),
     "AIMEE_ATTACH_ID": ("Client & session", "Presence attach id used when joining an existing session."),
     "AIMEE_HOOK_CLIENT": ("Client & session", "Identifies the calling hook client (e.g. claude/codex) for hook routing."),
-    "AIMEE_NO_AUTOSTART": ("Client & session", "If set, the client does not auto-start a local aimee-server."),
     "AIMEE_NO_CLIENT_INTEGRATIONS": ("Client & session", "If set (to any value other than 0/false), aimee does not auto-register itself into detected AI-tool user configs (Claude Code, Gemini, Copilot, Codex). Overrides the client_integrations_enabled config; honored by the aimee binary and by install.sh/configure-hooks.sh."),
     "AIMEE_MODEL": ("Client & session", "Override the primary model for the session."),
     "AIMEE_EFFORT": ("Client & session", "Reasoning-effort hint for the session/model."),
@@ -693,6 +717,8 @@ ENV_DESC = {
     # Server runtime
     "AIMEE_SERVER_HTTP_BIND": ("Server runtime", "TCP bind address for the server `/v1` HTTP listener (else UDS-only)."),
     "AIMEE_SERVER_STARTUP_FD": ("Server runtime", "Inherited fd for startup-readiness signalling (service launch)."),
+    "AIMEE_RUNTIME_WEB_ENABLED": ("Server runtime", "Enable the browser runtime and its optional runtime-web process. The shipped container default is on; `0`, `false`, `off`, or `no` disables both unless `AIMEE_MODULE_RUNTIME_WEB` explicitly enables the process."),
+    "AIMEE_MODULE_RUNTIME_WEB": ("Server runtime", "Explicit runtime-web process intent. `1`, `true`, `on`, or `yes` enables it; `0`, `false`, `off`, or `no` disables it. When valid, this takes precedence over `AIMEE_RUNTIME_WEB_ENABLED`; unset or malformed preserves the shipped module default."),
     "AIMEE_API_REMOTE_WRITES": ("Server runtime", "Legacy value: `off`, `data`, or `full`. Still parsed, but no longer authorizes user writes; non-off values warn and feed `remote_writes.global_ignored`."),
     "AIMEE_API_MTLS": ("Server runtime", "Client-certificate mode: `off`, `optional`, or `required`. The managed server image defaults to `optional` so enrollment works before the durable roster promotes the listener to required."),
     "AIMEE_SEARCH_ALLOW_PRIVATE_ENDPOINT": (
@@ -736,7 +762,17 @@ ENV_DESC = {
     "SYNTHESIS_MODEL": ("Knowledge base (aimee-kb)", "Model label sent to SYNTHESIS_ENDPOINT's chat endpoint (single-model gateways ignore it). Default 'aimee-synth'."),
     "EMBEDDER_URL": ("Knowledge base (aimee-kb)", "Embedder endpoint override (/embed, /embed_batch); takes precedence over SYNTHESIS_ENDPOINT for embedding."),
     "AIMEE_KB_API_URL": ("Knowledge base (aimee-kb)", "aimee-kb HTTP API base URL."),
+    "AIMEE_KB_DOCUMENT_INSPECTION": (
+        "Knowledge base (aimee-kb)",
+        "Enable fail-closed structural inspection of HTML and OOXML hidden, active, external, "
+        "and resource channels before conversion or staged KB writes. Off when unset.",
+    ),
     "AIMEE_KB_API_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "First-boot transport for the aimee-kb API bearer token. Server and KB bootstrap paths seal it into Vault and remove it from the environment before long-lived service startup."),
+    "AIMEE_KB_CLIENT_BEARER_TOKEN": ("Knowledge base (aimee-kb)", "Rotating bearer aimee-server presents on its mTLS connection to aimee-kb. Bootstrap seals the first-boot value into Vault and removes it from the environment; the client reads it live for every request."),
+    "AIMEE_KB_CLIENT_OIDC_TOKEN": ("Knowledge base (aimee-kb)", "OIDC access token aimee-server presents as its third service-identity layer. Bootstrap seals it into Vault; the KB pins RS256, issuer, audience, typ=at+jwt, subject, and the subject-to-certificate service name."),
+    "AIMEE_KB_SERVICE_IDENTITY_TOKEN": ("Knowledge base (aimee-kb)", "Self-contained managed-stack application identity token, scoped as service:aimee-server and independently rotated from the connection bearer. The deploy wizard seals the matching value into both server and KB Vaults; external OIDC mode never falls back to it."),
+    "AIMEE_KB_CLIENT_PAM_USERNAME": ("Knowledge base (aimee-kb)", "Host account name for the third service-identity layer when KB OIDC is not configured. Bootstrap seals it into Vault; changing it requires a matching PAM account and service certificate enrollment."),
+    "AIMEE_KB_CLIENT_PAM_PASSWORD": ("Knowledge base (aimee-kb)", "Rotating PAM password paired with AIMEE_KB_CLIENT_PAM_USERNAME. Bootstrap seals it into Vault, removes it from the environment, and the client reads it live for every request."),
     "AIMEE_KB_API_CA_BUNDLE": ("Knowledge base (aimee-kb)", "CA bundle path for verifying the aimee-kb TLS certificate."),
     "AIMEE_KB_CACHE_TTL_S": ("Knowledge base (aimee-kb)", "KB client cache TTL (seconds)."),
     "AIMEE_KB_CONN": (
@@ -778,6 +814,29 @@ ENV_DESC = {
         "synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no "
         "embedder is deployed. The sidecar refuses to start without this material.",
     ),
+    "AIMEE_KB_EMBED_ALL_FILES": (
+        "Knowledge base (aimee-kb)",
+        "Set to 1 to give EVERY indexed file a dense document vector, including source. "
+        "Off by default because source files are already embedded by the code path, and "
+        "embedding them a second time as prose was 82% of the doc-embedding token budget "
+        "on a real corpus. Chunk rows are written either way, so lexical and FTS search "
+        "over source is unaffected by this setting; only the redundant vector is skipped.",
+    ),
+    "AIMEE_EMBED_HTTP_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s "
+        "was shorter than a cold model load plus a large batch, so the first request of a "
+        "run could fail on a healthy embedder.",
+    ),
+    "AIMEE_KB_READ_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a single KB read issued by the client, in milliseconds.",
+    ),
+    "AIMEE_KB_SCAN_TIMEOUT_MS": (
+        "Knowledge base (aimee-kb)",
+        "Deadline for a code-index scan request, in milliseconds. Scans are queued and "
+        "drained by the ingest workers, so this bounds the REQUEST rather than the work.",
+    ),
     "AIMEE_KB_EMIT_ENROLL": ("Knowledge base (aimee-kb)", "Emit a client enrollment token on KB start."),
     "AIMEE_KB_EMIT_SCOPE": ("Knowledge base (aimee-kb)", "Scope for the emitted enrollment token."),
     "AIMEE_KB_OIDC_ISSUER": ("Knowledge base (aimee-kb)", "OIDC issuer for KB API auth."),
@@ -812,6 +871,14 @@ ENV_DESC = {
     "AIMEE_VECTOR_KB_BATCH_SIZE": ("Knowledge base (aimee-kb)", "Embedding batch size for KB vector ingest."),
     # Database & vectors
     "AIMEE_DB2_URL": ("Database & vectors", "Postgres (DB2) connection URL for the KB store."),
+    "AIMEE_TEST_DB2_TEMPLATE_URL": (
+        "Database & vectors",
+        "Test-only. Postgres template database the DB2 test shim clones per test process, so unit "
+        "tests run against the real engine instead of the sqlite shim (which translates DB2's SQL "
+        "rather than executing it). Build the template with `make db2-test-template` and the suite "
+        "with `make unit-tests-pg`; unset, tests use the sqlite shim as before. Read only by test "
+        "binaries; no production code path consults it.",
+    ),
     "AIMEE_DB2_STATEMENT_TIMEOUT_MS": (
         "Database & vectors",
         "Per-connection `statement_timeout` in ms. Defaults to the pool's stuck-lease "
@@ -843,6 +910,7 @@ ENV_DESC = {
     "AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED": ("Memory", "Strip unverified citations from recall output."),
     "AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED": ("Memory", "Enable the async cognify pipeline."),
     "AIMEE_MEMORY_COREF_MODE": ("Memory", "Coreference-resolution mode."),
+    "AIMEE_MEMORY_DECOMPOSE_HEURISTIC": ("Memory", "Override the heuristic sub-query expansion stage during recall (0 disables it)."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS": ("Memory", "Inserts before a maintenance cycle triggers."),
     "AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS": ("Memory", "Seconds before a maintenance cycle triggers."),
     "AIMEE_MEMORY_PAGERANK_RELATIONS": ("Memory", "Relation types included in memory PageRank."),
@@ -938,6 +1006,7 @@ ENV_DESC = {
     "AIMEE_WEBCHAT_USERS": ("Server runtime", "Optional first-boot webchat account registry. It is sealed into Vault and removed from the environment before runtime-web starts."),
     "AIMEE_VAULT_ENV_OVERWRITE": ("Server runtime", "First-boot control flag allowing supplied credential values to replace existing Vault records. It is not itself a credential."),
     "AIMEE_AUTONOMY_BASE": ("Workflow engine", "Legacy C workflow integration-branch fallback. The Go WFE uses the branch checked out when it admits the repository."),
+    "AIMEE_PR_BASE_MODE": ("Workflow engine", "What a pr.open with no explicit base targets: the run's feature branch (default) or, when set to default_branch, the autonomous base. The server exports the configured pr_base_mode into this variable at startup, so `aimee config set pr_base_mode` stays the one operator knob; the workflow engine reads it from the environment because that module is deliberately config-free."),
     "AIMEE_AUTONOMY_MAX_ACTIVE_PER_PRINCIPAL": ("Workflow engine", "Maximum active autonomous work items for one authenticated principal."),
     "AIMEE_AUTONOMY_MAX_USD": ("Workflow engine", "Default USD ceiling for an autonomous work item; 0 disables this default ceiling."),
     "AIMEE_AUTONOMY_SUBMIT_RATE_PER_MIN": ("Workflow engine", "Autonomous-submission rate limit per principal."),
@@ -947,10 +1016,9 @@ ENV_DESC = {
     "AIMEE_CLIENT_TYPE": ("Client & session", "Calling client type used for integration-specific request shaping."),
     "AIMEE_CODEX_REFRESH_SKEW": ("Delegates & backends", "Seconds before Codex OAuth expiry at which the server refreshes the token."),
     "AIMEE_CODE_INDEX_SOURCE": ("Knowledge base (aimee-kb)", "Source label recorded for code-index ingestion."),
-    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default."),
+    "AIMEE_DB2_EVAL_URL": ("Database & vectors", "Separate DB2 URL used by evaluation harnesses; never the production default. The harness applies the DB2 schema into the named database: into its public schema when that schema is empty, otherwise into a throwaway schema beside it. Either way the copy is dropped on close, so point this at a disposable server."),
     "AIMEE_DB2_POOL_SIZE": ("Database & vectors", "DB2 connection-pool size override."),
     "AIMEE_DELEGATE_MAX_INFLIGHT": ("Delegates & backends", "Process-wide maximum number of admitted delegate attempts."),
-    "AIMEE_DELEGATE_SANDBOX": ("Delegates & backends", "Enable the configured delegate sandbox backend."),
     "AIMEE_DIM_PROBE_BUDGET_MS": ("Database & vectors", "Time budget for probing an embedder's output dimension."),
     "AIMEE_IR_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical request IR."),
     "AIMEE_IR_RESP_PATH": ("Diagnostics & misc", "Diagnostic path for recording canonical response IR."),
@@ -1034,6 +1102,8 @@ def parse_env_vars():
             found.add(m.group(1))
         for m in ENV_BY_NAME_RE.finditer(text):
             found.add(m.group(1))
+        for m in ENV_PAIR_BY_NAME_RE.finditer(text):
+            found.update(m.groups())
     return found | ENV_DYNAMIC
 
 
@@ -1136,9 +1206,9 @@ EXT_DESC = {
     "CODEX_CWD": ("Codex / Claude integration", "Working directory reported by the Codex frontend."),
     "CODEX_THREAD_ID": ("Codex / Claude integration", "Codex conversation/thread id."),
     "CLAUDE_SESSION_ID": ("Codex / Claude integration", "Claude Code session id when aimee runs as its backend."),
-    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential used by the generic llm-chat sidecar; prefer the vault or a secret command."),
-    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the generic llm-chat sidecar."),
-    "SYNTHESIS_MODEL": ("Provider endpoints", "Model requested by the generic llm-chat sidecar."),
+    "SYNTHESIS_API_KEY": ("Provider credentials", "Bearer credential the KB presents to its configured synthesis endpoint; prefer Vault custody."),
+    "SYNTHESIS_ENDPOINT": ("Provider endpoints", "OpenAI-compatible base URL used by the KB, including a managed model-specific mTLS sidecar."),
+    "SYNTHESIS_MODEL": ("Provider endpoints", "Model identity the KB requests from its configured synthesis endpoint."),
     "SYNTHESIS_CA_FILE": ("Provider endpoints", "CA that verifies the synthesis sidecar's certificate on the kb -> aimee-llm hop. REPLACES the system trust store for that endpoint, so set it only for a sidecar the kb's own CA issued."),
     "SYNTHESIS_CERT_FILE": ("Provider endpoints", "Client certificate the kb presents to the synthesis sidecar, whose terminator requires one. Offered only to the host:port `SYNTHESIS_ENDPOINT` names."),
     "SYNTHESIS_KEY_FILE": ("Provider endpoints", "Private key for `SYNTHESIS_CERT_FILE`."),
@@ -1346,6 +1416,9 @@ AGENT_FIELD_DESC = {
     "enabled": "Whether the agent is active.",
     "provider": "Provider name.",
     "model": "Model name.",
+    "default_delegate": "Delegate this agent hands work to when a task arrives with no "
+    "explicit delegate. Lets a project pin its own worker without every caller passing "
+    "--delegate.",
     "endpoint": "Provider endpoint URL.",
     "backend": "Execution backend (http / cli / ssh / docker).",
     "api_key": "Inline API key (prefer `api_key_env` or the vault).",
@@ -1416,7 +1489,12 @@ AGENT_FIELD_RE = re.compile(r'cJSON_GetObjectItem(?:CaseSensitive)?\(\s*\w+\s*,\
 
 
 def parse_agent_fields():
-    f = SRC / "server" / "agent_config.c"
+    # DELIBERATELY the routing module only. An agent object is also parsed by
+    # src/modules/vault/agent_credentials.c, which reads the credential-bearing
+    # fields -- and the vault is an attack surface, so generated public docs do
+    # not enumerate what it holds or name the file that reads it. Operators who
+    # need those field names have `aimee agent setup`, which prompts for them.
+    f = SRC / "modules" / "routing" / "agent_config.c"
     if not f.exists():
         return set()
     return set(AGENT_FIELD_RE.findall(f.read_text(encoding="utf-8")))
@@ -1431,7 +1509,8 @@ def render_config_files(agent_fields):
            "### `agents.json`: agent / model definitions",
            "",
            "`{\"default_agent\": \"<name>\", \"agents\": [ {<agent>}, … ]}`. Each agent "
-           "object's fields (scanned from `src/server/agent_config.c`):",
+           "object's non-credential fields (credential fields are vault-held and "
+           "deliberately not enumerated here):",
            "",
            "| Field | Description |",
            "|-------|-------------|"]
@@ -1496,21 +1575,81 @@ def render_limitations():
     ]).rstrip() + "\n"
 
 
+def _require(what: str, rows, source: str):
+    """Refuse to emit a document a parser came back empty for.
+
+    Every extractor here scrapes C source with a regex, so a rename on the C
+    side does not break the parse -- it silently matches NOTHING, and the
+    generator writes a hollow document and exits 0. That is exactly what
+    happened when the CLI command rows moved and their tier enum was renamed
+    from CLIENT_TIER_ to AIMEE_CMD_TIER_: docs/gen/cli-commands.md went from 812
+    lines to 8 with no error, and docs-gen-check would have reported it as an
+    ordinary content change because all it does is diff the output against git.
+
+    An empty extraction is never a legitimate state for any of these tables, so
+    treat it as the failure it is and name the source file, which is where the
+    rename will be.
+    """
+    if not rows:
+        raise SystemExit(
+            f"gen-reference-docs: FAIL - parsed 0 {what} from {source}. "
+            "The extractor matched nothing, which usually means the C side was "
+            "renamed. Fix the pattern rather than committing an empty document."
+        )
+    return rows
+
+
+
+def _plant_test():
+    """Prove the generator REFUSES a source it cannot parse.
+
+    Every extractor here scrapes C with a regex, so a rename on the C side does
+    not break the parse -- it matches nothing, and the generator writes a hollow
+    document and exits 0. That is not hypothetical: when the CLI rows moved and
+    their tier enum was renamed, docs/gen/cli-commands.md went from 812 lines to
+    8 with no error, and docs-gen-check would have reported it as an ordinary
+    content change.
+
+    Plant that exact regression -- rename the tier token -- and require a
+    failure.
+    """
+    global _CLI_ROWS_TEXT
+    real = (SRC / "server" / "cli_command_defs_data.h").read_text(encoding="utf-8")
+    _CLI_ROWS_TEXT = real.replace("AIMEE_CMD_TIER_", "PLANTED_RENAMED_TIER_")
+    try:
+        _require("CLI commands", parse_cli_commands(), "planted source")
+    except SystemExit:
+        print("gen-reference-docs: plant-test ok (unparseable source refused)")
+        return 0
+    finally:
+        _CLI_ROWS_TEXT = None
+    print("gen-reference-docs: PLANT FAIL - a source that parsed to nothing did NOT "
+          "fail; the generator would emit an empty document", file=sys.stderr)
+    return 1
+
+
 def main():
+    if "--plant-test" in sys.argv:
+        return _plant_test()
     check = "--check" in sys.argv
     GEN.mkdir(parents=True, exist_ok=True)
-    cli = render_cli(parse_cli_commands())
-    fields = parse_config_fields()
+    cli = render_cli(_require("CLI commands", parse_cli_commands(),
+                              "src/server/cli_command_defs_data.h"))
+    fields = _require("config fields", parse_config_fields(), "external config module")
     sections, flat = parse_config_sections()
+    _require("config sections", sections, "external config module")
     # a key that is a CLI-settable scalar (or a section name) is not also a stray
     # "other top-level" key: subtract both so nothing is double-listed.
     flat = flat - {k for k, _, _ in fields} - set(sections)
     cfg = render_config(fields, sections, flat)
     cfg = (cfg.rstrip() + "\n\n"
-           + render_env(parse_env_vars()).rstrip() + "\n\n"
-           + render_external_env(parse_external_env()).rstrip() + "\n\n"
-           + render_workflow(parse_block_catalog(), parse_engine_default_rounds()).rstrip() + "\n\n"
-           + render_config_files(parse_agent_fields()).rstrip() + "\n\n"
+           + render_env(_require("env vars", parse_env_vars(), "src/")).rstrip() + "\n\n"
+           + render_external_env(_require("external env vars", parse_external_env(),
+                                          "src/")).rstrip() + "\n\n"
+           + render_workflow(_require("workflow blocks", parse_block_catalog(), "src/"),
+                             parse_engine_default_rounds()).rstrip() + "\n\n"
+           + render_config_files(_require("agent fields", parse_agent_fields(),
+                                          "src/")).rstrip() + "\n\n"
            + render_limitations())
     targets = {GEN / "cli-commands.md": cli, GEN / "configuration.md": cfg}
 

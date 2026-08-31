@@ -1,10 +1,14 @@
 # Proposal: make module ownership drive source, builds, config, and documentation
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
-> [`module-runtime-source-ownership-and-build-residual.md`](../pending/module-runtime-source-ownership-and-build-residual.md).
+> [`module-runtime-source-ownership-and-build-residual.md`](module-runtime-source-ownership-and-build-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
   C-core / separate-module-program boundary and the shared-memory event bus. The amendment adds the
   polyglot build, the event contract schema, the single in-source bus host and the bus-client spec
   with C and Go reference clients, bus ownership, and dependency enforcement over the bus; it reopens
@@ -33,7 +37,7 @@ composition, listeners, lifecycle, and generic dispatch. `src/base`, `src/platfo
 code remain deliberately small and may not absorb feature logic.
 
 The migration removes feature implementation from `src/`, `src/server/`, `src/kb/`, `src/db1/`,
-`src/db2/`, and `src/headers/`. Database files move by owning capability, not by database number.
+`src/modules/db2/c/`, and `src/headers/`. Database files move by owning capability, not by database number.
 Temporary forwarding headers and root allowlists have owners, expiries, and may only shrink.
 
 **Language boundary (2026-07-23 amendment).** Under the suite amendment, the communication core is C
@@ -73,12 +77,12 @@ declaration must be complete enough that a client which has never heard of the m
 and dispatch its surfaces from the declaration alone: for a command, the verb and subcommand path,
 the argument and flag schema with types and defaults, one-line and long help, tier, hidden flag, and
 aliases; for a tool, the name, description, and JSON input schema; for a route, the method and path;
-for a web surface, its identifier. Declarations are **declarative only** — a descriptor may not
+for a web surface, its identifier. Declarations are **declarative only**. A descriptor may not
 declare executable content, a template language, a code reference, a client-side handler binding, or
 a surface requiring client-local execution, and the validator rejects each. This proposal owns the
-declarations; [`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md)
+declarations; [`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md)
 exclusively owns their projected wire form, the registration chain that carries them, and the
-client-side compatibility rules — and its projection must be derived from these declarations, never
+client-side compatibility rules, and its projection must be derived from these declarations, never
 authored separately.
 
 Optional modules are physically absent from the selected object and capability closure when
@@ -154,8 +158,7 @@ core-contract audit test proves the ledger remains required independently of gov
 
 ## Event contract schema and the bus (2026-07-23 amendment)
 
-`module-runtime` owns the shared-memory event bus and its schema registry. The bus has two sides —
-the **bus host** and the **bus client** — and only one of them is a public, reimplementable spec:
+`module-runtime` owns the shared-memory event bus and its schema registry. The bus has two sides (the **bus host** and the **bus client**) and only one of them is a public, reimplementable spec:
 
 - **The bus host is a single implementation in the core source, in C.** It owns the shared segment,
   the admission/handle handshake, observer routing, and the governance/audit tap. Only the two
@@ -172,14 +175,14 @@ the **bus host** and the **bus client** — and only one of them is a public, re
 Two independent client references, **not one**, are what keep the bus-client spec honest: a
 cross-language conformance suite runs shared wire-vector fixtures against both C and Go, and an
 interop test drives the single in-source bus host with both a C and a Go client on one segment,
-exchanging events in both directions. Passing the same vectors is what makes "any language" credible
-— a third-language client is written against the spec and the vectors, not by reading a reference.
+exchanging events in both directions. Passing the same vectors is what makes "any language" credible.
+A third-language client is written against the spec and the vectors, not by reading a reference.
 Each module declares its event contract in the descriptor: the event kinds it **publishes**, the
 kinds it **subscribes to**, and the kinds it may **request** (correlated request/reply). The
 generator emits, from those declarations, the typed event stubs and a publisher/subscriber edge map. An event kind has
 exactly one owning publisher module; a request kind has exactly one serving module. The bus
 authorizes and taps every event through the trust kernel (see
-[`governance-attestable-enforcement.md`](governance-attestable-enforcement.md)); no module-to-module
+[`governance-attestable-enforcement.md`](../pending/governance-attestable-enforcement.md)); no module-to-module
 path exists outside it.
 
 `memory` is a sink: its descriptor may declare no request or subscribe edge to any other feature
@@ -189,9 +192,9 @@ edge fail validation with descriptor/kind ownership evidence.
 
 **Execution model (shared invariant 19).** Core and every module are separate programs; there is no
 cross-language linking and no cgo. A trusted first-party module runs as its own process, mapped to
-only its authorized bus queues. An untrusted external or user module runs under an enforced sandbox —
+only its authorized bus queues. An untrusted external or user module runs under an enforced sandbox,
 an OS-sandboxed process (seccomp/namespaces/container, any language) or a WebAssembly instance in a
-host — reachable only through its authorized bus queues and unable to read core, `vault`, or another
+host, reachable only through its authorized bus queues and unable to read core, `vault`, or another
 module's memory. The sandbox mechanism is a deployment choice; the bus contract and admission are
 identical across them. Native Go plugin loading is not used. `module-loader` owns artifact
 verification, the sandbox host(s), and lifecycle.
@@ -199,8 +202,8 @@ verification, the sandbox host(s), and lifecycle.
 **Bus admission (shared invariant 17).** `module-runtime` is the sole admission authority for its
 service's shared-memory bus. The shared segment is not mappable by an arbitrary process: core grants
 a module its handle and its own queue mappings only when the module is installed and registered, its
-identity/artifact is attested — reusing the vault principal and `cert:CN`/bearer classes and, for
-external modules, `governance` artifact trust, not a second scheme — and `execution-policy` authorizes
+identity/artifact is attested, reusing the vault principal and `cert:CN`/bearer classes and, for
+external modules, `governance` artifact trust, not a second scheme, and `execution-policy` authorizes
 it. A refused module is not started and holds no handle; the refusal is audited. Admission is
 least-privilege, so an admitted module still reaches only its declared, authorized event kinds.
 
@@ -208,7 +211,7 @@ least-privilege, so an admitted module still reaches only its declared, authoriz
 `module-runtime` maintains, per event kind, the set of registered authorized observers and routes
 each event only to that set; a request and its reply are delivered point-to-point to the serving
 module and the requester. A subscription is admitted only when the descriptor declares the subscribe
-edge and `execution-policy` authorizes it for the module's principal — there is no all-events
+edge and `execution-policy` authorizes it for the module's principal. There is no all-events
 subscription for any module, and an undeclared or unauthorized subscription is refused, fail-closed
 and audited. The sole full-stream observer is core's governance/audit tap, which is trust-kernel
 infrastructure, not a feature module.
@@ -220,12 +223,12 @@ infrastructure, not a feature module.
 - **Capability publication.** A module publishes its capabilities and state transitions to core over
   the bus at registration and as they change; core aggregates them into the capability closure and
   the advertisement projection
-  ([`thin-client-capability-advertisement.md`](thin-client-capability-advertisement.md)). Core does
+  ([`thin-client-capability-advertisement.md`](../pending/thin-client-capability-advertisement.md)). Core does
   not poll a module for its capabilities. A module that registers without publishing a capability
   contract, or that serves an event kind it never advertised, fails validation.
 - **Dependency-complete installation (hard) and soft dependencies.** Each descriptor declares its
   module dependencies as **hard** or **soft**. The installer/profile generator computes the hard
-  dependency closure and refuses — fail closed, naming the missing module — any install or selection
+  dependency closure and refuses (fail closed, naming the missing module) any install or selection
   that would leave a hard dependency uninstalled, and refuses any removal that would strand an
   installed hard dependent; this is an install-time precondition distinct from runtime readiness, and
   `memory`, as near-universal hard dependency, orders first. A **soft** dependency declares a
@@ -257,7 +260,7 @@ Dependency enforcement combines two graphs. For the C core: compiler depfiles, p
 markers, public AST/type references, generated-header producer edges, and selected-object symbol
 edges; public headers may include only declared public dependencies. For modules: the declared event
 publish/subscribe/request edges, plus each language's own intra-module import check where available,
-so a module may reach another participant only through the generated event stubs over the bus — never
+so a module may reach another participant only through the generated event stubs over the bus, never
 by importing another module's source or linking its artifact. Across both: cross-module linkage,
 undeclared edges, cycles, and core-to-optional edges fail with file/line/symbol or
 descriptor/event-kind ownership evidence.

@@ -7,6 +7,12 @@ Use **Edit Workflows** to define the graph. Use **Workflows** to submit a propos
 run. Definitions are instance-wide files under `$AIMEE_HOME/workflows`. The project picker changes
 browser context, not the definition namespace.
 
+All signed-in users can inspect definitions and validate an in-browser draft. Because definitions
+and custom blocks affect every future run on the instance, only the appliance administrator can
+persist, delete, or edit them globally. The editor marks persistence and custom-block mutation
+controls unavailable for other users, who may still inspect or validate an unsaved local draft;
+both the web proxy and workflow service enforce the global-write boundary.
+
 ![The Edit Workflows page with a four-node review graph, the block palette, and colored transition edges](images/workflow-editor-graph.png)
 
 ## Choose a shipped workflow
@@ -47,6 +53,64 @@ edge and read `plan.out` through `in.src`.
 The canvas renders `next` in gray, `on_pass` in green, `on_fail` in red, and input bindings as a
 lighter dotted line. Dragging a card only changes the current canvas layout. Coordinates are not part
 of the definition, so the editor lays out the graph again when it is reopened.
+
+## Execution and verification harness
+
+The workflow harness owns orchestration, not model credentials or module policy.
+It persists the pinned definition and transition state, dispatches work through
+the server resource plane, confines mutations to a worktree, and refuses to
+advance an implementation node until its configured verification path returns.
+
+```mermaid
+flowchart TB
+    START[trigger or API admission]
+
+    subgraph WFE[aimee-wfe workflow harness]
+        ADMIT[validate and pin input,<br/>definition, and block catalog]
+        SCHED[durable scheduler]
+        RUN[NativeRunner implementation step]
+        WT[isolated branch and worktree]
+        VERIFY[repository verifier]
+        SELECT[admitted-regression selector<br/>exact-path-v1]
+        MANIFEST[revision + diff digest +<br/>selected/excluded reasons]
+        TEMP[temporary suites containing<br/>ledger-matching task bytes only]
+        EVAL[existing eval runner]
+        RESULT[typed step result<br/>advance, changes, pending, or error]
+    end
+
+    subgraph SERVER[aimee-server daemon]
+        RESOURCE[typed agent / roundtable<br/>resource operations]
+        BUS[server event-bus host]
+        MODS[supervised policy and<br/>resource modules]
+        STORE[aimee store module]
+    end
+
+    DB1[(DB1 workflow, lifecycle,<br/>and eval-candidate rows)]
+
+    START --> ADMIT -->|persist before dispatch| BUS
+    BUS <--> STORE --> DB1
+    ADMIT --> SCHED --> RUN
+    RUN --> WT
+    RUN -->|delegate and review work| RESOURCE <--> BUS
+    BUS <--> MODS
+    WT --> VERIFY --> SELECT
+    SELECT -->|read admitted candidates| BUS
+    SELECT --> MANIFEST
+    MANIFEST -->|observe: attach evidence only| RESULT
+    MANIFEST -->|enforce: complete selection required| TEMP --> EVAL --> RESULT
+    RUN --> RESULT
+    RESULT -->|atomic lifecycle transition| BUS
+```
+
+The standard repository verifier runs first. `admitted_regressions: observe`
+then records a deterministic selection manifest without changing routing. In
+`enforce`, a truncated candidate scan, stale admitted bytes, invalid task, runner
+failure, or failed selected suite returns requested changes instead of advancing.
+No unselected task is copied into the temporary suite.
+
+The event bus in this diagram carries typed state and resource calls. Repository
+diffs, worktree files, and evaluation case bodies remain in the harness-owned
+filesystem boundary; they are not published as bus event bodies.
 
 ## Build a graph in the browser
 
@@ -142,6 +206,40 @@ When a review or roundtable keeps requesting changes, exhaustion parks the run a
 exhausted. A runner error, terminal block failure, or pending external condition can park or reject
 without following `on_fail`, so `on_fail` is not a general exception handler. Run-level spend, turn,
 wall-clock, concurrency, and resume limits remain additional backstops.
+
+Blocker-set comparison is versioned and deterministic. Finding IDs are excluded;
+the gate, persona, severity, location, and summary are normalized, hashed, sorted,
+and deduplicated. This lets the lifecycle distinguish strict progress from a
+renumbered or reordered review.
+
+```mermaid
+flowchart TD
+    F[requested-change feedback] --> N[normalize blocker fingerprints<br/>plus artifact and feedback hashes]
+    N --> P[load prior convergence row]
+    P --> B{both blocker sets valid?}
+    B -->|no| L[legacy exact artifact +<br/>feedback hash comparison]
+    B -->|yes| C[classify strict subset, equal,<br/>superset, or churn]
+    C --> M{mode is enforce?}
+    M -->|no: observe| L
+    M -->|yes| S{strict subset?}
+    S -->|yes: progress| R[reset consecutive repeats]
+    S -->|no| I[increment consecutive repeats]
+    L --> H{exact hashes repeated?}
+    H -->|yes| I
+    H -->|no| R
+    R --> W[persist current hashes, set,<br/>relationship, and counters]
+    I --> W
+    W --> Q{repeat or round limit reached?}
+    Q -->|repeat limit| NP[park: convergence_no_progress]
+    Q -->|round limit| CL[park: convergence_limit]
+    Q -->|neither| LOOP[follow requested-change edge]
+```
+
+The shipped workflows currently use `blocker_convergence: observe`: relationships
+are recorded for calibration while the established exact-hash rule still decides
+the repeat counter. Enforcement can be enabled per node after that evidence shows
+the normalized set is stable enough; if either round lacks a structured set, the
+legacy rule remains authoritative.
 
 ## Compose a graph from child workflows
 
@@ -270,14 +368,28 @@ Other source names can be displayed by the UI but are reported as unsupported by
 
 You can configure a watched directory in either place:
 
-- **Configure a rule.** Add it under `trigger_rules` in `aimee.yaml` or use the **Workflows** trigger panel.
-- **Configure the graph.** Make `trigger.watch-dir` the start node and set `params.workspace`.
+- select **Workflows → Triggers → + New trigger** as the appliance administrator, then choose the
+  repository or an absolute server-visible checkout path, saved workflow, watched directory,
+  optional branch/ref, mode, and spend cap;
+- add a rule under `trigger_rules` in `aimee.yaml` when repairing an invalid registry or managing it
+  as configuration;
+- make `trigger.watch-dir` the workflow's start node and set its `params.workspace`.
+
+The browser keeps a new trigger as a draft until an explicit save succeeds, uses optimistic
+versioning to avoid overwriting another operator, and makes graph-native triggers read-only. Other
+users can inspect automatic starts but cannot change the global registry. The registry accepts at
+most 32 rules and rejects repository traversal, option-shaped Git refs, invalid run modes, and
+negative or non-finite spend caps.
 
 A graph-native trigger without `params.workspace` is saved but disarmed. `params.dir` defaults to
 `docs/proposals/pending`; `params.ref` defaults to the refreshed remote default ref; and
 `params.max_spend_usd` sets the admitted run's spend ceiling. The scanner reads committed, visible
 Markdown files from the selected git ref, deduplicates the proposal bytes with workflow and mode,
 and retries admission on a later scan when the concurrency cap is full.
+
+The definition validator checks graph-native trigger parameter types, directory confinement, Git
+ref safety, run mode, and spend cap when the workflow is authored. Invalid trigger nodes therefore
+fail **Validate** or **Save** instead of becoming a repeating scanner error.
 
 Setting `trigger.max_concurrent` to `0` pauses new trigger and browser-submit admission. It does not
 remove the cap.

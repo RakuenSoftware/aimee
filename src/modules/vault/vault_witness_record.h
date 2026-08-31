@@ -12,7 +12,7 @@
  * so a copy retained off-host can be compared byte-for-byte against the local
  * store. A bug in encoding or digesting produces evidence that looks well-formed
  * locally yet is worthless for comparison, so the format is fixed here, matched
- * by the SQL side (`src/db2/schema.sql`), and pinned by stored test vectors.
+ * by the SQL side (`src/modules/db2/c/schema.sql`), and pinned by stored test vectors.
  *
  * This module is pure and production-uninvoked in E1: it has no database, no I/O,
  * and is not reachable from admission, the reseal orchestrator, or any route.
@@ -28,13 +28,13 @@ extern "C"
  * tell them apart; an unknown value is rejected, never ignored. */
 typedef enum
 {
-   VAULT_WITNESS_SRC_AUDIT = 0, /* kb_audit_event: hash-chained, has a predecessor */
+   VAULT_WITNESS_SRC_AUDIT = 0, /* legacy/external audit source with predecessor */
    VAULT_WITNESS_SRC_REWRAP = 1, /* kb_vault_rewrap_worm: no source predecessor link */
    VAULT_WITNESS_SRC_OPEN = 2    /* kb_vault_open_event: row hash, no predecessor link */
 } vault_witness_source_t;
 
 /* Field caps. Tenant/provider are bounded shard-key components; actor matches the
- * existing kb_audit_event actor bound (575). These are validated by the decoder. */
+ * legacy audit actor bound (575). These are validated by the decoder. */
 #define VAULT_WITNESS_TENANT_MAX 128
 #define VAULT_WITNESS_PROVIDER_MAX 128
 #define VAULT_WITNESS_SOURCE_ID_MAX 256
@@ -56,7 +56,7 @@ typedef enum
  * audit ledger (the one with a real predecessor); for rewrap/open it is 0 and
  * `source_pred_hash` must be all-zero. `is_first_in_shard` is 1 only for
  * shard_seq==1, where `witness_pred_hash` must equal the genesis sentinel. */
-typedef struct
+typedef struct vault_witness_record
 {
    vault_witness_source_t source;
    uint64_t seal_epoch;

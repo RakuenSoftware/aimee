@@ -1,3 +1,4 @@
+#include "support/delegate_role_seam_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -8,11 +9,10 @@
 
 extern char test_vault_server_codex_oauth[4096];
 void test_oauth_tokens_reset(void);
-#include <sqlite3.h>
 #include "aimee.h"
-#include "db.h"
-#include "db_schema.h"
-#include "db1.h"
+#include "db1_client/db1.h"
+#include "support/store_module_fixture.h"
+#include "db1_client/execution_trace.h"
 #include "agent.h"
 #include "agent_config.h"
 #include "runtime_secret.h"
@@ -30,6 +30,8 @@ void test_oauth_tokens_reset(void);
 #include "cJSON.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
+#include <aimee/audit/audit_action.h>
+#include <aimee/audit/audit_worm.h>
 
 void test_agent_route_with_caps_honors_tools_enabled(void);
 void test_agent_route_with_caps_honors_context_override(void);
@@ -74,6 +76,7 @@ void test_responses_object_folds_in_streamed_function_call(void);
 void test_responses_object_keeps_existing_function_call(void);
 void test_responses_object_keeps_existing_text(void);
 void test_ir_parse_responses_tool_call(void);
+void test_ir_parse_responses_namespaced_tool_call(void);
 void test_ir_parse_responses_text_only(void);
 void test_responses_parser_uses_output_text_done(void);
 void test_responses_parser_separates_message_items(void);
@@ -462,6 +465,14 @@ static void test_agent_route(void)
    cfg.agents[1].cost_tier = 2;
    cfg.agents[1].enabled = 1;
    assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   /* A delegate preference is independent from the primary default and may
+    * intentionally choose a dearer local/default worker. */
+   strcpy(cfg.default_delegate, "expensive");
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[1]);
+   cfg.agents[1].enabled = 0;
+   assert(agent_route(&cfg, "summarize") == &cfg.agents[0]);
+   cfg.agents[1].enabled = 1;
+   cfg.default_delegate[0] = '\0';
    cfg.agents[1].cost_tier = 0;
    /* Equal eligible peers are both used despite an explicit primary default. */
    agent_t *first = agent_route(&cfg, "summarize");
@@ -508,6 +519,84 @@ static int test_route_selector(int randomized, uint32_t candidate_count, uint32_
    return 0;
 }
 
+static void test_route_authority_refuses_without_provider(void)
+{
+   agent_config_t cfg;
+   memset(&cfg, 0, sizeof(cfg));
+   cfg.agent_count = 2;
+   for (int i = 0; i < 2; i++)
+   {
+      snprintf(cfg.agents[i].name, sizeof(cfg.agents[i].name), "peer%d", i);
+      strcpy(cfg.agents[i].roles[0], "review");
+      cfg.agents[i].role_count = 1;
+      cfg.agents[i].enabled = 1;
+      cfg.agents[i].cost_tier = 0;
+   }
+   /* No authority yet: the built-in balancer serves equal peers. */
+   agent_reset_route_selection_authority();
+   assert(agent_route(&cfg, "review") != NULL);
+   /* Declare an authority, then lose the provider. The daemon must refuse
+    * rather than quietly resume the built-in balancer under a different
+    * policy than the operator deployed. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   /* The refusal must be legible as a routing fault, not as an empty roster:
+    * that distinction is the whole reason the flag exists. */
+   assert(agent_route_last_was_module_fault());
+   /* Dropping the authority drops the fault with it: a later empty roster must
+    * not inherit this outage and be reported as one. */
+   agent_reset_route_selection_authority();
+   assert(!agent_route_last_was_module_fault());
+   assert(agent_route(&cfg, "review") != NULL);
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) != -1);
+   /* The role picker is the second seam with the same shape. Exercise it from a
+    * cleared flag so this asserts the picker's own bookkeeping and not a fault
+    * left behind by agent_route above -- a delegate that routes through here
+    * would otherwise still be told the roster was empty. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(!agent_route_last_was_module_fault());
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
+   /* The words an operator actually reads. Every caller renders a failed route
+    * through this one helper, so this is where the two cases are pinned: each
+    * site that spelled the message itself got the distinction wrong. */
+   char why[256];
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "routing module unavailable") != NULL);
+   assert(strstr(why, "no agent available") == NULL);
+   agent_reset_route_selection_authority();
+   agent_route_failure_message("review", why, sizeof(why));
+   assert(strstr(why, "no agent available for role") != NULL);
+   assert(strstr(why, "routing module unavailable") == NULL);
+
+   /* A seat that is produced WITHOUT consulting the provider still clears the
+    * latch. The single-candidate shortcut returns before the provider is asked,
+    * so clearing only on provider success left the fault latched after the
+    * module came back -- and the next genuinely empty roster then read as an
+    * outage. */
+   agent_set_route_selection_provider(test_route_selector);
+   agent_set_route_selection_provider(NULL);
+   assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   agent_config_t one;
+   memset(&one, 0, sizeof(one));
+   one.agent_count = 1;
+   snprintf(one.agents[0].name, sizeof(one.agents[0].name), "solo");
+   strcpy(one.agents[0].roles[0], "review");
+   one.agents[0].role_count = 1;
+   one.agents[0].enabled = 1;
+   one.agents[0].cost_tier = 0;
+   /* Deliberately NO reset here: the latch has to still be set going in, or this
+    * asserts nothing. One candidate needs no selection, so the shortcut answers
+    * before the authority is consulted -- and that success must clear the latch. */
+   assert(agent_route_last_was_module_fault());
+   assert(agent_route(&one, "review") == &one.agents[0]);
+   assert(!agent_route_last_was_module_fault());
+   agent_reset_route_selection_authority();
+}
+
 static void test_agent_route_selection_provider(void)
 {
    agent_config_t cfg;
@@ -538,13 +627,24 @@ static void test_agent_route_selection_provider(void)
     * or invalid reply cannot silently resurrect the old in-process decision. */
    g_route_selector_fail = 1;
    assert(agent_route(&cfg, "review") == NULL);
+   assert(agent_route_last_was_module_fault());
+   /* Clear via a successful pick, so the role-picker assertion below is about
+    * that seam rather than the fault agent_route just recorded. */
+   g_route_selector_fail = 0;
+   assert(delegate_pick_for_role(&cfg, "review", NULL, 0) >= 0);
+   assert(!agent_route_last_was_module_fault());
+   g_route_selector_fail = 1;
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
+   assert(agent_route_last_was_module_fault());
 
    g_route_selector_fail = 0;
    g_route_selector_pick = 2;
    assert(agent_route(&cfg, "review") == NULL);
    assert(delegate_pick_for_role(&cfg, "review", NULL, 0) == -1);
-   agent_set_route_selection_provider(NULL);
+   /* Drop the latched authority too: a plain provider=NULL now REFUSES rather
+    * than silently resuming the built-in balancer, which is the whole point of
+    * the latch. Only a suite may undo it. */
+   agent_reset_route_selection_authority();
 }
 
 /* The OpenAI Chat and Responses tool surfaces are generated from one builtin
@@ -616,12 +716,12 @@ static void test_tool_surface_single_source(void)
    cJSON_Delete(resp);
 }
 
-static void test_current_code_only_role_tool_policy(void)
+static void test_knowledge_write_gates_the_tool_policy(void)
 {
-   assert(agent_tools_role_current_code_only("review") == 1 &&
-          agent_tools_role_current_code_only("diagnose") == 1);
-   assert(agent_tools_role_current_code_only("inspect") == 1 &&
-          agent_tools_role_current_code_only("validate") == 0);
+   /* The carried permission, not the role, is what the tool policy reads. */
+   agent_tools_knowledge_write_set(0);
+   assert(agent_tools_tool_allowed_for_role("diagnose", "search_memory") == 0);
+   agent_tools_knowledge_write_set(1);
    assert(agent_tools_tool_allowed_for_role("validate", "bash") == 1);
    assert(agent_tools_tool_allowed_for_role("validate", "write_file") == 0);
    assert(agent_tools_tool_allowed_for_role("search", "bash") == 0);
@@ -657,9 +757,122 @@ static void test_current_code_only_role_tool_policy(void)
    cJSON_Delete(tools);
 }
 
-static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
+/* A delegate that does not hold `shell` cannot run commands, whatever toolset it
+ * was given.
+ *
+ * The independence is the point. A toolset comes from a map keyed on the role
+ * NAME, so a role an operator defined without `shell` still resolves to one
+ * carrying bash. `code` is used here for exactly that reason: it is a role whose
+ * toolset has bash, and the permission is what refuses it.
+ */
+/* A permission the delegate does not hold withholds its tools, whatever toolset
+ * the role resolved to.
+ *
+ * `code` is the case that mattered: its toolset carries write_file, and a role
+ * an operator defined under that name without repo_write used to be handed it
+ * anyway. The advertised array and the dispatch check read the SAME list, so
+ * what is offered and what is allowed cannot disagree -- both are asserted.
+ *
+ * WHICH tool needs which permission is the module's list, pinned against the
+ * module in server-go/modules/delegates/toolpermissions_test.go. */
+/* One delegate's permissions must not become another's.
+ *
+ * Delegate turns run on pooled worker threads and overlap by design, so these
+ * carriers are thread-local. They were not when they were written, which is the
+ * bug this pins: a confined delegate would be silently un-confined by whichever
+ * concurrent turn wrote last. The same defect was measured once for the active
+ * toolset -- three of four turns resolved the last writer's -- and the fix there
+ * is the reason this one is stated.
+ */
+static void *permission_posture_thread(void *unused)
+{
+   (void)unused;
+   /* A second turn, withholding everything. */
+   agent_tools_knowledge_write_set(0);
+   agent_tools_shell_set(0);
+   static const char *const denied[] = {"read_file"};
+   agent_tools_denied_set(denied, 1);
+
+   assert(agent_tools_knowledge_write_allowed() == 0);
+   assert(agent_tools_shell_allowed() == 0);
+   assert(agent_tools_tool_denied("read_file") == 1);
+   return NULL;
+}
+
+static void test_one_delegates_permissions_are_not_anothers(void)
+{
+   agent_tools_knowledge_write_set(1);
+   agent_tools_shell_set(1);
+   agent_tools_denied_set(NULL, 0);
+
+   pthread_t t;
+   assert(pthread_create(&t, NULL, permission_posture_thread, NULL) == 0);
+   assert(pthread_join(t, NULL) == 0);
+
+   /* This turn is untouched by the other one. */
+   assert(agent_tools_knowledge_write_allowed() == 1);
+   assert(agent_tools_shell_allowed() == 1);
+   assert(agent_tools_tool_denied("read_file") == 0);
+   printf("  PASS: test_one_delegates_permissions_are_not_anothers\n");
+}
+
+static void test_permissions_clamp_the_toolset(void)
+{
+   static const char *const denied[] = {"write_file", "edit_file", "git_push"};
+   agent_tools_denied_set(denied, 3);
+
+   /* Offered: the tool is gone from the array a `code` delegate is handed. */
+   cJSON *tools = build_tools_array();
+   assert(tools_array_has_name(tools, "write_file"));
+   agent_tools_filter_for_role(tools, "code");
+   assert(!tools_array_has_name(tools, "write_file"));
+   assert(!tools_array_has_name(tools, "edit_file"));
+   /* And what the permission does NOT withhold survives the same filter. */
+   assert(tools_array_has_name(tools, "read_file"));
+   cJSON_Delete(tools);
+
+   /* Allowed: and the same answer at the gate that runs it. */
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 0);
+   assert(agent_tools_tool_allowed_for_role("code", "read_file") == 1);
+
+   /* Withholding nothing restores it: the clamp is the list, not the role. */
+   agent_tools_denied_set(NULL, 0);
+   assert(agent_tools_tool_allowed_for_role("code", "write_file") == 1);
+   printf("  PASS: test_permissions_clamp_the_toolset\n");
+}
+
+static void test_a_delegate_without_shell_cannot_run_commands(void)
+{
+   agent_tools_set_dispatch_role("code");
+   agent_tools_shell_set(0);
+
+   char *result = dispatch_tool_call("bash", "{\"command\":\"ls\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   result = dispatch_tool_call("execute_script", "{\"body\":\"echo hi\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") != NULL);
+   free(result);
+
+   /* Holding it, the refusal is gone: whatever bash does next, it is not this. */
+   agent_tools_shell_set(1);
+   result = dispatch_tool_call("bash", "{\"command\":\"true\"}", 1000);
+   assert(result != NULL);
+   assert(strstr(result, "`shell` permission") == NULL);
+   free(result);
+
+   agent_tools_set_dispatch_role(NULL);
+   printf("  PASS: test_a_delegate_without_shell_cannot_run_commands\n");
+}
+
+static void test_withheld_knowledge_write_blocks_stale_context_tools(void)
 {
    agent_tools_set_dispatch_role("diagnose");
+   /* Withheld knowledge_write is what closes these doors, and it is carried
+    * into the run rather than worked out per call. */
+   agent_tools_knowledge_write_set(0);
 
    char *result = dispatch_tool_call("find_symbol", "{\"identifier\":\"main\"}", 1000);
    assert(result != NULL);
@@ -676,6 +889,7 @@ static void test_current_code_only_dispatch_blocks_stale_context_tools(void)
    assert(strstr(result, "mutating or broad aimee context commands are disabled") != NULL);
    free(result);
 
+   agent_tools_knowledge_write_set(1);
    agent_tools_set_dispatch_role(NULL);
 }
 
@@ -776,7 +990,8 @@ static void test_codex_oauth_reads_vault_only(void)
    char saved_home[600] = "";
    if (old_home)
       snprintf(saved_home, sizeof(saved_home), "%s", old_home);
-   char dir[] = "/tmp/aimee-codex-home.XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-codex-home.XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(dir) != NULL);
    char sub[512], authpath[600];
    snprintf(sub, sizeof(sub), "%s/.codex", dir);
@@ -870,7 +1085,8 @@ static void test_agent_config_provider_cli_roundtrip(void)
    {
       FILE *f = fopen(agent_config_path(), "w");
       assert(f != NULL);
-      fputs("{\"agents\":[{\"name\":\"codex-cli\",\"roles\":[\"code\"],"
+      fputs("{\"default_delegate\":\"codex-cli\",\"agents\":[{\"name\":\"codex-cli\",\"roles\":["
+            "\"code\"],"
             "\"backend\":\"cli-stdio\",\"cli_kind\":\"codex\",\"cli_cmd\":\"codex\","
             "\"cli_idle_timeout_ms\":1234,\"session_reuse\":true},"
             "{\"name\":\"claude\",\"provider\":\"claude\",\"roles\":[\"code\"],"
@@ -896,6 +1112,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t loaded;
    assert(agent_load_config(&loaded) == 0);
    assert(loaded.agent_count == 6);
+   assert(strcmp(loaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(loaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(loaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(loaded.agents[0].cli_cmd, "codex") == 0);
@@ -943,6 +1160,7 @@ static void test_agent_config_provider_cli_roundtrip(void)
    agent_config_t reloaded;
    assert(agent_load_config(&reloaded) == 0);
    assert(reloaded.agent_count == 6);
+   assert(strcmp(reloaded.default_delegate, "codex-cli") == 0);
    assert(strcmp(reloaded.agents[0].backend, AGENT_BACKEND_PROVIDER_CLI) == 0);
    assert(strcmp(reloaded.agents[0].cli_kind, "codex") == 0);
    assert(strcmp(reloaded.agents[0].cli_cmd, "codex") == 0);
@@ -1288,17 +1506,36 @@ static void test_tool_bash(void)
 
 /* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on
  * the aimee-server host — that host is uid 0 with the docker socket mounted, so an
- * unsandboxed command is a host-root escalation. The test config's sandbox mode is
- * OFF (default), so tool_bash would otherwise fork on the host; with a delegation
- * active it must refuse instead. The primary session (no delegation) still runs. */
+ * unsandboxed command is a host-root escalation. With a delegation active tool_bash
+ * must refuse instead of forking on the host. The primary session (no delegation)
+ * still runs.
+ *
+ * The sandbox is OPTED OUT explicitly here rather than relying on the config default:
+ * the default is now SANDBOX_MODE_WORKSPACE_ONLY, so an inherited default no longer
+ * reaches the unsandboxed branch at all, and a test that depends on it would silently
+ * stop exercising the containment it exists to prove. `sandbox: {mode: off}` is also
+ * the realistic shape of this risk — an operator who turned isolation off. */
+/* Containment: a DELEGATE (untrusted model) must never run a shell UNSANDBOXED on the
+ * aimee-server host — that host is uid 0 with the docker socket mounted, so an
+ * unsandboxed command is a host-root escalation. With a delegation active tool_bash
+ * must refuse rather than fork on the host; the primary session still runs.
+ *
+ * The mode is forced through the test seam rather than through config. The mode now
+ * defaults to WORKSPACE_ONLY, and this binary cannot redirect config in-process (the
+ * config path resolves before a test can move HOME), so without the override this
+ * fail-closed branch would silently stop being exercised. */
 static void test_tool_bash_delegate_unsandboxed_refused(void)
 {
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_OFF);
+
    g_test_delegation_id = "test-deleg";
    char *result = tool_bash("echo escalated", 5000);
    assert(result != NULL);
    assert(strstr(result, "refused") != NULL);   /* fail-closed */
    assert(strstr(result, "escalated") == NULL); /* the command did NOT run */
    assert(strstr(result, "\"exit_code\":-1") != NULL);
+   /* Names the setting rather than blaming an "unavailable" sandbox. */
+   assert(strstr(result, "sandbox.mode=off") != NULL);
    free(result);
 
    /* The trusted primary (operator) session still runs on the host. */
@@ -1307,6 +1544,20 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
    assert(result != NULL);
    assert(strstr(result, "primary-ok") != NULL);
    free(result);
+
+   /* With the sandbox ON, the same delegated command is contained by ISOLATION
+    * instead of refusal — it runs, rather than being refused. This is the branch the
+    * new default puts real installs on, so it is asserted rather than assumed. */
+   sandbox_set_mode_override_for_test(SANDBOX_MODE_WORKSPACE_ONLY);
+   g_test_delegation_id = "test-deleg";
+   result = tool_bash("echo contained", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "refused") == NULL);
+   assert(strstr(result, "\"exit_code\":0") != NULL);
+   free(result);
+
+   g_test_delegation_id = NULL;
+   sandbox_set_mode_override_for_test(-1); /* restore production behaviour */
 }
 
 /* A write into a source checkout is redirected into an aimee-managed worktree
@@ -1320,7 +1571,7 @@ static void test_tool_bash_delegate_unsandboxed_refused(void)
 static void test_detached_skips_worktree_rewrite(void)
 {
    char repo[256];
-   snprintf(repo, sizeof(repo), "/tmp/det_wt_test.XXXXXX");
+   snprintf(repo, sizeof(repo), "%s/det_wt_test.XXXXXX", platform_tmpdir());
    assert(mkdtemp(repo) != NULL);
    char shellcmd[512];
    snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
@@ -1365,6 +1616,79 @@ static void test_detached_skips_worktree_rewrite(void)
           rc_detached);
 }
 
+/* The guardrail redirects a shell command into the session worktree by returning
+ * 3 with the rewritten line ("cd <worktree> && <cmd>") — the command-shaped twin
+ * of the rc==1 path rewrite. cmd_hooks.c applies both; the delegate tool dispatch
+ * applied only rc==1, so a rewrite arrived as "not 0" and was reported as a
+ * refusal, with the rewritten command as the reason. Every shell command a
+ * delegate ran came back "guardrail blocked: cd <worktree> && <cmd>" — `pwd` and
+ * `echo hello` included — so a delegate could edit files and never run one
+ * command. This pins the verdict and that it is applied, not refused. */
+static void test_shell_worktree_rewrite_is_applied_not_refused(void)
+{
+   char repo[256];
+   snprintf(repo, sizeof(repo), "%s/shell_wt_rw.XXXXXX", platform_tmpdir());
+   assert(mkdtemp(repo) != NULL);
+   char shellcmd[512];
+   snprintf(shellcmd, sizeof(shellcmd), "git init -q '%s' >/dev/null 2>&1", repo);
+   (void)system(shellcmd);
+
+   session_state_t state;
+   memset(&state, 0, sizeof(state));
+   strcpy(state.guardrail_mode, MODE_APPROVE);
+
+   workspace_provider_clear_active();
+   char msg[1024] = "";
+   int rc = pre_tool_check("bash", "{\"command\":\"pwd\"}", &state, MODE_APPROVE, repo, msg,
+                           sizeof(msg));
+
+   if (rc == 3)
+   {
+      /* The verdict carries a rewritten command, not a refusal reason. */
+      assert(strncmp(msg, "cd ", 3) == 0);
+      assert(strstr(msg, ".aimee") != NULL);
+      assert(strstr(msg, "pwd") != NULL);
+
+      /* End to end: the dispatch must APPLY that rewrite, not report it. Create
+       * the worktree the guardrail wants to redirect into, then run the same
+       * tool call through the real dispatch and require both that it was not
+       * refused and that the command actually ran there. Before the fix this
+       * returned "error: guardrail blocked: cd ... && pwd". */
+      char target[768] = "";
+      const char *start = msg + 3; /* past "cd " */
+      const char *end = strstr(start, " && ");
+      assert(end != NULL && (size_t)(end - start) < sizeof(target));
+      memcpy(target, start, (size_t)(end - start));
+      target[end - start] = '\0';
+      snprintf(shellcmd, sizeof(shellcmd), "mkdir -p '%s'", target);
+      assert(system(shellcmd) == 0);
+
+      run_cmd_set_cwd(repo);
+      char *out = dispatch_tool_call("bash", "{\"command\":\"pwd\"}", 10000);
+      run_cmd_set_cwd(NULL);
+      assert(out != NULL);
+      if (strstr(out, "guardrail blocked") != NULL)
+      {
+         fprintf(stderr, "  dispatch refused the rewrite instead of applying it: %s\n", out);
+         assert(0 && "shell worktree rewrite was reported as a refusal");
+      }
+      /* pwd ran inside the redirected worktree, so its output names that path. */
+      assert(strstr(out, target) != NULL);
+      free(out);
+      printf("  shell_worktree_rewrite: rc=3 applied; pwd ran in %.48s...\n", target);
+   }
+   else
+   {
+      /* Not every environment reaches the rewrite (it needs a session worktree
+       * to redirect into). Say so rather than pass silently on a case that never
+       * exercised the contract. */
+      printf("  shell_worktree_rewrite: skipped (rc=%d, no worktree to redirect into)\n", rc);
+   }
+
+   snprintf(shellcmd, sizeof(shellcmd), "rm -rf '%s'", repo);
+   (void)system(shellcmd);
+}
+
 static void test_tool_read_file(void)
 {
    /* Write a temp file */
@@ -1399,7 +1723,7 @@ static void test_tool_read_file(void)
    /* Nonexistent path */
    result = tool_read_file("/nonexistent/path/file.txt", 0, 0, 1);
    assert(result != NULL);
-   assert(strstr(result, "error: cannot open") != NULL);
+   assert(strstr(result, "error: parent path cannot be resolved") != NULL);
    free(result);
 
    unsigned char binary_content[] = {0x7f, 'E', 'L', 'F', '\0', 0x01, 0x02, 0x03};
@@ -1477,6 +1801,17 @@ static void test_tool_write_file(void)
    assert(result != NULL);
    assert(strcmp(result, "ok") == 0);
    free(result);
+
+   /* Text tools must reject malformed UTF-8 without changing the file. */
+   char malformed[] = {'b', 'a', 'd', (char)0xc2, '\0'};
+   result = tool_write_file(tmppath, malformed);
+   assert(result != NULL);
+   assert(strstr(result, "not valid UTF-8") != NULL);
+   free(result);
+   readback = tool_read_file(tmppath, 0, 0, 1);
+   assert(readback != NULL);
+   assert(strcmp(readback, "hello changed") == 0);
+   free(readback);
 
    unlink(tmppath);
 }
@@ -2421,7 +2756,7 @@ static void test_tool_list_files(void)
    free(result);
    result = tool_list_files("/nonexistent_dir_12345", NULL);
    assert(result != NULL);
-   assert(result[0] == '\0');
+   assert(strstr(result, "error:") != NULL);
    free(result);
    unlink(alpha);
    unlink(beta);
@@ -2507,7 +2842,8 @@ static void test_dispatch_tool_call(void)
 
    /* execute_script is write-capable and therefore requires the managed
     * worktree context that a real delegate turn supplies. */
-   char script_root[] = "/tmp/aimee-script-dispatch.XXXXXX";
+   char script_root[256];
+   snprintf(script_root, sizeof script_root, "%s/aimee-script-dispatch.XXXXXX", platform_tmpdir());
    assert(mkdtemp(script_root) != NULL);
    char script_cwd[MAX_PATH_LEN];
    assert(snprintf(script_cwd, sizeof(script_cwd), "%s/.aimee/worktrees/unit-test-agent/main",
@@ -2537,6 +2873,22 @@ static void test_dispatch_tool_call(void)
    assert(result != NULL);
    assert(strstr(result, "error") == NULL);
    free(result);
+
+   /* Reversible writes are contracted and independently read back before the
+    * dispatcher reports success. */
+   run_cmd_set_cwd(script_cwd);
+   result = dispatch_tool_call(
+       "write_file", "{\"path\":\"contract.txt\",\"content\":\"verified write\\n\"}", 5000);
+   assert(result != NULL);
+   assert(strstr(result, "error:") == NULL);
+   free(result);
+   result = dispatch_tool_call("read_file", "{\"path\":\"contract.txt\",\"raw\":true}", 5000);
+   assert(result != NULL && strcmp(result, "verified write\n") == 0);
+   free(result);
+   result = dispatch_tool_call("write_file", "{\"content\":\"no target\"}", 5000);
+   assert(result != NULL && strstr(result, "effect contract refused") != NULL);
+   free(result);
+   run_cmd_set_cwd(NULL);
 
    /* Write file error includes recovery hint */
    run_cmd_set_cwd(script_cwd);
@@ -3051,32 +3403,41 @@ static void test_delegation_error_guidance(void)
 
 static void test_agent_trace_log_uses_db1_execution_trace(void)
 {
-   /* Earlier tests in this suite exercise dispatch_tool_call, which now
-    * lazy-inits DB1 against the real config db_path. Tear that down so
-    * this test's :memory: init actually takes effect. */
-   db1_shutdown();
+   /* Started once from main, before anything else touches the bus. */
+   if (!store_module_fixture_available())
+      return;
 
-   sqlite3 *db = NULL;
-   assert(sqlite3_open(":memory:", &db) == SQLITE_OK);
-   db1_apply_pragmas(db, DB_MODE_CLI);
-   {
-      char err[512] = {0};
-      assert(db1_apply_schema_sqlite(db, err, sizeof(err)) == 0);
-   }
-   assert(db != NULL);
-   assert(db1_init(":memory:") == 0);
-
-   agent_trace_log(7, 3, "call", "content", "bash", "{}", "ok", "abc123");
+   /* The real Postgres-backed store enforces execution_trace.plan_id as a
+    * foreign key. Seed the plan this trace declares instead of relying on the
+    * old in-process stub's acceptance of a fabricated id. The assertion remains
+    * about agent_trace_log mapping turn and tool_name into the stored row. */
+   int plan_id = db1_execution_plan_create("trace-fixture", "trace contract", "[]");
+   assert(plan_id > 0);
+   agent_trace_log(plan_id, 3, "call", "content", "bash", "{}", "ok", "abc123");
 
    db1_execution_trace_recent_row_t rows[4];
    int count = db1_execution_trace_list_recent(rows, 4);
    assert(count == 1);
    assert(rows[0].turn == 3);
    assert(strcmp(rows[0].tool_name, "bash") == 0);
+}
 
-   db1_shutdown();
-   db1_stmt_cache_clear();
-   sqlite3_close(db);
+static void test_agent_endpoint_valid(void)
+{
+   /* `agent add` is positional, so a flag in the endpoint slot used to be SAVED as the
+    * endpoint: the agent reported ON and returned success, and the only symptom was
+    * `agent probe` reporting "GET --provider/models returned -1" later. */
+   assert(!agent_endpoint_valid("--provider"));
+   assert(!agent_endpoint_valid("-x"));
+   assert(!agent_endpoint_valid(""));
+   assert(!agent_endpoint_valid(NULL));
+
+   /* Narrow on purpose: everything that is not obviously a flag stays accepted,
+    * including the scheme-less host:port forms this command has always taken. */
+   assert(agent_endpoint_valid("http://127.0.0.1:8080/v1"));
+   assert(agent_endpoint_valid("https://api.openai.com/v1"));
+   assert(agent_endpoint_valid("localhost:11434"));
+   assert(agent_endpoint_valid("wizard-llm:8080/v1"));
 }
 
 static void test_agent_name_valid(void)
@@ -3103,6 +3464,8 @@ static void test_agent_name_valid(void)
  * whose normalized target is outside an aimee-managed worktree. */
 static void test_session_isolation_guard(void)
 {
+   const char *current_home = getenv("AIMEE_HOME");
+   char *saved_aimee_home = current_home ? strdup(current_home) : NULL;
    char home[512];
    snprintf(home, sizeof(home), "%s/aimee_sess_iso_XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(home) != NULL);
@@ -3113,25 +3476,18 @@ static void test_session_isolation_guard(void)
    const char *primary = "/some/repo/src/x.c";
    const char *worktree = "/some/repo/.aimee/worktrees/ab12/main/src/x.c";
 
-   /* (1) Default ON (no aimee.yaml): a primary-checkout target is blocked, since
-    *     session-worktree isolation is required by default. */
+   /* Default ON, including when config authority is unavailable: a
+    * primary-checkout target is blocked. */
    remove(cfg);
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
 
-   /* (2) Explicit false: still no block. */
-   FILE *f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: false\n", f);
-   fclose(f);
-   assert(agent_tools_session_isolation_blocks(primary, NULL) == 0);
-
-   /* (3) Enabled: primary-checkout target blocked, managed-worktree target allowed. */
-   f = fopen(cfg, "w");
-   assert(f != NULL);
-   fputs("require_session_worktree: true\n", f);
-   fclose(f);
+   /* Only the managed worktree that owns cwd is allowed. */
    assert(agent_tools_session_isolation_blocks(primary, NULL) == 1);
-   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 0);
+   assert(agent_tools_session_isolation_blocks(worktree, NULL) == 1);
+   assert(agent_tools_session_isolation_blocks(worktree, "/some/repo/.aimee/worktrees/ab12/main") ==
+          0);
+   assert(agent_tools_session_isolation_blocks("/some/repo/.aimee/worktrees/other/main/src/x.c",
+                                               "/some/repo/.aimee/worktrees/ab12/main") == 1);
    /* Traversal escape out of the worktree normalizes + blocks. */
    assert(agent_tools_session_isolation_blocks(
               "/some/repo/.aimee/worktrees/ab12/main/../../../src/y.c", NULL) == 1);
@@ -3144,7 +3500,9 @@ static void test_session_isolation_guard(void)
     * server-side mirror of #1314's guardrail fix): a wfe delegate's writes into
     * its own wfe worktree must not be refused by this backstop. */
    assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_ab12.s3/src/x.c",
-                                               NULL) == 0);
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
+   assert(agent_tools_session_isolation_blocks("/var/lib/aimee/wfe-worktrees/wi_other.s3/src/x.c",
+                                               "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 1);
    assert(agent_tools_session_isolation_blocks("src/x.c",
                                                "/var/lib/aimee/wfe-worktrees/wi_ab12.s3") == 0);
    /* Traversal OUT of a wfe worktree still blocks. */
@@ -3154,7 +3512,13 @@ static void test_session_isolation_guard(void)
    assert(agent_tools_session_isolation_blocks(NULL, NULL) == 0);
 
    remove(cfg);
-   assert(platform_setenv("AIMEE_HOME", "") == 0); /* clear override */
+   if (saved_aimee_home)
+   {
+      assert(platform_setenv("AIMEE_HOME", saved_aimee_home) == 0);
+      free(saved_aimee_home);
+   }
+   else
+      assert(platform_unsetenv("AIMEE_HOME") == 0);
    printf("session_isolation guard (Layer 2) OK\n");
 }
 
@@ -3162,7 +3526,7 @@ static void test_session_isolation_guard(void)
  * mtime alone is not a safe cache key: it is neither monotonic nor guaranteed
  * distinct across a rewrite. Observed live on the appliance's tiered
  * filesystem, where a reinstalled agents.json landed with an mtime ~9h in the
- * past and every /v1/agents request kept failing (502) and /v1/agent/list kept
+ * past and every /v1/agents request kept failing (502) and /v1/model/list kept
  * returning an empty array until the file was touched. Size+inode come free
  * from the same stat() and make the rewrite detectable. */
 static void test_agent_config_cache_detects_same_mtime_rewrite(void)
@@ -3334,8 +3698,80 @@ static void test_agent_config_deletion_guard(void)
    printf("  PASS: agent_config_deletion_guard\n");
 }
 
+/* Saving a config must not seed the load cache with the caller's struct.
+ *
+ * Every writer (the setup wizard's /v1 agent-add included) builds an agent_t
+ * from request fields and calls agent_save_config(); NONE of them run the
+ * normalisation that agent_load_config() owns — provider defaulting, the wire
+ * rewrite, agent_derive_catalog_provider(), the tier/capability pass. The save
+ * path used to memcpy that raw struct into the cache and stamp it with the
+ * freshly written file's stat, so the very next load was a cache HIT on an
+ * unnormalised config and stayed one for the life of the process.
+ *
+ * The user-visible damage was silent: a wizard-added Kimi agent kept an empty
+ * catalog_provider, so agent_catalog_provider() fell back to the wire name
+ * "openai". That cost it the {moonshotai,k3,1.0} required-temperature row (the
+ * delegate's default 0.3 reached a model that accepts only 1, failing every
+ * call with "invalid temperature: only 1 is allowed for this model") and made
+ * model_capability_get() miss, so it advertised no tools and tool roles
+ * rejected it as unavailable. Only a restart cleared it. */
+static void test_agent_save_config_does_not_cache_underived_agents(void)
+{
+   /* The bug is invisible when the cache is bypassed, so assert on the cached
+    * path explicitly rather than inheriting whatever the harness set. */
+   platform_unsetenv("AIMEE_NO_CACHE");
+   unlink(agent_config_path());
+
+   /* Exactly what a writer hands to agent_save_config: endpoint and model set,
+    * no provider and no catalog_provider — both are load-side derivations. */
+   agent_config_t built;
+   memset(&built, 0, sizeof(built));
+   built.agent_count = 1;
+   snprintf(built.default_agent, sizeof(built.default_agent), "%s", "Kimi");
+   snprintf(built.agents[0].name, sizeof(built.agents[0].name), "%s", "Kimi");
+   snprintf(built.agents[0].endpoint, sizeof(built.agents[0].endpoint), "%s",
+            "https://api.kimi.com/coding/v1");
+   snprintf(built.agents[0].model, sizeof(built.agents[0].model), "%s", "kimi-k3");
+   snprintf(built.agents[0].auth_type, sizeof(built.agents[0].auth_type), "%s", "bearer");
+   snprintf(built.agents[0].api_key, sizeof(built.agents[0].api_key), "%s", "k");
+   snprintf(built.agents[0].roles[0], sizeof(built.agents[0].roles[0]), "%s", "review");
+   built.agents[0].role_count = 1;
+   built.agents[0].enabled = 1;
+   assert(built.agents[0].catalog_provider[0] == '\0');
+
+   assert(agent_save_config(&built) == 0);
+
+   agent_config_t loaded;
+   assert(agent_load_config(&loaded) == 0);
+   const agent_t *kimi = agent_find(&loaded, "Kimi");
+   assert(kimi != NULL);
+
+   /* The load must have re-parsed and derived. Asserting the raw field rather
+    * than agent_catalog_provider() is deliberate: the accessor falls back to
+    * ->provider, which would mask an empty field behind the wire name — and it
+    * is the RAW field that model_sampling.c's required-temperature gate reads. */
+   assert(strcmp(kimi->catalog_provider, "moonshotai") == 0);
+
+   /* The wire provider is still the load-side default, untouched by derivation. */
+   assert(strcmp(kimi->provider, "openai") == 0);
+
+   unlink(agent_config_path());
+   printf("  PASS: test_agent_save_config_does_not_cache_underived_agents\n");
+}
+
 int main(void)
 {
+   /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
+      starts the bus, and obs_bus refuses to be configured once it is running.
+      Several tests below bring the bus up as a side effect, so a fixture started
+      at the first store-backed test finds it already up and dies -- which is how
+      this was found: with AIMEE_STORE_URL set, the suite aborted at
+      "configure the module endpoint" rather than skipping.
+      Ordering, not availability, and only a run with a real database shows it. */
+   if (store_module_fixture_available())
+      store_module_fixture_start();
+
+   delegate_role_seam_install();
    char tmp_home[512];
    snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-agent-home-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmp_home) != NULL);
@@ -3347,6 +3783,10 @@ int main(void)
     * operator's real agents.json. Set it before any config or agent call. */
    assert(platform_setenv("AIMEE_HOME", tmp_home) == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   char audit_db[640];
+   snprintf(audit_db, sizeof(audit_db), "%s/audit-worm.db", tmp_home);
+   assert(audit_ensure_key() == 0);
+   assert(audit_worm_init_at(audit_db) == 0);
    assert(config_output_dir()[0] != '\0');
 
    /* Guard the sandbox itself: if agent_config_path() ever resolves outside the
@@ -3355,6 +3795,7 @@ int main(void)
    assert(strncmp(agent_config_path(), tmp_home, strlen(tmp_home)) == 0);
    session_id_set_override("unit-test-agent");
    test_tool_surface_single_source();
+   test_agent_endpoint_valid();
    test_agent_name_valid();
    test_agent_expand_env();
    test_agent_save_never_serializes_literal_key();
@@ -3363,14 +3804,18 @@ int main(void)
    test_agent_find();
    test_agent_route();
    test_agent_route_selection_provider();
+   test_route_authority_refuses_without_provider();
    test_agent_route_policy_filter();
    test_agent_route_primary_turn_marker();
    test_agent_route_client_only_claude_excluded();
    test_agent_routing_block_reason();
    test_agent_route_with_caps_honors_tools_enabled();
    test_agent_route_with_caps_honors_context_override();
-   test_current_code_only_role_tool_policy();
-   test_current_code_only_dispatch_blocks_stale_context_tools();
+   test_knowledge_write_gates_the_tool_policy();
+   test_withheld_knowledge_write_blocks_stale_context_tools();
+   test_a_delegate_without_shell_cannot_run_commands();
+   test_permissions_clamp_the_toolset();
+   test_one_delegates_permissions_are_not_anothers();
    test_provider_env_credentials_and_headers();
    test_codex_oauth_request_creds();
    test_codex_oauth_reads_vault_only();
@@ -3382,6 +3827,7 @@ int main(void)
    test_catalog_provider_explicit_round_trip();
    test_unknown_context_window_does_not_pass_min_context();
    test_context_window_table_covers_live_vendors();
+   test_agent_save_config_does_not_cache_underived_agents();
    test_catalog_provider_host_matching_is_label_anchored();
    test_catalog_provider_namespaced_model_ids();
    test_moonshot_heuristic_scopes_reasoning_to_known_families();
@@ -3421,6 +3867,7 @@ int main(void)
    test_responses_object_keeps_existing_function_call();
    test_responses_object_keeps_existing_text();
    test_ir_parse_responses_tool_call();
+   test_ir_parse_responses_namespaced_tool_call();
    test_ir_parse_responses_text_only();
    test_responses_parser_uses_output_text_done();
    test_responses_parser_separates_message_items();
@@ -3469,6 +3916,7 @@ int main(void)
    test_compact_system_role();
    test_delegation_error_guidance();
    test_cancelled_durable_job_blocks_tool_dispatch();
+   test_shell_worktree_rewrite_is_applied_not_refused();
    test_delegate_bash_cancel_kills_running_tool();
    test_parent_write_guard_readonly_large_find();
    test_agent_trace_log_uses_db1_execution_trace();
@@ -3479,6 +3927,7 @@ int main(void)
     * (#2569); tmp_home is a unique mkdtemp path, so this targets only this
     * test's own daemon. */
    {
+      audit_worm_close();
       char cmd[640];
       snprintf(cmd, sizeof(cmd), "pkill -KILL -f 'aimee-kb --socket=%s' 2>/dev/null", tmp_home);
       (void)system(cmd);

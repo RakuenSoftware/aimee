@@ -1,6 +1,12 @@
 name: Nightly Fuzz
 
 on:
+  pull_request:
+    paths:
+      - '.github/workflows/fuzz-nightly.yml'
+      - 'src/Makefile'
+      - 'src/tests/fuzz_*.c'
+      - 'src/tests/fuzz_corpus/**'
   schedule:
     - cron: '0 3 * * *'   # 03:00 UTC daily
   workflow_dispatch:       # Allow manual trigger
@@ -14,29 +20,39 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
 
       - name: Install dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libpq-dev
 
       - name: Build all fuzz targets
         run: |
           cd src
-          make -j$(nproc) tests/fuzz_extractors tests/fuzz_json_parse \
-               tests/fuzz_config_load tests/fuzz_memory_search \
-               tests/fuzz_message_frame tests/fuzz_acl_parse
+          make -j"$(nproc)" fuzz-build
 
       - name: Seed corpus smoke test
         run: cd src && make fuzz
 
       - name: Extended fuzz run (30 minutes)
+        if: github.event_name != 'pull_request'
         run: |
+          set -euo pipefail
           cd src
-          PER_TARGET=300  # 5 minutes per target, 6 targets = 30 min
+          mapfile -t targets < <(make -s fuzz-list)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "No fuzz targets registered"
+            exit 1
+          fi
+
+          TOTAL_SECONDS=1800
+          PER_TARGET=$((TOTAL_SECONDS / ${#targets[@]}))
+          echo "Running ${#targets[@]} targets for ${PER_TARGET}s each"
+          artifact_dir="$GITHUB_WORKSPACE/fuzz-artifacts"
+          mkdir -p "$artifact_dir"
 
           fuzz_extended() {
             local target="$1"
@@ -47,23 +63,36 @@ jobs:
             local end=$((SECONDS + PER_TARGET))
             local iterations=0
 
-            echo "--- $name: extended run for ${PER_TARGET}s ---"
+            printf '%s\n' "$name: extended run for ${PER_TARGET}s"
 
             while [ $SECONDS -lt $end ]; do
               # Generate random inputs of varying sizes (16 bytes to 4KB)
               for sz in 16 64 256 1024 4096; do
                 dd if=/dev/urandom bs="$sz" count=1 2>/dev/null > "$tmpdir/input"
-                ./"$target" "$tmpdir/input" 2>/dev/null || true
+                if ! ./"$target" "$tmpdir/input" >"$tmpdir/output.log" 2>&1; then
+                  cp "$tmpdir/input" "$artifact_dir/${name}.crash-input"
+                  cp "$tmpdir/output.log" "$artifact_dir/${name}.crash.log"
+                  return 1
+                fi
                 iterations=$((iterations + 1))
               done
             done
 
             rm -rf "$tmpdir"
-            echo "--- $name: $iterations iterations completed ---"
+            printf '%s %s\n' "$name" "$iterations" | tee -a "$artifact_dir/iterations.txt"
           }
 
-          for target in tests/fuzz_extractors tests/fuzz_json_parse \
-                        tests/fuzz_config_load tests/fuzz_memory_search \
-                        tests/fuzz_message_frame tests/fuzz_acl_parse; do
+          printf 'commit=%s\ncompiler=%s\n' "$GITHUB_SHA" "$(cc --version | head -1)" \
+            > "$artifact_dir/toolchain.txt"
+          for target in "${targets[@]}"; do
             fuzz_extended "$target"
           done
+
+      - name: Retain fuzz evidence and crash inputs
+        if: always() && github.event_name != 'pull_request'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: fuzz-evidence-${{ github.sha }}
+          path: fuzz-artifacts/
+          if-no-files-found: error
+          retention-days: 30

@@ -3,17 +3,18 @@
  * line-check ceiling). Cross-TU declarations live in the module header. */
 #include "server_mcp_internal.h"
 #include "server.h"
+#include "server_mcp_memory_gate.h"  /* capability grading for `mutate` / `memory_maintain` */
 #include <aimee/tools/agent_tools.h> /* the native surface this table registers into */
 #include "toolset.h"                 /* toolset_register_native_tool */
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"
 #include "commands.h"
-#include "db2/curiosity.h"
+#include "modules/db2/c/curiosity.h"
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "config.h"
 #include "dashboard.h"
@@ -28,6 +29,7 @@
 #include <aimee/delegates/delegate_economics.h>
 #include <aimee/delegates/delegate_patch_coordinator.h>
 #include "platform_path.h"
+#include "aimee_session_guidance.h" /* THE standing guidance; one definition, all surfaces */
 #include "lsp.h"
 #include "server_mcp_learning.h"
 #include "server_mcp_process.h"
@@ -50,6 +52,7 @@
 #include <unistd.h>
 #include <stdarg.h>
 #include "agent_help_data.h"
+#include "peer_client.h"
 
 /* Per-call bundle passed to every handler: the request context plus the
  * out-param for tools that emit an MCP `structured` payload alongside text. */
@@ -76,8 +79,25 @@ static cJSON *mcph_search_memory(struct mcp_call *c)
 {
    return tool_search_memory(c->jargs);
 }
+/* mcp_mutate_verb_method / mcp_memory_maintain_required_cap live in
+ * server_mcp_memory_gate.c: they are the security-critical half of these two
+ * gates, and no test links this TU. See that header. */
 static cJSON *mcph_mutate(struct mcp_call *c)
 {
+   cJSON *jv = cJSON_GetObjectItemCaseSensitive(c->jargs, "verb");
+   const char *verb = cJSON_IsString(jv) ? jv->valuestring : NULL;
+   const char *method = mcp_mutate_verb_method(verb);
+   if (method)
+   {
+      uint32_t required = server_capability_for_method(method);
+      /* No conn means no capabilities to check against (the native surface calls
+       * with conn == NULL). `mutate` is deliberately NOT marked native, so this
+       * is unreachable today — and it denies rather than allows precisely so it
+       * stays that way: an unattributable caller must not be the third ungated
+       * door into the same destructive call. */
+      if (required && (!c->conn || (c->conn->capabilities & required) == 0))
+         return text_content("error: forbidden: insufficient capabilities for this memory verb");
+   }
    return tool_memory_mutate(c->jargs);
 }
 static cJSON *mcph_memory_ask(struct mcp_call *c)
@@ -305,7 +325,43 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
+
+   /* SESSION-START GUIDANCE, on the one channel an MCP-only agent actually has.
+    *
+    * The standing guidance is injected by cli_session_start (CLI) and
+    * gw_stage_memory (gateway). Both of those work on a request aimee is
+    * PROXYING. An MCP client talks straight to its provider and aimee only
+    * serves tools, so aimee never sees that request and neither site can fire:
+    * an MCP-only agent received no guidance at all. Measured consequence -- 13.3
+    * MCP tool calls per cell and ZERO aimee CLI invocations across 13 benchmark
+    * cells, because nothing ever told it the chainable command form exists.
+    *
+    * memory_recall(session_start=true) is the seam: Codex issues it as its FIRST
+    * tool call of a session, before any exploration. Attaching here makes the
+    * guidance arrive once, at the start, on every surface -- the same text from
+    * the same header, with no per-transport variant.
+    *
+    * Prepended to the TEXT rather than added as a JSON field: a field is easy to
+    * skip, and this has to be read to be acted on. Emitted even when recall
+    * itself returns nothing, because "no memories yet" is exactly a fresh session
+    * -- the case where the guidance matters most and where returning only an
+    * error would drop it. */
    cJSON *content;
+   if (session_start)
+   {
+      size_t n = sizeof(AIMEE_GUIDANCE_BLOCK) + (rendered ? strlen(rendered) + 2 : 1);
+      char *both = malloc(n);
+      if (both)
+      {
+         snprintf(both, n, "%s%s%s", AIMEE_GUIDANCE_BLOCK, rendered ? "\n" : "",
+                  rendered ? rendered : "");
+         free(rendered);
+         content = text_content(both);
+         free(both);
+         return content;
+      }
+      /* OOM: fall through and return what we have rather than nothing. */
+   }
    if (!rendered)
       content = mcph_kb_last_result("memory recall returned no result");
    else
@@ -505,7 +561,42 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(jargs, "force");
    if (cJSON_IsBool(jf))
       force = cJSON_IsTrue(jf) ? 1 : 0;
-   char *envelope = kb_client_memory_maintenance_run_json(modes, force, dry_run);
+
+   /* The prune mode is the bulk twin of memory.delete: memory_expire() wipes
+    * every L0 row and its provenance and deletes stale L1 rows, and
+    * memory_enforce_retention() hard-deletes restricted/sensitive memories past
+    * their retention window. This tool is the model's door to it, and it was
+    * ungated -- there is not even an RPC method twin to inherit a grade from
+    * (memory.maintenance_run is a KB-service method the server never dispatches).
+    *
+    * Grading it is NOT sufficient on its own, and it is worth being explicit
+    * about why: reaching any MCP tool requires CAP_TOOL_EXECUTE, which lives
+    * only in CAPS_AUTHENTICATED and CAPS_ALL -- and both also carry
+    * CAP_MEMORY_ADMIN. Every caller that can invoke this tool therefore already
+    * clears an admin-graded gate, so a gate alone would still leave a model able
+    * to bulk-delete.
+    *
+    * So the model's door does not prune at all, for the same reason its `forget`
+    * retires rather than destroys. The operator keeps prune via
+    * `aimee memory maintain`, and the scheduler still runs the full cycle. The
+    * capability gate stays as defence in depth on the modes actually run. */
+   int dropped_prune = 0;
+   unsigned int run_modes = mcp_memory_maintain_model_modes(modes, &dropped_prune);
+
+   uint32_t required = mcp_memory_maintain_required_cap(run_modes);
+   if (!c->conn || (c->conn->capabilities & required) == 0)
+      return text_content("error: forbidden: insufficient capabilities for memory maintenance");
+
+   /* Nothing left to do once prune is removed (a bare call asking only for it):
+    * say so rather than running an empty cycle and reporting success. */
+   if (run_modes == 0)
+      return text_content("memory maintenance: nothing run. The prune mode permanently deletes "
+                          "memories (all L0 rows, stale L1 rows, and restricted/sensitive rows "
+                          "past retention) and is not available through this tool; it is an "
+                          "operator action (`aimee memory maintain`). Other modes: replay, "
+                          "compact, summarize.");
+
+   char *envelope = kb_client_memory_maintenance_run_json(run_modes, force, dry_run);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *summary = resp ? cJSON_GetObjectItemCaseSensitive(resp, "summary") : NULL;
@@ -517,6 +608,25 @@ static cJSON *mcph_memory_maintain(struct mcp_call *c)
       cJSON_Delete(detached);
    }
    cJSON_Delete(resp);
+   /* Say when the request was narrowed. Running less than asked and reporting
+    * plain success would read as "pruned" to the caller. */
+   if (dropped_prune)
+   {
+      const char *body = rendered ? rendered : "{}";
+      size_t need = strlen(body) + 256;
+      char *note = (char *)malloc(need);
+      if (note)
+      {
+         snprintf(note, need,
+                  "%s\n(prune was NOT run: it permanently deletes memories and is an operator "
+                  "action, `aimee memory maintain`. The other requested modes ran.)",
+                  body);
+         cJSON *content = text_content(note);
+         free(note);
+         free(rendered);
+         return content;
+      }
+   }
    cJSON *content = rendered ? text_content(rendered) : text_content("{}");
    free(rendered);
    return content;
@@ -720,29 +830,29 @@ static cJSON *mcph_task_list(struct mcp_call *c)
    return json_result_content(result);
 }
 
-static cJSON *mcph_index_find_callers(struct mcp_call *c)
+/* One symbol's caller list, as its own object. Returns NULL only on OOM; a
+ * lookup that fails reports status "error" so one bad symbol cannot void the
+ * rest of a batch. */
+static cJSON *find_callers_one(const char *project, int all_projects, const char *symbol)
 {
-   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
-   if (!cJSON_IsString(js) || !js->valuestring[0])
-      return text_content("error: index_find_callers requires 'symbol'");
-   int all_projects = mcp_code_scope_all(c->jargs);
-   if (all_projects < 0)
-      return text_content("error: scope must be 'current' or 'all'");
-   const char *project = mcp_code_project_from_args(c->jargs);
-   if (!all_projects && !project)
-      return text_content("error: no active project determined from cwd; pass 'project' or "
-                          "scope='all' explicitly");
    const int max = 200;
    caller_hit_t *hits = calloc((size_t)max, sizeof(*hits));
    if (!hits)
-      return text_content("error: out of memory");
-   int n = kb_client_index_find_callers_scoped(project, all_projects, js->valuestring, hits, max);
-   if (n < 0)
+      return NULL;
+   int n = kb_client_index_find_callers_scoped(project, all_projects, symbol, hits, max);
+   cJSON *result = cJSON_CreateObject();
+   if (!result)
    {
       free(hits);
-      return mcph_kb_last_result("index_find_callers failed");
+      return NULL;
    }
-   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "symbol", symbol);
+   if (n < 0)
+   {
+      cJSON_AddStringToObject(result, "status", "error");
+      free(hits);
+      return result;
+   }
    cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "callers");
    for (int i = 0; i < n; i++)
@@ -757,32 +867,83 @@ static cJSON *mcph_index_find_callers(struct mcp_call *c)
    }
    cJSON_AddNumberToObject(result, "count", n);
    free(hits);
+   return result;
+}
+
+static cJSON *mcph_index_find_callers(struct mcp_call *c)
+{
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
+   cJSON *jss = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbols");
+   int batch = cJSON_IsArray(jss) && cJSON_GetArraySize(jss) > 0;
+   if (!batch && (!cJSON_IsString(js) || !js->valuestring[0]))
+      return text_content("error: index_find_callers requires 'symbol' or 'symbols'");
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects < 0)
+      return text_content("error: scope must be 'current' or 'all'");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!all_projects && !project)
+      return text_content("error: no active project determined from cwd; pass 'project' or "
+                          "scope='all' explicitly");
+
+   /* Batched because the measured shape is find_callers(a), find_callers(b),
+    * find_callers(c) -- three round trips for three independent lookups, at the
+    * end of a cell where the agent already knows all three names. Nothing about
+    * b's callers depends on a's answer. */
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jss)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *one = find_callers_one(project, all_projects, e->valuestring);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+      }
+      return json_result_content(out);
+   }
+
+   cJSON *result = find_callers_one(project, all_projects, js->valuestring);
+   if (!result)
+      return text_content("error: out of memory");
+   cJSON *st = cJSON_GetObjectItemCaseSensitive(result, "status");
+   if (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0)
+   {
+      cJSON_Delete(result);
+      return mcph_kb_last_result("index_find_callers failed");
+   }
    return json_result_content(result);
 }
 
-static cJSON *mcph_index_structure(struct mcp_call *c)
+/* One file's definition list, as its own object. Split out so a batched call can
+ * loop it: the agent's measured shape is structure(fileA) ... structure(fileD),
+ * four separate round trips over four different files, because it maps each file
+ * before choosing ranges to read. Those maps are independent -- nothing about
+ * file B depends on file A's answer -- so they belong in one call. */
+static cJSON *structure_one(const char *project, const char *file_path)
 {
-   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
-   if (!cJSON_IsString(jf) || !jf->valuestring[0])
-      return text_content("error: index_structure requires 'file_path'");
-   int all_projects = mcp_code_scope_all(c->jargs);
-   if (all_projects != 0)
-      return text_content(all_projects < 0 ? "error: scope must be 'current'"
-                                           : "error: index_structure requires one project");
-   const char *project = mcp_code_project_from_args(c->jargs);
-   if (!project)
-      return text_content("error: no active project determined from cwd; pass 'project'");
    const int max = 1000;
    definition_t *defs = calloc((size_t)max, sizeof(*defs));
    if (!defs)
-      return text_content("error: out of memory");
-   int n = kb_client_index_structure(project, jf->valuestring, defs, max);
-   if (n < 0)
+      return NULL;
+   int n = kb_client_index_structure(project, file_path, defs, max);
+   cJSON *result = cJSON_CreateObject();
+   if (!result)
    {
       free(defs);
-      return mcph_kb_last_result("index_structure failed");
+      return NULL;
    }
-   cJSON *result = cJSON_CreateObject();
+   cJSON_AddStringToObject(result, "file_path", file_path);
+   if (n < 0)
+   {
+      /* One unreadable file must not discard the maps that resolved. */
+      cJSON_AddStringToObject(result, "status", "error");
+      free(defs);
+      return result;
+   }
    cJSON_AddStringToObject(result, "status", n > 0 ? "ok" : "empty");
    cJSON *arr = cJSON_AddArrayToObject(result, "definitions");
    for (int i = 0; i < n; i++)
@@ -797,6 +958,50 @@ static cJSON *mcph_index_structure(struct mcp_call *c)
    }
    cJSON_AddNumberToObject(result, "count", n);
    free(defs);
+   return result;
+}
+
+static cJSON *mcph_index_structure(struct mcp_call *c)
+{
+   cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
+   cJSON *jfs = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_paths");
+   int batch = cJSON_IsArray(jfs) && cJSON_GetArraySize(jfs) > 0;
+   if (!batch && (!cJSON_IsString(jf) || !jf->valuestring[0]))
+      return text_content("error: index_structure requires 'file_path' or 'file_paths'");
+   int all_projects = mcp_code_scope_all(c->jargs);
+   if (all_projects != 0)
+      return text_content(all_projects < 0 ? "error: scope must be 'current'"
+                                           : "error: index_structure requires one project");
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
+
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jfs)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *one = structure_one(project, e->valuestring);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+      }
+      return json_result_content(out);
+   }
+
+   cJSON *result = structure_one(project, jf->valuestring);
+   if (!result)
+      return text_content("error: out of memory");
+   cJSON *st = cJSON_GetObjectItemCaseSensitive(result, "status");
+   if (cJSON_IsString(st) && strcmp(st->valuestring, "error") == 0)
+   {
+      cJSON_Delete(result);
+      return mcph_kb_last_result("index_structure failed");
+   }
    return json_result_content(result);
 }
 
@@ -1026,11 +1231,50 @@ static cJSON *code_graph_passthrough(char *json, int status, const char *tool)
    return text_content(msg);
 }
 
+/* Run one hybrid query, including the live cite-capture side effect. Split out
+ * so a batched call can loop it: the measured shape is four separate hybrid
+ * searches in one task, each a full round trip, and the queries are independent
+ * -- the agent is asking four different questions up front, not refining one. */
+static char *hybrid_one(struct mcp_call *c, const char *query, const char *symbol,
+                        const char *project, int all_projects, int max_results, int *status)
+{
+   char *json =
+       kb_client_code_hybrid_scoped(query, symbol, project, all_projects, max_results, status);
+   /* §3 live cite-capture (default off): observe the retrieved file paths for this
+    * session so a re-cited source earns trust across turns. Best-effort; gated by the
+    * same flag as the retrieval-side trust tie-break. */
+   if (json && project && c->sid && c->sid[0] && config_code_trust_actuation_enabled())
+   {
+      cJSON *root = cJSON_Parse(json);
+      cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
+      if (cJSON_IsArray(results))
+      {
+         int n = cJSON_GetArraySize(results);
+         const char **paths = calloc((size_t)(n > 0 ? n : 1), sizeof(*paths));
+         int cnt = 0;
+         for (int i = 0; paths && i < n; i++)
+         {
+            cJSON *row = cJSON_GetArrayItem(results, i);
+            cJSON *fp = row ? cJSON_GetObjectItemCaseSensitive(row, "file_path") : NULL;
+            if (cJSON_IsString(fp) && fp->valuestring[0])
+               paths[cnt++] = fp->valuestring;
+         }
+         if (cnt > 0)
+            kb_client_code_lessons_observe(project, c->sid, paths, cnt);
+         free(paths);
+      }
+      cJSON_Delete(root);
+   }
+   return json;
+}
+
 static cJSON *mcph_index_hybrid(struct mcp_call *c)
 {
    cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
-   if (!cJSON_IsString(jq) || !jq->valuestring[0])
-      return text_content("error: index_hybrid requires 'query'");
+   cJSON *jqs = cJSON_GetObjectItemCaseSensitive(c->jargs, "queries");
+   int batch = cJSON_IsArray(jqs) && cJSON_GetArraySize(jqs) > 0;
+   if (!batch && (!cJSON_IsString(jq) || !jq->valuestring[0]))
+      return text_content("error: index_hybrid requires 'query' or 'queries'");
    cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
    const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
    int all_projects = mcp_code_scope_all(c->jargs);
@@ -1043,37 +1287,104 @@ static cJSON *mcph_index_hybrid(struct mcp_call *c)
    long long mr = 0;
    int max_results = pdf_arg_pos_int(c->jargs, "max_results", 100.0, &mr) ? (int)mr : 20;
    int status = -1;
-   char *json = kb_client_code_hybrid_scoped(jq->valuestring, symbol, project, all_projects,
-                                             max_results, &status);
-   /* §3 live cite-capture (default off): observe the retrieved file paths for this
-    * session so a re-cited source earns trust across turns. Best-effort; gated by the
-    * same flag as the retrieval-side trust tie-break. */
-   if (json && project && c->sid && c->sid[0])
+
+   if (batch)
    {
-      if (config_code_trust_actuation_enabled())
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jqs)
       {
-         cJSON *root = cJSON_Parse(json);
-         cJSON *results = root ? cJSON_GetObjectItemCaseSensitive(root, "results") : NULL;
-         if (cJSON_IsArray(results))
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         int st = -1;
+         char *j = hybrid_one(c, e->valuestring, symbol, project, all_projects, max_results, &st);
+         cJSON *row = cJSON_CreateObject();
+         cJSON_AddStringToObject(row, "query", e->valuestring);
+         if (j)
          {
-            int n = cJSON_GetArraySize(results);
-            const char **paths = calloc((size_t)(n > 0 ? n : 1), sizeof(*paths));
-            int cnt = 0;
-            for (int i = 0; paths && i < n; i++)
-            {
-               cJSON *row = cJSON_GetArrayItem(results, i);
-               cJSON *fp = row ? cJSON_GetObjectItemCaseSensitive(row, "file_path") : NULL;
-               if (cJSON_IsString(fp) && fp->valuestring[0])
-                  paths[cnt++] = fp->valuestring;
-            }
-            if (cnt > 0)
-               kb_client_code_lessons_observe(project, c->sid, paths, cnt);
-            free(paths);
+            /* Parse so the batch is one JSON document rather than strings of
+             * JSON; fall back to the raw text if the service returned
+             * something unparseable rather than dropping the answer. */
+            cJSON *parsed = cJSON_Parse(j);
+            if (parsed)
+               cJSON_AddItemToObject(row, "result", parsed);
+            else
+               cJSON_AddStringToObject(row, "result_raw", j);
+            free(j);
          }
-         cJSON_Delete(root);
+         else
+            cJSON_AddNumberToObject(row, "error_status", st);
+         cJSON_AddItemToArray(out, row);
       }
+      return json_result_content(out);
    }
+
+   char *json = hybrid_one(c, jq->valuestring, symbol, project, all_projects, max_results, &status);
    return code_graph_passthrough(json, status, "index_hybrid");
+}
+
+/* Defined with the span handler below; investigate reads bounded windows through
+ * the same containment-checked resolver rather than duplicating the walk. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len);
+
+/* index command=investigate -- the bounded task packet (/v1/code/context).
+ *
+ * This existed as a route and a client call, wired ONLY as automatic
+ * pre-injection for aimee's own ingress and for delegates. An agent talking over
+ * MCP could not reach it by any path, which is why the measured opening move is
+ * four separate hybrid queries followed by four structure calls: the composed
+ * answer was there and was never on the menu.
+ *
+ * Unlike hybrid it leads with exact and structural evidence, rejects weak
+ * vector-only rows, attaches current-generation provenance, carries a span per
+ * item so the caller can read the range without a second lookup, and returns an
+ * explicit answerable/no_answer decision. The route fixes max_results=4 and a
+ * 1200-token budget, so this cannot become the expensive call. */
+/* MCP and the command share ONE investigation packet. This handler used to
+ * carry its own retrieval and code attachment with no typed verdict, so an
+ * unreachable knowledge service arrived over MCP as a bare error_status --
+ * the same confusion the command surface was fixed for. */
+static cJSON *mcph_index_investigate(struct mcp_call *c)
+{
+   cJSON *jq = cJSON_GetObjectItemCaseSensitive(c->jargs, "query");
+   cJSON *jqs = cJSON_GetObjectItemCaseSensitive(c->jargs, "queries");
+   int batch = cJSON_IsArray(jqs) && cJSON_GetArraySize(jqs) > 0;
+   if (!batch && (!cJSON_IsString(jq) || !jq->valuestring[0]))
+      return text_content("error: index investigate requires 'query' or 'queries'");
+   cJSON *js = cJSON_GetObjectItemCaseSensitive(c->jargs, "symbol");
+   const char *symbol = cJSON_IsString(js) ? js->valuestring : NULL;
+   /* The route requires an active project and never broadens scope. */
+   const char *project = mcp_code_project_from_args(c->jargs);
+   if (!project)
+      return text_content("error: no active project determined from cwd; pass 'project'");
+
+   cJSON *inc = cJSON_GetObjectItemCaseSensitive(c->jargs, "include_code");
+   int include_code = !cJSON_IsBool(inc) || cJSON_IsTrue(inc);
+   cJSON *fallback_arg = cJSON_GetObjectItemCaseSensitive(c->jargs, "fallback");
+   int fallback_enabled = !cJSON_IsBool(fallback_arg) || cJSON_IsTrue(fallback_arg);
+
+   if (batch)
+   {
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *e;
+      cJSON_ArrayForEach(e, jqs)
+      {
+         if (!cJSON_IsString(e) || !e->valuestring[0])
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         cJSON *row = server_index_investigate_packet(e->valuestring, symbol, project, include_code,
+                                                      fallback_enabled);
+         if (row)
+            cJSON_AddItemToArray(out, row);
+      }
+      return json_result_content(out);
+   }
+   cJSON *packet = server_index_investigate_packet(jq->valuestring, symbol, project, include_code,
+                                                   fallback_enabled);
+   return packet ? json_result_content(packet) : text_content("error: out of memory");
 }
 
 static cJSON *mcph_index_graph_hubs(struct mcp_call *c)
@@ -1260,14 +1571,111 @@ static cJSON *mcph_pdf_open_asset(struct mcp_call *c)
  * line range through the active workspace provider (code_span_read does the B4
  * path-safety + slicing). Bounds the line args via pdf_arg_pos_int so an
  * out-of-range double can't UB-cast. */
+/* Resolve a project's indexed root once. Split out so a batched call pays the
+ * project-list walk a single time instead of per span. */
+static int code_span_resolve_root(const char *project, char *out, size_t out_len)
+{
+   const int max_projs = 256;
+   project_info_t *projs = calloc((size_t)max_projs, sizeof(*projs));
+   if (!projs)
+      return -1;
+   int np = kb_client_index_list(projs, max_projs);
+   if (np < 0)
+   {
+      free(projs);
+      return -1;
+   }
+   out[0] = '\0';
+   for (int i = 0; i < np; i++)
+      if (strcmp(projs[i].name, project) == 0 && projs[i].root[0])
+      {
+         snprintf(out, out_len, "%s", projs[i].root);
+         break;
+      }
+   free(projs);
+   return out[0] ? 0 : -1;
+}
+
 static cJSON *mcph_code_span_get(struct mcp_call *c)
 {
    cJSON *jp = cJSON_GetObjectItemCaseSensitive(c->jargs, "project");
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(c->jargs, "file_path");
    if (!cJSON_IsString(jp) || !jp->valuestring[0])
       return text_content("error: code_span_get requires 'project'");
+
+   /* BATCH FORM: spans:[{file_path,line_start,line_end}, ...].
+    *
+    * One range per call made this the most expensive way to read a file. Reading
+    * six ranges cost six round trips, where the shell form it replaced batched
+    * them into one command -- and a round trip is not cheap: the whole
+    * conversation prefix is re-sent every time. Measured on one cell, 82 tool
+    * calls against a ~12k fixed prefix is ~1M tokens of a 1.18M total, so turns,
+    * not bytes, are the bill. Accepting a list lets the caller pay once. */
+   cJSON *jspans = cJSON_GetObjectItemCaseSensitive(c->jargs, "spans");
+   if (cJSON_IsArray(jspans) && cJSON_GetArraySize(jspans) > 0)
+   {
+      char root[MAX_PATH_LEN] = "";
+      if (code_span_resolve_root(jp->valuestring, root, sizeof(root)) != 0)
+         return text_content("error: unknown project (no indexed root)");
+      int max_lines = config_code_span_max_lines() > 0 ? config_code_span_max_lines() : 400;
+      cJSON *out = cJSON_CreateArray();
+      if (!out)
+         return text_content("error: out of memory");
+      cJSON *sp;
+      cJSON_ArrayForEach(sp, jspans)
+      {
+         /* Models double-encode array elements. Measured on a benchmark cell: one
+          * batch of three arrived as JSON *strings* ("{\"file_path\":...}") rather
+          * than objects and silently returned nothing -- a wasted round trip,
+          * which is the exact cost this call exists to avoid. Re-parse a string
+          * element instead of skipping it. */
+         cJSON *decoded = NULL;
+         if (cJSON_IsString(sp) && sp->valuestring && sp->valuestring[0] == '{')
+         {
+            decoded = cJSON_Parse(sp->valuestring);
+            if (decoded)
+               sp = decoded;
+         }
+         else if (cJSON_IsString(sp) && sp->valuestring)
+         {
+            /* The other shape a model reaches for is the CLI spelling it just
+             * read in the help text, path:start-end. Accept it rather than
+             * returning nothing for an entry whose intent is unambiguous. */
+            char sh_path[MAX_PATH_LEN];
+            int sh_start = 0, sh_end = 0;
+            if (server_mcp_span_shorthand_parse(sp->valuestring, sh_path, sizeof(sh_path),
+                                                &sh_start, &sh_end))
+            {
+               decoded = cJSON_CreateObject();
+               if (decoded)
+               {
+                  cJSON_AddStringToObject(decoded, "file_path", sh_path);
+                  cJSON_AddNumberToObject(decoded, "line_start", (double)sh_start);
+                  cJSON_AddNumberToObject(decoded, "line_end", (double)sh_end);
+                  sp = decoded;
+               }
+            }
+         }
+         cJSON *sf = cJSON_GetObjectItemCaseSensitive(sp, "file_path");
+         if (!cJSON_IsString(sf) || !sf->valuestring[0])
+         {
+            cJSON_Delete(decoded);
+            continue; /* skip the malformed entry; the rest of the batch still answers */
+         }
+         long long bls = 0, ble = 0;
+         int b_start = pdf_arg_pos_int(sp, "line_start", 2000000000.0, &bls) ? (int)bls : 1;
+         int b_end = pdf_arg_pos_int(sp, "line_end", 2000000000.0, &ble) ? (int)ble : b_start;
+         cJSON *one =
+             code_span_read(jp->valuestring, root, sf->valuestring, b_start, b_end, max_lines);
+         if (one)
+            cJSON_AddItemToArray(out, one);
+         cJSON_Delete(decoded);
+      }
+      return json_result_content(out);
+   }
+
    if (!cJSON_IsString(jf) || !jf->valuestring[0])
-      return text_content("error: code_span_get requires 'file_path'");
+      return text_content("error: code_span_get requires 'file_path' or 'spans'");
 
    long long ls = 0, le = 0;
    int line_start = pdf_arg_pos_int(c->jargs, "line_start", 2000000000.0, &ls) ? (int)ls : 1;
@@ -1360,6 +1768,208 @@ static cJSON *mcph_workflow_run(struct mcp_call *c)
    return content;
 }
 
+/* ── peer messaging: one aimee session talking to another ────────────────────
+ *
+ * The sender is c->sid, NEVER an argument. A `from` parameter would let any
+ * caller claim to be any session, and the registry's provenance stamping exists
+ * precisely so a message's origin is a fact rather than a claim -- handing the
+ * caller a field to fill in would put the forgery one layer above the check.
+ *
+ * These are the FIRST callers of the aimee module in the product. Before them
+ * the module served four stages that nothing invoked, and the only client that
+ * had ever spoken to it was a probe written to test it. */
+
+/* An unresolved session id is a refusal to state, not a silent no-op.
+ *
+ * Native calls (aimee's own agents) and external MCP calls both carry a sid,
+ * but a sid is not guaranteed non-empty, and sending "from nobody" would reach
+ * the module as an unknown_sender refusal whose reason the caller cannot see.
+ * Saying so here names the actual condition. */
+static const char *peer_self(struct mcp_call *c)
+{
+   return (c && c->sid && c->sid[0]) ? c->sid : NULL;
+}
+
+/* Render one message. The envelope is the module's stamp, so what a reader sees
+ * here is provenance rather than anything the sender asserted. */
+static cJSON *peer_message_json(const peer_client_message_t *m)
+{
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddStringToObject(j, "id", m->id ? m->id : "");
+   cJSON_AddStringToObject(j, "conversation_id", m->conversation_id ? m->conversation_id : "");
+   cJSON_AddStringToObject(j, "from_session", m->from_session ? m->from_session : "");
+   cJSON_AddStringToObject(j, "from_owner", m->from_owner ? m->from_owner : "");
+   cJSON_AddStringToObject(j, "sent_at", m->sent_at ? m->sent_at : "");
+   cJSON_AddBoolToObject(j, "is_reply", m->is_reply ? 1 : 0);
+   cJSON_AddNumberToObject(j, "hop", m->hop);
+   cJSON_AddStringToObject(j, "text", m->text ? m->text : "");
+   return j;
+}
+
+/* The three outcomes, kept three in the text a model reads.
+ *
+ * "could not reach the peer module" and "the peer module refused" are different
+ * instructions: the first says try again or tell a human, the second says stop
+ * and read the reason. Collapsing them into one "failed" line is how an agent
+ * ends up retrying a refusal forever, so the wording differs deliberately. */
+static cJSON *peer_outcome_text(const char *verb, peer_client_result_t rc, uint32_t status,
+                                int transport)
+{
+   char msg[320];
+   if (rc == PEER_CLIENT_TRANSPORT)
+      /* The transport outcome is NAMED, not summarised. "did not answer" covers
+         a module that is absent, a grant that denied the call, a deadline that
+         expired and a reply too large to receive -- four conditions with four
+         different responses, and a reader given only the summary cannot tell
+         which one they are looking at. That cost real time: a hang and an
+         absence were indistinguishable in this exact sentence. */
+      snprintf(msg, sizeof msg,
+               "peer %s: the request was never judged — the peer-messaging module did not "
+               "answer (%s). This is NOT a refusal; do not treat it as the peer saying no.",
+               verb, peer_client_transport_name(transport));
+   else
+      snprintf(msg, sizeof msg, "peer %s refused: %s", verb, peer_client_status_name(status));
+   return text_content(msg);
+}
+
+static cJSON *mcph_peer_send(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_send needs a session id and this call carries none");
+   cJSON *jto = cJSON_GetObjectItemCaseSensitive(c->jargs, "to");
+   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(c->jargs, "text");
+   if (!cJSON_IsString(jto) || !jto->valuestring[0])
+      return text_content("error: peer_send requires 'to' (the recipient's session id)");
+   if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
+      return text_content("error: peer_send requires 'text'");
+   cJSON *jconv = cJSON_GetObjectItemCaseSensitive(c->jargs, "conversation_id");
+   cJSON *jexpect = cJSON_GetObjectItemCaseSensitive(c->jargs, "expect_reply");
+   peer_client_message_t stamped;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_send(self, jto->valuestring, jtext->valuestring,
+                        cJSON_IsString(jconv) ? jconv->valuestring : NULL,
+                        cJSON_IsTrue(jexpect) ? 1 : 0, &stamped, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("send", rc, status, transport);
+   cJSON *j = peer_message_json(&stamped);
+   char msg[320];
+   snprintf(msg, sizeof msg, "Delivered to %s (message %s, conversation %s).", jto->valuestring,
+            stamped.id ? stamped.id : "", stamped.conversation_id ? stamped.conversation_id : "");
+   peer_client_message_free(&stamped);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
+static cJSON *mcph_peer_reply(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_reply needs a session id and this call carries none");
+   cJSON *jh = cJSON_GetObjectItemCaseSensitive(c->jargs, "reply_to");
+   cJSON *jtext = cJSON_GetObjectItemCaseSensitive(c->jargs, "text");
+   if (!cJSON_IsString(jh) || !jh->valuestring[0])
+      return text_content("error: peer_reply requires 'reply_to' (the token printed beside the "
+                          "message in your inbox)");
+   if (!cJSON_IsString(jtext) || !jtext->valuestring[0])
+      return text_content("error: peer_reply requires 'text'");
+
+   peer_client_message_t stamped;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_reply(self, jh->valuestring, jtext->valuestring, &stamped, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("reply", rc, status, transport);
+   cJSON *j = peer_message_json(&stamped);
+   char msg[320];
+   /* The hop is reported because it is the point of replying rather than
+      sending: it is what makes the conversation's loop ceiling reachable. */
+   snprintf(msg, sizeof msg, "Replied to %s (message %s, conversation %s, hop %d).",
+            stamped.from_session ? "the sender" : "the sender", stamped.id ? stamped.id : "",
+            stamped.conversation_id ? stamped.conversation_id : "", stamped.hop);
+   peer_client_message_free(&stamped);
+   cJSON *content = text_content(msg);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
+static cJSON *mcph_peer_inbox(struct mcp_call *c)
+{
+   const char *self = peer_self(c);
+   if (!self)
+      return text_content("error: peer_inbox needs a session id and this call carries none");
+   cJSON *jmax = cJSON_GetObjectItemCaseSensitive(c->jargs, "max");
+   int max = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : PEER_CLIENT_INBOX_TAKE_MAX;
+   peer_client_message_t *msgs = NULL;
+   size_t count = 0;
+   int remaining = 0;
+   uint32_t status = PEER_CLIENT_STATUS_OK;
+   int transport = 0;
+   peer_client_result_t rc =
+       peer_client_inbox_take(self, max, &msgs, &count, &remaining, &status, &transport);
+   if (rc != PEER_CLIENT_OK)
+      return peer_outcome_text("inbox", rc, status, transport);
+   cJSON *j = cJSON_CreateObject();
+   cJSON_AddNumberToObject(j, "remaining", remaining);
+   cJSON *arr = cJSON_AddArrayToObject(j, "messages");
+   for (size_t i = 0; i < count; i++)
+      cJSON_AddItemToArray(arr, peer_message_json(&msgs[i]));
+
+   /* THE MESSAGES GO IN THE TEXT, NOT ONLY IN structuredContent.
+    *
+    * mcp_native_call passes structured = NULL and the native dispatch flattens
+    * the CONTENT array alone, so an in-process agent never sees
+    * structuredContent at all. With the bodies only there, aimee's own agents
+    * received "1 message(s) taken; 0 still waiting." and no mail -- a tool that
+    * reports the size of an answer instead of the answer.
+    *
+    * Found by having two live models hold a conversation: the second read its
+    * inbox, replied "I received the message, but its contents were not
+    * available to me", and every mechanical check passed -- delivery, drain,
+    * counts, provenance -- because the external MCP path DOES carry
+    * structuredContent and was the only path ever tested. */
+   dstr_t body;
+   dstr_init(&body);
+   dstr_appendf(&body, "%zu message(s) taken; %d still waiting.", count, remaining);
+   for (size_t i = 0; i < count; i++)
+   {
+      const peer_client_message_t *m = &msgs[i];
+      /* Sender and conversation travel with the text because a reply needs
+         both: who to answer, and which thread to answer on. */
+      dstr_appendf(&body, "\n\n[%zu] from %s (conversation %s)", i + 1,
+                   m->from_session ? m->from_session : "?",
+                   m->conversation_id ? m->conversation_id : "?");
+      /* The reply handle rides with the message because a reply needs the hop
+         count, and `peer send` cannot carry it -- send always declares hop 0, so
+         two sessions answering each other with send reset the loop count every
+         time and DefaultMaxHops could never be reached. Offered only when the
+         message can actually be represented; a handle that would be malformed is
+         omitted rather than printed broken. */
+      char handle[PEER_CLIENT_REPLY_HANDLE_MAX];
+      if (peer_client_reply_handle(m, handle, sizeof handle) == 0)
+         dstr_appendf(&body, "\n   reply_to: %s", handle);
+      dstr_appendf(&body, "\n%s", m->text ? m->text : "");
+   }
+   peer_client_messages_free(msgs, count);
+   cJSON *content = text_content(body.data ? body.data : "0 message(s) taken.");
+   dstr_free(&body);
+   if (c->structured)
+      *c->structured = j;
+   else
+      cJSON_Delete(j);
+   return content;
+}
+
 /* ── name → handler table (exact match; order is irrelevant — names unique) ──
  *
  * THIS TABLE IS THE SINGLE SOURCE OF TRUTH for which tools aimee has.
@@ -1380,6 +1990,20 @@ static cJSON *mcph_workflow_run(struct mcp_call *c)
  * session_search / workflow_run touch conn — keep those two external-only (they are
  * about an external client's own session anyway, and are EXEMPT in
  * check-native-tool-parity.py for that reason).
+ *
+ * A NATIVE TOOL MUST PUT ITS ANSWER IN THE CONTENT, NOT ONLY IN structuredContent.
+ * mcp_native_call passes structured = NULL and the native dispatch
+ * (td_mcp_tool -> mcp_content_flatten) flattens the content array alone, so an
+ * in-process agent NEVER SEES structuredContent. peer_inbox put the message
+ * bodies only there and a count in the text, and aimee's own agents received
+ * "1 message(s) taken; 0 still waiting." and no mail — a tool returning the size
+ * of an answer instead of the answer. Every mechanical check passed, because the
+ * external MCP path does carry structuredContent and was the only path tested;
+ * what found it was a live model saying its message "contents were not available
+ * to me". The other three handlers that write structuredContent — memory_ask,
+ * session_search, workflow_run — are all NULL in the native column, so no
+ * in-process caller reaches them; a native marker on any of those needs their
+ * payload moved into the content first.
  *
  * scripts/check-native-tool-parity.py fails the build on an unmarked, unexempted
  * new tool, so this stays true rather than becoming a comment that used to be. */
@@ -1453,6 +2077,7 @@ static const struct
     {"index_structure", mcph_index_structure, "core,review_indexed"},
     {"code_span_get", mcph_code_span_get, NULL},
     {"index_hybrid", mcph_index_hybrid, NULL},
+    {"index_investigate", mcph_index_investigate, "core,review_indexed"},
     {"index_graph_hubs", mcph_index_graph_hubs, NULL},
     {"index_graph_audit", mcph_index_graph_audit, NULL},
     {"index_graph_diff", mcph_index_graph_diff, NULL},
@@ -1477,6 +2102,13 @@ static const struct
     {"advance_request", mcph_advance_request, NULL},
     /* Start a saved workflow-engine run from a written proposal */
     {"workflow_run", mcph_workflow_run, NULL},
+    /* Peer messaging. NATIVE, not exempt: an in-process agent has exactly the
+     * same use for reaching another session as an external client does, and
+     * both carry a sid (mcp_native_call passes one). Marking these external-only
+     * would have asserted the opposite of the reason they exist. */
+    {"peer_send", mcph_peer_send, "core"},
+    {"peer_inbox", mcph_peer_inbox, "core"},
+    {"peer_reply", mcph_peer_reply, "core"},
 };
 
 mcp_tool_handler_fn mcp_tool_lookup(const char *tool)

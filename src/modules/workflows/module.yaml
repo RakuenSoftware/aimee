@@ -20,6 +20,7 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/workflows/gw_orch_workflows.c",
+    "src/modules/workflows/module_adapter.c",
     "src/modules/workflows/tool_egress.c",
     "src/modules/workflows/wfe_advance.c",
     "src/modules/workflows/wfe_advance_exec.c",
@@ -51,6 +52,21 @@
     "src/modules/workflows/wfe_validate.c",
     "src/modules/workflows/wfe_verdict.c"
   ],
+  "go_sources": [
+    "server-go/modules/workflows/autonomous.go",
+    "server-go/modules/workflows/control.go",
+    "server-go/modules/workflows/gate.go",
+    "server-go/modules/workflows/workflows.go"
+  ],
+  "go_tests": [
+    "server-go/modules/workflows/autonomous_test.go",
+    "server-go/modules/workflows/control_test.go",
+    "server-go/modules/workflows/gate_test.go",
+    "server-go/modules/workflows/workflows_test.go"
+  ],
+  "public_headers": [
+    "src/modules/workflows/include/aimee/workflows/module_api.h"
+  ],
   "private_headers": [
     "src/modules/workflows/gw_orch_workflows.h",
     "src/modules/workflows/tool_egress.h",
@@ -81,36 +97,21 @@
   "tests": [
     "src/tests/test_gw_orch_workflows.c",
     "src/tests/test_wfe_advance.c",
-    "src/tests/test_wfe_advance_exec.c",
-    "src/tests/test_wfe_approval.c",
     "src/tests/test_wfe_autonomous_route.c",
-    "src/tests/test_wfe_autonomy.c",
-    "src/tests/test_wfe_bind_ingress.c",
-    "src/tests/test_wfe_block_resolve.c",
     "src/tests/test_wfe_blocks.c",
-    "src/tests/test_wfe_custom.c",
-    "src/tests/test_wfe_delegate_seam.c",
     "src/tests/test_wfe_deliver.c",
     "src/tests/test_wfe_enforce.c",
-    "src/tests/test_wfe_engine.c",
     "src/tests/test_wfe_externalization.c",
     "src/tests/test_wfe_failure_taxonomy.c",
-    "src/tests/test_wfe_foreach.c",
-    "src/tests/test_wfe_foreach_spawn.c",
     "src/tests/test_wfe_gate_reject.c",
     "src/tests/test_wfe_manager_artifacts.c",
     "src/tests/test_wfe_manager_blocks.c",
-    "src/tests/test_wfe_manager_flow.c",
     "src/tests/test_wfe_native_gate.c",
     "src/tests/test_wfe_panel_roundtable.c",
     "src/tests/test_wfe_replay_worktree.c",
-    "src/tests/test_wfe_roundtable.c",
     "src/tests/test_wfe_router.c",
     "src/tests/test_wfe_router_catalog.c",
-    "src/tests/test_wfe_safety.c",
-    "src/tests/test_wfe_scheduler.c",
     "src/tests/test_wfe_sliced_build.c",
-    "src/tests/test_wfe_webapi.c",
     "src/tests/test_workflow.c"
   ],
   "docs": [

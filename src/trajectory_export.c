@@ -3,7 +3,7 @@
 #include "trajectory.h"
 
 #include "cJSON.h"
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "modules/memory/memory_platform.h"
 
 #include <stdint.h>
@@ -226,7 +226,7 @@ int trajectory_export(const char *selector, const trajectory_opts_t *opts, char 
    ie_event_row_t *rows = calloc(TRAJ_MAX_EVENTS, sizeof(*rows));
    if (!rows)
       return -1;
-   int n = ie_list_for_session(selector, rows, TRAJ_MAX_EVENTS);
+   int n = db1_interaction_event_list_for_session(selector, rows, TRAJ_MAX_EVENTS);
    if (n <= 0)
    {
       free(rows);

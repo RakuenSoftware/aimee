@@ -16,6 +16,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static verify_step_t mk_step(const char *name, const char *tier)
 {
@@ -139,13 +142,119 @@ static void test_cancelled_unavailable(void)
    printf("  PASS: cancelled -> unavailable (distinct from passed)\n");
 }
 
+/* "no Makefile found" was asserted for five different causes and never named the
+ * directory it searched. In this very repository -- which has src/Makefile, a case
+ * find_makefile_subdir handles explicitly -- `aimee git verify` reported exactly
+ * that, because verify_root resolved to a different checkout via the session's
+ * worktree mapping. The Makefile was never missing.
+ *
+ * The fix is not a better guess, it is naming the path. Assert the root appears in
+ * every branch, so a wrong root stays diagnosable from the message alone. */
+static void test_unavailable_reason_names_the_root(void)
+{
+   char why[768];
+
+   /* A directory with no Makefile: say so, and say where. */
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-reason-XXXXXX", platform_tmpdir());
+   char *dir = mkdtemp(tmpl);
+   assert(dir != NULL);
+   verify_config_unavailable_reason(dir, why, sizeof(why));
+   assert(strstr(why, dir) != NULL);
+   assert(strstr(why, "no Makefile") != NULL);
+   /* And point at the real cause of the observed failure, which is not the file. */
+   assert(strstr(why, "worktree mapping") != NULL);
+
+   /* A Makefile under src/ is FOUND, so the message must not claim otherwise --
+    * this is the exact shape of this repo, and the case that was misreported. */
+   char sub[512];
+   snprintf(sub, sizeof(sub), "%s/src", dir);
+   assert(mkdir(sub, 0755) == 0);
+   char mk[600];
+   snprintf(mk, sizeof(mk), "%s/Makefile", sub);
+   FILE *f = fopen(mk, "w");
+   assert(f != NULL);
+   fputs("nothing-aimee-knows:\n\t@true\n", f);
+   fclose(f);
+
+   verify_config_unavailable_reason(dir, why, sizeof(why));
+   assert(strstr(why, "no Makefile") == NULL); /* it exists; do not lie about it */
+   assert(strstr(why, dir) != NULL);
+   assert(strstr(why, "src") != NULL);
+   assert(strstr(why, "recognise") != NULL);
+
+   unlink(mk);
+   rmdir(sub);
+   rmdir(dir);
+
+   /* No resolvable root at all: distinct from "no Makefile", because there was
+    * nowhere to look rather than nothing to find. */
+   verify_config_unavailable_reason("", why, sizeof(why));
+   assert(strstr(why, "no repository root") != NULL);
+   verify_config_unavailable_reason(NULL, why, sizeof(why));
+   assert(strstr(why, "no repository root") != NULL);
+
+   printf("  test_unavailable_reason_names_the_root: PASS\n");
+}
+
+/* Verify picks its target by asking which candidate is actually a repository.
+ * That question only has value if "no" is a possible answer.
+ *
+ * resolve_verify_root falls back to the directory itself, and ultimately to
+ * getcwd(), so it answers "yes, here" for ANY directory. Relying on it to choose
+ * a root is how `aimee git verify` came to resolve /var/lib/aimee -- aimee-server's
+ * own home, not a repository -- and then report no Makefile there. Passing an
+ * explicit path=<repo> did not help, because the argument was never read.
+ *
+ * Pin the discriminator: a real repo resolves, a plain directory does NOT. */
+static void test_git_toplevel_rejects_a_non_repo(void)
+{
+   char out[1024];
+
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee-verify-root-XXXXXX", platform_tmpdir());
+   char *dir = mkdtemp(tmpl);
+   assert(dir != NULL);
+
+   /* A directory that is not a repository must fail, not answer with itself. */
+   out[0] = '\0';
+   assert(verify_git_toplevel(dir, out, sizeof(out)) != 0);
+
+   /* The same directory, once it IS a repository, resolves to its toplevel. */
+   char cmd[1200];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q 2>/dev/null", dir);
+   assert(system(cmd) == 0);
+   out[0] = '\0';
+   assert(verify_git_toplevel(dir, out, sizeof(out)) == 0);
+   assert(out[0] == '/');
+   /* mkdtemp under /tmp may be a symlink (macOS /tmp -> /private/tmp), so compare
+    * on the leaf rather than the full path. */
+   const char *leaf = strrchr(dir, '/');
+   assert(leaf && strstr(out, leaf + 1) != NULL);
+
+   /* A subdirectory resolves to the repository ROOT, not to itself. */
+   char sub[1100];
+   snprintf(sub, sizeof(sub), "%s/nested/deeper", dir);
+   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", sub);
+   assert(system(cmd) == 0);
+   char sub_out[1024];
+   assert(verify_git_toplevel(sub, sub_out, sizeof(sub_out)) == 0);
+   assert(strcmp(sub_out, out) == 0);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", dir);
+   (void)system(cmd);
+   printf("  test_git_toplevel_rejects_a_non_repo: PASS\n");
+}
+
 int main(void)
 {
    printf("git_verify_contract:\n");
+   test_git_toplevel_rejects_a_non_repo();
    test_all_pass();
    test_one_fail();
    test_skip();
    test_cancelled_unavailable();
+   test_unavailable_reason_names_the_root();
    printf("ok\n");
    return 0;
 }

@@ -110,18 +110,27 @@ extern "C"
     * {"id":…,"object":"response","created_at":…,"model":…,"status":"completed",
     *  "output":[{"id":…,"type":"message","status":"completed","role":"assistant",
     *  "content":[{"type":"output_text","text":…,"annotations":[]}]}],
-    *  "usage":{"input_tokens":…,"output_tokens":…,"total_tokens":…}}
+    *  "usage":{"input_tokens":…,"output_tokens":…,"total_tokens":…,
+    *           "input_tokens_details":{"cached_tokens":…}}}
+    *
+    * cached_tokens is the part of prompt_tokens the provider served from its
+    * prompt cache. Pass it through from the upstream reply -- do NOT pass 0 as a
+    * placeholder on a path that has the real value. A client bills what this
+    * block says, so a dropped cached count silently prices cache reads at the
+    * full uncached rate (roughly 10x), and looks exactly like caching being
+    * broken rather than unreported. Emitted even when zero.
+    *
     * Returns bytes written (excluding NUL), or -1 if it does not fit. */
    int openai_format_response(const char *id, const char *model, const char *output_text,
-                              long created, int prompt_tokens, int completion_tokens, char *resp,
-                              int cap);
+                              long created, int prompt_tokens, int completion_tokens,
+                              int cached_tokens, char *resp, int cap);
 
    /* Build a `run` object (same message/usage shape as a response, with
     * "object":"run" and the given status, e.g. "completed"). Returns bytes
     * written (excluding NUL), or -1 if it does not fit. */
    int openai_format_run(const char *id, const char *model, const char *output_text, long created,
-                         int prompt_tokens, int completion_tokens, const char *status, char *resp,
-                         int cap);
+                         int prompt_tokens, int completion_tokens, int cached_tokens,
+                         const char *status, char *resp, int cap);
 
    /* Responses API streaming events (data payloads; the caller writes the SSE
     * `event:` line and frames them). Each returns bytes written or -1.
@@ -134,7 +143,7 @@ extern "C"
    int openai_format_responses_delta(const char *item_id, const char *delta, char *resp, int cap);
    int openai_format_responses_completed(const char *id, const char *model, const char *output_text,
                                          long created, int prompt_tokens, int completion_tokens,
-                                         char *resp, int cap);
+                                         int cached_tokens, char *resp, int cap);
 
    /* Responses-API terminal error events (Codex parity). Codex treats both as
     * fatal stream errors:
@@ -158,26 +167,32 @@ extern "C"
     * helpers emit the matching SSE data payloads (bytes written or -1). */
    struct cJSON *openai_responses_message_item(const char *item_id, const char *text,
                                                const char *status);
+   /* `tool_namespace` is the call's owning namespace group, or NULL/"" when it has
+    * none; it is emitted only when set. A Codex client offers its MCP tools inside
+    * a `namespace` group and routes the answer on (namespace, name) together, so a
+    * call that arrived with one must carry it back. */
    struct cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
-                                                     const char *name, const char *arguments,
-                                                     const char *status);
+                                                     const char *name, const char *tool_namespace,
+                                                     const char *arguments, const char *status);
    int openai_format_responses_msg_item_added(const char *item_id, int output_index, char *resp,
                                               int cap);
    int openai_format_responses_msg_item_done(const char *item_id, const char *text,
                                              int output_index, char *resp, int cap);
    int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
-                                             const char *name, int output_index, char *resp,
-                                             int cap);
+                                             const char *name, const char *tool_namespace,
+                                             int output_index, char *resp, int cap);
    int openai_format_responses_fc_item_done(const char *item_id, const char *call_id,
-                                            const char *name, const char *arguments,
-                                            int output_index, char *resp, int cap);
+                                            const char *name, const char *tool_namespace,
+                                            const char *arguments, int output_index, char *resp,
+                                            int cap);
    int openai_format_responses_fc_args_delta(const char *item_id, int output_index,
                                              const char *delta, char *resp, int cap);
    int openai_format_responses_fc_args_done(const char *item_id, int output_index,
                                             const char *arguments, char *resp, int cap);
    int openai_format_responses_completed_items(const char *id, const char *model, long created,
                                                struct cJSON *output_arr, int prompt_tokens,
-                                               int completion_tokens, char *resp, int cap);
+                                               int completion_tokens, int cached_tokens, char *resp,
+                                               int cap);
 
    /* Read an optional numeric sampling field from an OpenAI request body.
     * Returns the value when it is a finite number within [0, hi]; otherwise

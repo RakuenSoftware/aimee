@@ -105,6 +105,15 @@ vault_status_t vault_service_get_server_wrap(const char *principal, const char *
                  VAULT_ERR_CRYPTO); /* decrypt/tamper — fail closed */
 }
 
+int vault_service_has_server_principal(const char *agent, const char *cred)
+{
+   if (!agent || !cred)
+      return 0;
+   /* vault_store_has_entry reads the store index only -- see vault_store.h: "no
+    * decryption". Deliberately no vaudit() here: nothing was accessed. */
+   return vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent, cred) == 1;
+}
+
 /* Read (agent, cred) from the SERVER principal's vault under the server master KEK
  * — no client, no unlock. VAULT_OK / VAULT_NO_ENTRY (no file or no entry) /
  * VAULT_ERR_* (fail closed). */
@@ -329,11 +338,18 @@ vault_status_t vault_service_rekey_password(const char *principal, attested_tran
    if (!old_password || old_len == 0 || !new_password || new_len == 0)
       return VAULT_ERR_BADARG;
 
-   /* Read-only compatibility path. No legacy actor vault means there is nothing
-    * to rekey; the shared environment vault is independent of PAM passwords. */
+   /* Read-only: a rekey against a non-existent principal must fail closed, never
+    * materialize a vault an attacker could then own.
+    *
+    * It must also not report success. The old password is verified BELOW, by
+    * deriving from this salt — so returning VAULT_OK here would make
+    * handle_vault_rekey answer {"status":"ok"} to a password change that
+    * verified no old password and re-wrapped nothing. The shared environment
+    * vault being independent of PAM passwords is a reason there is nothing to
+    * rekey, not a reason to call a no-op a success. */
    uint8_t salt[VAULT_SALT_LEN];
    if (vault_store_salt_readonly(principal, salt) != 0)
-      return VAULT_OK;
+      return VAULT_ERR_CRYPTO;
 
    uint8_t old_kek[VAULT_KEK_LEN], new_kek[VAULT_KEK_LEN];
    vault_status_t st = VAULT_OK;

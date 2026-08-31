@@ -253,6 +253,7 @@ static int cli_session_execute_inner(const agent_t *agent, const agent_network_t
        agent->cli_idle_timeout_ms > 0
            ? agent->cli_idle_timeout_ms
            : (agent->timeout_ms > 0 ? agent->timeout_ms : AGENT_DEFAULT_TIMEOUT_MS);
+   recv_timeout_ms = agent_timeout_cap_ms(recv_timeout_ms, agent->tool_loop_timeout_ms_cap);
    int recv_rc = cli_session_recv(&sess, raw, CLI_SESSION_BUF_MAX, recv_timeout_ms);
    if (recv_rc != 0)
    {

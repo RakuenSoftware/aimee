@@ -223,10 +223,26 @@ static const ctx_window_entry_t g_ctx_windows[] = {
     {NULL, 0},
 };
 
+/* Defined below, next to the dynamic capability set it reads. */
+static int capability_dynamic_context_window(const char *model_id);
+
 int model_context_window(const char *model_id)
 {
    if (!model_id || !model_id[0])
       return 0;
+
+   /* Catalogue first, prefix table second. The prefix table is a hand-written
+    * approximation -- it maps every "claude" id to 200000, which understates
+    * every current model by 5x (they are 1M) and cannot track a release. Ask
+    * the catalogue for a measured value and keep the table only as the fallback
+    * for ids the catalogue does not carry (claude-2, older gpt-4 variants).
+    *
+    * NOT routed through model_capability_get(): that falls through to the
+    * heuristic, and the heuristic derives its context_window FROM this
+    * function, so that path would recurse. */
+   int measured = capability_dynamic_context_window(model_id);
+   if (measured > 0)
+      return measured;
 
    for (int i = 0; g_ctx_windows[i].prefix != NULL; i++)
    {
@@ -500,23 +516,30 @@ typedef struct
    int deprecated;
 } capability_entry_t;
 
+/* Models the CATALOGUE DOES NOT CARRY, and nothing else.
+ *
+ * This table used to hold rows for models the catalogue also describes, and
+ * those rows were maintained by hand against an assistant knowledge cutoff. They
+ * drifted, as hand-maintained copies of someone else's data do: measured against
+ * data/models_dev_snapshot.json, three of the nine disagreed, and not subtly --
+ * claude-sonnet-4-6 and claude-opus-4-6 both claimed 200000/8192 where the
+ * catalogue says 1000000/128000. A max_output of 8192 against a real ceiling of
+ * 128000 truncates a reply at a sixteenth of what the model can produce.
+ *
+ * Those rows normally lose to the catalogue (it is consulted first), so the
+ * damage only surfaces when the catalogue load comes up empty -- which is
+ * exactly when nobody is watching, and precisely the failure that already
+ * happened once: a stale row outranked the snapshot's own numbers when the
+ * nested-schema reader returned zero entries.
+ *
+ * A row that agrees with the catalogue is dead weight; a row that disagrees can
+ * only ever be wrong. Both kinds are gone. What remains is the one case the
+ * catalogue cannot answer: a model it does not list at all. Deprecation moved to
+ * g_local_deprecations below, because that IS knowledge the catalogue lacks. */
 static const capability_entry_t g_capabilities[] = {
-    {"openai", "gpt-4o", 128000, 16384, 2.50, 10.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_AUDIO |
-         MODEL_CAP_STREAMING,
-     "text,image,audio", "2025-06", 0, 0},
-    {"openai", "gpt-4-turbo", 128000, 4096, 10.00, 30.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2024-04", 0, 1},
     {"anthropic", "claude-3-5-sonnet", 200000, 8192, 3.00, 15.00,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
      "text,image", "2025-04", 0, 0},
-    {"anthropic", "claude-sonnet-4-6", 200000, 8192, 3.00, 15.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2025-10", 0, 0},
-    {"anthropic", "claude-opus-4-6", 200000, 8192, 15.00, 75.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2025-10", 0, 0},
     {"gemini", "gemini-1.5-pro", 1000000, 8192, 1.25, 5.00,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_AUDIO |
          MODEL_CAP_STREAMING,
@@ -527,9 +550,24 @@ static const capability_entry_t g_capabilities[] = {
      "text,image,audio", "2025-08", 0, 0},
     {"groq", "llama-3-70b-instruct", 8192, 4096, 0.59, 0.79,
      MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING, "text", "2023-12", 1, 0},
-    {"minimax", "MiniMax-M2.7", 200000, 8192, 0.0, 0.0,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING, "text", "2026-01", 0, 0},
     {NULL, NULL, 0, 0, 0.0, 0.0, 0, NULL, NULL, 0, 0},
+};
+
+/* Models THIS PROJECT has retired, whatever the catalogue says.
+ *
+ * The catalogue reports a model as live while the vendor still lists it, so a
+ * model retired here comes back routable on every refresh unless the decision is
+ * recorded somewhere. It is recorded here — a name, not a copy of the vendor's
+ * numbers, so it cannot drift the way the capability rows did. */
+typedef struct
+{
+   const char *provider;
+   const char *model_id;
+} deprecation_entry_t;
+
+static const deprecation_entry_t g_local_deprecations[] = {
+    {"openai", "gpt-4-turbo"},
+    {NULL, NULL},
 };
 
 #define MODEL_CAP_DYNAMIC_MAX 1024
@@ -819,9 +857,72 @@ static void capability_dynamic_load_once(void)
       count = capability_load_from_file(path, g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX);
    if (count <= 0 && model_snapshot_path(path, sizeof(path)) == 0)
       count = capability_load_from_file(path, g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX);
+
+   /* Both loads above parse the FLAT schema -- a top-level "models" ARRAY. The
+    * bundled models.dev snapshot is NESTED ({provider: {models: {id: {...}}}}),
+    * so that parse returns zero and this in-memory catalogue has always been
+    * empty. An empty dynamic set silently hands every lookup to the
+    * hand-written g_capabilities table below it, which is why a stale row
+    * (claude-sonnet-4-6 at 200k/8192) outranked the snapshot's own 1M/128k.
+    *
+    * Fall back to the nested reader. Loaded ONCE here on purpose:
+    * models_dev_cache_lookup() re-parses the whole file per call, so resolving
+    * this at lookup time would put a 226KB JSON parse in the hot path. */
+   if (count <= 0)
+   {
+      count = models_dev_cache_list(g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX, 0, 0);
+      if (count > MODEL_CAP_DYNAMIC_MAX)
+         count = MODEL_CAP_DYNAMIC_MAX; /* documented to report the full match count */
+      /* The cache readers set the capability FLAGS but leave the derived
+       * `modalities` string empty; every other source arrives with it filled. */
+      for (int i = 0; i < count; i++)
+         capability_set_modalities(&g_dynamic_caps[i]);
+   }
+
+   /* Carry local deprecation forward. The catalogue treats "still listed
+    * upstream" as live (fill_cap_from_nested: absent key means live), so a model
+    * this project has already retired -- gpt-4-turbo, say -- comes back marked
+    * live and becomes routable again. Deprecation is the one thing this project
+    * knows that the catalogue does not, and routing AWAY from a model is the
+    * conservative direction, so OR it in rather than let the catalogue clear it.
+    * Numbers and capabilities still come from the catalogue; only this flag is
+    * merged. Runs before overrides so an operator can still override the result
+    * either way. */
+   for (int i = 0; i < count && i < MODEL_CAP_DYNAMIC_MAX; i++)
+   {
+      if (g_dynamic_caps[i].deprecated)
+         continue;
+      for (int j = 0; g_local_deprecations[j].provider != NULL; j++)
+      {
+         if (strcasecmp(g_local_deprecations[j].provider, g_dynamic_caps[i].provider) == 0 &&
+             strcasecmp(g_local_deprecations[j].model_id, g_dynamic_caps[i].model_id) == 0)
+         {
+            g_dynamic_caps[i].deprecated = 1;
+            break;
+         }
+      }
+   }
+
    if (count > 0)
       capability_apply_overrides(g_dynamic_caps, &count, MODEL_CAP_DYNAMIC_MAX);
    g_dynamic_count = count > 0 ? count : 0;
+}
+
+/* Context window from the catalogue only (no static table, no heuristic) --
+ * see the recursion note in model_context_window(). Reads the in-memory
+ * dynamic set, so this stays a scan rather than a per-call JSON parse. */
+static int capability_dynamic_context_window(const char *model_id)
+{
+   if (!model_id || !model_id[0])
+      return 0;
+   capability_dynamic_load_once();
+   for (int i = 0; i < g_dynamic_count; i++)
+   {
+      if (g_dynamic_caps[i].context_window > 0 &&
+          strcasecmp(g_dynamic_caps[i].model_id, model_id) == 0)
+         return g_dynamic_caps[i].context_window;
+   }
+   return 0;
 }
 
 int model_capability_refresh(char *msg, size_t msg_len)

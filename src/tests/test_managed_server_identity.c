@@ -23,6 +23,12 @@ int main(void)
    assert(strcmp(identity.state, "issued") == 0);
    assert(kb_managed_server_identity_validate(&identity) == 1);
 
+   kb_managed_server_identity_t reused = identity;
+   snprintf(reused.management_cert, sizeof(reused.management_cert), "%s", reused.client_cert);
+   snprintf(reused.management_key, sizeof(reused.management_key), "%s", reused.client_key);
+   assert(kb_managed_server_identity_validate(&reused) == 0);
+   kb_managed_server_identity_clear(&reused);
+
    char path[256];
    snprintf(path, sizeof(path), "/tmp/aimee-managed-server-identity-%ld.json", (long)getpid());
    unlink(path);

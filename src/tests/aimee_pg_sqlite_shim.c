@@ -33,8 +33,8 @@
 #endif
 
 #include "db_postgres.h"
-#include "../db2/db2.h"
-#include "../db2/db2_internal.h"
+#include "../modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_internal.h"
 
 #include <ctype.h>
 #include <math.h>
@@ -132,6 +132,24 @@ static void shim_noop_int_func(sqlite3_context *ctx, int argc, sqlite3_value **a
    sqlite3_result_int(ctx, 0);
 }
 
+/* Transaction-local request context has no SQLite analogue. Unit tests only
+ * need set_config() to preserve the value-returning SELECT shape used by the
+ * production writer; PostgreSQL integration tests cover its isolation. */
+static void shim_set_config_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   if (argc != 3 || sqlite3_value_type(argv[1]) == SQLITE_NULL)
+      sqlite3_result_null(ctx);
+   else
+      sqlite3_result_value(ctx, argv[1]);
+}
+
+static void shim_current_setting_func(sqlite3_context *ctx, int argc, sqlite3_value **argv)
+{
+   (void)argc;
+   (void)argv;
+   sqlite3_result_null(ctx);
+}
+
 static void pgvec_register_functions(sqlite3 *db)
 {
    if (!db)
@@ -143,13 +161,29 @@ static void pgvec_register_functions(sqlite3 *db)
                            NULL, shim_noop_int_func, NULL, NULL);
    sqlite3_create_function(db, "pg_advisory_xact_lock", 1, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
                            shim_noop_int_func, NULL, NULL);
-   /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables. */
+   sqlite3_create_function(db, "set_config", 3, SQLITE_UTF8 | SQLITE_INNOCUOUS, NULL,
+                           shim_set_config_func, NULL, NULL);
+   sqlite3_create_function(db, "current_setting", 2,
+                           SQLITE_UTF8 | SQLITE_DETERMINISTIC | SQLITE_INNOCUOUS, NULL,
+                           shim_current_setting_func, NULL, NULL);
+   /* Fake pg_indexes so pgvec_table_ready() returns true for vector tables.
+    *
+    * indexdef is carried, not just indexname, because the readiness probe reads
+    * the access method now. While this view returned only a name ending _hnsw it
+    * agreed with the probe's old assumption no matter what the real schema
+    * built -- so the shim reported the store ready on a deployment where the
+    * probe would have said no, and the whole suite stayed green through a
+    * regression that took every memory search down to lexical. A fake that
+    * cannot disagree with the code it stands in for tests nothing. */
    sqlite3_exec(
        db,
        "CREATE VIEW IF NOT EXISTS pg_indexes AS "
-       "SELECT 'memory_embeddings' AS tablename, 'idx_memory_embeddings_hnsw' AS indexname "
+       "SELECT 'memory_embeddings' AS tablename, 'idx_memory_embeddings_diskann' AS indexname, "
+       "'CREATE INDEX idx_memory_embeddings_diskann ON memory_embeddings USING diskann (embedding)'"
+       " AS indexdef "
        "UNION ALL "
-       "SELECT 'kb_embeddings', 'idx_kb_embeddings_hnsw'",
+       "SELECT 'kb_embeddings', 'idx_kb_embeddings_diskann', "
+       "'CREATE INDEX idx_kb_embeddings_diskann ON kb_embeddings USING diskann (embedding)'",
        NULL, NULL, NULL);
 }
 
@@ -254,6 +288,60 @@ static char *translate_sql(const char *sql_in)
             p += 7;
          continue;
       }
+      /* DROP TRIGGER <name> ON <table> -> DROP TRIGGER <name>.
+       * A trigger name is schema-scoped in Postgres and table-scoped in sqlite,
+       * so Postgres requires the ON clause and sqlite rejects it. Without this
+       * the two engines have no common spelling and a test that drops a trigger
+       * has to branch on the backend -- which is exactly what this shim exists
+       * to avoid. Postgres syntax is the source spelling, as everywhere else. */
+      if (starts_with(p, "DROP TRIGGER "))
+      {
+         memcpy(out + o, "DROP TRIGGER ", 13);
+         o += 13;
+         p += 13;
+         while (*p == ' ')
+            p++;
+         if (starts_with(p, "IF EXISTS "))
+         {
+            memcpy(out + o, "IF EXISTS ", 10);
+            o += 10;
+            p += 10;
+            while (*p == ' ')
+               p++;
+         }
+         /* Copy the trigger name, then swallow a trailing ON <table>. The
+          * headroom check at the top of the loop covers a fixed 128 bytes; an
+          * identifier is unbounded, so re-check as it is copied. */
+         while (*p && *p != ' ' && *p != ';')
+         {
+            if (o + 2 >= cap)
+            {
+               cap *= 2;
+               char *nb = realloc(out, cap);
+               if (!nb)
+               {
+                  free(out);
+                  return NULL;
+               }
+               out = nb;
+            }
+            out[o++] = *p++;
+         }
+         const char *save = p;
+         while (*p == ' ')
+            p++;
+         if (starts_with(p, "ON ") || starts_with(p, "on "))
+         {
+            p += 3;
+            while (*p == ' ')
+               p++;
+            while (*p && *p != ' ' && *p != ';')
+               p++; /* the table name */
+         }
+         else
+            p = save;
+         continue;
+      }
       /* GREATEST(...) -> MAX(...) — sqlite's MAX is also a scalar. */
       if (starts_with(p, "GREATEST("))
       {
@@ -262,21 +350,23 @@ static char *translate_sql(const char *sql_in)
          p += 9;
          continue;
       }
-      /* pg_now_text() -> datetime('now')  (sqlite has datetime built-in). */
+      /* pg_now_text() -> strftime in the SAME canonical ISO format the postgres
+       * function emits (schema.sql). datetime('now') would return the space
+       * separator, so the shim would write a spelling production never writes and
+       * every format-sensitive assertion here would be testing the wrong string. */
       if (starts_with(p, "pg_now_text()"))
       {
-         memcpy(out + o, "datetime('now')", 15);
-         o += 15;
+         memcpy(out + o, "strftime('%Y-%m-%dT%H:%M:%SZ','now')", 36);
+         o += 36;
          p += 13;
          continue;
       }
-      /* pg_now_text(<modifier>) -> datetime('now', <modifier>). The shim
-       * keeps the modifier verbatim; sqlite's datetime accepts the same
-       * '+/-N units' grammar postgres'  pg_now_text(modifier) does. */
+      /* pg_now_text(<modifier>) -> the same, plus the modifier verbatim; sqlite's
+       * strftime accepts the same '+/-N units' grammar postgres' overload does. */
       if (starts_with(p, "pg_now_text("))
       {
-         memcpy(out + o, "datetime('now', ", 16);
-         o += 16;
+         memcpy(out + o, "strftime('%Y-%m-%dT%H:%M:%SZ','now', ", 37);
+         o += 37;
          p += 12;
          continue;
       }
@@ -330,36 +420,49 @@ static char *translate_sql(const char *sql_in)
          }
          /* Fallthrough: emit literally if the shape doesn't match. */
       }
-      /* ::timestamp -> drop (treat the LHS as TEXT, lexicographic
-       * comparison works for the canonical 'YYYY-MM-DD HH:MM:SS'
-       * format the schema enforces). */
-      if (starts_with(p, "::timestamp"))
+      /* ::<type> -> drop. Every one of these is a Postgres cast whose whole job is
+       * to pin a type on a value sqlite does not type in the first place: the
+       * shim's columns are TEXT or untyped, so the bare value is already
+       * compatible.
+       *
+       * Numeric casts matter beyond the columns. A libpq parameter arrives with NO
+       * type, so an expression like "-?2" or "?3*?3" is ambiguous and Postgres
+       * rejects it outright; the fix is ::double precision at the placeholder, and
+       * that SQL then has to survive the shim too, or one backend's fix breaks the
+       * other. Longest match first, so ::integer is not read as ::int followed by a
+       * stray "eger", and ::boolean not as ::bool. */
       {
-         p += 11;
-         continue;
-      }
-      /* ::text -> drop.  JSONB-to-text cast; SQLite stores the column as
-       * TEXT already so the bare value is compatible without a cast. */
-      if (starts_with(p, "::text"))
-      {
-         p += 6;
-         continue;
-      }
-      /* ::vector -> drop.  pgvector cast; the SQLite schema stubs store
-       * embeddings as TEXT so the bare value is compatible without a cast. */
-      if (starts_with(p, "::vector"))
-      {
-         p += 8;
-         continue;
-      }
-      /* ::halfvec -> drop.  Same as ::vector — the embedding columns are now
-       * halfvec (fp16), but the SQLite stub still stores embeddings as TEXT, so
-       * the bare value is compatible without a cast. Must precede no other rule
-       * (longer literal than ::vector). */
-      if (starts_with(p, "::halfvec"))
-      {
-         p += 9;
-         continue;
+         static const char *const casts[] = {"::double precision",
+                                             "::timestamptz",
+                                             "::halfvec",
+                                             "::timestamp",
+                                             "::boolean",
+                                             "::smallint",
+                                             "::integer",
+                                             "::numeric",
+                                             "::bigint",
+                                             "::vector",
+                                             "::float8",
+                                             "::jsonb",
+                                             "::real",
+                                             "::bool",
+                                             "::json",
+                                             "::text",
+                                             "::int",
+                                             "::json",
+                                             NULL};
+         int stripped = 0;
+         for (int ci = 0; casts[ci]; ci++)
+         {
+            if (starts_with(p, casts[ci]))
+            {
+               p += strlen(casts[ci]);
+               stripped = 1;
+               break;
+            }
+         }
+         if (stripped)
+            continue;
       }
       /* ILIKE -> LIKE.  SQLite's LIKE is case-insensitive for ASCII by
        * default, which matches ILIKE semantics for the terms this
@@ -616,25 +719,30 @@ int aimee_pg_exec(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
    /* The schema-apply path runs the full postgres schema text through
     * here. Tests are expected to apply db2_apply_schema_sqlite_shim to
     * their handle BEFORE registering it; ignore the postgres schema text. */
-   if (sql && (strstr(sql, "CREATE OR REPLACE FUNCTION") != NULL ||
-               strstr(sql, "AT TIME ZONE 'UTC'") != NULL ||
-               strstr(sql, "GENERATED ALWAYS AS") != NULL || strstr(sql, "to_tsvector") != NULL ||
-               strstr(sql, "USING hnsw") != NULL || strstr(sql, "DROP INDEX") != NULL))
+   if (sql &&
+       (strstr(sql, "CREATE OR REPLACE FUNCTION") != NULL ||
+        strstr(sql, "AT TIME ZONE 'UTC'") != NULL || strstr(sql, "GENERATED ALWAYS AS") != NULL ||
+        strstr(sql, "to_tsvector") != NULL || strstr(sql, "USING hnsw") != NULL ||
+        strstr(sql, "USING diskann") != NULL || strstr(sql, "DROP INDEX") != NULL))
       return 0;
    char *sql_t = translate_sql(sql);
    if (!sql_t)
       return -1;
    char *errmsg = NULL;
    int rc = sqlite3_exec(db, sql_t, NULL, NULL, &errmsg);
-   free(sql_t);
    if (rc != SQLITE_OK)
    {
+      if (getenv("AIMEE_PG_SHIM_TRACE"))
+         fprintf(stderr, "pg-shim exec: %s (sql=%s)\n", errmsg ? errmsg : sqlite3_errmsg(db),
+                 sql_t);
       if (errbuf && errlen)
          snprintf(errbuf, errlen, "%s", errmsg ? errmsg : sqlite3_errmsg(db));
       sqlite3_free(errmsg);
+      free(sql_t);
       return -1;
    }
    sqlite3_free(errmsg);
+   free(sql_t);
    return 0;
 }
 
@@ -660,6 +768,19 @@ int aimee_pg_exec_with_changes(void *pg_conn, const char *sql, char *errbuf, siz
 
 /* --- Statements --- */
 
+/* Statement counter, test-only. Round-trip COUNT is what a batching regression
+ * changes, and unlike a timing assertion it is deterministic: no clock, no load
+ * sensitivity, and it fails the same way on every machine. */
+static long s_stmt_count = 0;
+void aimee_pg_test_stmt_count_reset(void)
+{
+   s_stmt_count = 0;
+}
+long aimee_pg_test_stmt_count(void)
+{
+   return s_stmt_count;
+}
+
 aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, size_t errlen)
 {
    return aimee_pg_prepare_ex(pg_conn, sql, NULL, errbuf, errlen);
@@ -668,6 +789,7 @@ aimee_pg_stmt_t *aimee_pg_prepare(void *pg_conn, const char *sql, char *errbuf, 
 aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_prepare_error_t *kind,
                                      char *errbuf, size_t errlen)
 {
+   s_stmt_count++;
    if (kind)
       *kind = AIMEE_PG_PREPARE_INVALID;
    sqlite3 *db = (sqlite3 *)pg_conn;
@@ -684,6 +806,8 @@ aimee_pg_stmt_t *aimee_pg_prepare_ex(void *pg_conn, const char *sql, aimee_pg_pr
    int rc = sqlite3_prepare_v2(db, sql_t, -1, &st, NULL);
    if (rc != SQLITE_OK)
    {
+      if (getenv("AIMEE_PG_SHIM_TRACE"))
+         fprintf(stderr, "pg-shim prepare: %s (sql=%s)\n", sqlite3_errmsg(db), sql_t);
       if (kind && rc == SQLITE_NOMEM)
          *kind = AIMEE_PG_PREPARE_RESOURCE;
       if (errbuf && errlen)
@@ -729,6 +853,9 @@ aimee_pg_step_t aimee_pg_step(aimee_pg_stmt_t *stmt, char *errbuf, size_t errlen
    }
    if (errbuf && errlen)
       snprintf(errbuf, errlen, "step: %s", sqlite3_errmsg(stmt->db));
+   if (getenv("AIMEE_PG_SHIM_TRACE"))
+      fprintf(stderr, "pg-shim step: %s (sql=%s)\n", sqlite3_errmsg(stmt->db),
+              sqlite3_sql(stmt->st));
    return AIMEE_PG_ERR;
 }
 

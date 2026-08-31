@@ -8,6 +8,8 @@
 #include <unistd.h>
 
 #include <aimee/skills/skill.h>
+#include "modules/skills/skill_trigger_policy.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- Helpers --- */
 
@@ -18,7 +20,7 @@ static char *make_tmpdir(void)
 {
    char *tmp = malloc(64);
    assert(tmp);
-   snprintf(tmp, 64, "/tmp/test_skill_XXXXXX");
+   snprintf(tmp, 64, "%s/test_skill_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    return tmp;
 }
@@ -114,6 +116,23 @@ static void test_skill_load_not_found(void)
    assert(content == NULL);
 }
 
+static void test_project_skill_requires_operator_approval(void)
+{
+   char *root = make_tmpdir();
+   char skills_dir[512], path[512];
+   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
+   mkdir_p(skills_dir);
+   snprintf(path, sizeof(path), "%s/unapproved.md", skills_dir);
+   write_file(path, "unapproved authority\n");
+   unsetenv("AIMEE_UNVERIFIED_PROJECT_SKILLS");
+   unsetenv("AIMEE_SKILL_APPROVAL_MANIFEST");
+   unsetenv("AIMEE_SKILL_APPROVAL_PUBLIC_KEY");
+   assert(skill_load(root, "unapproved") == NULL);
+   setenv("AIMEE_UNVERIFIED_PROJECT_SKILLS", "I_ACKNOWLEDGE_UNVERIFIED_AGENT_AUTHORITY", 1);
+   rm_rf(root);
+   free(root);
+}
+
 static void test_skill_load_found(void)
 {
    char *root = make_tmpdir();
@@ -131,6 +150,47 @@ static void test_skill_load_found(void)
    assert(strstr(content, "Performance Skill") != NULL);
    assert(strstr(content, "Profile before optimizing") != NULL);
    free(content);
+
+   rm_rf(root);
+   free(root);
+}
+
+static void test_skill_load_rejects_links_and_traversal_names(void)
+{
+   char *root = make_tmpdir();
+   char skills_dir[512], outside[512], link_path[512], hard_path[512];
+   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
+   mkdir_p(skills_dir);
+   snprintf(outside, sizeof(outside), "%s/secret.md", root);
+   write_file(outside, "secret\n");
+   snprintf(link_path, sizeof(link_path), "%s/linked.md", skills_dir);
+   assert(symlink(outside, link_path) == 0);
+   assert(skill_load(root, "linked") == NULL);
+   snprintf(hard_path, sizeof(hard_path), "%s/hard.md", skills_dir);
+   assert(link(outside, hard_path) == 0);
+   assert(skill_load(root, "hard") == NULL);
+   assert(skill_load(root, "../secret") == NULL);
+
+   rm_rf(root);
+   free(root);
+}
+
+static void test_skill_support_rejects_symlink_components(void)
+{
+   char *root = make_tmpdir();
+   char skill_dir[512], manifest[512], outside_dir[512], outside_file[512], link_dir[512];
+   snprintf(skill_dir, sizeof(skill_dir), "%s/.aimee/skills/safe", root);
+   mkdir_p(skill_dir);
+   snprintf(manifest, sizeof(manifest), "%s/SKILL.md", skill_dir);
+   write_file(manifest, "---\nname: safe\ndescription: Safe fixture.\n---\nBody.\n");
+   snprintf(outside_dir, sizeof(outside_dir), "%s/outside", root);
+   mkdir_p(outside_dir);
+   snprintf(outside_file, sizeof(outside_file), "%s/secret.md", outside_dir);
+   write_file(outside_file, "secret\n");
+   snprintf(link_dir, sizeof(link_dir), "%s/references", skill_dir);
+   assert(symlink(outside_dir, link_dir) == 0);
+   char err[256] = "";
+   assert(skill_support_file_load(root, "safe", "references/secret.md", err, sizeof(err)) == NULL);
 
    rm_rf(root);
    free(root);
@@ -484,7 +544,7 @@ static void test_skill_manage_write_file_guards_paths(void)
    assert(skill_manage_write_file(root, "support", "references/example.md", "ok", "user", err,
                                   sizeof(err)) == 0);
    char path[512];
-   snprintf(path, sizeof(path), "%s/.aimee/skills/references/example.md", root);
+   snprintf(path, sizeof(path), "%s/.aimee/skills/support/references/example.md", root);
    char *content = read_file(path);
    assert(strcmp(content, "ok") == 0);
    free(content);
@@ -784,9 +844,9 @@ static void test_skill_trigger_frontmatter_matches(void)
                          "  arg_pattern: [\"sleep \", \"curl \"]\n"
                          "---\n"
                          "Prefer condition checks.\n";
-   assert(skill_trigger_matches_content(content, "Bash", "sleep 5") == 1);
-   assert(skill_trigger_matches_content(content, "Bash", "echo ok") == 0);
-   assert(skill_trigger_matches_content(content, "Write", "sleep 5") == 0);
+   assert(skill_trigger_policy_matches_content(content, "Bash", "sleep 5") == 1);
+   assert(skill_trigger_policy_matches_content(content, "Bash", "echo ok") == 0);
+   assert(skill_trigger_policy_matches_content(content, "Write", "sleep 5") == 0);
 
    const char *path_content = "---\nname: path-skill\n"
                               "description: Use when matching path trigger frontmatter.\n"
@@ -795,9 +855,51 @@ static void test_skill_trigger_frontmatter_matches(void)
                               "  path_pattern: [\"_test.\", \"test_\"]\n"
                               "---\n"
                               "Prefer tests first.\n";
-   assert(skill_trigger_matches_content(path_content, "Write", "src/foo_test.c") == 1);
-   assert(skill_trigger_matches_content(path_content, "Edit", "src/test_foo.c") == 1);
-   assert(skill_trigger_matches_content(path_content, "Write", "src/foo.c") == 0);
+   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo_test.c") == 1);
+   assert(skill_trigger_policy_matches_content(path_content, "Edit", "src/test_foo.c") == 1);
+   assert(skill_trigger_policy_matches_content(path_content, "Write", "src/foo.c") == 0);
+}
+
+static int trigger_policy_provider(const char *content, const char *tool_name, const char *subject,
+                                   int *match)
+{
+   if (!match)
+      return -1;
+   *match = skill_trigger_policy_matches_content(content, tool_name, subject);
+   return 0;
+}
+
+static int trigger_error_provider(const char *content, const char *tool_name, const char *subject,
+                                  int *match)
+{
+   (void)content;
+   (void)tool_name;
+   (void)subject;
+   (void)match;
+   return -1;
+}
+
+static void test_skill_trigger_requires_process_provider(void)
+{
+   char *root = make_tmpdir();
+   char skills_dir[512], path[512];
+   snprintf(skills_dir, sizeof(skills_dir), "%s/.aimee/skills", root);
+   mkdir_p(skills_dir);
+   snprintf(path, sizeof(path), "%s/wait.md", skills_dir);
+   write_file(path, "---\nname: wait\ntriggers:\n  tool: [Bash]\n"
+                    "  arg_pattern: [\"sleep \"]\n---\nWait safely.\n");
+
+   skill_trigger_register_match_provider(NULL);
+   assert(skill_trigger_matches(root, "wait", "Bash", "sleep 5") == -1);
+   skill_trigger_register_match_provider(trigger_policy_provider);
+   assert(skill_trigger_matches(root, "wait", "Bash", "sleep 5") == 1);
+   assert(skill_trigger_matches(root, "wait", "Bash", "echo ok") == 0);
+   skill_trigger_register_match_provider(trigger_error_provider);
+   assert(skill_trigger_matches(root, "wait", "Bash", "sleep 5") == -1);
+   skill_trigger_register_match_provider(NULL);
+
+   rm_rf(root);
+   free(root);
 }
 
 static void test_skill_capability_autostub_proposes_missing_tool(void)
@@ -996,17 +1098,107 @@ static void test_skill_eval_missing_fixtures(void)
    free(root);
 }
 
+typedef struct
+{
+   int order[16];
+   int calls;
+   int no_effect;
+   int tool_attempt;
+} executable_eval_runner_t;
+
+static int executable_eval_runner(void *opaque, const char *system_prompt, const char *prompt,
+                                  int max_tokens, char **response_out,
+                                  skill_trial_usage_t *usage_out, char *errbuf, size_t errbuf_len)
+{
+   (void)prompt;
+   (void)max_tokens;
+   (void)errbuf;
+   (void)errbuf_len;
+   executable_eval_runner_t *runner = opaque;
+   int treatment = strstr(system_prompt, "### ACTIVE SKILL:") != NULL;
+   runner->order[runner->calls++] = treatment;
+   *response_out = strdup(runner->no_effect || treatment ? "I reviewed first."
+                                                         : "I changed it without review.");
+   memset(usage_out, 0, sizeof(*usage_out));
+   usage_out->prompt_tokens = 10;
+   usage_out->completion_tokens = 5;
+   usage_out->latency_ms = 20;
+   usage_out->cost_usd = 0.01;
+   usage_out->tool_calls = runner->tool_attempt;
+   snprintf(usage_out->route, sizeof(usage_out->route), "test/model");
+   return *response_out ? 0 : -1;
+}
+
+static void test_skill_executable_eval_is_paired_held_out_and_bounded(void)
+{
+   char *root = make_tmpdir();
+   char path[512];
+   snprintf(path, sizeof(path), "%s/.aimee/skills/paired-eval", root);
+   mkdir_p(path);
+   snprintf(path, sizeof(path), "%s/.aimee/skills/paired-eval/SKILL.md", root);
+   write_file(path, "---\nname: paired-eval\ndescription: Use when reviewing changes.\n---\n"
+                    "Always review first.\n");
+   snprintf(path, sizeof(path), "%s/.aimee/skill-evals/paired-eval", root);
+   mkdir_p(path);
+   snprintf(path, sizeof(path), "%s/.aimee/skill-evals/paired-eval/review.json", root);
+   write_file(path, "{\"name\":\"review\",\"prompt\":\"Change the risky file.\","
+                    "\"violation_check\":{\"type\":\"contains\",\"value\":\"without review\"},"
+                    "\"compliance_check\":{\"type\":\"contains\",\"value\":\"reviewed first\"}}\n");
+
+   executable_eval_runner_t runner = {0};
+   skill_trial_options_t options = {
+       .runner = executable_eval_runner,
+       .runner_ctx = &runner,
+       .repeats = 2,
+       .max_tokens = 128,
+       .minimum_delta = 0.5,
+       .max_case_cost_usd = 0.1,
+       .max_total_cost_usd = 0.2,
+       .route = "test/model",
+   };
+   skill_trial_result_t result;
+   char err[256] = "";
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(result.passed && !result.inconclusive);
+   assert(result.calls == 4 && result.paired_improvements == 2);
+   assert(result.compliance_delta == 1.0 && result.cost_usd == 0.04);
+   assert(runner.order[0] == 0 && runner.order[1] == 1 && runner.order[2] == 1 &&
+          runner.order[3] == 0);
+   assert(strlen(result.skill_digest) == 64 && strlen(result.held_out_case_set_digest) == 64 &&
+          strlen(result.manifest_digest) == 64);
+   skill_usage_t usage;
+   assert(skill_usage_get(root, "paired-eval", &usage) == 0 && usage.use_count == 0);
+
+   memset(&runner, 0, sizeof(runner));
+   runner.no_effect = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && !result.inconclusive && result.compliance_delta == 0.0);
+
+   memset(&runner, 0, sizeof(runner));
+   runner.tool_attempt = 1;
+   assert(skill_eval_executable(root, "paired-eval", &options, &result, err, sizeof(err)) == 0);
+   assert(!result.passed && result.inconclusive);
+   assert(strstr(result.first_failure, "tool or external-effect") != NULL);
+
+   rm_rf(root);
+   free(root);
+}
+
 int main(void)
 {
    g_test_home = make_tmpdir();
    g_test_bundled = make_tmpdir();
    setenv("AIMEE_HOME", g_test_home, 1);
    setenv("AIMEE_BUNDLED_SKILLS_DIR", g_test_bundled, 1);
+   setenv("AIMEE_UNVERIFIED_PROJECT_SKILLS", "I_ACKNOWLEDGE_UNVERIFIED_AGENT_AUTHORITY", 1);
 
+   test_project_skill_requires_operator_approval();
    test_skill_path_not_found();
    test_skill_path_found_project();
    test_skill_load_not_found();
    test_skill_load_found();
+   test_skill_load_rejects_links_and_traversal_names();
+   test_skill_support_rejects_symlink_components();
    test_skill_directory_format_found();
    test_skill_list_empty();
    test_skill_list_finds_project_skills();
@@ -1030,12 +1222,14 @@ int main(void)
    test_skill_list_null_inputs();
    test_skill_lint_rules();
    test_skill_trigger_frontmatter_matches();
+   test_skill_trigger_requires_process_provider();
    test_skill_capability_autostub_proposes_missing_tool();
    test_skill_change_eval_gate();
    test_skill_eval_passes_with_delta();
    test_skill_eval_fails_without_treatment_compliance();
    test_skill_eval_fails_without_baseline_violation();
    test_skill_eval_missing_fixtures();
+   test_skill_executable_eval_is_paired_held_out_and_bounded();
 
    rm_rf(g_test_home);
    rm_rf(g_test_bundled);

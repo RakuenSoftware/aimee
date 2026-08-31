@@ -1,4 +1,4 @@
-# Debian 13 (trixie) for libpq 17. The kb links db2/vault_operator_status_runtime.c,
+# Debian 13 (trixie) for libpq 17. The kb links modules/db2/c/vault_operator_status_runtime.c,
 # which uses the PostgreSQL 17 async-cancel API (PQcancelCreate / PGcancelConn /
 # PQcancelPoll). Bookworm ships libpq 15, where those symbols do not exist, so the
 # kb build failed here with -Werror=implicit-function-declaration while the native
@@ -8,7 +8,16 @@
 ARG PG_MAJOR=18
 ARG PGVECTORSCALE_VERSION=0.9.0
 
-FROM debian:trixie-slim AS build
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS module-go-build
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/ ./
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module \
+    && CGO_ENABLED=0 go build -trimpath -o /out/aimee-module-config \
+         github.com/RakuenSoftware/aimee-module-config/runtime
+
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -18,6 +27,7 @@ RUN apt-get update \
         git \
         libp11-kit-dev \
         libpq-dev \
+        libsqlite3-dev \
         libssl-dev \
         libzstd-dev \
         pkg-config \
@@ -27,37 +37,34 @@ RUN apt-get update \
 
 WORKDIR /src
 COPY . .
+COPY --from=module-go-build /out/aimee-module /tmp/aimee-module-go
+COPY --from=module-go-build /out/aimee-module-config /tmp/aimee-module-config-go
 ARG AIMEE_VERSION=""
 # Ship the tree-sitter extraction front-end: fetch + sha256-verify the pinned
 # grammars (scripts/fetch-treesitter.sh; git + network needed only in this trusted
 # build stage), then build the kb with AIMEE_TREESITTER=1 (real-AST C/C++ class/
 # method extraction). See docs/proposals/pending/cpp-class-method-extraction.md.
 RUN sh scripts/fetch-treesitter.sh \
-    && make -C src ../aimee-kb -j"$(nproc)" AIMEE_TREESITTER=1 ${AIMEE_VERSION:+GIT_VERSION=v$AIMEE_VERSION}
+    && build_version="$AIMEE_VERSION" \
+    && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
+    && make -C src ../aimee-kb ../aimee-kb-worm -j"$(nproc)" AIMEE_TREESITTER=1 \
+         GIT_VERSION="v$build_version"
 
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
-    && for source in /module-runtime/src/*.c; do \
-         binary="${source##*/}"; binary="${binary%.c}"; \
-         cc -std=c11 -O2 -Wall -Wextra -Werror -Isrc/core/event_bus/include \
-           -Isrc/modules/memory/include -Isrc/modules/learning/include \
-           -Isrc/modules/routing/include -Isrc/modules/delegates/include \
-           -Isrc/modules/tools/include -Isrc/modules/workspace/include \
-           -Isrc/modules/git/include -Isrc/modules/skills/include \
-           -Isrc/modules/response-composition/include \
-           "$source" \
-           src/core/event_bus/bus_attach.c src/core/event_bus/bus_client.c \
-           src/core/event_bus/bus_endpoint.c src/core/event_bus/bus_region.c \
-           src/core/event_bus/bus_ring.c src/core/event_bus/bus_wire.c \
-           src/core/event_bus/module_protocol.c src/core/event_bus/module_runtime.c \
-           -pthread \
-           -o "/module-runtime/bin/$binary"; \
-       done
+    && python3 scripts/build_c_module_runtime_bundle.py \
+         --bundle /module-runtime --output /module-runtime/bin --placement kb \
+    && while IFS= read -r module_id; do \
+         [ -n "$module_id" ] || continue; \
+         if [ "$module_id" = config ]; then module_bin=/tmp/aimee-module-config-go; \
+         else module_bin=/tmp/aimee-module-go; fi; \
+         install -m 0755 "$module_bin" "/module-runtime/bin/aimee-module-$module_id"; \
+       done < /module-runtime/go.modules
 
 # pgvectorscale (StreamingDiskANN). Always installed: it adds ~1 MB to the image,
 # and the kb already decides at RUNTIME whether to use it -- pgvec_vectorscale_available()
 # probes pg_extension and falls back to HNSW with a warning when it is absent
-# (src/db2/pgvec_transport.c). Gating it at build time would defeat that and make
+# (src/modules/db2/c/pgvec_transport.c). Gating it at build time would defeat that and make
 # the index type a property of which image you happened to pull.
 #
 # Upstream ships the built extension as a .deb per (version, pg major, arch), so
@@ -67,7 +74,7 @@ RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
 # with no dependency on this repo's source at all. The old comment here claimed CI
 # cached the layer; it never did (the buildx GHA cache was thrashing its quota and
 # restored nothing), so the compile ran in full on every single run.
-FROM debian:trixie-slim AS pgvectorscale-build
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS pgvectorscale-build
 ARG PG_MAJOR
 ARG PGVECTORSCALE_VERSION
 # TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
@@ -109,7 +116,7 @@ RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'v
 
 # Runtime must match the build stage: libpq5 here has to provide at least the
 # PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
-FROM debian:trixie-slim
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 
 # python3 runs the sidecar clients the kb popens (llm-chat.py,
 # learning-synthesize.py, curator-extract.py -> LLM endpoint) AND the in-container
@@ -120,6 +127,7 @@ RUN apt-get update \
         curl \
         libgomp1 \
         libpq5 \
+        libsqlite3-0 \
         libssl3 \
         libzstd1 \
         python3 \
@@ -168,9 +176,16 @@ RUN set -eux; \
     else \
       python3 -m venv "$EMBEDDER_VENV"; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          --index-url https://download.pytorch.org/whl/cpu torch; \
+          --index-url https://download.pytorch.org/whl/cpu "torch==2.13.0"; \
       "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
-          "sentence-transformers>=3.3" "transformers>=5.2" einops; \
+          "sentence-transformers==5.2.3" "transformers==4.57.6" "einops==0.8.2"; \
+      # onnxruntime is the CPU serving path this embedder was characterised on.
+      # Without it sentence-transformers falls back to fp32 torch, which costs
+      # ~2000 ms for one ~512-token text on 4 cores (25M-parameter model) and
+      # made corpus ingest run at ~20 s/file. optimum provides the ORT backend
+      # sentence-transformers loads via backend="onnx".
+      "$EMBEDDER_VENV/bin/pip" install --no-cache-dir --quiet \
+          "optimum[onnxruntime]==2.1.0" "onnxruntime==1.29.0"; \
       find "$EMBEDDER_VENV" -name '__pycache__' -type d -prune -exec rm -rf {} +; \
       rm -rf /root/.cache/pip; \
     fi
@@ -365,8 +380,14 @@ if selected not in table:
     sys.exit(f"AIMEE_EMBEDDER={selected!r} is not in the registry. "
              f"Known: {', '.join(sorted(table))}")
 table = {selected: table[selected]}
+# KEEP onnx/model.onnx: it is the runtime this embedder is served with. Excluding
+# it left sentence-transformers on fp32 torch, at ~2000 ms for one ~512-token text
+# on 4 cores (25M-param model) -- ~20 s per source file of corpus ingest.
+# Only the BASE graph. bekko publishes nine variants (fp16, int8, quantized,
+# O1-O4); quantized drifts the vectors and optimized is redundant with ORT's own
+# graph optimisation, so model_*.onnx stay out, as does the onnx_data sidecar.
 SKIP = [
-    "onnx/*", "openvino/*", "*.onnx", "*.onnx_data",   # alternate runtimes
+    "onnx/model_*.onnx", "openvino/*", "*.onnx_data",  # variants we do not serve
     "*.bin", "*.h5", "*.msgpack", "*.tflite", "*.ckpt",  # duplicate/legacy formats
     "*.gguf",                                          # not this runtime either
 ]
@@ -399,15 +420,20 @@ def code_repos(snapshot_dir):
 
 
 for name, spec in table.items():
-    repo, revision = spec["repo"], spec.get("revision") or "main"
+    repo, revision = spec["repo"], spec.get("revision")
+    if not revision or len(revision) != 40:
+        raise RuntimeError(f"{name}: revision must be an immutable 40-character commit")
     print(f"baking {name}: {repo}@{revision}", flush=True)
     local = fetch(repo, revision=revision, ignore_patterns=SKIP)
-    # Code repos are referenced by name only — auto_map carries no revision — so these
-    # take the default branch. That is a looser pin than the weights get; a model whose
-    # code must be pinned needs its auto_map repo added to the registry explicitly.
+    # auto_map carries no revision. Refuse external code unless the registry binds
+    # every referenced repository to an immutable commit.
+    code_revisions = spec.get("code_revisions") or {}
     for code_repo in sorted(code_repos(local)):
-        print(f"  + code: {code_repo}", flush=True)
-        fetch(code_repo, allow_patterns=["*.py", "*.json", "*.txt"])
+        code_revision = code_revisions.get(code_repo)
+        if not code_revision or len(code_revision) != 40:
+            raise RuntimeError(f"{name}: unpinned auto_map code repository {code_repo}")
+        print(f"  + code: {code_repo}@{code_revision}", flush=True)
+        fetch(code_repo, revision=code_revision, allow_patterns=["*.py", "*.json", "*.txt"])
 PYBAKE
 
 # The bake runs as root and huggingface_hub writes its tree-cache metadata 0600, so
@@ -441,6 +467,7 @@ RUN if [ -d /opt/aimee/models ]; then chmod -R a+rX /opt/aimee/models; fi
 # Nothing between the bake and here executes the binary, which is what makes the move
 # safe: the entrypoint script, USER, HEALTHCHECK and ENTRYPOINT all follow.
 COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /src/aimee-kb-resolver /usr/local/bin/aimee-kb-resolver
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
 COPY --from=build /module-runtime/grants/kb/ /opt/aimee/module-grants/kb/
@@ -466,6 +493,7 @@ COPY scripts/embed-remote.py scripts/llm-chat.py \
 # the entrypoint seeds it into $AIMEE_HOME/.config/aimee on first start.
 COPY deploy/container/aimee.yaml /opt/aimee/defaults/aimee.yaml
 COPY deploy/container/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-entrypoint.sh
+COPY deploy/container/optional-modules-lib.sh /usr/local/bin/optional-modules-lib.sh
 COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/aimee-kb-db-export.sh /usr/local/bin/aimee-kb-db-export
 RUN chmod +x /usr/local/bin/aimee-kb-entrypoint.sh /usr/local/bin/aimee-kb-db-export \

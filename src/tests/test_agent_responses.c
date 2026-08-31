@@ -227,6 +227,33 @@ void test_ir_parse_responses_tool_call(void)
    cJSON *item = cJSON_GetArrayItem(p.assistant_message, 0);
    cJSON *cid = cJSON_GetObjectItemCaseSensitive(item, "call_id");
    assert(cid && cJSON_IsString(cid) && strcmp(cid->valuestring, "call_1") == 0);
+   /* a plain tool has no group */
+   assert(p.calls[0].tool_namespace[0] == '\0');
+   agent_free_parsed_response(&p);
+}
+
+/* A tool the client offered inside a `namespace` group comes back with a BARE
+ * nested name and the group beside it. Both halves have to reach the parsed call:
+ * the client routes on the pair and answers "unsupported call: git" given only the
+ * name. */
+void test_ir_parse_responses_namespaced_tool_call(void)
+{
+   const char *body =
+       "event: response.output_item.done\r\n"
+       "data: {\"item\":{\"type\":\"function_call\",\"call_id\":\"call_7\",\"name\":\"git\","
+       "\"namespace\":\"mcp__aimee\",\"arguments\":\"{\\\"command\\\":\\\"status\\\"}\"}}\r\n\r\n"
+       "event: response.completed\r\n"
+       "data: {\"response\":{\"output\":[{\"type\":\"function_call\",\"call_id\":\"call_7\","
+       "\"name\":\"git\",\"namespace\":\"mcp__aimee\","
+       "\"arguments\":\"{\\\"command\\\":\\\"status\\\"}\"}],"
+       "\"usage\":{\"input_tokens\":3,\"output_tokens\":4}}}\r\n\r\n";
+
+   parsed_response_t p;
+   assert(agent_ir_parse_responses(body, -1, NULL, &p) == 0);
+   assert(p.call_count == 1);
+   /* the name stays bare -- it is the group that qualifies it */
+   assert(strcmp(p.calls[0].name, "git") == 0);
+   assert(strcmp(p.calls[0].tool_namespace, "mcp__aimee") == 0);
    agent_free_parsed_response(&p);
 }
 

@@ -1,6 +1,6 @@
 # Roadmap
 
-This is the remaining direction after v0.2.192. Accepted implementation detail lives in proposals;
+This is the remaining direction after 0.4.0. Accepted implementation detail lives in proposals;
 current behavior lives in product guides and generated references.
 
 ## 1. Finish the event-bus move
@@ -21,7 +21,7 @@ current behavior lives in product guides and generated references.
 
 ## 3. Continue the Go service cutover
 
-- move remaining DB1 API families behind one Go owner at a time;
+- keep the completed DB1 Go-family catalog, PostgreSQL transport, and migration ownership in sync;
 - isolate provider, policy, vault, and tool resources before changing ownership;
 - preserve `/v1` compatibility and crash recovery;
 - keep native code only where the boundary and evidence justify it.
@@ -45,7 +45,7 @@ current behavior lives in product guides and generated references.
 
 - organization data connectors with scope and provenance;
 - fleet registration and routing across multiple KBs by corpus, authority, and capabilities;
-- per-KB internal or remote embedder and synthesizer placement, with no separate inference service;
+- fleet routing across per-KB embedding placement and local-sidecar or remote synthesis placement;
 - curator extraction quality and benchmark cadence;
 - retrieval fusion selection and evidence contracts;
 - better code-graph architecture surfaces;

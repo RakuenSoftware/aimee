@@ -3,22 +3,30 @@
 #include "server_http.h"
 #include "server_http_authz.h"
 #include "server_http_internal.h"
+#include "server_http_identity.h"
 #include "runtime_secret.h"
+#include "request_context.h"
 #include "http_content_encoding.h"
 #include "server.h" /* CAP_* / CAPS_* bits, server_capability_for_method */
 #include "server/server_mgmt_endpoint.h"
-#include "server/wfe_http_proxy.h"
+#include "server/workflow_control_bus.h"
+#include <aimee/audit/obs_bus.h>
 #include "agent_config.h"
 #include "config.h"
+#include "command_registry.h"
+#include "role_templates.h"
+#include "delegate_permissions_stub.h"
 #include "cJSON.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "openai_runs_store.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "util.h"
 #include <netinet/in.h> /* INADDR_ANY / INADDR_LOOPBACK for the bind-policy test */
 #include <assert.h>
+#include <limits.h>
 #include <pthread.h>
+#include <pwd.h>
 #include <stdio.h>
 #include <stdatomic.h>
 #include <stdlib.h>
@@ -30,24 +38,12 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 
-extern int g_remote_writes;
-
-typedef struct
+static char *kb_agent_surfaces_stub(void)
 {
-   pthread_barrier_t *barrier;
-   int result;
-   char bearer[65];
-} wizard_bootstrap_thread_t;
-
-static void *wizard_bootstrap_thread(void *arg)
-{
-   wizard_bootstrap_thread_t *thread = arg;
-   int barrier_result = pthread_barrier_wait(thread->barrier);
-   assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-   thread->result =
-       server_http_first_user_bootstrap("webuser:alice", thread->bearer, sizeof(thread->bearer));
-   return NULL;
+   return strdup("{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}");
 }
+
+extern int g_remote_writes;
 
 int kb_client_mtls_management_jwks_fetch(void *ctx, char *out, size_t cap, size_t *len)
 {
@@ -108,6 +104,11 @@ double wfe_autonomy_default_max_cost_usd(void)
    return 5.0;
 }
 
+int wfe_autonomy_killed(void)
+{
+   return 0;
+}
+
 /* Narrow response-writer seams not otherwise needed by this route-only unit. */
 const char *ingress_preinject_turn_id(void)
 {
@@ -141,10 +142,24 @@ static int stub_completion_handler(const char *body, char *resp, int cap)
    return 200;
 }
 
+static char g_recall_session_id[80];
+static int stub_recall_session_handler(const char *body, char *resp, int cap)
+{
+   (void)body;
+   snprintf(g_recall_session_id, sizeof(g_recall_session_id), "%s", session_id());
+   snprintf(resp, (size_t)cap, "{\"stub\":true}");
+   return 200;
+}
+
 /* Stub rules provider: returns a fixed heap JSON body (route frees it). */
 static char *stub_rules_provider(void)
 {
    return strdup("{\"epoch\":3,\"rules\":[{\"id\":\"r1\"}]}");
+}
+
+static char *stub_typed_not_found_provider(void)
+{
+   return strdup("{\"status\":\"error\",\"kind\":\"not_found\",\"http_status\":404}");
 }
 
 /* Stub models provider: appends two fixed agent names to /v1/models. */
@@ -255,7 +270,10 @@ int server_dispatch(server_ctx_t *ctx, server_conn_t *conn, const char *msg, siz
    /* Mimic a real method handler: write an NDJSON response to the loopback fd
     * the first-class /v1 route handed us, so the capture path is exercised end to
     * end. */
-   const char *r = "{\"status\":\"ok\",\"result\":42}\n";
+   const char *r = strstr(g_disp_body, "\"test_http_status\":true")
+                       ? "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                         "\"http_status\":400}\n"
+                       : "{\"status\":\"ok\",\"result\":42}\n";
    ssize_t w = write(conn->fd, r, strlen(r));
    (void)w;
    return 0;
@@ -287,77 +305,215 @@ static void submit_and_wait_op(const char *method)
    assert(status == OPENAI_RUN_COMPLETED);
 }
 
-static void test_wfe_http_proxy_round_trip(void)
+/* The bus is not started in a unit test, so the module surface is stubbed to
+ * report exactly that. obs_bus_module_call must still resolve for the link even
+ * though an unattached module is answered before it is reached. */
+int obs_bus_module_available(uint32_t event_kind)
 {
-   char temp[] = "/tmp/aimee-wfe-proxy-XXXXXX";
-   assert(mkdtemp(temp) != NULL);
-   char socket_path[sizeof(((struct sockaddr_un *)0)->sun_path)];
-   assert(snprintf(socket_path, sizeof(socket_path), "%s/wfe.sock", temp) > 0);
+   (void)event_kind;
+   return 0;
+}
 
-   int listener = socket(AF_UNIX, SOCK_STREAM, 0);
-   assert(listener >= 0);
-   struct sockaddr_un addr = {.sun_family = AF_UNIX};
-   assert(snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", socket_path) > 0);
-   assert(bind(listener, (struct sockaddr *)&addr, sizeof(addr)) == 0);
-   assert(listen(listener, 1) == 0);
+aimee_module_call_result_t
+obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, uint64_t deadline_ns,
+                    const void *request_body, uint32_t request_len, void *response_body,
+                    uint32_t response_capacity, uint32_t *response_len,
+                    aimee_module_cancelled_fn cancelled, void *cancel_context)
+{
+   (void)event_kind;
+   (void)stage_id;
+   (void)trace_id;
+   (void)deadline_ns;
+   (void)request_body;
+   (void)request_len;
+   (void)response_body;
+   (void)response_capacity;
+   (void)response_len;
+   (void)cancelled;
+   (void)cancel_context;
+   return AIMEE_MODULE_CALL_TRANSPORT;
+}
 
-   pid_t child = fork();
-   assert(child >= 0);
-   if (child == 0)
-   {
-      int client = accept(listener, NULL, NULL);
-      if (client < 0)
-         _exit(10);
-      char request[4096] = "";
-      size_t used = 0;
-      while (used + 1 < sizeof(request))
-      {
-         ssize_t got = read(client, request + used, sizeof(request) - used - 1);
-         if (got <= 0)
-            _exit(11);
-         used += (size_t)got;
-         request[used] = '\0';
-         if (strstr(request, "{\"proposal_md\":\"test\"}"))
-            break;
-      }
-      if (!strstr(request, "POST /v1/dev/submit?source=release-test HTTP/1.1\r\n") ||
-          !strstr(request, "Authorization: Bearer proxy-test-token\r\n") ||
-          !strstr(request, "X-Aimee-Webuser: webuser:release-test\r\n"))
-         _exit(12);
-      const char *response = "HTTP/1.1 202 Accepted\r\nContent-Type: application/json\r\n"
-                             "Content-Length: 30\r\nConnection: close\r\n\r\n"
-                             "{\"ok\":true,\"work_item_id\":\"w\"}";
-      if (write(client, response, strlen(response)) != (ssize_t)strlen(response))
-         _exit(13);
-      close(client);
-      close(listener);
-      _exit(0);
-   }
-
-   setenv("AIMEE_WFE_HTTP_SOCKET", socket_path, 1);
-   assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "proxy-test-token") == 0);
+/* The private workflow proxy is gone: the control plane is reached over the
+ * event bus. Its round-trip test went with the transport it exercised -- the
+ * request shaping it covered is now tested in Go against the same mux
+ * (server-go/modules/workflows/control_test.go).
+ *
+ * What is still C's to answer is the unattached case. A control call with no
+ * module serving the stage must say so, not hang or claim success. */
+static void test_workflow_control_reports_an_unattached_module(void)
+{
    char response[256];
    const char *body = "{\"proposal_md\":\"test\"}";
-   int status = wfe_http_proxy_request("POST", "/v1/dev/submit", "source=release-test", body,
-                                       (int)strlen(body), "webuser:release-test", response,
-                                       sizeof(response));
-   unsetenv("AIMEE_WFE_HTTP_SOCKET");
-   runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
-   int child_status = 0;
-   assert(waitpid(child, &child_status, 0) == child);
-   assert(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
-   assert(status == 202);
-   assert(strcmp(response, "{\"ok\":true,\"work_item_id\":\"w\"}") == 0);
-   close(listener);
-   assert(unlink(socket_path) == 0);
-   assert(rmdir(temp) == 0);
+   int status = workflow_control_request("POST", "/v1/dev/submit", "source=release-test", body,
+                                         (int)strlen(body), "webuser:release-test", 1, response,
+                                         sizeof(response));
+   assert(status == 503);
+   assert(strstr(response, "not attached to the event bus") != NULL);
+}
+
+/* `aimee roles show` has to answer the question a log line was answering: what
+ * did this role actually come to?
+ *
+ * A permission nothing enforces and a tool the set withholds are both invisible
+ * in the frontmatter an operator wrote, and both change what the delegate can
+ * do. The route carries them structurally so the CLI can print them and the
+ * Personas tab can render them.
+ *
+ * WHAT the resolved set is belongs to the delegates module and is proved there.
+ * What is proved HERE is that the route asks and reports faithfully, including
+ * the case where resolution fails: a role that holds nothing is not the same as
+ * a role that grants nothing, and the response says which. */
+static void test_role_template_show_reports_what_the_role_came_to(void)
+{
+   delegate_permissions_stub_install();
+   assert(role_template_write("gatekeeper",
+                              "---\npermissions:\n  - tools\n  - name: deploy\n"
+                              "    enforced_at: deploy-gate\n---\n\nYou gate deploys.\n") == 0);
+
+   /* The route writes the JSON body and returns the status; the envelope is the
+      caller's job. */
+   char resp[8192];
+   assert(route_role_template_show("gatekeeper", resp, (int)sizeof(resp)) == 200);
+   cJSON *o = cJSON_Parse(resp);
+   assert(o != NULL);
+
+   cJSON *perms = cJSON_GetObjectItemCaseSensitive(o, "permissions");
+   assert(cJSON_IsObject(perms));
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(perms, "resolved")));
+
+   /* Held, with the point each is bound to. */
+   cJSON *held = cJSON_GetObjectItemCaseSensitive(perms, "held");
+   assert(cJSON_GetArraySize(held) == 2);
+   int saw_deploy_gate = 0;
+   cJSON *g = NULL;
+   cJSON_ArrayForEach(g, held)
+   {
+      const char *name = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "name"));
+      const char *at = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(g, "enforced_at"));
+      if (name && strcmp(name, "deploy") == 0 && at && strcmp(at, "deploy-gate") == 0)
+         saw_deploy_gate = 1;
+   }
+   assert(saw_deploy_gate);
+
+   /* This role holds no shell and no repo_write, so those tools are withheld
+      whatever toolset it runs with -- the thing an operator cannot see. */
+   cJSON *denied = cJSON_GetObjectItemCaseSensitive(perms, "denied_tools");
+   assert(cJSON_GetArraySize(denied) > 0);
+   int saw_bash = 0, saw_write = 0;
+   cJSON *d = NULL;
+   cJSON_ArrayForEach(d, denied)
+   {
+      const char *tool = cJSON_GetStringValue(d);
+      saw_bash |= (tool && strcmp(tool, "bash") == 0);
+      saw_write |= (tool && strcmp(tool, "write_file") == 0);
+   }
+   assert(saw_bash && saw_write);
+
+   cJSON_Delete(o);
+   (void)role_template_delete("gatekeeper");
+   printf("  PASS: test_role_template_show_reports_what_the_role_came_to\n");
+}
+
+/* TLS seams the identity capture reaches through. This suite drives capture
+ * with fd = -1 on a TCP-shaped request, so no connection is ever TLS and these
+ * only need to answer "not TLS" -- linking the real TLS stack here would pull in
+ * the whole connection layer to test header parsing. */
+#include "server_conn_io.h"
+#include "server_tls.h"
+
+int server_conn_io_has_ssl(int fd)
+{
+   (void)fd;
+   return 0;
+}
+
+SSL *server_conn_io_get_ssl(int fd)
+{
+   (void)fd;
+   return NULL;
+}
+
+int server_tls_peer_identity(SSL *ssl, char *cn_out, size_t cn_len, char *serial_out,
+                             size_t serial_len)
+{
+   (void)ssl;
+   if (cn_out && cn_len)
+      cn_out[0] = 0;
+   if (serial_out && serial_len)
+      serial_out[0] = 0;
+   return 0;
+}
+
+int server_tls_peer_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int server_tls_local_cert(SSL *ssl, server_tls_peer_cert_t *out)
+{
+   (void)ssl;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+static int slow_stream_handler(const char *body, server_http_sse_event_emit emit, void *ctx)
+{
+   (void)body;
+   struct timespec ts;
+   ts.tv_sec = 17;
+   ts.tv_nsec = 0;
+   nanosleep(&ts, NULL);
+   emit(ctx, "done", "{}");
+   return 0;
+}
+
+static void test_sse_keepalive_slow_generation(void)
+{
+   int fds[2];
+   if (pipe(fds) != 0)
+      return;
+   server_http_sse_live_run(fds[1], "{}", slow_stream_handler);
+   close(fds[1]);
+   char buf[8192];
+   ssize_t n = read(fds[0], buf, 8191);
+   if (n < 1)
+      n = 0;
+   buf[n] = 0;
+   close(fds[0]);
+   assert(n != 0);
+   assert(strstr(buf, "keep-alive") != NULL);
+}
+
+static void test_json_number_serialization_is_exact(void)
+{
+   const char *cases[] = {"9007199254740991", "9007199254740992", "9007199254740993"};
+   for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      cJSON *before = cJSON_Parse(cases[i]);
+      assert(cJSON_IsNumber(before));
+      char *encoded = cJSON_PrintUnformatted(before);
+      assert(encoded != NULL);
+      cJSON *after = cJSON_Parse(encoded);
+      assert(cJSON_IsNumber(after));
+      assert(after->valuedouble == before->valuedouble);
+      cJSON_Delete(after);
+      free(encoded);
+      cJSON_Delete(before);
+   }
 }
 
 int main(void)
 {
+   test_json_number_serialization_is_exact();
+   test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");
 
-   test_wfe_http_proxy_round_trip();
+   test_workflow_control_reports_an_unattached_module();
 
    char home[PATH_MAX];
    snprintf(home, sizeof(home), "%s/aimee-shttp-XXXXXX", platform_tmpdir());
@@ -484,6 +640,28 @@ int main(void)
       assert(strstr(resp, "\"personas\"") && strstr(resp, "\"sessions\""));
       assert(strstr(resp, "\"models\""));
       assert(strstr(resp, "\"version\":\""));
+      cJSON *caps = cJSON_Parse(resp);
+      cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      assert(cJSON_IsObject(surfaces));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "cli_only")));
+      assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+      cJSON_Delete(caps);
+
+      aimee_command_registry_reset();
+      assert(aimee_agent_surface_register("runtime_future", AIMEE_SURFACE_MCP, "runtime-future") ==
+             0);
+      server_http_set_kb_agent_surfaces_provider(kb_agent_surfaces_stub);
+      st = server_http_route("GET", "/v1/capabilities", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      caps = cJSON_Parse(resp);
+      surfaces = cJSON_GetObjectItemCaseSensitive(caps, "agent_surfaces");
+      cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+      assert(cJSON_GetArraySize(mcp_only) == 2);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "runtime_future") == 0);
+      assert(strcmp(cJSON_GetArrayItem(mcp_only, 1)->valuestring, "kb_future") == 0);
+      cJSON_Delete(caps);
+      server_http_set_kb_agent_surfaces_provider(NULL);
+      aimee_command_registry_reset();
    }
 
    /* --- GET /v1/models is an OpenAI-shaped model list with the aimee model --- */
@@ -615,12 +793,12 @@ int main(void)
    }
 
    /* Go owns workflow state, but the public C resource plane must forward to it.
-    * An absent private socket is a service outage, not a retired 410 endpoint. */
+    * A control plane that is not serving the stage is a service outage, not a
+    * retired 410 endpoint. The stub above reports the module as unattached. */
    {
-      unsetenv("AIMEE_WFE_HTTP_SOCKET");
       int st = server_http_route("POST", "/v1/dev/submit", "{}", 2, resp, sizeof(resp));
       assert(st == 503);
-      assert(strstr(resp, "control plane is unavailable"));
+      assert(strstr(resp, "not attached to the event bus"));
       st = server_http_route("GET", "/v1/workflow/items/wi_test", NULL, 0, resp, sizeof(resp));
       assert(st == 503);
    }
@@ -646,6 +824,43 @@ int main(void)
    {
       int st = server_http_route("GET", "/v1/personas/does-not-exist", NULL, 0, resp, sizeof(resp));
       assert(st == 404);
+   }
+
+   /* --- users can add, edit, and remove a persona through the server API --- */
+   {
+      const char *created =
+          "{\"name\":\"ignored-body-name\",\"description\":\"First version\","
+          "\"delegates\":\"full\",\"roles\":[\"code\"],"
+          "\"persona\":\"You are a staff engineer in %s.\","
+          "\"principles\":\"# Principles\\n- Prefer evidence.\",\"brief\":\"Initial brief\"}";
+      int st = server_http_route("PUT", "/v1/personas/staff-engineer", created,
+                                 (int)strlen(created), resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "\"name\":\"staff-engineer\""));
+      assert(strstr(resp, "First version"));
+
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Prefer evidence"));
+
+      const char *edited =
+          "{\"description\":\"Edited version\",\"delegates\":\"readonly\","
+          "\"roles\":[\"review\"],\"persona\":\"Edited identity.\","
+          "\"principles\":\"# Principles\\n- Review carefully.\",\"brief\":\"Edited brief\"}";
+      st = server_http_route("PUT", "/v1/personas/staff-engineer", edited, (int)strlen(edited),
+                             resp, sizeof(resp));
+      assert(st == 200);
+      assert(strstr(resp, "Edited version"));
+      assert(strstr(resp, "Edited identity"));
+
+      st = server_http_route("DELETE", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 200);
+      st = server_http_route("GET", "/v1/personas/staff-engineer", NULL, 0, resp, sizeof(resp));
+      assert(st == 404);
+
+      st = server_http_route("PUT", "/v1/personas/bad%2Fname", created, (int)strlen(created), resp,
+                             sizeof(resp));
+      assert(st == 400 || st == 404);
    }
 
    /* --- session persona store: set/get + isolation --- */
@@ -829,6 +1044,10 @@ int main(void)
       st = server_http_route("GET", "/v1/agents", NULL, 0, resp, sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"epoch\":3")); /* stub body */
+      server_http_set_agents_provider(stub_typed_not_found_provider);
+      st = server_http_route("GET", "/v1/agents", NULL, 0, resp, sizeof(resp));
+      assert(st == 404);
+      assert(strstr(resp, "\"kind\":\"not_found\""));
       server_http_set_agents_provider(NULL);
    }
 
@@ -898,6 +1117,32 @@ int main(void)
                              sizeof(resp));
       assert(st == 200);
       assert(strstr(resp, "\"stub\":true"));
+
+      /* The production activation seam must see the request's conversation id,
+       * and the override must not leak into a later request on this worker. */
+      server_http_set_memory_recall_handler(stub_recall_session_handler);
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: activation-route-session\r\n\r\n");
+      g_recall_session_id[0] = '\0';
+      st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
+                             sizeof(resp));
+      assert(st == 200);
+      assert(strcmp(g_recall_session_id, "activation-route-session") == 0);
+      assert(session_id_override_active() == 0);
+      server_http_identity_clear();
+
+      server_http_identity_capture(-1, 1,
+                                   "POST /v1/memory/recall HTTP/1.1\r\nHost: h\r\n"
+                                   "aimee-session-id: invalid/session\r\n\r\n");
+      g_recall_session_id[0] = '\0';
+      st = server_http_route("POST", "/v1/memory/recall", "{\"task_hint\":\"x\"}", 17, resp,
+                             sizeof(resp));
+      assert(st == 400);
+      assert(g_recall_session_id[0] == '\0');
+      assert(session_id_override_active() == 0);
+      server_http_identity_clear();
+
       server_http_set_memory_recall_handler(NULL);
    }
 
@@ -1036,6 +1281,66 @@ int main(void)
 
    /* --- server_http_authorize: UDS vs TCP + bearer + session-key rule --- */
    {
+      char unbound[128], bound_sid[80];
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 1);
+      assert(strcmp(unbound, "secret") == 0);
+      assert(strcmp(bound_sid, "0123456789abcdef0123456789abcdef") == 0);
+      /* The binding is a strict terminal suffix. Invalid forms remain ordinary
+       * bearer text and never acquire a session identity. */
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcde", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(strcmp(unbound, "secret.aimee-session.0123456789abcdef0123456789abcde") == 0);
+      assert(bound_sid[0] == '\0');
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef0", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdeg", unbound, sizeof(unbound),
+                 bound_sid, sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(".aimee-session.0123456789abcdef0123456789abcdef",
+                                               unbound, sizeof(unbound), bound_sid,
+                                               sizeof(bound_sid)) == 0);
+      assert(server_http_session_bearer_unbind(
+                 "secret.aimee-session.0123456789abcdef0123456789abcdef.trailing", unbound,
+                 sizeof(unbound), bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, 6, bound_sid, sizeof(bound_sid)) == 0);
+      assert(
+          server_http_session_bearer_unbind("secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                            unbound, sizeof(unbound), bound_sid, 32) == 0);
+
+      /* The connection bearer may ride in x-api-key while Authorization carries a
+       * caller identity JWT. The session binding has to be recovered from either
+       * header, or a client that scopes itself through x-api-key authenticates
+       * while presenting no session at all -- and everything keyed on the session
+       * (persona delivery, economizer session keys) then treats every request as
+       * a brand new session. */
+      {
+         const char *only_api_key =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, only_api_key);
+         assert(strcmp(server_http_identity_session_hdr(), "fedcba9876543210fedcba9876543210") ==
+                0);
+
+         /* An explicit session header still wins over the bearer suffix. */
+         const char *explicit_hdr =
+             "GET /v1/health HTTP/1.1\r\nHost: h\r\naimee-session-id: explicit-sid\r\n"
+             "x-api-key: secret.aimee-session.fedcba9876543210fedcba9876543210\r\n\r\n";
+         server_http_identity_capture(-1, 1, explicit_hdr);
+         assert(strcmp(server_http_identity_session_hdr(), "explicit-sid") == 0);
+
+         /* An unsuffixed key leaves no session behind. */
+         const char *plain = "GET /v1/health HTTP/1.1\r\nHost: h\r\nx-api-key: secret\r\n\r\n";
+         server_http_identity_capture(-1, 1, plain);
+         assert(server_http_identity_session_hdr()[0] == 0);
+         printf("server_http:   PASS: x-api-key carries the session binding too\n");
+      }
+
       /* UDS is always authorized regardless of token, when no session key. */
       assert(server_http_authorize(0, "", NULL, NULL, 0) == 0);
       assert(server_http_authorize(0, "secret", NULL, NULL, 0) == 0);
@@ -1048,7 +1353,19 @@ int main(void)
       /* TCP with a bearer configured: Authorization or x-api-key exact match passes. */
       assert(server_http_authorize(1, "secret", "Bearer secret", NULL, 0) == 0);
       assert(server_http_authorize(1, "secret", NULL, "secret", 0) == 0);
+      assert(server_http_authorize(1, "secret",
+                                   "Bearer secret.aimee-session.0123456789abcdef0123456789abcdef",
+                                   NULL, 0) == 0);
+      assert(server_http_authorize(1, "secret", NULL,
+                                   "secret.aimee-session.fedcba9876543210fedcba9876543210",
+                                   0) == 0);
       assert(server_http_authorize(1, "secret", "Bearer nope", "secret", 0) == 0);
+      /* The caller identity JWT may occupy Authorization while the independent
+       * rotating connection bearer occupies x-api-key. A valid identity-shaped
+       * Authorization value does not replace the connection bearer. */
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", "secret", 0) ==
+             0);
+      assert(server_http_authorize(1, "secret", "Bearer header.payload.signature", NULL, 0) == 401);
       assert(server_http_authorize(1, "secret", NULL, "nope", 0) == 401);
       assert(server_http_authorize(1, "secret", NULL, NULL, 0) == 401);
       assert(server_http_authorize(1, "secret", "secret", NULL, 0) == 401);
@@ -1393,6 +1710,28 @@ int main(void)
              server_capability_for_method("help.get"));
       assert(server_http_route_caps("POST", "/v1/mcp/call") == CAP_TOOL_EXECUTE);
 
+      /* Destroying a memory is graded apart from writing one, the way
+       * rules.delete is graded apart from rules.*: a grant that lets an agent
+       * remember must not, by itself, let it forget. */
+      assert(server_capability_for_method("memory.store") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.delete") == CAP_MEMORY_ADMIN);
+      assert(server_capability_for_method("memory.delete") !=
+             server_capability_for_method("memory.store"));
+      assert(server_http_route_caps("POST", "/v1/memory/delete") == CAP_MEMORY_ADMIN);
+      /* update overwrites content, so it must be a write — not the memory.*
+       * read-prefix default it used to fall through to. */
+      assert(server_capability_for_method("memory.update") == CAP_MEMORY_WRITE);
+      assert(server_capability_for_method("memory.update") != CAP_MEMORY_READ);
+      /* Mirrors the rules split this is modelled on. */
+      assert(server_capability_for_method("rules.delete") == CAP_RULES_ADMIN);
+      /* memory:admin must not leak into the read-only set, and must stay inside
+       * the authenticated set (the operator can still administer their store). */
+      assert((CAPS_READ_ONLY & CAP_MEMORY_ADMIN) == 0);
+      assert((CAPS_READ_ONLY & CAP_DASHBOARD_READ) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_DASHBOARD_READ) == 0);
+      assert((CAPS_AUTHENTICATED & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+      assert((CAPS_ALL & CAP_MEMORY_ADMIN) == CAP_MEMORY_ADMIN);
+
       /* Reads sit within the read-only set; compute requires CAP_CHAT. */
       assert((server_http_route_caps("GET", "/v1/rules") & ~CAPS_READ_ONLY) == 0);
       assert((server_http_route_caps("POST", "/v1/kb/search") & ~CAPS_READ_ONLY) == 0);
@@ -1416,6 +1755,30 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/workspaces") == CAP_TOOL_EXECUTE);
       assert(server_http_route_caps("DELETE", "/v1/workspaces/%2Fhome%2Fme%2Fp") ==
              CAP_TOOL_EXECUTE);
+
+      /* A `mirror` registration is seeded by fetching the client's head from its
+       * remote, so BOTH must survive the REST hop. This route forwarded only
+       * --provider, so a mirror registration over REST was refused for a missing
+       * --remote — and the reverse channel, which registers this way, had no
+       * route to the sandboxed tier at all. */
+      {
+         const char *args[WS_ADD_FLAG_ARGS_MAX];
+         int n = workspace_add_flag_args("mirror", "git@github.com:o/r.git", "abc123", args,
+                                         WS_ADD_FLAG_ARGS_MAX);
+         assert(n == 6);
+         assert(strcmp(args[0], "--provider") == 0 && strcmp(args[1], "mirror") == 0);
+         assert(strcmp(args[2], "--remote") == 0 && strcmp(args[3], "git@github.com:o/r.git") == 0);
+         assert(strcmp(args[4], "--head") == 0 && strcmp(args[5], "abc123") == 0);
+
+         /* Absent coordinates stay absent — `detached`/`shared` take neither, and
+          * an empty --remote would be a worse error than no flag. */
+         n = workspace_add_flag_args("detached", "", "", args, WS_ADD_FLAG_ARGS_MAX);
+         assert(n == 2);
+         assert(strcmp(args[0], "--provider") == 0 && strcmp(args[1], "detached") == 0);
+
+         /* No provider, nothing to say. */
+         assert(workspace_add_flag_args("", "r", "h", args, WS_ADD_FLAG_ARGS_MAX) == 0);
+      }
       /* A read-scoped bearer (index:read only) satisfies the GETs but is denied
        * the writes; a write bearer (tool:execute) is allowed. The route gate is
        * (route_caps & conn_caps) == route_caps. */
@@ -1461,13 +1824,6 @@ int main(void)
       assert(server_http_route_allowed(1, "scope:project:a:secret", "POST", "/v1/runner/poll", 0) ==
              0);
 
-      /* Forge-token install: tool:execute, TCP-reachable (a client hands the hub
-       * its short-lived token over /v1); a scoped read-only bearer is denied. */
-      assert(server_http_route_caps("POST", "/v1/workspaces/%2Fp/forge-token") == CAP_TOOL_EXECUTE);
-      assert(server_http_route_is_local_only("POST", "/v1/workspaces/%2Fp/forge-token") == 0);
-      assert(server_http_route_allowed(1, "scope:project:a:s", "POST",
-                                       "/v1/workspaces/%2Fp/forge-token", 0) == 0);
-
       /* Connection effective caps by transport + bearer. */
       assert(server_http_conn_caps(0, NULL, 0) == CAPS_ALL);                /* UDS */
       assert(server_http_conn_caps(0, "scope:project:a:s", 0) == CAPS_ALL); /* UDS exempt */
@@ -1507,8 +1863,8 @@ int main(void)
        * only remote_writes>=data. Fail-closed at the default. */
       const char *exec_paths[] = {"/v1/delegate/launch",   "/v1/delegate/backend_exec",
                                   "/v1/roundtable/review", "/v1/cron/add",
-                                  "/v1/agent/add",         "/v1/worktree/gc",
-                                  "/v1/model/refresh",     "/v1/api/disable"};
+                                  "/v1/model/add",         "/v1/worktree/gc",
+                                  "/v1/catalog/refresh",   "/v1/api/disable"};
       for (size_t i = 0; i < sizeof(exec_paths) / sizeof(exec_paths[0]); i++)
       {
          assert(server_http_route_allowed(1, "plain", "POST", exec_paths[i],
@@ -1520,6 +1876,23 @@ int main(void)
          assert(server_http_route_allowed(0, NULL, "POST", exec_paths[i],
                                           SERVER_REMOTE_WRITES_OFF) == 1); /* UDS always */
       }
+      /* The mirror tier's client-diff upload is the workspace resource plane,
+       * driven by a remote fs authority exactly like workspace.add and the
+       * runner channel, so it is TCP-exempt. It needs tool:execute, so WITHOUT
+       * the exemption the gate would demand remote_writes=full: at the default a
+       * thin client could never upload, and the server would reconstruct a clean
+       * checkout at head with the client's uncommitted work silently missing.
+       *
+       * The cap is derived from the row's op (the row passes 0, and
+       * v1_route_caps_lookup prefers the op), which is why it reads as
+       * tool:execute here despite the literal 0 in the table. */
+      assert(server_http_route_caps("POST", "/v1/workspace/mirror-sync") == CAP_TOOL_EXECUTE);
+      assert(server_http_route_allowed(1, "plain", "POST", "/v1/workspace/mirror-sync",
+                                       SERVER_REMOTE_WRITES_OFF) == 1);
+      /* The sibling it shares a plane with, for contrast. */
+      assert(server_http_route_allowed(1, "plain", "POST", "/v1/workspaces",
+                                       SERVER_REMOTE_WRITES_OFF) == 1);
+
       assert(server_http_route_caps("POST", "/v1/roundtable/review") == CAP_DELEGATE);
       assert(server_http_route_allowed(1, "scope:project:alpha:s3cr3t", "POST",
                                        "/v1/roundtable/review", SERVER_REMOTE_WRITES_FULL) == 0);
@@ -1768,16 +2141,15 @@ int main(void)
 
       /* Later write batches: session + rules/collab-rules + skill mutations, all
        * UDS-only at the default remote_writes=off. */
-      const char *write_paths[] = {"/v1/wm/set",
-                                   "/v1/attempts/record",
-                                   "/v1/rules/delete",
-                                   "/v1/collab_rules/approve",
-                                   "/v1/collab_rules/reject",
-                                   "/v1/collab_rules/retire",
-                                   "/v1/skills/create",
-                                   "/v1/skills/edit",
-                                   "/v1/skills/archive",
-                                   "/v1/skills/pin"};
+      const char *write_paths[] = {
+          "/v1/wm/set", "/v1/attempts/record", "/v1/rules/delete", "/v1/collab_rules/approve",
+          "/v1/collab_rules/reject", "/v1/collab_rules/retire", "/v1/skills/create",
+          "/v1/skills/edit", "/v1/skills/archive", "/v1/skills/pin",
+          /* Typed-fact correction surface (§3 / §4). These are
+           * data-plane writes; listing them here is what puts them
+           * behind the write-tier gate rather than leaving them
+           * reachable by anyone holding the shared bearer. */
+          "/v1/facts/retract", "/v1/entities/merge", "/v1/entities/unmerge"};
       for (size_t i = 0; i < sizeof(write_paths) / sizeof(write_paths[0]); i++)
       {
          assert(server_http_route_allowed(0, NULL, "POST", write_paths[i], 0) == 1); /* UDS ok */
@@ -1792,6 +2164,15 @@ int main(void)
       assert(server_http_route_caps("POST", "/v1/skills/create") == CAP_TOOL_WRITE);
       /* Skill reads remain TCP-reachable (only the mutations are write-gated). */
       assert(server_http_route_allowed(1, NULL, "GET", "/v1/skills", 0) == 1);
+
+      /* The typed-fact correction surface exists and carries the write capability.
+       * Before this it did not exist at all: the layer could learn a fact and had
+       * no route by which anyone could say it was wrong, and a recorded entity
+       * merge was reversible only from a test. A non-zero cap here is also what
+       * proves the route resolved — an unrouted path reports 0. */
+      assert(server_http_route_caps("POST", "/v1/facts/retract") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/merge") == CAP_MEMORY_WRITE);
+      assert(server_http_route_caps("POST", "/v1/entities/unmerge") == CAP_MEMORY_WRITE);
    }
 
    /* --- aimee.api.remote_writes lifts the TCP write deny under capability control --- */
@@ -1913,6 +2294,23 @@ int main(void)
       assert(server_http_route("GET", "/v1/nope", NULL, 0, rb, sizeof(rb)) == 404);
       /* A wrong-verb known path 404s (no matching row). */
       assert(server_http_route("DELETE", "/v1/health", NULL, 0, rb, sizeof(rb)) == 404);
+      /* cJSON_Parse accepts a valid prefix by default. The HTTP contract is one
+       * JSON document: trailing whitespace is valid, a second value is not, and
+       * neither synchronous nor queued routes may execute the prefix. */
+      const char *trailing = "{\"name\":\"probe\"} {}";
+      g_disp_method[0] = '\0';
+      assert(server_http_route("POST", "/v1/cron/add", trailing, (int)strlen(trailing), rb,
+                               sizeof(rb)) == 400);
+      assert(strstr(rb, "invalid JSON body"));
+      assert(g_disp_method[0] == '\0');
+      openai_runs_store_reset();
+      assert(server_http_route("POST", "/v1/roundtable/review", trailing, (int)strlen(trailing), rb,
+                               sizeof(rb)) == 400);
+      assert(strstr(rb, "invalid JSON body"));
+      const char *with_ws = "{\"name\":\"probe\"} \r\n\t";
+      assert(server_http_route("POST", "/v1/cron/add", with_ws, (int)strlen(with_ws), rb,
+                               sizeof(rb)) == 200);
+      assert(strcmp(g_disp_method, "cron.add") == 0);
       /* A real route with no handler seam wired in this test returns 503, not 404
        * — proving the row matched and dispatched. */
       assert(server_http_route("GET", "/v1/rules", NULL, 0, rb, sizeof(rb)) == 503);
@@ -2099,7 +2497,7 @@ int main(void)
           {"POST", "/v1/cron/add", "{\"name\":\"nightly\"}", "cron.add"},
           {"POST", "/v1/provider/set", "{\"name\":\"openai\"}", "provider.set"},
           {"POST", "/v1/wm/context", "{\"k\":\"v\"}", "wm.context"},
-          {"POST", "/v1/agent/add", "{\"name\":\"a\"}", "agent.add"},
+          {"POST", "/v1/model/add", "{\"name\":\"a\"}", "model.add"},
           {"POST", "/v1/mcp/audit", "{}", "mcp.audit"},
           {"GET", "/v1/cron", NULL, "cron.list"},
           {"GET", "/v1/provider/list", NULL, "provider.list"},
@@ -2128,6 +2526,16 @@ int main(void)
           server_http_route("POST", "/v1/cron/add", spoof, (int)strlen(spoof), resp, sizeof(resp));
       assert(st == 200);
       assert(strcmp(g_disp_method, "cron.add") == 0);
+
+      /* Typed NDJSON errors carry their transport-independent HTTP mapping in
+       * the envelope. The first-class HTTP adapter must honor it rather than
+       * reporting a failed operation as a successful 200 response. */
+      const char *typed_error = "{\"test_http_status\":true}";
+      st = server_http_route("POST", "/v1/cron/add", typed_error, (int)strlen(typed_error), resp,
+                             sizeof(resp));
+      assert(st == 400);
+      assert(strcmp(resp, "{\"status\":\"error\",\"kind\":\"invalid_argument\","
+                          "\"http_status\":400}") == 0);
    }
 
    /* (The /v1/rpc method-allowlist tests were removed with the bridge: each method
@@ -2146,6 +2554,62 @@ int main(void)
       assert(server_http_resolve_bind_addr(1 /*want_ext*/, 1 /*tls*/) == INADDR_ANY);
    }
 
+   /* Every user-facing ingress converges on one canonical caller context before
+    * kb_client opens the independently authenticated server -> KB hop. This is
+    * attribution, not another credential protocol at the KB boundary. */
+   {
+      int pair[2];
+      assert(socketpair(AF_UNIX, SOCK_STREAM, 0, pair) == 0);
+      server_http_populate_request_context(pair[0], 0, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-uds",
+                                           "GET", "/v1/search", CAPS_ALL);
+      struct passwd *pw = getpwuid(getuid());
+      assert(pw && pw->pw_name && pw->pw_name[0]);
+      assert(strcmp(request_context_caller_subject(), pw->pw_name) == 0); /* local CLI */
+      char missing_subject[64];
+      assert(server_http_host_subject_for_uid(LONG_MAX, missing_subject, sizeof(missing_subject)) ==
+             -1);
+      assert(missing_subject[0] == '\0');
+      request_context_clear();
+      close(pair[0]);
+      close(pair[1]);
+
+      assert(runtime_secret_store("AIMEE_INGRESS_PROXY_SECRET", "ctx-secret") == 0);
+      static const struct
+      {
+         const char *surface;
+         const char *principal;
+         const char *want;
+      } proxied[] = {
+          {"web", "webuser:web-alice", "web-alice"},
+          {"remote-cli", "cli-alice", "cli-alice"},
+          {"mcp", "mcp-alice", "mcp-alice"},
+      };
+      for (size_t i = 0; i < sizeof(proxied) / sizeof(proxied[0]); ++i)
+      {
+         char request[512];
+         snprintf(request, sizeof(request),
+                  "GET /v1/search HTTP/1.1\r\nX-Aimee-Proxy-Authorization: ctx-secret\r\n"
+                  "X-Aimee-Principal: %s\r\nX-Aimee-Source: %s\r\n\r\n",
+                  proxied[i].principal, proxied[i].surface);
+         server_http_populate_request_context(-1, 1, request, "ctx-proxy", "GET", "/v1/search",
+                                              CAPS_ALL);
+         const request_context_t *ctx = request_context_get();
+         assert(ctx && ctx->trusted && strcmp(ctx->source, proxied[i].surface) == 0);
+         assert(strcmp(request_context_caller_subject(), proxied[i].want) == 0);
+         request_context_clear();
+      }
+      runtime_secret_remove("AIMEE_INGRESS_PROXY_SECRET");
+
+      /* Remote thinclient OIDC is verified by the existing identity-token gate;
+       * handle_conn installs those verified claims after base context capture. */
+      server_http_populate_request_context(-1, 1, "GET /v1/search HTTP/1.1\r\n\r\n", "ctx-oidc",
+                                           "GET", "/v1/search", CAPS_ALL);
+      request_context_override_caller_authorization("header.payload.signature");
+      assert(strcmp(request_context_caller_authorization(), "header.payload.signature") == 0);
+      assert(request_context_caller_subject()[0] == '\0');
+      request_context_clear();
+   }
+
    /* --- AIMEE_WEBCHAT_GIT=0 disables the whole git surface (503 first) --- */
    {
       char resp[2048];
@@ -2155,7 +2619,6 @@ int main(void)
       {
          const char *m, *p, *body;
       } git_routes[] = {
-          {"POST", "/v1/workspaces/ws1/forge-token", "{}"},
           {"POST", "/v1/workspace/clone", "{}"},
           {"POST", "/v1/workspace/git", "{}"},
           {"GET", "/v1/workspace/projects", NULL},
@@ -2230,6 +2693,9 @@ int main(void)
    {
       const char *valid = "GET /v1/health HTTP/1.1\r\nHost: localhost\r\nContent-Length: 0\r\n\r\n";
       const char *valid_no_length = "OPTIONS /v1/health HTTP/1.1\r\nHost: localhost\r\n\r\n";
+      const char *missing_host = "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\n";
+      const char *empty_host = "GET /v1/health HTTP/1.1\r\nHost:   \r\n\r\n";
+      const char *duplicate_host = "GET /v1/health HTTP/1.1\r\nHost: one\r\nHost: two\r\n\r\n";
       const char *partial =
           "POST /v1/responses HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n\r\n{}";
       const char *route_oversize =
@@ -2247,6 +2713,9 @@ int main(void)
           "GET /v1/health HTTP/1.1\r\nContent-Length: 0\r\n\r\nGET /v1/health HTTP/1.1\r\n\r\n";
       assert(server_http_request_framing_valid(valid, strlen(valid)) == 1);
       assert(server_http_request_framing_valid(valid_no_length, strlen(valid_no_length)) == 1);
+      assert(server_http_request_framing_valid(missing_host, strlen(missing_host)) == 0);
+      assert(server_http_request_framing_valid(empty_host, strlen(empty_host)) == 0);
+      assert(server_http_request_framing_valid(duplicate_host, strlen(duplicate_host)) == 0);
       assert(server_http_request_framing_valid(partial, strlen(partial)) == 1);
       assert(server_http_request_framing_valid(route_oversize, strlen(route_oversize)) == 1);
       assert(server_http_request_framing_valid(length_overflow, strlen(length_overflow)) == 0);
@@ -2258,10 +2727,23 @@ int main(void)
       assert(server_http_request_framing_valid(pipelined, strlen(pipelined)) == 0);
    }
 
-   /* The wizard creates one durable identity transaction: additive bearer now,
-    * explicit full tier only after the CSR certificate is bound. */
+   /* Wizard enrollment with no store reachable.
+    *
+    * This suite stubs obs_bus_module_available() to 0 deliberately -- its
+    * subject is the HTTP layer with no module attached -- so every
+    * db1_remote_client_* call the enrollment path makes is refused before it
+    * reaches a module. That makes this the right place to pin the FAIL-CLOSED
+    * direction, and the wrong place to pin the happy path: a bootstrap that
+    * reported success here would be handing out an owner credential that no
+    * store has a record of.
+    *
+    * The happy path moved to where a store exists:
+    *   - claim semantics: server-go/modules/aimee/families/identity.go
+    *     (+ identity_test.go);
+    *   - two setup requests racing for the single owner row, which is what the
+    *     two threads here were really testing: scripts/test-family-identity.sql,
+    *     against a real server. */
    {
-      assert(db1_init(":memory:") == 0);
       assert(runtime_secret_store("AIMEE_API_BEARER_TOKEN", "primary") == 0);
       assert(config_set_server_api_mtls(1) == 0);
       for (int i = 0; i < AIMEE_API_BEARER_EXTRA_MAX; i++)
@@ -2271,52 +2753,30 @@ int main(void)
          runtime_secret_remove(name);
       }
 
-      pthread_barrier_t barrier;
-      pthread_t workers[2];
-      wizard_bootstrap_thread_t attempts[2] = {{.barrier = &barrier}, {.barrier = &barrier}};
-      assert(pthread_barrier_init(&barrier, NULL, 3) == 0);
-      assert(pthread_create(&workers[0], NULL, wizard_bootstrap_thread, &attempts[0]) == 0);
-      assert(pthread_create(&workers[1], NULL, wizard_bootstrap_thread, &attempts[1]) == 0);
-      int barrier_result = pthread_barrier_wait(&barrier);
-      assert(barrier_result == 0 || barrier_result == PTHREAD_BARRIER_SERIAL_THREAD);
-      assert(pthread_join(workers[0], NULL) == 0);
-      assert(pthread_join(workers[1], NULL) == 0);
-      assert(pthread_barrier_destroy(&barrier) == 0);
-      assert(attempts[0].result == 0 && attempts[1].result == 0);
-      assert(strcmp(attempts[0].bearer, attempts[1].bearer) == 0);
+      char bearer[65] = "";
+      assert(server_http_first_user_bootstrap("webuser:alice", bearer, sizeof(bearer)) != 0);
+      /* Nothing minted, nothing configured, nothing authorized: a refusal that
+       * still left a usable bearer behind would be worse than a crash. */
+      assert(bearer[0] == '\0');
+      assert(server_http_enrolled_bearer_count() == 0);
+      assert(config_server_api_bearer_extra_count() == 0);
 
-      char bearer[65], again[65], principal[128];
-      snprintf(bearer, sizeof(bearer), "%s", attempts[0].bearer);
-      assert(strlen(bearer) == 64 && server_http_enrolled_bearer_count() == 1);
-      assert(config_server_api_bearer_extra_count() == 1);
-      assert(strcmp(config_server_api_bearer_extra(0), bearer) == 0);
-      assert(server_http_authorize_enrolled(1, "primary", NULL, bearer, 0) == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 0);
-      assert(strcmp(again, bearer) == 0); /* refresh is idempotent */
-      assert(server_http_first_user_bootstrap("webuser:bob", again, sizeof(again)) == -2);
-
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 0);
+      /* And the certificate side refuses rather than inventing a tier. It only
+       * ever RAISES the caller's tier, so starting at OFF is what shows that an
+       * unreachable store cannot elevate one. */
+      char principal[128] = "unset";
       int effective_tier = SERVER_REMOTE_WRITES_OFF;
-      assert(server_http_first_user_apply_cert_grant(0, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 0);
-      assert(effective_tier == SERVER_REMOTE_WRITES_OFF && !principal[0]);
-      assert(server_http_first_user_bind_cert(bearer, "A1B2") == 1);
-      assert(server_http_first_user_cert_tier("A1B2", principal, sizeof(principal)) == 2);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      effective_tier = SERVER_REMOTE_WRITES_OFF;
       assert(server_http_first_user_apply_cert_grant(1, "A1B2", &effective_tier, principal,
-                                                     sizeof(principal)) == 2);
-      assert(effective_tier == SERVER_REMOTE_WRITES_FULL);
-      assert(strcmp(principal, "webuser:alice") == 0);
-      assert(server_http_first_user_bootstrap("webuser:alice", again, sizeof(again)) == 1);
+                                                     sizeof(principal)) < 0);
+      assert(effective_tier == SERVER_REMOTE_WRITES_OFF);
+      assert(principal[0] == '\0');
       runtime_secret_remove("AIMEE_API_BEARER_TOKEN");
-      runtime_secret_remove("AIMEE_API_BEARER_TOKEN_EXTRA_0");
-      db1_shutdown();
    }
 
    compute_pool_shutdown(&g_test_server_ctx.orchestration_pool);
    g_test_server_ctx.orchestration_pool_initialized = 0;
    platform_test_rmrf(home);
+   test_sse_keepalive_slow_generation();
    printf("OK\n");
    return 0;
 }

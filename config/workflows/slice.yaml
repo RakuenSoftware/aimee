@@ -23,6 +23,7 @@ nodes:
     params:
       # Give implementation a small corrective window before operator repair.
       max_rounds: 3
+      admitted_regressions: observe
     next: freeze
     # Requested changes return to implementation.
     on_fail: impl
@@ -46,6 +47,7 @@ nodes:
           - reviewer
       quorum: 4
       max_rounds: 6
+      blocker_convergence: observe
     on_pass: pr
     on_fail: impl
   # Open the slice sub-PR (targets the parent feature branch).

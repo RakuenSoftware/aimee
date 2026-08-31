@@ -16,10 +16,15 @@
 
 #include "kb_client.h"
 #include "kb_client_memory_internal.h"
-#include "db1/user_memory.h"
+#include "kb_client_pii.h"
+#include "db1_client/caches.h"
+#include "db1_client/user_memory.h"
+#include "db1_optional.h"
 #include "cJSON.h"
+#include "config.h"
 #include "memory_query.h" /* db2_memory_low_eff_row_t etc. */
 #include "tasks.h"
+#include "integrity.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +34,114 @@ static __thread int s_kbc_memory_scope_active;
 static __thread int s_kbc_memory_scope_all;
 static __thread char s_kbc_memory_workspace[512];
 static __thread char s_kbc_memory_project[512];
+
+#define KBC_MEMORY_ACTIVATION_MAX_ROWS 256
+
+typedef struct
+{
+   int64_t memory_id;
+   int64_t last_turn;
+} kbc_memory_activation_row_t;
+
+typedef struct
+{
+   kbc_memory_activation_row_t rows[KBC_MEMORY_ACTIVATION_MAX_ROWS];
+   int count;
+   int64_t current_turn;
+   int loaded;
+} kbc_memory_activation_t;
+
+static void kbc_memory_activation_load(kbc_memory_activation_t *activation)
+{
+   memset(activation, 0, sizeof(*activation));
+   const char *conversation_id = session_id();
+   if (!conversation_id || !conversation_id[0] || !db1_context_snapshot_activation)
+      return;
+
+   char rows[KBC_MEMORY_ACTIVATION_MAX_ROWS][DB1_CONTEXT_ACTIVATION_ROW_LEN];
+   int n = db1_context_snapshot_activation(conversation_id, rows, KBC_MEMORY_ACTIVATION_MAX_ROWS);
+   if (n < 0)
+      return;
+
+   for (int i = 0; i < n && activation->count < KBC_MEMORY_ACTIVATION_MAX_ROWS; i++)
+   {
+      char *end = NULL;
+      long long memory_id = strtoll(rows[i], &end, 10);
+      if (memory_id < 0 || !end)
+         continue;
+      long long turn = strtoll(end, NULL, 10);
+      if (turn < 0)
+         continue;
+      if (memory_id == 0)
+      {
+         activation->current_turn = (int64_t)turn;
+         continue;
+      }
+      activation->rows[activation->count].memory_id = (int64_t)memory_id;
+      activation->rows[activation->count].last_turn = (int64_t)turn;
+      activation->count++;
+   }
+   activation->loaded = activation->current_turn > 0;
+}
+
+static void kbc_memory_activation_add(cJSON *req, kbc_memory_activation_t *activation)
+{
+   kbc_memory_activation_load(activation);
+   if (!req || !activation->loaded)
+      return;
+   cJSON *obj = cJSON_AddObjectToObject(req, "activation");
+   cJSON *rows = obj ? cJSON_AddArrayToObject(obj, "rows") : NULL;
+   if (!obj || !rows)
+      return;
+   cJSON_AddNumberToObject(obj, "current_turn", (double)activation->current_turn);
+   for (int i = 0; i < activation->count; i++)
+   {
+      cJSON *row = cJSON_CreateObject();
+      if (!row)
+         break;
+      cJSON_AddNumberToObject(row, "memory_id", (double)activation->rows[i].memory_id);
+      cJSON_AddNumberToObject(row, "last_turn", (double)activation->rows[i].last_turn);
+      cJSON_AddItemToArray(rows, row);
+   }
+}
+
+static void kbc_memory_activation_record_recall(const cJSON *response,
+                                                const kbc_memory_activation_t *activation)
+{
+   static const char *sections[] = {"identity", "preferences", "active_context", "open_commitments",
+                                    NULL};
+   const cJSON *recall = cJSON_GetObjectItemCaseSensitive(response, "recall");
+   int64_t seen[64];
+   int seen_n = 0;
+   for (int s = 0; cJSON_IsObject(recall) && sections[s]; s++)
+   {
+      const cJSON *arr = cJSON_GetObjectItemCaseSensitive(recall, sections[s]);
+      const cJSON *item = NULL;
+      cJSON_ArrayForEach(item, arr)
+      {
+         const cJSON *managed = cJSON_GetObjectItemCaseSensitive(item, "activation_managed");
+         if (!cJSON_IsTrue(managed))
+            continue;
+         const cJSON *mid = cJSON_GetObjectItemCaseSensitive(item, "memory_id");
+         if (!cJSON_IsNumber(mid) || mid->valuedouble <= 0.0)
+            continue;
+         int64_t id = (int64_t)mid->valuedouble;
+         int duplicate = 0;
+         for (int i = 0; i < seen_n; i++)
+            if (seen[i] == id)
+               duplicate = 1;
+         if (duplicate)
+            continue;
+         if (seen_n < (int)(sizeof(seen) / sizeof(seen[0])))
+            seen[seen_n++] = id;
+         const char *conversation_id = session_id();
+         if (activation->loaded && activation->current_turn > 0 && conversation_id &&
+             conversation_id[0] && db1_context_snapshot_insert_turn)
+            (void)db1_context_snapshot_insert_turn(conversation_id, id, 0.0,
+                                                   activation->current_turn);
+      }
+   }
+}
 
 void kb_client_memory_scope_context_set(const char *workspace, const char *project, int include_all)
 {
@@ -650,6 +763,32 @@ char *kb_client_memory_assemble_context(const char *task_hint)
    return out;
 }
 
+char *kb_client_memory_assemble_typed_context(const char *query)
+{
+   if (!query || !query[0])
+      return NULL;
+
+   cJSON *req = cJSON_CreateObject();
+   kbc_memory_add_scope_context(req);
+   cJSON_AddStringToObject(req, "query", query);
+   char *json = kb_v1_action_request("memory.assemble_typed_context", req);
+   if (!json)
+      return NULL;
+   cJSON *resp = cJSON_Parse(json);
+   free(json);
+   if (!resp)
+      return NULL;
+   cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
+   cJSON *used = cJSON_GetObjectItemCaseSensitive(resp, "used_tokens");
+   cJSON *body = cJSON_GetObjectItemCaseSensitive(resp, "rendered_context");
+   char *out = NULL;
+   if (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0 && cJSON_IsNumber(used) &&
+       used->valuedouble > 0 && cJSON_IsString(body) && body->valuestring[0])
+      out = strdup(body->valuestring);
+   cJSON_Delete(resp);
+   return out;
+}
+
 int kb_client_memory_compact_windows(int *summary_count, int *fact_count)
 {
    if (summary_count)
@@ -797,6 +936,7 @@ int kb_client_memory_query_health(memory_health_t *out)
    cJSON *tp = cJSON_GetObjectItemCaseSensitive(health, "total_promotions");
    cJSON *td = cJSON_GetObjectItemCaseSensitive(health, "total_demotions");
    cJSON *te = cJSON_GetObjectItemCaseSensitive(health, "total_expirations");
+   cJSON *lag = cJSON_GetObjectItemCaseSensitive(health, "write_to_readable_lag");
    if (cJSON_IsNumber(cy))
       out->cycles = (int)cy->valuedouble;
    if (cJSON_IsNumber(cr))
@@ -815,14 +955,31 @@ int kb_client_memory_query_health(memory_health_t *out)
       out->total_demotions = (int)td->valuedouble;
    if (cJSON_IsNumber(te))
       out->total_expirations = (int)te->valuedouble;
+   if (cJSON_IsObject(lag))
+   {
+      cJSON *samples = cJSON_GetObjectItemCaseSensitive(lag, "samples");
+      cJSON *p50 = cJSON_GetObjectItemCaseSensitive(lag, "p50_secs");
+      cJSON *p95 = cJSON_GetObjectItemCaseSensitive(lag, "p95_secs");
+      cJSON *p99 = cJSON_GetObjectItemCaseSensitive(lag, "p99_secs");
+      if (cJSON_IsNumber(samples))
+         out->write_to_readable_samples = (int64_t)samples->valuedouble;
+      out->write_to_readable_p50_secs = cJSON_IsNumber(p50) ? p50->valuedouble : -1.0;
+      out->write_to_readable_p95_secs = cJSON_IsNumber(p95) ? p95->valuedouble : -1.0;
+      out->write_to_readable_p99_secs = cJSON_IsNumber(p99) ? p99->valuedouble : -1.0;
+   }
    cJSON_Delete(resp);
    return 0;
 }
 
-int kb_client_memory_delete(int64_t id)
+int kb_client_memory_delete_as(int64_t id, memory_authority_t authority)
 {
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
+   /* Only ever sent for a user/operator caller. The KB treats an absent field as
+    * model authority, so a stale client cannot destroy anything. */
+   if (authority == MEMORY_AUTHORITY_USER)
+      cJSON_AddStringToObject(req, "authority", "user");
    char *json = kb_v1_action_request("memory.delete", req);
    if (!json)
       return -1;
@@ -833,8 +990,15 @@ int kb_client_memory_delete(int64_t id)
    cJSON *status = cJSON_GetObjectItemCaseSensitive(resp, "status");
    int rc = (cJSON_IsString(status) && strcmp(status->valuestring, "ok") == 0) ? 0 : -1;
    cJSON_Delete(resp);
-   kb_client_memory_audit_note("memory.delete", id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
+   kb_client_memory_audit_note(authority == MEMORY_AUTHORITY_USER ? "memory.delete"
+                                                                  : "memory.retire",
+                               id, NULL, NULL, NULL, 0.0, NULL, rc == 0);
    return rc;
+}
+
+int kb_client_memory_delete(int64_t id)
+{
+   return kb_client_memory_delete_as(id, MEMORY_AUTHORITY_USER);
 }
 
 int kb_client_memory_stats(memory_stats_t *out)
@@ -1030,7 +1194,13 @@ int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *sign
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "workspace", workspace ? workspace : "");
    cJSON_AddStringToObject(req, "signal_type", signal_type ? signal_type : "");
-   cJSON_AddStringToObject(req, "rule", rule ? rule : "");
+   /* The learned rule is prose; workspace and signal_type are enumerated
+    * handles the kb groups on. */
+   if (kb_client_pii_add_string_required(req, "rule", rule ? rule : "") != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    cJSON_AddNumberToObject(req, "observed_confidence", observed_confidence);
    if (session_id && session_id[0])
       cJSON_AddStringToObject(req, "session_id", session_id);
@@ -1061,6 +1231,8 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
+   kbc_memory_activation_t activation;
+   kbc_memory_activation_add(req, &activation);
    if (task_hint && task_hint[0])
       cJSON_AddStringToObject(req, "task_hint", task_hint);
    if (limit_tokens > 0)
@@ -1074,11 +1246,29 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
    if (!j)
       return NULL;
 
+   /* Every recall consumer shares this seam. Reclassify legacy/future rows at
+    * materialization before they can become prompt authority. */
+   integrity_result_t recall_gate;
+   if (integrity_ingress_decide(j, INTEGRITY_SOURCE_AGENT_MESSAGE, "recall", 1, &recall_gate))
+   {
+      free(j);
+      return strdup("{\"status\":\"quarantined\",\"recall\":{},"
+                    "\"integrity_verdict\":\"quarantine\"}");
+   }
+
    /* Fast path: when this user has no db1 memory (the case until capture is
     * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
     * through verbatim — recall is on the primary agent's hot per-turn loop. */
    if (!db1_user_memory_any())
+   {
+      cJSON *response = cJSON_Parse(j);
+      if (response)
+      {
+         kbc_memory_activation_record_recall(response, &activation);
+         cJSON_Delete(response);
+      }
       return j;
+   }
 
    /* Merge this user's db1 identity/preferences on top of the org bundle. */
    cJSON *bundle = cJSON_Parse(j);
@@ -1092,6 +1282,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
          db1_user_memory_merge_into_array(cJSON_GetObjectItemCaseSensitive(recall, "preferences"),
                                           DB1_USER_RECALL_PREFERENCES, "user preference");
       }
+      kbc_memory_activation_record_recall(bundle, &activation);
       char *merged = cJSON_PrintUnformatted(bundle);
       cJSON_Delete(bundle);
       if (merged)
@@ -1201,11 +1392,27 @@ int kb_client_memory_load_eval_corpus(memory_t *out, int max, char *label_out, s
 
 int kb_client_memory_get(int64_t id, memory_t *out)
 {
+   return kb_client_memory_get_as_of(id, NULL, out, NULL);
+}
+
+int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
+                                    kb_valid_at_t *verdict)
+{
+   if (verdict)
+      *verdict = KB_VALID_AT_UNASKED;
    if (!out)
       return -1;
+   *out = NULL;
 
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "id", (double)id);
+   /* Only sent when asked. aimee-kb emits as_of/valid_at exactly when it
+    * receives a non-empty as_of, so an empty one here would be indistinguishable
+    * from not asking -- and this omission is what left `memory get --as-of`
+    * marshalling the flag correctly and then dropping it on this hop. */
+   if (as_of && as_of[0])
+      cJSON_AddStringToObject(req, "as_of", as_of);
    char *json = kb_v1_action_request("memory.get", req);
    if (!json)
       return -1;
@@ -1229,8 +1436,31 @@ int kb_client_memory_get(int64_t id, memory_t *out)
       cJSON_Delete(resp);
       return -1;
    }
-   kbc_memory_row_from_json(mem_j, out);
+   /* aimee-kb answers with a bool, or the string "unknown" when it could not
+    * tell. A missing key means it was not asked. */
+   if (verdict)
+   {
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(resp, "valid_at");
+      if (cJSON_IsString(v))
+         *verdict = KB_VALID_AT_UNKNOWN;
+      else if (cJSON_IsBool(v))
+         *verdict = cJSON_IsTrue(v) ? KB_VALID_AT_YES : KB_VALID_AT_NO;
+   }
+   *out = cJSON_DetachItemFromObjectCaseSensitive(resp, "memory");
    cJSON_Delete(resp);
+   return *out ? 0 : -1;
+}
+
+int kb_client_memory_get_as_of(int64_t id, const char *as_of, memory_t *out, kb_valid_at_t *verdict)
+{
+   if (!out)
+      return -1;
+   cJSON *mem_j = NULL;
+   int rc = kb_client_memory_get_json_as_of(id, as_of, &mem_j, verdict);
+   if (rc != 0)
+      return rc;
+   kbc_memory_row_from_json(mem_j, out);
+   cJSON_Delete(mem_j);
    return 0;
 }
 

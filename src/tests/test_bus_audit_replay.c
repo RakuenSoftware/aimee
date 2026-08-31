@@ -23,6 +23,7 @@
 #include <aimee/audit/obs_bus.h>
 #include <aimee/core/event_bus/bus_capture.h>
 #include "log.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 #define N                 3000
 #define KIND_AUDIT_ACTION 3000 /* must match obs_bus.c */
@@ -90,7 +91,8 @@ int main(void)
 {
    printf("test_bus_audit_replay:\n");
 
-   char home[] = "/tmp/aimee-busreplay-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-busreplay-XXXXXX", platform_tmpdir());
    if (!mkdtemp(home))
    {
       fprintf(stderr, "FAIL: tmp home\n");

@@ -4,9 +4,9 @@
  * in cmd_memory_core.c too). */
 #include "aimee.h"
 #include "cmd_memory_internal.h"
-#include "db1.h"
-#include "db2/collab_rules.h"
-#include "db2/memory_query.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/collab_rules.h"
+#include "modules/db2/c/memory_query.h"
 #include "kb_client.h"
 #include "platform_process.h"
 #include "kb.h"

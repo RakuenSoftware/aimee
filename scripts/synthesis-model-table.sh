@@ -12,7 +12,25 @@
 # is 1.6-1.8x slower with nothing to indicate why.
 #
 # THE QUANT IS PER MODEL, not one global. E2B ships Q4 because it is the small-box
-# option and 1.4 GB matters there; E4B ships Q6 because it is the quality option.
+# option and every GB matters there; E4B ships Q6 because it is the quality option.
+#
+# E2B ALSO SHIPS QAT WEIGHTS, and that is why its quant tag carries a `qat-` prefix
+# while E4B's does not. Quantisation-aware training recovers most of what Q4 costs a
+# model this small: the campaign measured google's QAT q4_0 arm at +0.0389 strict F1
+# over the same model's UD-Q4_K_XL, a delta outside the +/-0.024 interval that n=1001
+# resolves. That evidence is NOT on this branch -- it is defect 39 in
+# bench/tier-a/MEASUREMENT_LOG.md on branch bench/tier-a-small-models (629c62eb93),
+# whose copy of that file runs past the defect 30 this branch stops at. What ships here is unsloth's
+# UD requant OF THAT QAT CHECKPOINT -- it keeps the repo-shaped addressing and the
+# in-repo MTP draft that google's GGUF repo does not publish, and it is 2.62 GB
+# against google's 3.35 GB. It has NOT been benchmarked separately; the +0.0389 is
+# evidence for QAT weights, not for this exact requant of them.
+#
+# The `qat-` prefix lives in the QUANT rather than the model id on purpose: the model
+# id is the image axis (aimee-llm-e2b) and is referenced from config, the wizard and
+# the deploy layer, while `files` builds ${model}-${quant}.gguf -- which is exactly
+# the published gemma-4-E2B-it-qat-UD-Q4_K_XL.gguf. The MTP draft is NOT qat-tagged
+# in that repo; it is mtp-${model}.gguf, so that half of `files` is unchanged.
 #
 # THE SHA256 IS THE POINT. It is Hugging Face's own LFS oid, which is also the name
 # HF gives the blob in its cache -- so a baked cache is self-verifying: the filename
@@ -35,10 +53,10 @@ model=${2:?usage: synthesis-model-table.sh <repo|quant|sha|mtpsha|files> <model-
 
 case "$model" in
   gemma-4-E2B-it)
-    repo=unsloth/gemma-4-E2B-it-GGUF
-    quant=UD-Q4_K_XL
-    sha=b52f438017efaec5debf1c0d8be690571e212a07c312f1102bbce927258cfc32
-    mtpsha=9eba819938efccfd6044f8af84e3bbfddc639a2bcf32ebc36420e6a649191919 ;;
+    repo=unsloth/gemma-4-E2B-it-qat-GGUF
+    quant=qat-UD-Q4_K_XL
+    sha=e531007218dfab990486a5de7676a6932d6ea8dea233d1f698d7c21cf8a16889
+    mtpsha=586f2460b909008640981ec34060aa864e03c144fbabfb3173c4335087e4aae0 ;;
   gemma-4-E4B-it)
     repo=unsloth/gemma-4-E4B-it-GGUF
     quant=UD-Q6_K_XL

@@ -24,6 +24,17 @@ module-root headers are declared as `private_headers`. `kb_curator_provider.c` (
 core, not KB-tier) and the DB2 artifact/link storage APIs stay their owners' and are consumed through
 their contracts.
 
+The separately supervised `kb-synthesis` process serves one bounded Go stage at principal 22/event
+9729. It evaluates the existing code-unit grounding rule: when a parsed artifact claims no side
+effects, structural callees are checked against the exact side-effecting function set and the first
+contradiction is returned. The caller still owns JSON parsing, evidence authorization, queue state,
+model invocation, persistence, and artifact acceptance. Production `aimee-kb` shapes each request in
+`kb_curator_grounding.c`, batches an unbounded structural call graph into the bounded 64-callee wire
+contract, and calls the process only through its local event bus. A missing module, malformed response,
+or transport failure rolls back the artifact transaction and retries the extraction; there is no local
+grounding-policy fallback. The C `module_adapter.c` remains a process-parity fixture only and is not a
+second curator worker.
+
 ## Dependencies and consumers
 
 - `config`: supplies explicit enablement, capable provider/sidecar selection, limits, and prompt versions.
@@ -94,8 +105,11 @@ answers to remain operational when this module is omitted.
 
 `test_curator_synthesize.c`, `test_curator_serve.c`, `test_kb_curator_provider.c`,
 `test_curator_pipeline.c`, and curator queue/index tests cover selection, provider separation, persistence,
-serving, and scheduling. Disabled/unconfigured providers and no eligible topic are clean idle results;
-malformed output, provider failure, or artifact-write failure must not mark a topic successfully synthesized.
+serving, and scheduling. C/Go process parity tests cover only the bounded grounding decision described
+above, while the curator tests inject that wire handler at the production provider seam. A missing or
+failed grounding process is a visible retryable extraction failure, never a clean decision. Disabled or
+unconfigured synthesis providers and no eligible topic are clean idle results; malformed output,
+provider failure, or artifact-write failure must not mark a topic successfully synthesized.
 
 ## Operational diagnostics
 

@@ -15,6 +15,10 @@ int agent_session_retry_degenerate_response(cJSON *messages, int *turn, int *ret
 int agent_session_retry_required_evidence(cJSON *messages, int *turn, int *max_t, int initial_max_t,
                                           int *retry_count, char *error, size_t error_len);
 int agent_required_evidence_keep_tools(int required, int successful_evidence_calls);
+/* Whether the evidence gate should still hold the final text turn open.
+ * Never on the last usable turn: see the definition. */
+int agent_evidence_gate_defers_final_turn(int required, int successful_evidence_calls,
+                                          int last_usable_turn);
 int agent_required_evidence_reject_response(int required, int successful_evidence_calls,
                                             int is_tool_call, int call_count);
 int agent_required_evidence_budget_exhausted(int required, int successful_evidence_calls,

@@ -14,7 +14,7 @@ MAIN = ROOT / "src" / "kb" / "kb_mgmt_jwks_publish_main.c"
 PRIVATE = {
     "kb/kb_mgmt_jwks_publish_main.o",
     "kb/kb_mgmt_jwks_publication.o",
-    "db2/management_jwks_publication.o",
+    "modules/db2/c/management_jwks_publication.o",
 }
 SHARED_OFFLINE = {
     "kb/kb_mgmt_offline_hardening.o",

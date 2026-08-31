@@ -2,7 +2,7 @@
 # compilers and a shell; the final scratch image contains only the allowlisted
 # authority binary and its exact dynamic-library closure. TLS identity, the
 # status-role DSN, and the executable KMS adapter are read-only runtime mounts.
-FROM debian:bookworm-slim AS build
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS build
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \

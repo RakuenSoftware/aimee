@@ -36,9 +36,19 @@ void test_agent_route_with_caps_honors_tools_enabled(void)
    strcpy(cfg.agents[1].roles[0], "review");
    cfg.agents[1].role_count = 1;
    cfg.agents[1].enabled = 1;
+   strcpy(cfg.agents[1].api_key, "test-mistral-key");
 
    agent_t *routed = agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0);
    assert(routed == &cfg.agents[0]);
+
+   /* A configured delegate preference is soft under the capability gate: it is
+    * selected when eligible, and transparently skipped when it cannot satisfy
+    * the packet. */
+   strcpy(cfg.default_delegate, "no-tools");
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == &cfg.agents[0]);
+   cfg.agents[1].tools_enabled = 1;
+   assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == &cfg.agents[1]);
+   cfg.agents[1].tools_enabled = 0;
 
    cfg.agents[0].tools_enabled = 0;
    assert(agent_route_with_caps(&cfg, "review", &sys_cfg, MODEL_CAP_TOOLS, 0) == NULL);
@@ -551,7 +561,10 @@ void test_unknown_context_window_does_not_pass_min_context(void)
 void test_context_window_table_covers_live_vendors(void)
 {
    assert(model_context_window("MiniMax-M3") == 1000000);
-   assert(model_context_window("MiniMax-M2") == 200000);
+   /* 196608, not the round 200000 the prefix table used to report: that figure
+    * was itself the rounding this test was written to catch, just one model
+    * further down the list. The catalogue publishes the real window. */
+   assert(model_context_window("MiniMax-M2") == 196608);
    assert(model_context_window("kimi-k2.7-code") == 262144);
    /* The bare fallback still resolves the oldest known family, never a newer. */
    assert(model_context_window("minimax") == 200000);

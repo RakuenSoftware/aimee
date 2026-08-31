@@ -1,16 +1,20 @@
 # Proposal: Capability-thresholded delegate routing
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived delivered scope (2026-07-26).** This proposal is retained as the historical
 > specification for work already delivered. Remaining work is tracked in
 > [`capability-thresholded-delegate-routing-residual.md`](../pending/capability-thresholded-delegate-routing-residual.md).
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Author:** JBailes
 - **Date:** 2026-07-22
 - **Supersedes:** nothing. Extends the existing `agent_route_with_caps()` path.
 - **Related:** `standing-benchmark-cadence.md` (competence data source),
   `agentic-supervised-swebench.md` (per-model agentic score),
-  `provider-neutral-economizer-safety-spec.md` (normative gate — see §7)
+  `provider-neutral-economizer-safety-spec.md` (normative gate; see §7)
 
 ## 0. Target operator experience
 
@@ -19,8 +23,8 @@
 > attributed.
 
 Everything below serves that. Routing then picks the cheapest model whose capability meets the
-packet's requirement (§1), and any surface that names a model — roundtable seats, `--via`,
-review attribution — names it as `provider:model` with a catalog display name (§5b.1).
+packet's requirement (§1), and any surface that names a model, roundtable seats, `--via`,
+review attribution, names it as `provider:model` with a catalog display name (§5b.1).
 
 The data to do this already exists and aimee already ingests it. models.dev supplies, per model:
 context window, input/output/cache price, capability flags, deprecation, and a display name.
@@ -28,7 +32,7 @@ The provider registry (`model_provider_t.fetch_models`, `server_provider_models_
 supplies the live model list per provider. **The one thing standing between those two sources
 and the experience above is the join key**: capability lookup is keyed on `(provider, model)`,
 and the live config supplies a wire-protocol name (`anthropic`) where the catalog expects a
-vendor name (`minimax`, `moonshotai`) — §2.6. Fix that join and auto-detection of models, costs
+vendor name (`minimax`, `moonshotai`), §2.6. Fix that join and auto-detection of models, costs
 and capabilities becomes reading data aimee already has.
 
 ## 1. Objective
@@ -36,7 +40,7 @@ and capabilities becomes reading data aimee already has.
 > Route each delegate packet to the **cheapest agent whose capability meets the packet's
 > requirement**. Capability is a *filter*; price is the *ordering* among survivors.
 
-Stated as a rule: threshold, then minimize. Deliberately NOT a scalar value score — see §3.2.
+Stated as a rule: threshold, then minimize. Deliberately NOT a scalar value score. See §3.2.
 
 ## 2. Verified current state
 
@@ -88,7 +92,7 @@ routing for any role**, including `review` and `code`. It is reachable only via 
 `--via claude`, `--tier 1`, or a provider/model override
 (`delegate_apply_route_overrides`, `delegate_routing.c:271`).
 
-This is not a hypothetical. It is the "cheap silently eats everything" failure, already live.
+This is the "cheap silently eats everything" failure, already live.
 It is also why the feature must be framed as capability protection: the system is already
 maximally cheap and has no floor.
 
@@ -103,21 +107,21 @@ quality."
 
 **Implication: do not build a new learned router.** The learning substrate exists. It is
 capability-blind and has only two coarse arms, and it can currently only move *up* to
-`delegate_max_cost_tier` — it cannot express "cheapest agent that is good enough."
+`delegate_max_cost_tier`. It cannot express "cheapest agent that is good enough."
 
 ### 2.5 What "capability" currently means
 
 `MODEL_CAP_REASONING|TOOLS|VISION|PDF|AUDIO|STREAMING` plus context window and a `deprecated`
 flag (`src/headers/model_registry.h:25-39`). These are **modality and plumbing** facts: can the
 model physically accept this request. Requirements are inferred deterministically from the
-prompt by `delegate_infer_capability_requirements()` (`delegate_routing.c:11`) — file
+prompt by `delegate_infer_capability_requirements()` (`delegate_routing.c:11`), file
 extensions map to VISION/PDF/AUDIO, `strlen/4` gives a token estimate.
 
 Nothing expresses **competence**: whether the model is good enough at the task. Haiku and Opus
-both satisfy `MODEL_CAP_TOOLS`. `MODEL_CAP_REASONING` is a boolean — it says a model exposes
+both satisfy `MODEL_CAP_TOOLS`. `MODEL_CAP_REASONING` is a boolean. It says a model exposes
 reasoning, not that it reasons well enough for this packet.
 
-### 2.6 The context windows ARE available — the config conflates wire protocol with vendor
+### 2.6 The context windows ARE available: the config conflates wire protocol with vendor
 
 models.dev carries both context windows and prices for every live agent, and aimee already
 ingests it (`src/models_dev.c`, `https://models.dev/api.json`, 24h TTL cache at
@@ -134,7 +138,7 @@ Fetched 2026-07-22:
 | `openai/gpt-5.6-luna` | 1,050,000 | 1.00 | 6.00 | 0.10 |
 
 The lookup misses because `model_capability_get()` matches on provider with `strcasecmp` in
-every path — operator overrides, the dynamic cache, the static table, and
+every path, operator overrides, the dynamic cache, the static table, and
 `models_dev_cache_lookup()` (`model_registry.c:852-899`). The live agents are registered with
 `provider: "anthropic"` because they speak the **Anthropic wire format**, but models.dev keys
 them by **model vendor**: `minimax` and `moonshotai`.
@@ -143,24 +147,24 @@ them by **model vendor**: `minimax` and `moonshotai`.
 every defect in §2.7. `agent_t` needs to carry both: a wire/API shape (which determines the
 request builder) and a catalog identity (which determines capability lookup).
 
-### 2.7 What the misregistration actually causes — and a correction
+### 2.7 What the misregistration actually causes: and a correction
 
 An earlier draft of this proposal claimed enabling capability routing would strand these agents
 **fail-closed**. That was wrong. Verified behavior is the opposite and worse:
 
-`model_capability_get()` never returns 0 for a named model — it falls through to
+`model_capability_get()` never returns 0 for a named model. It falls through to
 `model_capability_get_heuristic()` (`model_registry.c:251`), which always returns 1. So the
 fail-closed branch in `agent_satisfies_required_caps()` (`agent_config.c:1770`) is unreachable
 for any named model. Consequences with the live config:
 
 1. **Capability inference is actively suppressed.** The heuristic has a `minimax` branch
-   granting `REASONING|TOOLS|STREAMING` (`model_registry.c:304`) — dead code for these agents,
+   granting `REASONING|TOOLS|STREAMING` (`model_registry.c:304`), dead code for these agents,
    because their provider reads `anthropic`. They instead take the Anthropic branch, match no
    `claude-*` prefix and neither "opus" nor "sonnet", and so resolve to `TOOLS|STREAMING`
    only: **no REASONING, no VISION, no PDF**.
 2. **MiniMax-M3 gets a silently wrong context window.** `model_context_window()` prefix-matches
    the stale `{"minimax", 200000}` fallback (`model_registry.c:196`), yielding **200,000**
-   against a true **1,000,000** — a 5x understatement that would exclude a 1M-context model
+   against a true **1,000,000**. A 5x understatement that would exclude a 1M-context model
    from exactly the long-context packets it is best suited to.
 3. **kimi-k2.7-code resolves to context window 0.** No `kimi`/`moonshot` entry exists in
    `g_ctx_windows`. And the context gate is **fail-open on zero**:
@@ -176,8 +180,7 @@ for any named model. Consequences with the live config:
    default timeout**. The comment at that site names the exact symptom this causes: slow
    multi-minute completions "cut off and retried as spurious read failures."
 
-So the migration hazard is not stranding. It is that **capability routing would run on wrong
-data and fail open**, which is the worse failure: it looks like it is working. And item 4 is a
+So the migration hazard is that **capability routing would run on wrong data and fail open**, which is the worse failure: it looks like it is working. And item 4 is a
 live operational defect right now, with capability routing still off.
 
 ### 2.9 Root cause is a too-narrow guard on an existing normalization
@@ -195,14 +198,14 @@ config twice over: it fires only when `provider == "openai"` (live agents are `"
 and it hardcodes the model substring `MiniMax-M2` (live model is `MiniMax-M3`). There is no
 moonshotai/kimi equivalent at all.
 
-This is therefore a **bug in an existing mechanism**, not a missing feature — which makes
+This is therefore a **bug in an existing mechanism**, not a missing feature, which makes
 Slice 0 considerably smaller than a new abstraction. Note `agent_t.provider` is
 `char[16]` (`agent_types.h:238`); `"moonshotai"` fits, but the field is tight enough that any
 vendor-identity work must check bounds rather than assume headroom.
 
 ### 2.8 `cost_tier` is factually inverted for at least one agent
 
-Per §2.2, `codex` / `gpt-5.6-sol` sits at `cost_tier` **0** — the cheapest tier, alongside
+Per §2.2, `codex` / `gpt-5.6-sol` sits at `cost_tier` **0**, the cheapest tier, alongside
 MiniMax ($0.30/$1.20) and kimi ($0.95/$4.00). Its actual price is **$5.00 / $30.00 per Mtok**:
 the most expensive model in the fleet, output-pricier than `claude-opus-4-8` at $5.00/$25.00,
 which sits at tier **1**.
@@ -212,8 +215,8 @@ Codex tier; `terra` ($2.50/$15) and `luna` ($1.00/$6) are the cheaper variants a
 registered at all.
 
 This must be corrected before any competence work, because it means today's "cheapest-first"
-router is not even minimizing price. It is minimizing a hand-entered integer that disagrees
-with the published price sheet.
+router is minimizing a hand-entered integer that disagrees with the published price sheet, and not
+price at all.
 
 ### 2.8.1 A principled tier ladder exists in the catalog
 
@@ -239,7 +242,7 @@ Two observations that matter for §3:
   *cheapness ordering* even though it is not a defensible *quality* ordering. This is the
   §3.2 split working as intended.
 - **Every model in the table reports `reasoning: true`.** `MODEL_CAP_REASONING` therefore
-  discriminates nothing across this fleet — direct evidence for §2.5 that the existing
+  discriminates nothing across this fleet, direct evidence for §2.5 that the existing
   capability flags cannot express competence, and that Slice 2 needs a real measured axis
   rather than another boolean.
 
@@ -272,7 +275,7 @@ NULL. **The downloaded cache can never resolve a single model.** Consistent with
 
 **The bundled snapshot is flat but stale and tiny.** `data/models_dev_snapshot.json` has **10
 entries**: `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5-20251001`, `gpt-4o`, and
-six others. **Not one live fleet model.** `claude-opus-4-8` — the operator's primary — is
+six others. **Not one live fleet model.** `claude-opus-4-8` (the operator's primary) is
 absent, as are `gpt-5.6-*`, `MiniMax-M3`, and `kimi-k2.7-code`.
 
 So for every model in the live fleet, `models_dev_cache_lookup()` returns 0 from both sources,
@@ -287,16 +290,16 @@ and every capability resolution falls through to the static `g_capabilities` tab
 - **`cost_in_per_mtok` / `cost_out_per_mtok` are 0 for every live model.** They are populated
   only from the static table or operator overrides. **Slice 0b's price lint therefore has no
   data and cannot be built as specified.**
-- **`MODEL_CAP_REASONING` is never set from catalog data at all** — `fill_cap_from_json` reads
+- **`MODEL_CAP_REASONING` is never set from catalog data at all**: `fill_cap_from_json` reads
   `tools`, `vision`, `pdf`, `deprecated` and no reasoning key. Today it comes solely from
   per-vendor heuristic branches.
 - §0's promise ("aimee auto-detects models, costs, and capabilities") is blocked on this, not
   only on the join key. Fixing the join key was necessary and insufficient.
 
 **New Slice 0b-pre (blocks 0b and 0c): make models.dev ingestion actually work.** Preferred
-shape: teach the reader BOTH schemas — flat key first (preserves the bundled snapshot and
+shape: teach the reader BOTH schemas, flat key first (preserves the bundled snapshot and
 `model_overrides.json`, which share the flat format), then a nested traversal for the
-downloaded api.json — and capture `reasoning`/`tool_call` while there. This avoids rewriting
+downloaded api.json, and capture `reasoning`/`tool_call` while there. This avoids rewriting
 downloaded bytes, keeps the atomic-rename download, and leaves the override format untouched.
 
 ### 2.11 Catalog context window is NOT the routing ceiling (operator correction)
@@ -312,9 +315,9 @@ Operator correction, 2026-07-23. Earlier drafts implied the per-agent
 
 So two distinct quantities were being conflated:
 
-- **Capability context window** — what the model *can* accept. Catalog data. Used to reject a
+- **Capability context window**: what the model *can* accept. Catalog data. Used to reject a
   packet the model physically cannot hold.
-- **Routing/serving ceiling** — what the operator *permits*, which may be lower for cost or
+- **Routing/serving ceiling**: what the operator *permits*, which may be lower for cost or
   product reasons. Operator config.
 
 Treating the catalog value as authoritative would push requests across a provider price cliff.
@@ -327,7 +330,7 @@ This also matters to §7: crossing 200k on Claude changes the price band, which 
 cost cliff a routing decision can trigger. A future competence/price model must treat price as
 varying WITHIN a model by context band, not as one number per model.
 
-### 2.11.1 Regression this creates in prompt budgeting — OPEN
+### 2.11.1 Regression this creates in prompt budgeting: OPEN
 
 `agent_exec_context_budget_chars()` (`src/server/agent_context_budget.c`) reserves the model's
 output ceiling from the window:
@@ -340,14 +343,14 @@ int prompt_tokens = agent->middleware.context_window - output_tokens;
 
 No live agent pins `max_tokens`, so the fallback applies. Correcting the catalog identity raised
 `model_max_output` for `claude` from **8192 to 128000**, so with the deliberate 200k ceiling the
-prompt budget falls from ~191,800 to ~72,000 tokens — a ~62% reduction. `codex` is affected the
+prompt budget falls from ~191,800 to ~72,000 tokens, a ~62% reduction. `codex` is affected the
 same way (272k ceiling, 128k reserved).
 
 Reserving a model's *theoretical maximum* output from a *policy-capped* window is too
 conservative: these models will not emit 128k tokens on a typical delegate turn. Options, none
 yet chosen:
 
-1. Reserve `min(model_max_output, ceiling / 4)` — bounded, no config change.
+1. Reserve `min(model_max_output, ceiling / 4)`, bounded, no config change.
 2. Reserve the agent's configured `max_tokens` and default it explicitly per agent.
 3. Add a separate `reserved_output_tokens` knob distinct from the model ceiling.
 
@@ -357,8 +360,8 @@ these commits are relied on in production.
 ### 2.12 Pricing: resolved by default, operator-overridable, three axes
 
 Operator direction, 2026-07-23: default to catalog-resolved pricing and let the operator set
-their own in the GUI/CLI. Implemented as `agent_resolved_price()` — override first, catalog
-second, per axis — which is now the single source of truth for "what does this agent cost us".
+their own in the GUI/CLI. Implemented as `agent_resolved_price()`, override first, catalog
+second, per axis, which is now the single source of truth for "what does this agent cost us".
 
 This supersedes `tier_price_exempt` as the primary mechanism for the subscription case. Stating
 the real marginal price is strictly more informative than opting out of the comparison: the
@@ -386,7 +389,7 @@ Surfaces: `aimee agent --price-in/--price-out/--price-cached`, persisted in agen
 emitted by `aimee agent list --json` alongside `price_overridden` so the GUI can show whether a
 figure is the operator's or the catalog's.
 
-### 2.12.1 The catalog encodes CONTEXT-BAND pricing — unexploited
+### 2.12.1 The catalog encodes CONTEXT-BAND pricing: unexploited
 
 While adding the cached axis, the live catalog turned out to publish per-context-band prices,
 which is exactly the §2.11 price cliff in machine-readable form:
@@ -403,13 +406,13 @@ So `gpt-5.6-sol` **doubles** to $10/$45 above 272k, and MiniMax-M3 doubles above
 confirms the operator's constraint is not a preference but a real billing cliff, and it means
 price is a function of (model, context band), not one number per model.
 
-**RESOLVED 2026-07-23** — bands are now modelled; what follows was the gap.
+**RESOLVED 2026-07-23**, bands are now modelled; what follows was the gap.
 Correction: the MiniMax-M3 threshold is **512,000**, not 200,000. The registry's
 `context_over_200k` key name does not encode the real threshold (sol's is 272,000),
 so only the structured `cost.tiers[].tier.size` is authoritative.
 
 Superseded gap description: `model_capability_t` held a single price triple. Implications for later
-slices — a routing decision that pushes a packet across a band changes the price by 2x, so any
+slices, a routing decision that pushes a packet across a band changes the price by 2x, so any
 cost comparison must know which band the packet lands in; and §7's economizer interaction is
 sharper, since a context-reducing transform that crosses a band downward is a genuine, provable
 saving of exactly the kind v2 authorises (its class 4, "long-context threshold avoidance").
@@ -457,8 +460,8 @@ Stated by the operator 2026-07-22, in priority order above any cost objective:
 2. **User-facing sessions must be coherent.** A user must never be handed a model too weak to
    hold a reasonable interaction. This is about the capability of the seat the user talks to,
    not about model stability across turns.
-3. **The managing agent** — the orchestrator that decomposes work and dispatches other agents —
-   must also run on the most capable tier. Its errors multiply across every packet it creates.
+3. **The managing agent**: the orchestrator that decomposes work and dispatches other agents,
+must also run on the most capable tier. Its errors multiply across every packet it creates.
 4. **Never route a packet to a model that cannot complete it** (the operator's phrasing: do not
    send to Luna what needs Sol).
 
@@ -496,7 +499,7 @@ Slice 0a.
 #### The orchestrator has no equivalent marker
 
 No `agent_routing_primary_turn()` analogue exists for "this agent is managing other agents".
-`primary_only` (`server.c:1957`) is an *exclusion* — it removes an agent from delegation — not
+`primary_only` (`server.c:1957`) is an *exclusion* (it removes an agent from delegation) not
 a floor. Establishing invariant (3) requires a new marker on the orchestration path. This is
 listed as work, not assumed present.
 
@@ -511,7 +514,7 @@ nobody, or when an agent's capability cannot be established:
 
 This supersedes the earlier §4 recommendation to close the zero-context gate strictly. Strict
 fail-closed violates invariant (1); the current fail-open (§2.7 item 3) violates invariant (4).
-Fail-upward satisfies both: the failure mode becomes "we spent more than necessary" — visible,
+Fail-upward satisfies both: the failure mode becomes "we spent more than necessary", visible,
 recoverable, and never an outage or a garbage result.
 
 It also gives §3.1's filter a defined answer for the empty case instead of an error, and it is
@@ -523,10 +526,10 @@ paying for a failure, whereas fail-upward *assumes* it whenever capability is un
 Competence must be **measured offline on a cadence, spending no production tokens**. Two
 pending proposals already produce exactly this and should be the source of record:
 
-- `standing-benchmark-cadence.md` — scheduled full LoCoMo / LongMemEval / memory / code-vector
+- `standing-benchmark-cadence.md`: scheduled full LoCoMo / LongMemEval / memory / code-vector
   runs with persisted, retained, drift-checked scores. Its own thesis is that aimee cites
   parity numbers nobody measures.
-- `agentic-supervised-swebench.md` — a graded, tool-using, per-model agentic score against the
+- `agentic-supervised-swebench.md`: a graded, tool-using, per-model agentic score against the
   official SWE-bench Docker grader.
 
 Until those land, competence is **operator-declared per agent** with the declaration recorded
@@ -545,10 +548,10 @@ The precondition is, in order:
    request builder keeps using the Anthropic wire shape.
 2. **Replace the fail-open hole with fail-upward** (§3.3c) at `agent_config.c:1789`: an
    effective context window of 0 must not qualify an agent for *cheap* selection, but must
-   route to the primary rather than reject — a strict rejection would violate the operator's
+   route to the primary rather than reject. A strict rejection would violate the operator's
    no-outage invariant. Superseded wording follows for history: an effective context window of 0 must
    not skip the `min_context` gate. Decide explicitly whether unknown-context means reject
-   (fail closed) or requires an operator override — but it must not silently pass.
+   (fail closed) or requires an operator override, but it must not silently pass.
 3. **Fix `cost_tier`** to agree with published price (§2.8), or derive it from the
    `cost_in_per_mtok` / `cost_out_per_mtok` fields that `model_capability_t` already carries
    and `capability_copy_from_json()` already ingests (`model_registry.c:678-690`).
@@ -560,11 +563,11 @@ confident wrong ones.
 
 ## 5. Slices
 
-### Slice 0 — Catalog identity correctness (NEW, blocks everything else)
+### Slice 0: Catalog identity correctness (NEW, blocks everything else)
 
 **Scope:** §4 items 1-4. Separate wire shape from catalog identity; close the zero-context
 fail-open; correct `cost_tier` against published price; retire the stale minimax prefix.
-No routing-policy change — this only makes the existing inputs true.
+No routing-policy change. This only makes the existing inputs true.
 
 **Acceptance criteria:**
 - `model_capability_get()` resolves `MiniMax-M3` to context 1,000,000 and `kimi-k2.7-code` to
@@ -576,7 +579,7 @@ No routing-policy change — this only makes the existing inputs true.
 - No behavioral change while `model_meta_capability_routing` is off (it still returns
   `agent_route()`), so this slice is independently shippable.
 
-### Slice 1 — Capability-routing enablement
+### Slice 1: Capability-routing enablement
 
 **Scope:** flip `model_meta_capability_routing` to default 1; keep the config key as an escape
 hatch. Depends on Slice 0.
@@ -591,7 +594,7 @@ hatch. Depends on Slice 0.
 **Validation-pending:** the dry-run must be executed against the live server config; it cannot
 be certified from the worktree alone.
 
-### Slice 2 — Competence as a declared capability axis
+### Slice 2: Competence as a declared capability axis
 
 **Scope:** add a competence field to the agent record and to `model_capability_t`; extend
 `agent_satisfies_required_caps()` with the threshold comparison; add a per-(role x packet
@@ -599,19 +602,19 @@ class) required-competence table with a conservative default.
 
 **Acceptance criteria:**
 - With a competence floor declared for `code`, a tier-0 agent below the floor is excluded and
-  `claude` (tier 1) is selected — i.e. §2.3 is fixed and provably so in a test.
+  `claude` (tier 1) is selected, i.e. §2.3 is fixed and provably so in a test.
 - With no floor declared, routing is byte-identical to Slice 1 behavior.
 - Competence declarations are auditable: the route decision log records the threshold, each
   candidate's competence, and the exclusion reason.
 
-### Slice 3 — Provider breadth
+### Slice 3: Provider breadth
 
 **Scope:** register the remaining providers (Fable / Sonnet / Haiku, Codex terra / luna,
 OpenRouter, local llama.cpp / Ollama) with honest `cost_tier`, catalog entries, and competence
 declarations.
 
 **Precondition:** Slices 1 and 2 merged. Registering cheap agents *before* a competence floor
-exists reproduces §2.3 at greater scale — every new tier-0 agent immediately captures traffic
+exists reproduces §2.3 at greater scale, every new tier-0 agent immediately captures traffic
 from every role it claims.
 
 **Acceptance criteria:**
@@ -623,16 +626,16 @@ from every role it claims.
 - Dominated agents (cheaper AND more capable than a peer) are reported by a config lint so the
   registry gets pruned rather than accumulating unreachable entries.
 
-### Slice 4 — Reconcile the existing bandit
+### Slice 4: Reconcile the existing bandit
 
-**Scope:** make the `delegate_routing` bandit (§2.4) capability-aware — arms must select among
+**Scope:** make the `delegate_routing` bandit (§2.4) capability-aware, arms must select among
 *qualified* candidates only, so a `cheapest` draw can never select below the competence floor.
 
 **Acceptance criteria:**
 - The bandit cannot produce a route that the capability predicate would reject.
 - Reward remains spend-aware; no new production token spend is introduced by the bandit itself.
 
-## 5b. Slice 0c — provider-general registration (operator-requested shape)
+## 5b. Slice 0c: provider-general registration (operator-requested shape)
 
 **Requested behavior:** registering `codex` registers *codex*, one agent. aimee selects the
 appropriate model (`sol` / `terra` / `luna`) per dispatch. Not three agent entries.
@@ -643,11 +646,11 @@ appropriate model (`sol` / `terra` / `luna`) per dispatch. Not three agent entri
   `/v1/provider.*` (`src/cli_v1_routes.c:322-329`), `model_provider_t` with `default_model`,
   `default_aux_model`, `fallback_models`, `fetch_models` (`src/headers/model_provider.h`).
 - Model enumeration with caching: `server_provider_models_cached()`
-  (`src/server_provider.c:104`) — DB1-backed, 1h TTL, falls back to cache when the live fetch
+  (`src/server_provider.c:104`). DB1-backed, 1h TTL, falls back to cache when the live fetch
   fails.
 - An auto-select already exists at registration: `ag_probe_models()` (`src/cmd_agent.c:175`)
   takes the **first id returned by the provider** when no model is requested
-  (`cmd_agent.c:218-222`). That is arbitrary, not appropriate — for `moonshotai` the list
+  (`cmd_agent.c:218-222`). That is arbitrary, not appropriate, for `moonshotai` the list
   includes deprecated previews.
 - Per-call model reporting is already modeled: `agent_result_t` carries `model`,
   `served_model`, and `requested_model` as distinct fields (`agent_types.h:344-358`), with a
@@ -672,10 +675,10 @@ that must be designed, not discovered:
    (`agent_fallback.c:89`) uses the agent name. With one agent per provider, a failing `sol`
    would mark all of `codex` DOWN, including healthy `luna`. Health must become per-model, or
    per (provider, model).
-3. **Admission is already per-model — this part is fine.** `concurrency_per_model` is keyed by
+3. **Admission is already per-model. This part is fine.** `concurrency_per_model` is keyed by
    model string (`ag_set_model_concurrency`, `cmd_agent.c:278`), so per-model caps keep working.
    But `max_parallel` is per-agent and would become a shared provider-wide ceiling across all
-   its models. That is arguably the *correct* semantic (a provider quota), but it is a
+   its models. That is the *correct* semantic (a provider quota), but it is a
    behavior change and must be stated.
 4. **Same-tier fallback becomes ill-defined.** `agent_try_same_tier_fallback()` iterates peers
    at equal `ag->cost_tier` (`agent_fallback.c:78-85`). With tier on the model, "same tier"
@@ -689,7 +692,7 @@ capabilities derived from the catalog automatically. Therefore a mis-keyed vendo
 stale prefix entry (§2.7) propagates directly into routing with no operator in the loop.
 
 Concretely: registering `codex` today discovers `sol`, `terra`, `luna` and, with no price basis
-wired in, lands all three at a default tier — reproducing the `sol`-at-tier-0 error of §2.8
+wired in, lands all three at a default tier, reproducing the `sol`-at-tier-0 error of §2.8
 three times over.
 
 This also **reorders the proposal**. Slice 3 (provider breadth) previously assumed manual
@@ -701,7 +704,7 @@ tier/capability derivation moves from "worth doing" to **blocking**.
 Provider-general *registration* does not mean provider-granular *identity*. Anything that picks
 or attributes a specific model must continue to name the model, and must display it. For a
 registered `codex`, a roundtable must offer and display **Sol, Terra and Luna as three distinct
-seats** — not one "codex" seat.
+seats**, not one "codex" seat.
 
 This is a referencing concern, not only a display one. Sites that identify a model today:
 
@@ -711,7 +714,7 @@ This is a referencing concern, not only a display one. Sites that identify a mod
   "reference models per round" (`:121`), so the intended granularity is already *model*.
 - **Operator pinning.** `--via AGENT` (`delegate_apply_route_overrides`) names an agent.
 - **Health.** `provider_catalog_get_health(peer->name)` keys on agent name (§5b consequence 2).
-- **Admission.** `concurrency_per_model` already keys on the model string — already correct.
+- **Admission.** `concurrency_per_model` already keys on the model string, already correct.
 
 **The canonical form already exists.** `model_capability_resolve_ref()`
 (`src/model_registry.c:386`) parses `provider:model` refs, resolves bare aliases, and falls back
@@ -722,7 +725,7 @@ therefore reuse, not new invention.
 
 **Display names are also already in the catalog.** models.dev carries a per-model `name`:
 `gpt-5.6-sol` -> `"GPT-5.6 Sol"`, plus per-provider names (`OpenAI`, `MiniMax (minimax.io)`,
-`Moonshot AI`). `model_capability_t` does not currently carry a display name —
+`Moonshot AI`). `model_capability_t` does not currently carry a display name,
 `capability_copy_from_json()` (`model_registry.c:643-701`) reads provider, model, context,
 max_output, costs, flags, cutoff, open_weights and deprecated, but no name. Adding one
 additive field yields operator-facing labels like `GPT-5.6 Sol` without hand-maintained
@@ -744,19 +747,19 @@ already carries. Note `model_capability_t` already has a `deprecated` flag and
 `agent_satisfies_required_caps()` already rejects on it (`agent_config.c:1791`), so
 deprecation filtering is largely free once §2.6 is fixed.
 
-## 5c. Slice 2 refined — role granularity as the competence axis
+## 5c. Slice 2 refined: role granularity as the competence axis
 
 **Operator direction (2026-07-22):** split roles into specific actions (e.g. `code_simple` vs
 `code_complex`, likely several code roles), track how well each model performs per role, and
 use that to decide which roles a model may be assigned.
 
-This resolves §6 open question 1. Competence is **not** a scalar and **not** per-domain — it is
+This resolves §6 open question 1. Competence is **not** a scalar and **not** per-domain. It is
 per **(model, role)**. That is the right shape, and it fits the existing architecture: roles are
-already the routing key (`agent_supports_role()` is consulted in every routing loop —
+already the routing key (`agent_supports_role()` is consulted in every routing loop,
 `agent_config.c:1661, 1688, 1708, 1727, 1751, 1816, 1847`). Per-(model, role) competence
 therefore refines a dimension the router already has, rather than adding a new one.
 
-### CORRECTED 2026-07-23: role filtering is not bypassed — the DEFAULT is permissive
+### CORRECTED 2026-07-23: role filtering is not bypassed: the DEFAULT is permissive
 
 An earlier version of this section claimed role filtering was "bypassed twice" and that a role
 split therefore required a code change first. **That was wrong.** Operator correction, verified
@@ -777,8 +780,8 @@ declarations give precise routing today, with no code change:
 - `exec_roles` must be declared, which makes exec eligibility exact.
 
 Verified: two specialists declaring `code_simple` / `code_complex` each receive exactly their
-own role — **including the dearer one, which cheapest-first would never select if role
-filtering were inert** — and a built-in role neither declares reaches neither.
+own role, **including the dearer one, which cheapest-first would never select if role
+filtering were inert**, and a built-in role neither declares reaches neither.
 
 **Consequence for Slice 2:** splitting a broad role into specific ones is a CONFIGURATION
 action, not a blocked code change. What remains genuinely missing is the competence *data* to
@@ -791,7 +794,7 @@ none declares `exec_roles`. That is a config posture, not a defect.
 
 1. **The `all` wildcard.** `agent_has_role()` (`agent_config.c:1353-1362`) treats a literal
    `"all"` entry as matching every role. Per §2.2 the live config has **three of four agents
-   declaring `roles: ["all"]`** — `codex`, `MiniMax-M3`, `kimi-k2.7-code`. Role-based filtering
+   declaring `roles: ["all"]`**, `codex`, `MiniMax-M3`, `kimi-k2.7-code`. Role-based filtering
    is therefore inert for exactly the agents that win routing, and this is a direct cause of
    §2.3.
 2. **The exec-role fallback.** `agent_supports_role()` returns 1 for any exec role
@@ -809,7 +812,7 @@ Fine-grained roles reintroduce the difficulty-estimation problem this proposal a
 something must decide a packet is `code_simple` rather than `code_complex`.
 
 It does not need a classifier. **The role is chosen by the orchestrator when it creates the
-packet** — that is already how delegation works (`aimee delegate <role> ...`). And per §3.3b
+packet**. That is already how delegation works (`aimee delegate <role> ...`). And per §3.3b
 invariant (3), the orchestrator is pinned to the most capable tier. So the labelling is
 performed by the most capable model in the fleet, at the moment it decomposes the work, as a
 side effect of an action it already takes. No inference layer, no learned router, no extra
@@ -834,7 +837,7 @@ Consequences that must be designed, not discovered:
   "capable".
 - **Measurement cost scales with the split.** Every new role multiplies the benchmark surface.
   This is the strongest argument for splitting roles *sparingly* and only where routing would
-  actually differ — a role split that never changes which model is selected is pure cost.
+  actually differ. A role split that never changes which model is selected is pure cost.
 - **`roles[]` becomes derived, not declared.** The operator direction "if they can be assigned
   them" means the assignment list should ultimately follow measured competence rather than
   hand-editing. That is the endpoint; the interim is an operator declaration with a recorded
@@ -843,8 +846,8 @@ Consequences that must be designed, not discovered:
 ### Sequencing
 
 This is Slice 2 and it depends on Slice 0 (catalog identity) and on a competence data source
-(§3.4). The role split itself — narrowing `roles[]`, constraining the `all` wildcard, closing
-the exec-role fallback — is separable and can land earlier, since it is a correctness fix to
+(§3.4). The role split itself, narrowing `roles[]`, constraining the `all` wildcard, closing
+the exec-role fallback, is separable and can land earlier, since it is a correctness fix to
 role filtering independent of any competence measurement.
 
 ## 6. Open questions
@@ -865,15 +868,15 @@ role filtering independent of any competence measurement.
 **This section was rewritten 2026-07-22 after discovering the spec had been superseded
 mid-analysis.** Earlier drafts argued against `aimee-economizer-safety-v1` (off-only), quoting a
 baseline clause pinning "the same model, endpoint, account/project routing, service tier,
-region, and API shape". That clause no longer exists. The live file is now:
+region, and API shape"; that clause no longer exists; the live file is now:
 
 - `provider-neutral-economizer-safety-spec.md`, retitled **"Provider-specific, proof-gated
   economizer safety specification"**
 - **Version:** `aimee-economizer-safety-v2`, **State:** APPROVED, CONVERGED, dated 2026-07-22
 - **Scope:** "OpenAI GPT-5.6-family and Anthropic Claude **request paths**"
 
-Every argument in earlier drafts of this section — both the "operator-selected policy" framing
-rejected at round 1 and the "sign of the cost effect" framing that replaced it — was made
+Every argument in earlier drafts of this section, both the "operator-selected policy" framing
+rejected at round 1 and the "sign of the cost effect" framing that replaced it, was made
 against text that is no longer normative. Neither is retained.
 
 ### What v2 actually regulates
@@ -897,7 +900,7 @@ pricing threshold.
 
 ### Why delegate routing is outside that scope
 
-The model is an **input to v2's proof, held fixed on both sides of the inequality** — not
+The model is an **input to v2's proof, held fixed on both sides of the inequality**, not
 something the economizer may vary. V2 regulates what aimee does *to a request once the model is
 chosen*. Delegate routing decides *which agent handles a work packet*, upstream of request
 construction, and produces no candidate-versus-untouched pair for the same model.
@@ -928,8 +931,8 @@ before Slice 0c, not before Slice 0.
 
 The spec was rewritten by another session while this analysis was in progress. Any future review
 of this proposal must re-verify the spec version before relying on §7. The round-2 panel flagged
-exactly this — it reported quote-accuracy as unverified because it could not read the spec file
-— and that flag was correct even though the finding was discarded at replay verification.
+exactly this (it reported quote-accuracy as unverified because it could not read the spec file)
+and that flag was correct even though the finding was discarded at replay verification.
 
 ## 8. Review history
 
@@ -937,7 +940,7 @@ exactly this — it reported quote-accuracy as unverified because it could not r
   reviewed an earlier draft proposing allowlist-based *downgrade*. Blocking finding: the
   downgrade operation was vacuous because the router already routes cheapest-first. Confirmed
   against source and against the live server; the proposal was inverted in response. Two further
-  blocking findings — scalar `cost_tier` inadequacy (addressed in §3.2) and the economizer-spec
+  blocking findings, scalar `cost_tier` inadequacy (addressed in §3.2) and the economizer-spec
   relabeling (§7, still open). Because no seat successfully used repository tools, no round-1
   finding certifies shipped behavior; the load-bearing one was independently verified by hand.
 - **Round 2:** not yet run. Required before this leaves PENDING.
@@ -961,7 +964,7 @@ and pricing code.
 | Identity | `provider:model` refs and catalog display names in roundtable attribution, the server projection (GUI) and the CLI |
 | Scope ceiling | `max_scope` per agent + `--scope` per packet, forwarded and enforced server-side; routing never relaxes it (`agent_route_with_caps_scoped`) |
 | Health demotion | prefer-healthy-over-degraded routing + trips-driven exponential breaker backoff (60s→30m), the fix for the six-day out-of-quota `codex` outage where a failing seat kept winning selection |
-| Escalation | automatic verifier-driven re-dispatch RETIRED (see §11) — now advisory: reports `escalation_warranted` + `suggested_escalation_target`, never re-dispatches |
+| Escalation | automatic verifier-driven re-dispatch RETIRED (see §11): now advisory: reports `escalation_warranted` + `suggested_escalation_target`, never re-dispatches |
 | Docs / help | generated config reference for the `routing` section and the new agent fields; `DELEGATES.md` Routing section; `delegate --scope` in CLI help |
 
 ### Live defects found and fixed along the way
@@ -969,7 +972,7 @@ and pricing code.
 These were present before this work and are the reason it was worth doing:
 
 - Every capability lookup for MiniMax and Kimi missed, so both lost
-  `MODEL_CAP_REASONING` and ran on the SHORT per-call timeout — whose symptom the code
+  `MODEL_CAP_REASONING` and ran on the SHORT per-call timeout, whose symptom the code
   itself documents as "slow completions cut off and retried as spurious read failures".
 - `claude` and `codex` resolved **no capability flags at all** and an **8192-token output
   ceiling** (true: 128000), because their provider strings are CLI/product names, not
@@ -982,19 +985,19 @@ These were present before this work and are the reason it was worth doing:
 
 ### Not delivered
 
-- **Slice 2 — competence axis.** NOT blocked on routing: §5c is corrected — declaring narrow
+- **Slice 2 (competence axis.** NOT blocked on routing: §5c is corrected) declaring narrow
   `roles` plus an explicit `exec_roles` gives precise per-role routing today, proven by
   `test_declared_roles_route_precisely`. The live fleet is permissive by CONFIG (three of four
   agents declare `roles: ["all"]`, none declares `exec_roles`), not by defect. What is missing
   is the competence DATA to decide which model earns which role.
-- **Slice 4 — bandit reconciliation.** The existing `cheapest`/`premium` DB2 bandit
+- **Slice 4, bandit reconciliation.** The existing `cheapest`/`premium` DB2 bandit
   (`server_compute.c`) is still capability-blind.
 - **Registration-scoped health keys.** Health keys on the agent name, which is now unique
   per model, so a failing sol cannot mark terra down. Two registrations of the SAME
   provider with different credentials would still share model-level health.
 - **Context bands are read but not consumed by cost decisions** beyond the lint.
 
-### Validation gaps — stated plainly
+### Validation gaps: stated plainly
 
 - Full CI has never run on this branch.
 - **Nothing is verified against the live server.** `aimee doctor` and `aimee agent list`
@@ -1016,10 +1019,10 @@ session). Only FOUR role values appear in six days of real use:
 
 | role | n | what the prompts actually ask |
 |---|---|---|
-| `review` | 31 | almost entirely one shape: *"Review the complete artifact against the complete original request. ARTIFACT STAGE: plan\|frozen_diff"* |
-| `draft` | 5 | SWE-bench style bounded bug fixes, and best-of-N patch selection — not prose drafting |
+| `review` | 31 | almost entirely one shape: *"Review the complete artifact against the complete original request; ARTIFACT STAGE: plan\|frozen_diff"* |
+| `draft` | 5 | SWE-bench style bounded bug fixes, and best-of-N patch selection: not prose drafting |
 | `code` | 2 | *"Implement the complete approved task in this worktree, run the repository verification"* |
-| `roundtable` | 1 | adversarial panel review — **declared nowhere**, works by falling through |
+| `roundtable` | 1 | adversarial panel review: **declared nowhere**, works by falling through |
 
 Caveat: 40 jobs, one operator, six days. Enough to show what IS used; not enough to prove
 what is never needed.
@@ -1027,7 +1030,7 @@ what is never needed.
 ### Done
 
 Culled the six persona-shaped roles (`prose`, `line-edit`, `lyric`, `hook`, `prosody`,
-`songform`) and the two alias entries (`test`, `implement`) — see the commit for the
+`songform`) and the two alias entries (`test`, `implement`). See the commit for the
 persona-vs-role reasoning. `continuity` and `beat-check` kept: the novel persona genuinely
 delegates them.
 
@@ -1035,8 +1038,8 @@ delegates them.
 
 An architect panel recommended culling `explain`, `execute`, `summarize`, `format`, `search`,
 `diagnose` and folding `refactor` into `code`. **I did not act on that**, because the panel's
-own precondition — "search all personas, agent declarations, callers, tests and configuration
-before removal" — fails when actually run: every one of those roles has 10–49 live code
+own precondition, "search all personas, agent declarations, callers, tests and configuration
+before removal": fails when actually run: every one of those roles has 10–49 live code
 references, and `refactor`, `execute`, `search`, `diagnose` and `validate` are declared by
 built-in personas.
 
@@ -1047,8 +1050,8 @@ It also recommended culling `deploy` as having "no template, no route". **That i
 
 1. **`artifact_gate` with a structured `stage`.** The strongest data-backed change: 31 of 40
    observed jobs are a staged artifact-vs-request gate whose stage lives in PROMPT TEXT, so
-   routing cannot see the most informative signal in the sample. Must roll out atomically —
-   add the role to every agent intended to receive it, THEN switch callers, or exact role
+   routing cannot see the most informative signal in the sample. Must roll out atomically.
+Add the role to every agent intended to receive it, THEN switch callers, or exact role
    filtering leaves jobs unroutable.
 2. **`roundtable` becomes an orchestration MODE, not a role.** It describes how several agents
    are coordinated, not a capability one agent supplies. It is an undeclared production
@@ -1057,8 +1060,8 @@ It also recommended culling `deploy` as having "no template, no route". **That i
    explicitly rejected `code_simple`/`code_complex`: scope is more stable and auditable than
    subjective difficulty (a single-file bug can be hard; a repo-wide mechanical change can be
    easy), and difficulty roles multiply combinatorially while coupling tiers to prompt labels.
-   The observed data supports the distinction — bounded benchmark fixes versus whole-worktree
-   implementation — but is too small to calibrate tier thresholds. Collect telemetry first.
+   The observed data supports the distinction, bounded benchmark fixes versus whole-worktree
+   implementation, but is too small to calibrate tier thresholds. Collect telemetry first.
 
 Each step changes agent ELIGIBILITY, so none is a template-only edit, and none can be verified
 from this worktree against the live server.
@@ -1068,7 +1071,7 @@ from this worktree against the live server.
 ## 11. Transport reality: where scope and verify actually run
 
 Found by trying to exercise escalation end to end against the live server, which is the only
-way this surfaced — every unit test passes with or without the defect.
+way this surfaced. Every unit test passes with or without the defect.
 
 **The deployed topology is a thin client talking to a remote server over `/v1`.** The thin
 `aimee` binary links `CLI_SRCS`, which does NOT include `cmd_agent_delegate.c`; it carries no
@@ -1079,8 +1082,8 @@ Consequences, all verified rather than inferred:
 
 - `--verify` and `--scope` were **silently dropped** on every routed run. A caller got a normal,
   successful-looking result while the verifier never executed and the scope ceiling never bound.
-- `agent_route_with_caps_scoped()` had **no production caller passing a real scope** —
-  `server_compute.c` read `required_caps`/`min_context` off the request and then called the
+- `agent_route_with_caps_scoped()` had **no production caller passing a real scope**,
+`server_compute.c` read `required_caps`/`min_context` off the request and then called the
   *unscoped* router. The one place a ceiling could apply was the one variant nobody called.
 - `verify_escalation_warranted()` / `agent_route_escalation_target()` are referenced **only** by
   `cmd_agent_delegate.c`, which no supported deployment invokes.
@@ -1089,7 +1092,7 @@ Consequences, all verified rather than inferred:
 
 The two flags are structurally different and were wrongly conflated onto one transport path.
 
-**`scope` is routing policy** — it names a ceiling, carries no caller-supplied code, and the
+**`scope` is routing policy**. It names a ceiling, carries no caller-supplied code, and the
 server already chooses the seat. Forwarded and enforced server-side; the effective ceiling is
 logged with the placement so a ceiling that failed to bind is distinguishable from one that bound
 and admitted the seat. Constraints accepted from the panel: caller scope may only NARROW what
@@ -1110,8 +1113,8 @@ The panel's recommendation, now actioned:
 > Drop generic verifier-driven auto-escalation from the public `--verify` contract. Route
 > correctly first; make retries explicit.
 
-The argument: a verifier failure has many causes a dearer model will not fix — invalid tests,
-environment problems, ambiguous requirements, an impossible task — so "the output failed a test"
+The argument: a verifier failure has many causes a dearer model will not fix, invalid tests,
+environment problems, ambiguous requirements, an impossible task, so "the output failed a test"
 does not establish "the seat was badly chosen", and automatic spend escalation is a poor default
 response to that ambiguity. It also let whoever supplied the verify command decide when to spend.
 This is consistent with the operator's own rule that over-selecting beats laddering: the scope
@@ -1121,22 +1124,22 @@ failure afterwards is evidence the routing policy needs correcting.
 **What changed.** `cmd_agent_delegate.c` no longer re-dispatches. On an attributable failure it
 now REPORTS:
 
-- `escalation_warranted` — the failure is attributable to the work product, so the placement is
+- `escalation_warranted`: the failure is attributable to the work product, so the placement is
   worth investigating. Routing telemetry, not an instruction.
-- `suggested_escalation_target` — the seat a retry *should* use: genuinely dearer AND still
+- `suggested_escalation_target`: the seat a retry *should* use: genuinely dearer AND still
   eligible under this packet's scope and capability requirements. Absent when no such seat exists,
   which is itself the answer: the placement cannot be corrected by spending more.
 
-`escalated` was removed rather than pinned false. Not for tidiness — `verify_outcome` and
-`escalation_warranted` are both emitted unconditionally, so always-present is the house style — but
+`escalated` was removed rather than pinned false. Not for tidiness, `verify_outcome` and
+`escalation_warranted` are both emitted unconditionally, so always-present is the house style, but
 because it could only ever have been produced by the same in-process path, so no deployed caller
 has ever read it and there is nothing to break. `delegate_snapshot_worktree()` went with it: it existed only to make a failed
 automatic re-dispatch recoverable, and with nothing re-dispatching there is no partial-worktree
 hazard to guard against. `worktree_may_be_partial` and `pre_escalation_snapshot` are gone for the
 same reason.
 
-**What was kept, deliberately.** `agent_route_escalation_target()` — the judgement of which seat
-is genuinely dearer and still eligible — is the part worth keeping, and is what now backs
+**What was kept, deliberately.** `agent_route_escalation_target()`, the judgement of which seat
+is genuinely dearer and still eligible, is the part worth keeping, and is what now backs
 `suggested_escalation_target`. `verify_classify()` still separates an attributable work-product
 failure from an unusable verifier, because that distinction governs whether the placement warning
 is honest. `verify_escalation_warranted()`'s `already_escalated` argument was CUT: it existed only to stop the
@@ -1145,10 +1148,10 @@ be exactly the speculative generality this codebase avoids.
 
 **These advisory fields have no in-tree consumer today, and that is stated in the code.** They are
 produced only by an in-process run with `--verify`, and that flag is refused on the server-routed
-path — which is how every supported deployment invokes delegates. They exist so a human reading the
+path, which is how every supported deployment invokes delegates. They exist so a human reading the
 JSON, or a future operator-owned retry policy, can see the placement judgement without re-deriving
 it. Naming that plainly is the point: the alternative is a field the next reader mistakes for a
 contract something acts on.
 
 If automated escalation returns, it should be an operator-owned recovery policy enabled narrowly
-for specific task and failure classes — never a consequence of a caller-supplied flag.
+for specific task and failure classes, never a consequence of a caller-supplied flag.

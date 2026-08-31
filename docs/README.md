@@ -12,7 +12,7 @@ Start here:
 | configure a deployment | [Settings](SETTINGS.md) and [generated configuration](gen/configuration.md) |
 | call the API | [Public API](PUBLIC_API.md) and [generated routes](gen/api-v1.md) |
 | find a command | [Generated command reference](gen/cli-commands.md) |
-| operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), and [workflows](WORKFLOWS.md) |
+| operate delegates and workflows | [Delegates](DELEGATES.md), [sandbox](DELEGATE_SANDBOX.md), [role permissions](DELEGATE_ROLE_PERMISSIONS.md), and [workflows](WORKFLOWS.md) |
 | understand memory and retrieval | [Knowledge](KNOWLEDGE.md), [curator](CURATOR_PIPELINE.md), and [retrieval](retrieval-stack.md) |
 | understand KB scaling and model placement | [KB fleet and model placement](KB_FLEET.md) |
 | check support or feature state | [Compatibility](COMPATIBILITY.md) and [status](STATUS.md) |
@@ -22,9 +22,11 @@ Start here:
 | write or review documentation | [Documentation voice and maintenance](WRITING.md) |
 | set budgets, rate limits, or a model catalog | [Teams, budgets, and rate limits](ORG_GOVERNANCE.md) |
 | work on aimee itself | [Technical reference](../src/README.md) and [owners](../OWNERS.md) |
+| see where the project is going | [Roadmap](ROADMAP.md) and [proposals](PROPOSALS.md) |
 
 ## Product guides
 
+- [Commands](COMMANDS.md)
 - [Code intelligence](CODE_INTELLIGENCE.md)
 - [Roundtables](ENSEMBLE.md)
 - [Workflows](WORKFLOWS.md) and [workflow actions](WORKFLOW_ACTIONS.md)
@@ -38,6 +40,9 @@ Start here:
 - [Embedder selection](embedder-sweep.md)
 - [CSS render sidecar](../deploy/css-render/README.md)
 - [Browser workspace](DASHBOARD.md), [VS Code](VSCODE.md), and [KB console](KB_CONSOLE.md)
+- [Context economizer](features/economizer.md), [tool-output condensation](features/tool-output-condensation.md),
+  and [canonical response parsing](features/ir-only-response-parsing.md)
+- [Agent reference](agent.md), returned by the `get_help` MCP tool
 
 ## Security and operations
 
@@ -51,11 +56,23 @@ Start here:
 - [Vault key rotation](runbooks/vault-master-key-rotation.md)
 - [Witness evidence and egress gate](runbooks/witness-evidence-and-egress-gate.md)
 - [Workflow autonomy](wfe-autonomy-runbook.md)
+- [Observability security](runbooks/observability-security.md)
+- [Appliance state recovery](runbooks/appliance-state-recovery.md)
+- [Retrieval readiness and recovery](runbooks/retrieval-readiness-and-recovery.md)
+- [Virtual-context alerts](observability/virtual-context-alerts.md)
+- [WORM audit worker](WORM_WORKER.md)
 
 ## Engineering
 
 - [Module contracts](modules/README.md)
 - [Technical reference](../src/README.md)
+- [Observability module](modules/observability.md)
+- [Core C libraries](core/connection.md): [event bus](core/event-bus.md) and
+  [repository extraction](core/repository-extraction.md)
+- [Turn integrity](architecture/turn-integrity.md)
+- [Event bus decisions](dev/EVENT_BUS_DECISIONS.md), [feature tree](dev/EVENT_BUS_FEATURE_TREE.md),
+  and [arena payloads](dev/EVENT_BUS_ARENA_GUIDE.md)
+- [Fold pipeline order](dev/fold-pipeline-order.md)
 - [Go rewrite direction](dev/GO_REWRITE.md)
 - [Workflow ownership](dev/WFE_OWNERSHIP.md)
 - [Sanitizer call-site register](SANITIZER_CALL_SITES.md)

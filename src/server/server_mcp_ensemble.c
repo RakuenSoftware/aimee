@@ -1,10 +1,11 @@
 /* server_mcp_ensemble.c: MCP ensemble (multi-agent session) tool handlers */
 #include "server_mcp_ensemble.h"
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "headers/primary_session_adapter.h"
 #include "server_http.h"
 #include "agent_config.h"
+#include "config.h"
 #include "persona.h"
 #include "role_templates.h"
 #include "util.h" /* safe_strdup */
@@ -177,11 +178,21 @@ int server_mcp_handle_ensemble_tool(server_conn_t *conn, const char *tool, cJSON
                int id = 0;
                if (!getcwd(cwd, sizeof(cwd)))
                   cwd[0] = '\0';
-               rc = db1_ensemble_create(cwd, jt->valuestring,
-                                        (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring
-                                                                                   : "general",
-                                        assignments, &id, errbuf, sizeof(errbuf));
+               char *assignments_json = cJSON_PrintUnformatted(assignments);
                cJSON_Delete(assignments);
+               if (!assignments_json)
+               {
+                  snprintf(errbuf, sizeof(errbuf), "failed to serialize assignments");
+                  rc = -1;
+               }
+               else
+               {
+                  rc = db1_ensemble_create(
+                      cwd, config_default_dir(), jt->valuestring,
+                      (cJSON_IsString(jc) && jc->valuestring[0]) ? jc->valuestring : "general",
+                      assignments_json, &id, errbuf, sizeof(errbuf));
+                  free(assignments_json);
+               }
                if (rc == 0)
                   rc = db1_ensemble_get(id, &info, &prompt, &context, errbuf, sizeof(errbuf));
             }
@@ -339,8 +350,8 @@ cJSON *server_mcp_set_primary_agent(const char *session_id, cJSON *args)
           "error: set_primary_agent requires an 'agent' name (or clear:true)");
 
    const char *name = jagent->valuestring;
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, name))
+   agent_t agbuf;
+   if (agent_registry_find(name, &agbuf) != 0)
    {
       char out[256];
       snprintf(out, sizeof(out), "error: no such agent '%s' (see 'aimee agent list')", name);

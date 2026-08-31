@@ -568,6 +568,65 @@ static void test_emit_message_as_sse_replays_text_only(void)
    PASS("emit_message_as_sse_replays_text_only");
 }
 
+/* The replayed message_delta must carry an ANTHROPIC stop_reason whatever dialect the
+ * primary speaks. Captured live against a codex primary, this path emitted
+ * "stop_reason":"completed" -- a Responses status -- to an Anthropic client. */
+static void test_emit_message_as_sse_normalizes_stop_reason(void)
+{
+   static const struct
+   {
+      const char *raw;      /* what the provider reported */
+      const char *expected; /* what an Anthropic client must receive */
+   } cases[] = {
+       /* Responses statuses: the live bug */
+       {"completed", "end_turn"},
+       {"incomplete", "max_tokens"},
+       /* OpenAI-chat finish_reasons */
+       {"tool_calls", "tool_use"},
+       {"function_call", "tool_use"},
+       {"length", "max_tokens"},
+       {"stop", "end_turn"},
+       {"content_filter", "end_turn"},
+       /* Anthropic's own vocabulary survives untouched -- a native primary must not
+        * have its stop_reason rewritten by a translation it never needed. */
+       {"end_turn", "end_turn"},
+       {"max_tokens", "max_tokens"},
+       {"tool_use", "tool_use"},
+       {"stop_sequence", "stop_sequence"},
+       /* An unrecognized value passes through rather than being flattened: a
+        * stop_reason newer than this table is more useful intact than guessed at. */
+       {"pause_turn", "pause_turn"},
+   };
+   size_t i;
+
+   for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+   {
+      replay_capture_t cap;
+      char want[64];
+      parsed_response_t p = seed_parsed_for_replay(0, NULL, NULL, cases[i].raw, "hi");
+      memset(&cap, 0, sizeof(cap));
+      emit_message_as_sse(&p, "msg_sr", "claude-test", replay_capture, &cap);
+      snprintf(want, sizeof(want), "\"stop_reason\":\"%s\"", cases[i].expected);
+      assert(strstr(cap.data[4], want) != NULL);
+      free_parsed_for_replay(&p);
+   }
+   PASS("emit_message_as_sse_normalizes_stop_reason");
+}
+
+/* message_stop is the event that tells a client the turn is over; it was emitted as
+ * a bare {} with no `type`, the only replayed event that could not identify itself. */
+static void test_emit_message_as_sse_message_stop_carries_type(void)
+{
+   replay_capture_t cap;
+   parsed_response_t p = seed_parsed_for_replay(0, NULL, NULL, "end_turn", "hi");
+   memset(&cap, 0, sizeof(cap));
+   emit_message_as_sse(&p, "msg_ms", "claude-test", replay_capture, &cap);
+   assert(strcmp(cap.events[cap.count - 1], "message_stop") == 0);
+   assert(strstr(cap.data[cap.count - 1], "\"type\":\"message_stop\"") != NULL);
+   free_parsed_for_replay(&p);
+   PASS("emit_message_as_sse_message_stop_carries_type");
+}
+
 /* Empty content (the "no_text" + "calls_0" combo): one empty text block
  * is emitted, matching the buffered renderer's empty-text-block fallback. */
 static void test_emit_message_as_sse_replays_empty_content_as_single_text_block(void)
@@ -735,6 +794,8 @@ int main(void)
    test_stream_text_then_tool();
    test_request_headers_passthrough();
    test_emit_message_as_sse_replays_text_only();
+   test_emit_message_as_sse_normalizes_stop_reason();
+   test_emit_message_as_sse_message_stop_carries_type();
    test_emit_message_as_sse_replays_empty_content_as_single_text_block();
    test_emit_message_as_sse_replays_surviving_tool_calls();
    test_emit_message_as_sse_replays_text_and_tool_calls();

@@ -12,7 +12,7 @@
 #include <aimee/delegates/gw_orch_delegates.h>
 #include <aimee/delegates/delegate_role.h> /* delegate_role_is_write — force tools for coord write tasks */
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "log.h"
 #include "platform_random.h"
 #include "cJSON.h"
@@ -64,7 +64,7 @@ static int coord_spawn_delegate(void *ctx, const char *role, const char *brief)
     * tools it mutates nothing, the run is flagged "produced no diff", and a WFE
     * implement slice loops to max_iters and never lands a change. Forcing tools
     * also makes the router require a tool-capable model (MODEL_CAP_TOOLS). Read
-    * roles already opt in via delegate_role_enable_tools_by_default; a caller can
+    * roles already opt in through their `tools` permission; a caller can
     * still pass tools:false explicitly, which server_compute honors. */
    if (delegate_role_is_write(req_role))
    {
@@ -145,7 +145,7 @@ int server_compute_dispatch_coord_task(server_ctx_t *ctx, int task_id, const cha
 
 #define COORD_POLL_INTERVAL_SECS 10
 #define COORD_MAX_ACTIVE_JOBS    32
-#define COORD_PROMPT_MAX         16384
+#define COORD_PROMPT_MAX         DB1_COORD_PROMPT_LEN
 #define COORD_FILES_MAX          DB1_COORD_FILES_LEN
 #define COORD_CWD_MAX            DB1_COORD_CWD_LEN
 #define COORD_ROLE_MAX           DB1_COORD_ROLE_LEN
@@ -187,9 +187,8 @@ static int dispatcher_recover_previous_boot(void)
    unsigned char rnd[8];
    if (platform_random_bytes(rnd, sizeof(rnd)) != 0)
    {
-      struct timespec ts;
-      clock_gettime(CLOCK_REALTIME, &ts);
-      memcpy(rnd, &ts, sizeof(rnd));
+      LOG_ERROR("coord_dispatcher", "secure entropy unavailable; dispatcher not started");
+      return -1;
    }
    snprintf(g_claim_owner, sizeof(g_claim_owner), "coord-%ld-", (long)getpid());
    size_t used = strlen(g_claim_owner);

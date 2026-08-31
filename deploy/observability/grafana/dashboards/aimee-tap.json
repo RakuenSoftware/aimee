@@ -1,0 +1,51 @@
+{
+  "annotations": {"list": []},
+  "editable": true,
+  "graphTooltip": 1,
+  "panels": [
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "eps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+      "id": 1,
+      "targets": [{"expr": "sum by (event_kind) (rate(aimee_tap_events_total[$__rate_interval]))", "legendFormat": "kind {{event_kind}}", "refId": "A"}],
+      "title": "Tap event rate",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"unit": "Bps"}, "overrides": []},
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+      "id": 2,
+      "targets": [{"expr": "sum(rate(aimee_tap_payload_bytes_total[$__rate_interval]))", "legendFormat": "payload", "refId": "A"}],
+      "title": "Observed payload throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "gridPos": {"h": 6, "w": 6, "x": 0, "y": 8},
+      "id": 3,
+      "targets": [{"expr": "sum(increase(aimee_tap_exceptions_total[1h]))", "refId": "A"}],
+      "title": "Tap exceptions (1h)",
+      "type": "stat"
+    },
+    {
+      "datasource": {"type": "loki", "uid": "loki"},
+      "gridPos": {"h": 9, "w": 18, "x": 6, "y": 8},
+      "id": 4,
+      "targets": [{"expr": "{service_name=\"aimee-server\"} | json | event_kind != \"\"", "refId": "A"}],
+      "title": "Tap structured events",
+      "type": "logs"
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 41,
+  "tags": ["aimee", "tap", "opentelemetry"],
+  "templating": {"list": []},
+  "time": {"from": "now-1h", "to": "now"},
+  "timezone": "browser",
+  "title": "Aimee Tap Observability",
+  "uid": "aimee-tap",
+  "version": 1
+}

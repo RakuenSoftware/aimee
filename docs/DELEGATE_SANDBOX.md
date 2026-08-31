@@ -1,7 +1,7 @@
 # Delegate sandbox
 
-Write-capable delegates run in an assigned worktree and, by default, a container with no network or
-ambient credentials (`delegate_sandbox` is on unless an operator sets `delegate_sandbox: false`).
+Delegates run in an assigned full source worktree and a container with no network or ambient
+credentials.
 The sandbox bounds damage after a model or dependency makes a bad decision; it does not make
 arbitrary host mounts safe.
 
@@ -19,6 +19,12 @@ arbitrary host mounts safe.
 The agent's role and workflow still decide whether the worktree is writable. A container is not a
 write grant.
 
+The immutable specification, Docker create/start/resume lifecycle, and post-start verification live
+in `server-go/modules/delegates`. The network-capable package proxy lives in
+`server-go/modules/sandbox`; `aimee-delegate-egress` is the shipped Go entry point for both. C only
+hands canonical filesystem facts or an already-accepted Unix fd to that binary. It cannot request a
+network mode, provide an allowlist, resolve a destination, dial a socket, or override a refusal.
+
 ## Source authority
 
 The server resolves the workspace and canonical worktree before launch. Absolute paths are accepted
@@ -33,8 +39,8 @@ owns them. Arbitrary sibling paths are not.
 Delegates do not reach public package registries directly. Package requests use a mediated proxy or
 prebuilt cache with allowlist, vulnerability, integrity, size, and audit policy.
 
-If a task needs network, grant the narrow destination and protocol. Do not switch the whole backend
-to host networking for one dependency.
+If a task needs external data, grant the narrow destination and protocol to an aimee-server module
+on the other side of the bus. Never switch the delegate container to host networking.
 
 ## Images
 
@@ -59,22 +65,19 @@ Local CLI-provider logins stay on the thin client and do not enter the container
 
 ## Isolation failure
 
-Fail closed when the requested namespace, mount, network, or resource boundary cannot be created.
-An operator may configure a documented degraded mode for a trusted host; every degraded launch emits
-a sandbox audit event with the missing boundary.
+Fail closed when the requested namespace, exact mount set, environment, network, or resource boundary
+cannot be created or proved after every start or resume. The failed container is destroyed.
 
 Never silently fall back from container to host shell.
 
 ## A sandbox needs a workspace, and a bind source the daemon can see
 
-Two conditions have to hold before a delegate can run a shell or read a file. Both fail quietly, and
-both look like the model being unhelpful rather than like a deployment problem.
+Two conditions have to hold before a delegate can run a shell or read a file. Both are checked and
+refused explicitly.
 
 **The delegate needs an assigned worktree.** The container provider is bound per delegate from that
-worktree; it is deliberately not selectable from configuration, because a configurable kind would
-have to fall back to the shared provider when no container exists, which is the one outcome the
-sandbox is for. A delegate launched with no workspace has nothing to containerise, falls through to
-co-located execution, and is then refused:
+worktree; it is deliberately not selectable from configuration. A delegate launched with no full
+source workspace is refused before container creation:
 
 ```text
 refused: a delegated shell requires sandbox isolation, but the sandbox is off/unavailable;
@@ -120,25 +123,22 @@ docker inspect <aimee-delegate-...> --format '{{range .Mounts}}{{.Source}} -> {{
 A source equal to the destination on a sibling-daemon host means the translation did not apply, and
 that mount is an empty directory.
 
-## Non-sandbox security, unresolved
+## No host fallback for delegates
 
-This section is a marker, not a description of shipped behavior. Tracked in
-[issue #2190](https://github.com/RakuenSoftware/aimee/issues/2190).
+A delegate runs in its allocated container or it does not run. The former INERT path was removed
+by `89db96aebe`:
+an unavailable container backend now fails allocation, and a delegated shell that reaches a
+co-located path with `sandbox.mode=off` is refused before fork/exec. The trusted primary/operator
+session remains a separate host-execution path; it is not a delegate fallback.
 
-`delegate_sandbox` defaulting to on does not by itself deliver the posture above. Two gaps remain
-open:
+`delegate_sandbox_require_isolation` is a compatibility key and cannot weaken the boundary. The Go
+module always verifies network isolation, exact source/target/read-write mounts, and the effective
+credentialless environment after start or resume. Package access, when enabled, crosses only the
+audited Go package proxy;
+credential stripping and workspace guards remain defense in depth inside the container boundary.
 
-- **The INERT path contradicts "never silently fall back".** When the dial is on but no docker
-  daemon is reachable, `delegate_sandbox_log_posture()` logs `INERT` at boot and delegates then run
-  on the host. `delegate_sandbox_require_isolation` is the fail-closed guard, but it defaults to
-  off, so the default posture claims sandboxed and, on a box without docker, is not.
-- **The in-process boundary is undefined.** When there is no sandbox (no docker, a runtime that
-  ignores `--network none`, or a deliberate opt-out), what protects the host is an implicit union of
-  the shell-git gate, the credential strip, and the guardrails path policy. That union is not stated
-  as a guarantee anywhere and is not tested as one.
-
-Decide the intended non-sandbox boundary, then make the INERT path enforce exactly that instead of
-degrading to aimee-server's own filesystem and environment.
+Regression coverage lives in `test_server_compute` (container allocation is mandatory) and
+`test_agent` (an active delegate is refused when a shell would otherwise run with sandbox mode off).
 
 ## Lifecycle
 

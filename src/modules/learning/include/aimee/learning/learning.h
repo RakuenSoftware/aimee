@@ -9,6 +9,8 @@
 #include <stdint.h>
 
 typedef int (*learning_signal_classifier_fn)(const char *signal_type, uint32_t *sink_mask);
+/* Production installs the supervised event-bus classifier during server startup.
+ * NULL clears it. Signal ingestion fails before persistence when it is absent or fails. */
 void learning_router_register_signal_classifier(learning_signal_classifier_fn classifier);
 
 #define LEARNING_MAX_PROPOSAL_IDS 8
@@ -121,5 +123,143 @@ void learning_router_detection_metrics_reset(void);
 
 /* Called by learning_implicit.c to record a detection-pass timing. */
 void learning_router_record_detection_ms(double ms);
+
+/* --- Endogeneity accounting (recursive-self-improvement S0) ---
+ *
+ * A learning loop that feeds on its own output drifts into an echo chamber:
+ * it keeps committing proposals whose only evidence is something it inferred
+ * earlier. commit_ratio cannot see that — it measures acceptance, not where
+ * the evidence came from. These functions classify committed proposals by the
+ * provenance of the signal that raised them and expose the exogenous share as
+ * a gate.
+ *
+ * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
+
+typedef enum
+{
+   /* Rooted in something outside the system's own reasoning: a human acting
+    * through the feedback surface, a test/verify exit status, a grader, a git
+    * outcome, an operator accept. */
+   LEARNING_EVIDENCE_EXOGENOUS = 0,
+   /* Rooted in the system's own output: an implicit detector reading aimee's
+    * own transcript, a lesson derived from a lesson, a self-generated eval
+    * result. Unknown provenance classifies here — the conservative side. */
+   LEARNING_EVIDENCE_ENDOGENOUS = 1,
+} learning_evidence_origin_t;
+
+/* Classify a signal's provenance from its (source, signal_type) pair. Pure;
+ * no DB access. `signal_type` overrides `source` for the implicit-detector
+ * types, because the signal-capture API defaults an unset source to
+ * "explicit" — without that override a caller could launder a self-derived
+ * signal into the exogenous count by simply omitting the field. NULL or empty
+ * arguments classify as endogenous. */
+learning_evidence_origin_t learning_evidence_classify(const char *source, const char *signal_type);
+
+/* Exogenous share of committed proposals over a window. `exogenous_ratio` is
+ * meaningful only when `committed_total` > 0; it is 0.0 for an empty window,
+ * which means "nothing observed", NOT "wholly endogenous" — read
+ * committed_total before acting on the ratio. */
+typedef struct
+{
+   int64_t committed_total;      /* committed proposals in the window */
+   int64_t committed_exogenous;  /* of those, exogenously rooted */
+   int64_t committed_endogenous; /* of those, endogenously rooted */
+   double exogenous_ratio;       /* exogenous / max(1, total); 0 when total == 0 */
+   int window_days;
+} learning_endogeneity_t;
+
+/* Overall (sink == NULL / "") or per-sink endogeneity over `window_days`
+ * (values <= 0 pick LEARNING_METRICS_DEFAULT_WINDOW_DAYS). Returns 0 on
+ * success, -1 on bad args / SQL / connection error. */
+int learning_metrics_endogeneity(int window_days, learning_endogeneity_t *out);
+int learning_metrics_endogeneity_for_sink(int window_days, const char *sink,
+                                          learning_endogeneity_t *out);
+
+/* Floor below which self-generated signal is judged to dominate, and the
+ * sample size below which the ratio is not yet worth acting on. A fresh
+ * installation has committed nothing, so the gate must not be closed by an
+ * empty window — that would make it impossible to ever bootstrap. */
+#define LEARNING_ENDOGENEITY_MIN_EXOGENOUS_RATIO 0.25
+#define LEARNING_ENDOGENEITY_MIN_SAMPLE          20
+
+typedef enum
+{
+   LEARNING_GATE_OPEN = 0,
+   /* Observed a large enough sample and the exogenous share is under the
+    * floor: the loop is feeding on itself. Gated promotions must refuse. */
+   LEARNING_GATE_CLOSED_ENDOGENOUS = 1,
+   /* The share could not be computed (DB2 configured but erroring). Distinct
+    * from CLOSED so the caller can decide; a build with DB2 compiled out
+    * reports OPEN instead, since no learning is being persisted there. */
+   LEARNING_GATE_UNAVAILABLE = 2,
+} learning_gate_state_t;
+
+/* Gate state over the window. `out` may be NULL. learning_gate_check() uses
+ * the defaults above; the _with() form takes explicit bounds so a caller (and
+ * the tests) can supply their own without a config round trip. */
+learning_gate_state_t learning_gate_check(learning_endogeneity_t *out);
+learning_gate_state_t learning_gate_check_with(int window_days, double min_exogenous_ratio,
+                                               int min_sample, learning_endogeneity_t *out);
+
+/* --- Post-commit regret (recursive-self-improvement S5) ---
+ *
+ * commit_ratio answers "was it accepted?". These answer "was accepting it
+ * right?" — which is the only question that can tell a detector that is
+ * usually correct from one that is merely persuasive. A detector whose
+ * commits keep getting reverted earns a higher bar, automatically.
+ *
+ * See docs/proposals/pending/recursive-self-improvement-closing-the-loops.md */
+
+/* What became of a committed proposal. STANDING is the only non-regret
+ * outcome; the rest each mean the commit did not hold. */
+#define LEARNING_FATE_STANDING     "standing"
+#define LEARNING_FATE_SUPERSEDED   "superseded"
+#define LEARNING_FATE_CONTRADICTED "contradicted"
+#define LEARNING_FATE_REVERTED     "reverted"
+
+/* 1 when `fate` is a recognised fate name, 0 otherwise. Pure. */
+int learning_fate_is_valid(const char *fate);
+/* 1 when `fate` counts against the detector that produced it. Pure; an
+ * unrecognised fate is NOT counted as regret, because guessing would let a
+ * typo silently raise a detector's bar. */
+int learning_fate_is_regret(const char *fate);
+
+/* Record what became of a committed proposal. Returns 0 on success, -1 on bad
+ * args / unknown fate / storage error. */
+int learning_fate_record(int proposal_id, const char *fate, const char *reason);
+
+typedef struct
+{
+   char signal_type[32];
+   int64_t committed; /* committed in the window */
+   int64_t settled;   /* of those, with a fate recorded */
+   int64_t regret;    /* of those settled, a fate that did not hold */
+   double regret_rate; /* regret / max(1, settled); 0 when settled == 0 */
+} learning_detector_regret_t;
+
+/* Per-detector regret over `window_days` (<= 0 picks the default window),
+ * ordered by signal_type. Returns rows written (capped at max) or -1. */
+#define LEARNING_REGRET_MAX_DETECTORS 32
+int learning_metrics_regret(int window_days, learning_detector_regret_t *out, int max);
+
+/* Regret is only worth acting on once enough commits have settled; below this
+ * a detector keeps the default bar however its handful of commits went. */
+#define LEARNING_REGRET_MIN_SAMPLE     8
+#define LEARNING_REGRET_RAISE_BAR_RATE 0.34 /* a third of commits not holding */
+#define LEARNING_REGRET_NO_FAST_RATE   0.50 /* half not holding */
+#define LEARNING_CORROBORATION_DEFAULT 2
+#define LEARNING_CORROBORATION_RAISED  3
+
+/* How many independent corroborations this detector's proposals need before
+ * they commit. Returns LEARNING_CORROBORATION_DEFAULT for an unmeasured or
+ * well-behaved detector, and a raised bar for one whose commits keep failing
+ * to hold. Never lowers the bar below the default: evidence of being right is
+ * not a reason to ask for less. */
+int learning_detector_corroboration_required(const char *signal_type);
+
+/* Whether a high-confidence signal from this detector may still take the
+ * immediate-commit path. Returns 0 once the detector's observed regret says
+ * its confidence is not earned. */
+int learning_detector_may_fast_commit(const char *signal_type);
 
 #endif

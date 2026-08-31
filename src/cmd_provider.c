@@ -5,7 +5,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "runtime_secret.h"
 #include <aimee/delegates/delegate_credentials.h>
 #include "cJSON.h"
@@ -42,18 +42,14 @@ static int provider_has_credentials(const model_provider_t *p)
    return 0;
 }
 
-static void provider_free_models(char **models, int n)
+static void provider_free_models(provider_model_t *models, int n)
 {
-   if (!models)
-      return;
-   for (int i = 0; i < n; i++)
-      free(models[i]);
-   free(models);
+   db1_model_catalog_free(models, n);
 }
 
 #define PROVIDER_MODEL_CATALOG_TTL_SECONDS 3600
 
-static int provider_models_cached(model_provider_t *p, char ***models_out, int *n_out)
+static int provider_models_cached(model_provider_t *p, provider_model_t **models_out, int *n_out)
 {
    *models_out = NULL;
    *n_out = 0;
@@ -200,7 +196,7 @@ static void provider_models(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   char **models = NULL;
+   provider_model_t *models = NULL;
    int n = 0;
    if (!json_output)
       fprintf(stderr, "fetching models from %s...\n", p->models_url ? p->models_url : p->name);
@@ -214,7 +210,7 @@ static void provider_models(app_ctx_t *ctx, int argc, char **argv)
    {
       cJSON *arr = cJSON_CreateArray();
       for (int i = 0; i < n; i++)
-         cJSON_AddItemToArray(arr, cJSON_CreateString(models[i]));
+         cJSON_AddItemToArray(arr, cJSON_CreateString(models[i].id));
       char *json = cJSON_Print(arr);
       if (json)
       {
@@ -226,7 +222,7 @@ static void provider_models(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
    for (int i = 0; i < n; i++)
-      printf("%s\n", models[i]);
+      printf("%s\n", models[i].id);
    provider_free_models(models, n);
    fprintf(stderr, "%d models\n", n);
 }
@@ -257,7 +253,7 @@ static void provider_test(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   char **models = NULL;
+   provider_model_t *models = NULL;
    int n = 0;
    if (p->fetch_models(p, &models, &n) != 0)
    {
@@ -328,7 +324,7 @@ static void model_show(app_ctx_t *ctx, int argc, char **argv)
    (void)ctx;
    if (argc < 1)
    {
-      fprintf(stderr, "usage: aimee model show [provider:]<model>\n");
+      fprintf(stderr, "usage: aimee catalog show [provider:]<model>\n");
       return;
    }
 
@@ -375,7 +371,7 @@ static void model_list(app_ctx_t *ctx, int argc, char **argv)
          open_weights_only = 1;
       else
       {
-         fprintf(stderr, "usage: aimee model list [--capability <name>] [--open-weights]\n");
+         fprintf(stderr, "usage: aimee catalog list [--capability <name>] [--open-weights]\n");
          return;
       }
    }

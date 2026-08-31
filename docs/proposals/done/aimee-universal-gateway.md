@@ -1,14 +1,18 @@
 # Aimee as the universal LLM gateway: dual-API surface, model-derived proxy/translate, and a general inspect/alter pipeline
 
-- **State:** ✅ **COMPLETE — all phases shipped; proposal done.** P1 (derive
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** **COMPLETE. All phases shipped; proposal done.** P1 (derive
   proxy/translate, delete the `claude_proxy_parity` flag) is complete (#658); P2a
   (request pipeline scaffold over a canonical IR) is complete (#669); P2b (model-pin
-  policy stage) is complete (#671); P2c (response-side tool policing — buffered
+  policy stage) is complete (#671); P2c (response-side tool policing, buffered
   AND streaming paths) is complete (#677, #679); the OpenAI-ingress
   response-policing sibling slice (streaming `/v1/responses`, mirroring the
   Anthropic path through the shared `gateway_policy_police_parsed_response`)
   is complete (#682); P3 (memory injection as one shared pipeline stage) is complete
-  (#685); P4 (delegate unification — route aimee's own outbound model-call loop
+  (#685); P4 (delegate unification, route aimee's own outbound model-call loop
   through the pipeline so tool-policing applies to delegate calls) is complete (#695).
   (R1 surfaced 3 findings; R2: Findings A &
   B confirmed RESOLVED by security · architect · qa; Finding C resolved via the
@@ -25,24 +29,23 @@
 - **Author:** JBailes (drafted by the engineer agent, 2026-06-23).
 - **Origin:** follow-up to the `claude_proxy_parity` work (#648/#651 shipped a
   config flag to `main`; #654 to flip its default was closed). That flag was the
-  **wrong model** — it made "passthrough vs. translate" a human-set toggle when it
-  is really a derived property of the serving model. This proposal replaces the
+  **wrong model**. It made "passthrough vs; translate" a human-set toggle when it
+  is a derived property of the serving model. This proposal replaces the
   flag with the correct architecture and names the layer the flag was groping at.
 
 ## Thesis
 
 **Aimee sits at the center of every model call. It is a translation layer, a
-memory layer, and a guardrail/policy layer — and every call, from any client, to
+memory layer, and a guardrail/policy layer, and every call, from any client, to
 any model (primary or delegate), passes through it.** The client's API and the
 model's API are independent axes; aimee speaks the client's API on one side, the
 model's API on the other, translating between them when they differ, and can
 inspect and alter anything in between.
 
-"Parity" is not a setting. It is the degenerate case where the client API equals
-the model API and no transform is required — pure passthrough. Everything else is
+"Parity" is the degenerate case where the client API equals the model API and no transform is required, pure passthrough. Everything else is
 a transform aimee applies.
 
-## Problem — where aimee is today
+## Problem: where aimee is today
 
 Most of the surface already exists, which is why the right move is consolidation,
 not green-field:
@@ -63,11 +66,11 @@ The three real defects:
    (`src/headers/config.h`, gated in `anthropic_http.c` via `parity_on()`) layered
    a human toggle on top of a choice that is fully determined by the serving
    model's API (`driver_is_anthropic`). Wrong axis of control.
-4. **The ingresses are deliberately stateless — calls do NOT go through aimee's
+4. **The ingresses are deliberately stateless, calls do NOT go through aimee's
    systems.** `anthropic_http.c`'s own contract: *"does NOT run aimee's agent
    loop, memory, persona, or toolset."* The lone exception already bolted on is
    context pre-injection (`ingress_preinject_build`, wired ad-hoc into *both*
-   ingresses) — proof that per-call alteration is wanted, but done as a one-off,
+   ingresses), proof that per-call alteration is wanted, but done as a one-off,
    not a general mechanism. Tool use still cannot be policed (e.g. prevent a model
    from spawning subagents), and full guardrails (`guardrails.h`, `guardrail_mode`)
    run only on the **agentic** path (`/v1/runs`) and the internal loop, not the
@@ -113,7 +116,7 @@ Properties:
   policing (strip the subagent/`Task` tool from `tools`; reject a disallowed
   `tool_use`) is the *first* concrete policy, not a special case.
 - **Bounded, not the agent loop.** The pipeline is per-call request/response
-  transforms — it does not hijack the client's multi-turn loop or context
+  transforms. It does not hijack the client's multi-turn loop or context
   ownership. This preserves the original reason the ingress was stateless ("don't
   corrupt the context the client builds") while still letting aimee inspect and
   alter each call. Memory injection stays cache-safe (append after the client's
@@ -126,43 +129,43 @@ Properties:
 
 | Capability | Today | Target |
 |---|---|---|
-| Anthropic API in | ✅ `/v1/messages` | ✅ (through pipeline) |
-| OpenAI API in | ✅ `/v1/chat/completions` etc. | ✅ (through pipeline) |
-| Anthropic-in → Anthropic-model | ✅ passthrough | ✅ passthrough (derived) |
-| Anthropic-in → OpenAI-model | ✅ translate | ✅ translate (derived) |
-| OpenAI-in → OpenAI-model | ✅ passthrough | ✅ passthrough (derived) |
-| OpenAI-in → Anthropic-model | ✅ via driver | ✅ translate (derived) |
-| Proxy/translate selection | ❌ manual `claude_proxy_parity` | ✅ derived from serving model API |
-| Inspect/alter proxied calls | ❌ stateless ingress | ✅ pipeline stages |
-| Tool policing / prevent subagents | ❌ none | ✅ policy stage |
-| Memory injection on proxy | ⚠️ ad-hoc `ingress_preinject_build` on **both** ingresses (anthropic_http.c ×2, openai_chat.c ×5) | ✅ one shared pipeline stage |
-| Same path for delegates | ⚠️ driver layer, separate | ✅ unified |
+| Anthropic API in | yes, `/v1/messages` | yes (through pipeline) |
+| OpenAI API in | yes, `/v1/chat/completions` etc. | yes (through pipeline) |
+| Anthropic-in → Anthropic-model | yes, passthrough | yes, passthrough (derived) |
+| Anthropic-in → OpenAI-model | yes, translate | yes, translate (derived) |
+| OpenAI-in → OpenAI-model | yes, passthrough | yes, passthrough (derived) |
+| OpenAI-in → Anthropic-model | yes, via driver | yes, translate (derived) |
+| Proxy/translate selection | no, manual `claude_proxy_parity` | yes, derived from serving model API |
+| Inspect/alter proxied calls | no, stateless ingress | yes, pipeline stages |
+| Tool policing / prevent subagents | no, none | yes, policy stage |
+| Memory injection on proxy | partial, ad-hoc `ingress_preinject_build` on **both** ingresses (anthropic_http.c ×2, openai_chat.c ×5) | yes, one shared pipeline stage |
+| Same path for delegates | partial, driver layer, separate | yes, unified |
 
 ## Phasing
 
-- **P1 — derive, delete the flag. ✅ SHIPPED (#658, merged to `testing`).** Removed
+- **P1, derive, delete the flag. SHIPPED (#658, merged to `testing`).** Removed
   `claude_proxy_parity`; gates passthrough/translate purely on the serving model's
   API (`driver_is_anthropic`) in `anthropic_http.c`. Net behavior: an Anthropic call
-  is forwarded untouched to an Anthropic model, translated to an OpenAI model —
-  automatically. Covered by `src/tests/test_anthropic_http.c`
+  is forwarded untouched to an Anthropic model, translated to an OpenAI model,
+automatically. Covered by `src/tests/test_anthropic_http.c`
   (`messages_buffered_anthropic_parity_passthrough` honors the inbound model,
   `messages_buffered_openai_family_translates` + the streaming variant translate +
   swap). The single-model-shim behavior change (client model forwarded verbatim) is
   documented; the model-pin that bounds it lands in P2.
-- **P2 — gateway pipeline scaffold + first policy.** Introduce the canonical
+- **P2, gateway pipeline scaffold + first policy.** Introduce the canonical
   request/response IR and a typed stage interface at the ingress seam; port the
   existing translation into it; add the first policy stage: **tool policing**
   (configurable tool allow/deny; the subagent/`Task` strip on request + disallowed
   `tool_use` rejection on response). Bounded, per-call, opt-in by policy.
-- **P3 — memory as a stage. ✅ SHIPPED (#685).** Both ingresses called
+- **P3, memory as a stage. SHIPPED (#685).** Both ingresses called
   `ingress_preinject_build` ad-hoc (anthropic_http.c, openai_chat.c); folded into
   **one** shared memory/context pipeline stage (`server/gw_stage_memory.c`), cache-safe,
   identical rendered bytes.
-- **P4 — unify delegates + symmetric coverage. ✅ SHIPPED (#695).** The OpenAI ingress
+- **P4, unify delegates + symmetric coverage. SHIPPED (#695).** The OpenAI ingress
   was routed through the pipeline in #672; #695 routes aimee's own outbound model-call
   loop (the shared primary+delegate `agent_execute_with_tools_internal`) through the
   same pipeline via the new `gateway_delegate.{c,h}` module, so a config-enabled
-  tool-policing policy (`gateway_prevent_subagents`) applies to delegate calls — both
+  tool-policing policy (`gateway_prevent_subagents`) applies to delegate calls, both
   request side (subagent-strip) and response side (police a denied `tool_use`), gated to
   delegates so aimee's own primary delegation is never stripped. Memory and model-pin are
   deliberately not re-run on aimee's own calls (memory would double-inject over
@@ -184,7 +187,7 @@ Properties:
    `tool_use` in the response, on **both** the Anthropic and OpenAI ingresses,
    with an audit row per intervention. Response policing is implemented for the
    **buffered and streaming paths together** (not buffered-first); the action is
-   **per-tool and per-severity** — e.g. a high-severity tool is blocked/rewritten
+   **per-tool and per-severity**, e.g. a high-severity tool is blocked/rewritten
    even mid-SSE-stream, a low-severity one may be flagged/audited only.
 4. The two ad-hoc `ingress_preinject_build` call paths (anthropic_http.c,
    openai_chat.c) are replaced by **one** shared pipeline stage with byte-identical
@@ -200,14 +203,14 @@ Properties:
 
 - **Streaming + buffered policing together, per-tool/per-severity.** Response
   policing is implemented for both the buffered and streaming paths in the same
-  phase — not buffered-first. The action is a function of the tool and the
+  phase, not buffered-first. The action is a function of the tool and the
   severity: a high-severity tool is blocked/rewritten even mid-SSE-stream; a
   low-severity one may be audited/flagged only.
   *Feasibility (resolves the security finding that mid-stream rewrite is
   impossible under today's byte relay):* when a tool-policing policy is active, the
   Anthropic streaming path stops using the raw byte relay
   (`anthropic_http.c` `relay_flush`/`relay_append_data`, which passes SSE bytes
-  through unparsed) and instead drives a **block-aware translator** — the same
+  through unparsed) and instead drives a **block-aware translator**, the same
   `anthropic_stream_xlate` machinery already used for the OpenAI→Anthropic path.
   A `tool_use` content block streams its arguments as `input_json_delta`s and is
   fully bounded by `content_block_start`/`content_block_stop`; the translator
@@ -217,23 +220,23 @@ Properties:
   block** (not per arbitrary byte), at the cost of buffering one tool_use block;
   the byte relay remains the fast path when no policy is active.
 - **The pipeline is a new CORE module `gateway_pipeline.{c,h}`** that the ingresses
-  call — not grown into the size-capped `anthropic_http.c`/`openai_chat.c`.
+  call, not grown into the size-capped `anthropic_http.c`/`openai_chat.c`.
 - **Do not duplicate `/v1/runs`.** The agentic endpoint and this per-call pipeline
   **share** the policy/memory primitives (one implementation of tool-policing and
   memory injection, called from both); the pipeline must not re-implement them.
 
-## Decisions, cont. — single-model Anthropic endpoints (resolves the qa finding)
+## Decisions, cont.: single-model Anthropic endpoints (resolves the qa finding)
 
 P1 makes passthrough automatic for any Anthropic-API primary, which **honors the
 client's requested model** (the parity path forwards `model` verbatim) instead of
 swapping to the agent's configured `ag->model`. For a primary that is a
 single-model Anthropic-*compatible* shim (llama.cpp / vLLM `/v1/messages`), an
-arbitrary client model name would be forwarded and rejected upstream — a behavior
+arbitrary client model name would be forwarded and rejected upstream, a behavior
 change vs. today's default (model-swap).
 
 Resolution: **P1 honors the client model (the stated intent) and the P1 PR
 documents the behavior change.** The fixed-model case is served by a **model-pin /
-allowlist policy** — a P2 pipeline stage (config: pin to `ag->model`, or an
+allowlist policy**, a P2 pipeline stage (config: pin to `ag->model`, or an
 allowlist with swap-or-reject on miss). Default is honor; single-model operators
 enable the pin. P1 keeps the existing fallback: when the client omits `model`, the
 agent's model is used. This is a real but bounded regression window (P1→P2) for

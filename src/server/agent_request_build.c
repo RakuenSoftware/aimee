@@ -7,6 +7,8 @@
 #include "agent.h"
 #include "agent_protocol.h"        /* agent_anthropic_set_system, agent_request_max_tokens */
 #include "agent_request_shaping.h" /* agent_request_shape_user_prompt */
+#include "agent_config.h"          /* agent_catalog_provider */
+#include "model_registry.h"        /* model_capability_get, MODEL_CAP_* */
 #include "model_sampling.h"        /* model_sampling_apply_{openai,anthropic} */
 #include "config.h"
 #include <aimee/ir/aimee_ir.h>
@@ -65,6 +67,47 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
       ir.max_tokens = agent_request_max_tokens(agent, max_tokens);
       ir.has_max_tokens = 1;
    }
+
+   /* Extended thinking on aimee's own Anthropic turns (default-off). Without this
+    * the IR carried no `thinking` config on an aimee-originated turn -- ir->thinking
+    * is otherwise populated only by an inbound client request -- so aimee never
+    * asked a reasoning-capable model to reason.
+    *
+    * GATED ON THE MODEL SAYING IT ACCEPTS THIS SHAPE, not on the wire format. Two
+    * separate faults are fixed by that single condition:
+    *
+    *  - The shape. This used to emit {"type":"enabled", budget_tokens: N}, which
+    *    Anthropic removed: it is a 400 on Opus 4.7/4.8/5, Sonnet 5 and Fable 5, and
+    *    survives only on the 4.6 generation. It now emits {"type":"adaptive"}, and
+    *    only for a model whose provider positively reports adaptive support.
+    *
+    *  - The predicate. `is_anth` is the WIRE FORMAT, not the vendor. A third-party
+    *    model behind an Anthropic-compatible endpoint (MiniMax and Moonshot both
+    *    ship one) satisfied it, so enabling this knob sent Anthropic thinking
+    *    config to a vendor that never advertised it -- while the Claude seat, a
+    *    provider-CLI agent with no HTTP endpoint, never reached this path at all.
+    *    A capability check excludes the former without needing to name it.
+    *
+    * FAILS CLOSED. MODEL_CAP_THINKING_ADAPTIVE is set only by a provider that
+    * publishes the capability; models.dev carries a bare `reasoning` boolean and
+    * cannot distinguish the two shapes, so a catalogued-only model leaves it clear
+    * and gets no thinking config. Sending nothing costs a missed opportunity to
+    * reason; sending the wrong shape costs a 400 the operator sees as an agent
+    * failure. */
+   int thinking_on = 0;
+   if (is_anth && config_extended_thinking_enabled())
+   {
+      model_capability_t cap;
+      memset(&cap, 0, sizeof cap);
+      if (model_capability_get(agent_catalog_provider(agent), agent->model, &cap) &&
+          (cap.flags & MODEL_CAP_THINKING_ADAPTIVE))
+      {
+         thinking_on = 1;
+         cJSON *think = cJSON_CreateObject();
+         cJSON_AddStringToObject(think, "type", "adaptive");
+         ir.thinking = think;
+      }
+   }
    /* temperature is layered post-build by model_sampling below (so the curated
     * top_p/top_k/... the IR model does not carry are applied alongside it). */
 
@@ -87,6 +130,24 @@ cJSON *agent_build_request(const agent_t *agent, const char *system_prompt, cons
          agent_anthropic_set_system(req, system_prompt, 1, config_cache_min_chars());
       }
       model_sampling_apply_anthropic(agent, req, temperature);
+      /* Strip sampling entirely alongside thinking, rather than pinning
+       * temperature to 1 as this used to.
+       *
+       * Every model that reaches this branch is adaptive-capable, i.e. 4.6 or
+       * later, and across that range removal is the only universally valid
+       * choice: on 4.7 and later ANY of temperature / top_p / top_k is a 400,
+       * while on 4.6 they are merely permitted. Adding temperature=1 was correct
+       * for 4.6 and is itself a rejection on everything newer -- the old code
+       * turned one 400 into two.
+       *
+       * Done after model_sampling has layered the curated values on, because
+       * that is where they arrive; there is nothing to talk out of it earlier. */
+      if (thinking_on)
+      {
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "temperature");
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_p");
+         cJSON_DeleteItemFromObjectCaseSensitive(req, "top_k");
+      }
    }
    else if (!is_resp)
    {

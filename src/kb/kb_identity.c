@@ -3,7 +3,7 @@
 
 #include "kb_identity.h"
 
-#include "db2/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
+#include "modules/db2/c/management_intent_fields.h" /* db2_intent_bare_username (header-only) */
 
 #include <ctype.h>
 #include <stdio.h>
@@ -104,6 +104,34 @@ static int id_encode(const char *in, char *out, size_t cap)
    return 0;
 }
 
+static int id_decode(const char *in, size_t len, char *out, size_t cap)
+{
+   if (!in || !len || !out || cap == 0)
+      return -1;
+   size_t o = 0;
+   for (size_t i = 0; i < len; ++i)
+   {
+      unsigned char c = (unsigned char)in[i];
+      if (c == '%')
+      {
+         if (i + 2 >= len)
+            return -1;
+         if (in[i + 1] == '2' && in[i + 2] == '5')
+            c = '%';
+         else if (in[i + 1] == '3' && in[i + 2] == 'A')
+            c = ':';
+         else
+            return -1;
+         i += 2;
+      }
+      if (c < 0x20 || c == 0x7f || o + 1 >= cap)
+         return -1;
+      out[o++] = (char)c;
+   }
+   out[o] = '\0';
+   return o ? 0 : -1;
+}
+
 int kb_principal_from_verify(const kb_verify_result_t *v, const char *issuer, kb_principal_t *out)
 {
    if (!v || !out)
@@ -202,6 +230,77 @@ int kb_identity_key(const kb_principal_t *p, char *out, size_t cap)
    default:
       return -1;
    }
+}
+
+int kb_identity_key_from_fields(int kind, const char *issuer, const char *subject,
+                                int authenticated, char *out, size_t cap)
+{
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   if (!issuer || !subject || !out || cap < 2 || authenticated != 1 ||
+       strnlen(issuer, sizeof(principal.issuer)) == sizeof(principal.issuer) ||
+       strnlen(subject, sizeof(principal.subject)) == sizeof(principal.subject))
+      return -1;
+
+   switch (kind)
+   {
+   case KB_PRIN_OIDC:
+   case KB_PRIN_CERT:
+   case KB_PRIN_OWNER:
+   case KB_PRIN_HOST:
+      principal.kind = (kb_principal_kind_t)kind;
+      break;
+   default:
+      return -1;
+   }
+   memcpy(principal.issuer, issuer, strlen(issuer) + 1);
+   memcpy(principal.subject, subject, strlen(subject) + 1);
+   principal.authenticated = 1;
+   return kb_identity_key(&principal, out, cap);
+}
+
+int kb_principal_from_identity_key(const char *identity_key, kb_principal_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   if (!identity_key || !out)
+      return -1;
+
+   char canonical[DB2_INTENT_ACTOR_MAX + 1] = {0};
+   size_t n = strnlen(identity_key, sizeof(canonical));
+   if (!n || n >= sizeof(canonical))
+      return -1;
+   memcpy(canonical, identity_key, n);
+   if (!db2_intent_canonical_actor(canonical, sizeof(canonical)))
+      return -1;
+   if (strcmp(canonical, "owner") == 0)
+   {
+      kb_verify_result_t verified;
+      memset(&verified, 0, sizeof(verified));
+      snprintf(verified.subject, sizeof(verified.subject), "%s", "owner");
+      return kb_principal_from_verify(&verified, "", out);
+   }
+   if (!strchr(canonical, ':'))
+      return kb_principal_from_host_account(canonical, out);
+
+   int cert = strncmp(canonical, "cert:", 5) == 0;
+   const char *first = canonical + 5;
+   const char *middle = strchr(first, ':');
+   if (!middle)
+      return -1;
+   char issuer[256] = "";
+   char subject[256] = "";
+   if (id_decode(first, (size_t)(middle - first), issuer, sizeof(issuer)) != 0 ||
+       id_decode(middle + 1, strlen(middle + 1), subject, sizeof(subject)) != 0)
+      return -1;
+   if (cert)
+      return kb_principal_from_cert(issuer, subject, NULL, out);
+
+   kb_verify_result_t verified;
+   memset(&verified, 0, sizeof(verified));
+   if (copy_strict(verified.subject, sizeof(verified.subject), subject) != 0)
+      return -1;
+   return kb_principal_from_verify(&verified, issuer, out);
 }
 
 /* ---- Composite identity resolution (slice 2, I7) ------------------------- */

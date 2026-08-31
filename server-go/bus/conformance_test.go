@@ -211,9 +211,9 @@ func TestCrossLanguageConformance(t *testing.T) {
 
 const (
 	// Kinds must match bus_conformance_host.c.
-	KIND_NOTIFY   uint32 = 1000
-	KIND_ACK      uint32 = 1001
-	KIND_ECHO     uint32 = 1002
+	KIND_NOTIFY     uint32 = 1000
+	KIND_ACK        uint32 = 1001
+	KIND_ECHO       uint32 = 1002
 	KIND_NOSERVER   uint32 = 1003
 	KIND_CANCEL_ACK uint32 = 1004
 )

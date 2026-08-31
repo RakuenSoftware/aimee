@@ -5,11 +5,11 @@
  * Note: db2_test_shim_open() already applies the schema, which records the shim's
  * default dim — so the test first clears the row to exercise the fresh-record path
  * deterministically. */
-#include "../db2/db_schema.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h" /* db2_effective_dim */
+#include "../modules/db2/c/db_schema.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h" /* db2_effective_dim */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -149,15 +149,14 @@ int main(void)
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
                         sizeof err) == 0);
 
-   /* ---- EMBED_MAX_DIM bumped to 4000 (unified-llm-container §"8B truncation"):
-    * a 4000-d dim now records cleanly (was rejected when the cap was 2560). ---- */
+   /* ---- EMBED_MAX_DIM ceiling: a 4000-d dim records cleanly. ---- */
    assert(aimee_pg_exec(conn, "DELETE FROM kb_meta WHERE key = 'schema_embedding_dim'", err,
                         sizeof err) == 0);
    err[0] = '\0';
    assert(db2_embedding_dim_record_or_check(conn, 4000, err, sizeof err) == 0);
    assert(db2_embedding_dim_get(conn) == 4000);
 
-   /* ================= unified-llm-container §2: model-identity drift guard ====== */
+   /* ================= model-identity drift guard =============================== */
    /* No-op when the embedder reports no identity (the legacy torch embedder). */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(conn, NULL, NULL, err, sizeof err) == 0);
@@ -165,36 +164,36 @@ int main(void)
 
    /* Fresh record, then a matching check is a no-op. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
 
-   /* The same-dim DIFFERENT-model swap is REFUSED (the footgun: pplx-embed and
-    * Qwen3-0.6B are both 1024-d, so a dim-only guard would miss this). */
+   /* A same-dimension DIFFERENT-model swap is refused; a dimension-only guard
+    * would miss this vector-space change. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "perplexity-ai/pplx-embed-v1-0.6b", NULL, err,
-                                              sizeof err) == -1);
+   assert(db2_embedding_model_record_or_check(conn, "example/other-384", NULL, err, sizeof err) ==
+          -1);
    assert(err[0] != '\0');
-   assert(strstr(err, "Qwen/Qwen3-Embedding-0.6B@abc") != NULL); /* names recorded */
-   assert(strstr(err, "pplx-embed") != NULL);                    /* and configured */
+   assert(strstr(err, "bekko-embedding-v1-a25m@abc") != NULL); /* names recorded */
+   assert(strstr(err, "example/other-384") != NULL);           /* and configured */
    /* The refusal did not change the recorded identity. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == 0);
 
    /* A transition on the compat-list is ADMITTED (operator-validated cosine>=0.99)
     * and updates the recorded identity. Whitespace + multiple entries tolerated. */
-   const char *compat =
-       " other->x , Qwen/Qwen3-Embedding-0.6B@abc -> Qwen/Qwen3-Embedding-0.6B@def ";
+   const char *compat = " other->x , hotchpotch/bekko-embedding-v1-a25m@abc -> "
+                        "hotchpotch/bekko-embedding-v1-a25m@def ";
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@def", compat, err,
-                                              sizeof err) == 0);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@def",
+                                              compat, err, sizeof err) == 0);
    /* Now the recorded id is @def; the old @abc would itself be a mismatch. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@abc", NULL, err,
-                                              sizeof err) == -1);
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@abc", NULL,
+                                              err, sizeof err) == -1);
    /* A compat entry that doesn't match the actual transition does NOT admit. */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(conn, "totally/different@ghi", "a->b,c->d", err,
@@ -204,14 +203,15 @@ int main(void)
     * Malformed entries (no arrow, empty side) are silently skipped (not admitted);
     * newline-separated entries are tolerated. */
    err[0] = '\0';
-   assert(db2_embedding_model_record_or_check(conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
+   assert(db2_embedding_model_record_or_check(conn, "hotchpotch/bekko-embedding-v1-a25m@xyz",
                                               "no_arrow_here, ->, -> , a-->b", err,
                                               sizeof err) == -1); /* none admit */
    err[0] = '\0';
    assert(db2_embedding_model_record_or_check(
-              conn, "Qwen/Qwen3-Embedding-0.6B@xyz",
-              "junk->junk\nQwen/Qwen3-Embedding-0.6B@def->Qwen/Qwen3-Embedding-0.6B@xyz", err,
-              sizeof err) == 0); /* newline-separated entry admits */
+              conn, "hotchpotch/bekko-embedding-v1-a25m@xyz",
+              "junk->junk\nhotchpotch/bekko-embedding-v1-a25m@def->hotchpotch/"
+              "bekko-embedding-v1-a25m@xyz",
+              err, sizeof err) == 0); /* newline-separated entry admits */
 
    /* The vector-space guard: pooling/prefix changes keep the dim AND the model name,
     * so this is the only guard that can see them. Unlike the model guard there is no
@@ -291,13 +291,25 @@ int main(void)
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);
    assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings RENAME TO kb_embeddings_hidden", err,
                         sizeof err) == 0);
-   assert(aimee_pg_exec(conn, "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz",
-                        err, sizeof err) == 0);
+   /* The two engines need different fixtures for the same shape, because they
+    * disagree about when a view's body is resolved: sqlite binds it lazily, so a
+    * view over a missing table is created happily and only fails on read, while
+    * Postgres resolves at CREATE time and refuses outright. Postgres gets an INDEX
+    * under the name instead -- to_regclass resolves it, so corpus_table_exists says
+    * "there is something here", and SELECT ... FROM it fails ("cannot open
+    * relation ... this operation is not supported for indexes"). Same two answers
+    * corpus_has_vectors reads: present, and unreadable. */
+   const char *hide_sql = aimee_pg_is_shim()
+                              ? "CREATE VIEW kb_embeddings AS SELECT * FROM missing_relation_xyz"
+                              : "CREATE INDEX kb_embeddings ON kb_embeddings_hidden(point_id)";
+   const char *unhide_sql =
+       aimee_pg_is_shim() ? "DROP VIEW kb_embeddings" : "DROP INDEX kb_embeddings";
+   assert(aimee_pg_exec(conn, hide_sql, err, sizeof err) == 0);
    err[0] = '\0';
    assert(db2_embedder_serving_record_or_check(conn, "bekko-a25m/abcd", err, sizeof err) == -1);
    /* and the placeholder still stands */
    err[0] = '\0';
-   assert(aimee_pg_exec(conn, "DROP VIEW kb_embeddings", err, sizeof err) == 0);
+   assert(aimee_pg_exec(conn, unhide_sql, err, sizeof err) == 0);
    assert(aimee_pg_exec(conn, "ALTER TABLE kb_embeddings_hidden RENAME TO kb_embeddings", err,
                         sizeof err) == 0);
    assert(db2_embedder_serving_record_or_check(conn, "builtin/lexical-v1", err, sizeof err) == 0);

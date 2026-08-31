@@ -1,6 +1,6 @@
 # Compaction quality: committed baseline
 
-- **State:** PENDING — residual scope only.
+- **State:** PENDING. Residual scope only.
 
 **Archived parent:** [`compaction-quality-measurement.md`](../done/compaction-quality-measurement.md)
 

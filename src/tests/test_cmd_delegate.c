@@ -1,4 +1,5 @@
 /* test_cmd_delegate.c: unit tests for CLI delegation chain depth guard */
+#include "support/delegate_role_seam_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,9 +11,49 @@
 #include <aimee/delegates/delegate_role.h>
 #include "model_registry.h"
 #include "log.h"
+#include <aimee/core/event_bus/module_runtime.h>
+#include <aimee/delegates/module_api.h>
+
+extern aimee_module_status_t aimee_delegates_module_handler(const aimee_module_invocation_t *,
+                                                            const uint8_t *, uint32_t, uint8_t *,
+                                                            uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+/* Capability inference is the delegates module's rule now, so the unit test
+ * asks the module the same way production does, through the C wire-parity
+ * fixture, rather than reimplementing the answer locally. */
+static int capabilities_via_module(const char *prompt, int tools_enabled, unsigned *required_caps,
+                                   int *min_context)
+{
+   size_t prompt_len = prompt ? strlen(prompt) : 0;
+   size_t request_cap = AIMEE_DELEGATES_CAP_HEADER_LEN + prompt_len;
+   uint8_t *request = malloc(request_cap);
+   if (!request)
+      return -1;
+   size_t request_len =
+       aimee_delegates_cap_request_encode(prompt, prompt_len, tools_enabled, request, request_cap);
+   uint8_t response[AIMEE_DELEGATES_CAP_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CAPABILITIES};
+   int rc =
+       request_len > 0 && aimee_delegates_module_handler(
+                              &invocation, request, (uint32_t)request_len, response,
+                              sizeof(response), &response_len, NULL) == AIMEE_MODULE_STATUS_OK
+           ? aimee_delegates_cap_response_decode(response, response_len, required_caps, min_context)
+           : -1;
+   free(request);
+   return rc;
+}
 #include "modules/tools/agent_tools_internal.h"
 #include "provider_cli_adapter.h"
 #include "cJSON.h"
+#include <aimee/delegates/delegate_launch_args.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* role_template_max_turns() (via delegate_role.o, reached by the max-turns policy)
  * reads the role_templates dir under config_default_dir() and parses `max_turns:`
@@ -34,7 +75,7 @@ static void write_role_template(const char *canonical, int max_turns)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-cmddel-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-cmddel-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
@@ -114,6 +155,15 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
          return ag;
    }
    return NULL;
+}
+
+/* The real one lives beside the routing fault latch, which this suite does not
+ * link. With no module authority in play the honest wording is the empty-roster
+ * one, which is exactly what these route stubs model. */
+void agent_route_failure_message(const char *role, char *buf, size_t len)
+{
+   if (buf && len)
+      snprintf(buf, len, "no agent available for role '%s'", role ? role : "");
 }
 
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier)
@@ -346,43 +396,6 @@ static void test_guarded_lxc_readonly_root_matching(void)
    printf("  PASS: test_guarded_lxc_readonly_root_matching\n");
 }
 
-static void test_role_default_tools(void)
-{
-   assert(delegate_role_enable_tools_by_default("search") == 1);
-   assert(delegate_role_enable_tools_by_default("execute") == 1);
-   assert(delegate_role_enable_tools_by_default("diagnose") == 1);
-   assert(delegate_role_enable_tools_by_default("validate") == 1);
-   assert(delegate_role_enable_tools_by_default("inspect") == 1);
-   assert(delegate_role_enable_tools_by_default("test") == 1);
-   assert(delegate_role_enable_tools_by_default("check") == 1);
-   assert(delegate_role_enable_tools_by_default("research") == 1);
-   assert(delegate_role_enable_tools_by_default("code") == 0);
-   assert(delegate_role_enable_tools_by_default(NULL) == 0);
-   assert(delegate_role_enable_tools_by_default("") == 0);
-   printf("  PASS: test_role_default_tools\n");
-}
-
-static void test_role_result_cache_policy(void)
-{
-   assert(delegate_role_result_cache_enabled("review") == 0);
-   assert(delegate_role_result_cache_enabled("validate") == 0);
-   assert(delegate_role_result_cache_enabled("diagnose") == 0);
-   assert(delegate_role_result_cache_enabled("search") == 0);
-   assert(delegate_role_result_cache_enabled("execute") == 0);
-   assert(delegate_role_result_cache_enabled("code") == 0);
-   assert(delegate_role_result_cache_enabled("refactor") == 0);
-   assert(delegate_role_result_cache_enabled("inspect") == 0);
-   assert(delegate_role_result_cache_enabled("test") == 0);
-   assert(delegate_role_result_cache_enabled("summarize") == 1);
-   assert(delegate_role_result_cache_enabled("format") == 1);
-   assert(delegate_role_result_cache_enabled("draft") == 1);
-   assert(delegate_role_result_cache_enabled("reason") == 0);
-   assert(delegate_role_result_cache_enabled("custom-review") == 0);
-   assert(delegate_role_result_cache_enabled(NULL) == 0);
-   assert(delegate_role_result_cache_enabled("") == 0);
-   printf("  PASS: test_role_result_cache_policy\n");
-}
-
 static void test_prompt_plan_inline_prompt_only(void)
 {
    delegate_prompt_plan_t plan;
@@ -422,77 +435,56 @@ static void test_prompt_plan_requires_prompt_source(void)
    printf("  PASS: test_prompt_plan_requires_prompt_source\n");
 }
 
-static void test_validation_bundle_appended_for_review_roles(void)
-{
-   char *code_prompt = strdup("base prompt");
-   char *unchanged = delegate_maybe_append_validation_bundle("code", ".", code_prompt, NULL, 0);
-   assert(unchanged == code_prompt);
-   free(unchanged);
-
-   char *review_prompt =
-       delegate_maybe_append_validation_bundle("review", ".", NULL, "base prompt", 0);
-   assert(review_prompt != NULL);
-   assert(strstr(review_prompt, "base prompt") == review_prompt);
-   assert(strstr(review_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(review_prompt, "zero-result search command") != NULL);
-   assert(strstr(review_prompt, "Directory layout claims") != NULL);
-   assert(strstr(review_prompt, "whole relevant source tree") != NULL);
-   assert(strstr(review_prompt, "do not infer sibling headers") != NULL);
-   free(review_prompt);
-
-   char *diagnose_prompt =
-       delegate_maybe_append_validation_bundle("diagnose", ".", NULL, "base prompt", 0);
-   assert(diagnose_prompt != NULL);
-   assert(strstr(diagnose_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(diagnose_prompt, "Directory layout claims") != NULL);
-   assert(strstr(diagnose_prompt, "whole relevant source tree") != NULL);
-   free(diagnose_prompt);
-
-   char *inspect_prompt =
-       delegate_maybe_append_validation_bundle("inspect", ".", NULL, "base prompt", 0);
-   assert(inspect_prompt != NULL);
-   assert(strstr(inspect_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(inspect_prompt, "whole relevant source tree") != NULL);
-   free(inspect_prompt);
-
-   char *test_prompt = delegate_maybe_append_validation_bundle("test", ".", NULL, "base prompt", 0);
-   assert(test_prompt != NULL);
-   assert(strstr(test_prompt, "Validation Evidence Bundle") != NULL);
-   assert(strstr(test_prompt, "whole relevant source tree") != NULL);
-   free(test_prompt);
-   printf("  PASS: test_validation_bundle_appended_for_review_roles\n");
-}
-
 /* When the caller supplies the review target (target_provided=1, e.g. a diff via
  * --prompt-file), the host-cwd "Validation Evidence Bundle" is suppressed and the
  * reviewer is pointed at aimee's branch-indexed capabilities instead. */
-static void test_provided_target_suppresses_cwd_bundle(void)
+/* Build an mkdtemp template under TMPDIR rather than hardcoding /tmp: a shared
+ * /tmp accumulates an entry per run, and the sandbox gives each session its own
+ * TMPDIR precisely so those land somewhere disposable. */
+static void review_tmp_template(char *out, size_t cap, const char *name)
 {
-   char *review =
-       delegate_maybe_append_validation_bundle("review", ".", NULL, "the diff to review", 1);
-   assert(review != NULL);
-   assert(strstr(review, "the diff to review") == review);
-   assert(strstr(review, "Review Target & Exploration") != NULL);
-   assert(strstr(review, "is NOT proof that anything is absent") != NULL);
-   assert(strstr(review, "uncertainty may be a non-blocking suggestion, never a blocker") != NULL);
-   assert(strstr(review, "are always available") == NULL);
-   assert(strstr(review, "explore_via_aimee") != NULL);
-   assert(strstr(review, "code_search") != NULL);
-   /* the wrong-tree cwd bundle must NOT be present */
-   assert(strstr(review, "Validation Evidence Bundle") == NULL);
-   free(review);
+   const char *base = getenv("TMPDIR");
+   if (!base || !base[0])
+      base = "/tmp";
+   size_t len = strlen(base);
+   while (len > 1 && base[len - 1] == '/')
+      len--;
+   snprintf(out, cap, "%.*s/%s-XXXXXX", (int)len, base, name);
+}
 
-   /* Applies to any role, not just review roles, when a target is provided. */
-   char *coder = delegate_maybe_append_validation_bundle("code", ".", NULL, "base", 1);
-   assert(coder != NULL);
-   assert(strstr(coder, "Review Target & Exploration") != NULL);
-   free(coder);
-   printf("  PASS: test_provided_target_suppresses_cwd_bundle\n");
+/* A review-evidence provider the tests drive directly.
+ *
+ * WHICH roles are guarded, which are snippet-checked, and what counts as
+ * claiming there was nothing to review are the module's rules, pinned against
+ * the module (server-go/modules/delegates/reviewevidence_test.go) -- including
+ * the two fixtures that used to live here. Restating them in this harness would
+ * put the rule in two places again.
+ *
+ * What only this side can test is that the guard HONOURS a verdict: that it
+ * runs the checkout comparison exactly when told to, reports the module's
+ * wording, and leaves an unguarded review alone. So the verdict is set by the
+ * test, not decided here. */
+static unsigned g_review_verdict;
+static const char *g_review_message = "";
+static unsigned g_review_flags_seen;
+
+static int test_review_evidence_provider(const char *role, const char *response, unsigned flags,
+                                         unsigned *verdict, char *message, size_t message_cap)
+{
+   (void)role;
+   (void)response;
+   g_review_flags_seen = flags;
+   if (verdict)
+      *verdict = g_review_verdict;
+   if (message && message_cap)
+      snprintf(message, message_cap, "%s", g_review_message);
+   return 0;
 }
 
 static void test_review_evidence_drift_detects_reversed_snippet(void)
 {
-   char root[] = "/tmp/aimee-review-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);
@@ -542,7 +534,8 @@ static void test_review_evidence_drift_detects_reversed_snippet(void)
 
 static void test_review_evidence_drift_ignores_historical_diff_snippet(void)
 {
-   char root[] = "/tmp/aimee-review-diff-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-diff-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);
@@ -583,7 +576,8 @@ static void test_review_evidence_drift_ignores_historical_diff_snippet(void)
 
 static void test_review_evidence_drift_ignores_inline_review_annotation(void)
 {
-   char root[] = "/tmp/aimee-review-annotation-drift-XXXXXX";
+   char root[256];
+   snprintf(root, sizeof root, "%s/aimee-review-annotation-drift-XXXXXX", platform_tmpdir());
    assert(mkdtemp(root) != NULL);
    char srcdir[512];
    snprintf(srcdir, sizeof(srcdir), "%s/src", root);
@@ -622,9 +616,15 @@ static void test_review_evidence_drift_ignores_inline_review_annotation(void)
    printf("  PASS: test_review_evidence_drift_ignores_inline_review_annotation\n");
 }
 
-static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(void)
+/* The guard reports the module's contradiction verdict, in the module's words.
+ *
+ * This replaces a fixture that pinned the ROLE list and the claim keywords by
+ * driving a real git worktree. Those are rules and they now live in one place;
+ * what could only be tested here is that the verdict reaches the caller. */
+static void test_review_evidence_guard_reports_a_contradiction(void)
 {
-   char root[] = "/tmp/aimee-review-clean-claim-XXXXXX";
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-verdict");
    assert(mkdtemp(root) != NULL);
 
    char cmd[1024];
@@ -634,13 +634,133 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
    agent_result_t result;
    memset(&result, 0, sizeof(result));
    result.success = 1;
-   result.response = strdup("No uncommitted diff exists. The working tree is clean.");
+   result.response = strdup("No uncommitted diff exists.");
    assert(result.response != NULL);
 
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CONTRADICTION;
+   g_review_message = "delegate evidence drift: the wording the module chose";
    int rc = 0;
    delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert(rc == -1);
+   assert(strcmp(result.error, "delegate evidence drift: the wording the module chose") == 0);
+   free(result.response);
+
+   /* An unguarded verdict leaves the review alone, whatever it said. */
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup("No uncommitted diff exists.");
+   assert(result.response != NULL);
+   g_review_verdict = 0;
+   g_review_message = "";
+   rc = 0;
+   delegate_apply_review_evidence_guard("code", root, &rc, &result, 0);
    assert(rc == 0);
    assert(result.error[0] == '\0');
+   free(result.response);
+
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
+   assert(system(cmd) == 0);
+   printf("  PASS: test_review_evidence_guard_reports_a_contradiction\n");
+}
+
+/* The caller runs the checkout comparison exactly when the verdict asks for it.
+ *
+ * The response below cites a snippet that does NOT match the file, so the
+ * difference between the two halves is entirely whether CHECK_SNIPPETS was set.
+ * This replaces a fixture that asserted the same thing via the role "diagnose";
+ * which roles get the check is now the module's to say. */
+static void test_review_evidence_guard_runs_the_snippet_check_only_when_asked(void)
+{
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-snippet");
+   assert(mkdtemp(root) != NULL);
+   char srcdir[512];
+   snprintf(srcdir, sizeof(srcdir), "%s/src", root);
+   assert(mkdir(srcdir, 0700) == 0);
+   char path[512];
+   snprintf(path, sizeof(path), "%s/src/kb_client.c", root);
+   FILE *f = fopen(path, "w");
+   assert(f != NULL);
+   fputs("void f(void)\n"
+         "{\n"
+         "   cJSON *req = cJSON_CreateObject();\n"
+         "   if (!req)\n"
+         "      return;\n"
+         "   char *resp = kb_client_v1_post_json(\"/v1/internal/ingest/job/claim\", req, 1000, "
+         "NULL);\n"
+         "   cJSON_Delete(req);\n"
+         "   return;\n"
+         "}\n",
+         f);
+   fclose(f);
+
+   /* The reversed-order snippet from the drift test above: known to drift, so
+    * the only difference between the two halves below is the verdict. */
+   const char *response =
+       "Findings\n"
+       "**Severity: critical | Location: `src/kb_client.c:6`**\n"
+       "```c\n"
+       "cJSON_Delete(req);\n"
+       "char *resp = kb_client_v1_post_json(\"/v1/internal/ingest/job/claim\", req, 1000, NULL);\n"
+       "```\n";
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup(response);
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
+   g_review_message = "";
+   int rc = 0;
+   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
+   assert(rc == 0);
+   assert(result.error[0] == '\0');
+   free(result.response);
+
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup(response);
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED | AIMEE_DELEGATES_REVIEW_CHECK_SNIPPETS;
+   rc = 0;
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert(rc == -1);
+   assert(strstr(result.error, "delegate evidence drift") != NULL);
+   free(result.response);
+
+   unlink(path);
+   rmdir(srcdir);
+   rmdir(root);
+   printf("  PASS: test_review_evidence_guard_runs_the_snippet_check_only_when_asked\n");
+}
+
+/* The worktree-dirty fact is computed here and travels WITH the question. A
+ * module that never learns the worktree is dirty cannot catch the one thing
+ * this guard exists to catch. */
+static void test_review_evidence_guard_sends_the_facts_it_owns(void)
+{
+   char root[512];
+   review_tmp_template(root, sizeof(root), "aimee-review-facts");
+   assert(mkdtemp(root) != NULL);
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "git -C '%s' init -q", root);
+   assert(system(cmd) == 0);
+
+   agent_result_t result;
+   memset(&result, 0, sizeof(result));
+   result.success = 1;
+   result.response = strdup("a report");
+   assert(result.response != NULL);
+
+   g_review_verdict = AIMEE_DELEGATES_REVIEW_GUARDED;
+   g_review_message = "";
+   g_review_flags_seen = 0xffffffffu;
+   int rc = 0;
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) == 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) == 0);
    free(result.response);
 
    char path[512];
@@ -652,57 +772,18 @@ static void test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree(voi
 
    memset(&result, 0, sizeof(result));
    result.success = 1;
-   result.response = strdup("No uncommitted diff exists. The working tree is clean.");
+   result.response = strdup("a report");
    assert(result.response != NULL);
-
+   g_review_flags_seen = 0;
    rc = 0;
-   delegate_apply_review_evidence_guard("validate", root, &rc, &result, 0);
-   assert(rc == -1);
-   assert(strstr(result.error, "delegate evidence drift") != NULL);
+   delegate_apply_review_evidence_guard("review", root, &rc, &result, 1);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_WORKTREE_DIRTY) != 0);
+   assert((g_review_flags_seen & AIMEE_DELEGATES_REVIEW_TARGET_PROVIDED) != 0);
    free(result.response);
 
    snprintf(cmd, sizeof(cmd), "rm -rf '%s'", root);
    assert(system(cmd) == 0);
-   printf("  PASS: test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree\n");
-}
-
-static void test_diagnose_evidence_guard_allows_nonreview_snippets(void)
-{
-   char root[] = "/tmp/aimee-diagnose-snippet-XXXXXX";
-   assert(mkdtemp(root) != NULL);
-   char srcdir[512];
-   snprintf(srcdir, sizeof(srcdir), "%s/docs", root);
-   assert(mkdir(srcdir, 0700) == 0);
-   char path[512];
-   snprintf(path, sizeof(path), "%s/docs/proposal.md", root);
-   FILE *f = fopen(path, "w");
-   assert(f != NULL);
-   fputs("one\n"
-         "two\n"
-         "three\n",
-         f);
-   fclose(f);
-
-   agent_result_t result;
-   memset(&result, 0, sizeof(result));
-   result.success = 1;
-   result.response = strdup("Finding\n"
-                            "**Location: `docs/proposal.md:2`**\n"
-                            "```md\n"
-                            "this is an explanatory quote, not an exact current-file snippet\n"
-                            "```\n");
-   assert(result.response != NULL);
-
-   int rc = 0;
-   delegate_apply_review_evidence_guard("diagnose", root, &rc, &result, 0);
-   assert(rc == 0);
-   assert(result.error[0] == '\0');
-   free(result.response);
-
-   unlink(path);
-   rmdir(srcdir);
-   rmdir(root);
-   printf("  PASS: test_diagnose_evidence_guard_allows_nonreview_snippets\n");
+   printf("  PASS: test_review_evidence_guard_sends_the_facts_it_owns\n");
 }
 
 static void test_apply_max_turns_override(void)
@@ -885,100 +966,70 @@ static void test_via_override_rejects_role_mismatch(void)
    printf("  PASS: test_via_override_rejects_role_mismatch\n");
 }
 
-static void test_capability_filter_drops_deprecated_on_auto_route(void)
+/* The capability POLICY moved to the module (stage 17): the predicate, the
+ * context-window precedence and the modality relaxation are decided and tested
+ * there, where the fleet-wide relaxation can actually be exercised.
+ *
+ * What stays here is the wrapper's own job, and it is the half most likely to
+ * rot silently: RESOLVING each agent's facts out of the catalog, the registry
+ * and the CLI adapters, and APPLYING the verdict to the fleet. A recording
+ * provider makes both visible. */
+static unsigned g_rf_flags[8];
+static int g_rf_override_ctx[8], g_rf_catalog_ctx[8], g_rf_cli_ctx[8];
+static unsigned g_rf_count, g_rf_required_caps;
+static int g_rf_min_context, g_rf_drop_deprecated;
+static int g_rf_keep[8];
+
+static int recording_route_filter(const uint8_t *request, size_t request_len, uint8_t *response,
+                                  size_t response_cap, size_t *response_len)
 {
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "old");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "deprecated-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
+   if (request_len < AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN)
+      return -1;
+   g_rf_drop_deprecated = request[5];
+   g_rf_count = aimee_delegates_get_u32(request + 8);
+   g_rf_required_caps = aimee_delegates_get_u32(request + 12);
+   g_rf_min_context = (int)aimee_delegates_get_u32(request + 16);
+   if (g_rf_count > 8)
+      return -1;
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "new");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "vision-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
+   for (unsigned i = 0; i < g_rf_count; i++)
+   {
+      const uint8_t *at = request + AIMEE_DELEGATES_ROUTEFILTER_HEADER_LEN +
+                          (size_t)i * AIMEE_DELEGATES_ROUTEFILTER_AGENT_LEN;
+      g_rf_flags[i] = aimee_delegates_get_u32(at);
+      g_rf_override_ctx[i] = (int)aimee_delegates_get_u32(at + 8);
+      g_rf_catalog_ctx[i] = (int)aimee_delegates_get_u32(at + 12);
+      g_rf_cli_ctx[i] = (int)aimee_delegates_get_u32(at + 16);
+   }
 
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_VISION, 0, 1, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_drops_deprecated_on_auto_route\n");
+   size_t need = 16u + (size_t)g_rf_count * 4u;
+   if (response_cap < need)
+      return -1;
+   memset(response, 0, need);
+   aimee_delegates_put_u32(response, AIMEE_DELEGATES_ROUTEFILTER_RESPONSE_MAGIC);
+   unsigned kept = 0;
+   for (unsigned i = 0; i < g_rf_count; i++)
+      if (g_rf_keep[i])
+      {
+         aimee_delegates_put_u32(response + 16 + i * 4, 1u);
+         kept++;
+      }
+   aimee_delegates_put_u32(response + 4, kept);
+   *response_len = need;
+   return 0;
 }
 
-static void test_capability_filter_enforces_min_context(void)
+static void test_route_filter_resolves_facts_and_applies_the_verdict(void)
 {
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "small");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "vision-tinyctx-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
+   delegate_register_route_filter_provider(recording_route_filter);
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "large");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "vision-large-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_VISION, 10000, 0, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_enforces_min_context\n");
-}
-
-static void test_capability_filter_honors_tools_enabled(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "metadata-only");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "notools-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].tools_enabled = 0;
-
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "configured-tools");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "notools-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS, 0, 0, errbuf,
-                                             sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 0);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_honors_tools_enabled\n");
-}
-
-/* A tmux-CLI agent (codex) has no `model` and may have context_window=0 (records
- * registered before the window was persisted). The filter must fall back to the
- * CLI adapter's declared window so it survives a min-context floor — and still
- * drop a CLI agent whose adapter is unknown / declares no window. */
-static void test_capability_filter_cli_agent_uses_adapter_context(void)
-{
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
    cfg.agent_count = 2;
 
-   /* codex: no model, no explicit window — resolves via the codex adapter (272k). */
+   /* A tmux-CLI agent: no model and no explicit window, so its window can only
+    * come from the codex adapter. That resolution is the wrapper's, and the
+    * module cannot do it -- so it must arrive on the wire. */
    snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "codex");
    snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "codex");
    snprintf(cfg.agents[0].cli_kind, sizeof(cfg.agents[0].cli_kind), "codex");
@@ -986,81 +1037,70 @@ static void test_capability_filter_cli_agent_uses_adapter_context(void)
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
    cfg.agents[0].tools_enabled = 1;
-   cfg.agents[0].middleware.context_window = 0;
 
-   /* unknown CLI kind, no model/window — must NOT resolve a window, so dropped. */
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "mystery-cli");
+   /* An explicit override, which must be sent as itself rather than resolved. */
+   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "other");
    snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "mystery");
    snprintf(cfg.agents[1].cli_kind, sizeof(cfg.agents[1].cli_kind), "no-such-cli");
    snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "review");
    cfg.agents[1].role_count = 1;
    cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-   cfg.agents[1].middleware.context_window = 0;
+   cfg.agents[1].tools_enabled = 0;
+   cfg.agents[1].middleware.context_window = 400000;
+
+   g_rf_keep[0] = 1; /* the module's answer: keep the first, drop the second */
+   g_rf_keep[1] = 0;
 
    char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 5131, 0, errbuf,
+   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 5131, 1, errbuf,
                                              sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 1); /* codex kept via adapter window */
-   assert(cfg.agents[1].enabled == 0); /* unknown CLI dropped */
-   printf("  PASS: test_capability_filter_cli_agent_uses_adapter_context\n");
+
+   /* The requirement reached the module unchanged. */
+   assert(g_rf_count == 2);
+   assert(g_rf_required_caps == MODEL_CAP_TOOLS);
+   assert(g_rf_min_context == 5131);
+   assert(g_rf_drop_deprecated == 1);
+
+   /* Facts the module cannot look up: role membership, the agent's own tools
+    * setting, and the CLI adapter's window. */
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_ENABLED);
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_HAS_ROLE);
+   assert(g_rf_flags[0] & AIMEE_DELEGATES_RF_TOOLS);
+   assert(g_rf_cli_ctx[0] > 0); /* resolved from the codex adapter */
+   assert(g_rf_override_ctx[0] == 0);
+
+   assert(!(g_rf_flags[1] & AIMEE_DELEGATES_RF_TOOLS)); /* tools off travels */
+   assert(g_rf_override_ctx[1] == 400000);              /* sent, not resolved */
+   assert(g_rf_cli_ctx[1] == 0);                        /* unknown CLI has none */
+
+   /* And the verdict was applied to the fleet. */
+   assert(cfg.agents[0].enabled == 1);
+   assert(cfg.agents[1].enabled == 0);
+   printf("  PASS: test_route_filter_resolves_facts_and_applies_the_verdict\n");
 }
 
-/* An inferred modality cap (vision/pdf/audio) that no model satisfies must NOT
- * hard-fail the fleet: it is relaxed to the hard caps (tools + min_context) so
- * the text models stay routable. Guards the fleet-wide false-fail where a text
- * task merely mentioning an image required vision no model had. */
-static void test_capability_filter_relaxes_unmet_modality(void)
+/* With no provider there is no verdict, and the router must refuse rather than
+ * route on requirements nothing checked. */
+static void test_route_filter_refuses_without_a_provider(void)
 {
+   delegate_register_route_filter_provider(NULL);
+
    agent_config_t cfg;
    memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 2;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "text-a");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "text-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
+   cfg.agent_count = 1;
+   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "a");
+   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "review");
    cfg.agents[0].role_count = 1;
    cfg.agents[0].enabled = 1;
    cfg.agents[0].tools_enabled = 1;
 
-   snprintf(cfg.agents[1].name, sizeof(cfg.agents[1].name), "text-b");
-   snprintf(cfg.agents[1].model, sizeof(cfg.agents[1].model), "text-model");
-   snprintf(cfg.agents[1].provider, sizeof(cfg.agents[1].provider), "openai");
-   snprintf(cfg.agents[1].roles[0], sizeof(cfg.agents[1].roles[0]), "diagnose");
-   cfg.agents[1].role_count = 1;
-   cfg.agents[1].enabled = 1;
-   cfg.agents[1].tools_enabled = 1;
-
-   /* Require TOOLS (hard) + VISION (soft); no text-model has vision. The hard
-    * TOOLS must be enforced, the unmet VISION relaxed -> both kept, no error. */
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS | MODEL_CAP_VISION,
-                                             0, 0, errbuf, sizeof(errbuf)) == 0);
-   assert(cfg.agents[0].enabled == 1);
-   assert(cfg.agents[1].enabled == 1);
-   printf("  PASS: test_capability_filter_relaxes_unmet_modality\n");
-}
-
-/* A hard capability (tools) that no model satisfies still fails closed — only the
- * inferred modality caps are soft. */
-static void test_capability_filter_hard_cap_still_fails(void)
-{
-   agent_config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   cfg.agent_count = 1;
-   snprintf(cfg.agents[0].name, sizeof(cfg.agents[0].name), "metadata-only");
-   snprintf(cfg.agents[0].model, sizeof(cfg.agents[0].model), "notools-model");
-   snprintf(cfg.agents[0].provider, sizeof(cfg.agents[0].provider), "openai");
-   snprintf(cfg.agents[0].roles[0], sizeof(cfg.agents[0].roles[0]), "diagnose");
-   cfg.agents[0].role_count = 1;
-   cfg.agents[0].enabled = 1;
-   cfg.agents[0].tools_enabled = 0;
-
-   char errbuf[128];
-   assert(delegate_filter_route_capabilities(&cfg, "diagnose", MODEL_CAP_TOOLS, 0, 0, errbuf,
+   char errbuf[128] = "";
+   assert(delegate_filter_route_capabilities(&cfg, "review", MODEL_CAP_TOOLS, 0, 0, errbuf,
                                              sizeof(errbuf)) == -1);
-   assert(cfg.agents[0].enabled == 0);
-   printf("  PASS: test_capability_filter_hard_cap_still_fails\n");
+   assert(errbuf[0] != '\0');
+
+   delegate_register_route_filter_provider(recording_route_filter);
+   printf("  PASS: test_route_filter_refuses_without_a_provider\n");
 }
 
 static void test_capability_inference_audio_extension_not_keyword(void)
@@ -1236,8 +1276,37 @@ static void test_delegate_filter_route_scope(void)
    printf("  PASS: test_delegate_filter_route_scope\n");
 }
 
+static int chain_via_module(unsigned op, int has_depth, int has_parent, int parent_known,
+                            int parent_active, int parent_depth, int max_depth, int *flag,
+                            int32_t *current_depth)
+{
+   uint8_t request[AIMEE_DELEGATES_CHAIN_REQUEST_LEN];
+   uint8_t response[AIMEE_DELEGATES_CHAIN_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_DELEGATES_STAGE_CHAIN};
+   return aimee_delegates_chain_request_encode(op, has_depth, has_parent, parent_known,
+                                               parent_active, (int32_t)parent_depth,
+                                               (int32_t)max_depth, request, sizeof(request)) == 0 &&
+                  aimee_delegates_module_handler(&invocation, request, sizeof(request), response,
+                                                 sizeof(response), &response_len,
+                                                 NULL) == AIMEE_MODULE_STATUS_OK
+              ? aimee_delegates_chain_response_decode(response, response_len, flag, current_depth)
+              : -1;
+}
+
 int main(void)
 {
+   delegate_role_seam_install();
+   /* Fails closed until the module is reachable: no capability is asserted from
+    * a local guess. */
+   {
+      unsigned caps = 0xffffffffu;
+      int min_ctx = -1;
+      delegate_infer_capability_requirements("screenshot.png", 1, &caps, &min_ctx);
+      assert(caps == 0 && min_ctx == 0);
+   }
+   delegate_routing_register_capability_provider(capabilities_via_module);
+   delegate_register_chain_provider(chain_via_module);
    printf("test_cmd_delegate\n");
    setup_role_templates();
    test_depth_zero_when_env_unset();
@@ -1249,19 +1318,17 @@ int main(void)
    test_depth_error_message_content();
    test_delegate_chain_env_clear_policy();
    test_guarded_lxc_readonly_root_matching();
-   test_role_default_tools();
-   test_role_result_cache_policy();
    test_prompt_plan_inline_prompt_only();
    test_prompt_plan_file_only();
    test_prompt_plan_prompt_and_file();
    test_prompt_plan_requires_prompt_source();
-   test_validation_bundle_appended_for_review_roles();
-   test_provided_target_suppresses_cwd_bundle();
+   delegate_register_review_evidence_provider(test_review_evidence_provider);
    test_review_evidence_drift_detects_reversed_snippet();
    test_review_evidence_drift_ignores_historical_diff_snippet();
    test_review_evidence_drift_ignores_inline_review_annotation();
-   test_review_evidence_guard_rejects_clean_claim_on_dirty_worktree();
-   test_diagnose_evidence_guard_allows_nonreview_snippets();
+   test_review_evidence_guard_reports_a_contradiction();
+   test_review_evidence_guard_runs_the_snippet_check_only_when_asked();
+   test_review_evidence_guard_sends_the_facts_it_owns();
    test_apply_max_turns_override();
    test_apply_max_turns_policy_caps_inspection_roles();
    test_apply_max_turns_policy_aliases();
@@ -1271,12 +1338,8 @@ int main(void)
    test_tier_override_keeps_same_tier_pool();
    test_delegate_checkout_records_unavailable_heads();
    test_via_override_rejects_role_mismatch();
-   test_capability_filter_drops_deprecated_on_auto_route();
-   test_capability_filter_enforces_min_context();
-   test_capability_filter_honors_tools_enabled();
-   test_capability_filter_cli_agent_uses_adapter_context();
-   test_capability_filter_relaxes_unmet_modality();
-   test_capability_filter_hard_cap_still_fails();
+   test_route_filter_resolves_facts_and_applies_the_verdict();
+   test_route_filter_refuses_without_a_provider();
    test_capability_inference_audio_extension_not_keyword();
    test_capability_inference_detects_modalities();
    test_delegate_filter_route_scope();

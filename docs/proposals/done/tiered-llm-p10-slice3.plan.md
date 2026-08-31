@@ -3,11 +3,15 @@
 > requires an external anchor). The anchor/seal foundation must land first; this plan is
 > revisited as the CA-key-behind-anchor slice afterward. See tiered-llm-p10-slice3b-anchor.plan.md.
 
-# P10/P7 slice 3 implementation plan — kb CA key behind the vault (P7 §7)
+# P10/P7 slice 3 implementation plan: kb CA key behind the vault (P7 §7)
+
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
 
 Slice 3 of P10+P7. Branch off `testing` (P1, P3a, P10 slice 1, P10/P7 slice 2 merged).
 Goal: stop persisting the kb enrollment CA **private** key as plaintext PKCS#8
-(`kb/pki.c` `ca-key.pem`, mode 0600) — store it as a vault credential
+(`kb/pki.c` `ca-key.pem`, mode 0600), store it as a vault credential
 (`org:pki:ca-key`), decrypt only in-memory at sign time, cleanse after. The CA key is
 "the single highest-risk at-rest secret in kb today" (P7 §7). First real consumer of the
 slice-2 kb vault.
@@ -18,7 +22,7 @@ slice-2 kb vault.
   cert) + `ca-key.pem` (0600, **plaintext** PKCS#8 via `pem_from_key` :50, no cipher).
   `kb_pki_ca_load` (:567) reads both. `kb_pki_ca_load_or_create` (:585) loads or
   generates+saves. `kb_pki_ca_t` holds `cert_pem[]` + `key_pem[]` in memory.
-- Sign-time (`src/kb/enroll.c`): three call sites — CA fingerprint/bootstrap
+- Sign-time (`src/kb/enroll.c`): three call sites, CA fingerprint/bootstrap
   (`kb_pki_ca_load_or_create` :418), client-cert issue (`kb_pki_ca_load` :456 →
   `kb_pki_issue_client_cert` :469), CSR sign (`kb_pki_ca_load` :501 →
   `kb_pki_sign_csr` :513). Each already does `OPENSSL_cleanse(&ca, sizeof(ca))` after
@@ -29,11 +33,11 @@ slice-2 kb vault.
 
 ## Design decisions
 
-1. **kb_vault accessor** — new `src/kb/kb_vault.{c,h}` (kb-only; uses the pg backend +
+1. **kb_vault accessor**: new `src/kb/kb_vault.{c,h}` (kb-only; uses the pg backend +
    file custody). Thin orchestration over the vault facade:
-   - `int kb_vault_available(void)` — the **dev gate**: true iff the vault backend is
+   - `int kb_vault_available(void)`: the **dev gate**: true iff the vault backend is
      bound AND custody is `file` (single-instance dev, P7 §3). A hardened custody
-     (`kms`/`tpm2`/… — not implemented until the anchor slice) makes this return false so
+     (`kms`/`tpm2`/…, not implemented until the anchor slice) makes this return false so
      the CA-in-vault path **fails closed** rather than storing a live key under a bare
      file root.
    - `int kb_vault_put(principal, agent, cred, secret)` / `kb_vault_get(principal, agent,
@@ -43,9 +47,9 @@ slice-2 kb vault.
      after each op. Returns fail-closed on any error.
    - **Principal→tenant enforcement:** slice 3 only stores the platform-scoped CA key
      (`org:pki`), so no tenant check is needed yet; a `team:<n>` principal put/get (P2b)
-     will assert the active tenant context matches — stubbed with a TODO + a hard reject
+     will assert the active tenant context matches, stubbed with a TODO + a hard reject
      of a `team:` principal in slice 3 (the CA path never uses one).
-2. **CA-key slot:** `principal="org:pki", agent="ca", cred="key"` — AAD
+2. **CA-key slot:** `principal="org:pki", agent="ca", cred="key"`. AAD
    `org:pki|ca|key|<version>`, platform-scoped (team_id NULL). The **cert** (`ca.pem`,
    public) stays a file; only the **private key** moves into the vault.
 3. **pki.c changes (minimal, behavior-preserving for the sign path):**
@@ -65,15 +69,15 @@ slice-2 kb vault.
    If a startup CA-fingerprint log runs earlier, make CA access **lazy** (first enrollment
    request) or move it after the bind. The implementation verifies no CA load precedes the
    vault bind (grep the startup path); if one does, reorder or lazy-init.
-5. **Envelope crypto** unchanged — `vault_crypto` (random DEK, AES-KW wrap under the
+5. **Envelope crypto** unchanged, `vault_crypto` (random DEK, AES-KW wrap under the
    custody KEK, AES-256-GCM with AAD). The CA key ciphertext lands in `org_vault_secret`
    (platform-scoped, admin-only RLS, ciphertext-at-rest). A DB dump yields no usable key.
 
 ## Scope (slice 3)
 
-1. `src/kb/kb_vault.{c,h}` — the accessor above; wire its object into the kb link
-   (`KB_SRCS`) — it's a `kb/` source, kb-only, allowed by target-isolation.
-2. `src/kb/pki.c` — CA key save/load via the vault + legacy-plaintext migration + the
+1. `src/kb/kb_vault.{c,h}`: the accessor above; wire its object into the kb link
+   (`KB_SRCS`), it's a `kb/` source, kb-only, allowed by target-isolation.
+2. `src/kb/pki.c`: CA key save/load via the vault + legacy-plaintext migration + the
    dev gate. `ca-key.pem` no longer written on new/migrated deployments.
 3. Bootstrap-ordering fix if needed.
 4. Tests: a real-PG-gated integration test (`test_kb_ca_vault` or extend an enroll test)
@@ -84,15 +88,15 @@ slice-2 kb vault.
 
 ## Explicitly deferred (later slices)
 
-External-anchor custody + seal/unseal (§2-3) — until then the CA-in-vault is dev-mode
-only; use-in-place (§4) — the CA key is still `key_from_pem`'d in process at sign time
+External-anchor custody + seal/unseal (§2-3), until then the CA-in-vault is dev-mode
+only; use-in-place (§4). The CA key is still `key_from_pem`'d in process at sign time
 (scoped-access, not memory isolation); mlock (§5); WORM-audited key use (§6); rotation +
 anti-rollback (§8). Org vendor keys are P2b.
 
 ## Gate
 
 - `make -j kb` + `make -j server` link clean; `make lint` (kb-target-isolation,
-  module-boundary) + `make schema-sync-check` green (no schema change this slice — reuses
+  module-boundary) + `make schema-sync-check` green (no schema change this slice, reuses
   slice-2 `org_vault_*`).
 - Existing `test_pki` + enroll unit tests pass unchanged; new CA-in-vault integration test
   passes on real PG17 (CT103); a forced-plaintext-scan asserts no CA private-key bytes in

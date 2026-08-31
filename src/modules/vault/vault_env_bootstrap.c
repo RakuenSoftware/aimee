@@ -11,6 +11,11 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#if defined(__linux__)
+#include <sys/prctl.h>
+#include <sys/types.h>
+#include <unistd.h>
+#endif
 
 #define ENV_AGENT             "environment"
 #define ENV_NAME_MAX          128
@@ -21,6 +26,9 @@
 #define ENV_OVERWRITE_CONTROL "AIMEE_VAULT_ENV_OVERWRITE"
 #define WEBCHAT_SECRET_MAX    (64 * 1024)
 #define WEBCHAT_AGENT         "webchat-login"
+/* Mirrors GIT_FORGE_VAULT_AGENT. Spelled out rather than included so this
+ * first-boot module keeps no link dependency on the git modules. */
+#define GIT_FORGE_AGENT "git"
 
 static int span_has_suffix(const char *name, size_t name_len, const char *suffix)
 {
@@ -52,6 +60,8 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USERS") && memcmp(name, "AIMEE_WEBCHAT_USERS", len) == 0) ||
        (len == strlen("AIMEE_KB_CONN") && memcmp(name, "AIMEE_KB_CONN", len) == 0) ||
+       (len == strlen("AIMEE_KB_CLIENT_PAM_USERNAME") &&
+        memcmp(name, "AIMEE_KB_CLIENT_PAM_USERNAME", len) == 0) ||
        (len == strlen("AIMEE_GIT_AUTHOR_NAME") &&
         memcmp(name, "AIMEE_GIT_AUTHOR_NAME", len) == 0) ||
        (len == strlen("AIMEE_GIT_AUTHOR_EMAIL") &&
@@ -342,6 +352,97 @@ int vault_env_seal_webchat_record(const char *record_name)
    }
    OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
    free(value);
+   return rc;
+}
+
+int vault_env_seal_forge_credential(const char *cred_name)
+{
+   /* Closed allowlist, like the webchat seal. These are exactly the two
+    * credentials git_forge_vault.c reads back out of the server principal. */
+   if (!cred_name || (strcmp(cred_name, "forge_token") != 0 && strcmp(cred_name, "ssh_key") != 0))
+      return -1;
+
+   char *value = calloc(1, WEBCHAT_SECRET_MAX + 1);
+   if (!value)
+      return -1;
+   size_t len = fread(value, 1, WEBCHAT_SECRET_MAX + 1, stdin);
+   int rc = -1;
+   if (len > 0 && len <= WEBCHAT_SECRET_MAX && feof(stdin))
+   {
+      value[len] = '\0';
+      /* A token is a single line, and `echo $TOK |` appends a newline that would
+       * otherwise be sealed verbatim and corrupt every Authorization header
+       * built from it. Trailing whitespace is never part of a forge token, so
+       * strip it here rather than making every caller remember -n. An SSH key
+       * keeps its interior newlines; only the trailing ones go. */
+      while (len > 0 && (value[len - 1] == '\n' || value[len - 1] == '\r' ||
+                         value[len - 1] == ' ' || value[len - 1] == '\t'))
+         value[--len] = '\0';
+      if (len > 0)
+         rc = vault_service_set_server(GIT_FORGE_AGENT, cred_name, value) == VAULT_OK ? 0 : -1;
+   }
+   OPENSSL_cleanse(value, WEBCHAT_SECRET_MAX + 1);
+   free(value);
+   return rc;
+}
+
+#define EGRESS_MODULE_EXECUTABLE "/usr/local/libexec/aimee-modules/aimee-module-egress"
+
+int vault_env_egress_parent_path_ok(const char *path)
+{
+   return path && strcmp(path, EGRESS_MODULE_EXECUTABLE) == 0;
+}
+
+int vault_env_egress_parent_attest(void)
+{
+#if defined(__linux__)
+   char proc_path[64], executable[4096];
+   int n = snprintf(proc_path, sizeof(proc_path), "/proc/%ld/exe", (long)getppid());
+   if (n <= 0 || (size_t)n >= sizeof(proc_path))
+      return -1;
+   ssize_t got = readlink(proc_path, executable, sizeof(executable) - 1);
+   if (got <= 0 || (size_t)got >= sizeof(executable))
+      return -1;
+   executable[got] = '\0';
+   if (!vault_env_egress_parent_path_ok(executable) || prctl(PR_SET_DUMPABLE, 0) != 0)
+      return -1;
+   return 0;
+#else
+   return -1;
+#endif
+}
+
+static int mcp_egress_credential_name_ok(const char *name)
+{
+   static const char prefix[] = "AIMEE_MCP_";
+   static const char suffix[] = "_TOKEN";
+   if (!name || strncmp(name, prefix, sizeof(prefix) - 1) != 0)
+      return 0;
+   const char *digits = name + sizeof(prefix) - 1;
+   unsigned long ref = 0;
+   const char *p = digits;
+   while (*p >= '0' && *p <= '9')
+   {
+      ref = ref * 10 + (unsigned long)(*p - '0');
+      p++;
+   }
+   return p != digits && strcmp(p, suffix) == 0 && ref >= 712 && ref < 968;
+}
+
+int vault_env_print_egress_credential(const char *env_name)
+{
+   if (vault_env_egress_parent_attest() != 0 || !mcp_egress_credential_name_ok(env_name))
+      return -1;
+   char value[ENV_SECRET_VALUE_MAX + 1];
+   memset(value, 0, sizeof(value));
+   int present = runtime_secret_get(env_name, value, sizeof(value));
+   size_t len = present ? strlen(value) : 0;
+   int rc = present && len > 0 && len <= ENV_SECRET_VALUE_MAX && !memchr(value, '\n', len) &&
+                    !memchr(value, '\r', len) && fwrite(value, 1, len, stdout) == len &&
+                    fflush(stdout) == 0
+                ? 0
+                : -1;
+   OPENSSL_cleanse(value, sizeof(value));
    return rc;
 }
 

@@ -1,6 +1,6 @@
-#include "db2/db2_pool.h"
-#include "db2/db_postgres.h"
-#include "db2/org_vault_rewrap.h"
+#include "modules/db2/c/db2_pool.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/org_vault_rewrap.h"
 
 #include <assert.h>
 #include <pthread.h>
@@ -36,6 +36,48 @@ static const char *g_state_response = "promoted";
 static const char *g_check_principal = "a";
 static int64_t g_summary_secrets, g_summary_checks, g_secret_id = 1;
 static int g_verify_page_rows;
+
+static int invalid_operation_id_to_hex(const uint8_t operation_id[16], char out[33])
+{
+   (void)operation_id;
+   memset(out, 'A', 32);
+   out[32] = '\0';
+   return 0;
+}
+
+static void test_reseal_contract(void)
+{
+   uint8_t operation_id[16] = {1}, decoded_id[16];
+   char hex[33];
+   aimee_db2_register_vault_reseal_provider(NULL);
+   memset(hex, 'x', sizeof(hex));
+   assert(db2_vault_reseal_operation_id_to_hex(operation_id, hex) == -1);
+   assert(hex[0] == '\0');
+
+   db2_vault_reseal_provider_t invalid = {.operation_id_to_hex = invalid_operation_id_to_hex};
+   aimee_db2_register_vault_reseal_provider(&invalid);
+   assert(db2_vault_reseal_operation_id_to_hex(operation_id, hex) == -1);
+
+   const db2_vault_reseal_provider_t provider = {
+       .operation_id_to_hex = vault_reseal_operation_id_to_hex,
+       .operation_id_from_hex = vault_reseal_operation_id_from_hex,
+       .receipt_decode = vault_reseal_receipt_decode,
+       .receipt_digest = vault_reseal_receipt_digest,
+   };
+   aimee_db2_register_vault_reseal_provider(&provider);
+   assert(db2_vault_reseal_operation_id_to_hex(operation_id, hex) == 0);
+   assert(db2_vault_reseal_operation_id_from_hex(hex, decoded_id) == 0);
+   assert(memcmp(operation_id, decoded_id, sizeof(operation_id)) == 0);
+
+   vault_tpm2_reseal_receipt_t receipt = {.old_generation = 7, .new_generation = 8};
+   memcpy(receipt.operation_id, operation_id, sizeof(operation_id));
+   uint8_t wire[VAULT_RESEAL_RECEIPT_V1_LEN], digest[32];
+   vault_tpm2_reseal_receipt_t decoded;
+   assert(vault_reseal_receipt_encode(&receipt, wire) == 0);
+   assert(db2_vault_reseal_receipt_decode(wire, sizeof(wire), &decoded) == 0);
+   assert(memcmp(decoded.operation_id, operation_id, sizeof(operation_id)) == 0);
+   assert(db2_vault_reseal_receipt_digest(wire, digest) == 0);
+}
 
 int db2_pool_active(void)
 {
@@ -699,6 +741,7 @@ static void test_output_clear_helpers(void)
 
 int main(void)
 {
+   test_reseal_contract();
    test_sqlstate_mapping();
    test_public_handle_phases();
    test_transaction_kind_gates();

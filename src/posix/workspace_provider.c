@@ -84,6 +84,26 @@ static int shared_write_all(const workspace_provider_t *p, const char *path, con
    return 0;
 }
 
+static int shared_append(const workspace_provider_t *p, const char *path, const char *data,
+                         size_t len)
+{
+   (void)p;
+   if (!path)
+      return -1;
+
+   FILE *f = fopen(path, "ab");
+   if (!f)
+      return -1;
+   if (len > 0 && data && fwrite(data, 1, len, f) != len)
+   {
+      fclose(f);
+      return -1;
+   }
+   if (fclose(f) != 0)
+      return -1;
+   return 0;
+}
+
 static int shared_stat(const workspace_provider_t *p, const char *path, ws_stat_t *st)
 {
    (void)p;
@@ -340,6 +360,7 @@ static const workspace_provider_t g_shared_provider = {
     .kind = WS_PROVIDER_SHARED,
     .read_all = shared_read_all,
     .write_all = shared_write_all,
+    .append = shared_append,
     .stat = shared_stat,
     .list = shared_list,
     .exec = shared_exec,

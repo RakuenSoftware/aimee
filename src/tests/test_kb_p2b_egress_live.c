@@ -4,17 +4,24 @@
 #include "kb_enroll.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
+#include "kb_curator_drain.h"
+#include "kb_curator_llm.h"
+#include "kb_curator_queue.h"
+#include "kb_curator_serve.h"
+#include "runtime_secret.h"
+#include "modules/kb-synthesis/kb_curator_notify.h"
 #include "modules/vault/vault_crypto.h"
 #include "modules/vault/vault_internal.h"
+#include "modules/vault/vault_kek_check.h"
 #include "modules/vault/vault_server_key.h"
 #include "modules/vault/vault_service.h"
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/db2_tenant.h"
-#include "db2/enrollments.h"
-#include "db2/org_vault_key_use.h"
-#include "db2/vault_pg.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/enrollments.h"
+#include "modules/db2/c/org_vault_key_use.h"
+#include "modules/db2/c/vault_pg.h"
 
 #include <assert.h>
 #include <openssl/crypto.h>
@@ -22,6 +29,97 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+static void register_crypto_provider(void)
+{
+   const db2_vault_crypto_provider_t provider = {
+       .aad_build_v2 = vault_aad_build_v2,
+       .aad_build_v1_safe = vault_aad_build_v1_safe,
+       .random = vault_crypto_random,
+       .dek_wrap = vault_dek_wrap,
+       .dek_unwrap = vault_dek_unwrap,
+       .secret_encrypt = vault_secret_encrypt,
+       .secret_decrypt = vault_secret_decrypt,
+       .kek_check_wrap = vault_kek_check_wrap,
+       .kek_check_verify = vault_kek_check_verify,
+   };
+   aimee_db2_register_vault_crypto_provider(&provider);
+}
+
+/* This live fixture links the full KB route closure so it can exercise the
+ * real mTLS listener and egress route. Curator workers are unrelated to that
+ * path and are not started here; provide their link-only boundary with inert
+ * behavior instead of pulling background threads and provider dispatch into a
+ * credential-transport test. */
+void kb_curator_queue_counts(kb_curator_queue_counts_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+}
+
+void kb_curator_invalidation_broadcast(const char *project, const char *file_path,
+                                       int artifacts_stale)
+{
+   (void)project;
+   (void)file_path;
+   (void)artifacts_stale;
+}
+
+int kb_curator_implements_json(const char *topic, char *out, size_t out_cap)
+{
+   (void)topic;
+   if (out && out_cap)
+      out[0] = '\0';
+   return -1;
+}
+
+int kb_curator_synthesize_serve_json(const char *topic, char *out, size_t out_cap)
+{
+   return kb_curator_implements_json(topic, out, out_cap);
+}
+
+int kb_curator_contradictions_json(int limit, char *out, size_t out_cap)
+{
+   (void)limit;
+   return kb_curator_implements_json(NULL, out, out_cap);
+}
+
+int kb_curator_queue_docs_for_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+int kb_curator_code_unit_jobs_delete_project(const char *project)
+{
+   (void)project;
+   return 0;
+}
+
+struct cJSON *kb_curator_stages_json(void)
+{
+   return NULL;
+}
+
+struct cJSON *kb_curator_presets_json(void)
+{
+   return NULL;
+}
+
+char *kb_curator_llm_run(kb_curator_stage_t stage, const char *system_prompt,
+                         const char *request_json, struct cJSON *json_schema,
+                         const char *fallback_command, int out_cap, char *errbuf, size_t errlen)
+{
+   (void)stage;
+   (void)system_prompt;
+   (void)request_json;
+   (void)json_schema;
+   (void)fallback_command;
+   (void)out_cap;
+   if (errbuf && errlen)
+      errbuf[0] = '\0';
+   return NULL;
+}
 
 static int64_t scalar(const char *sql)
 {
@@ -77,6 +175,12 @@ static kb_principal_t owner(void)
    return p;
 }
 
+static int test_pam_check_credentials(const char *user, const char *password)
+{
+   return user && password && strcmp(user, "p2b-live") == 0 &&
+          strcmp(password, "p2b-live-password") == 0;
+}
+
 static int egress_request(int port, const char *ca, const char *cert, const char *key,
                           const char *request_id, int64_t team, char *response, size_t response_cap)
 {
@@ -90,8 +194,12 @@ static int egress_request(int port, const char *ca, const char *cert, const char
                     request_id, (long long)team);
    assert(n > 0 && (size_t)n < sizeof(body));
    int status = 0;
-   assert(kb_tls_client_request("localhost", port, ca, cert, key, "POST", "/v1/llm/egress", body,
-                                response, response_cap, &status) == 0);
+   assert(kb_tls_client_request_auth("localhost", port, ca, cert, key, "POST", "/v1/llm/egress",
+                                     body,
+                                     "Authorization: Bearer p2b-live-token\r\n"
+                                     "X-Aimee-Service-Authorization: Basic "
+                                     "cDJiLWxpdmU6cDJiLWxpdmUtcGFzc3dvcmQ=\r\n",
+                                     response, response_cap, &status) == 0);
    return status;
 }
 
@@ -121,6 +229,7 @@ int main(void)
    const unsigned char plaintext[] =
        "{\"access_key_id\":\"AKIDEXAMPLE\",\"secret_access_key\":\"secret\"}";
 
+   register_crypto_provider();
    assert(db2_init(url) == 0);
    vault_store_set_backend(&vault_pg_backend);
    int64_t epoch = 0;
@@ -160,12 +269,16 @@ int main(void)
 
    const char *aimee_home = getenv("AIMEE_HOME");
    assert(aimee_home && *aimee_home);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                               "scope:service:p2b-live:p2b-live-token") == 0);
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    assert(kb_mtls_start(0, aimee_home, "localhost") == 0);
    int mtls_port = kb_mtls_bound_port();
    assert(mtls_port > 0);
    char conn[1024], ca[KB_PKI_CERT_PEM_MAX], cert[KB_PKI_CERT_PEM_MAX];
    char client_key[KB_PKI_KEY_PEM_MAX];
-   assert(kb_enroll_mint(aimee_home, "localhost", mtls_port, "p2b-live", conn, sizeof(conn)) == 0);
+   assert(kb_enroll_mint(aimee_home, "localhost", mtls_port, "service:p2b-live", conn,
+                         sizeof(conn)) == 0);
    assert(kb_tls_enroll(conn, ca, sizeof(ca), cert, sizeof(cert), client_key, sizeof(client_key)) ==
           0);
    char cert_fp[KB_PKI_FP_HEX], cert_issuer[256], cert_serial[128], identity[512];
@@ -173,7 +286,7 @@ int main(void)
    assert(kb_pki_cert_metadata(cert, cert_issuer, sizeof(cert_issuer), cert_serial,
                                sizeof(cert_serial)) == 0);
    kb_principal_t probe;
-   assert(kb_principal_from_cert(cert_issuer, cert_serial, "p2b-live", &probe) == 0);
+   assert(kb_principal_from_cert(cert_issuer, cert_serial, "service:p2b-live", &probe) == 0);
    assert(kb_identity_key(&probe, identity, sizeof(identity)) == 0);
    assert(add_member(identity, team) == 0);
    char authority[33];
@@ -282,7 +395,9 @@ int main(void)
    OPENSSL_cleanse(wrapped, sizeof(wrapped));
    OPENSSL_cleanse(ciphertext, sizeof(ciphertext));
    OPENSSL_cleanse(client_key, sizeof(client_key));
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
    kb_mtls_stop();
+   kb_tls_set_pam_check_for_test(NULL);
    db2_shutdown();
    puts("PASS: enrolled mTLS -> admission -> vault-sign -> TLS dispatch -> IR settlement");
    return 0;

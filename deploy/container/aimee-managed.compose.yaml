@@ -77,6 +77,12 @@ services:
       # single-deployment/multi-role, so callers do not select arbitrary models.
       SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-aimee-synth}
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
+      # Intra-op threads for ONE embed request. The server defaults this to
+      # min(8, usable cpus), which is right for a single request and wrong when
+      # several ingest workers embed concurrently: on a 7-core box that is
+      # 6 workers x 7 threads = 42 threads competing for 7 cores. Pin it so
+      # workers x threads lands near the core count. Unset keeps the default.
+      EMBEDDER_THREADS: ${EMBEDDER_THREADS:-}
       # Internal-only mTLS lane used for server enrollment and signed management
       # JWKS refresh. It is reachable on the Compose network, not published. The
       # value is the certificate DNS identity; the listener still binds all
@@ -92,7 +98,7 @@ services:
       AIMEE_WORKSPACES_DIR: /var/lib/aimee-workspaces
     command: ["--http-port=8741"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -142,6 +148,7 @@ services:
       - --port=8745
       - --endpoint=https://aimee-server:8743
       - --uid=1000
+      - --member=${AIMEE_MANAGED_KB_MEMBER}
     depends_on:
       aimee-kb: { condition: service_healthy }
     volumes:
@@ -157,10 +164,20 @@ services:
     image: ${AIMEE_AUTHORITY_BOOTSTRAP_IMAGE:-ghcr.io/rakuensoftware/aimee-authority-bootstrap:${AIMEE_IMAGE_TAG:-latest}}
     user: "0:0"
     network_mode: none
+    # Give this child cgroup an explicit no-swap policy. Nested Docker exposes
+    # the physical host's /proc/swaps rather than the outer LXC's virtualized
+    # view, so /proc alone cannot prove the effective policy. Equal memory and
+    # memory+swap limits make cgroup v2 publish memory.swap.max=0 inside the
+    # one-shot, which the offline hardening verifies before accepting fallback.
+    mem_limit: 1g
+    memswap_limit: 1g
     environment:
       # The offline tools still attempt mlockall first. Unprivileged LXC cannot
-      # raise RLIMIT_MEMLOCK, so the managed one-shot may continue only after a
-      # fail-closed /proc/swaps check proves there is no active swap.
+      # apply an unlimited RLIMIT_MEMLOCK at container creation time: asking the
+      # OCI runtime to do so prevents the container from starting, before this
+      # fail-closed fallback can inspect /proc/swaps. Inherit the runtime limit;
+      # the managed one-shot attempts mlockall and may continue only after it
+      # proves either that no swap is active or that this cgroup cannot use it.
       AIMEE_OFFLINE_ALLOW_NO_SWAP_MLOCK_FALLBACK: "1"
     depends_on:
       aimee-kb: { condition: service_healthy }

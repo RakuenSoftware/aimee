@@ -12,7 +12,7 @@
  */
 
 #include "kb_http_reflections.h"
-#include "db2/artifacts.h"
+#include "modules/db2/c/artifacts.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

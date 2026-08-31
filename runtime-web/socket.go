@@ -42,32 +42,32 @@ func rpcError(msg map[string]json.RawMessage) error {
 	if errMsg == "" {
 		errMsg = status
 	}
-	if kind := rpcErrorKind(msg); kind != "" {
-		return &rpcFault{kind: kind, msg: errMsg}
+	if httpStatus := rpcErrorHTTPStatus(msg); httpStatus != 0 {
+		return &rpcFault{httpStatus: httpStatus, msg: errMsg}
 	}
 	return fmt.Errorf("server: %s", errMsg)
 }
 
-// rpcFault is a dispatch error the server classified. Plain errors stay plain,
-// so callers that only print the message are unaffected.
+// rpcFault is a dispatch error the server classified through the runtime-web
+// module. Plain errors stay plain, so callers that only print the message are
+// unaffected.
 type rpcFault struct {
-	kind string
-	msg  string
+	httpStatus int
+	msg        string
 }
 
 func (e *rpcFault) Error() string { return "server: " + e.msg }
 
-// Kind returns the server's fault class, or "" when it did not classify.
-func (e *rpcFault) Kind() string { return e.kind }
-
-func rpcErrorKind(msg map[string]json.RawMessage) string {
-	raw, ok := msg["kind"]
+func rpcErrorHTTPStatus(msg map[string]json.RawMessage) int {
+	raw, ok := msg["http_status"]
 	if !ok {
-		return ""
+		return 0
 	}
-	var kind string
-	_ = json.Unmarshal(raw, &kind)
-	return kind
+	var status int
+	if json.Unmarshal(raw, &status) != nil || status < 400 || status > 599 {
+		return 0
+	}
+	return status
 }
 
 // rpcErrorStatus maps a dispatch error onto an HTTP status.
@@ -77,23 +77,13 @@ func rpcErrorKind(msg map[string]json.RawMessage) string {
 // delivered as an upstream failure, which misleads whoever reads the logs and
 // invites a client to retry a request that can never succeed.
 //
-// An UNCLASSIFIED error still maps to 502. That is deliberate: the server has
-// ~479 error sites and only some are audited, so guessing at the rest would
-// mislabel genuine server faults as the caller's mistake — the same error in
-// the opposite direction. Handlers opt in by sending a kind.
+// A response without a valid module-produced status still maps to 502. That is
+// deliberate fail-closed transport behavior, not a local fault-classification
+// fallback.
 func rpcErrorStatus(err error) int {
 	var fault *rpcFault
 	if errors.As(err, &fault) {
-		switch fault.Kind() {
-		case "invalid_argument":
-			return http.StatusBadRequest
-		case "not_found":
-			return http.StatusNotFound
-		case "permission_denied":
-			return http.StatusForbidden
-		case "unavailable":
-			return http.StatusServiceUnavailable
-		}
+		return fault.httpStatus
 	}
 	return http.StatusBadGateway
 }

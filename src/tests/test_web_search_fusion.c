@@ -114,24 +114,11 @@ int web_egress_private_endpoint_allowed(void)
    return 0;
 }
 
-/* minimal stubs: the test drives the duckduckgo path only.
- *
- * These replace a config_load stub that zeroed the whole struct. Returning 0
- * from each accessor is the same contract — web_search falls back to its
- * HTTP_RETRY_* defaults — but stubs one value per knob instead of requiring the
- * test to know config_t's shape. */
-#include "config.h"
-int config_load(config_t *c)
-{
-   memset(c, 0, sizeof(*c));
-   return 0;
-}
+/* Minimal accessor stubs: the test drives the duckduckgo path only. */
 /* run_engine reads these two directly now. Empty is what the zeroed struct gave
  * it, and both engines are skipped as unconfigured -- the duckduckgo path this
- * suite drives is unaffected. */
-/* Engine selection: empty backends + empty backend, so web_search falls through
- * to its duckduckgo default -- the path this suite drives, and what the zeroed
- * config_t the old stub returned produced. */
+ * suite drives is unaffected. Engine selection is empty, so web_search falls
+ * through to its duckduckgo default. */
 const char *config_search_backends(void)
 {
    return "";
@@ -139,6 +126,10 @@ const char *config_search_backends(void)
 const char *config_search_backend(void)
 {
    return "";
+}
+int config_search_fetch_pages(void)
+{
+   return 0;
 }
 
 /* run_engine takes the _copy form (the value crosses an HTTP round trip). Empty
@@ -167,13 +158,18 @@ int config_retry_max_ms(void)
 {
    return 0;
 }
-int http_retry_post(const char *u, const char *a, const char *b, char **r, int t)
+int http_retry_post(const char *u, const char *a, const char *b, char **r, int t,
+                    const char *headers, int attempts, int base_ms, int max_ms)
 {
    (void)u;
    (void)a;
    (void)b;
    (void)r;
    (void)t;
+   (void)headers;
+   (void)attempts;
+   (void)base_ms;
+   (void)max_ms;
    return -1;
 }
 

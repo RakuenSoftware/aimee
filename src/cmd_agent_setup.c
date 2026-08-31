@@ -122,9 +122,9 @@ static void setup_api_provider(agent_config_t *cfg, const char *provider, const 
    read_line("Fallback model (leave blank to skip): ", fallback_buf, sizeof(fallback_buf), 0);
 
    char roles_buf[256];
-   read_line(
-       "Roles (comma-separated, default: summarize,format,draft,review,explain,code,execute): ",
-       roles_buf, sizeof(roles_buf), 0);
+   read_line("Roles (comma-separated, default: summarize,format,draft,explain,code,execute; "
+             "add review explicitly to authorize review work): ",
+             roles_buf, sizeof(roles_buf), 0);
 
    char tier_buf[16];
    read_line("Cost tier (0=free, 1=cheap, 2=expensive, default: 1): ", tier_buf, sizeof(tier_buf),
@@ -201,9 +201,8 @@ static void setup_api_provider(agent_config_t *cfg, const char *provider, const 
    }
    else
    {
-      const char *defaults[] = {"summarize", "format", "draft",  "review",
-                                "explain",   "code",   "execute"};
-      for (int i = 0; i < 7; i++)
+      const char *defaults[] = {"summarize", "format", "draft", "explain", "code", "execute"};
+      for (int i = 0; i < (int)(sizeof(defaults) / sizeof(defaults[0])); i++)
          snprintf(ag->roles[ag->role_count++], 32, "%s", defaults[i]);
    }
 
@@ -292,7 +291,7 @@ static void setup_server_oauth_cli(const char *vendor)
 
    cJSON *start_body = cJSON_CreateObject();
    cJSON_AddStringToObject(start_body, "vendor", vendor);
-   cJSON *started = cli_oauth_post("/v1/agent/cli_oauth_start", start_body);
+   cJSON *started = cli_oauth_post("/v1/model/cli_oauth_start", start_body);
    cJSON_Delete(start_body);
    if (!started)
    {
@@ -322,7 +321,7 @@ static void setup_server_oauth_cli(const char *vendor)
          cJSON_AddStringToObject(cb, "vendor", vendor);
          cJSON_AddStringToObject(cb, "session", session);
          cJSON_AddStringToObject(cb, "code", line);
-         cJSON *r = cli_oauth_post("/v1/agent/cli_oauth_code", cb);
+         cJSON *r = cli_oauth_post("/v1/model/cli_oauth_code", cb);
          cJSON_Delete(cb);
          if (!r)
          {
@@ -342,7 +341,7 @@ static void setup_server_oauth_cli(const char *vendor)
       cJSON *pb = cJSON_CreateObject();
       cJSON_AddStringToObject(pb, "vendor", vendor);
       cJSON_AddStringToObject(pb, "session", session);
-      cJSON *pr = cli_oauth_post("/v1/agent/cli_oauth_poll", pb);
+      cJSON *pr = cli_oauth_post("/v1/model/cli_oauth_poll", pb);
       cJSON_Delete(pb);
       if (!pr)
          continue;

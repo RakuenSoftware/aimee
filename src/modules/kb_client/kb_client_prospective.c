@@ -5,6 +5,7 @@
  * so the file stays under the per-file line cap. */
 
 #include "kb_client.h"
+#include "kb_client_pii.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -29,12 +30,28 @@ char *kb_client_memory_prospective_create_json(const char *trigger_text, const c
                                                const char *recurrence, const char *valid_until)
 {
    cJSON *req = cJSON_CreateObject();
-   if (trigger_text)
-      cJSON_AddStringToObject(req, "trigger_text", trigger_text);
-   if (action_text)
-      cJSON_AddStringToObject(req, "action_text", action_text);
-   if (anchor_entity && anchor_entity[0])
-      cJSON_AddStringToObject(req, "anchor_entity", anchor_entity);
+   /* trigger_text and action_text are session-authored prose that aimee-kb
+    * PERSISTS -- the same contract as memory.store, so the same screen. */
+   if ((trigger_text &&
+        kb_client_pii_add_string_required(req, "trigger_text", trigger_text) != 0) ||
+       (action_text && kb_client_pii_add_string_required(req, "action_text", action_text) != 0) ||
+       kb_client_pii_add_string(req, "anchor_entity", anchor_entity) != 0)
+   {
+      cJSON_Delete(req);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL,
+                                  0.0, NULL, 0);
+      return kb_client_pii_withheld_json();
+   }
+   /* anchor_file is a path the caller must be able to match on later, so it is
+    * an identifier: withhold rather than redact it into a path that resolves
+    * to nothing. */
+   if (kb_client_pii_identifier_sensitive(anchor_file))
+   {
+      cJSON_Delete(req);
+      kb_client_memory_audit_note("memory.prospective_create.withheld_pii", 0, NULL, NULL, NULL,
+                                  0.0, NULL, 0);
+      return kb_client_pii_withheld_json();
+   }
    if (anchor_file && anchor_file[0])
       cJSON_AddStringToObject(req, "anchor_file", anchor_file);
    if (recurrence && recurrence[0])
@@ -220,6 +237,7 @@ int kb_client_memory_tag_workspace(int64_t memory_id, const char *workspace)
    if (memory_id <= 0 || !workspace || !workspace[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
    cJSON_AddStringToObject(req, "workspace", workspace);
    char *json = kb_v1_action_request("memory.tag_workspace", req);
@@ -240,6 +258,7 @@ int kb_client_memory_tag_scope(int64_t memory_id, const char *scope_type, const 
    if (memory_id <= 0 || !scope_type || !scope_type[0] || !scope_value || !scope_value[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
+   kb_client_memory_scope_context_apply(req);
    cJSON_AddNumberToObject(req, "memory_id", (double)memory_id);
    cJSON_AddStringToObject(req, "scope_type", scope_type);
    cJSON_AddStringToObject(req, "scope_value", scope_value);

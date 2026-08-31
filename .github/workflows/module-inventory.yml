@@ -5,11 +5,26 @@ name: Module inventory
 # classic Team-plan check, their workflow/script definitions are reviewable PR
 # content. Do not present proposal-ordering as an isolated trusted executor; a
 # stronger guarantee requires Enterprise required workflows or an external app.
+# These filters match the BASE branch, and the only base these gates exist for
+# is `main`.
+#
+# Everything in this workflow governs the module boundary: the canonical
+# inventory, source ownership, and the frozen DB2 consumer surface. Those are
+# promote-time questions, decided when work is promoted to `main`. `testing` is
+# the shared integration branch, so running them there blocks ordinary feature
+# work on a module-structure decision that is not being made at that point.
+#
+# This is the same call the refactor-surface-baseline step below already made
+# for itself, and for the same reason: a branch whose job is to absorb in-flight
+# work trips a freeze constantly, and the useful review is the one diff at the
+# promote, not a rejection per feature PR. That step now carries a `base_ref !=
+# testing` guard it no longer needs, since the workflow cannot fire on testing
+# at all; it is left in place as defence in depth if these filters widen again.
 on:
   pull_request:
-    branches: [feature/core-modularization]
+    branches: [main]
   push:
-    branches: [feature/core-modularization]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -62,6 +77,8 @@ jobs:
           printf '%s\n' "$output" | grep -q 'rule=required-classification'
       - name: Test inventory failure modes
         run: python3 -I scripts/tests/test_check_module_inventory.py -v
+      - name: Test that a principal ref is an identity, not a position
+        run: python3 -I scripts/tests/test_principal_ref_identity.py -v
       - name: Enforce background skill-curator removal
         run: python3 -I -S scripts/check_background_skill_curator_absence.py
       - name: Test background skill-curator absence failure modes
@@ -70,12 +87,114 @@ jobs:
         run: python3 -I -S scripts/check_module_source_ownership.py
       - name: Test module source ownership failure modes
         run: python3 -I scripts/tests/test_check_module_source_ownership.py -v
+      - name: Freeze the DB2 source boundary and consumer inventory
+        run: python3 -I -S scripts/check_db2_source_boundary.py
+      - name: Refuse DB2 compatibility-include allowlist growth
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          python3 -I -S scripts/check_db2_source_boundary.py --previous-ref FETCH_HEAD
+      - name: Test DB2 source-boundary failure modes
+        run: python3 -I scripts/tests/test_check_db2_source_boundary.py -v
+      - name: Enforce generated DB2 operation contract
+        run: python3 -I -S scripts/gen_db2_contract.py
+      - name: Test DB2 operation-contract failure modes
+        run: python3 -I scripts/tests/test_gen_db2_contract.py -v
+      - name: Enforce generated DB2 declaration ledger
+        run: python3 -I -S scripts/gen_db2_declaration_ledger.py
+      - name: Test DB2 declaration-ledger failure modes
+        run: python3 -I scripts/tests/test_gen_db2_declaration_ledger.py -v
+      - name: Measure DB2 C link closure
+        run: python3 -I -S scripts/check_db2_link_closure.py
+      - name: Refuse DB2 C link-closure debt growth
+        if: github.event_name == 'pull_request'
+        run: python3 -I -S scripts/check_db2_link_closure.py --no-probe --previous-ref FETCH_HEAD
+      - name: Test DB2 C link-closure failure modes
+        run: python3 -I scripts/tests/test_check_db2_link_closure.py -v
+      - name: Refuse premature DB2 process activation
+        run: python3 -I -S scripts/check_db2_activation.py
+      - name: Test DB2 activation-gate failure modes
+        run: python3 -I scripts/tests/test_check_db2_activation.py -v
+      - name: Enforce module bus boundary
+        run: python3 -I -S scripts/check_module_bus_boundary.py
+      - name: Test module bus-boundary failure modes
+        run: python3 -I scripts/tests/test_check_module_bus_boundary.py -v
       - name: Enforce panel contract boundary
         run: python3 -I -S scripts/check_panel_contract_boundary.py
       - name: Test panel contract boundary failure modes
         run: python3 -I scripts/tests/test_check_panel_contract_boundary.py -v
+      # The surface baseline is a digest of the PUBLIC surface: 370 public
+      # headers, the routes, the schemas, the CLI help. That is a release
+      # question, so it gates `main` and not the integration branch.
+      #
+      # On `testing` it was answering a question nobody asked. A branch whose
+      # job is to absorb in-flight work touches public headers constantly, so
+      # every PR re-froze the digest -- a mechanical diff nobody reads -- and
+      # any two concurrent PRs then collided on the same regenerated lines.
+      # Nineteen rebases in one migration, none of which surfaced a single real
+      # change to the surface.
+      #
+      # Nothing is lost by moving it. The promoting testing -> main PR runs this
+      # and fails until the baseline is refrozen, and THAT diff is the useful
+      # artifact: one review of everything a release changes on the public
+      # surface, instead of nineteen refreezes read by nobody.
+      # Integration bases, not just `testing`: agent/<topic> and aimee/feat/<id>
+      # are stacked onto the same way (see ci.yml's pull_request branch list), so
+      # a sub-PR based on one hit this release gate while its eventual base does
+      # not. Both escapes were wrong -- re-freeze, which the refusal below then
+      # blocks on the way to `testing`, or leave the PR red.
       - name: Enforce refactor surface baselines
+        if: >-
+          !startsWith(github.base_ref, 'agent/')
+          && !startsWith(github.base_ref, 'aimee/feat/')
+          && github.base_ref != 'testing'
+          && github.ref != 'refs/heads/testing'
+          && !startsWith(github.ref, 'refs/heads/agent/')
         run: python3 -I -S scripts/refactor_baselines.py
+      # The surface baseline is a RELEASE gate, enforced on `main` by the step
+      # above and deliberately not here. That makes re-freezing it on a `testing`
+      # PR pure cost: it is a whole-tree digest, so any two PRs touching public
+      # headers rewrite the same lines and collide. It cost a rebase on three of
+      # five PRs in one migration, and the collisions were never about the
+      # surface -- the digest was recomputed, the diff was mechanical, nobody
+      # read it.
+      #
+      # So on `testing` the baseline is simply NOT MAINTAINED. It goes stale,
+      # which is intended: the promoting testing -> main PR re-freezes it once,
+      # and THAT diff is the useful artifact -- one review of everything a
+      # release changed on the public surface.
+      #
+      # Adding a public header therefore does not require touching this file.
+      - name: Refuse a baseline re-freeze on the integration branch
+        if: >-
+          github.base_ref == 'testing'
+          || startsWith(github.base_ref, 'agent/')
+          || startsWith(github.base_ref, 'aimee/feat/')
+        run: |
+          set -eu
+          git fetch --no-tags --depth=1 origin "$GITHUB_BASE_REF"
+          if git diff --quiet FETCH_HEAD -- tests/baselines/refactor/index.json; then
+            echo "surface baseline untouched: ok"
+            exit 0
+          fi
+          cat >&2 <<'MSG'
+          ::error::This PR changes tests/baselines/refactor/index.json, and it targets the
+          integration branch `${{ github.base_ref }}`.
+
+          The public-surface baseline is a release question. It gates `main`, not this
+          branch, so re-freezing it here achieves nothing and collides with every other
+          PR that does the same.
+
+          Revert the file and push again:
+
+              git checkout "origin/${{ github.base_ref }}" -- tests/baselines/refactor/index.json
+
+          You do NOT need to re-freeze after adding or changing a public header. The
+          baseline is expected to be stale on an integration branch; the promotion PR into `main`
+          re-freezes it once, and that single diff is the review of what the release
+          changed on the public surface.
+          MSG
+          exit 1
       - name: Enforce refactor cleanup accounting
         run: python3 -I -S scripts/check_cleanup_ledger.py
       - name: Test refactor baseline failure modes
@@ -126,7 +245,18 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # Descriptor validation dominates this job and scales with the module
+    # catalog, so leave headroom for catalog growth.
+    #
+    # At timeout-minutes: 5 it had already reached 4m56s on `testing` -- four
+    # seconds of margin -- so it was not gating anything, it was waiting to fail
+    # for whoever pushed next. It then did, twice, at 5m17s, and reported as
+    # "Cancelled after 5m", which reads like a concurrency cancel rather than
+    # the timeout it is.
+    #
+    # 15 gives real headroom without hiding a runaway: a genuine hang still
+    # fails, it just no longer fails on catalog growth alone.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -146,6 +276,12 @@ jobs:
         run: python3 -I -S scripts/validate_module_process_contracts.py
       - name: Test descriptor failure modes and taxonomy convergence
         run: python3 -I scripts/tests/test_validate_module_descriptors.py -v
+      - name: Test exhaustive standalone C-process export generation
+        run: python3 -I scripts/tests/test_export_c_process_build.py -v
+      - name: Test deterministic C embedded-header generation
+        run: python3 -I scripts/tests/test_generate_c_embedded_header.py -v
+      - name: Test exhaustive C-process runtime-bundle builds
+        run: python3 -I scripts/tests/test_build_c_module_runtime_bundle.py -v
       - name: Enforce canonical module public-header layout
         run: python3 -I -S scripts/check_module_header_layout.py
       - name: Test module public-header layout failure modes
@@ -184,7 +320,21 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # scan_history walks every commit since the historical cutoff, and that
+    # history keeps growing. The job used to run FOUR of those walks -- the gate
+    # itself, two property checks that re-ran the whole script, and the suite's
+    # real-history test -- and so approached the 20 minutes this timeout was
+    # sized for. It now runs exactly one; the properties are unit-tested and the
+    # suite is told the scan already happened.
+    #
+    # The one remaining walk is ~6 minutes here and grows with history. Most of
+    # that is `--find-copies-harder`, measured at 283s of a 319s run against 8.9s
+    # without it. The flag is NOT redundant -- it is what catches governed content
+    # copied out of a watched path whose source was never modified, which is the
+    # evasion this gate exists to see -- so it stays, and the headroom stays with
+    # it. Speeding up the walk itself means changing what the gate can detect,
+    # which is a contract question, not a performance one.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
@@ -198,14 +348,18 @@ jobs:
       # limitation above. Branch protection supplies enforcement, not isolation.
       - name: Enforce Git proposal ordering
         run: python3 -I -S scripts/check_proposal_ordering.py
-      - name: Prove event revision binding
-        env:
-          GITHUB_EVENT_NAME: push
-          GITHUB_REF: refs/heads/feature/core-modularization
-          GITHUB_SHA: ${{ github.sha }}
-        run: python3 -I -S scripts/check_proposal_ordering.py
-      - name: Validate CWD independence
-        run: cd /tmp && python3 -I -S "$GITHUB_WORKSPACE/scripts/check_proposal_ordering.py"
+      # `Prove event revision binding` and `Validate CWD independence` used to
+      # live here, each re-running the whole gate against the real repository.
+      # Both properties are settled before any history is read -- validate_event()
+      # runs immediately after `rev-parse HEAD` and is pure env/string logic, and
+      # the config root is resolved in main() before the scan -- so each spent
+      # ~6 minutes re-scanning 4,000+ commits with rename/copy detection that
+      # could not change either verdict. They are now
+      # test_event_binding_requires_the_checked_out_revision,
+      # test_event_binding_gates_pull_request_base and
+      # test_config_root_resolution_is_cwd_independent in the failure-mode suite
+      # below, where they run in milliseconds and assert BOTH directions rather
+      # than only that a good context passes.
       - name: Reject a non-repository config root
         run: |
           root=$(mktemp -d)
@@ -217,4 +371,10 @@ jobs:
           echo "$output"
           printf '%s\n' "$output" | grep -q 'rule=config-root'
       - name: Test proposal-ordering failure modes
+        # The suite's test_current_repository_passes is the same full-history
+        # scan the gate step above already performed, on this same checkout.
+        # Telling it so keeps the job to ONE scan; the test still runs in full
+        # for anyone executing the suite outside this workflow.
+        env:
+          PROPOSAL_ORDERING_FULL_SCAN_DONE: "1"
         run: python3 -I scripts/tests/test_check_proposal_ordering.py -v

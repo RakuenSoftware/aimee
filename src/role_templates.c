@@ -1,6 +1,7 @@
 /* role_templates.c: per-role system prompt templates for delegates */
 #include "aimee.h"
 #include "role_templates.h"
+#include "toolset.h"
 #include "config.h"
 #include "dstr.h"
 #include "platform_path.h"
@@ -132,7 +133,8 @@ static const builtin_template_t g_defaults[] = {
      "- `aimee:find_symbol <name>` — exact file:line for any C symbol; use before guessing include "
      "paths.\n"
      "- `aimee:search_memory <query>` — prior decisions and project facts from KB.\n"
-     "- `aimee:ast_grep_search <pattern>` — structural code search when text search is ambiguous.\n"
+     "- `aimee index ast-grep --lang <language> '<pattern>'` — structural code search when text "
+     "search is ambiguous.\n"
      "- `aimee:get_help` — how aimee's internals work.\n\n"
      "Use index hits to choose exact files and lines for local inspection. If find_symbol returns "
      "no results for a named artifact, always run `rg` in the exact worktree before reporting it "
@@ -216,7 +218,8 @@ static const builtin_template_t g_defaults[] = {
      "- `aimee:find_symbol <name>` — exact file:line for any C symbol; use before guessing include "
      "paths.\n"
      "- `aimee:search_memory <query>` — search KB for prior decisions and project facts.\n"
-     "- `aimee:ast_grep_search <pattern>` — structural AST search when text grep is ambiguous.\n\n"
+     "- `aimee index ast-grep --lang <language> '<pattern>'` — structural AST search when text "
+     "grep is ambiguous.\n\n"
      "Use index hits to choose exact files and lines for local inspection.\n\n"
      "## Output\n"
      "A list of findings with citations. State explicitly if nothing was found.\n\n"
@@ -393,6 +396,79 @@ int role_template_max_turns(const char *role)
          return atoi(p + 10);
    }
    return -1;
+}
+
+/* Read `toolset:` out of the leading frontmatter. Same shape as max_turns above:
+ * one scalar key, read where the template already lives. */
+const char *role_template_toolset(const char *project_root, const char *role)
+{
+   static _Thread_local char name[TOOLSET_NAME_MAX];
+   name[0] = '\0';
+
+   char *frontmatter = role_template_frontmatter(project_root, role);
+   if (!frontmatter)
+      return NULL;
+
+   const char *found = NULL;
+   for (const char *p = frontmatter; *p; p++)
+      if ((p == frontmatter || p[-1] == '\n') && strncmp(p, "toolset:", 8) == 0)
+      {
+         found = p + 8;
+         break;
+      }
+   if (!found)
+   {
+      free(frontmatter);
+      return NULL;
+   }
+
+   while (*found == ' ' || *found == '\t')
+      found++;
+   size_t n = 0;
+   while (found[n] && found[n] != '\n' && found[n] != '\r' && n + 1 < sizeof(name))
+      n++;
+   while (n > 0 && (found[n - 1] == ' ' || found[n - 1] == '\t'))
+      n--;
+   memcpy(name, found, n);
+   name[n] = '\0';
+   free(frontmatter);
+   return name[0] ? name : NULL;
+}
+
+char *role_template_frontmatter(const char *project_root, const char *role)
+{
+   if (!role || !role[0])
+      return NULL;
+   char path[ROLE_TEMPLATE_PATH_MAX];
+   if (role_template_path(project_root, role, path, sizeof(path)) != 0)
+      return NULL;
+   FILE *f = fopen(path, "r");
+   if (!f)
+      return NULL;
+   char buf[ROLE_TEMPLATE_MAX_SIZE];
+   size_t n = fread(buf, 1, sizeof(buf) - 1, f);
+   buf[n] = '\0';
+   fclose(f);
+
+   if (strncmp(buf, "---", 3) != 0)
+      return NULL;
+   const char *body = buf + 3;
+   while (*body == '\r')
+      body++;
+   if (*body != '\n')
+      return NULL;
+   body++;
+   const char *close = strstr(body, "\n---");
+   if (!close)
+      return NULL;
+
+   size_t len = (size_t)(close - body) + 1; /* keep the closing newline */
+   char *out = malloc(len + 1);
+   if (!out)
+      return NULL;
+   memcpy(out, body, len);
+   out[len] = '\0';
+   return out;
 }
 
 char *role_template_build(const char *project_root, const char *role, const char *task,

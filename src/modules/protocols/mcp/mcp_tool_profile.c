@@ -9,6 +9,7 @@
 #include "cJSON.h"
 #include <aimee/protocols/mcp/mcp_tools.h>
 #include "agent_code_capabilities.h"
+#include <stdio.h> /* snprintf, for the trimmed-description suffix */
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
@@ -30,32 +31,118 @@ static const char *const MCP_CORE_TOOLS[] = {
     "search_memory",
     "memory_recall",
     "get_identity", /* grounding */
+    /* ast_grep_search is additionally withheld at RUNTIME when no ast-grep
+     * binary resolves (server_mcp_surface.c) -- that part stayed, because a tool
+     * that cannot run is different from a tool with a cheaper alternative. */
     AIMEE_CODE_TOOL_FIND_SYMBOL,
     AIMEE_CODE_TOOL_AST_GREP_SEARCH,
-    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS, /* direct adoption-critical code intel */
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+    AIMEE_CODE_TOOL_INDEX,
+    /* SAME REASONING AS delegate_status BELOW, AND THE SAME MEASUREMENT.
+     *
+     * `index` multiplexes the retrieval an agent needs when the question is not a
+     * symbol name: command=hybrid (lexical + dense, bounded by max_results,
+     * default 20), plus structure, find_callers, blast_radius and span. Leaving it
+     * out of the floor did not make agents use less retrieval -- it made them use
+     * a recursive text search instead, because that is one visible call while
+     * hybrid cost find_tools -> describe_tool -> call_tool.
+     *
+     * Measured across the benchmark's aimee cells: 87 shell searches emitting
+     * 2.4 MB, 49 of them wide alternations, one large enough to hit the client's
+     * 1 MB truncation. index_hybrid answers that class of question with a capped,
+     * ranked result set and was reachable the whole time -- just never in one
+     * call. A tool the agent cannot afford to reach is a tool it does not have. */
+    /* RE-TESTED 2026-08-12 WITH THE COMMAND FORMS IN PLACE, AND THE OLD
+     * MEASUREMENT HELD. The argument for removing these four was that the
+     * fallback had changed: each is now an `aimee ...` command the standing
+     * guidance names, and a command chains where a tool call cannot. That
+     * argument was wrong about what the agent actually does.
+     *
+     * Trimmed vs untrimmed, same task, n=3 each, healthy box:
+     *   CLI invocations   2.3 -> 1.3 per cell   (DOWN, not up)
+     *   MCP calls         4.3 -> 6.3
+     *   shell commands    9.3 -> 11
+     *   searches            3 -> 4.3   (4.2 KB -> 6.1 KB of output)
+     *   credits         15.52 -> 19.15 mean     (+23%)
+     *
+     * The MCP calls it did make were find_tools x4, describe_tool x2,
+     * call_tool x1 -- the discovery detour the comment above describes, paid in
+     * full. Naming a command in guidance does not make the agent prefer it over
+     * a schema that is present in every request; removing the schema just sends
+     * it to discovery and to grep, exactly as before. */
     "git", /* all git/gh ops via one multiplexed tool (command=...) */
     "delegate",
+    /* SAME REASONING AS `index` ABOVE, AND THE SAME MEASUREMENT.
+     *
+     * The failure that loses the hard tasks is a patch that is reasonable but is
+     * not the change that was asked for. roundtable_review exists precisely for
+     * that -- `original_request` is documented as goal-drift detection, and every
+     * seat is an ordinary delegate, so a one-seat panel is a single reviewer.
+     *
+     * It was left out of the floor, so reaching it cost find_tools ->
+     * describe_tool -> call_tool. Measured on am_b84c9294aa: 74 tool calls, the
+     * skill telling the agent to review before reporting done, and roundtable
+     * NEVER invoked -- the MCP mix was find_symbol, index, preview_blast_radius,
+     * search_memory. The agent shipped the same one-file, 7-line caller-side fix
+     * as before, against a reference that changes four files in another module.
+     *
+     * That looked like guidance being ignored. It was the tool not being visible.
+     * A tool the agent cannot afford to reach is a tool it does not have. */
+    "roundtable_review", /* blocks and returns the verdict; there is no poller to pair with it */
     /* An MCP delegate call returns a job_id and runs in the background, so its
      * poller is not optional: without delegate_status in the floor, an agent
      * that follows our own instruction to delegate cannot read the result
      * without a find_tools -> describe_tool -> call_tool detour. Measured on a
      * real cell, five of fourteen tool calls went on exactly that. This is the
-     * same reasoning that already puts roundtable_status here. */
+     * same reasoning that puts roundtable_review here. */
     "delegate_status",
     "roundtable_review", /* multi-agent */
-    "roundtable_status", /* poll asynchronous roundtable_review */
     "ask_user",
     "send_message", /* interaction */
     "note",         /* capture (note family: create/list/search) */
+    /* peer family: send/inbox. One entry, and it earns the slot for a reason
+     * that does not apply to anything else on this floor.
+     *
+     * Every other capability withheld from the floor has a fallback the agent
+     * reaches for instead -- worse, slower, but a fallback: `index` was added
+     * here because leaving it out did not reduce retrieval, it produced 87 shell
+     * searches. Peer messaging has NO fallback. There is no clumsier way for one
+     * session to reach another; the alternative to being shown this tool is not
+     * coordinating at all, and an agent that does not know the capability exists
+     * never calls find_tools looking for it.
+     *
+     * `send_message` sitting two lines above is a live hazard rather than a
+     * coincidence: it delivers to an operator over telegram/ntfy/webhook and
+     * reads, to an agent wanting to reach another session, exactly like the tool
+     * for doing that. Being on the floor beside it is what keeps the two
+     * distinguishable at the moment of choosing. */
+    "peer",
     NULL,
 };
 
-/* Tools that hand work to a SECOND agent. Their cost, tool calls and edits land
- * outside the caller's transcript, so any measurement of "what did this agent
- * do" stops being attributable the moment one is used. The "solo" profile
- * withholds them; nothing else does. */
-static const char *const MCP_MULTI_AGENT_TOOLS[] = {
-    "delegate", "delegate_status", "roundtable_review", "roundtable_status", NULL,
+/* Floor entries that `index` already multiplexes, dropped only under the "merged"
+ * profile. Reachable as `index command=preview`, so dropping the standalone entry
+ * removes a duplicate, not a capability.
+ *
+ * find_symbol and ast_grep_search are NOT here, and adding them to the index family
+ * table is not the way to get them here: a family member is folded OUT of the flat
+ * tools/list, so that change silently removed both from the default surface for every
+ * client (the golden count went 53 -> 51). Multiplexing them is a change to what
+ * aimee presents by default, not a presentation-profile tweak, and it needs deciding
+ * as such. */
+static const char *const MCP_INDEX_MULTIPLEXED_TOOLS[] = {
+    AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS,
+    NULL,
+};
+
+/* The tools that only make sense when delegation runs. delegate_status is here
+ * for the reason the floor comment gives for including it: an MCP delegate call
+ * returns a job_id and its poller is not optional. With delegation off there are
+ * no jobs to poll, so the pair leaves together or not at all. */
+static const char *const MCP_DELEGATE_TOOLS[] = {
+    "delegate",
+    "delegate_status",
+    NULL,
 };
 
 static int mcp_name_in_set(const char *name, const char *const *set)
@@ -261,27 +348,163 @@ int mcp_call_tool_demux(const char *tool, cJSON *args, const char **out_tool, cJ
    return 1;
 }
 
-int mcp_filter_tools_for_profile(cJSON *tools, const char *profile)
+/* Keep the first sentence (or `cap` bytes), whichever is shorter, and say where the
+ * rest went. cap == 0 removes the field outright, which is only ever used for
+ * parameter hints -- a tool's own description is never emptied, because a nameless
+ * tool is worse than a terse one. */
+static void compact_description(cJSON *owner, int cap, int point_at_describe)
+{
+   cJSON *desc = cJSON_GetObjectItemCaseSensitive(owner, "description");
+   if (!cJSON_IsString(desc) || !desc->valuestring)
+      return;
+   if (cap == 0)
+   {
+      /* Deleting beats setting "": an empty string still costs the key, the quotes
+       * and a comma on every property of every tool, on every turn. */
+      cJSON_DeleteItemFromObjectCaseSensitive(owner, "description");
+      return;
+   }
+   const char *s = desc->valuestring;
+   int len = (int)strlen(s);
+   if (len <= cap)
+      return;
+   int cut = cap;
+   for (int i = 0; i < len - 1 && i < cap; i++)
+      if (s[i] == '.' && (s[i + 1] == ' ' || s[i + 1] == '\n'))
+      {
+         cut = i + 1;
+         break;
+      }
+   char buf[512];
+   int n = cut < (int)sizeof(buf) - 32 ? cut : (int)sizeof(buf) - 32;
+   memcpy(buf, s, (size_t)n);
+   buf[n] = '\0';
+   if (point_at_describe)
+      snprintf(buf + n, sizeof(buf) - (size_t)n, " (describe_tool for full guidance)");
+   cJSON_SetValuestring(desc, buf);
+}
+
+int mcp_tool_prose_lean(void)
+{
+   const char *v = getenv("AIMEE_MCP_TOOL_PROSE");
+   return v &&
+          (strcasecmp(v, "lean") == 0 || strcasecmp(v, "1") == 0 || strcasecmp(v, "true") == 0);
+}
+
+int mcp_compact_tool_prose(cJSON *tools)
+{
+   /* WHAT THIS DOES NOT DO: hide a tool, drop a parameter, or change a type, enum or
+    * required list. Every tool stays advertised and callable with exactly the shape it
+    * had. Only guidance PROSE is shortened, and describe_tool still serves it in full.
+    *
+    * Why it is worth doing: tools/list is re-sent as request context on every turn, so
+    * its size is a tax paid per turn whether or not a tool is called. Measured on the
+    * Ponytail benchmark's aimee arm -- 20,238 bytes over 19 tools, of which 11,894
+    * (59%) is prose: 4,053 bytes of top-level descriptions and 7,841 nested in schema
+    * property descriptions. `git` alone spends 2,667 of its 4,588 bytes on prose. At
+    * ~35 model requests per cell that surface accounted for 47% of the arm's input
+    * tokens.
+    *
+    * The alternative -- presenting fewer tools -- was already tried and is recorded
+    * above: agents fell back to recursive shell search rather than pay
+    * find_tools -> describe_tool -> call_tool. Trimming prose keeps the whole surface
+    * reachable in one call while paying for the part a client actually needs to
+    * construct one. */
+   if (!tools || !cJSON_IsArray(tools))
+      return 0;
+   int trimmed = 0;
+   cJSON *tool = NULL;
+   cJSON_ArrayForEach(tool, tools)
+   {
+      compact_description(tool, MCP_TOOL_PROSE_TOP_CAP, 1);
+      cJSON *schema = cJSON_GetObjectItemCaseSensitive(tool, "inputSchema");
+      if (!schema)
+         schema = cJSON_GetObjectItemCaseSensitive(tool, "input_schema");
+      cJSON *props = cJSON_GetObjectItemCaseSensitive(schema, "properties");
+      cJSON *prop = NULL;
+      cJSON_ArrayForEach(prop, props)
+      {
+         /* No describe_tool pointer here: the per-parameter hint is reached through
+          * the tool, and repeating the pointer once per property would spend back
+          * what the trim saves. */
+         compact_description(prop, MCP_TOOL_PROSE_PARAM_CAP, 0);
+      }
+      trimmed++;
+   }
+   return trimmed;
+}
+
+int mcp_filter_tools_for_profile(cJSON *tools, const char *profile, int delegates_enabled)
 {
    if (!tools || !cJSON_IsArray(tools))
       return 0;
    profile = mcp_tool_profile_effective(profile);
    /* "full" presents everything; an unknown profile fails OPEN to the full set so
     * a typo never silently hides tools. "core"/"lean" keep only the Tier-0 set.
-    * "solo" is core minus the tools that hand work to another agent -- it must be
-    * matched explicitly here, because failing open would grant delegation to a
-    * caller that asked for the opposite. */
-   int solo = strcmp(profile, "solo") == 0;
-   if (!solo && strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0)
-      return 0;
-
+    *
+    * THERE IS NO "solo" PROFILE. It withheld delegate/roundtable so a run could
+    * be measured without a second agent's tokens landing outside the transcript.
+    * That makes the thing under measurement a configuration nobody deploys: the
+    * benchmark stops describing aimee and starts describing a variant built for
+    * the benchmark. If delegates should not run, do not configure them -- that is
+    * a real deployment state and it is honest. Hiding shipped tools to flatter a
+    * measurement is not. */
+   /* "merged" is "core" minus the code-intel tools that `index` now multiplexes:
+    * find_symbol -> index command=symbol, ast_grep_search -> command=ast_grep,
+    * preview_blast_radius -> command=preview (which already existed -- that entry was
+    * a straight duplicate of a subcommand the floor already carried).
+    *
+    * This is NOT the earlier hide-behind-discovery attempt. That removed the
+    * CAPABILITY from the floor, so reaching it cost find_tools -> describe_tool ->
+    * call_tool and agents used shell search instead. Here the capability stays in the
+    * floor inside `index`, one call away, and its subcommand names ride in the
+    * schema's enum -- which survives the prose trim, so a lean client still sees
+    * exactly which commands exist. Three definitions (2,483 bytes) become two enum
+    * entries. */
    int removed = 0;
+
+   /* Delegation off is a DEPLOYMENT STATE, not a presentation profile -- exactly
+    * the distinction the comment above draws when it refuses a "solo" profile.
+    * A config that says delegates do not run is a configuration someone actually
+    * deploys, so the tools that drive them are genuinely absent and advertising
+    * them would be the dishonest half: the agent is told to delegate, calls the
+    * tool, and it cannot work.
+    *
+    * Applied before the profile early-return so it holds for "full" too. A
+    * profile decides how much of a working surface to SHOW; this decides what
+    * exists. `roundtable_review` is deliberately NOT withheld here -- the review
+    * levers change what the prompt DEMANDS, not whether the capability works, and
+    * hiding a tool that still functions is the flattery that comment warns
+    * against.
+    *
+    * Taken as a PARAMETER, not read from config here: a module may not reach a
+    * peer module directly (check_module_bus_boundary enforces it), and reading
+    * config_accessors.h from protocols/ is exactly that crossing. The server owns
+    * the config read and passes the answer down. */
+   if (!delegates_enabled)
+   {
+      for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
+      {
+         cJSON *tool = cJSON_GetArrayItem(tools, i);
+         cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
+         if (cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_DELEGATE_TOOLS))
+         {
+            cJSON_DeleteItemFromArray(tools, i);
+            removed++;
+         }
+      }
+   }
+
+   int merged = strcmp(profile, "merged") == 0;
+   if (strcmp(profile, "core") != 0 && strcmp(profile, "lean") != 0 && !merged)
+      return removed;
    for (int i = cJSON_GetArraySize(tools) - 1; i >= 0; i--)
    {
       cJSON *tool = cJSON_GetArrayItem(tools, i);
       cJSON *nm = cJSON_GetObjectItemCaseSensitive(tool, "name");
-      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS) &&
-                 !(solo && mcp_name_in_set(nm->valuestring, MCP_MULTI_AGENT_TOOLS));
+      int keep = cJSON_IsString(nm) && mcp_name_in_set(nm->valuestring, MCP_CORE_TOOLS);
+      if (keep && merged && mcp_name_in_set(nm->valuestring, MCP_INDEX_MULTIPLEXED_TOOLS))
+         keep = 0;
       if (!keep)
       {
          cJSON_DeleteItemFromArray(tools, i);

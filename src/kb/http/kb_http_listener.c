@@ -1,7 +1,7 @@
 /* kb_http_listener.c: bounded concurrent plain-HTTP listener for aimee-kb. */
 
 #include "kb_http.h"
-#include "db2/db2.h"
+#include "modules/db2/c/db2.h"
 #include "kb/kb_login_throttle.h"
 #include "log.h"
 #include <sys/stat.h>
@@ -47,6 +47,14 @@ char g_bearer_token[256];
 
 static void serve_connection(int fd, const char *peer)
 {
+   /* The peer address is this listener's ONLY evidence about who is calling, and
+    * kb_login_throttle_peer_is_loopback() is where the rest of the kb asks about
+    * it — the /v1/health local exemption in kb_http.c, and now the typed-fact
+    * write authority in kb_service_memory.c. Set before routing and cleared
+    * after: an empty peer is not local, so a pooled worker cannot inherit the
+    * previous caller's address. Only this listener sets it, which is what makes
+    * it mean "arrived over plain HTTP from a loopback peer" and not merely
+    * "loopback" — the mTLS listener never does. */
    kb_login_throttle_set_peer(peer);
    handle_connection(fd);
    kb_login_throttle_set_peer("");
@@ -189,8 +197,9 @@ static void bearer_marker_path(char *out, size_t n)
    snprintf(out, n, "%s/kb-bearer-sealed", kb_default_config_dir());
 }
 
-/* Warn while this deployment has never been sealed; refuse once it has.
- * Returns 0 to continue binding, -1 to refuse. */
+/* A network-reachable plaintext listener is never allowed to start without a
+ * credential.  The marker remains useful diagnostic state for sealed installs,
+ * but first boot receives the same fail-closed posture as every later boot. */
 static int enforce_bearer_ratchet(int port)
 {
    char marker[MAX_PATH_LEN];
@@ -225,16 +234,15 @@ static int enforce_bearer_ratchet(int port)
                 "bootstrap, or remove that marker to deliberately return to an unauthenticated "
                 "listener.",
                 port, marker);
-      return -1;
+      return KB_HTTP_START_UNSAFE_BIND;
    }
 
    LOG_ERROR("kb_http",
-             "binding 0.0.0.0:%d with NO bearer configured: this socket serves privileged routes "
-             "unauthenticated to anything that can reach it. Seal a kb bearer "
-             "(AIMEE_KB_API_BEARER_TOKEN, through the first-boot Vault bootstrap), or unset "
-             "AIMEE_KB_HTTP_BIND to keep the plain listener on loopback.",
+             "refusing to bind 0.0.0.0:%d with no bearer configured; seal "
+             "AIMEE_KB_API_BEARER_TOKEN through first-boot Vault bootstrap, or unset "
+             "AIMEE_KB_HTTP_BIND to keep the unauthenticated listener process-local",
              port);
-   return 0;
+   return KB_HTTP_START_UNSAFE_BIND;
 }
 
 int kb_http_start(int port, const char *bearer_token)
@@ -248,7 +256,7 @@ int kb_http_start(int port, const char *bearer_token)
 
    g_listen_fd = socket(AF_INET, SOCK_STREAM, 0);
    if (g_listen_fd < 0)
-      return -1;
+      return KB_HTTP_START_ERROR;
    fcntl(g_listen_fd, F_SETFD, FD_CLOEXEC);
    int opt = 1;
    setsockopt(g_listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
@@ -269,18 +277,14 @@ int kb_http_start(int port, const char *bearer_token)
     * unauthenticated — fine for the loopback default, not fine once it is
     * reachable off-host.
     *
-    * Ratchet rather than a flat refusal. A flat refusal would break every
-    * deployment that has not been sealed yet, which today is all of them; a flat
-    * warning would let a sealed deployment silently lose its bearer and reopen
-    * the hole. So: warn while a deployment has never been sealed, and refuse
-    * once it has. The marker is written the first time a bearer is present, and
-    * lives beside the rest of the kb's state so it persists exactly as long as
-    * the vault it corresponds to. */
-   if (baddr == INADDR_ANY && enforce_bearer_ratchet(port) != 0)
+    * The marker is written when a bearer is present for diagnostics, but is not
+    * an authorization state: an unsealed first boot fails closed too. */
+   int ratchet_rc = KB_HTTP_START_OK;
+   if (baddr == INADDR_ANY && (ratchet_rc = enforce_bearer_ratchet(port)) != KB_HTTP_START_OK)
    {
       close(g_listen_fd);
       g_listen_fd = -1;
-      return -1;
+      return ratchet_rc;
    }
 
    struct sockaddr_in sa;
@@ -289,12 +293,18 @@ int kb_http_start(int port, const char *bearer_token)
    sa.sin_addr.s_addr = htonl(baddr);
    sa.sin_port = htons((uint16_t)port);
 
-   if (bind(g_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0 ||
-       listen(g_listen_fd, KB_HTTP_BACKLOG) < 0)
+   if (bind(g_listen_fd, (struct sockaddr *)&sa, sizeof(sa)) < 0)
+   {
+      int result = errno == EADDRINUSE ? KB_HTTP_START_ADDRESS_IN_USE : KB_HTTP_START_ERROR;
+      close(g_listen_fd);
+      g_listen_fd = -1;
+      return result;
+   }
+   if (listen(g_listen_fd, KB_HTTP_BACKLOG) < 0)
    {
       close(g_listen_fd);
       g_listen_fd = -1;
-      return -1;
+      return KB_HTTP_START_ERROR;
    }
 
    g_running = 1;
@@ -303,7 +313,7 @@ int kb_http_start(int port, const char *bearer_token)
       g_running = 0;
       close(g_listen_fd);
       g_listen_fd = -1;
-      return -1;
+      return KB_HTTP_START_ERROR;
    }
 
    LOG_INFO("kb_http", "listening on %s:%d", baddr == INADDR_ANY ? "0.0.0.0" : "127.0.0.1", port);

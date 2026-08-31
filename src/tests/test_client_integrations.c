@@ -13,6 +13,20 @@
 #include "../client_integrations.c"
 #include "platform_test_util.h"
 
+static int g_test_integrations_enabled = 1;
+static const char *g_test_transport_preference = "cli-first";
+
+static cJSON *test_client_config_value(const char *key)
+{
+   if (!strcmp(key, "client_integrations_enabled"))
+      return cJSON_CreateBool(g_test_integrations_enabled);
+   if (!strcmp(key, "client_tool_transport_preference"))
+      return cJSON_CreateString(g_test_transport_preference);
+   if (!strcmp(key, "subagent_ban_enabled"))
+      return cJSON_CreateBool(1);
+   return NULL;
+}
+
 /* --- Test build_marketplace_root --- */
 
 static void test_build_marketplace_root(void)
@@ -71,64 +85,220 @@ static void test_build_aimee_plugin_entry(void)
    cJSON_Delete(entry);
 }
 
-static void test_codex_delegate_policy_is_explicit(void)
+static void test_tool_transport_registration_plan(void)
 {
-   const char *prompt = codex_delegate_policy_prompt();
-   assert(strstr(prompt, "spawn_agent") != NULL);
-   assert(strstr(prompt, "Claude Agent") != NULL);
-   assert(strstr(prompt, "delegate MCP tool") != NULL);
+   client_tool_registration_plan_t plan =
+       client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_CLI_FIRST, 1, 1, 0, 0);
+   assert(plan.cli == 1 && plan.mcp == 0);
 
-   const char *skill = codex_skill_markdown();
-   assert(strstr(skill, "Do not call provider-native sub-agent tools") != NULL);
-   assert(strstr(skill, "`spawn_agent`") != NULL);
-   assert(strstr(skill, "`delegate` MCP tool") != NULL);
+   plan = client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_CLI_FIRST, 0, 1, 0, 0);
+   assert(plan.cli == 0 && plan.mcp == 1); /* CLI cannot register -> MCP fallback */
 
-   const char *code_prompt = codex_code_exploration_prompt();
-   assert(strstr(code_prompt, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
-   assert(strstr(code_prompt, AIMEE_CODE_TOOL_AST_GREP_SEARCH) != NULL);
-   assert(strstr(code_prompt, AIMEE_CODE_TOOL_INDEX) != NULL);
-   assert(strstr(code_prompt, AIMEE_CODE_INDEX_COMMAND_HYBRID) != NULL);
-   assert(strstr(code_prompt, "search_graph") == NULL);
+   plan = client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_MCP_FIRST, 1, 1, 0, 0);
+   assert(plan.cli == 0 && plan.mcp == 1);
 
-   /* THE GUIDANCE MUST BE SUBSTITUTIVE, AND IT MUST BOUND EXPLORATION.
-    *
-    * Both properties have already regressed once each, and neither failure looked
-    * like a bug in the tooling:
-    *
-    *  - Offering the index as a FALLBACK after grep produced ZERO index calls
-    *    across a four-task benchmark on a verified-healthy index.
-    *  - Naming what the index is for without saying what to stop doing produced
-    *    an ADDITIVE agent: it used the index AND ran the full shell survey, 1.5
-    *    to 2.4x the commands of plain codex, for up to 4.4x the cost. Command
-    *    output is re-sent every later turn, so cost grows with the square of the
-    *    command count and the survey dominates.
-    *
-    * Pin both properties as text, because that is where they live. */
-   assert(strstr(code_prompt, "instead of raw grep/read") != NULL);
-   assert(strstr(code_prompt, "Do not survey the repository") != NULL);
+   plan = client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_MCP_FIRST, 1, 0, 0, 0);
+   assert(plan.cli == 1 && plan.mcp == 0); /* MCP cannot register -> CLI fallback */
 
-   /* The index replaces the search rather than confirming it. */
-   assert(strstr(skill, "REPLACES that search") != NULL);
-   /* No orienting by enumeration -- that is the expensive half. */
-   assert(strstr(skill, "Start from the index, not from a survey") != NULL);
-   assert(strstr(skill, "Never run it over the whole tree") != NULL);
-   /* The v1 phrasing that caused the zero-index-call run must not come back. */
-   assert(strstr(skill, "prefer local file inspection first") == NULL);
+   /* One-surface module capabilities override the preference only for their own
+    * surface. Distinct capabilities may therefore require both registrations,
+    * while no dual-surface capability is duplicated. */
+   plan = client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_CLI_FIRST, 1, 1, 0, 1);
+   assert(plan.cli == 1 && plan.mcp == 1);
+   plan = client_tool_registration_plan(CLIENT_TOOL_TRANSPORT_MCP_FIRST, 1, 1, 1, 0);
+   assert(plan.cli == 1 && plan.mcp == 1);
+
+   assert(client_tool_transport_parse("cli-first") == CLIENT_TOOL_TRANSPORT_CLI_FIRST);
+   assert(client_tool_transport_parse("mcp-first") == CLIENT_TOOL_TRANSPORT_MCP_FIRST);
+   assert(client_tool_transport_parse("mcp") == CLIENT_TOOL_TRANSPORT_MCP_FIRST);
+   assert(client_tool_transport_parse("invalid") == CLIENT_TOOL_TRANSPORT_CLI_FIRST);
+}
+
+static void test_codex_cli_registration_is_command_first(void)
+{
+   char skill[4096];
+   assert(format_codex_cli_skill(skill, sizeof(skill), NULL, "/opt/aimee/bin/aimee") == 0);
+   assert(strstr(skill, "/opt/aimee/bin/aimee index investigate") != NULL);
+   assert(strstr(skill, "/opt/aimee/bin/aimee index hybrid") != NULL);
+   assert(strstr(skill, "/opt/aimee/bin/aimee index find") != NULL);
+   assert(strstr(skill, "/opt/aimee/bin/aimee memory search") != NULL);
+   assert(strstr(skill, "MCP tool `") == NULL);
+}
+
+static void test_codex_manifest_registers_selected_transports_only(void)
+{
+   char manifest[4096];
+   client_tool_registration_plan_t plan = {.cli = 1, .mcp = 0};
+   format_codex_plugin_json(manifest, sizeof(manifest), 0, plan, NULL, "/opt/aimee/bin/aimee");
+   cJSON *root = cJSON_Parse(manifest);
+   assert(cJSON_IsObject(root));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "skills")));
+   assert(cJSON_GetObjectItemCaseSensitive(root, "mcpServers") == NULL);
+   cJSON *iface = cJSON_GetObjectItemCaseSensitive(root, "interface");
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(iface, "defaultPrompt")));
+   cJSON_Delete(root);
+
+   plan.cli = 0;
+   plan.mcp = 1;
+   format_codex_plugin_json(manifest, sizeof(manifest), 0, plan, NULL, "/opt/aimee/bin/aimee");
+   root = cJSON_Parse(manifest);
+   assert(cJSON_IsObject(root));
+   assert(cJSON_GetObjectItemCaseSensitive(root, "skills") == NULL);
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "mcpServers")));
+   iface = cJSON_GetObjectItemCaseSensitive(root, "interface");
+   cJSON *mcp_prompt =
+       cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(iface, "defaultPrompt"), 0);
+   assert(cJSON_IsString(mcp_prompt));
+   assert(strstr(mcp_prompt->valuestring, "REQUIRED FIRST STEP") != NULL);
+   assert(strstr(mcp_prompt->valuestring, "investigate") != NULL);
+   cJSON_Delete(root);
+
+   /* Distinct CLI-only and MCP-only capabilities legitimately aggregate to both
+    * registrations; the projection decides which capabilities each contains. */
+   plan.cli = 1;
+   plan.mcp = 1;
+   format_codex_plugin_json(manifest, sizeof(manifest), 1, plan, "local doctor",
+                            "/opt/aimee/bin/aimee");
+   root = cJSON_Parse(manifest);
+   assert(cJSON_IsObject(root));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "skills")));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "mcpServers")));
+   cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
+   assert(cJSON_IsString(hooks));
+   assert(strcmp(hooks->valuestring, "../hooks/codex-hooks.json") == 0);
+   iface = cJSON_GetObjectItemCaseSensitive(root, "interface");
+   cJSON *prompt = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(iface, "defaultPrompt"), 0);
+   assert(cJSON_IsString(prompt));
+   assert(strstr(prompt->valuestring, "local doctor") != NULL);
+   assert(strstr(prompt->valuestring, "index") != NULL);
+   assert(strstr(prompt->valuestring, "investigate") != NULL);
+   cJSON_Delete(root);
+
+   char skill[4096];
+   format_codex_cli_skill(skill, sizeof(skill), "local doctor,workspace repair",
+                          "/opt/aimee/bin/aimee");
+   assert(strstr(skill, "`/opt/aimee/bin/aimee local doctor`") != NULL);
+   assert(strstr(skill, "`/opt/aimee/bin/aimee workspace repair`") != NULL);
+   assert(strstr(skill, "aimee index investigate") == NULL);
+}
+
+static void test_projected_mcp_only_module_registers_filtered_backup(void)
+{
+   cJSON *projection =
+       cJSON_Parse("{\"agent_surfaces\":{\"cli_only\":[],\"mcp_only\":[\"kb_future\"]}}");
+   assert(cJSON_IsObject(projection));
+   client_tool_surface_requirements_t req = client_tool_surface_requirements_from_json(projection);
+   cJSON_Delete(projection);
+   assert(req.cli_only[0] == '\0');
+   assert(strcmp(req.mcp_only, "kb_future") == 0);
+
+   client_tool_registration_plan_t plan = client_tool_registration_plan(
+       CLIENT_TOOL_TRANSPORT_CLI_FIRST, 1, 1, req.cli_only[0], req.mcp_only[0]);
+   assert(plan.cli == 1 && plan.mcp == 1);
+
+   char manifest[4096];
+   format_codex_plugin_json(manifest, sizeof(manifest), 0, plan, NULL, "/opt/aimee/bin/aimee");
+   cJSON *root = cJSON_Parse(manifest);
+   assert(cJSON_IsObject(root));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "skills")));
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(root, "mcpServers")));
+   cJSON_Delete(root);
+
+   char mcp[4096];
+   format_mcp_json(mcp, sizeof(mcp), "/aimee-test/bin/aimee", req.mcp_only);
+   root = cJSON_Parse(mcp);
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(root, "mcpServers");
+   cJSON *aimee = cJSON_GetObjectItemCaseSensitive(servers, "aimee");
+   cJSON *env = cJSON_GetObjectItemCaseSensitive(aimee, "env");
+   cJSON *allowlist = cJSON_GetObjectItemCaseSensitive(env, "AIMEE_MCP_TOOL_ALLOWLIST");
+   assert(cJSON_IsString(allowlist));
+   assert(strcmp(allowlist->valuestring, "kb_future") == 0);
+   cJSON_Delete(root);
+   client_tool_surface_requirements_dispose(&req);
+}
+
+static void test_projected_module_names_are_not_truncated(void)
+{
+   cJSON *root = cJSON_CreateObject();
+   cJSON *surfaces = cJSON_AddObjectToObject(root, "agent_surfaces");
+   cJSON_AddArrayToObject(surfaces, "cli_only");
+   cJSON *mcp_only = cJSON_AddArrayToObject(surfaces, "mcp_only");
+   char name[64];
+   for (int i = 0; i < 400; i++)
+   {
+      snprintf(name, sizeof(name), "future_module_%03d", i);
+      cJSON_AddItemToArray(mcp_only, cJSON_CreateString(name));
+   }
+
+   client_tool_surface_requirements_t req = client_tool_surface_requirements_from_json(root);
+   cJSON_Delete(root);
+   assert(req.complete == 1);
+   assert(req.mcp_only != NULL && strlen(req.mcp_only) > 2048);
+   assert(strstr(req.mcp_only, "future_module_399") != NULL);
+
+   size_t cap = strlen(req.mcp_only) + 4096;
+   char *mcp = malloc(cap);
+   assert(mcp != NULL);
+   assert(format_mcp_json(mcp, cap, "/aimee-test/bin/aimee", req.mcp_only) == 0);
+   root = cJSON_Parse(mcp);
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(root, "mcpServers");
+   cJSON *aimee = cJSON_GetObjectItemCaseSensitive(servers, "aimee");
+   cJSON *env = cJSON_GetObjectItemCaseSensitive(aimee, "env");
+   cJSON *allowlist = cJSON_GetObjectItemCaseSensitive(env, "AIMEE_MCP_TOOL_ALLOWLIST");
+   assert(cJSON_IsString(allowlist));
+   assert(strstr(allowlist->valuestring, "future_module_399") != NULL);
+   cJSON_Delete(root);
+   free(mcp);
+   client_tool_surface_requirements_dispose(&req);
+}
+
+static void test_codex_plugin_provisions_session_worktree(void)
+{
+   {
+      const char *hooks = codex_hooks_json("/usr/local/bin/aimee", "cli");
+      assert(strstr(hooks, "\"SessionStart\"") != NULL);
+      assert(strstr(hooks, "session-start") != NULL);
+      assert(strstr(hooks, "startup|resume|clear|compact") != NULL);
+      assert(strstr(hooks, "\"PreToolUse\"") != NULL);
+      assert(strstr(hooks, "\"SessionEnd\"") != NULL);
+      assert(strstr(hooks, "session-end") != NULL);
+      assert(strstr(hooks, "AIMEE_CLI_PATH=/usr/local/bin/aimee") != NULL);
+      /* MUST be `hooks pre`, not `hooks`. Bare `hooks` exits with "hooks requires
+       * 'pre' or 'post'" and codex allows the tool -- a hook that is installed,
+       * declared, well-formed, and enforces nothing. The first version of this
+       * assertion pinned exactly that defect by matching the prefix. */
+      assert(strstr(hooks, "/usr/local/bin/aimee hooks pre") != NULL);
+      cJSON *parsed = cJSON_Parse(hooks);
+      assert(parsed != NULL); /* codex refuses a malformed hooks file outright */
+      cJSON_Delete(parsed);
+      /* A hooks file codex never loads is the same as no hook, so the manifest
+       * must point at it. ensure_codex_plugin writes both; assert the path the
+       * manifest declares matches the file the writer emits. */
+      assert(strstr(hooks, "\"command\"") != NULL);
+   }
 }
 
 static void test_mcp_config_uses_resolved_command(void)
 {
    char buf[1024];
-   format_mcp_json(buf, sizeof(buf), "/tmp/aimee-bin");
-   assert(strstr(buf, "\"command\": \"/tmp/aimee-bin\"") != NULL);
-   assert(strstr(buf, "\"command\": \"aimee\"") == NULL);
-   assert(strstr(buf, "\"args\": [\"mcp-serve\"]") != NULL);
+   assert(format_mcp_json(buf, sizeof(buf), "/aimee-test/bin/aimee", NULL) == 0);
+   cJSON *config = cJSON_Parse(buf);
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(config, "mcpServers");
+   cJSON *configured = cJSON_GetObjectItemCaseSensitive(servers, "aimee");
+   cJSON *configured_command = cJSON_GetObjectItemCaseSensitive(configured, "command");
+   assert(cJSON_IsString(configured_command));
+   assert(strcmp(configured_command->valuestring, "/aimee-test/bin/aimee") == 0);
+   cJSON *configured_args = cJSON_GetObjectItemCaseSensitive(configured, "args");
+   assert(cJSON_IsArray(configured_args));
+   assert(strcmp(cJSON_GetArrayItem(configured_args, 0)->valuestring, "mcp-serve") == 0);
+   cJSON_Delete(config);
+   assert(strstr(buf, "AIMEE_IR_SESSION_OWNER") == NULL);
 
-   cJSON *server = create_aimee_mcp_server("/tmp/aimee-bin");
+   cJSON *server = create_aimee_mcp_server("/aimee-test/bin/aimee");
    assert(cJSON_IsObject(server));
    cJSON *cmd = cJSON_GetObjectItemCaseSensitive(server, "command");
    assert(cJSON_IsString(cmd));
-   assert(strcmp(cmd->valuestring, "/tmp/aimee-bin") == 0);
+   assert(strcmp(cmd->valuestring, "/aimee-test/bin/aimee") == 0);
    cJSON *args = cJSON_GetObjectItemCaseSensitive(server, "args");
    assert(cJSON_IsArray(args));
    cJSON *arg0 = cJSON_GetArrayItem(args, 0);
@@ -145,36 +315,59 @@ static void test_mcp_config_uses_resolved_command(void)
  * all and falls back to grep, which is indistinguishable from deciding the
  * index was not worth calling. Measured: 18 tools with AIMEE_HOME, 0 without,
  * regardless of HOME. */
-/* The solo profile withholds the delegate tools. Guidance that still tells the
- * agent to delegate would point at a tool it cannot see, and would undermine the
- * one guarantee the profile exists to give: that no second agent touches the
- * work. */
-static void test_solo_profile_guidance_forbids_delegation(void)
+/* THE SKILL IS THE SAME TEXT FOR EVERY RUN.
+ *
+ * There used to be a "solo" variant that withheld the delegate tools and swapped
+ * the delegation bullets for "do all of this work yourself". A profile that hides
+ * shipped tools during measurement makes the measured thing a configuration
+ * nobody deploys -- the benchmark stops describing aimee. If work should not be
+ * delegated, that is a rule of the run, not a different build.
+ *
+ * Pin that the profile no longer changes what the agent is told. */
+static void test_hooks_do_not_vary_by_tool_profile(void)
 {
-   const char *prompt = NULL;
-
    setenv("AIMEE_MCP_TOOL_PROFILE", "solo", 1);
-   prompt = codex_delegate_policy_prompt();
-   assert(strstr(prompt, "do this work yourself") != NULL);
-   assert(strstr(prompt, "use the aimee delegate MCP tool") == NULL);
+   char solo_hooks[1536];
+   snprintf(solo_hooks, sizeof solo_hooks, "%s", codex_hooks_json("aimee", "cli"));
 
-   /* The skill is what the agent actually reads: it must not name a tool the
-    * profile withheld. */
-   {
-      const char *skill = codex_skill_markdown_effective();
-      assert(strstr(skill, "`delegate` MCP tool") == NULL);
-      assert(strstr(skill, "Do all of this work yourself") != NULL);
-      /* the rest of the skill survives */
-      assert(strstr(skill, AIMEE_CODE_TOOL_FIND_SYMBOL) != NULL);
-   }
-
-   /* The default still routes parallel work through delegate. */
    setenv("AIMEE_MCP_TOOL_PROFILE", "core", 1);
-   prompt = codex_delegate_policy_prompt();
-   assert(strstr(prompt, "use the aimee delegate MCP tool") != NULL);
-   assert(strstr(codex_skill_markdown_effective(), "`delegate` MCP tool") != NULL);
+   assert(strcmp(solo_hooks, codex_hooks_json("aimee", "cli")) == 0);
 
    unsetenv("AIMEE_MCP_TOOL_PROFILE");
+}
+
+static void test_client_markdown_is_retired(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-test-no-markdown-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+
+   char skill[640], command[640], customized[640], unrelated[640];
+   snprintf(skill, sizeof skill, "%s/plugins/aimee/skills/aimee/SKILL.md", tmpdir);
+   snprintf(command, sizeof command, "%s/.claude/commands/aimee-search.md", tmpdir);
+   snprintf(customized, sizeof customized, "%s/.claude/commands/aimee-delegate.md", tmpdir);
+   snprintf(unrelated, sizeof unrelated, "%s/.claude/commands/user-command.md", tmpdir);
+   write_text_file(skill, "user-customized legacy skill", 0644);
+   write_text_file(command,
+                   "Search aimee memory for project facts, prior decisions, and stored context.\n"
+                   "\n"
+                   "Use the aimee MCP tool `search_memory` with the query: $ARGUMENTS\n"
+                   "\n"
+                   "If no query is provided, use `list_facts` to show all stored facts.\n",
+                   0644);
+   write_text_file(customized, "user-customized legacy command", 0644);
+   write_text_file(unrelated, "keep", 0644);
+   assert(access(skill, F_OK) == 0 && access(command, F_OK) == 0);
+
+   retire_client_markdown(tmpdir);
+   assert(access(skill, F_OK) == 0);
+   assert(access(command, F_OK) != 0);
+   assert(access(customized, F_OK) == 0);
+   assert(access(unrelated, F_OK) == 0);
+
+   char rm_cmd[700];
+   snprintf(rm_cmd, sizeof rm_cmd, "rm -rf '%s'", tmpdir);
+   (void)system(rm_cmd);
 }
 
 static void test_mcp_config_carries_aimee_home(void)
@@ -186,11 +379,19 @@ static void test_mcp_config_carries_aimee_home(void)
 
    setenv("AIMEE_HOME", "/var/lib/aimee-home", 1);
 
-   format_mcp_json(buf, sizeof(buf), "/tmp/aimee-bin");
+   assert(format_mcp_json(buf, sizeof(buf), "/aimee-test/bin/aimee", NULL) == 0);
    assert(strstr(buf, "\"env\"") != NULL);
-   assert(strstr(buf, "\"AIMEE_HOME\": \"/var/lib/aimee-home\"") != NULL);
+   assert(strstr(buf, "AIMEE_IR_SESSION_OWNER") == NULL);
+   cJSON *config = cJSON_Parse(buf);
+   cJSON *servers = cJSON_GetObjectItemCaseSensitive(config, "mcpServers");
+   cJSON *configured = cJSON_GetObjectItemCaseSensitive(servers, "aimee");
+   cJSON *configured_env = cJSON_GetObjectItemCaseSensitive(configured, "env");
+   cJSON *configured_home = cJSON_GetObjectItemCaseSensitive(configured_env, "AIMEE_HOME");
+   assert(cJSON_IsString(configured_home));
+   assert(strcmp(configured_home->valuestring, "/var/lib/aimee-home") == 0);
+   cJSON_Delete(config);
 
-   server = create_aimee_mcp_server("/tmp/aimee-bin");
+   server = create_aimee_mcp_server("/aimee-test/bin/aimee");
    assert(cJSON_IsObject(server));
    env = cJSON_GetObjectItemCaseSensitive(server, "env");
    assert(cJSON_IsObject(env));
@@ -202,10 +403,11 @@ static void test_mcp_config_carries_aimee_home(void)
    /* Unset means the default resolution already works; pinning a value the
     * operator never chose would be worse than saying nothing. */
    unsetenv("AIMEE_HOME");
-   format_mcp_json(buf, sizeof(buf), "/tmp/aimee-bin");
+   assert(format_mcp_json(buf, sizeof(buf), "/aimee-test/bin/aimee", NULL) == 0);
    assert(strstr(buf, "AIMEE_HOME") == NULL);
+   assert(strstr(buf, "AIMEE_IR_SESSION_OWNER") == NULL);
 
-   server = create_aimee_mcp_server("/tmp/aimee-bin");
+   server = create_aimee_mcp_server("/aimee-test/bin/aimee");
    assert(cJSON_GetObjectItemCaseSensitive(server, "env") == NULL);
    cJSON_Delete(server);
 }
@@ -229,18 +431,8 @@ static int hook_event_has_cmd(cJSON *hooks, const char *event, const char *needl
    return 0;
 }
 
-/* Assert ensure_claude_code_hooks registered EVERY hook aimee relies on. This
- * required set is INDEPENDENT of the production code's registration order/table
- * on purpose -- so if any registration is ever dropped (as the SessionStart hook
- * silently was, leaving the primary with no aimee session brief: the configured
- * persona [default `engineer`, but operator-selectable via AIMEE_MODE / the mode
- * file] + MCP-skill index + Rules + Key Facts, rendered by `aimee session-start`
- * -> session_start_emit -> build_session_context), this fails. Adding a new client
- * hook means adding it here too. Each entry: {settings.json event, the
- * `aimee <subcommand>` it invokes}. Asserted for BOTH the fresh-settings and the
- * add-to-an-existing-settings.json paths (the latter is the exact shape of the
- * live regression: a settings.json that already had the other hooks but not
- * SessionStart). */
+/* Assert the remaining tool and recall hooks. Persona delivery is deliberately
+ * absent: shared model ingress prepends the editable persona for every client. */
 static void assert_required_hooks_present(cJSON *hooks)
 {
    static const struct
@@ -248,10 +440,9 @@ static void assert_required_hooks_present(cJSON *hooks)
       const char *event;
       const char *subcommand;
    } required[] = {
-       {"SessionStart", "session-start"},          /* session brief: persona + skills + rules */
        {"UserPromptSubmit", "user-prompt-submit"}, /* per-turn recall envelope */
        {"PreCompact", "pre-compact"},              /* post-compact recall re-prime */
-       {"PreToolUse", "attention-guard"},          /* per-file attention + destructive-op guard */
+       {"PreToolUse", "hooks pre"},                /* policy plus transparent workspace routing */
        {"PostToolUse", "hooks post"},              /* post-edit hook */
    };
    for (size_t i = 0; i < sizeof(required) / sizeof(required[0]); i++)
@@ -349,7 +540,7 @@ static void test_claude_mcp_creates_fresh_user_config(void)
    fputs("{\"existingKey\": true, \"mcpServers\": {\"other\": {\"command\": \"other-mcp\"}}}", fp);
    fclose(fp);
 
-   ensure_claude_code_mcp_entry(config_path, fake_bin);
+   ensure_claude_code_mcp_entry(config_path, fake_bin, NULL);
 
    cJSON *root = read_json_file(config_path);
    assert(root != NULL);
@@ -380,6 +571,28 @@ static void test_claude_mcp_creates_fresh_user_config(void)
    assert(cJSON_IsArray(args));
    assert(strcmp(cJSON_GetArrayItem(args, 0)->valuestring, "mcp-serve") == 0);
 
+   cJSON_Delete(root);
+
+   /* A projected MCP-only module keeps the fallback registration but narrows
+    * it to that module instead of duplicating the dual-surface CLI tools. */
+   ensure_claude_code_mcp_entry(config_path, fake_bin, "future_module_399");
+   root = read_json_file(config_path);
+   servers = cJSON_GetObjectItem(root, "mcpServers");
+   aimee = cJSON_GetObjectItem(servers, "aimee");
+   cJSON *env = cJSON_GetObjectItem(aimee, "env");
+   cJSON *allowlist = cJSON_GetObjectItem(env, "AIMEE_MCP_TOOL_ALLOWLIST");
+   assert(cJSON_IsString(allowlist));
+   assert(strcmp(allowlist->valuestring, "future_module_399") == 0);
+   cJSON_Delete(root);
+
+   /* CLI-first with no MCP-only projection retires only Aimee's generated MCP
+    * entry and preserves every unrelated Claude setting/server. */
+   remove_claude_code_mcp(config_path);
+   root = read_json_file(config_path);
+   assert(cJSON_IsTrue(cJSON_GetObjectItem(root, "existingKey")));
+   servers = cJSON_GetObjectItem(root, "mcpServers");
+   assert(cJSON_IsObject(cJSON_GetObjectItem(servers, "other")));
+   assert(cJSON_GetObjectItem(servers, "aimee") == NULL);
    cJSON_Delete(root);
 
    /* Cleanup */
@@ -497,9 +710,8 @@ static void test_claude_hooks_subagent_ban_gate(void)
    assert(hook_event_has_cmd(hooks, "PreToolUse", "subagent-guard"));
    assert(perms_deny_has(root, "Task"));
    assert(perms_deny_has(root, "Agent"));
-   /* The attention-guard matcher no longer claims Task|Agent (the dedicated guard
-    * owns them now). */
-   assert(hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
+   /* The composed pre hook covers all tools; the dedicated guard owns Task|Agent. */
+   assert(hook_event_has_cmd(hooks, "PreToolUse", "hooks pre"));
    cJSON_Delete(root);
 
    /* The path written into the user's GLOBAL config must be the INSTALLED
@@ -582,7 +794,9 @@ static void test_claude_hooks_patch_existing_matcher(void)
    snprintf(settings_path, sizeof(settings_path), "%s/settings.json", tmpdir);
    FILE *fp = fopen(settings_path, "w");
    assert(fp != NULL);
-   fputs("{\"hooks\":{\"PostToolUse\":[{\"matcher\":\"Edit|Write|MultiEdit\","
+   fputs("{\"hooks\":{\"SessionStart\":[{\"hooks\":[{\"type\":\"command\","
+         "\"command\":\"aimee session-start\"}]}],"
+         "\"PostToolUse\":[{\"matcher\":\"Edit|Write|MultiEdit\","
          "\"hooks\":[{\"type\":\"command\",\"command\":\"AIMEE_HOOK_CLIENT=claude "
          "aimee hooks post\"}]}]}}",
          fp);
@@ -604,10 +818,10 @@ static void test_claude_hooks_patch_existing_matcher(void)
    assert(strstr(matcher->valuestring, "EnterWorktree") != NULL);
    assert(strstr(matcher->valuestring, "ExitWorktree") != NULL);
 
-   /* Regression (the live shape of the SessionStart bug): a settings.json that
-    * already had SOME hooks must still get the MISSING ones added -- SessionStart
-    * in particular. Merging into an existing file must not skip a hook. */
+   /* SessionStart remains installed for silent workspace provisioning only. */
    assert_required_hooks_present(hooks);
+   assert(hook_event_has_cmd(hooks, "SessionStart", "session-start"));
+   assert(hook_event_has_cmd(hooks, "SessionEnd", "session-end"));
    cJSON_Delete(root);
 
    char cmd[512];
@@ -646,10 +860,10 @@ static void test_claude_hooks_repoint_stale_command(void)
    assert(cJSON_IsObject(root));
    cJSON *hooks = cJSON_GetObjectItemCaseSensitive(root, "hooks");
 
-   /* Both the PreToolUse attention-guard and the PostToolUse hooks-post commands
-    * are re-pointed off the stale /tmp path to the resolved binary. */
+   /* The stale direct guard is replaced by the composed pre hook; both current
+    * commands are re-pointed off the stale /tmp path. */
    const char *events[] = {"PreToolUse", "PostToolUse"};
-   const char *needles[] = {"attention-guard", "hooks post"};
+   const char *needles[] = {"hooks pre", "hooks post"};
    for (int e = 0; e < 2; e++)
    {
       cJSON *arr = cJSON_GetObjectItemCaseSensitive(hooks, events[e]);
@@ -671,6 +885,7 @@ static void test_claude_hooks_repoint_stale_command(void)
       assert(strstr(found, "AIMEE_HOOK_CLIENT=claude ") == found);
       assert(strstr(found, needles[e]) != NULL);
    }
+   assert(!hook_event_has_cmd(hooks, "PreToolUse", "attention-guard"));
    cJSON_Delete(root);
 
    char cmd[512];
@@ -1224,7 +1439,59 @@ static void test_write_text_file_no_op(void)
    unlink(tmppath);
 }
 
+static void test_unselected_generated_surface_is_removed(void)
+{
+   char path[512];
+   snprintf(path, sizeof(path), "%s/aimee-test-generated-surface-XXXXXX", platform_tmpdir());
+   int fd = mkstemp(path);
+   assert(fd >= 0);
+   close(fd);
+
+   assert(sync_generated_surface_file(path, "generated\n", 1) == 0);
+   assert(access(path, F_OK) == 0);
+   assert(sync_generated_surface_file(path, NULL, 0) == 0);
+   assert(access(path, F_OK) != 0);
+   assert(errno == ENOENT);
+   /* Retiring an already-absent generated surface is idempotent. */
+   assert(sync_generated_surface_file(path, NULL, 0) == 0);
+}
+
+static void test_generated_surface_availability_drives_fallback(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-surface-probe-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+
+   char writable[640];
+   snprintf(writable, sizeof(writable), "%s/skills/aimee/SKILL.md", tmpdir);
+   assert(generated_surface_path_writable(writable) == 1);
+
+   char blocker[640];
+   snprintf(blocker, sizeof(blocker), "%s/not-a-directory", tmpdir);
+   assert(write_text_file(blocker, "block", 0644) == 0);
+   char unavailable[700];
+   snprintf(unavailable, sizeof(unavailable), "%s/child/SKILL.md", blocker);
+   assert(generated_surface_path_writable(unavailable) == 0);
+
+   client_tool_registration_plan_t plan = client_tool_registration_plan(
+       CLIENT_TOOL_TRANSPORT_CLI_FIRST, generated_surface_path_writable(unavailable),
+       generated_surface_path_writable(writable), 0, 0);
+   assert(plan.cli == 0 && plan.mcp == 1);
+
+   char rm_cmd[700];
+   snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf '%s'", tmpdir);
+   (void)system(rm_cmd);
+}
+
 /* --- Test the client-integrations opt-out gate --- */
+
+static void test_tool_transport_preference_config(void)
+{
+   g_test_transport_preference = "mcp-first";
+   assert(client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_MCP_FIRST);
+   g_test_transport_preference = "cli-first";
+   assert(client_tool_transport_preference() == CLIENT_TOOL_TRANSPORT_CLI_FIRST);
+}
 
 static void test_client_integrations_optout_gate(void)
 {
@@ -1261,14 +1528,8 @@ static void test_client_integrations_optout_gate(void)
    assert(client_integrations_allowed() == 1);
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
 
-   /* Config-driven opt-out: client_integrations_enabled: false closes the gate
-    * even with no env override. */
-   char yaml_path[600];
-   snprintf(yaml_path, sizeof(yaml_path), "%s/aimee.yaml", tmpdir);
-   FILE *fp = fopen(yaml_path, "w");
-   assert(fp != NULL);
-   fputs("client_integrations_enabled: false\n", fp);
-   fclose(fp);
+   /* Config-driven opt-out from the remote config contract closes the gate. */
+   g_test_integrations_enabled = 0;
    assert(client_integrations_allowed() == 0);
 
    /* And the env override still wins the other way: "0" cannot re-enable it once
@@ -1279,6 +1540,7 @@ static void test_client_integrations_optout_gate(void)
    /* Restore AIMEE_HOME (best-effort) and neutralize the opt-out env so later
     * code in this process sees a clean state. */
    platform_setenv("AIMEE_NO_CLIENT_INTEGRATIONS", "0");
+   g_test_integrations_enabled = 1;
    if (old_home[0])
       platform_setenv("AIMEE_HOME", old_home);
 
@@ -1287,15 +1549,107 @@ static void test_client_integrations_optout_gate(void)
    system(rm_cmd);
 }
 
+static void test_opencode_and_hermes_worktree_adapters(void)
+{
+   char tmpdir[512];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-client-adapters-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   char path[768];
+   snprintf(path, sizeof path, "%s/.config/opencode", tmpdir);
+   assert(platform_mkdir_p(path, 0700) == 0);
+   snprintf(path, sizeof path, "%s/.hermes", tmpdir);
+   assert(platform_mkdir_p(path, 0700) == 0);
+   snprintf(path, sizeof path, "%s/.hermes/config.yaml", tmpdir);
+   assert(write_text_file(path, "model: test\nplugins:\n  enabled: [existing]\n", 0600) == 0);
+
+   ensure_opencode_worktree_integration(tmpdir);
+   ensure_hermes_worktree_integration(tmpdir);
+   ensure_hermes_worktree_integration(tmpdir); /* idempotent config merge */
+
+   dstr_t text;
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.config/opencode/plugins/aimee-worktrees.js", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "session.created") != NULL);
+   assert(strstr(dstr_cstr(&text), "session.deleted") != NULL);
+   assert(strstr(dstr_cstr(&text), "session-end") != NULL);
+   assert(strstr(dstr_cstr(&text), "tool.execute.before") != NULL);
+   assert(strstr(dstr_cstr(&text), "attention-guard") != NULL);
+   assert(strstr(dstr_cstr(&text), "new TextEncoder().encode(JSON.stringify(payload))") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/plugins/aimee-worktrees/__init__.py", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "on_session_start") != NULL);
+   assert(strstr(dstr_cstr(&text), "on_session_end") != NULL);
+   assert(strstr(dstr_cstr(&text), "pre_tool_call") != NULL);
+   assert(strstr(dstr_cstr(&text), "active_sid") != NULL);
+   assert(strstr(dstr_cstr(&text), "session_id or active_sid[0]") != NULL);
+   assert(strstr(dstr_cstr(&text), "'action':'block'") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/plugins/aimee-worktrees/plugin.yaml", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "provides_hooks:") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - on_session_start") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - pre_tool_call") != NULL);
+   assert(strstr(dstr_cstr(&text), "  - on_session_end") != NULL);
+   dstr_free(&text);
+
+   dstr_init(&text);
+   snprintf(path, sizeof path, "%s/.hermes/config.yaml", tmpdir);
+   assert(dstr_read_file(&text, path) == 0);
+   assert(strstr(dstr_cstr(&text), "existing, aimee-worktrees") != NULL);
+   const char *first = strstr(dstr_cstr(&text), "aimee-worktrees");
+   assert(first && strstr(first + 1, "aimee-worktrees") == NULL);
+   assert(strstr(dstr_cstr(&text), "model: test") != NULL);
+   dstr_free(&text);
+
+   char cmd[800];
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
+static void test_installed_client_detection_does_not_require_first_run(void)
+{
+   char tmpdir[512], bin[640];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-client-path-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(tmpdir) != NULL);
+   snprintf(bin, sizeof bin, "%s/opencode", tmpdir);
+   assert(write_text_file(bin, "#!/bin/sh\nexit 0\n", 0700) == 0);
+   assert(chmod(bin, 0700) == 0);
+
+   const char *old = getenv("PATH");
+   char *saved = old ? strdup(old) : NULL;
+   assert(platform_setenv("PATH", tmpdir) == 0);
+   assert(client_command_installed("opencode") == 1);
+   assert(client_command_installed("hermes") == 0);
+   assert(platform_setenv("PATH", saved ? saved : "") == 0);
+   free(saved);
+
+   char cmd[800];
+   snprintf(cmd, sizeof cmd, "rm -rf '%s'", tmpdir);
+   system(cmd);
+}
+
 int main(void)
 {
+   client_config_set_provider(test_client_config_value);
    printf("client_integrations: ");
 
    test_build_marketplace_root();
    test_build_aimee_plugin_entry();
-   test_codex_delegate_policy_is_explicit();
+   test_tool_transport_registration_plan();
+   test_codex_cli_registration_is_command_first();
+   test_codex_manifest_registers_selected_transports_only();
+   test_projected_mcp_only_module_registers_filtered_backup();
+   test_projected_module_names_are_not_truncated();
+   test_codex_plugin_provisions_session_worktree();
    test_mcp_config_uses_resolved_command();
-   test_solo_profile_guidance_forbids_delegation();
+   test_hooks_do_not_vary_by_tool_profile();
+   test_client_markdown_is_retired();
    test_mcp_config_carries_aimee_home();
    test_read_json_file_missing();
    test_read_json_file_valid();
@@ -1315,12 +1669,17 @@ int main(void)
    test_codex_marketplace_fresh();
    test_codex_marketplace_preserves_other_plugins();
    test_write_text_file_no_op();
+   test_unselected_generated_surface_is_removed();
+   test_generated_surface_availability_drives_fallback();
    test_claude_trust_creates_entry_for_new_path();
    test_claude_trust_updates_existing_untrusted_entry();
    test_claude_trust_idempotent();
    test_claude_trust_preserves_other_projects();
    test_claude_trust_no_op_when_claude_json_missing();
+   test_tool_transport_preference_config();
    test_client_integrations_optout_gate();
+   test_opencode_and_hermes_worktree_adapters();
+   test_installed_client_detection_does_not_require_first_run();
 
    printf("all tests passed\n");
    return 0;

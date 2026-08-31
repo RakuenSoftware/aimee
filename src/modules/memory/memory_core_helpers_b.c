@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -14,27 +11,28 @@
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -43,8 +41,27 @@
 #include <unistd.h>
 #include <pthread.h>
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void coref_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.coref", "coreference refresh is unavailable: the relational store is "
+                            "unreachable, so entity coreference is left stale rather than "
+                            "confirmed current");
+}
+
 void memory_refresh_coref_entities(int64_t memory_id, const char *content)
 {
+   if (!db2_conn())
+   {
+      coref_warn_store_unreachable();
+      return;
+   }
    if (memory_id <= 0 || !content || !content[0] || !memory_coref_has_pronoun(content))
       return;
 
@@ -412,8 +429,37 @@ enum
    MEMORY_QEMBED_CAP = 32,
    MEMORY_QEMBED_TEXT_MAX = 1024,
    MEMORY_QEMBED_CMD_MAX = 512,
-   MEMORY_EMBED_HTTP_TIMEOUT_MS = 30000
+   /* Fallback only; use memory_embed_http_timeout_ms(). */
+   MEMORY_EMBED_HTTP_TIMEOUT_MS_DEFAULT = 180000
 };
+
+/* Bound on one embed round trip.
+ *
+ * This was hardcoded at 30 s, which is ~20x an UNLOADED 128-text batch (1.5 s
+ * measured against bekko-a25m). It is not 20x a loaded one: the kb embeds from
+ * up to KB_WORKER_MAX threads, the embedder is a ThreadingHTTPServer, and each
+ * request runs torch with EMBEDDER_THREADS threads. On a 4-CPU container that
+ * oversubscribes the machine several times over, every in-flight batch slows
+ * together, and the first to cross 30 s makes the kb drop the connection --
+ * which the embedder then reports as BrokenPipeError and `kb build` reports as
+ * "knowledge service /v1/code/build did not respond".
+ *
+ * The cost is a property of batch size and host load, not of the service being
+ * healthy, so default generously and let an operator tune it. The correct
+ * companion fix is to stop oversubscribing (EMBEDDER_THREADS), not to wait
+ * longer -- but a bound below the real cost turns a slow build into a failed
+ * one, and that is the failure this removes. */
+int memory_embed_http_timeout_ms(void)
+{
+   const char *env = getenv("AIMEE_EMBED_HTTP_TIMEOUT_MS");
+   if (env && env[0])
+   {
+      long v = strtol(env, NULL, 10);
+      if (v > 0 && v <= 24L * 60 * 60 * 1000)
+         return (int)v;
+   }
+   return MEMORY_EMBED_HTTP_TIMEOUT_MS_DEFAULT;
+}
 
 /* In-process HTTP embedding. When embedding_command is an http(s):// URL we POST
  * to the embedder directly instead of forking an interpreter, so a query embed is
@@ -474,7 +520,7 @@ int memory_embed_http_post_status(const char *base, const char *path, const char
    }
    memory_embed_http_url(base, path, url, sizeof(url));
    *resp = NULL;
-   int status = agent_http_post(url, auth_header, body, resp, MEMORY_EMBED_HTTP_TIMEOUT_MS, NULL);
+   int status = agent_http_post(url, auth_header, body, resp, memory_embed_http_timeout_ms(), NULL);
    if (status_out)
       *status_out = status;
    runtime_secret_wipe(token, sizeof(token));
@@ -555,7 +601,7 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
    }
 
    char *body = NULL;
-   int status = agent_http_get(url, auth_header, &body, MEMORY_EMBED_HTTP_TIMEOUT_MS);
+   int status = agent_http_get(url, auth_header, &body, memory_embed_http_timeout_ms());
    /* 503 is expected while the embedder warms up and still carries the payload —
     * serving_id is registry data, not a measurement, so it is readable before the
     * child can embed. Anything else with no body is a transport failure. */
@@ -609,6 +655,13 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
    const char *effective_cmd = memory_effective_embedding_cmd(command);
    s_qembed_requests++;
 
+   /* No configured embedder is an unavailable vector lane, not a request to
+    * execute a magic `builtin` command. The lexical fallback was removed from
+    * memory_embed_text; resurrecting its old name here only starts a failing
+    * subprocess and trips the dependency breaker. */
+   if (!effective_cmd || !effective_cmd[0])
+      return 0;
+
    /* Cacheable only when both keys fit their buffers (so a stored key is exact,
     * never a truncated prefix that could false-match a different query). */
    int cacheable = text && command && strlen(text) < MEMORY_QEMBED_TEXT_MAX &&
@@ -630,12 +683,6 @@ int memory_embed_text_runtime(const char *text, const char *command, float *out,
    s_qembed_misses++;
    long long _emb_t0 = util_now_ms();
    int dim = memory_embed_text(text, effective_cmd, EMBED_INPUT_QUERY, out, max_dim);
-   if (dim <= 0 && strcmp(effective_cmd, "builtin") != 0)
-   {
-      aimee_log(LOG_WARN, "memory",
-                "query embedding failed for configured command; retrying with builtin embeddings");
-      dim = memory_embed_text(text, "builtin", EMBED_INPUT_QUERY, out, max_dim);
-   }
    s_qembed_ms += util_now_ms() - _emb_t0;
    s_qembed_spawns++;
 
@@ -932,12 +979,10 @@ static void memory_embed_unit_row(int64_t unit_id, const char *unit_type, const 
                unit_key ? unit_key : "", unit_text, weight);
 
    float vec[EMBED_MAX_DIM];
-   const char *model = (command && command[0]) ? command : "builtin";
-   int dim = memory_embed_text(text, model, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
+   int dim = memory_embed_text(text, command, EMBED_INPUT_DOCUMENT, vec, EMBED_MAX_DIM);
    if (dim <= 0)
       return;
 
-   (void)model;
    memory_sync_unit_vec_row(unit_id, vec, dim);
 }
 
@@ -1082,18 +1127,11 @@ void memory_refresh_units_graph(int64_t memory_id, const char *key, const char *
 
    db2_memory_unit_edges_delete_for_memory(memory_id);
 
-   /* Drop the per-unit pgvector points before deleting the rows. */
-   {
-      int64_t prior_unit_ids[256];
-      int prior_n = db2_memory_unit_list_ids(
-          memory_id, prior_unit_ids, (int)(sizeof(prior_unit_ids) / sizeof(prior_unit_ids[0])));
-      for (int i = 0; i < prior_n; i++)
-      {
-         int64_t pt = PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET + prior_unit_ids[i];
-         pgvec_memory_vector_delete_point(pt);
-         db2_vector_index_op_remove(pt);
-      }
-   }
+   /* Drop the per-unit pgvector points before deleting the rows. Derived in SQL
+    * rather than enumerated: a fixed buffer here bounded reclamation at its own
+    * size and silently orphaned every unit past it. */
+   (void)pgvec_memory_vector_delete_points_for_memory(memory_id, 0);
+   db2_vector_index_ops_remove_for_memory(memory_id, PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET, 0);
    db2_memory_units_delete_for_memory(memory_id);
 
    int64_t summary_units[8];

@@ -6,9 +6,9 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "db2/demotion.h"
-#include "db2/feedback.h"
-#include "db2/kb_service_backend.h"
+#include "modules/db2/c/demotion.h"
+#include "modules/db2/c/feedback.h"
+#include "modules/db2/c/kb_service_backend.h"
 #include "kb_calibrate.h"
 #include "kb_demote.h"
 #include "kb_ranker_fit.h"
@@ -224,6 +224,12 @@ int kb_handle_learning_propose_signal(int fd, cJSON *req)
 {
    cJSON *resp = db2_kb_service_learning_propose_signal_json(req);
    return kb_reply_or_error(fd, resp, "failed to record learning signal");
+}
+
+int kb_handle_learning_record_application(int fd, cJSON *req)
+{
+   cJSON *resp = db2_kb_service_learning_record_application_json(req);
+   return kb_reply_or_error(fd, resp, "failed to record learning application");
 }
 
 int kb_handle_agent_outcome_record(int fd, cJSON *req)

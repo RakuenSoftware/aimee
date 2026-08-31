@@ -26,16 +26,9 @@ FORBIDDEN = (
     "skill_curator.c",
     "skill_curator.h",
 )
-CONFIG_KEYS = ("curator_interval_hours", '"curator"')
-CONFIG_FILES = (
-    "src/modules/config/config.c",
-    "src/modules/config/config.h",
-    "src/modules/config/config_save.c",
-    "src/modules/config/config_skills.c",
-)
 BUILD_FILES = ("CMakeLists.txt", "src/Makefile", "src/tests/Rules.mk")
 DISPOSITION = "docs/audit/dispositions/background-skill-curator.yaml"
-PROPOSAL = "docs/proposals/pending/feature-liveness-and-background-curator-removal.md"
+PROPOSAL = "docs/proposals/done/feature-liveness-and-background-curator-removal.md"
 
 
 class CheckError(ValueError):
@@ -73,31 +66,27 @@ def validate(root: Path) -> None:
         for token in FORBIDDEN:
             require(token not in text, "retired-reference", f"{token!r} in {path.relative_to(root)}")
 
-    for rel in CONFIG_FILES:
-        text = read(root / rel)
-        for key in CONFIG_KEYS:
-            require(key not in text, "retired-config", f"{key!r} in {rel}")
-
     for rel in BUILD_FILES:
         text = read(root / rel)
-        require("skill_curator" not in text, "retired-build-object", rel)
+        # The protected build may invoke this checker by name; reject only the
+        # retired object/source forms rather than making enforcement self-failing.
+        require("skill_curator.o" not in text, "retired-build-object", rel)
 
     memory = read(root / "src/modules/memory/memory_maintenance.c")
     require("db1_maintenance_state_load" in memory, "memory-maintenance-preserved", "load anchor")
     require("db1_maintenance_state_save" in memory, "memory-maintenance-preserved", "save anchor")
-    require((root / "src/db1/maintenance.c").is_file(), "maintenance-state-preserved", "DB1 implementation")
+    # The store's side of maintenance state. It was src/modules/db1/maintenance.c
+    # until the store became a Go module; the anchor is the ops themselves, so
+    # this keeps checking that retiring the skill curator did not take
+    # maintenance state with it.
+    store_state = read(root / "server-go/modules/aimee/families/runtime_state.go")
+    require("maintenanceStateLoad" in store_state, "maintenance-state-preserved", "store load implementation")
+    require("maintenanceStateSave" in store_state, "maintenance-state-preserved", "store save implementation")
 
     kb_files = list((root / "src/modules/kb-synthesis").glob("kb_curator_*.c"))
     require(len(kb_files) >= 3, "kb-curator-preserved", "KB curator implementation family")
-    require((root / "src/modules/config/config_kb_curator.c").is_file(), "kb-curator-preserved", "KB config")
     build_text = "\n".join(read(root / rel) for rel in BUILD_FILES)
     require("kb_curator_pipeline.c" in build_text, "kb-curator-preserved", "KB build anchor")
-
-    legacy_test = read(root / "src/tests/test_config.c")
-    require("Retired background skill-curator keys" in legacy_test, "legacy-config-test", "test marker")
-    require("curator_interval_hours" in legacy_test and "curator:" in legacy_test,
-            "legacy-config-test", "exact retired nesting")
-    require("g_config_strict = 1" in legacy_test, "legacy-config-test", "strict-mode compatibility")
 
     disposition_path = root / DISPOSITION
     try:

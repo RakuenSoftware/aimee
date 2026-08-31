@@ -1,12 +1,12 @@
-# Event bus — arena payloads (developer guide)
+# Event bus: arena payloads (developer guide)
 
-This is the practical guide to sending and receiving **large** event-bus payloads
-— those that do not fit the inline budget. It complements the design rationale in
+This is the practical guide to sending and receiving **large** event-bus payloads,
+those that do not fit the inline budget. It complements the design rationale in
 [`EVENT_BUS_DECISIONS.md`](EVENT_BUS_DECISIONS.md) (D3 leases, D7 blast radius, D10
 capture) and the delivery map in
 [`EVENT_BUS_FEATURE_TREE.md`](EVENT_BUS_FEATURE_TREE.md).
 
-If your payload fits the inline budget, you do not need any of this — use
+If your payload fits the inline budget, you do not need any of this. Use
 `bus_client_publish` / `bus_client_request` / `bus_client_reply` and read
 `ev.payload` from `bus_client_poll`. The audit/guardrail/memory bridges are all
 inline; their rows are bounded well under the budget.
@@ -16,7 +16,7 @@ inline; their rows are bounded well under the budget.
 A frame's payload is either **inline** (it rides in the ring slot, after the
 64-byte header, and must fit `inline_budget`) or **arena** (the bytes live in the
 shared arena region; the frame carries only a *lease reference*). Use the arena
-when a single event's payload can exceed `inline_budget` — for example a tool
+when a single event's payload can exceed `inline_budget`, for example a tool
 call's arguments or results. Choose per event: a small payload of the same kind
 still goes inline.
 
@@ -25,7 +25,7 @@ still goes inline.
 The arena's lease **table** is host-private (D3): it lives in the host process's
 own memory, not in shared memory, so a client cannot forge a lease's lifetime.
 The consequence is that **only code in the same process as the host can produce or
-resolve an arena payload** — it needs a pointer to the host's `bus_arena_t`. A
+resolve an arena payload**. It needs a pointer to the host's `bus_arena_t`. A
 thin cross-process `bus_client` can attach and exchange inline frames, but it
 cannot allocate a lease. This is deliberate and consistent with D7: the bus is
 linked only into the trusted daemons (aimee-server, aimee-kb), and arena
@@ -58,7 +58,7 @@ bus_client_publish_arena(producer, KIND, lease, ref.generation, len);
      consumer needs it. */
 ```
 
-**Once you send the frame, the lease is the host's.** Do not touch it again — the
+**Once you send the frame, the lease is the host's.** Do not touch it again. The
 host takes ownership by publishing it during routing. If you allocate a lease and
 then decide *not* to send it (an error path), call `bus_arena_cancel` to release
 your producer reference.
@@ -69,7 +69,7 @@ refuses an over-large allocation, so there is no second size check in
 
 ## Consuming an arena payload
 
-`bus_client_poll` returns an arena frame with `ev.payload == NULL` — it does not
+`bus_client_poll` returns an arena frame with `ev.payload == NULL`. It does not
 auto-resolve arena bytes (only the co-located host arena can). Resolve it
 yourself, then release:
 
@@ -95,7 +95,7 @@ reclaimed when the last consumer releases (or when a consumer is reaped).
 
 ## What the host does with it (routing)
 
-You do not call this — it is what happens when you `pump` — but it is worth
+You do not call this (it is what happens when you `pump`) but it is worth
 knowing:
 
 - **Notification:** published to a snapshot of the kind's observers (refcount =
@@ -118,7 +118,7 @@ Every arena frame is validated against the authoritative lease (generation match
 
 The host's lease table is guarded by an in-process mutex, so you may `alloc` /
 `fill` from a producer thread while the pump thread routes and a consumer thread
-reads — exactly obs_bus's shape (`consumer_main` runs pump + drain; emit runs on
+reads, exactly obs_bus's shape (`consumer_main` runs pump + drain; emit runs on
 any thread). The lock covers only the table bookkeeping; your `memcpy` into the
 span and your read out of it happen outside it, kept safe by the refcount. The
 ThreadSanitizer lane `scripts/run-bus-arena-tsan.sh` exercises this.
@@ -127,7 +127,7 @@ ThreadSanitizer lane `scripts/run-bus-arena-tsan.sh` exercises this.
 
 Arena events are captured like any other: the tap materializes the payload bytes
 into the record (D10), so a captured arena event replays byte-exact from the
-record and never needs its long-gone lease. You get this for free — the capture
+record and never needs its long-gone lease. You get this for free, the capture
 tap and the audit replay path already handle it.
 
 ## Quick reference

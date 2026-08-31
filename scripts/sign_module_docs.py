@@ -104,10 +104,18 @@ def _inventory(repo: Path) -> tuple[set[str], set[str]]:
     value = contract.strict_json_bytes(
         _repository_file(repo, INVENTORY_PATH, max_bytes=contract.MAX_DESCRIPTOR_BYTES)
     )
-    if not isinstance(value, dict) or set(value) != {"schema_version", "required", "optional"}:
+    if not isinstance(value, dict) or set(value) != {
+        "schema_version",
+        "required",
+        "optional",
+        "principal_refs",
+        "retired_principal_refs",
+        "plugin_principal_ref_band",
+        "retired_principal_ref_band",
+    }:
         fail("inventory", "canonical inventory has unexpected shape")
-    if value["schema_version"] != 1 or type(value["schema_version"]) is not int:
-        fail("inventory", "canonical inventory schema_version must equal 1")
+    if value["schema_version"] != 2 or type(value["schema_version"]) is not int:
+        fail("inventory", "canonical inventory schema_version must equal 2")
     groups: list[set[str]] = []
     for name in ("required", "optional"):
         entries = value[name]

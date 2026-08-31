@@ -1,11 +1,11 @@
 # CLI Command Reference
 
-> Auto-generated from `src/cli_help_data.h` by `scripts/gen-reference-docs.py`.
+> Auto-generated from `src/server/cli_command_defs_data.h` by `scripts/gen-reference-docs.py`.
 > Do not edit by hand; run `make -C src docs-gen` to regenerate.
 
 `aimee` is a thin client: each command either runs a small local operation or forwards a typed request to `aimee-server`. Server-backed commands accept `--json` for machine-readable output. Run `aimee help <command>` for per-command help, or `aimee help --all` for every tier.
 
-Total commands: 66
+Total commands: 77
 
 ## Core commands
 
@@ -19,6 +19,7 @@ Subcommands:
   show             Show all config values
   get <key>        Get one config value
   set <key> <val>  Set one config value
+  deploy-env       Emit the compose env for this backend record
 ```
 
 ### `aimee delegate`
@@ -46,6 +47,28 @@ Subcommands:
 Use `aimee jobs list|status|logs|cancel` for durable background delegate jobs.
 ```
 
+### `aimee get-help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  <topic>          Explain a topic -- work queue, delegation, memory,
+                   git, build, conventions. The words are joined, so
+                   `aimee get-help work queue` is one topic.
+```
+
+### `aimee get_help`
+
+Explain how aimee itself works.
+
+Subcommands:
+
+```
+  Underscore spelling of `aimee get-help`; both route to help.get.
+```
+
 ### `aimee help`
 
 Show help for a command.
@@ -67,8 +90,12 @@ Subcommands:
   scan             Scan workspaces and (re)build the index (--force)
   watch <name> <root>  Install git hooks that re-index after branch changes
   blast-radius     Show files affected by changes to a file
+  ast-grep --lang LANG [--path PATH] '<pattern>'  Structural pattern search
   structure        Show file structure
+  span <file> [start] [end]  Read an exact line range (chainable with &&)
   callers          Find callers of a symbol
+  investigate "<question>" [...]  Ask the index; several questions, one call
+  hybrid "<phrase>" [...]  Search for a phrase, not a symbol (--scope all)
 ```
 
 ### `aimee init`
@@ -98,6 +125,20 @@ Subcommands:
   grant revoke     Revoke one subject's grant (--server, --team, --subject)
 ```
 
+> `kb grant set`, `show`, `list`, and `revoke` remain in legacy help grammar, but server-side dispatch was removed in 0.4.0. Manage grants directly through the KB `/v1/write-tier-grants` API.
+
+### `aimee launch`
+
+Launch any client in an isolated Aimee session.
+
+Subcommands:
+
+```
+  [--gateway] -- <client> [args...]  Fetch the default tip, bind one session worktree,
+                                      then exec the client
+                         (Codex, Claude, OpenCode, or any executable)
+```
+
 ### `aimee manuscript`
 
 Novel-mode manuscript tools.
@@ -123,7 +164,7 @@ Subcommands:
   search           Search stored memory
   store            Store a memory
   list             List memories
-  get              Read a memory by id
+  get              Read a memory by id (--as-of <ts>: was it in force then?)
   read             Assemble current memory context
 ```
 
@@ -139,6 +180,29 @@ Subcommands:
   edit <name>      Edit or create a persona in $EDITOR
   add <name>       Alias for edit
   rm <name>        Reset a built-in or remove a custom persona
+```
+
+### `aimee presence`
+
+Show who and what is currently active.
+
+Subcommands:
+
+```
+  --owner <who>    Limit the listing to one owner
+```
+
+### `aimee primary`
+
+Session's active primary agent.
+
+Subcommands:
+
+```
+  <name>           Set the session's primary agent
+  --show           Print the current primary (also the default with no
+                   argument)
+  --clear          Clear the session's primary agent
 ```
 
 ### `aimee rules`
@@ -166,6 +230,10 @@ Subcommands:
   --require-verify  Fail if the published SHA-256 cannot be verified
 ```
 
+### `aimee session-end`
+
+SessionEnd hook entry point.
+
 ### `aimee session-start`
 
 SessionStart hook entry point.
@@ -179,10 +247,23 @@ Subcommands:
 ```
   list             List available skills
   show <name>      Print a skill body or support file
+  eval <name>      Run stored-response skill eval fixtures
+  eval-fixtures <name>  Alias for eval
+  eval-exec <name> Run paired executable held-out skill trials
   create           Create a project skill from a markdown file
   patch            Patch a project skill by string replacement
   lifecycle        Apply stale/archive lifecycle transitions
   autostub         Propose capability skills for uncovered tools
+```
+
+### `aimee tool`
+
+Call any Aimee capability by its registered tool name.
+
+Subcommands:
+
+```
+  call <tool> [--key value|key=value ...]  Same implementation exposed through MCP
 ```
 
 ### `aimee toolset`
@@ -195,6 +276,19 @@ Subcommands:
   list             List named toolsets
   show <name>      Show a toolset definition
   resolve <name>   Print the resolved tool list
+```
+
+### `aimee use`
+
+Select the active model provider.
+
+Subcommands:
+
+```
+  <name>           Make <name> the active provider
+  Same command as `aimee provider set`; both spellings route to
+  provider.set, so `aimee use ollama` and `aimee provider set ollama`
+  do the same thing.
 ```
 
 ### `aimee vault`
@@ -231,20 +325,14 @@ Subcommands:
 
 ### `aimee agent`
 
-Sub-agent management.
+Deprecated alias for `model`.
 
 Subcommands:
 
 ```
-  list             List configured delegates
-  add              Add or update a delegate provider
-  setup            Run an agent provider's attended OAuth setup
-  local            Register/update a local OpenAI-compatible delegate
-                   (--provider openai|llama-eval for request shaping)
-  remove           Remove a configured delegate
-  enable           Enable a configured delegate
-  disable          Disable a configured delegate
-  probe            Probe delegate endpoint, slots, and execution
+  Every subcommand of `aimee model`, kept working under the old name.
+  A roster entry is one (endpoint, model) target, so it is now a MODEL;
+  `aimee catalog` is the separate per-model capability metadata.
 ```
 
 ### `aimee api`
@@ -285,6 +373,18 @@ Subcommands:
   config           Show resolved aux task->provider/model mapping
   test <task> "<prompt>"
                    Execute a single auxiliary task call
+```
+
+### `aimee catalog`
+
+Model capability metadata.
+
+Subcommands:
+
+```
+  list             List catalogued models (--capability <name>, --open-weights)
+  show <model>     Show context, cost, flags, cutoff, deprecation
+  refresh          Refresh model metadata cache
 ```
 
 ### `aimee claude-proxy`
@@ -491,16 +591,41 @@ Subcommands:
   cancel <job_id>  Cooperatively cancel a queued or running delegate job
 ```
 
-### `aimee model`
+### `aimee learning`
 
-Model capability metadata.
+Learning-loop safety, regret, and negative knowledge.
 
 Subcommands:
 
 ```
-  list             List known models (--capability <name>, --open-weights)
-  show <model>     Show context, cost, flags, cutoff, deprecation
-  refresh          Refresh model metadata cache
+  approaches "<goal>"
+                   Approaches that already failed against a similar goal
+                   (advisory recall for planning; never blocks)
+  attribution [suite]
+                   Measured per-capability contribution from the ablation grid
+  fate <id> <standing|superseded|contradicted|reverted> [--reason R]
+                   Record what became of a committed proposal; regret raises
+                   the bar for the detector that raised it
+  resolve [--budget N]
+                   Close curiosity gaps the corpus now answers (bounded, on demand)
+```
+
+### `aimee model`
+
+Model roster management.
+
+Subcommands:
+
+```
+  list             List configured models
+  add              Add or update a model
+  setup            Run a provider's attended OAuth setup
+  local            Register/update a local OpenAI-compatible model
+                   (--provider openai|llama-eval for request shaping)
+  remove           Remove a configured model
+  enable           Enable a configured model
+  disable          Disable a configured model
+  probe            Probe a model's endpoint, slots, and execution
 ```
 
 ### `aimee notes`
@@ -746,11 +871,38 @@ Subcommands:
 
 ### `aimee git`
 
-Git helpers.
+Git and GitHub operations (run on aimee-server).
 
 Subcommands:
 
 ```
+  Every command takes an optional primary word then key=value pairs:
+    aimee git merge origin/testing      aimee git pr create title="..."
+    aimee git sync                      aimee git log count=5
+
+  status           Working tree status
+  add <paths|-A>   Stage changes (-A includes new files)
+  commit <msg>     Stage tracked changes and commit
+  push [-f]        Push the session's branch
+  pull / fetch     Bring refs down from a remote
+  sync [base]      Make this branch current with its base (fetch + rebase)
+  merge <ref>      Merge a ref in; conflicts are named and undone by default
+  rebase <base>    Rebase onto a branch, same conflict handling
+  cherry-pick <r>  Apply a commit here
+  revert <ref>     Back a commit out
+    ... any of the five above also take: continue | abort | skip
+  switch <branch>  Move to a branch
+  checkout <paths> Restore paths from a ref
+  restore <paths>  Restore or unstage paths
+  reset <ref>      soft/mixed/hard reset
+  branch <action>  create/switch/list/delete/claim/orphan
+  stash <action>   push/pop/apply/list/drop
+  tag <action>     create/list/delete
+  log / diff       History and diff summaries
+  pr <action>      create/view/list/edit/checks/merge_status/merge/ready
+                   (create writes its own title and body from your commits)
+  issue list       Open issues
+  clone <url>      Clone a repository
   verify           Verify the current changes before merge
 ```
 
@@ -766,4 +918,14 @@ Subcommands:
 
 ```
   trust            Set per-repo cross-repo trust
+```
+
+### `aimee verify`
+
+Verify the working tree against its remote.
+
+Subcommands:
+
+```
+  Same command as `aimee git verify`; both spellings route to git.verify.
 ```

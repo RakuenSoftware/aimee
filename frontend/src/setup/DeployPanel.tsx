@@ -224,7 +224,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
     return (
       <div style={box}>
         <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Bring up the stack</div>
-        <div style={{ fontSize: 12, color: '#556', lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
           This server can’t launch containers itself. Start the knowledge base + LLM alongside it with:
           <pre style={pre}>docker compose -f compose.server.yaml up -d</pre>
         </div>
@@ -245,13 +245,13 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
         <div style={{ fontWeight: 700, fontSize: 13 }}>Deploy the knowledge base + LLM</div>
         <Button variant="primary"
-          style={applying || status.running ? { background: '#9aa', borderColor: '#9aa', cursor: 'default' } : undefined}
+          style={applying || status.running ? { background: 'var(--sg-text-hint)', borderColor: 'var(--sg-text-hint)', cursor: 'default' } : undefined}
           disabled={applying || status.running}
           onClick={deploy}>
           {status.running ? 'Deploying…' : applying ? 'Starting…' : svcs.length ? 'Re-deploy' : 'Deploy'}
         </Button>
       </div>
-      <div style={{ fontSize: 12, color: '#556', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
+      <div style={{ fontSize: 12, color: 'var(--sg-text-muted)', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
         aimee-server brings up aimee-kb, including its database, for you via Docker. No extra commands.
       </div>
 
@@ -261,26 +261,26 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
             <div key={s.name} style={{ display: 'flex', gap: 8, fontSize: 12.5 }}>
               <span aria-hidden>{serviceFailed(s) ? '🔴' : servicePending(s) ? '🟡' : /running|up|healthy/i.test(s.state) ? '🟢' : '⚪'}</span>
               <span style={{ fontFamily: 'monospace', minWidth: 130 }}>{s.name}</span>
-              <span style={{ color: '#667' }}>{s.state}</span>
+              <span style={{ color: 'var(--sg-text-secondary)' }}>{s.state}</span>
             </div>
           ))}
         </div>
       )}
 
-      {status.running && <div style={{ fontSize: 12, color: '#8a5a00' }}>⏳ Starting KB, then LLM (image pulls can take a few minutes)…</div>}
-      {settledOk && <div style={{ fontSize: 12, color: '#2c8f56' }}>
+      {status.running && <div style={{ fontSize: 12, color: 'var(--sg-warning-dark)' }}>⏳ Starting KB, then LLM (image pulls can take a few minutes)…</div>}
+      {settledOk && <div style={{ fontSize: 12, color: 'var(--sg-success-dark)' }}>
         ✅ Stack containers are up. LLM model downloads may continue in the background.
       </div>}
-      {settledErr && <div style={{ fontSize: 12, color: '#c62828' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
-      {!settledErr && failedSvcs.length > 0 && <div style={{ fontSize: 12, color: '#c62828' }}>
+      {settledErr && <div style={{ fontSize: 12, color: 'var(--sg-danger-dark)' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
+      {!settledErr && failedSvcs.length > 0 && <div style={{ fontSize: 12, color: 'var(--sg-danger-dark)' }}>
         ⛔ {failedSvcs.map((s) => s.name).join(', ')} failed after startup. Check its container logs.
       </div>}
-      {err && <div style={{ fontSize: 12, color: '#c62828' }}>{err}</div>}
+      {err && <div style={{ fontSize: 12, color: 'var(--sg-danger-dark)' }}>{err}</div>}
 
       {enrollment?.state === 'ready' && enrollmentCommand && (
         <div style={{ ...pairing, marginTop: 9 }}>
           <div style={{ fontWeight: 700, fontSize: 12.5 }}>Connect your client</div>
-          <div style={{ fontSize: 12, color: '#556', lineHeight: 1.45, marginTop: 3 }}>
+          <div style={{ fontSize: 12, color: 'var(--sg-text-muted)', lineHeight: 1.45, marginTop: 3 }}>
             Run this once on a Linux workstation. It pins the server, creates your private key
             locally, enrolls mTLS, and activates full write access for{' '}
             <code>{enrollment.principal}</code>.
@@ -291,20 +291,20 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
               {copied ? 'Copied' : 'Copy command'}
             </Button>
           </div>
-          <div style={{ fontSize: 11.5, color: '#667', marginTop: 5 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-secondary)', marginTop: 5 }}>
             The bearer alone cannot write; the full grant is bound to the enrolled client certificate.
           </div>
         </div>
       )}
       {enrollment?.state === 'paired' && (
-        <div style={{ ...pairing, marginTop: 9, color: '#2c6f46' }}>
+        <div style={{ ...pairing, marginTop: 9, color: 'var(--sg-success-dark)' }}>
           ✅ {enrollment.principal} already has an enrolled mTLS client with full write access.
         </div>
       )}
 
       {status.output.trim() && (
         <details style={{ marginTop: 6 }}>
-          <summary style={{ cursor: 'pointer', fontSize: 12, color: '#667' }}>Deploy log</summary>
+          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--sg-text-secondary)' }}>Deploy log</summary>
           <pre style={pre}>{status.output}</pre>
         </details>
       )}
@@ -313,13 +313,13 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
 }
 
 const box: React.CSSProperties = {
-  border: '1px solid #dde', borderRadius: 8, padding: '10px 12px', marginBottom: 14, background: '#f8fafc',
+  border: '1px solid var(--sg-border-medium)', borderRadius: 8, padding: '10px 12px', marginBottom: 14, background: 'var(--sg-surface-alt)',
 };
 const pre: React.CSSProperties = {
-  whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: '#eef1f6', borderRadius: 6,
+  whiteSpace: 'pre-wrap', wordBreak: 'break-word', background: 'var(--sg-surface-sunken)', borderRadius: 6,
   padding: '8px 10px', fontSize: 11.5, margin: '6px 0 0', maxHeight: 220, overflow: 'auto',
 };
 const pairing: React.CSSProperties = {
-  border: '1px solid #cbd8eb', borderRadius: 7, background: '#f1f6fd', padding: '8px 10px',
+  border: '1px solid var(--sg-info-border)', borderRadius: 7, background: 'var(--sg-info-bg)', padding: '8px 10px',
   fontSize: 12,
 };

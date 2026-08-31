@@ -1,8 +1,10 @@
 /* client_session_worktree.h: thin-client per-session worktree bootstrap.
  *
- * Every new agent session — a Claude Code session via the SessionStart hook, an
- * MCP-hosted session via `aimee mcp serve` — must run on its OWN branch cut from
- * the repository's default branch, inside its OWN worktree. The server-side
+ * Every new agent session, regardless of host client, must run on its OWN branch
+ * cut from the repository's default branch, inside its OWN worktree. The generic
+ * `aimee launch -- <client>` process boundary calls this before the client starts;
+ * SessionStart and MCP children never try to move their already-running parent.
+ * The server-side
  * implementation of that policy lives in modules/workspace (worktree_create_
  * sibling_at_ref); this is the thin-client twin of it.
  *
@@ -32,7 +34,7 @@
 /* Ensure the per-session worktree for `sid` exists, creating it (and its
  * session branch, cut from the base branch) if needed. Idempotent: re-running
  * for the same session id reuses the same worktree, so startup/resume/compact
- * all land in one place.
+ * all land in one place. The launcher calls this before exec'ing the client.
  *
  * Writes the absolute worktree path into out[cap] on success.
  *
@@ -46,12 +48,45 @@
  * Never chdirs; the caller decides whether to enter the worktree. */
 int client_session_worktree_ensure(const char *sid, char *out, size_t cap);
 
-/* Resolve the branch a fresh session worktree should be cut from, mirroring the
- * server's worktree_detect_base_branch policy: AIMEE_SESSION_WORKTREE_BASE (or
- * the "remote_default" default) -> origin/HEAD -> the local default branch.
- * Deliberately has NO silent fall back to the current HEAD: inheriting whatever
- * branch the shared checkout happens to be on is what put sessions on another
- * session's branch. `current` is reachable only by explicit opt-in.
+/* As above, but resolve the repository from `cwd` rather than the caller's
+ * process cwd. Lifecycle and tool hooks must use the cwd in their payload: a
+ * hook subprocess can have a different cwd, and it cannot chdir its parent.
+ * An existing Aimee worktree is reused only when its key belongs to `sid`;
+ * entering another session's worktree creates/routes to this session's own. */
+int client_session_worktree_ensure_at(const char *sid, const char *cwd, char *out, size_t cap);
+
+/* SessionEnd cleanup. Removes only a clean Aimee-owned checkout. Git refuses
+ * dirty/untracked trees, and the session branch is deleted only when merged.
+ * Returns 0 removed, 1 retained/not applicable, -1 invalid input. */
+int client_session_worktree_release_at(const char *sid, const char *cwd);
+
+/* Transparently route a tool path or shell command from the checkout named by
+ * `cwd` into `sid`'s worktree. These are the client-neutral primitives used by
+ * Claude, Codex, OpenCode, Hermes, and future lifecycle adapters.
+ *
+ * route_path writes an absolute path. A NULL/empty input means "the effective
+ * cwd", which is useful for shell tools. route_command prefixes the command
+ * with the routed cwd and remaps literal absolute source-root references.
+ * A path outside the repository is returned unchanged without provisioning a
+ * worktree; external reads must not depend on repository base resolution.
+ *
+ * Returns 0 when routed, 1 when isolation is not applicable, -2 when the
+ * worktree could not be prepared, and -3 when the input explicitly targets a
+ * different Aimee session's worktree. */
+int client_session_worktree_route_path(const char *sid, const char *cwd, const char *input,
+                                       char *out, size_t cap);
+int client_session_worktree_route_command(const char *sid, const char *cwd, const char *command,
+                                          char *out, size_t cap);
+int client_session_worktree_route_patch(const char *sid, const char *cwd, const char *patch,
+                                        char *out, size_t cap);
+
+/* Resolve the exact ref/commit a fresh session worktree should be cut from,
+ * mirroring the server policy. With origin configured, session start performs
+ * a bounded, non-interactive fetch and pins the remote's current HEAD commit;
+ * it never accepts stale tracking data after a failed fetch. An explicit
+ * feature/release ref is preserved, but creation makes the fetched default tip
+ * its ancestor inside the new session branch. `current` and `local_default`
+ * are the explicit offline/stale overrides.
  * Returns 0 and fills buf[cap] on success, -1 when no base could be resolved. */
 int client_session_worktree_base(const char *git_root, char *buf, size_t cap);
 
@@ -60,5 +95,21 @@ int client_session_worktree_base(const char *git_root, char *buf, size_t cap);
  * distinct ids never collide on a shared sanitized prefix. Pure; exposed for
  * tests and so both call sites derive the same key. */
 void client_session_worktree_key(const char *sid, char *out, size_t cap);
+
+/* Publish the HOST-assigned session id under <home>/session-ppid-<pid> so the
+ * session's other processes resolve the same one, and therefore the same
+ * worktree. Written for the caller's parent AND, on Linux, for the host process
+ * found by walking up to it -- a hook whose command carries an env assignment
+ * runs under a shell and so is a grandchild, while `aimee mcp serve` is a direct
+ * child and reads the key named for the host. The walk stops at the host so no
+ * shared ancestor (terminal, service manager) is ever named.
+ *
+ * Authoritative: truncates an existing file, because the host's id outranks one
+ * a peer minted for itself when it could not find this. Rejects a sid
+ * containing '/', a newline, or a control character.
+ *
+ * Returns 0 when at least one location was published, -1 otherwise (including
+ * on Windows, where session-worktree isolation is not a feature). */
+int client_session_id_publish(const char *sid, const char *home);
 
 #endif /* DEC_CLIENT_SESSION_WORKTREE_H */

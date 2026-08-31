@@ -52,27 +52,27 @@ whose deny pattern covers the plugin routes, CLI verbs, and the `plugin_loader_d
 
 Exports with tracked production consumers:
 
-- `plugin_registry_load` and `plugin_discover_local` — `src/cmd_hooks.c`, `src/cmd_plugin.c`,
+- `plugin_registry_load` and `plugin_discover_local`, `src/cmd_hooks.c`, `src/cmd_plugin.c`,
   `src/dashboard.c`, `src/modules/protocols/mcp/mcp_tools.c`, and
   `src/server/dashboard_server.c`.
-- `plugin_registry_json` and `plugin_set_enabled` — `src/server/server_plugin.c`, with
+- `plugin_registry_json` and `plugin_set_enabled`, `src/server/server_plugin.c`, with
   `plugin_set_enabled` also called by `src/cmd_plugin.c`.
-- `plugin_install`, `plugin_remove`, and `plugin_manifest_parse` — `src/cmd_plugin.c`.
+- `plugin_install`, `plugin_remove`, and `plugin_manifest_parse`, `src/cmd_plugin.c`.
   `plugin_install` is additionally called by `src/tests/test_dashboard.c`.
-- `plugin_collect_hooks` — `src/cmd_hooks.c`. `plugin_collect_tools` —
-  `src/modules/protocols/mcp/mcp_tools.c`.
-- `plugin_loader_discover_all` — `src/server/server_main.c`, the live startup path.
+- `plugin_collect_hooks`: `src/cmd_hooks.c`. `plugin_collect_tools`,
+`src/modules/protocols/mcp/mcp_tools.c`.
+- `plugin_loader_discover_all`: `src/server/server_main.c`, the live startup path.
 
 Exports with no tracked production caller outside the module. The list is exhaustive; each entry
 names every tracked caller:
 
-- `plugin_registry_path` — called only from `plugin.c`. The two mentions in
+- `plugin_registry_path`: called only from `plugin.c`. The two mentions in
   `src/tests/test_plugin.c` are comments about path caching, not calls.
-- `plugin_registry_save` — called only from `plugin.c`, by the install, enable, and remove paths.
-- `plugin_load_and_register` — called from `plugin.c` and `plugin_loader.c`.
-- `plugin_tool_conflicts_with_builtin` — called from `plugin.c`, and externally only by
+- `plugin_registry_save`: called only from `plugin.c`, by the install, enable, and remove paths.
+- `plugin_load_and_register`: called from `plugin.c` and `plugin_loader.c`.
+- `plugin_tool_conflicts_with_builtin`: called from `plugin.c`, and externally only by
   `src/tests/test_plugin.c`.
-- `plugin_registry_get` — no module-local caller; its only tracked caller is
+- `plugin_registry_get`: no module-local caller; its only tracked caller is
   `src/tests/test_plugin.c`.
 
 Exports with no caller in the tracked tree at all:
@@ -91,7 +91,7 @@ Exports with no caller in the tracked tree at all:
 
 Both of the latter remain declared in public headers and shipped as external symbols in an enabled
 build. Absence of a tracked-tree caller is liveness evidence, not proof that no downstream host
-links and calls them — a downstream host can call the setter before discovery, in which case the
+links and calls them. A downstream host can call the setter before discovery, in which case the
 fallback chain does not apply. Removing or rewiring either is therefore an API and ABI
 compatibility decision rather than a dead-code cleanup, and the same applies to privatizing the
 five exports above.
@@ -130,7 +130,7 @@ Build systems do not register tests uniformly. Make registers `unit-test-plugin`
 > mistaken claim, and the ownership latch is unaffected.
 
 This remaining single-test gap is pre-existing test-registration debt with a concrete verification
-target — CTest must also execute `test_plugin` in an enabled profile — and is deferred to a
+target (CTest must also execute `test_plugin` in an enabled profile) and is deferred to a
 build-membership slice because it changes build inputs rather than file ownership.
 `scripts/check_module_test_registration.py` pins the build-file registration of every
 descriptor-declared test, bound to the declared source path rather than to a target name, so a

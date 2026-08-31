@@ -190,10 +190,13 @@ static void test_request_reply(void)
 
    bus_event_t ev;
    must_rc(bus_client_poll(&server, &ev), BUS_CLIENT_OK, "server gets request");
-   must(ev.frame.correlation_id == corr && (ev.frame.hdr_flags & BUS_F_REQUEST), "is the request");
+   must((ev.frame.hdr_flags & BUS_F_REQUEST), "is the request");
    must(ev.payload_len == 4 && memcmp(ev.payload, "ping", 4) == 0, "request payload");
+   /* The server answers with the correlation the host handed it, which is
+    * bus-unique rather than the requester's own; the host maps it back. */
+   const uint64_t served = ev.frame.correlation_id;
 
-   must_rc(bus_client_reply(&server, KIND_A, corr, "pong", 4), BUS_CLIENT_OK, "server replies");
+   must_rc(bus_client_reply(&server, KIND_A, served, "pong", 4), BUS_CLIENT_OK, "server replies");
    must(bus_host_pump(&h) == 1, "route reply");
 
    must_rc(bus_client_poll(&req, &ev), BUS_CLIENT_OK, "requester gets reply");

@@ -1,6 +1,10 @@
 # Design: config-extensible workflow blocks (+ CI/merge safety blocks)
 
-- **State:** done — design converged (2 rounds; reviewer READY, architect design-convincing — code-verification items deferred to the implementation roundtable)
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** done. Design converged (2 rounds; reviewer READY, architect design-convincing, code-verification items deferred to the implementation roundtable)
 - **Builds on:** the merged workflow engine (`aimee-dev-lifecycle-workflow.md`, PR #288).
 - **Goal:** let users **define their own composable blocks via config** (no recompile),
   type-checked by the same validator and run by a generic executor; and add three
@@ -13,9 +17,9 @@ Today the block catalog is hard-coded (C `CATALOG[]` + the `WFE_BLK_*` enum +
 C-registered executors). Users can compose *workflows* from the built-in blocks
 but cannot add a new *block* (e.g. "run my linter", "post to Slack", "deploy")
 without editing the engine. And the engine has no built-in guard against the
-exact failure that just bit us — trying to merge a PR whose CI is red.
+exact failure that just bit us, trying to merge a PR whose CI is red.
 
-## Part A — config-extensible blocks
+## Part A: config-extensible blocks
 
 ### Block registry (built-ins + config, merged at load)
 The catalog becomes a **runtime registry** = the static built-ins **plus** custom
@@ -39,8 +43,8 @@ blocks:
 Rules (validated at load; load fails closed on any violation):
 - `name` unique + not a built-in (shadowing a built-in is rejected).
 - `consumes` ∈ the closed artifact enum **or `none`**; `produces` ∈ **`branch` or
-  `none` only**. Custom blocks **cannot mint `verdict`, `approval`, or `pr`** —
-  those are *trust-bearing* artifacts produced only by the built-in gates
+  `none` only**. Custom blocks **cannot mint `verdict`, `approval`, or `pr`**.
+Those are *trust-bearing* artifacts produced only by the built-in gates
   (the panel-scored verdict), `gate.human` (a signed approval), and `pr.open`.
   A custom block transforms the branch (`branch→branch`, e.g. lint/format/deploy)
   or is a side-effecting sink (`…→none`, e.g. notify). `consumes:none` (a source)
@@ -56,9 +60,9 @@ so a workflow using a custom block is type-checked exactly like one using built-
 The frozen `wfe_iface.h` seam is untouched: a custom block is a single block type
 `WFE_BLK_CUSTOM` whose node carries the resolved spec. A generic
 `exec_custom(ctx, node)`:
-- **command** — **opt-in only**: refused unless `lifecycle.allow_command_blocks:
+- **command**: **opt-in only**: refused unless `lifecycle.allow_command_blocks:
   true` in config (default false), because it runs operator-authored argv. Runs
-  the `command` **argv directly (never via a shell — no string interpolation)**
+  the `command` **argv directly (never via a shell, no string interpolation)**
   through `safe_exec_capture`, with the working directory pinned to the resolved
   work-item repo. Non-zero exit → `WFE_STEP_FAILED`; success → the declared
   artifact (`branch` → the branch head SHA; `none` → a sink, no artifact). Trust:
@@ -75,10 +79,10 @@ The frozen `wfe_iface.h` seam is untouched: a custom block is a single block typ
     only if it is operator-owned and not world/group-writable (the approval-key
     perm check: refuse if `mode & 0022`), so a workflow author cannot introduce a
     `command` block without write access to operator config AND the global opt-in.
-- **delegate** — dispatch the configured persona/prompt against the branch
+- **delegate**: dispatch the configured persona/prompt against the branch
   (integration-gated like the other delegate-driven blocks); the produced artifact
   is the (mutated) `branch` head, or `none`. A delegate custom block does **not**
-  produce a `verdict` — gating is the job of `gate.roundtable` with its verdict
+  produce a `verdict`, gating is the job of `gate.roundtable` with its verdict
   contract.
 
 No new entry in the frozen seam; the executor vtable gains exactly one slot
@@ -88,7 +92,7 @@ No new entry in the frozen seam; the executor vtable gains exactly one slot
 `aimee workflow blocks` lists built-ins **and** custom blocks (marked `custom`);
 the W7 web composer renders both in the palette automatically.
 
-## Part B — three built-in safety blocks (need real forge/CI calls)
+## Part B: three built-in safety blocks (need real forge/CI calls)
 
 These can't be pure config (they call the forge), so they ship as built-ins.
 
@@ -102,7 +106,7 @@ mapping **every** state fail-closed (nothing but an explicit all-green advances)
 | no checks / unknown / forge unreachable | PARK (never advance) |
 Polling is **bounded**: the gate parks (it does not busy-loop); each re-poll is a
 fresh advance, and the engine's per-stage `max_attempts` + a `gate.ci.poll_timeout`
-cap the wait, then park `pending_human` so a human decides — never an indefinite
+cap the wait, then park `pending_human` so a human decides, never an indefinite
 spin.
 
 **`check.mergeable`** (consumes `pr` → `verdict`): no merge conflict against base →
@@ -112,7 +116,7 @@ computing) → PARK + re-check.
 **`merge` hardened (idempotent + race-safe)**: the merge act is the single source
 of truth. It (1) reads the PR state; if **already `MERGED`** → no-op success
 (never re-push/re-merge); (2) else issues the forge merge, and treats the forge's
-own *"already merged"/"not mergeable"* responses as authoritative — an
+own *"already merged"/"not mergeable"* responses as authoritative, an
 already-merged race resolves to success, a not-mergeable/lost-race resolves to
 LOOP, never a forced or duplicate merge. Detection is not a separate
 check-then-act window: the merge command itself is the atomic decision.
@@ -137,11 +141,11 @@ already-merged work.
   the existing delegate/forge executors.
 
 ## Risks
-- A `command` executor runs operator-authored argv (no shell, argv-only) — same
+- A `command` executor runs operator-authored argv (no shell, argv-only), same
   trust as the operator's shell; gated behind `lifecycle.allow_command_blocks`
   (default false) and run only in the work-item repo. The block registry is
   operator-owned config (same trust as `aimee.yaml`).
-- Custom blocks cannot mint trust-bearing artifacts (`verdict`/`approval`/`pr`) —
-  enforced at registry load, so a custom block can never impersonate a gate.
+- Custom blocks cannot mint trust-bearing artifacts (`verdict`/`approval`/`pr`),
+enforced at registry load, so a custom block can never impersonate a gate.
 - Config drift vs built-ins: a custom block shadowing a built-in name is rejected
   at load (fail closed).

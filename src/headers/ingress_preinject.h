@@ -8,7 +8,7 @@
  * turn — it reasons over the already-loaded context and, when it needs more,
  * explores THROUGH Aimee's MCP tools rather than raw grep.
  *
- * Opt-in: gated by config `ingress_preinject_enabled` (default off) and a
+ * Default-on: gated by config `ingress_preinject_enabled` and a
  * per-request disable (the `x-aimee-preinject: 0` header, surfaced by the
  * caller as request_disabled) so the A/B bench harness can toggle it live.
  *
@@ -34,10 +34,11 @@
  * added here because today's envelope already emits a typed-facts group. */
 typedef enum
 {
-   ING_SRC_CODE,   /* a code-search hit          */
-   ING_SRC_MEMORY, /* a memory preview           */
-   ING_SRC_FACTS,  /* the typed-facts block      */
-   ING_SRC_AUDIT,  /* the audit-context block    */
+   ING_SRC_CODE,     /* a code-search hit          */
+   ING_SRC_MEMORY,   /* a memory preview           */
+   ING_SRC_FACTS,    /* the typed-facts block      */
+   ING_SRC_TEMPORAL, /* temporal assertions/observations/reviewed procedures */
+   ING_SRC_AUDIT,    /* the audit-context block    */
 } ingress_source_kind_t;
 
 /* Which fold produced the resident form — one value per lossiness class, reserved
@@ -81,10 +82,11 @@ typedef struct
 char *ingress_render_block(const ingress_entry_t *entries, int count, size_t envelope_budget,
                            int headline_missing_count, int *omitted_count_out);
 
-/* Map a recall relevance score in [0,1] to a confidence tier string
- * ("high" | "medium" | "low"). Pure; thresholds documented in the .c. */
-const char *ingress_preinject_confidence(double top_score);
 typedef int (*ingress_confidence_provider_fn)(double top_score, const char **confidence);
+/* Request a confidence tier from the supervised memory process. Returns 0 and
+ * one of "high"/"medium"/"low" on success; -1 when the provider is absent,
+ * fails, or returns an invalid tier. */
+int ingress_preinject_confidence(double top_score, const char **confidence);
 void ingress_preinject_register_confidence_provider(ingress_confidence_provider_fn provider);
 
 /* Format code-search hits into a `recommended (code):` block — one
@@ -95,8 +97,8 @@ void ingress_preinject_register_confidence_provider(ingress_confidence_provider_
 char *ingress_preinject_format_code_block(const code_search_hit_t *hits, int n);
 
 /* Format the <aimee-context …> envelope from an already-packed context block
- * and a confidence tier. Returns a malloc'd string the caller frees, or NULL
- * when context_block is NULL/blank (no envelope → no injection). Pure. */
+ * and a validated confidence tier. Returns a malloc'd string the caller frees,
+ * or NULL when the block/tier is absent or invalid. Pure. */
 char *ingress_preinject_format_envelope(const char *context_block, const char *confidence);
 
 /* Extract the recall seed query from a parsed chat `messages` array: the text
@@ -116,6 +118,19 @@ char *ingress_preinject_last_assistant_from_messages(const cJSON *messages);
  * yields no context. Otherwise runs the recall/context-block path, derives a
  * confidence tier, and returns a malloc'd <aimee-context> envelope. */
 char *ingress_preinject_build(const char *query, int request_disabled);
+
+/* Turns whose memory recall could not reach the knowledge service, as distinct
+ * from turns that recalled nothing. Both yield an envelope with no memory
+ * previews, so without this counter an outage is indistinguishable from a quiet
+ * turn at every per-turn surface -- and an agent handed an empty recall will
+ * report that something does not exist when it merely could not look.
+ * (session_degraded_notice.c makes the same point, but only at SessionStart.)
+ *
+ * Deliberately a counter and a log line rather than a marker inside the
+ * envelope: those bytes are a cache prefix on the Anthropic arm, and perturbing
+ * them during an outage would cost prompt-cache hits exactly when the service is
+ * already degraded. Process-local and monotonic. */
+long long ingress_preinject_recall_unavailable_total(void);
 
 /* Merge `envelope` with `instructions` (the request system prompt), returning a
  * fresh malloc'd string the caller frees. Default: PREPENDS the envelope. When
@@ -153,7 +168,7 @@ void ingress_preinject_set_request_disabled(int disabled);
  * ingress_preinject_build mints its own. Set per request; like the disable
  * override it does not auto-reset — the HTTP layer sets it (or "" to clear) on
  * every request. */
-void ingress_preinject_mint_turn_id(char *buf, size_t len);
+int ingress_preinject_mint_turn_id(char *buf, size_t len);
 void ingress_preinject_set_turn_id(const char *turn_id);
 const char *ingress_preinject_turn_id(void);
 

@@ -147,6 +147,41 @@ void now_utc(char *buf, size_t len)
    strftime(buf, len, "%Y-%m-%dT%H:%M:%SZ", &tm);
 }
 
+time_t parse_utc_ts(const char *s)
+{
+   if (!s || !s[0])
+      return 0;
+
+   /* Read the separator as a character rather than matching a literal, so the
+    * ISO 'T' and the canonical form's space are the same parse. This is the
+    * shape canonical_index.c already uses; the parsers that hard-coded one
+    * spelling were the ones that silently returned the epoch for the other. */
+   int year = 0, mon = 0, day = 0, hour = 0, min = 0, sec = 0;
+   char sep = 0;
+   int n = sscanf(s, "%d-%d-%d%c%d:%d:%d", &year, &mon, &day, &sep, &hour, &min, &sec);
+   if (n == 3)
+      hour = min = sec = 0; /* a date alone is midnight */
+   else if (n != 7 || (sep != 'T' && sep != ' '))
+      return 0;
+   if (year < 1970 || mon < 1 || mon > 12 || day < 1 || day > 31)
+      return 0;
+
+   struct tm tmv;
+   memset(&tmv, 0, sizeof(tmv));
+   tmv.tm_year = year - 1900;
+   tmv.tm_mon = mon - 1;
+   tmv.tm_mday = day;
+   tmv.tm_hour = hour;
+   tmv.tm_min = min;
+   tmv.tm_sec = sec;
+   tmv.tm_isdst = 0;
+#if defined(_WIN32) || defined(_WIN64)
+   return _mkgmtime(&tmv);
+#else
+   return timegm(&tmv);
+#endif
+}
+
 /* --- Filler words for normalization --- */
 
 static const char *filler_words[] = {"the",   "a",     "an",    "is",    "are",      "was",
@@ -702,9 +737,9 @@ char *run_cmd(const char *cmd, int *exit_code)
    if (!tl_run_cwd[0])
       return run_cmd_impl(cmd, exit_code);
 
-   /* Prepend "cd '<dir>' && " so the shell child starts in the thread's
+   /* Prepend "cd <quoted-dir> && " so the shell child starts in the thread's
     * designated directory without mutating the process-global CWD. */
-   char *esc = shell_escape(tl_run_cwd);
+   char *esc = shell_quote(tl_run_cwd);
    size_t len = strlen(esc) + strlen(cmd) + 16;
    char *full = malloc(len);
    if (!full)
@@ -736,7 +771,7 @@ char *run_cmd_env_fd(const char *cmd, char *const envp[], int *exit_code, int pa
    char *line = NULL;
    if (tl_run_cwd[0])
    {
-      char *esc = shell_escape(tl_run_cwd);
+      char *esc = shell_quote(tl_run_cwd);
       if (esc)
       {
          size_t len = strlen(esc) + strlen(cmd) + 16;
@@ -918,15 +953,18 @@ int has_shell_metachar(const char *s)
    return 0;
 }
 
-char *shell_escape(const char *raw)
+char *shell_quote(const char *raw)
 {
    if (!raw)
-      return strdup("");
+      return strdup("''");
    size_t len = strlen(raw);
-   char *esc = malloc(len * 4 + 1);
+   if (len > (SIZE_MAX - 3) / 4)
+      return NULL;
+   char *esc = malloc(len * 4 + 3);
    if (!esc)
-      return strdup("");
+      abort();
    size_t j = 0;
+   esc[j++] = '\'';
    for (size_t i = 0; i < len; i++)
    {
       if (raw[i] == '\'')
@@ -941,6 +979,7 @@ char *shell_escape(const char *raw)
          esc[j++] = raw[i];
       }
    }
+   esc[j++] = '\'';
    esc[j] = '\0';
    return esc;
 }

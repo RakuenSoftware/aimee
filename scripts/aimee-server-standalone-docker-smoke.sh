@@ -5,12 +5,12 @@
 # /v1 surface with NO kb wired in, and that the lazy-kb path degrades gracefully
 # instead of crashing.
 #
-# Exercises (T3 in docs/proposals/pending/aimee-e2e-deploy-matrix.md):
+# Exercises T3 in scripts/e2e-matrix.sh:
 #   1. GET /v1/health             — server up (server-native, SQLite DB1)
 #   2. GET /v1/version            — build identifies itself
 #   3. GET /v1/health (no bearer) — rejected (401): auth enforced on TCP
-#   4. GET /v1/kb/status          — kb absent -> well-formed "unavailable"
-#                                   (proves graceful degradation, not a crash)
+#   4. GET /v1/rules              — read-scoped kb proxy returns a well-formed
+#                                   upstream error (not a crash)
 #
 # Usage:
 #   scripts/aimee-server-standalone-docker-smoke.sh             # stack already up
@@ -19,7 +19,8 @@
 #
 # Env: SERVER_URL (default https://localhost:8743), BEARER (required for an
 #      existing stack; generated as a first-boot secret with --up), COMPOSE_FILE
-#      (default compose.server-standalone.yaml), WAIT_SECONDS (300).
+#      (default compose.server-standalone.yaml), WAIT_SECONDS (300). Store
+#      passwords may be supplied explicitly; --up generates isolated values.
 #
 # Exit code: 0 = all checks passed.
 
@@ -41,6 +42,12 @@ for arg in "$@"; do
   esac
 done
 
+# Scope every fresh smoke stack explicitly. This keeps Vault bootstrap, startup,
+# logs, and teardown on the same project even when other projects use this file.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-standalone-$$"
+fi
+
 if [[ -z "$BEARER" ]]; then
   if [[ "$DO_UP" == 1 ]]; then
     BEARER="$(openssl rand -hex 32)"
@@ -51,6 +58,10 @@ if [[ -z "$BEARER" ]]; then
 fi
 if [[ "$DO_UP" == 1 ]]; then
   export AIMEE_API_BEARER_TOKEN="$BEARER"
+  : "${AIMEE_STORE_ADMIN_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_MIGRATOR_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_RUNTIME_PASSWORD:=$(openssl rand -hex 32)}"
+  export AIMEE_STORE_ADMIN_PASSWORD AIMEE_STORE_MIGRATOR_PASSWORD AIMEE_STORE_RUNTIME_PASSWORD
 fi
 
 cd "$(dirname "$0")/.."
@@ -69,6 +80,22 @@ check() {
   local name="$1" expect="$2"; shift 2
   local body
   if body="$(curl -fsS -k --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)" && [[ "$body" == *"$expect"* ]]; then
+    green "  PASS  $name"; PASS=$((PASS + 1))
+  else
+    red   "  FAIL  $name"
+    printf '        expected substring: %s\n        got: %s\n' "$expect" "${body:-<no response / curl error>}"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+check_error_body() {
+  local name="$1" expect="$2"; shift 2
+  local body
+  # Degraded dependency responses are deliberately non-2xx.  Preserve their
+  # JSON body so this assertion distinguishes a clean upstream error from a transport
+  # failure or crash.
+  if body="$(curl -sS -k --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)" &&
+     [[ "$body" == *"$expect"* ]]; then
     green "  PASS  $name"; PASS=$((PASS + 1))
   else
     red   "  FAIL  $name"
@@ -102,7 +129,18 @@ if [[ "$DO_UP" == 1 ]]; then
   # against the base file before creating the long-lived server container.
   bootstrap_compose="${COMPOSE_FILE%% *}"
   scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" server
-  "${DC[@]}" up -d --no-build
+  # `up` failing is where the stack's own words are the only diagnosis, and
+  # the EXIT trap tears everything down a moment later -- so dump them HERE,
+  # while the containers still exist. A store database that aborts during
+  # initdb exits before its first healthcheck, and compose reports only
+  # "dependency failed to start: container ... is unhealthy", which names the
+  # service and says nothing about the cause.
+  if ! "${DC[@]}" up -d --no-build; then
+    red "==> the stack did not come up; container logs follow"
+    "${DC[@]}" ps -a || true
+    "${DC[@]}" logs --no-color --tail=80 || true
+    exit 1
+  fi
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))
   while true; do
@@ -124,9 +162,11 @@ bold "==> Auth is enforced"
 check_status "GET /v1/health (no bearer) rejected" 401 "${SERVER_URL}/v1/health"
 
 bold "==> Lazy kb degrades gracefully (no kb wired in)"
-# With no kb, the server must answer /v1/kb/status with a well-formed
-# "unavailable" object (available:false) — NOT hang or crash.
-check "GET /v1/kb/status -> unavailable" '"available":false' "${SERVER_URL}/v1/kb/status"
+# /v1/kb/status is intentionally owner/dashboard-gated, so use the ordinary
+# read-scoped rules proxy to exercise the missing-kb path. It must return a
+# well-formed upstream error instead of hanging or crashing.
+check_error_body "GET /v1/rules -> upstream unavailable" '"error":"rules backend unavailable"' \
+  "${SERVER_URL}/v1/rules"
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

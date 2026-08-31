@@ -9,7 +9,7 @@
 set -euo pipefail
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-pkg="./bus/..."
+packages=("./bus/..." "./modules/..." "./cmd/aimee-module")
 gomod="$repo_root/server-go"
 
 if [ ! -d "$gomod/bus" ]; then
@@ -25,15 +25,15 @@ if [ "$cgo_files" != "[]" ]; then
    exit 1
 fi
 
-if grep -rn 'import[[:space:]]*"C"' bus/ >/dev/null 2>&1; then
-   echo "FAIL: the Go bus package imports \"C\"" >&2
-   grep -rn 'import[[:space:]]*"C"' bus/ >&2
+if grep -rn 'import[[:space:]]*"C"' bus/ modules/ cmd/aimee-module/ >/dev/null 2>&1; then
+   echo "FAIL: the Go bus/module runtime imports \"C\"" >&2
+   grep -rn 'import[[:space:]]*"C"' bus/ modules/ cmd/aimee-module/ >&2
    exit 1
 fi
 
-if ! CGO_ENABLED=0 go build "$pkg" >/dev/null 2>&1; then
-   echo "FAIL: the Go bus package does not build with CGO_ENABLED=0" >&2
+if ! CGO_ENABLED=0 go build "${packages[@]}" >/dev/null 2>&1; then
+   echo "FAIL: the Go bus/module runtime does not build with CGO_ENABLED=0" >&2
    exit 1
 fi
 
-echo "check_bus_go_no_cgo: ok — pure Go, no cgo, builds with CGO_ENABLED=0"
+echo "check_bus_go_no_cgo: ok — bus and migrated modules are pure Go"

@@ -8,14 +8,13 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include "../kb/kb_service_code_embed.h"
-#include "../db2/pgvec_kb_service.h"
-#include "../db2/entity_nodes.h"
+#include "../modules/db2/c/pgvec_kb_service.h"
+#include "../modules/db2/c/entity_nodes.h"
 
 static char g_db_path[512];
 
@@ -40,14 +39,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(g_db_path) == 0);
    db2_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }

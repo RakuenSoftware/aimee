@@ -8,10 +8,11 @@
  * server_http.c and its unit test deliberately stay free of.
  *
  * Dependencies sampled:
- *   db1  — db1_is_initialized(). Deliberately a no-I/O check, not the
- *          store/load/remove round-trip `aimee doctor` uses: doctor runs once
- *          on demand, this runs on a timer, and a periodic write probe would
- *          make the readiness endpoint its own source of load.
+ *   db1  — db1_store_probe(). A cached, read-only round trip through the DB1
+ *          module to its backing store. Module attachment alone can remain
+ *          true after PostgreSQL becomes unavailable, so it is not readiness.
+ *          The probe is cached for one second and runs off the request path,
+ *          keeping dependency I/O away from both callers and the listener.
  *   kb   — kb_client_health(). One HTTP call to aimee-kb, off the request path.
  *   modules — required same-container process modules attached to the local bus.
  *
@@ -34,7 +35,7 @@
  */
 #include "server_http.h"
 #include "kb_client.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "log.h"
 #include <aimee/audit/obs_bus.h>
 #include <aimee/delegates/module_api.h>
@@ -43,6 +44,7 @@
 #include <aimee/memory/module_api.h>
 #include <aimee/response-composition/module_api.h>
 #include <aimee/routing/module_api.h>
+#include <aimee/runtime-web/module_api.h>
 #include <aimee/skills/module_api.h>
 #include <aimee/tools/module_api.h>
 #include <aimee/workspace/module_api.h>
@@ -51,6 +53,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -116,6 +119,30 @@ static int ready_stale_secs(void)
    return env_int("AIMEE_READY_STALE_SECS", READY_STALE_DEFAULT, ready_interval_secs(), 86400);
 }
 
+static int env_switch_is(const char *value, int enabled)
+{
+   if (!value || !value[0])
+      return 0;
+   if (enabled)
+      return strcasecmp(value, "1") == 0 || strcasecmp(value, "true") == 0 ||
+             strcasecmp(value, "on") == 0 || strcasecmp(value, "yes") == 0;
+   return strcasecmp(value, "0") == 0 || strcasecmp(value, "false") == 0 ||
+          strcasecmp(value, "off") == 0 || strcasecmp(value, "no") == 0;
+}
+
+/* Keep readiness aligned with optional-modules-lib.sh. An explicit module
+ * switch wins; otherwise runtime-web follows the browser UI switch. Invalid or
+ * absent values preserve the image's default-on manifest entry. */
+static int runtime_web_required(void)
+{
+   const char *module_intent = getenv("AIMEE_MODULE_RUNTIME_WEB");
+   if (env_switch_is(module_intent, 1))
+      return 1;
+   if (env_switch_is(module_intent, 0))
+      return 0;
+   return !env_switch_is(getenv("AIMEE_RUNTIME_WEB_ENABLED"), 0);
+}
+
 static const char *dep_name(dep_state_t s)
 {
    switch (s)
@@ -172,7 +199,7 @@ void server_ready_sample_now(void)
    ready_snapshot_t s;
    memset(&s, 0, sizeof(s));
 
-   s.db1 = db1_is_initialized() ? DEP_OK : DEP_FAIL;
+   s.db1 = db1_store_probe() ? DEP_OK : DEP_FAIL;
 
    kb_health_t h;
    memset(&h, 0, sizeof(h));
@@ -209,12 +236,17 @@ void server_ready_sample_now(void)
        {AIMEE_TOOLS_EVENT_DISPATCH, "tools"},
        {AIMEE_WORKSPACE_EVENT_ACCESS, "workspace"},
        {AIMEE_GIT_EVENT_OPERATION, "git"},
+       {AIMEE_GIT_EVENT_REF_VALIDATE, "git"},
        {AIMEE_SKILLS_EVENT_CONTEXT, "skills"},
+       {AIMEE_SKILLS_EVENT_TRIGGER, "skills"},
        {AIMEE_RESPONSE_EVENT_COMPOSE, "response-composition"},
+       {AIMEE_RUNTIME_WEB_EVENT_CLASSIFY, "runtime-web"},
    };
    s.modules = DEP_OK;
    for (size_t i = 0; i < sizeof(required_modules) / sizeof(required_modules[0]); ++i)
    {
+      if (required_modules[i].kind == AIMEE_RUNTIME_WEB_EVENT_CLASSIFY && !runtime_web_required())
+         continue;
       if (obs_bus_module_available(required_modules[i].kind))
          continue;
       s.modules = DEP_FAIL;

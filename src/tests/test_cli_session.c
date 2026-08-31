@@ -12,6 +12,7 @@
 #include <sys/stat.h>
 #include "cJSON.h"
 #include "cli_session.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char g_claude_vault_oauth[512];
 static char g_codex_vault_oauth[512];
@@ -58,7 +59,8 @@ static char g_capturelog[320];
 
 static void install_fake_tmux(void)
 {
-   snprintf(g_fake_dir, sizeof(g_fake_dir), "/tmp/aimee_faketmux_%d", (int)getpid());
+   snprintf(g_fake_dir, sizeof(g_fake_dir), "%s/aimee_faketmux_%d", platform_tmpdir(),
+            (int)getpid());
    mkdir(g_fake_dir, 0700);
    char counter[300];
    snprintf(counter, sizeof(counter), "%s/counter", g_fake_dir);
@@ -102,7 +104,11 @@ static void install_fake_tmux(void)
            "'\"$c\"' end';\n"
            "    elif [ \"$FAKE_TMUX_MODE\" = prompt_then_answer ]; then\n"
            "      c=0; [ -f '%s' ] && c=$(cat '%s'); c=$((c+1)); echo \"$c\" > '%s';\n"
-           "      if [ \"$c\" -le 6 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
+           /* Four unchanged captures reach CLI_SESSION_STABLE_N, proving the
+            * prompt survives the ordinary completion threshold before the
+            * answer appears.  Keeping it at six made this timing test needlessly
+            * sensitive to process-launch latency under the parallel PG lane. */
+           "      if [ \"$c\" -le 4 ]; then echo '\xe2\x9d\xaf pasted repair prompt'; "
            "else printf '%%s\\n' '\xe2\x9d\xaf pasted repair prompt' "
            "'\xe2\x97\x8f {\"ok\":true}' '\xe2\x9c\xbb Baked for 1s'; fi;\n"
            "    else echo 'STATIC OUTPUT'; fi; exit 0 ;;\n"
@@ -175,13 +181,17 @@ static int capturelog_has(const char *needle)
 static void test_create_multiword_cli_cmd_single_arg(void)
 {
    unlink(g_createlog);
+   char quoting_wd[256];
+   snprintf(quoting_wd, sizeof quoting_wd, "%s/aimee quoting wd", platform_tmpdir());
    cli_session_t s;
    int rc = cli_session_create(&s, "aimee-quoting-test",
                                "AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions",
-                               "/tmp/aimee quoting wd", 0);
+                               quoting_wd, 0);
    assert(rc == 0);
    assert(createlog_has("ARG:[AIMEE_SESSION_ID=web-1 claude --dangerously-skip-permissions]"));
-   assert(createlog_has("ARG:[/tmp/aimee quoting wd]"));
+   char expect_wd[300];
+   snprintf(expect_wd, sizeof expect_wd, "ARG:[%s]", quoting_wd);
+   assert(createlog_has(expect_wd));
    /* No fragment may arrive as its own argument (the word-split regression). */
    assert(!createlog_has("ARG:[AIMEE_SESSION_ID=web-1]"));
    s.active = 0; /* fake tmux: no real session to tear down */
@@ -200,6 +210,27 @@ static cli_session_t fake_session(void)
    return s;
 }
 
+/* The wall-clock ceiling the recv tests below assert against.
+ *
+ * These ceilings answer "did recv terminate on its own bound, or run away?" —
+ * they are not performance targets, and the behaviour is already asserted
+ * separately by the return code above each one.
+ *
+ * It was 5000ms, which is 5x the 1000ms bound the first two tests pass in and
+ * 6x the 800ms grace the third one sets. That margin does not survive a busy
+ * machine: under the parallel suite this file failed 11 runs in 12, always on
+ * the clock and never on the behaviour — in the captured failure `rc == -4` and
+ * the `sendlog_has("Escape")` assertion both passed, and only `elapsed < 5000`
+ * did not.
+ *
+ * A ceiling only has to sit far enough below the WRONG outcome to tell the two
+ * apart. For the idle-timeout tests the wrong outcome is "never returns"; for
+ * the grace test it is riding the 30s idle bound instead of the 800ms grace.
+ * 15s is comfortably below both while giving scheduling ~15-18x the budget the
+ * code actually needs, so a correct run cannot lose the race and an incorrect
+ * one still cannot pass. */
+#define RECV_TERMINATION_CEILING_MS 15000
+
 static void test_recv_timeout_on_changing_pane(void)
 {
    setenv("FAKE_TMUX_MODE", "changing", 1);
@@ -211,7 +242,7 @@ static void test_recv_timeout_on_changing_pane(void)
    /* The pane never stabilises, so recv must hit the wall-clock bound (-2)
     * rather than hang. Allow generous slack above the 1000ms bound. */
    assert(rc == -2);
-   assert(elapsed < 5000);
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 static void test_recv_ok_on_stable_pane(void)
@@ -272,7 +303,9 @@ static void test_recv_does_not_return_static_prompt_as_answer(void)
    cli_session_t s = fake_session();
    cli_session_set_kind(&s, "claude");
    char buf[8192];
-   int rc = cli_session_recv(&s, buf, sizeof(buf), 10000);
+   /* The fake tmux forks twice per poll. Leave headroom for a fully saturated
+    * release runner; the fixture still answers after the fifth capture. */
+   int rc = cli_session_recv(&s, buf, sizeof(buf), 30000);
    assert(rc == 0);
    assert(strcmp(buf, "{\"ok\":true}") == 0);
 }
@@ -300,7 +333,7 @@ static void test_recv_busy_footer_not_finalized(void)
    int rc = cli_session_recv(&s, buf, sizeof(buf), 1000);
    long long elapsed = test_mono_ms() - t0;
    assert(rc == -2); /* never finalized; hit the wall-clock bound */
-   assert(elapsed < 5000);
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 /* --- cancel / steering-interrupt path --- */
@@ -378,7 +411,8 @@ static void test_recv_provider_error_returns_minus4(void)
    cli_session_set_error_grace_ms(0);
    assert(rc == -4);
    assert(sendlog_has("Escape")); /* stopped the retry loop */
-   assert(elapsed < 5000);        /* bounded by the 800ms grace, not the 30s timeout */
+   /* bounded by the 800ms grace, not the 30s idle timeout */
+   assert(elapsed < RECV_TERMINATION_CEILING_MS);
 }
 
 /* grace = 0 (default/opt-in off): the error pane is just a non-stabilising pane,
@@ -890,11 +924,14 @@ static char *slurp(const char *path)
 
 static void test_prepare_claude_seeds_gates(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
-   const char *wt = "/tmp/aimee_clitest_wt/session-abc";
+   char wt_buf[256];
+   snprintf(wt_buf, sizeof wt_buf, "%s/aimee_clitest_wt/session-abc", platform_tmpdir());
+   const char *wt = wt_buf;
 
    cli_session_prepare_claude(wt, 1);
 
@@ -935,7 +972,8 @@ static void test_prepare_claude_seeds_gates(void)
 
 static void test_prepare_claude_preserves_existing_settings(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1); /* cli_claude_home() resolves HOME first */
    setenv("AIMEE_HOME", home, 1);
@@ -949,7 +987,9 @@ static void test_prepare_claude_preserves_existing_settings(void)
    fputs("{\"theme\":\"dark\"}", f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt2", 1);
+   char wt2[256];
+   snprintf(wt2, sizeof wt2, "%s/aimee_clitest_wt2", platform_tmpdir());
+   cli_session_prepare_claude(wt2, 1);
 
    char *s = slurp(p);
    cJSON *sroot = cJSON_Parse(s);
@@ -969,7 +1009,8 @@ static void test_prepare_claude_preserves_existing_settings(void)
  * trust map, and history. prepare must leave it byte-for-byte untouched. */
 static void test_prepare_claude_skips_unparseable_config(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1);
    setenv("AIMEE_HOME", home, 1);
@@ -982,7 +1023,9 @@ static void test_prepare_claude_skips_unparseable_config(void)
    fputs(corrupt, f);
    fclose(f);
 
-   cli_session_prepare_claude("/tmp/aimee_clitest_wt3", 1);
+   char wt3[256];
+   snprintf(wt3, sizeof wt3, "%s/aimee_clitest_wt3", platform_tmpdir());
+   cli_session_prepare_claude(wt3, 1);
 
    char *after = slurp(jp);
    assert(after != NULL);
@@ -995,11 +1038,14 @@ static void test_prepare_claude_skips_unparseable_config(void)
  * isn't passed, so the operator's dangerous-mode prompt is left untouched). */
 static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
 {
-   char home[] = "/tmp/aimee_clitest_XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee_clitest_XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
    setenv("HOME", home, 1);
    setenv("AIMEE_HOME", home, 1);
-   const char *wt = "/tmp/aimee_clitest_wt4";
+   char wt_buf[256];
+   snprintf(wt_buf, sizeof wt_buf, "%s/aimee_clitest_wt4", platform_tmpdir());
+   const char *wt = wt_buf;
 
    cli_session_prepare_claude(wt, 0); /* not autonomous */
 
@@ -1034,9 +1080,9 @@ static void test_prepare_claude_nonautonomous_skips_bypass_seed(void)
 static void test_isolated_claude_home(void)
 {
    char shared[128];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-iso-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-iso-%d", platform_tmpdir(), (int)getpid());
    char runtime[160], cdir[192], json[288], settings[288];
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-iso-runtime-%d", (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-iso-runtime-%d", platform_tmpdir(), (int)getpid());
    snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
    mkdir(shared, 0700);
    mkdir(cdir, 0700);
@@ -1087,7 +1133,7 @@ static void test_isolated_claude_home(void)
 static void test_isolated_home_reclaimed_on_destroy(void)
 {
    char shared[128];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-isorm-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-isorm-%d", platform_tmpdir(), (int)getpid());
    char cdir[192], creds[288], json[288];
    snprintf(cdir, sizeof(cdir), "%s/.claude", shared);
    mkdir(shared, 0700);
@@ -1104,7 +1150,8 @@ static void test_isolated_home_reclaimed_on_destroy(void)
    fclose(f);
    setenv("HOME", shared, 1);
    char runtime[160];
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-isorm-runtime-%d", (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-isorm-runtime-%d", platform_tmpdir(),
+            (int)getpid());
    setenv("AIMEE_OAUTH_RUNTIME_DIR", runtime, 1);
    snprintf(g_claude_vault_oauth, sizeof(g_claude_vault_oauth), "{\"token\":\"vault-y\"}");
 
@@ -1140,8 +1187,9 @@ static void test_isolated_home_reclaimed_on_destroy(void)
 static void test_isolated_codex_home(void)
 {
    char shared[160], runtime[180], codex_dir[220], config[280];
-   snprintf(shared, sizeof(shared), "/tmp/aimee-codex-shared-%d", (int)getpid());
-   snprintf(runtime, sizeof(runtime), "/tmp/aimee-codex-runtime-%d", (int)getpid());
+   snprintf(shared, sizeof(shared), "%s/aimee-codex-shared-%d", platform_tmpdir(), (int)getpid());
+   snprintf(runtime, sizeof(runtime), "%s/aimee-codex-runtime-%d", platform_tmpdir(),
+            (int)getpid());
    snprintf(codex_dir, sizeof(codex_dir), "%s/.codex", shared);
    assert(mkdir(shared, 0700) == 0);
    assert(mkdir(codex_dir, 0700) == 0);

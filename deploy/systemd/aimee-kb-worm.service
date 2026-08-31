@@ -1,0 +1,31 @@
+[Unit]
+Description=Aimee WORM audit worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+EnvironmentFile=/etc/aimee/worm-worker.env
+Environment=AIMEE_HOME=/var/lib/aimee-worm
+Environment=AIMEE_WORM_PATH=/var/lib/aimee-worm/audit/kb-worm-live.db
+StateDirectory=aimee-worm
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/aimee-kb-worm
+Restart=on-failure
+RestartSec=2s
+NoNewPrivileges=yes
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -12,8 +12,10 @@
   "ownership_complete": true,
   "sources": [
     "src/modules/memory/gw_stage_memory.c",
+    "src/modules/memory/memory_activation.c",
     "src/modules/memory/memory_advanced.c",
     "src/modules/memory/memory_assemble.c",
+    "src/modules/memory/memory_candidate_fusion.c",
     "src/modules/memory/memory_conflict.c",
     "src/modules/memory/memory_context.c",
     "src/modules/memory/memory_core.c",
@@ -45,12 +47,32 @@
     "src/modules/memory/memory_scan.c",
     "src/modules/memory/module_adapter.c"
   ],
+  "go_sources": [
+    "server-go/modules/memory/commands.go",
+    "server-go/modules/memory/embed.go",
+    "server-go/modules/memory/extract.go",
+    "server-go/modules/memory/memory.go",
+    "server-go/modules/memory/ontology.go",
+    "server-go/modules/memory/ontology_seed.go",
+    "server-go/modules/memory/pii.go"
+  ],
+  "go_tests": [
+    "server-go/modules/memory/commands_test.go",
+    "server-go/modules/memory/embed_test.go",
+    "server-go/modules/memory/extract_conformance_test.go",
+    "server-go/modules/memory/gate_conformance_test.go",
+    "server-go/modules/memory/memory_test.go",
+    "server-go/modules/memory/ontology_test.go",
+    "server-go/modules/memory/pii_conformance_test.go"
+  ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h"
   ],
   "private_headers": [
     "src/modules/memory/gw_stage_memory.h",
+    "src/modules/memory/memory_activation.h",
     "src/modules/memory/memory_assemble_util.h",
+    "src/modules/memory/memory_candidate_fusion.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_extract_patterns.h",
     "src/modules/memory/memory_fact_gate.h",
@@ -64,13 +86,11 @@
   ],
   "tests": [
     "src/tests/test_gw_stage_memory.c",
-    "src/tests/test_memory.c",
     "src/tests/test_memory_advanced.c",
     "src/tests/test_memory_assemble_util.c",
     "src/tests/test_memory_embed_dim_guard.c",
     "src/tests/test_memory_fact_gate.c",
     "src/tests/test_memory_filter.c",
-    "src/tests/test_memory_health.c",
     "src/tests/test_memory_lanes.c",
     "src/tests/test_memory_profiles.c",
     "src/tests/test_memory_provider.c",

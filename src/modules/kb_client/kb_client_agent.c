@@ -4,6 +4,7 @@
  * under the per-file line cap. */
 
 #include "kb_client.h"
+#include "kb_client_pii.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -51,9 +52,13 @@ int kb_client_rules_insert(const char *polarity, const char *title, const char *
    cJSON *req = cJSON_CreateObject();
    if (polarity && polarity[0])
       cJSON_AddStringToObject(req, "polarity", polarity);
-   cJSON_AddStringToObject(req, "title", title);
-   if (description && description[0])
-      cJSON_AddStringToObject(req, "description", description);
+   /* A rule's title and description are prose written from a session. */
+   if (kb_client_pii_add_string_required(req, "title", title) != 0 ||
+       kb_client_pii_add_string(req, "description", description) != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    cJSON_AddNumberToObject(req, "weight", weight);
    char *json = kb_v1_action_request("rules.insert", req);
    if (!json)
@@ -156,9 +161,12 @@ int kb_client_collab_rules_propose(const char *text, const char *reason, const c
    if (!text || !text[0])
       return -1;
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "text", text);
-   if (reason && reason[0])
-      cJSON_AddStringToObject(req, "reason", reason);
+   if (kb_client_pii_add_string_required(req, "text", text) != 0 ||
+       kb_client_pii_add_string(req, "reason", reason) != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    if (proposed_by && proposed_by[0])
       cJSON_AddStringToObject(req, "proposed_by", proposed_by);
    char *json = kb_v1_action_request("collab_rules.propose", req);
@@ -357,10 +365,17 @@ int kb_client_decision_log_insert(int64_t task_id, const char *options, const ch
       return -1;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddNumberToObject(req, "task_id", (double)task_id);
-   cJSON_AddStringToObject(req, "options", options ? options : "");
-   cJSON_AddStringToObject(req, "chosen", chosen);
-   cJSON_AddStringToObject(req, "rationale", rationale ? rationale : "");
-   cJSON_AddStringToObject(req, "assumptions", assumptions ? assumptions : "");
+   /* A decision record is four prose fields; a rationale routinely quotes the
+    * material the decision was made about. */
+   if (kb_client_pii_add_string_required(req, "options", options ? options : "") != 0 ||
+       kb_client_pii_add_string_required(req, "chosen", chosen) != 0 ||
+       kb_client_pii_add_string_required(req, "rationale", rationale ? rationale : "") != 0 ||
+       kb_client_pii_add_string_required(req, "assumptions", assumptions ? assumptions : "") != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
+
    char *json = kb_v1_action_request("decision_log.insert", req);
    if (!json)
       return -1;
@@ -491,11 +506,16 @@ int kb_client_anti_pattern_insert(const char *pattern, const char *description, 
    if (!pattern)
       return -1;
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "pattern", pattern);
-   if (description && description[0])
-      cJSON_AddStringToObject(req, "description", description);
-   if (source && source[0])
-      cJSON_AddStringToObject(req, "source", source);
+   /* An anti-pattern is distilled from something that went wrong, and the
+    * pattern text often quotes it. source_ref is a citation handle. */
+   if (kb_client_pii_identifier_sensitive(source_ref) ||
+       kb_client_pii_add_string_required(req, "pattern", pattern) != 0 ||
+       kb_client_pii_add_string(req, "description", description) != 0 ||
+       kb_client_pii_add_string(req, "source", source) != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    if (source_ref && source_ref[0])
       cJSON_AddStringToObject(req, "source_ref", source_ref);
    cJSON_AddNumberToObject(req, "confidence", confidence);
@@ -594,9 +614,12 @@ int kb_client_feedback_record(const char *polarity, const char *title, const cha
       return -1;
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "polarity", polarity);
-   cJSON_AddStringToObject(req, "title", title);
-   if (description && description[0])
-      cJSON_AddStringToObject(req, "description", description);
+   if (kb_client_pii_add_string_required(req, "title", title) != 0 ||
+       kb_client_pii_add_string(req, "description", description) != 0)
+   {
+      cJSON_Delete(req);
+      return KB_CLIENT_WITHHELD_PII;
+   }
    cJSON_AddNumberToObject(req, "weight", weight);
    char *json = kb_v1_action_request("feedback.record", req);
    if (!json)

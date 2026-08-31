@@ -2,7 +2,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "cmd_agent_delegate_impl.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "cJSON.h"
 #include <ctype.h>
 #include <errno.h>
@@ -52,7 +52,7 @@ void delegate_print_help(void)
            "  --model NAME       Override the routed agent's model for this run\n"
            "  --tier N           Route to the best agent at cost tier N\n"
            "  --scope S          Packet size: \"bounded\" or \"whole_task\"; agents with a\n"
-           "                     lower max_scope are excluded (default whole_task)\n"
+           "                     lower max_scope are excluded (default bounded)\n"
            "  --plan             Use plan-mode execution\n"
            "  --dry-run          Show what would be sent without executing\n"
            "\n"
@@ -121,7 +121,7 @@ static void delegate_status_print_coord_hint_if_present(const char *task_id, con
    if (job_id <= 0)
       return;
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       return;
 
    db1_coord_job_t job;

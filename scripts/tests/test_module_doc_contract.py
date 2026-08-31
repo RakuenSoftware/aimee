@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import base64
+import contextlib
+import os
+import signal
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import importlib.util
@@ -28,17 +31,71 @@ SPEC.loader.exec_module(contract)
 FIXTURES = REPO_ROOT / "tests/fixtures/module-doc-contract"
 
 
-def process_is_gone_or_zombie(pid: int) -> bool:
-    """Return whether Linux reports a process as vanished or a zombie."""
+def _proc_stat_fields(pid: int) -> list[str] | None:
+    """Fields of /proc/<pid>/stat after the comm, or None if the pid is gone.
+
+    Splitting on the LAST ")" is deliberate: comm is an arbitrary program name in
+    parentheses and may itself contain them.
+    """
     try:
         stat = Path(f"/proc/{pid}/stat").read_text()
     except (FileNotFoundError, ProcessLookupError):
-        return True
+        return None
     _, separator, tail = stat.rpartition(")")
     fields = tail.split()
     if not separator or not fields:
         raise AssertionError(f"Malformed /proc/{pid}/stat")
-    return fields[0] == "Z"
+    return fields
+
+
+def process_starttime(pid: int) -> str | None:
+    """The process's start time in clock ticks, or None if it is already gone.
+
+    A pid is a NUMBER, and Linux hands numbers out again. Start time is what
+    makes it an identity: a recycled pid names a process that began later, so
+    (pid, starttime) is stable where pid alone is not.
+    """
+    fields = _proc_stat_fields(pid)
+    if fields is None:
+        return None
+    # /proc/<pid>/stat field 22 is starttime; `fields` begins at field 3 (state).
+    return fields[19] if len(fields) > 19 else None
+
+
+def process_is_gone_or_zombie(pid: int, starttime: str | None = None) -> bool:
+    """Return whether the process we meant is vanished, a zombie, or replaced.
+
+    Pass the `starttime` captured when the pid was learned. Without it this
+    answers a question about a NUMBER rather than about a process, and on a busy
+    machine the number can belong to something else by the time it is asked --
+    which reads as "still alive" and is how this reported a working kill as a
+    failure.
+    """
+    fields = _proc_stat_fields(pid)
+    if fields is None:
+        return True
+    if fields[0] == "Z":
+        return True
+    if starttime is not None and (len(fields) <= 19 or fields[19] != starttime):
+        # The pid was recycled: ours is gone and this is somebody else's process.
+        return True
+    return False
+
+
+def describe_process(pid: int) -> str:
+    """What /proc says about a pid, for a failure message that can be acted on."""
+    fields = _proc_stat_fields(pid)
+    if fields is None:
+        return f"pid {pid}: gone"
+    try:
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\0", b" ").decode(
+            "utf-8", "replace"
+        ).strip()
+    except OSError:
+        cmdline = "<unreadable>"
+    state = fields[0]
+    start = fields[19] if len(fields) > 19 else "?"
+    return f"pid {pid}: state={state} starttime={start} cmdline={cmdline!r}"
 
 
 def locked_toolchain():
@@ -567,17 +624,49 @@ class ModuleDocContractTests(unittest.TestCase):
             reader.budget.git_deadline = time.monotonic() + 0.1
             self.assert_rule("git-timeout", lambda: reader._git_bounded(
                 1024, "-c",
-                f"alias.orphan=!sh -c 'sleep 5 & echo $! > {child_pid_path}'",
+                f"alias.orphan=!sh -c 'sleep 600 & echo $! > {child_pid_path}'",
                 "orphan",
             ))
             child_pid = int(child_pid_path.read_text(encoding="ascii").strip())
-            for _ in range(100):
-                if process_is_gone_or_zombie(child_pid):
+            # The orphan MUST outlive the observation window, or this assertion is
+            # vacuous: with `sleep 5` the child exited on its own at five seconds,
+            # so any wait longer than that passed whether or not the process-group
+            # kill did anything. That is why the wait was ~1s -- and a 1s budget is
+            # not enough for the reap to be observable on a loaded runner, which
+            # failed CI here with the kill working correctly ("Git descendant
+            # survived process-group timeout", 2026-08-11).
+            #
+            # sleep 600 makes the two failure modes distinguishable: if the kill
+            # works the child is gone in milliseconds, and if it does not the child
+            # is still there when the deadline expires, so waiting longer costs
+            # nothing on success and cannot manufacture one.
+            # Capture the identity BEFORE waiting. After this point the pid may
+            # be recycled, and comparing start times is what tells "our child is
+            # gone" apart from "that number now belongs to someone else".
+            child_start = process_starttime(child_pid)
+
+            # ONE evaluation decides the outcome. The previous shape asked twice
+            # -- once to break the loop, once to set the result -- so a pid
+            # recycled between the two answered "gone" and then "alive", failing
+            # a kill that had worked, in well under a second. That is what this
+            # test did in CI on 2026-08-13.
+            reaped = False
+            deadline = time.monotonic() + 30.0
+            while time.monotonic() < deadline:
+                if process_is_gone_or_zombie(child_pid, child_start):
+                    reaped = True
                     break
                 time.sleep(0.01)
+            if not reaped:
+                # Never leave a ten-minute sleep behind for the next test or the
+                # runner to inherit -- the failure is the assertion below, not a
+                # leaked process.
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.kill(child_pid, signal.SIGKILL)
             self.assertTrue(
-                process_is_gone_or_zombie(child_pid),
-                "Git descendant survived process-group timeout",
+                reaped,
+                "Git descendant survived process-group timeout: "
+                + describe_process(child_pid),
             )
             reader.budget.git_deadline = time.monotonic() - 1
             with mock.patch.object(contract.subprocess, "Popen") as popen:

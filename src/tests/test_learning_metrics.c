@@ -6,15 +6,27 @@
  * See docs/proposals/done/learning-signals-router-phase-2.md. */
 
 #include <assert.h>
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
 #include <aimee/learning/learning.h>
+#include "modules/learning/learning_signal_policy.h"
+
+static int test_signal_classifier(const char *signal, uint32_t *sink_mask)
+{
+   return learning_signal_policy_sink_mask(signal, sink_mask);
+}
+
+static int failing_signal_classifier(const char *signal, uint32_t *sink_mask)
+{
+   (void)signal;
+   (void)sink_mask;
+   return -1;
+}
 
 static void seed_signal(const char *signal_type, const char *title, const char *description)
 {
@@ -35,8 +47,24 @@ int main(void)
 {
    printf("learning_metrics: ");
 
-   assert(db1_init(":memory:") == 0);
    db2_test_shim_open();
+
+   /* The production router must not classify or persist a signal without the
+    * separately supervised learning stage. */
+   {
+      learning_signal_input_t input = {0};
+      learning_dispatch_result_t result;
+      memset(&result, 0x7f, sizeof(result));
+      snprintf(input.signal_type, sizeof(input.signal_type), "%s", "thumb_up");
+      learning_router_register_signal_classifier(NULL);
+      assert(learning_router_record_signal(&input, &result) == -1);
+      assert(result.signal_id == 0 && result.proposal_count == 0 && result.committed_count == 0);
+      memset(&result, 0x7f, sizeof(result));
+      learning_router_register_signal_classifier(failing_signal_classifier);
+      assert(learning_router_record_signal(&input, &result) == -1);
+      assert(result.signal_id == 0 && result.proposal_count == 0 && result.committed_count == 0);
+   }
+   learning_router_register_signal_classifier(test_signal_classifier);
 
    /* --- empty DB: commit_ratio is 0, per-sink utilization all 0 --- */
    {
@@ -191,7 +219,6 @@ int main(void)
    }
 
    db2_test_shim_close();
-   db1_shutdown();
    printf("all tests passed\n");
    return 0;
 }

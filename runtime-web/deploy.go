@@ -69,3 +69,32 @@ func (s *server) deployRelay(w http.ResponseWriter, st int, data []byte, err err
 	}
 	w.Write(data)
 }
+
+// GET /api/embedders — the selectable-embedder catalog the wizard's Deploy-topology
+// step builds its picker from, relayed verbatim from the server's /v1/embedders.
+//
+// Without this route the browser got 404 and fetchEmbedders swallowed it (by design:
+// "a deployment whose server predates the endpoint still gets the free-text field").
+// The failure was therefore silent and total — the picker listed no bundled model, so
+// a new user could not choose bekko-a25m or nomic in the wizard at all, only
+// "external", which wants an endpoint and a width they are unlikely to have. The
+// catalog was there the whole time; nothing carried it across the webchat boundary.
+func (s *server) handleEmbedders(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, http.StatusMethodNotAllowed, "method not allowed")
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), socketCallTimeout)
+	defer cancel()
+	st, data, err := s.v1RequestWebuser(ctx, currentUser(r), http.MethodGet, "/v1/embedders", nil)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		writeJSONError(w, http.StatusServiceUnavailable, "embedders: aimee-server unavailable")
+		return
+	}
+	if st != http.StatusOK {
+		writeJSONError(w, st, vaultSafeErrorMessage(data))
+		return
+	}
+	w.Write(data)
+}

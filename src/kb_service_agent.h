@@ -23,6 +23,7 @@ int kb_handle_collab_rules_reject(int fd, cJSON *req);
 int kb_handle_collab_rules_retire(int fd, cJSON *req);
 int kb_handle_collab_rules_inject(int fd, cJSON *req);
 int kb_handle_learning_propose_signal(int fd, cJSON *req);
+int kb_handle_learning_record_application(int fd, cJSON *req);
 int kb_handle_agent_outcome_record(int fd, cJSON *req);
 int kb_handle_agent_hint_consume(int fd, cJSON *req);
 int kb_handle_anti_pattern_extract_from_feedback(int fd, cJSON *req);

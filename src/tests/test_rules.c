@@ -2,12 +2,11 @@
 #include <stdio.h>
 #include <string.h>
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
 #include "db_postgres.h"
-#include "db2_test_shim.h"
-#include "../db2/db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db2_internal.h"
 
 static void seed_rule(const char *polarity, const char *title, const char *description, int weight)
 {

@@ -16,6 +16,8 @@
  */
 #include "cli_attention_guard.h"
 #include "cli_session_start.h" /* read_stdin */
+#include "client_config.h"
+#include "client_session_worktree.h"
 #include "aimee_home.h"
 #include "agent_code_capabilities.h"
 #include "platform_path.h"
@@ -31,6 +33,134 @@
 #include <time.h>
 #include <sys/stat.h> /* stat, S_ISDIR — telling a file target from a directory */
 #include <unistd.h>   /* getcwd */
+
+static const char *attn_hook_cwd(const cJSON *hook, char *fallback, size_t cap)
+{
+   const char *cwd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "cwd"));
+   if (cwd && cwd[0])
+      return cwd;
+   if (getcwd(fallback, cap))
+      return fallback;
+   fallback[0] = '\0';
+   return fallback;
+}
+
+static const char *attn_hook_sid(const cJSON *hook, char *fallback, size_t cap)
+{
+   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "session_id"));
+   static const char *const envs[] = {"AIMEE_SESSION_ID", "CLAUDE_SESSION_ID", "CODEX_THREAD_ID",
+                                      NULL};
+   for (int i = 0; (!sid || !sid[0]) && envs[i]; i++)
+      sid = getenv(envs[i]);
+   if (!sid || !sid[0])
+      return NULL;
+   snprintf(fallback, cap, "%s", sid);
+   return fallback;
+}
+
+static int attn_tool_is_shell(const char *tool)
+{
+   return tool && (strcmp(tool, "Bash") == 0 || strcmp(tool, "terminal") == 0 ||
+                   strcmp(tool, "shell") == 0 || strcmp(tool, "exec_command") == 0 ||
+                   strcmp(tool, "execute_command") == 0);
+}
+
+/* Client-neutral route. Adapters only translate lifecycle events into this
+ * common payload; worktree ownership and path semantics stay here. */
+int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, const cJSON *input,
+                          cJSON **updated_out)
+{
+   *updated_out = NULL;
+   if (!sid || !cwd || !tool || !cJSON_IsObject(input))
+      return 1;
+   cJSON *updated = cJSON_Duplicate(input, 1);
+   if (!updated)
+      return -2;
+   int changed = 0;
+
+   static const char *const path_keys[] = {"file_path", "filePath", "path", "notebook_path",
+                                           "directory", "workdir",  NULL};
+   for (int i = 0; path_keys[i]; i++)
+   {
+      cJSON *item = cJSON_GetObjectItemCaseSensitive(updated, path_keys[i]);
+      if (!cJSON_IsString(item) || !item->valuestring[0])
+         continue;
+      char routed[16384];
+      int rc =
+          client_session_worktree_route_path(sid, cwd, item->valuestring, routed, sizeof routed);
+      if (rc < 0)
+      {
+         cJSON_Delete(updated);
+         return rc;
+      }
+      if (rc == 0 && strcmp(routed, item->valuestring) != 0)
+      {
+         cJSON_SetValuestring(item, routed);
+         changed = 1;
+      }
+   }
+
+   static const char *const command_keys[] = {"command", "cmd", NULL};
+   for (int i = 0; command_keys[i]; i++)
+   {
+      cJSON *command = cJSON_GetObjectItemCaseSensitive(updated, command_keys[i]);
+      if (!cJSON_IsString(command) || !command->valuestring[0])
+         continue;
+      char routed[32768];
+      int rc = 1;
+      if (strcmp(tool, "apply_patch") == 0 && strcmp(command_keys[i], "command") == 0)
+         rc = client_session_worktree_route_patch(sid, cwd, command->valuestring, routed,
+                                                  sizeof routed);
+      else if (attn_tool_is_shell(tool))
+         rc = client_session_worktree_route_command(sid, cwd, command->valuestring, routed,
+                                                    sizeof routed);
+      if (rc < 0)
+      {
+         cJSON_Delete(updated);
+         return rc;
+      }
+      if (rc == 0 && strcmp(routed, command->valuestring) != 0)
+      {
+         cJSON_SetValuestring(command, routed);
+         changed = 1;
+      }
+   }
+
+   if (!changed)
+   {
+      cJSON_Delete(updated);
+      return 1;
+   }
+   *updated_out = updated;
+   return 0;
+}
+
+static void attn_emit_updated_input(cJSON *updated)
+{
+   const char *client = getenv("AIMEE_HOOK_CLIENT");
+   cJSON *out = cJSON_CreateObject();
+   if (client && strcmp(client, "hermes") == 0)
+   {
+      cJSON_AddStringToObject(out, "action", "modify");
+      cJSON_AddItemToObject(out, "args", cJSON_Duplicate(updated, 1));
+   }
+   else if (client && strcmp(client, "opencode") == 0)
+      cJSON_AddItemToObject(out, "updatedInput", cJSON_Duplicate(updated, 1));
+   else
+   {
+      cJSON *specific = cJSON_AddObjectToObject(out, "hookSpecificOutput");
+      cJSON_AddStringToObject(specific, "hookEventName", "PreToolUse");
+      cJSON_AddStringToObject(specific, "permissionDecision", "allow");
+      cJSON_AddItemToObject(specific, "updatedInput", cJSON_Duplicate(updated, 1));
+   }
+   char *json = cJSON_PrintUnformatted(out);
+   if (json)
+   {
+      puts(json);
+      free(json);
+   }
+   cJSON_Delete(out);
+}
 
 double attn_score(const attn_record_t *recs, int n, const char *path, long now_ts)
 {
@@ -145,6 +275,7 @@ attn_op_t attn_classify(const char *tool_name, const char *bash_cmd)
 #define ATTN_MAX_RECORDS    1024
 #define ATTN_PRUNE_AGE_SECS (24 * 3600)
 #define ATTN_RAW_SCAN_PATH  "__aimee_raw_scan__"
+#define ATTN_DISCOVERY_PATH "__aimee_discovery__"
 
 static void attn_log_path(const char *session_id, char *out, size_t cap)
 {
@@ -264,6 +395,110 @@ static void attn_record(cJSON *arr, const char *path, int weight, long now_ts)
    cJSON_AddItemToArray(arr, e);
 }
 
+static int attn_has_recent_marker(cJSON *arr, const char *marker, long now_ts)
+{
+   cJSON *e = NULL;
+   cJSON_ArrayForEach(e, arr)
+   {
+      const char *path = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(e, "path"));
+      cJSON *ts = cJSON_GetObjectItemCaseSensitive(e, "ts");
+      if (!path || strcmp(path, marker) != 0 || !cJSON_IsNumber(ts))
+         continue;
+      long age = now_ts - (long)ts->valuedouble;
+      if (age >= 0 && age <= ATTN_PRUNE_AGE_SECS)
+         return 1;
+   }
+   return 0;
+}
+
+static int attn_cli_discovery(const char *tool_name, const char *command)
+{
+   if (!tool_name || !command || !command[0])
+      return 0;
+   if (strcasecmp(tool_name, "Bash") != 0 && strcasecmp(tool_name, "shell") != 0 &&
+       strcasecmp(tool_name, "command_execution") != 0)
+      return 0;
+   return strstr(command, "aimee index investigate") != NULL;
+}
+
+static int attn_contains_ci(const char *text, const char *needle)
+{
+   if (!text || !needle || !needle[0])
+      return 0;
+   size_t n = strlen(needle);
+   for (const char *p = text; *p; p++)
+      if (strncasecmp(p, needle, n) == 0)
+         return 1;
+   return 0;
+}
+
+static int attn_mcp_discovery(const char *tool_name, const char *command)
+{
+   if (!attn_contains_ci(tool_name, "aimee"))
+      return 0;
+   return attn_contains_ci(tool_name, "index") || attn_contains_ci(tool_name, "find_symbol") ||
+          attn_contains_ci(tool_name, "search_memory") || attn_contains_ci(tool_name, "context") ||
+          attn_contains_ci(command, "investigate");
+}
+
+int attn_discovery_gate(const char *tool_name, const char *command, const char *session_id,
+                        char *reason, size_t reason_len)
+{
+   if (reason && reason_len)
+      reason[0] = '\0';
+   const char *transport = getenv("AIMEE_HOOK_TRANSPORT");
+   int cli = transport && strcmp(transport, "cli") == 0;
+   int mcp = transport && strcmp(transport, "mcp") == 0;
+   if ((!cli && !mcp) || !tool_name || !tool_name[0])
+      return 0; /* legacy/unregistered hooks retain their existing behavior */
+
+   char path[1024];
+   attn_log_path(session_id, path, sizeof(path));
+   cJSON *arr = attn_load(path);
+   long now_ts = (long)time(NULL);
+   if (attn_has_recent_marker(arr, ATTN_DISCOVERY_PATH, now_ts))
+   {
+      cJSON_Delete(arr);
+      return 0;
+   }
+
+   int activated =
+       cli ? attn_cli_discovery(tool_name, command) : attn_mcp_discovery(tool_name, command);
+   if (activated)
+   {
+      attn_record(arr, ATTN_DISCOVERY_PATH, 1, now_ts);
+      attn_save(path, arr, now_ts);
+      cJSON_Delete(arr);
+      return 0;
+   }
+   cJSON_Delete(arr);
+
+   if (reason && reason_len)
+   {
+      if (cli)
+      {
+         const char *cli_path = getenv("AIMEE_CLI_PATH");
+         if (!cli_path || !cli_path[0])
+            cli_path = "aimee";
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered CLI before reading, searching, editing, or "
+                  "running repository commands: `%s index investigate \"<plain-language "
+                  "summary of the task>\"`. If the command reports unavailable, you may "
+                  "continue after that attempted call.",
+                  cli_path);
+      }
+      else
+         snprintf(reason, reason_len,
+                  "Aimee discovery is the required first repository action for this session. "
+                  "Retry through the registered Aimee MCP surface with index/investigate (or "
+                  "another indexed discovery operation) before using ordinary repository "
+                  "tools. If the MCP call reports unavailable, you may continue after that "
+                  "attempted call.");
+   }
+   return 2;
+}
+
 static int attn_raw_scan_count(cJSON *arr, long now_ts)
 {
    int count = 0;
@@ -280,75 +515,6 @@ static int attn_raw_scan_count(cJSON *arr, long now_ts)
          count++;
    }
    return count;
-}
-
-static int attn_parse_nonnegative_int(const char *s, int *out)
-{
-   if (!s || !out)
-      return 0;
-
-   while (isspace((unsigned char)*s))
-      s++;
-   if (*s == '+')
-      s++;
-   if (!isdigit((unsigned char)*s))
-      return 0;
-
-   errno = 0;
-   char *end = NULL;
-   long value = strtol(s, &end, 10);
-   if (errno || end == s || value < 0 || value > INT_MAX)
-      return 0;
-   *out = (int)value;
-   return 1;
-}
-
-static int attn_parse_ingress_max_raw_scans(const char *buf, int *out)
-{
-   if (!buf || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen("ingress_max_raw_scans");
-         if (strncmp(p, "ingress_max_raw_scans", key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               return attn_parse_nonnegative_int(p, out);
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
 }
 
 static int attn_read_file(const char *path, char **out)
@@ -392,78 +558,7 @@ static int attn_read_file(const char *path, char **out)
 
 static int attn_config_ingress_max_raw_scans(void)
 {
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 0;
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 0;
-
-   int value = 0;
-   if (!attn_parse_ingress_max_raw_scans(buf, &value))
-      value = 0;
-   free(buf);
-   return value;
-}
-
-/* Parse a boolean `<key>:` line from an aimee.yaml buffer. Accepts
- * true/1/yes/on (case-insensitive) as true; anything else (incl. a missing
- * key) leaves *out untouched. Mirrors attn_parse_ingress_max_raw_scans' lean,
- * link-free YAML-line scan so the guard need not pull in the full config. */
-static int attn_parse_bool_key(const char *buf, const char *key, int *out)
-{
-   if (!buf || !key || !out)
-      return 0;
-
-   const char *line = buf;
-   while (*line)
-   {
-      const char *p = line;
-      while (*p == ' ' || *p == '\t')
-         p++;
-
-      if (*p && *p != '#')
-      {
-         char quote = 0;
-         if (*p == '"' || *p == '\'')
-            quote = *p++;
-
-         size_t key_len = strlen(key);
-         if (strncmp(p, key, key_len) == 0)
-         {
-            p += key_len;
-            if (quote)
-            {
-               if (*p != quote)
-                  goto next_line;
-               p++;
-            }
-            while (*p && isspace((unsigned char)*p))
-               p++;
-            if (*p == ':' || *p == '=')
-            {
-               p++;
-               while (*p && (isspace((unsigned char)*p) || *p == '"' || *p == '\''))
-                  p++;
-               *out = (strncasecmp(p, "true", 4) == 0 || strncasecmp(p, "yes", 3) == 0 ||
-                       strncasecmp(p, "on", 2) == 0 || *p == '1');
-               return 1;
-            }
-         }
-      }
-
-   next_line:
-      while (*line && *line != '\n')
-         line++;
-      if (*line == '\n')
-         line++;
-   }
-
-   return 0;
+   return client_config_int("ingress_max_raw_scans", 0);
 }
 
 static int attn_config_require_session_worktree(void)
@@ -474,21 +569,7 @@ static int attn_config_require_session_worktree(void)
     * `git checkout <branch>` moves the branch the other is mutating, cross-
     * contaminating commits. Failing closed to isolation (each session in its own
     * `.aimee/worktrees/...` worktree+branch) is the only safe default. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to isolation */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_session_worktree", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_session_worktree", 1);
 }
 
 static int attn_config_require_aimee_memory(void)
@@ -497,21 +578,7 @@ static int attn_config_require_aimee_memory(void)
     * system (`aimee memory store`), where they are indexed, recalled, and
     * audited — not in per-harness markdown files aimee never sees. Only an
     * explicit `require_aimee_memory: false` opts out. */
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return 1; /* no resolvable home -> fail closed to enforcement */
-
-   char path[1024];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", home);
-
-   char *buf = NULL;
-   if (!attn_read_file(path, &buf))
-      return 1; /* no config file -> default ON */
-
-   int value = 1; /* default ON; only an explicit key overrides */
-   (void)attn_parse_bool_key(buf, "require_aimee_memory", &value);
-   free(buf);
-   return value;
+   return client_config_bool("require_aimee_memory", 1);
 }
 
 /* Public wrapper so other client TUs (e.g. the remote/thin session-start path)
@@ -1414,17 +1481,21 @@ static int attn_git_shares_foreign_session_history(const char *dir, const char *
                /* Registry branch names are launcher-generated, but treat them as data
                 * regardless: a name carrying a quote must never become shell syntax. */
                int other = sess[0] && (!own || !own[0] || strcmp(sess, own) != 0);
-               int quotable = !strchr(sess, '\'') && !strchr(sess, '\n');
+               int quotable = strlen(sess) <= 511 && strlen(defref) <= 511 && !strchr(sess, '\'') &&
+                              !strchr(sess, '\n') && !strchr(defref, '\'') &&
+                              !strchr(defref, '\n') && !strchr(dir, '\'') && !strchr(dir, '\n');
                if (other && quotable)
                {
-                  char cmd[3200];
-                  snprintf(cmd, sizeof(cmd),
-                           "git -C '%s' rev-parse --verify --quiet '%s^{commit}' >/dev/null 2>&1 "
-                           "&& mb=$(git -C '%s' merge-base HEAD '%s' 2>/dev/null) "
-                           "&& [ -n \"$mb\" ] "
-                           "&& ! git -C '%s' merge-base --is-ancestor \"$mb\" '%s' 2>/dev/null",
-                           dir, sess, dir, sess, dir, defref);
-                  if (system(cmd) == 0)
+                  char cmd[4096];
+                  int n =
+                      snprintf(cmd, sizeof(cmd),
+                               "cd '%.*s' "
+                               "&& git rev-parse --verify --quiet '%.*s^{commit}' >/dev/null 2>&1 "
+                               "&& mb=$(git merge-base HEAD '%.*s' 2>/dev/null) "
+                               "&& [ -n \"$mb\" ] "
+                               "&& ! git merge-base --is-ancestor \"$mb\" '%.*s' 2>/dev/null",
+                               2047, dir, 511, sess, 511, sess, 511, defref);
+                  if (n > 0 && (size_t)n < sizeof(cmd) && system(cmd) == 0)
                      shared = 1;
                }
             }
@@ -1448,7 +1519,7 @@ static int attn_git_shares_foreign_session_history(const char *dir, const char *
  * then silently fell back to "main" -- so on a repo whose default is anything else, the
  * refusal named the wrong branch AND compared the base against it. Observed on one repo
  * in one minute: "('testing')" for a Bash op, "('main')" for an Edit. */
-static void attn_git_dir_for(const char *target, char *out, size_t outlen)
+void attn_git_dir_for(const char *target, char *out, size_t outlen)
 {
    if (!out || !outlen)
       return;
@@ -1456,9 +1527,23 @@ static void attn_git_dir_for(const char *target, char *out, size_t outlen)
    struct stat st;
    if (out[0] && stat(out, &st) == 0 && S_ISDIR(st.st_mode))
       return;
-   char *slash = strrchr(out, '/');
-   if (slash && slash != out)
+   /* Walk UP to the nearest EXISTING directory. Stripping a single component is not
+    * enough when the target is a new file in a not-yet-created directory: the result
+    * is another missing path, so `git -C` cannot run there and BOTH lineage probes
+    * (current branch, default ref) fail. The caller reads default_resolved == 0 as an
+    * unverifiable lineage and fails closed — so creating a file in a new subdirectory
+    * was refused with a branch-lineage error that had nothing to do with the branch,
+    * for every session without a registry row (which is every Claude Code session,
+    * since EnterWorktree writes none). Failing closed on a genuinely unresolvable
+    * default branch is deliberate and is preserved; this only stops a MISSING
+    * DIRECTORY from being mistaken for one. */
+   char *slash;
+   while ((slash = strrchr(out, '/')) != NULL && slash != out)
+   {
       *slash = '\0';
+      if (stat(out, &st) == 0 && S_ISDIR(st.st_mode))
+         return;
+   }
 }
 
 /* Pure decision for the session-isolation guard (testable in isolation).
@@ -1511,10 +1596,21 @@ int handle_attention_guard(void)
    }
 
    const char *tool = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "tool_name"));
-   const char *sid = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(hook, "session_id"));
+   char sid_buf[128], cwd_buf[4096];
+   const char *sid = attn_hook_sid(hook, sid_buf, sizeof sid_buf);
+   const char *payload_cwd = attn_hook_cwd(hook, cwd_buf, sizeof cwd_buf);
    cJSON *ti = cJSON_GetObjectItemCaseSensitive(hook, "tool_input");
    const char *bash_cmd =
        ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command")) : NULL;
+
+   char discovery_reason[1024];
+   if (attn_discovery_gate(tool, bash_cmd, sid, discovery_reason, sizeof(discovery_reason)) != 0)
+   {
+      fprintf(stderr, "aimee attention-guard: %s\n", discovery_reason);
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 2;
+   }
 
    long now_ts = (long)time(NULL);
    attn_op_t op = attn_classify(tool, bash_cmd);
@@ -1528,17 +1624,14 @@ int handle_attention_guard(void)
     * block. */
    if (attn_config_require_aimee_memory())
    {
-      char mcwd[1024];
-      if (!getcwd(mcwd, sizeof(mcwd)))
-         mcwd[0] = '\0';
       const char *mfp = NULL;
       if (ti)
       {
-         const char *keys[] = {"file_path", "path", "notebook_path"};
+         const char *keys[] = {"file_path", "filePath", "path", "notebook_path"};
          for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]) && !mfp; k++)
             mfp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, keys[k]));
       }
-      if (attn_external_memory_blocked(op, tool, mfp, bash_cmd, mcwd))
+      if (attn_external_memory_blocked(op, tool, mfp, bash_cmd, payload_cwd))
       {
          fprintf(stderr,
                  "aimee attention-guard: refusing a direct write to an external agent-memory "
@@ -1554,18 +1647,45 @@ int handle_attention_guard(void)
       }
    }
 
-   /* Session-isolation guard (OPT-IN via require_session_worktree). Fails closed
-    * on a mutating op outside an aimee-managed worktree, so a session that never
-    * ran `session-start` (e.g. a missing SessionStart hook) cannot mutate the
-    * primary checkout / default branch. This is the aimee-level backstop for the
-    * worktree+branch isolation that the SessionStart hook would otherwise set up. */
-   if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && attn_config_require_session_worktree())
+   const int require_session_worktree = attn_config_require_session_worktree();
+
+   /* Provisioning happens at SessionStart; this idempotent per-tool route is the
+    * enforcement backstop for clients that resume oddly or skip a lifecycle
+    * event. Successful routing is silent and applies to reads as well as writes,
+    * so a session never reads one checkout and edits another. The explicit
+    * operator opt-out disables both routing and the guard below. */
+   cJSON *updated_input = NULL;
+   int route_rc = require_session_worktree
+                      ? attn_route_tool_input(sid, payload_cwd, tool, ti, &updated_input)
+                      : 1;
+   if (route_rc == -2 || route_rc == -3)
    {
-      char cwd[1024];
-      if (!getcwd(cwd, sizeof(cwd)))
-         cwd[0] = '\0';
+      fprintf(stderr, "aimee: internal session workspace isolation failed; tool call blocked\n");
+      cJSON_Delete(hook);
+      free(stdin_data);
+      return 2;
+   }
+   if (updated_input)
+   {
+      ti = updated_input;
+      bash_cmd = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "command"));
+   }
+
+   /* Session-isolation guard (default on via require_session_worktree). Fails
+    * closed on a mutating op outside an aimee-managed worktree, so a client that
+    * bypassed `aimee launch` cannot mutate the primary checkout/default branch.
+    * A SessionStart hook supplies context only and is never treated as cwd state. */
+   if ((op == ATTN_OP_SOFT || op == ATTN_OP_HARD) && require_session_worktree)
+   {
+      char routed_cwd[8192];
+      const char *cwd = payload_cwd;
+      if (client_session_worktree_route_path(sid, payload_cwd, NULL, routed_cwd,
+                                             sizeof routed_cwd) == 0)
+         cwd = routed_cwd;
       const char *fp =
           ti ? cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "file_path")) : NULL;
+      if (!fp && ti)
+         fp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, "filePath"));
       /* Branch lineage: being INSIDE a managed worktree is not enough. The worktree
        * must have been created by the launcher (so a registry row exists) and rooted
        * correctly -- a primary on the default branch, a delegate on its parent's.
@@ -1604,18 +1724,9 @@ int handle_attention_guard(void)
                 resolved && attn_git_shares_foreign_session_history(gitdir, defref, gitown);
             if (attn_unregistered_lineage_blocked(resolved, foreign))
             {
-               fprintf(stderr,
-                       "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
-                       "branch '%s', which has no launcher registry row and %s. A primary session "
-                       "must branch off the default branch ('%s'); a delegate off its parent. "
-                       "Recreate the session worktree with the launcher (Claude Code: "
-                       "EnterWorktree; aimee: launch `aimee`) instead of `git worktree add` by "
-                       "hand.\n",
-                       lin_target, gitown[0] ? gitown : "(unknown)",
-                       resolved ? "carries commits from another session's branch"
-                                : "could not be checked, because the default branch does not "
-                                  "resolve here",
-                       defbr[0] ? defbr : "(unresolved)");
+               fputs("aimee: internal session workspace isolation failed; tool call blocked\n",
+                     stderr);
+               cJSON_Delete(updated_input);
                cJSON_Delete(hook);
                free(stdin_data);
                return 2;
@@ -1624,15 +1735,9 @@ int handle_attention_guard(void)
          else if (reg_state == 2 && base[0] &&
                   attn_session_branch_blocked(base, defbr, parent_registered))
          {
-            fprintf(stderr,
-                    "aimee attention-guard: refusing a mutating op — the worktree at '%s' is on "
-                    "branch '%s' rooted at '%s', which is neither the default branch ('%s') nor a "
-                    "registered parent session branch. A primary session must branch off the "
-                    "default branch; a delegate off its parent. Recreate the session worktree "
-                    "with the launcher (Claude Code: EnterWorktree; aimee: launch `aimee`) instead "
-                    "of `git worktree add` by hand.\n",
-                    lin_target, own[0] ? own : "(unknown)", base,
-                    defbr[0] ? defbr : "(unresolved)");
+            fputs("aimee: internal session workspace isolation failed; tool call blocked\n",
+                  stderr);
+            cJSON_Delete(updated_input);
             cJSON_Delete(hook);
             free(stdin_data);
             return 2;
@@ -1643,13 +1748,8 @@ int handle_attention_guard(void)
        * isolation check below only sees the cwd for a Bash call. */
       if (bash_cmd && bash_cmd[0] && attn_bash_escapes_worktree(bash_cmd, cwd))
       {
-         fprintf(stderr,
-                 "aimee attention-guard: refusing a Bash command that writes outside this "
-                 "session's worktree. The command changes directory to, or redirects into, an "
-                 "absolute path that is not under .aimee/worktrees/ or .claude/worktrees/. The "
-                 "cwd being a valid worktree is not enough — what the command TOUCHES has to "
-                 "stay inside it. Do the work in the session worktree, or ask the operator to "
-                 "make the change.\n");
+         fputs("aimee: internal session workspace isolation failed; tool call blocked\n", stderr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 2;
@@ -1657,29 +1757,8 @@ int handle_attention_guard(void)
 
       if (attn_session_isolation_blocked(op, fp, cwd, sid))
       {
-         /* Name the path that was actually judged. When an absolute file_path is
-          * given it IS the effective target, and the cwd may be a perfectly good
-          * managed worktree — saying otherwise sends the reader off diagnosing a
-          * worktree that is not the problem. */
-         char target[2048];
-         attn_session_isolation_target(fp, cwd, target, sizeof(target));
-         char where[2300];
-         if (fp && fp[0])
-            snprintf(where, sizeof(where), "the write target '%s' is not inside a managed worktree",
-                     target);
-         else
-            snprintf(where, sizeof(where),
-                     "this session is operating in '%s', which is not a "
-                     "managed worktree",
-                     cwd[0] ? cwd : "(unknown cwd)");
-         fprintf(stderr,
-                 "aimee attention-guard: refusing a mutating op outside a session worktree — %s "
-                 "(.aimee/worktrees/... or .claude/worktrees/...). aimee requires each mutating "
-                 "session to run in an isolated worktree+branch off the default branch: create "
-                 "one (Claude Code: EnterWorktree; aimee: launch `aimee`, which materializes a "
-                 "worktree and chdirs into it). An operator may set require_session_worktree: "
-                 "false in aimee.yaml to disable this — there is no env-var bypass.\n",
-                 where);
+         fputs("aimee: internal session workspace isolation failed; tool call blocked\n", stderr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 2;
@@ -1726,6 +1805,7 @@ int handle_attention_guard(void)
       if (!recs)
       {
          cJSON_Delete(arr);
+         cJSON_Delete(updated_input);
          cJSON_Delete(hook);
          free(stdin_data);
          return 0;
@@ -1754,7 +1834,7 @@ int handle_attention_guard(void)
    else if (ti)
    {
       /* Accrue attention for the touched file (Read / edit-class). */
-      const char *keys[] = {"file_path", "path", "notebook_path"};
+      const char *keys[] = {"file_path", "filePath", "path", "notebook_path"};
       for (size_t k = 0; k < sizeof(keys) / sizeof(keys[0]); k++)
       {
          const char *fp = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(ti, keys[k]));
@@ -1765,6 +1845,9 @@ int handle_attention_guard(void)
 
    attn_save(path, arr, now_ts);
    cJSON_Delete(arr);
+   if (exit_code == 0 && updated_input)
+      attn_emit_updated_input(updated_input);
+   cJSON_Delete(updated_input);
    cJSON_Delete(hook);
    free(stdin_data);
    return exit_code;

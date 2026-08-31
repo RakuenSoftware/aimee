@@ -4,8 +4,10 @@
 #include <string.h>
 #include <aimee/delegates/delegate_role.h>
 #include "agent_types.h"
-#include <stdlib.h>   /* mkdtemp */
-#include <sys/stat.h> /* mkdir */
+#include "config.h"             /* config_default_dir */
+#include <stdlib.h>             /* mkdtemp */
+#include <sys/stat.h>           /* mkdir */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* delegate_agent_supports_role() now defers to the canonical agent_has_role()
  * (declared-role membership, `all` wildcard included). Stub it here — the real
@@ -41,7 +43,7 @@ static void write_role_template(const char *canonical, int max_turns)
 }
 static void setup_role_templates(void)
 {
-   snprintf(g_roles_dir, sizeof(g_roles_dir), "/tmp/aimee-test-roles-XXXXXX");
+   snprintf(g_roles_dir, sizeof(g_roles_dir), "%s/aimee-test-roles-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_roles_dir));
    char sub[512];
    snprintf(sub, sizeof(sub), "%s/role_templates", g_roles_dir);
@@ -52,247 +54,124 @@ static void setup_role_templates(void)
    /* no code.md -> role_template_max_turns returns -1 for "code" */
 }
 
-static void test_canonical_roles_unchanged(void)
+/* These tests used to assert the CONTENT of two tables that lived in C: which
+ * aliases resolve where, and which roles ship. Both were copies of the module's,
+ * agreeing with it by coincidence, and both are gone. What the answers ARE is
+ * pinned against the module in server-go/modules/delegates/rolepolicy_test.go
+ * and permissions_test.go.
+ *
+ * What is left here is the seam: that C asks, that it fails closed when nobody
+ * answers, and that the half C genuinely owns -- a template file on disk -- still
+ * works. */
+
+static int g_policy_calls;
+static int g_builtin_answer;
+
+/* A canonicalizer that resolves exactly one alias, so a test can tell "the
+ * module was asked and its answer used" from "C worked it out". */
+static int role_seam_canonicalize(const char *role, char *out, size_t cap)
 {
-   static const char *canonical[] = {"code",    "review",   "validate", "diagnose",
-                                     "execute", "refactor", "draft",    NULL};
-   for (int i = 0; canonical[i]; i++)
-   {
-      const char *out = delegate_role_canonicalize(canonical[i]);
-      assert(out == canonical[i]); /* pointer identity: no alias applied */
-   }
-   printf("  PASS: test_canonical_roles_unchanged\n");
+   if (!role || !out)
+      return -1;
+   snprintf(out, cap, "%s", strcmp(role, "alias-of-code") == 0 ? "code" : role);
+   return 0;
 }
 
-static void test_implement_maps_to_code(void)
+static int role_seam_policy(int op, const char *role, int a, int b, int c, int *out)
 {
-   const char *out = delegate_role_canonicalize("implement");
-   assert(out != NULL);
-   assert(strcmp(out, "code") == 0);
-   printf("  PASS: test_implement_maps_to_code\n");
+   (void)role;
+   (void)a;
+   (void)b;
+   (void)c;
+   if (op != DELEGATE_ROLE_OP_BUILTIN || !out)
+      return -1;
+   g_policy_calls++;
+   *out = g_builtin_answer;
+   return 0;
 }
 
-static void test_build_maps_to_code(void)
+static void install_role_seam(void)
 {
-   const char *out = delegate_role_canonicalize("build");
-   assert(out != NULL);
-   assert(strcmp(out, "code") == 0);
-   printf("  PASS: test_build_maps_to_code\n");
+   delegate_role_register_canonicalizer(role_seam_canonicalize);
+   delegate_register_role_policy_provider(role_seam_policy);
 }
 
-static void test_test_maps_to_validate(void)
+/* With nobody to ask, a role has no canonical spelling and nothing is known.
+ *
+ * This is the direction that matters. The fallback that used to sit here made
+ * the answer depend on whether the module was registered, which is the same
+ * question answered twice; a refusal is at least the same answer every time. */
+static void test_without_a_provider_nothing_is_known(void)
 {
-   const char *out = delegate_role_canonicalize("test");
-   assert(out != NULL);
-   assert(strcmp(out, "validate") == 0);
-   printf("  PASS: test_test_maps_to_validate\n");
+   delegate_role_register_canonicalizer(NULL);
+   delegate_register_role_policy_provider(NULL);
+
+   assert(delegate_role_canonicalize("code")[0] == '\0');
+   assert(delegate_role_known(NULL, "code") == 0);
+   assert(delegate_role_known(NULL, "implement") == 0);
+   printf("  PASS: test_without_a_provider_nothing_is_known\n");
 }
 
-static void test_check_maps_to_validate(void)
+/* The module's answer is used verbatim, for the spelling and for whether the
+ * role ships. */
+static void test_the_module_names_the_role(void)
 {
-   const char *out = delegate_role_canonicalize("check");
-   assert(out != NULL);
-   assert(strcmp(out, "validate") == 0);
-   printf("  PASS: test_check_maps_to_validate\n");
+   install_role_seam();
+
+   assert(strcmp(delegate_role_canonicalize("alias-of-code"), "code") == 0);
+
+   g_builtin_answer = 1;
+   g_policy_calls = 0;
+   assert(delegate_role_known(NULL, "alias-of-code") == 1);
+   assert(g_policy_calls == 1); /* asked, not assumed */
+
+   g_builtin_answer = 0;
+   assert(delegate_role_known(NULL, "not-a-role-anywhere") == 0);
+   printf("  PASS: test_the_module_names_the_role\n");
 }
 
-static void test_human_role_nouns_map_to_canonical_roles(void)
+/* And the half C owns: a template file makes a custom role known even when the
+ * module says it is not one that ships. */
+static void test_a_template_file_defines_a_custom_role(void)
 {
-   assert(strcmp(delegate_role_canonicalize("reviewer"), "review") == 0);
-   assert(strcmp(delegate_role_canonicalize("verifier"), "validate") == 0);
-   printf("  PASS: test_human_role_nouns_map_to_canonical_roles\n");
+   install_role_seam();
+   g_builtin_answer = 0;
+
+   char dir[512];
+   snprintf(dir, sizeof(dir), "%s/role_templates", config_default_dir());
+   char cmd[600];
+   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
+   assert(system(cmd) == 0);
+
+   char path[600];
+   snprintf(path, sizeof(path), "%s/deployer.md", dir);
+   FILE *f = fopen(path, "w");
+   assert(f != NULL);
+   fputs("You deploy things. {{TASK}}\n", f);
+   fclose(f);
+
+   assert(delegate_role_known(NULL, "deployer") == 1);
+   assert(delegate_role_known(NULL, "not-a-role-anywhere") == 0);
+
+   remove(path);
+   printf("  PASS: test_a_template_file_defines_a_custom_role\n");
 }
 
-static void test_planner_maps_to_plan(void)
-{
-   const char *out = delegate_role_canonicalize("planner");
-   assert(out != NULL);
-   assert(strcmp(out, "plan") == 0);
-   out = delegate_role_canonicalize("planning");
-   assert(out != NULL);
-   assert(strcmp(out, "plan") == 0);
-   printf("  PASS: test_planner_maps_to_plan\n");
-}
-
-static void test_charter_aliases_map_to_builtin_roles(void)
-{
-   assert(strcmp(delegate_role_canonicalize("synthesize"), "summarize") == 0);
-   assert(strcmp(delegate_role_canonicalize("rank-fuse"), "reason") == 0);
-   assert(strcmp(delegate_role_canonicalize("classify-score"), "reason") == 0);
-   assert(strcmp(delegate_role_canonicalize("evaluate-optimize"), "validate") == 0);
-   assert(strcmp(delegate_role_canonicalize("recall"), "search") == 0);
-   assert(strcmp(delegate_role_canonicalize("enforce"), "execute") == 0);
-   printf("  PASS: test_charter_aliases_map_to_builtin_roles\n");
-}
-
-static void test_unknown_role_unchanged(void)
-{
-   const char *role = "completely_unknown_role_xyz";
-   const char *out = delegate_role_canonicalize(role);
-   assert(out == role); /* pointer identity */
-   printf("  PASS: test_unknown_role_unchanged\n");
-}
-
-static void test_null_role(void)
-{
-   const char *out = delegate_role_canonicalize(NULL);
-   assert(out == NULL);
-   printf("  PASS: test_null_role\n");
-}
-
-static void test_empty_role(void)
-{
-   const char *role = "";
-   const char *out = delegate_role_canonicalize(role);
-   assert(out == role); /* pointer identity, no alias for empty */
-   printf("  PASS: test_empty_role\n");
-}
-
-static void test_is_write_code_role(void)
-{
-   assert(delegate_role_is_write("code") == 1);
-   printf("  PASS: test_is_write_code_role\n");
-}
-
-static void test_is_write_refactor_role(void)
-{
-   assert(delegate_role_is_write("refactor") == 1);
-   printf("  PASS: test_is_write_refactor_role\n");
-}
-
-static void test_is_write_implement_alias(void)
-{
-   assert(delegate_role_is_write("implement") == 1);
-   printf("  PASS: test_is_write_implement_alias\n");
-}
-
-static void test_is_write_read_only_roles(void)
-{
-   assert(delegate_role_is_write("review") == 0);
-   assert(delegate_role_is_write("validate") == 0);
-   assert(delegate_role_is_write("diagnose") == 0);
-   assert(delegate_role_is_write("execute") == 0);
-   assert(delegate_role_is_write("draft") == 0);
-   assert(delegate_role_is_write("planner") == 0);
-   printf("  PASS: test_is_write_read_only_roles\n");
-}
-
-static void test_is_write_null_empty(void)
-{
-   assert(delegate_role_is_write(NULL) == 0);
-   assert(delegate_role_is_write("") == 0);
-   printf("  PASS: test_is_write_null_empty\n");
-}
-
-static void test_novel_roles(void)
-{
-   /* continuity and beat-check survive the persona-vs-role cull: they are real
-    * read-only inspection actions a novel persona genuinely delegates, not
-    * restatements of who the delegate is. */
-   assert(delegate_role_is_write("continuity") == 0);
-   assert(delegate_role_is_write("beat-check") == 0);
-   assert(delegate_role_auto_tools_for_invocation("continuity", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("beat-check", 2, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("continuity", 1, 0) == 0);
-   printf("  PASS: test_novel_roles\n");
-}
-
-/* The cull deleted the roles that only restated a persona. Writing prose or a
- * lyric is the `draft` action performed BY a novel/songwriter persona, so these
- * names must now be rejected outright rather than silently degrading to a
- * read-only delegate with a generic prompt. */
+/* The removed-role blacklist is still C's, and still rejects. */
 static void test_culled_persona_roles_are_rejected(void)
 {
-   static const char *const culled[] = {"prose", "line-edit", "lyric",
-                                        "hook",  "prosody",   "songform"};
-   for (size_t i = 0; i < sizeof(culled) / sizeof(culled[0]); i++)
-   {
-      assert(delegate_role_removed_reason(culled[i]) != NULL);
-      /* And they must not linger as write roles, which would hand tool access
-       * to a name routing will refuse. */
-      assert(delegate_role_is_write(culled[i]) == 0);
-   }
-   /* Surviving roles are not swept up by the removal check. */
-   assert(delegate_role_removed_reason("draft") == NULL);
-   assert(delegate_role_removed_reason("continuity") == NULL);
-   assert(delegate_role_removed_reason(NULL) == NULL);
-   assert(delegate_role_removed_reason("") == NULL);
-   printf("  PASS: test_culled_persona_roles_are_rejected\n");
-}
+   install_role_seam();
+   g_builtin_answer = 1; /* even if the module claimed them, these are refused */
 
-/* An unknown role name used to be accepted verbatim and dispatched: no template
- * (generic prompt), no write classification (silently read-only), no agent role
- * an operator could grant. That is the same hazard the removed-role blacklist
- * guards, so the check has to be a positive list, not six special cases. */
-static void test_unknown_roles_are_not_known(void)
-{
-   static const char *const unknown[] = {"bogusrole", "revieww", "delete-everything", "", NULL};
-   for (int i = 0; unknown[i]; i++)
-      assert(delegate_role_known(NULL, unknown[i]) == 0);
-   assert(delegate_role_known(NULL, NULL) == 0);
-
-   /* Culled names are not known either — dispatch must reach the removed-role
-    * reason, never treat them as a live role. */
-   static const char *const culled[] = {"prose", "line-edit", "lyric", "hook", NULL};
+   static const char *const culled[] = {"prose",   "line-edit", "lyric", "hook",
+                                        "prosody", "songform",  NULL};
    for (int i = 0; culled[i]; i++)
-      assert(delegate_role_known(NULL, culled[i]) == 0);
-   printf("  PASS: test_unknown_roles_are_not_known\n");
-}
-
-/* Every shipped role, and every alias target, must be known. This is the drift
- * guard: adding an alias whose canonical name is not a real role would make the
- * alias dispatch-refused, and the failure would only show up in production. */
-static void test_known_roles_cover_documented_and_aliased(void)
-{
-   static const char *const roles[] = {"review",    "validate",   "diagnose",   "code",
-                                       "refactor",  "explain",    "draft",      "execute",
-                                       "summarize", "format",     "search",     "reason",
-                                       "plan",      "continuity", "beat-check", NULL};
-   for (int i = 0; roles[i]; i++)
-      assert(delegate_role_known(NULL, roles[i]) == 1);
-
-   static const char *const aliases[] = {"implement",
-                                         "build",
-                                         "reviewer",
-                                         "verifier",
-                                         "test",
-                                         "check",
-                                         "evaluate",
-                                         "inspect",
-                                         "research",
-                                         "enforce",
-                                         "recall",
-                                         "synthesize",
-                                         "rank-fuse",
-                                         "classify-score",
-                                         "planner",
-                                         "planning",
-                                         "evaluate-optimize",
-                                         NULL};
-   for (int i = 0; aliases[i]; i++)
    {
-      assert(delegate_role_known(NULL, aliases[i]) == 1);
-      /* and the alias must resolve INTO the known set, not merely match it */
-      assert(delegate_role_known(NULL, delegate_role_canonicalize(aliases[i])) == 1);
+      const char *why = delegate_role_removed_reason(culled[i]);
+      assert(why != NULL && strstr(why, "removed") != NULL);
    }
-   printf("  PASS: test_known_roles_cover_documented_and_aliased\n");
-}
-
-static void test_inspection_turn_policies(void)
-{
-   assert(delegate_default_max_turns_for_role("review") == 20);
-   assert(delegate_default_max_turns_for_role("test") == 12);
-   assert(delegate_default_max_turns_for_role("diagnose") == 16);
-   assert(delegate_default_max_turns_for_role("code") == -1);
-   assert(delegate_final_after_turns_for_role("review") == -1);
-   assert(delegate_final_after_turns_for_role("validate") == 8);
-   assert(delegate_final_after_turns_for_role("test") == 8);
-   assert(delegate_final_after_turns_for_role("search") == 10);
-   assert(delegate_final_after_turns_for_role("diagnose") == 12);
-   assert(delegate_final_after_turns_for_role("inspect") == 12);
-   assert(delegate_final_after_turns_for_role("plan") == -1);
-   assert(delegate_final_after_turns_for_role("code") == -1);
-   printf("  PASS: test_inspection_turn_policies\n");
+   assert(delegate_role_removed_reason("code") == NULL);
+   printf("  PASS: test_culled_persona_roles_are_rejected\n");
 }
 
 static void test_apply_max_turns_policy(void)
@@ -359,46 +238,16 @@ static void test_apply_max_turns_cap(void)
    printf("  PASS: test_apply_max_turns_cap\n");
 }
 
-static void test_auto_tools_policy(void)
-{
-   assert(delegate_role_auto_tools_for_invocation("diagnose", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("validate", 2, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("diagnose", 1, 0) == 0);
-   assert(delegate_role_auto_tools_for_invocation("inspect", 1, 0) == 0);
-   assert(delegate_role_auto_tools_for_invocation("diagnose", 1, 1) == 1);
-   assert(delegate_role_auto_tools_for_invocation("review", -1, 0) == 1);
-   assert(delegate_role_auto_tools_for_invocation("review", 1, 0) == 0);
-   printf("  PASS: test_auto_tools_policy\n");
-}
-
 int main(void)
 {
    printf("test_delegate_role\n");
    setup_role_templates();
-   test_canonical_roles_unchanged();
-   test_implement_maps_to_code();
-   test_build_maps_to_code();
-   test_test_maps_to_validate();
-   test_check_maps_to_validate();
-   test_human_role_nouns_map_to_canonical_roles();
-   test_planner_maps_to_plan();
-   test_charter_aliases_map_to_builtin_roles();
-   test_unknown_role_unchanged();
-   test_null_role();
-   test_empty_role();
-   test_is_write_code_role();
-   test_is_write_refactor_role();
-   test_is_write_implement_alias();
-   test_is_write_read_only_roles();
-   test_is_write_null_empty();
-   test_novel_roles();
+   test_without_a_provider_nothing_is_known();
+   test_the_module_names_the_role();
+   test_a_template_file_defines_a_custom_role();
    test_culled_persona_roles_are_rejected();
-   test_unknown_roles_are_not_known();
-   test_known_roles_cover_documented_and_aliased();
-   test_inspection_turn_policies();
    test_apply_max_turns_policy();
    test_apply_max_turns_cap();
-   test_auto_tools_policy();
    printf("All tests passed.\n");
    return 0;
 }

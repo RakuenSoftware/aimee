@@ -35,13 +35,15 @@
 #include <string.h>
 #include <unistd.h>
 
-#include "db2.h"
-#include "db2/db2_internal.h"
-#include "db2/db2_witness_checkpoint.h"
-#include "db2/db2_witness_emit.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_witness_checkpoint.h"
+#include "modules/db2/c/db2_witness_emit.h"
+#include "modules/db2/c/db_postgres.h"
 #include "modules/vault/vault_witness_offline.h"
 #include "modules/vault/vault_witness_signer.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
+#include "vault_witness_provider_fixture.h"
 
 #define MUST(cond, ...)                                                                            \
    do                                                                                              \
@@ -110,6 +112,7 @@ static int append_record(void *conn, const char *sid)
 
 int main(void)
 {
+   test_register_vault_witness_provider();
    const char *url = getenv("AIMEE_TEST_PG_URL");
    if (!url || !url[0])
    {
@@ -117,7 +120,8 @@ int main(void)
       return 0;
    }
    snprintf(g_url, sizeof g_url, "%s", url);
-   char home[] = "/tmp/aimee-witness-recovery-home-XXXXXX";
+   char home[256];
+   snprintf(home, sizeof home, "%s/aimee-witness-recovery-home-XXXXXX", platform_tmpdir());
    MUST(mkdtemp(home) != NULL, "mkdtemp failed");
    setenv("AIMEE_HOME", home, 1);
    MUST(db2_init(url) == 0, "db2_init failed for %s", url);

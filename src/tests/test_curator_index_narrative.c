@@ -9,7 +9,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_index_narrative.h"
 
 /* Stub the heavy embed + vector deps the handler references but this test never
@@ -67,6 +67,9 @@ static void test_seeded_commits(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_index_narrative"))
+      return 0;
+
    db2_test_shim_open();
    int rc = kb_curator_index_narrative_one(NULL);
    assert(rc == 0);

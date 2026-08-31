@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static const char *g_config_home;
 
@@ -28,7 +29,7 @@ static void path_join(char *out, size_t cap, const char *base, const char *name)
 
 static void new_home(char home[128])
 {
-   strcpy(home, "/tmp/aimee-vault-owner-XXXXXX");
+   snprintf(home, 128, "%s/aimee-vault-owner-XXXXXX", platform_tmpdir());
    assert(mkdtemp(home) != NULL);
 }
 

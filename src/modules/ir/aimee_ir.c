@@ -5,7 +5,96 @@
 #include "cJSON.h"
 
 #include <stdlib.h>
+#include <stdio.h>
 #include <string.h>
+
+void aimee_ir_block_set_context(aimee_block_t *block, aimee_context_origin_t origin,
+                                aimee_context_authority_t authority, aimee_context_trust_t trust,
+                                aimee_context_sensitivity_t sensitivity, int model_visible,
+                                const char *revision_domain, const char *revision_scope,
+                                unsigned long long revision_epoch)
+{
+   if (!block)
+      return;
+   memset(&block->context, 0, sizeof block->context);
+   block->context.origin = origin;
+   block->context.authority = authority;
+   block->context.trust = trust;
+   block->context.sensitivity = sensitivity;
+   block->context.model_visible = model_visible ? 1 : 0;
+   snprintf(block->context.revision_domain, sizeof block->context.revision_domain, "%s",
+            revision_domain ? revision_domain : "");
+   snprintf(block->context.revision_scope, sizeof block->context.revision_scope, "%s",
+            revision_scope ? revision_scope : "");
+   block->context.revision_epoch = revision_epoch;
+}
+
+int aimee_ir_context_promotion_allowed(aimee_context_origin_t origin,
+                                       aimee_context_authority_t from, aimee_context_authority_t to)
+{
+   if (to <= from)
+      return 1;
+   if (to == AIMEE_CTX_AUTH_POLICY)
+      return origin == AIMEE_CTX_ORIGIN_PLATFORM || origin == AIMEE_CTX_ORIGIN_OPERATOR;
+   if (to == AIMEE_CTX_AUTH_TASK_INSTRUCTION)
+      return origin == AIMEE_CTX_ORIGIN_PLATFORM || origin == AIMEE_CTX_ORIGIN_OPERATOR ||
+             origin == AIMEE_CTX_ORIGIN_USER;
+   return 1;
+}
+
+static int classify_blocks(aimee_block_t *blocks, int count, aimee_context_origin_t origin,
+                           aimee_context_authority_t authority, aimee_context_trust_t trust)
+{
+   int changed = 0;
+   for (int i = 0; blocks && i < count; i++)
+   {
+      aimee_block_t *block = &blocks[i];
+      if (block->context.origin != AIMEE_CTX_ORIGIN_UNKNOWN)
+         continue;
+      aimee_context_origin_t block_origin = origin;
+      aimee_context_authority_t block_authority = authority;
+      if (block->type == AIMEE_BLK_TOOL_RESULT)
+      {
+         block_origin = AIMEE_CTX_ORIGIN_TOOL;
+         block_authority = AIMEE_CTX_AUTH_EVIDENCE;
+      }
+      else if (block->type == AIMEE_BLK_THINKING)
+      {
+         block_origin = AIMEE_CTX_ORIGIN_MODEL;
+         block_authority = AIMEE_CTX_AUTH_DIAGNOSTIC;
+      }
+      aimee_ir_block_set_context(block, block_origin, block_authority, trust,
+                                 AIMEE_CTX_SENS_INTERNAL, 1, NULL, NULL, 0);
+      changed++;
+   }
+   return changed;
+}
+
+int aimee_ir_classify_context(aimee_request_t *request)
+{
+   if (!request)
+      return 0;
+   int changed = classify_blocks(request->system, request->n_system, AIMEE_CTX_ORIGIN_USER,
+                                 AIMEE_CTX_AUTH_TASK_INSTRUCTION, AIMEE_CTX_TRUST_UNVERIFIED);
+   for (int i = 0; i < request->n_messages; i++)
+   {
+      aimee_message_t *message = &request->messages[i];
+      aimee_context_origin_t origin = AIMEE_CTX_ORIGIN_UNKNOWN;
+      aimee_context_authority_t authority = AIMEE_CTX_AUTH_EVIDENCE;
+      aimee_context_trust_t trust = AIMEE_CTX_TRUST_UNVERIFIED;
+      if (message->role && strcmp(message->role, "user") == 0)
+      {
+         origin = AIMEE_CTX_ORIGIN_USER;
+         authority = AIMEE_CTX_AUTH_TASK_INSTRUCTION;
+      }
+      else if (message->role && strcmp(message->role, "assistant") == 0)
+         origin = AIMEE_CTX_ORIGIN_MODEL;
+      else if (message->role && strcmp(message->role, "tool") == 0)
+         origin = AIMEE_CTX_ORIGIN_TOOL;
+      changed += classify_blocks(message->blocks, message->n_blocks, origin, authority, trust);
+   }
+   return changed;
+}
 
 static void free_str(char *s)
 {
@@ -20,6 +109,7 @@ void aimee_block_free_contents(aimee_block_t *b)
    free_str(b->thinking_signature);
    free_str(b->tool_id);
    free_str(b->tool_name);
+   free_str(b->tool_namespace);
    cJSON_Delete(b->tool_input);
    cJSON_Delete(b->tool_result);
    free_str(b->media_type);
@@ -173,6 +263,13 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
 {
    if (a->type != b->type)
       return 0;
+   if (a->context.origin != b->context.origin || a->context.authority != b->context.authority ||
+       a->context.trust != b->context.trust || a->context.sensitivity != b->context.sensitivity ||
+       a->context.model_visible != b->context.model_visible ||
+       strcmp(a->context.revision_domain, b->context.revision_domain) != 0 ||
+       strcmp(a->context.revision_scope, b->context.revision_scope) != 0 ||
+       a->context.revision_epoch != b->context.revision_epoch)
+      return 0;
    if (!str_eq(a->cache_control, b->cache_control))
       return 0;
    switch (a->type)
@@ -182,8 +279,10 @@ static int block_eq(const aimee_block_t *a, const aimee_block_t *b)
    case AIMEE_BLK_THINKING:
       return str_eq(a->text, b->text) && str_eq(a->thinking_signature, b->thinking_signature);
    case AIMEE_BLK_TOOL_USE:
+      /* The namespace is part of the call's identity: two calls to the same bare
+       * name in different groups are different calls. */
       return str_eq(a->tool_id, b->tool_id) && str_eq(a->tool_name, b->tool_name) &&
-             json_eq(a->tool_input, b->tool_input);
+             str_eq(a->tool_namespace, b->tool_namespace) && json_eq(a->tool_input, b->tool_input);
    case AIMEE_BLK_TOOL_RESULT:
       return str_eq(a->tool_id, b->tool_id) && a->tool_is_error == b->tool_is_error &&
              json_eq(a->tool_result, b->tool_result);

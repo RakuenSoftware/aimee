@@ -5,7 +5,6 @@
 #include <aimee/tools/agent_tools.h>
 #include "agent_tools_internal.h"
 #include "aimee_home.h"
-#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "log.h"
 #include "economizer.h"
 #include "tool_args_coerce.h"
@@ -20,7 +19,6 @@ const char *delegation_active_id(void)
 {
    return NULL;
 }
-
 static __thread char g_dispatch_role[64];
 static agent_tool_classifier_fn g_tool_classifier;
 
@@ -28,7 +26,6 @@ void agent_tools_register_classifier(agent_tool_classifier_fn classifier)
 {
    g_tool_classifier = classifier;
 }
-
 void agent_tools_set_dispatch_role(const char *role)
 {
    if (role && role[0])
@@ -36,7 +33,6 @@ void agent_tools_set_dispatch_role(const char *role)
    else
       g_dispatch_role[0] = '\0';
 }
-
 const char *agent_tools_dispatch_role(void)
 {
    return g_dispatch_role[0] ? g_dispatch_role : NULL;
@@ -88,6 +84,7 @@ static void td_outcome_reset(void)
    g_td_reason = "";
    g_td_mode = "internal";
    g_td_explicit = 0;
+   agent_tools_effect_reset();
 }
 /* Record a definitive verdict at a return path (refusal, or a known error). */
 static void td_outcome_set(const char *verdict, const char *reason)
@@ -104,18 +101,6 @@ static void td_outcome_set(const char *verdict, const char *reason)
  * stderr beginning "refused:" is the fail-closed sandbox refusal. Only the numeric
  * exit_code, the status string, and a stderr PREFIX are read — no content is
  * stored; the parsed tree is freed. */
-static int is_exec_tool(const char *name)
-{
-   if (g_tool_classifier)
-   {
-      int classification = 0;
-      return g_tool_classifier(name, &classification) == 0 &&
-             classification == AIMEE_TOOL_CLASS_EXEC;
-   }
-   return strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0 ||
-          strcmp(name, "test") == 0 || strcmp(name, "run_tests") == 0;
-}
-
 static void td_classify_exec_result(const char *result)
 {
    cJSON *r = cJSON_Parse(result);
@@ -139,7 +124,7 @@ int db1_session_write_path_record(const char *session_id, const char *path);
 #include "process_mgr.h"
 #include "agent_exec.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "sandbox.h"
 #include "slop_detect.h"
@@ -473,7 +458,7 @@ char *tool_edit_file_anchored(const char *path, const char *snapshot_id, cJSON *
        * retry immediately against valid anchors */
       char fresh[ANCHOR_SNAPSHOT_ID_MAX];
       char resolved[MAX_PATH_LEN];
-      const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+      const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
       if (!verr && anchor_snapshot_create(resolved, content, rd, fresh) == 0)
          cJSON_AddStringToObject(res.reject, "snapshot_id", fresh);
       cJSON_AddStringToObject(res.reject, "path", actual_path);
@@ -635,6 +620,11 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       free(env_json);
       return result;
    }
+   int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
+   if (secs <= 0)
+      secs = 120;
+   if (secs > 600)
+      secs = 600;
 
    /* Sandboxed (CONTAINER) delegate: run the script INSIDE the container via the
     * provider's exec_shell, NOT as tool_execute_script's local fork on the
@@ -670,7 +660,10 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
       dstr_append_str(&c, body->valuestring);
       dstr_append_str(&c, "\nAIMEE_SCRIPT_EOF\n");
       int exit_code = -1;
-      char *out = c.data ? ws->exec_shell(ws, c.data, &exit_code) : NULL;
+      char *out = NULL;
+      if (c.data)
+         out = ws->exec_shell_timeout ? ws->exec_shell_timeout(ws, c.data, secs * 1000, &exit_code)
+                                      : ws->exec_shell(ws, c.data, &exit_code);
       dstr_free(&c);
       /* Learned toolchain: record apt-install intent only after a successful run. */
       if (exit_code == 0)
@@ -690,7 +683,6 @@ static char *td_execute_script(cJSON *args, const char *name, const char *dispat
    }
 
    {
-      int secs = (tout && cJSON_IsNumber(tout)) ? tout->valueint : 120;
       const char *dir = (wd && cJSON_IsString(wd)) ? wd->valuestring : NULL;
       result = tool_execute_script(lang->valuestring, body->valuestring, secs, dir, env_json);
    }
@@ -717,15 +709,15 @@ static char *td_tool_output_get(cJSON *args, const char *name, const char *dispa
        snprintf(spill_dir, sizeof spill_dir, "%s/tool-spills", home) >= (int)sizeof spill_dir)
       return safe_strdup("error: spill store unavailable");
    char err[64];
-   char *full = tool_condense_recall(spill_dir, r->valuestring, err, sizeof err);
-   if (!full)
+   char *full = NULL;
+   if (econ_module_tool_recall(spill_dir, r->valuestring, &full, err, sizeof err) != 0 || !full)
    {
       char msg[128];
       snprintf(msg, sizeof msg, "error: %s", err[0] ? err : "not found");
       return safe_strdup(msg);
    }
-   /* recovery-cost telemetry (P4): each recall is a page-back — the counter is bumped inside
-    * tool_condense_recall; log the bytes so the net-of-recovery is greppable next to the
+   /* Recovery-cost telemetry is bumped by the Go economizer; log the bytes so
+    * the net-of-recovery is greppable next to the
     * "condensed X->Y" lines. */
    aimee_log(LOG_INFO, "tool_condense", "tool_output_get recovered %zu bytes (%s)", strlen(full),
              r->valuestring);
@@ -1336,10 +1328,38 @@ static char *td_search_memory(cJSON *args, const char *name, const char *dispatc
    {
       memory_t facts[20];
       int count = kb_client_memory_find_facts(q->valuestring, 20, facts, 20);
+      kb_client_result_status_t status = kb_client_last_result_status();
       char buf[8192];
       int pos = 0;
       if (count <= 0)
-         pos += snprintf(buf, sizeof(buf), "No facts found for '%s'", q->valuestring);
+      {
+         td_retrieval_outcome_t outcome = TD_RETRIEVAL_FAILED;
+         const char *message = "memory retrieval failed";
+         if (status == KB_CLIENT_RESULT_EMPTY)
+         {
+            outcome = TD_RETRIEVAL_EMPTY;
+            message = "no local memory facts matched";
+         }
+         else if (status == KB_CLIENT_RESULT_ABSTAINED || status == KB_CLIENT_RESULT_STALE)
+         {
+            outcome = TD_RETRIEVAL_DEGRADED;
+            message = status == KB_CLIENT_RESULT_STALE ? "memory evidence is stale"
+                                                       : "memory retrieval abstained";
+         }
+         else if (status == KB_CLIENT_RESULT_UNAUTHORIZED)
+            message = "memory retrieval unauthorized";
+         else if (status == KB_CLIENT_RESULT_UNAVAILABLE)
+            message = "memory service unavailable";
+         char *contract =
+             td_render_retrieval_continuation(outcome, "memory", q->valuestring, message);
+         if (outcome == TD_RETRIEVAL_FAILED)
+            pos += snprintf(buf, sizeof(buf), "error: %s", message);
+         else
+            pos += snprintf(buf, sizeof(buf), "%s", message);
+         if (contract && pos < (int)sizeof(buf) - 2)
+            pos += snprintf(buf + pos, sizeof(buf) - (size_t)pos, "\n%s", contract);
+         free(contract);
+      }
       else
       {
          pos += snprintf(buf, sizeof(buf), "Found %d fact(s):\n\n", count);
@@ -1681,7 +1701,7 @@ static char *td_clarify_start(cJSON *args, const char *name, const char *dispatc
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1713,7 +1733,7 @@ static char *td_clarify_answer(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1743,7 +1763,7 @@ static char *td_diagnose_start(cJSON *args, const char *name, const char *dispat
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1776,7 +1796,7 @@ static char *td_diagnose_observe(cJSON *args, const char *name, const char *disp
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -1848,7 +1868,7 @@ static char *td_diagnose_evidence(cJSON *args, const char *name, const char *dis
                rank = DIAG_RANK_SPECULATION;
          }
          const char *src = (jsource && cJSON_IsString(jsource)) ? jsource->valuestring : "";
-         if (!config_present() || db1_init(config_db1_path()) != 0)
+         if (!config_present() || !db1_store_ready())
             result = safe_strdup("error: server storage unavailable");
          else
          {
@@ -1881,7 +1901,7 @@ static char *td_diagnose_status(cJSON *args, const char *name, const char *dispa
    }
    else
    {
-      if (!config_present() || db1_init(config_db1_path()) != 0)
+      if (!config_present() || !db1_store_ready())
          result = safe_strdup("error: server storage unavailable");
       else
       {
@@ -2000,7 +2020,9 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
     * exit_code/status, not a prefix); every other tool signals failure with a
     * leading "error:" marker — read only that marker, never the rest of the
     * string, so no tool output can reach the hook. */
-   if (!g_td_explicit && result && is_exec_tool(name ? name : ""))
+   if (!g_td_explicit && result &&
+       agent_tools_effect_classification(name ? name : "", g_tool_classifier) ==
+           AIMEE_TOOL_CLASS_EXEC)
       td_classify_exec_result(result);
    if (!g_td_explicit && result && strncmp(result, "error: timeout", 14) == 0)
       td_outcome_set("timeout", "timeout");
@@ -2008,6 +2030,7 @@ char *dispatch_tool_call_ctx(const char *name, const char *arguments_json, int t
       td_outcome_set("timeout", "timeout");
    else if (!g_td_explicit && result && strncmp(result, "error:", 6) == 0)
       td_outcome_set("error", "tool_error");
+   agent_tools_effect_finish(g_td_verdict, g_td_reason);
    {
       const char *who = session_id();
       agent_tool_completion_t o = {.actor = (who && who[0]) ? who : "tool",
@@ -2037,55 +2060,36 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       return safe_strdup(cancel_msg);
    }
 
-   /* --- Argument normalization: resolve common aliases --- */
+   /* --- Argument canonicalization ---------------------------------------
+    *
+    * One shape, decided in one place (headers/tool_args_coerce.h). The agent
+    * loop canonicalizes BEFORE its gates and hands the result down, so for that
+    * caller this is a no-op; the call stays here for the entry points that do
+    * not go through the loop (script RPC, the MCP gateway), which would
+    * otherwise dispatch un-normalized arguments. Idempotent, so both are safe. */
    {
-      static const struct
+      cJSON *canonical = tool_args_canonicalize(agent_tool_get_schema_cached(name), args);
+      if (canonical && canonical != args)
       {
-         const char *from;
-         const char *to;
-      } aliases[] = {{"filepath", "path"}, {"file_path", "path"}, {"file", "path"},
-                     {"filename", "path"}, {"file_name", "path"}, {"cmd", "command"},
-                     {"dir", "path"},      {"directory", "path"}, {"msg", "message"},
-                     {NULL, NULL}};
-      for (int i = 0; aliases[i].from; i++)
-      {
-         cJSON *f = cJSON_GetObjectItem(args, aliases[i].from);
-         if (f && !cJSON_GetObjectItem(args, aliases[i].to))
-         {
-            cJSON *det = cJSON_DetachItemFromObject(args, aliases[i].from);
-            if (det)
-               cJSON_AddItemToObject(args, aliases[i].to, det);
-         }
+         cJSON_Delete(args);
+         args = canonical;
       }
-      /* Coerce string integers: "5" → 5 for offset/limit/count fields */
-      static const char *int_fields[] = {"offset", "limit", "count", "max_results", NULL};
-      for (int i = 0; int_fields[i]; i++)
-      {
-         cJSON *f = cJSON_GetObjectItem(args, int_fields[i]);
-         if (f && cJSON_IsString(f))
-         {
-            char *end = NULL;
-            long v = strtol(f->valuestring, &end, 10);
-            if (end && *end == '\0' && f->valuestring != end)
-               cJSON_ReplaceItemInObject(args, int_fields[i], cJSON_CreateNumber(v));
-         }
-      }
+   }
 
-      /* Schema-driven coercion (small/local model providers emit ints/bools
-       * as strings, scalars where arrays are expected, JSON strings where
-       * objects are expected). Runs after the targeted int-field block so
-       * tools whose schema isn't in the registry still benefit from the
-       * fallback. */
-      cJSON *schema = agent_tool_get_schema_cached(name);
-      if (schema)
-      {
-         cJSON *coerced = tool_args_coerce(schema, args);
-         if (coerced && coerced != args)
-         {
-            cJSON_Delete(args);
-            args = coerced;
-         }
-      }
+   /* The `shell` permission, enforced where the command would run.
+    *
+    * Deliberately ahead of the toolset check and independent of it: a delegate
+    * gets its toolset from a map keyed on the role NAME, so a role an operator
+    * defined without `shell` still resolves to one carrying bash. This is the
+    * check that binds it. */
+   if ((strcmp(name, "bash") == 0 || strcmp(name, "execute_script") == 0) &&
+       !agent_tools_shell_allowed())
+   {
+      cJSON_Delete(args);
+      td_outcome_set("refused", "permission");
+      return safe_strdup("error: this delegate does not hold the `shell` permission, so it "
+                         "cannot run commands. Use the file and index tools, or give the role "
+                         "`shell` in its template's permissions block.");
    }
 
    const char *active_role = agent_tools_dispatch_role();
@@ -2097,7 +2101,7 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
           active_role, "indexed, memory, docs, notes, and remote MCP tools are "
                        "disabled for this role");
    }
-   if (agent_tools_role_current_code_only(active_role))
+   if (!agent_tools_knowledge_write_allowed())
    {
       const char *command = NULL;
       if (strcmp(name, "bash") == 0)
@@ -2183,7 +2187,6 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
        * already called db1_init; this is idempotent. Keeping the call here
        * so delegate subprocesses that reach dispatch without going through
        * a main-opened DB1 still persist read-before-write tracking. */
-      db1_init(config_db1_path());
 
       session_state_t state;
       session_state_load(&state, dispatch_sid);
@@ -2211,6 +2214,39 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
          if (fp_arg)
             cJSON_SetValuestring(fp_arg, msg);
       }
+      else if (rc == 3 && msg[0])
+      {
+         /* Shell COMMAND rewrite: the guardrail redirected this command into the
+          * session worktree and returned the rewritten line ("cd <worktree> && …"),
+          * exactly as it does for a path with rc==1. cmd_hooks.c applies both
+          * ("rc==1: edit tool file_path rewrite, rc==3: bash command rewrite").
+          *
+          * This path applied only rc==1, so a rewrite arrived here as "not 0" and
+          * was reported as a refusal — with the rewritten command as the reason.
+          * Every shell command a delegate ran came back "guardrail blocked: cd
+          * <worktree> && <cmd>", including `pwd` and `echo hello`, because the
+          * rewrite fires on every shell call whose cwd sits outside the worktree.
+          * A delegate could therefore edit files and never run one command.
+          *
+          * Rewrite the same field the guardrail read (command / cmd / body — see
+          * guardrails_command_item) so the tool runs the redirected line. */
+         cJSON *cmd_arg = cJSON_GetObjectItem(args, "command");
+         if (!cmd_arg || !cJSON_IsString(cmd_arg))
+            cmd_arg = cJSON_GetObjectItem(args, "cmd");
+         if (!cmd_arg || !cJSON_IsString(cmd_arg))
+            cmd_arg = cJSON_GetObjectItem(args, "body");
+         if (cmd_arg && cJSON_IsString(cmd_arg))
+            cJSON_SetValuestring(cmd_arg, msg);
+         else
+         {
+            /* Nothing to rewrite: refusing beats running the original command in
+             * a directory the guardrail just said it must not run in. */
+            cJSON_Delete(args);
+            td_outcome_set("refused", "guardrail");
+            return safe_strdup("error: guardrail requires a worktree rewrite but the tool carries "
+                               "no rewritable command field");
+         }
+      }
       else if (rc != 0)
       {
          /* Tool blocked by guardrails */
@@ -2222,6 +2258,17 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       }
    }
 
+   /* Contract the effective call only after mechanical policy rewrites have
+    * settled its target and arguments, and always before the side effect. */
+   int effect_classification = agent_tools_effect_classification(name, g_tool_classifier);
+   agent_tools_effect_propose(name, args, effect_classification);
+   if (agent_tools_effect_validate_and_execute(name, args, effect_classification) != 0)
+   {
+      cJSON_Delete(args);
+      td_outcome_set("refused", "effect_contract");
+      return safe_strdup("error: effect contract refused execution: missing target or proposal "
+                         "drift");
+   }
    char *result = NULL;
 
    if (strcmp(name, "bash") == 0)
@@ -2351,7 +2398,10 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       {
          /* err_buf is the MCP server's own error text and may echo argument
           * values; classify to an enum, never let it near the audit fields. */
-         td_outcome_set("error", "tool_error");
+         if (agent_tools_effect_mcp_failure_is_timeout(err_buf))
+            td_outcome_set("timeout", "timeout");
+         else
+            td_outcome_set("error", "tool_error");
          char err[384];
          snprintf(err, sizeof(err), "error: %s mcp tool failed: %s", local ? "remote" : "kb-hosted",
                   err_buf[0] ? err_buf : "unknown error");
@@ -2380,6 +2430,28 @@ static char *dispatch_tool_call_ctx_inner(const char *name, const char *argument
       else
          snprintf(err, sizeof(err), "error: unknown tool '%s'", name);
       result = safe_strdup(err);
+   }
+
+   if (agent_tools_effect_postcondition_pending() && result)
+   {
+      if (strncmp(result, "error:", 6) == 0)
+      {
+         /* The wrapper classifies the ordinary tool failure. */
+      }
+      else if (!agent_tools_effect_result_claims_success(result))
+         td_outcome_set("error", "precondition");
+      else
+      {
+         int verified = agent_tools_effect_verify_file_postcondition(name, args, dispatch_cwd);
+         agent_tools_effect_record_postcondition(verified, "readback");
+         if (!verified)
+         {
+            free(result);
+            result = safe_strdup("error: effect postcondition failed after mutation; inspect the "
+                                 "target before retrying");
+            td_outcome_set("error", "postcondition");
+         }
+      }
    }
 
    cJSON_Delete(args);

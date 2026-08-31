@@ -38,10 +38,25 @@
     "src/modules/git/git_verify_state.c",
     "src/modules/git/git_verify_step.c",
     "src/modules/git/mcp_git_branch.c",
+    "src/modules/git/mcp_git_integrate.c",
     "src/modules/git/mcp_git_pr.c",
     "src/modules/git/mcp_git_query.c",
     "src/modules/git/mcp_git_write.c",
     "src/modules/git/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/git/ci_grade.go",
+    "server-go/modules/git/cred_resolve.go",
+    "server-go/modules/git/forge_request.go",
+    "server-go/modules/git/git.go",
+    "server-go/modules/git/verify_state.go"
+  ],
+  "go_tests": [
+    "server-go/modules/git/ci_grade_test.go",
+    "server-go/modules/git/cred_resolve_test.go",
+    "server-go/modules/git/forge_request_test.go",
+    "server-go/modules/git/git_test.go",
+    "server-go/modules/git/verify_state_test.go"
   ],
   "public_headers": [
     "src/modules/git/include/aimee/git/git_ops.h",

@@ -2,6 +2,7 @@
   "descriptor_version": 1,
   "id": "workspace",
   "dependencies": [
+    "audit",
     "config",
     "execution-policy",
     "module-runtime",
@@ -14,6 +15,8 @@
   "sources": [
     "src/modules/workspace/cli_workspace_serve.c",
     "src/modules/workspace/workspace.c",
+    "src/modules/workspace/workspace_session_lookup.c",
+    "src/modules/workspace/workspace_client_diff.c",
     "src/modules/workspace/workspace_handle.c",
     "src/modules/workspace/workspace_manifest.c",
     "src/modules/workspace/workspace_mirror.c",
@@ -24,6 +27,15 @@
     "src/modules/workspace/workspace_scope.c",
     "src/modules/workspace/workspace_turn.c",
     "src/modules/workspace/module_adapter.c"
+  ],
+  "go_sources": [
+    "server-go/modules/workspace/workspace.go",
+    "server-go/modules/workspace/runner_io.go"
+  ],
+  "go_tests": [
+    "server-go/modules/workspace/workspace_test.go",
+    "server-go/modules/workspace/runner_test.go",
+    "server-go/modules/workspace/runner_io_test.go"
   ],
   "public_headers": [
     "src/modules/workspace/include/aimee/workspace/module_api.h",
@@ -49,8 +61,6 @@
     "src/tests/test_workspace_provider.c",
     "src/tests/test_workspace_provider_container.c",
     "src/tests/test_workspace_provider_detached.c",
-    "src/tests/test_workspace_runner_queue.c",
-    "src/tests/test_workspace_runner_registry.c",
     "src/tests/test_workspace_scope.c",
     "src/tests/test_workspace_turn.c"
   ],

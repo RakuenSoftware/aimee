@@ -1,0 +1,30 @@
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # TLS server authentication plus a file-backed bearer credential.
+  - job_name: aimee-server
+    scheme: https
+    static_configs:
+      - targets: [aimee-server.example:9464]
+    authorization:
+      type: Bearer
+      credentials_file: /run/secrets/aimee-observability-token
+    tls_config:
+      ca_file: /run/pki/observability-ca.pem
+      server_name: aimee-server.example
+      min_version: TLS12
+
+  # Mutual TLS. Add authorization.credentials_file if Aimee requires both.
+  - job_name: aimee-kb
+    scheme: https
+    static_configs:
+      - targets: [aimee-kb.example:9465]
+    tls_config:
+      ca_file: /run/pki/observability-ca.pem
+      cert_file: /run/pki/prometheus-client-chain.pem
+      key_file: /run/pki/prometheus-client-key.pem
+      server_name: aimee-kb.example
+      min_version: TLS12

@@ -19,6 +19,13 @@
 #define DEC_CLI_ATTENTION_GUARD_H 1
 
 #include <stddef.h>
+typedef struct cJSON cJSON;
+
+/* Client-neutral worktree router used by direct attention-guard hooks and by
+ * the full hooks.pre path. Returns 0 with an owned replacement input, 1 when no
+ * rewrite applies, -2 on provisioning failure, and -3 on cross-session access. */
+int attn_route_tool_input(const char *sid, const char *cwd, const char *tool, const cJSON *input,
+                          cJSON **updated_out);
 
 /* Op class for a tool call. */
 typedef enum
@@ -90,6 +97,14 @@ int attn_session_branch_blocked(const char *base_branch, const char *default_bra
  * default branch (`default_resolved` 0) blocks, as the registry path does. */
 int attn_unregistered_lineage_blocked(int default_resolved, int shares_foreign_session_history);
 
+/* Resolve the directory the lineage probes should run `git -C` in, given a mutation
+ * target that may be a directory, an existing file, or a file that does not exist yet.
+ * Walks up to the nearest EXISTING directory: a target inside a not-yet-created
+ * directory would otherwise yield a missing path, both probes would fail, and
+ * attn_unregistered_lineage_blocked would fail closed on a lineage that is actually
+ * fine. Exposed for testing alongside the other lineage helpers. */
+void attn_git_dir_for(const char *target, char *out, size_t outlen);
+
 /* 1 = BLOCK: a WRITING Bash command reaches outside every managed worktree -- `cd <abs>`
  * to an unmanaged directory, or a redirect to an absolute path outside one. The
  * isolation check judges the cwd for Bash, so without this a command starting in a good
@@ -108,6 +123,15 @@ int attn_bash_escapes_worktree(const char *bash_cmd, const char *cwd);
 int attn_external_memory_blocked(attn_op_t op, const char *tool_name, const char *file_path,
                                  const char *bash_cmd, const char *cwd);
 
+/* Enforce the generated client's effective Aimee discovery transport before its
+ * first ordinary tool call. The integration stamps AIMEE_HOOK_TRANSPORT=cli or
+ * =mcp into the hook command only when it has successfully registered that
+ * surface; an unstamped/legacy hook is left unchanged. A successful discovery
+ * attempt is remembered per host session. Returns 2 to deny and fills `reason`,
+ * otherwise 0. */
+int attn_discovery_gate(const char *tool_name, const char *command, const char *session_id,
+                        char *reason, size_t reason_len);
+
 /* `aimee attention-guard` PreToolUse-hook entry. Reads the host hook JSON from
  * stdin, updates the per-session attention log, and returns the hook exit code
  * (2 = block a hard-destructive op on a high-attention file, or — only when a
@@ -119,8 +143,7 @@ int handle_attention_guard(void);
 
 /* Authoritative "is session-worktree isolation required?" check (default ON
  * unless aimee.yaml sets `require_session_worktree: false`). Exposed so the
- * remote/thin session-start path can gate its worktree-prep directive on the
- * same answer the guard uses to block. */
+ * universal launcher can make the same decision the guard uses to block. */
 int attn_require_session_worktree(void);
 
 #endif /* DEC_CLI_ATTENTION_GUARD_H */

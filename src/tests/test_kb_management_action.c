@@ -330,6 +330,15 @@ int main(void)
    assert(!kb_management_action_body_parse(one, strlen(one), &a));
    assert(!kb_management_action_body_parse(two, strlen(two), &b));
    assert(!strcmp(a.canonical, b.canonical) && !memcmp(a.digest, b.digest, 32));
+   /* The roster ops were renamed to `model.*`; this is an INGRESS contract, so
+    * both spellings parse. They are distinct actions on the wire, not aliases —
+    * each is echoed verbatim, so the canonical form and digest differ. */
+   const char *renamed = "{\"action\":\"model.enable\",\"agent\":\"alpha\"}";
+   assert(!kb_management_action_body_parse(renamed, strlen(renamed), &b));
+   assert(!strcmp(b.canonical, "{\"action\":\"model.enable\",\"agent\":\"alpha\"}"));
+   assert(strcmp(a.canonical, b.canonical) != 0);
+   const char *renamed_off = "{\"action\":\"model.disable\",\"agent\":\"alpha\"}";
+   assert(!kb_management_action_body_parse(renamed_off, strlen(renamed_off), &b));
    assert(kb_management_action_body_parse(
        "{\"action\":\"agent.enable\",\"agent\":\"a\",\"agent\":\"b\"}", 54, &a));
    assert(kb_management_action_body_parse("{\"action\":\"agent.run\",\"agent\":\"a\"}", 35, &a));

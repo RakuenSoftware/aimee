@@ -188,6 +188,22 @@ int agent_required_evidence_keep_tools(int required, int successful_evidence_cal
    return evidence_pending(required, successful_evidence_calls);
 }
 
+int agent_evidence_gate_defers_final_turn(int required, int successful_evidence_calls,
+                                          int last_usable_turn)
+{
+   /* The evidence gate holds tools open while turns remain, so a review that
+    * still owes a repository lookup keeps trying to get one. It must not do
+    * that on the last usable turn. A delegate whose tool calls never succeed
+    * would otherwise have the final text turn suppressed on every turn
+    * including the last, spend its whole budget retrying, and return nothing
+    * at all -- which is how an evidence-gated review died with "max turns
+    * exhausted without final response" instead of answering. A verdict that
+    * records the missing evidence is worth more than silence. */
+   if (last_usable_turn)
+      return 0;
+   return evidence_pending(required, successful_evidence_calls);
+}
+
 int agent_required_evidence_reject_response(int required, int successful_evidence_calls,
                                             int is_tool_call, int call_count)
 {

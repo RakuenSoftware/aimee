@@ -8,7 +8,8 @@
 #include "aimee_home.h"
 #include <aimee/audit/audit_worm_chain.h>
 #include "dstr.h"
-#include "wfe_def.h" /* wfe_sha256_raw */
+#include "headers/aimee_sha256.h" /* aimee_sha256_raw */
+#include "platform_random.h"
 
 void audit_worm_hex32(const unsigned char in[32], char out[65])
 {
@@ -43,7 +44,39 @@ void audit_worm_row_hash(long long seq, const char *actor_role, const char *acto
       dstr_append_str(&m, v);
    }
    unsigned char dig[32];
-   wfe_sha256_raw(m.data, dstr_len(&m), dig);
+   aimee_sha256_raw(m.data, dstr_len(&m), dig);
+   dstr_free(&m);
+   audit_worm_hex32(dig, out_hex);
+}
+
+void audit_worm_row_hash_v2(long long seq, const char *ts, const char *actor_role,
+                            const char *actor_principal, const char *actor_issuer,
+                            const char *actor_subject, const char *transport_cn, long long team_id,
+                            const char *selected_default_from, const char *action,
+                            const char *subject, const char *verdict, const char *key_id,
+                            const char *detail, const char *prev_hash, char out_hex[65])
+{
+   char seqbuf[32], teambuf[32];
+   snprintf(seqbuf, sizeof seqbuf, "%lld", seq);
+   snprintf(teambuf, sizeof teambuf, "%lld", team_id);
+   const char *fields[] = {
+       "v2-full",    seqbuf,        ts,           actor_role, actor_principal,
+       actor_issuer, actor_subject, transport_cn, teambuf,    selected_default_from,
+       action,       subject,       verdict,      key_id,     detail};
+   dstr_t m;
+   dstr_init(&m);
+   dstr_append_str(&m, AUDIT_WORM_DOMAIN_V2);
+   dstr_append_char(&m, '\n');
+   dstr_append_str(&m, prev_hash ? prev_hash : "");
+   dstr_append_char(&m, '\n');
+   for (size_t i = 0; i < sizeof(fields) / sizeof(fields[0]); i++)
+   {
+      const char *v = fields[i] ? fields[i] : "";
+      dstr_appendf(&m, "%zu:", strlen(v));
+      dstr_append_str(&m, v);
+   }
+   unsigned char dig[32];
+   aimee_sha256_raw(m.data, dstr_len(&m), dig);
    dstr_free(&m);
    audit_worm_hex32(dig, out_hex);
 }
@@ -58,7 +91,7 @@ static void worm_hmac_sha256(const unsigned char *key, size_t keylen, const unsi
    if (keylen > 64)
    {
       unsigned char kh[32];
-      wfe_sha256_raw(key, keylen, kh);
+      aimee_sha256_raw(key, keylen, kh);
       memcpy(k, kh, 32);
    }
    else
@@ -78,12 +111,12 @@ static void worm_hmac_sha256(const unsigned char *key, size_t keylen, const unsi
    }
    memcpy(ib, ipad, 64);
    memcpy(ib + 64, msg, mlen);
-   wfe_sha256_raw(ib, 64 + mlen, inner);
+   aimee_sha256_raw(ib, 64 + mlen, inner);
    free(ib);
    unsigned char ob[96];
    memcpy(ob, opad, 64);
    memcpy(ob + 64, inner, 32);
-   wfe_sha256_raw(ob, 96, mac);
+   aimee_sha256_raw(ob, 96, mac);
 }
 
 void audit_worm_ckpt_mac(const unsigned char key[32], const char *head_hash, long long head_seq,
@@ -120,12 +153,7 @@ int audit_worm_chain_key_load(unsigned char key[32], char key_id[17])
    }
    else
    {
-      int rf = open("/dev/urandom", O_RDONLY);
-      if (rf < 0)
-         return -1;
-      ssize_t n = read(rf, key, 32);
-      close(rf);
-      if (n != 32)
+      if (platform_random_bytes(key, 32) != 0)
          return -1;
       int wf = open(path, O_WRONLY | O_CREAT | O_EXCL, 0600);
       if (wf < 0)
@@ -150,7 +178,7 @@ int audit_worm_chain_key_load(unsigned char key[32], char key_id[17])
       }
    }
    unsigned char kh[32];
-   wfe_sha256_raw(key, 32, kh);
+   aimee_sha256_raw(key, 32, kh);
    char full[65];
    audit_worm_hex32(kh, full);
    memcpy(key_id, full, 16); /* key_id = first 16 hex chars of SHA256(key) */

@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* base64 of known payloads (precomputed so the test needs no codec):
  *   "a\0b" (3 bytes) -> "YQBi"      "x\0y" (3 bytes) -> "eAB5"
@@ -187,7 +188,7 @@ int main(void)
    /* --- full round-trip: detached provider <-> runner <-> real filesystem --- */
    {
       char dir[256];
-      snprintf(dir, sizeof(dir), "/tmp/ws_detached_rt.XXXXXX");
+      snprintf(dir, sizeof(dir), "%s/ws_detached_rt.XXXXXX", platform_tmpdir());
       assert(mkdtemp(dir) != NULL);
       char fpath[320];
       snprintf(fpath, sizeof(fpath), "%s/file.bin", dir);
@@ -251,7 +252,7 @@ int main(void)
    /* --- ws_runner_serve_once: fetch op -> runner executes -> post result --- */
    {
       char sdir[256];
-      snprintf(sdir, sizeof(sdir), "/tmp/ws_serve_once.XXXXXX");
+      snprintf(sdir, sizeof(sdir), "%s/ws_serve_once.XXXXXX", platform_tmpdir());
       assert(mkdtemp(sdir) != NULL);
       snprintf(g_serve_path, sizeof(g_serve_path), "%s/served.txt", sdir);
       g_fetch_count = 0;

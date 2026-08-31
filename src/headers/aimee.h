@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h> /* time_t: parse_utc_ts */
 
 /* Limits */
 #define MAX_PATH_LEN        4096
@@ -40,6 +41,16 @@
 #define TIER_L3 "L3"
 #define TIER_L4 "L4"
 #define TIER_L5 "L5"
+
+/* Confidence a cross-session L5 synthesis enters at, and never rises above.
+ *
+ * Recurrence across sessions is a reachability and salience signal, not
+ * evidence: exposure does not validate. Synthesis previously scaled confidence
+ * with the session count toward 0.95, which converted popularity into truth and
+ * self-reinforced through ranking. A synthesized pattern is unproven inference
+ * and is priced as such; only independent evidence or explicit approval may
+ * raise belief, through the paths that already gate on those. */
+#define MEMORY_L5_SYNTHESIS_CONFIDENCE 0.5
 
 /* Human-readable functional tier names */
 #define TIER_L0_NAME "Experience"
@@ -90,18 +101,17 @@
 #define EFFECTIVENESS_MIN_SAMPLES      10
 
 /* Embedding retrieval.
- * EMBED_MAX_DIM is the largest embedder output we buffer for: 4000 covers the
- * Qwen3-Embedding ladder (0.6b=1024, 4b=2560, 8b truncated 4096->4000) as well
- * as the legacy pplx-embed (0.6b=1024 / 4b=2560). A deployment runs ONE embedder;
+ * EMBED_MAX_DIM is the largest embedder output we buffer for. A deployment runs
+ * ONE selected embedder;
  * config.embedder_dims selects which, and the DB2 halfvec columns are created at
  * that dimension (see db2/schema.sql). 4000 is the pgvector halfvec INDEX ceiling
- * (inclusive) — native 4096 would be unindexable, so the 8b tier truncates to
- * 4000 in the embedding proxy (see unified-llm-container §"The 8B truncation"). */
+ * (inclusive) — wider outputs must be reduced to 4000 by the embedding boundary
+ * before indexing. */
 #define EMBED_MAX_DIM 4000
 
 /* The embedding WIDTH is not declared here. It is a setting, so it lives in exactly
  * one place — config (config_embedder_dims_default / config_embedder_dims_effective,
- * src/modules/config/config_database.h). Layers that must not depend on config, like
+ * headers/config_database.h). Layers that must not depend on config, like
  * db2, have it injected at startup rather than keeping a copy. A #define here would be
  * a second declaration that can disagree with the embedder actually running. */
 
@@ -145,8 +155,8 @@ typedef enum
    SEV_BLOCK
 } severity_t;
 
-/* No forward declaration of config_t here any more. It existed so app_ctx_t
- * could carry a config_t*; that field is gone, and nothing else in this header
+/* No forward declaration of legacy_config_record here any more. It existed so app_ctx_t
+ * could carry a legacy_config_record*; that field is gone, and nothing else in this header
  * needs the type. Callers that genuinely need config ask the config module. */
 
 /* Application context (replaces globals, passed through command handlers).
@@ -159,7 +169,7 @@ typedef struct
    int json_output;
    const char *json_fields;
    const char *response_profile;
-   /* No config here. It used to carry a pre-loaded config_t so commands could
+   /* No config here. It used to carry a pre-loaded legacy_config_record so commands could
     * avoid re-reading; every command now asks the config module for the field it
     * wants, so the pointer had no readers left. */
 } app_ctx_t;
@@ -187,6 +197,19 @@ __attribute__((noreturn, format(printf, 1, 2))) void fatal(const char *fmt, ...)
 
 /* Utility: timestamp */
 void now_utc(char *buf, size_t len);
+
+/* Parse a stored UTC timestamp to epoch seconds, accepting BOTH spellings the
+ * tree writes: ISO "2026-08-09T19:07:23Z" (now_utc, from C) and the canonical
+ * text form "2026-08-09 19:07:23" (pg_now_text, from SQL). A trailing 'Z' and a
+ * missing time are both tolerated; a date alone reads as midnight.
+ *
+ * One reader must accept both because one column can hold both: the same DB2
+ * timestamp column is written by C via now_utc() and by SQL via pg_now_text(),
+ * depending on the code path that touched the row. Parsers that admitted only
+ * one spelling did not fail loudly on the other -- they returned 0, "the epoch",
+ * which reads as a real and very old time. Returns 0 when nothing parses, which
+ * keeps that existing contract for callers that treat 0 as "unknown/ancient". */
+time_t parse_utc_ts(const char *s);
 
 #include "config.h"
 #include "util.h"

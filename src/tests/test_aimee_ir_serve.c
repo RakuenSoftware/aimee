@@ -23,6 +23,9 @@ static const char *REQ =
     "\"messages\":[{\"role\":\"user\",\"content\":[{\"type\":\"text\",\"text\":\"hi\"}]}],"
     "\"tools\":[{\"name\":\"Read\",\"input_schema\":{\"type\":\"object\"}}]}";
 
+void ir_seam_test_session(const char *session_id);
+void ir_seam_test_persona(const char *instructions);
+
 int main(void)
 {
    printf("ir-serve: ");
@@ -111,11 +114,47 @@ int main(void)
    cJSON_Delete(rmsgs);
    cJSON_Delete(rtls);
 
+   /* A namespaced tool call in the history survives the CHAT HOP.
+    *
+    * A Responses request does not go responses -> IR -> responses. It goes
+    * responses -> IR -> CHAT -> IR -> responses, and the crossing in the middle is
+    * where a Codex `namespace` group was being dropped -- the same trap that made
+    * fixing only the Responses ends insufficient for the tools array. Chat has no
+    * namespace concept, so the group is carried beside `function` on the tool_call
+    * and read back on the way in. Without that, the provider is told a bare `git`
+    * with no group and the client cannot route the answer. */
+   {
+      const char *NSBODY =
+          "{\"model\":\"gpt-5.5\",\"stream\":true,\"input\":["
+          "{\"type\":\"function_call\",\"call_id\":\"call_7\",\"name\":\"git\","
+          "\"namespace\":\"mcp__aimee\",\"arguments\":\"{\\\"command\\\":\\\"status\\\"}\"}"
+          "]}";
+      char m2[64];
+      char *i2 = NULL;
+      cJSON *m2s = NULL, *t2 = NULL;
+      int s2 = 0;
+      assert(aimee_ir_responses_to_chat(NSBODY, m2, sizeof m2, &i2, &m2s, &t2, &s2) == 0);
+      assert(m2s && cJSON_GetArraySize(m2s) == 1);
+      cJSON *asst = cJSON_GetArrayItem(m2s, 0);
+      cJSON *tcs = cJSON_GetObjectItem(asst, "tool_calls");
+      assert(tcs && cJSON_GetArraySize(tcs) == 1);
+      cJSON *tc0 = cJSON_GetArrayItem(tcs, 0);
+      cJSON *ns = cJSON_GetObjectItem(tc0, "namespace");
+      assert(ns && cJSON_IsString(ns) && strcmp(ns->valuestring, "mcp__aimee") == 0);
+      /* the bare name is untouched -- the pair is what identifies the tool */
+      cJSON *f0 = cJSON_GetObjectItem(tc0, "function");
+      assert(f0 && strcmp(cJSON_GetObjectItem(f0, "name")->valuestring, "git") == 0);
+      free(i2);
+      cJSON_Delete(m2s);
+      cJSON_Delete(t2);
+   }
+
    /* aimee_ir_build_from_chat: agent-path chat components -> provider request via IR */
    cJSON *cm = cJSON_Parse("[{\"role\":\"user\",\"content\":\"hi\"}]");
    cJSON *ct = cJSON_Parse("[{\"type\":\"function\",\"function\":{\"name\":\"Read\",\"parameters\":"
                            "{\"type\":\"object\"}}}]");
-   cJSON *fc = aimee_ir_build_from_chat("gpt-5.5-codex", cm, ct, "be helpful", "chatgpt");
+   cJSON *fc =
+       aimee_ir_build_from_chat("gpt-5.5-codex", cm, ct, "be helpful", "chatgpt", 1024, 0.2);
    assert(fc);
    assert(strcmp(cJSON_GetObjectItem(fc, "model")->valuestring, "gpt-5.5-codex") == 0);
    assert(cJSON_IsFalse(cJSON_GetObjectItem(fc, "store"))); /* codex req shape */
@@ -175,6 +214,32 @@ int main(void)
       parsed_response_t p3;
       aimee_ir_response_to_parsed(NULL, &p3);
       assert(p3.call_count == 0 && p3.content == NULL && p3.is_tool_call == 0);
+   }
+
+   /* LEGACY FLAT PATH: an already-established conversation must be terminal in
+    * the durable delivery state. Otherwise a later compacted request, whose
+    * assistant history has disappeared, looks like a fresh session and receives
+    * a persona midway through it after a restart. */
+   {
+      ir_seam_test_session("legacy-established");
+      ir_seam_test_persona("PERSONA-BODY <aimee-persona name=x>");
+
+      char *established = aimee_ir_prepend_active_persona_text("follow-up", 1);
+      assert(established && !strstr(established, "aimee-persona"));
+      free(established);
+
+      char *compacted = aimee_ir_prepend_active_persona_text("compacted follow-up", 0);
+      assert(compacted && !strstr(compacted, "aimee-persona"));
+      free(compacted);
+
+      /* A genuinely fresh session does receive it, exactly once. */
+      ir_seam_test_session("legacy-fresh");
+      char *first = aimee_ir_prepend_active_persona_text("hello", 0);
+      assert(first && strstr(first, "aimee-persona"));
+      free(first);
+      char *second = aimee_ir_prepend_active_persona_text("hello again", 0);
+      assert(second && !strstr(second, "aimee-persona"));
+      free(second);
    }
 
    printf("ok\n");

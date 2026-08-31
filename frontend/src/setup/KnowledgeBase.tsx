@@ -8,6 +8,10 @@ import { buildDesiredConfig, type KbMode } from './deployTopology';
  *
  *  • Local  — deploy an aimee-kb on this instance. The following Deploy-topology
  *             + Shared-store (DB2) steps configure it.
+ *  • Cloud  — redeem a setup code from a hosted provider. The code is exchanged
+ *             for a URL and a key, which is what Remote asks an operator to
+ *             paste by hand, so this is Remote with the typing removed and it
+ *             saves identical config.
  *  • Remote — connect to an existing aimee-kb (kb_client_url + bearer token).
  *             Nothing is deployed here, so the wizard skips deploy topology + DB2.
  *
@@ -17,22 +21,48 @@ import { buildDesiredConfig, type KbMode } from './deployTopology';
  * can update its visible steps + restart summary. Self-contained like
  * PrimaryChooser / DeployTopology. */
 
+/* Where a setup code is redeemed. A default rather than a constant: a hosted
+ * aimee is not required to be ours, and someone running their own should not
+ * have to patch a binary to point at it. */
+export const DEFAULT_CLOUD_ENDPOINT = 'https://api.aimee.rakuensoftware.com';
+
+/** Which source the operator picked. Cloud and Remote both persist
+ *  kb_mode='remote'; they differ only in how the URL and key are obtained. */
+type KbSource = 'local' | 'cloud' | 'remote';
+
 export interface KnowledgeBaseProps {
   /** Called after the KB choice is persisted, with the restart-class keys changed
    * and the chosen mode (so the wizard can recompute which steps to show). */
   onSaved: (restartKeys: string[], kbMode: KbMode) => void | Promise<void>;
   /** Injected in tests (vitest node env has no real network). */
   fetchImpl?: typeof fetch;
+  /** Where a setup code is redeemed. Defaults to aimee cloud. */
+  cloudEndpoint?: string;
 }
 
-export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps) {
+export default function KnowledgeBase({
+  onSaved,
+  fetchImpl,
+  cloudEndpoint: cloudEndpointProp,
+}: KnowledgeBaseProps) {
   const toast = useToast();
   const [cfg, setCfg] = useState<ConfigMap>({});
   const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const [kbMode, setKbMode] = useState<KbMode>('local');
+  const [source, setSource] = useState<KbSource>('local');
+
+  const [code, setCode] = useState('');
+  const [redeeming, setRedeeming] = useState(false);
+  const [redeemed, setRedeemed] = useState('');
+  /* Not a visible field. The cloud option asks for exactly one thing, a code;
+   * turning the endpoint into an input turns that into a decision. It stays
+   * overridable as a prop so someone hosting their own is not stuck. */
+  const cloudEndpoint = cloudEndpointProp ?? DEFAULT_CLOUD_ENDPOINT;
+
+  /* Cloud and Remote are the same persisted mode; only the UI differs. */
+  const kbMode: KbMode = source === 'local' ? 'local' : 'remote';
   const [kbUrl, setKbUrl] = useState('');
   const [kbBearer, setKbBearer] = useState('');
 
@@ -42,7 +72,7 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
       const c = await loadConfig({ fetchImpl });
       if (!alive) return;
       setCfg(c);
-      setKbMode(String(c.kb_mode ?? 'local') === 'remote' ? 'remote' : 'local');
+      setSource(String(c.kb_mode ?? 'local') === 'remote' ? 'remote' : 'local');
       setKbUrl(String(c.kb_client_url ?? ''));
       setKbBearer(String(c.kb_client_bearer_token ?? ''));
       setLoaded(true);
@@ -51,6 +81,44 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
       alive = false;
     };
   }, [fetchImpl]);
+
+  /* Exchange a setup code for the URL and key it stands for.
+   *
+   * A code is single-use and short-lived, so this must not fire speculatively.
+   * It sits behind an explicit button, and a failure leaves the code in the box
+   * so a typo can be corrected without burning a fresh one. */
+  async function redeem() {
+    setRedeeming(true);
+    setError('');
+    setRedeemed('');
+    try {
+      const doFetch = fetchImpl ?? fetch;
+      const res = await doFetch(`${cloudEndpoint.replace(/\/+$/, '')}/v1/setup/redeem`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: code.trim() }),
+      });
+      const body = (await res.json()) as {
+        kb_url?: string;
+        bearer?: string;
+        tenant?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(body.error ?? 'That code was not accepted.');
+      if (!body.kb_url || !body.bearer) {
+        throw new Error('The provider did not return a usable knowledge base.');
+      }
+      setKbUrl(body.kb_url);
+      setKbBearer(body.bearer);
+      setRedeemed(body.tenant ? `Connected to ${body.tenant}.` : 'Code accepted.');
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'That code was not accepted.';
+      setError(msg);
+      toast.error(msg);
+    } finally {
+      setRedeeming(false);
+    }
+  }
 
   async function save() {
     setSaving(true);
@@ -98,30 +166,58 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
   }
 
   if (!loaded) {
-    return <div style={{ fontSize: 13, color: '#667', padding: '8px 0' }}>Loading…</div>;
+    return <div style={{ fontSize: 13, color: 'var(--sg-text-secondary)', padding: '8px 0' }}>Loading…</div>;
   }
 
-  const remote = kbMode === 'remote';
+  const remote = source === 'remote';
+  const cloud = source === 'cloud';
+  /* Nothing to save until a code has actually been exchanged. */
+  const cloudIncomplete = cloud && (kbUrl === '' || kbBearer === '');
 
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
-      <div style={{ fontSize: 12.5, color: '#556', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
         aimee needs a knowledge base for memory + search. Deploy one here, or point at an existing one.
       </div>
 
       <section style={{ display: 'grid', gap: 8 }}>
         <label style={radioRow}>
-          <input type="radio" checked={!remote} onChange={() => setKbMode('local')} />
+          <input type="radio" checked={source === 'local'} onChange={() => setSource('local')} />
           <span>Deploy a local knowledge base (recommended)</span>
         </label>
         <label style={radioRow}>
-          <input type="radio" checked={remote} onChange={() => setKbMode('remote')} />
-          <span>Connect to an existing aimee-kb</span>
+          <input type="radio" checked={source === 'cloud'} onChange={() => setSource('cloud')} />
+          <span>aimee cloud, or another hosted aimee-kb (paste a setup code)</span>
+        </label>
+        <label style={radioRow}>
+          <input type="radio" checked={remote} onChange={() => setSource('remote')} />
+          <span>Connect to an existing aimee-kb by hand</span>
         </label>
 
-        {remote ? (
+        {cloud ? (
           <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
-            <div style={{ fontSize: 11.5, color: '#778' }}>
+            <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
+              Paste the code from your welcome email. It is exchanged for the address and key of
+              your knowledge base, so nothing is deployed here and the next two steps are skipped.
+            </div>
+            <Field label="Setup code">
+              <input style={input} value={code} onChange={(e) => setCode(e.target.value)}
+                placeholder="AIMEE-XXXX-XXXX-XXXX-XXXX-XXXX" autoComplete="off" />
+            </Field>
+            <div>
+              <Button variant="default" disabled={redeeming || code.trim() === ''} onClick={redeem}>
+                {redeeming ? 'Redeeming…' : 'Redeem code'}
+              </Button>
+            </div>
+            {redeemed && (
+              <div style={{ fontSize: 12, color: 'var(--sg-success)' }}>
+                {redeemed} Continue below to finish.
+              </div>
+            )}
+          </div>
+        ) : remote ? (
+          <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
+            <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
               A remote KB deploys nothing here — aimee-server just connects to it. The deploy-topology
               and shared-store steps are skipped.
             </div>
@@ -135,20 +231,20 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
             </Field>
           </div>
         ) : (
-          <div style={{ fontSize: 11.5, color: '#778', paddingLeft: 24 }}>
+          <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', paddingLeft: 24 }}>
             The next steps place the embedder + synthesizer and set the shared store.
           </div>
         )}
       </section>
 
       {error && (
-        <div style={{ fontSize: 12.5, color: '#a33', background: '#fdeaea', border: '1px solid #f2c4c4', borderRadius: 6, padding: '8px 10px' }}>
+        <div style={{ fontSize: 12.5, color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)', borderRadius: 6, padding: '8px 10px' }}>
           {error}
         </div>
       )}
 
       <div>
-        <Button variant="primary" disabled={saving} onClick={save}>
+        <Button variant="primary" disabled={saving || cloudIncomplete} onClick={save}>
           {saving ? 'Saving…' : 'Save & continue'}
         </Button>
       </div>
@@ -159,7 +255,7 @@ export default function KnowledgeBase({ onSaved, fetchImpl }: KnowledgeBaseProps
 const radioRow: React.CSSProperties = { display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, cursor: 'pointer' };
 const input: React.CSSProperties = {
   width: '100%', boxSizing: 'border-box', padding: '7px 9px', borderRadius: 6,
-  border: '1px solid #ccd', fontSize: 13, fontFamily: 'ui-monospace, monospace',
+  border: '1px solid var(--sg-border-medium)', fontSize: 13, fontFamily: 'ui-monospace, monospace',
 };
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

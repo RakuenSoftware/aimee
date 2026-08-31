@@ -10,7 +10,6 @@
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -60,7 +59,11 @@ static void *conn_worker(void *arg)
    {
       do
       {
+         request_context_clear();
+         server_http_identity_clear();
          handle_conn(j->fd, j->is_tcp, j->is_management);
+         request_context_clear();
+         server_http_identity_clear();
       } while (j->is_tls && server_http_keepalive_take());
    }
    server_tls_end(j->fd, ssl);
@@ -110,4 +113,13 @@ int conn_offload(int fd, int is_tcp, int is_tls, int is_management)
    }
    pthread_detach(t);
    return 1;
+}
+
+void handle_conn_inline(int fd, int is_tcp)
+{
+   request_context_clear();
+   server_http_identity_clear();
+   handle_conn(fd, is_tcp, 0);
+   request_context_clear();
+   server_http_identity_clear();
 }

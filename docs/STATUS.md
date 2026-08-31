@@ -23,15 +23,20 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Feature | State | Boundary |
 | --- | --- | --- |
 | Persistent typed memory | Done | Facts, rules, decisions, episodes, provenance, contradiction, and staleness. |
-| DB1/DB2 ownership | Done | Server owns SQLite; KB owns PostgreSQL and pgvector; thin clients own neither. |
+| DB1/DB2 ownership | Done | The store module owns DB1's PostgreSQL; KB owns DB2's PostgreSQL and pgvector; the server and thin clients own neither. |
 | Embedded KB PostgreSQL | Done | Default container path; external PostgreSQL remains supported. |
 | Hybrid retrieval | Done | Lexical, dense, graph, evidence, synthesis, and abstention stages. |
 | Cross-repo code graph | Done | Symbols, calls, imports, dependencies, co-change, callers, and blast radius. |
 | Client-side content push | Done | Remote clients upload bytes; server paths never name client files. |
 | Structured PDF evidence | Gated | Coordinates are the base; vectors, tables, assets, and OCR have separate gates. |
 | Autonomous curation | Done | Extract, dedupe, contradict, decay, reflect, and promote through bounded workers. |
+| Temporal assertion recall | Done | Independent world-time and belief-time axes; current-only by default, historical recall opt-in. |
+| Evidence-backed observations | Done | Two independent sessions before a recurrence becomes an observation; every claim carries an exact span and hash. |
+| Reviewed procedural learning | Done | Observations raise proposals into the existing review gate with applicability, expiry, evidence, and rollback. |
+| Typed context assembly | Done | Per-channel budgets, packing traces, watermarks, and trust boundaries. Master and per-channel opt-outs remain. |
+| Index detach, purge, and GC | Proposed | `workspace remove` unregisters only. No shipped command deletes indexed data; the audited lifecycle is designed. |
 | Multi-KB fleet routing | Next | The design selects a KB by corpus, authority, and capabilities; current managed and split profiles configure one KB URL. |
-| Per-KB internal or remote model roles | In progress | Configuration records embedding and synthesis placement; profile support is still converging. There is no standalone inference service. |
+| Per-KB local or remote model roles | In progress | Embedding placement and model-specific local synthesis sidecars work; profile support is still converging. There is no generic inference gateway. |
 
 ## Agents and workflows
 
@@ -83,7 +88,7 @@ means the contract or branch exists but is not part of the integrated path yet.
 | Generic `/v1/rpc` | Named, versioned `/v1` routes. |
 | Combined appliance image | Managed or split container stack. |
 | Client-held agent keys | Server-sealed vault. |
-| `aimee-llm` inference container | Embedding and synthesis are per-KB roles, internal to that KB container or remote. No replacement inference service exists. |
+| Generic `aimee-llm` inference gateway | Embedding stays with the KB; local synthesis uses a model-specific `aimee-llm-e2b` or `aimee-llm-e4b` sidecar, and remote synthesis uses its configured endpoint. |
 | KB socket autostart | Explicit KB `/v1` service. |
 
 Generated [commands](gen/cli-commands.md), [configuration](gen/configuration.md), and

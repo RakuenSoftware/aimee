@@ -14,9 +14,9 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "log.h"
-#include "db2/artifacts.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db_postgres.h"
 
 #include <errno.h>
 #include <pthread.h> /* reclaim throttle is shared across the code workers */
@@ -251,7 +251,16 @@ static void ccu_reclaim_stale_running(int max_attempts)
        "                       THEN 'stale running lease reclaimed after max attempts'"
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
-       " WHERE status = 'running' AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       " WHERE status = 'running' AND claimed_at <> ''"
+       /* Compare the lease by VALUE, not as raw text. pg_now_text() is canonical
+        * ISO, but a row claimed before that became canonical still carries the
+        * space separator, and a text compare decides at character 10 where ' '
+        * (0x20) sorts below 'T' (0x54) -- so a legacy row read as older than any
+        * same-date threshold and its live lease was reclaimed out from under it.
+        * Lease horizons are minutes, so "same date" is the normal case here, not
+        * an edge. */
+       "   AND rtrim(replace(claimed_at,'T',' '),'Z')"
+       "     < rtrim(replace(pg_now_text(?2),'T',' '),'Z')",
        err, sizeof(err));
    if (!st)
    {
@@ -551,26 +560,20 @@ static char *ccu_invoke_sidecar(const char *cmd, const char *json_input, char *e
  * kb_curator_resolve_sidecar_command() in kb_curator_extract.c. */
 
 /* ── Structural grounding gate ─────────────────────────────────────────────
- * Reject a code_unit whose extracted payload claims the symbol has no side
- * effects when the structural call graph (code_calls) shows it calls a known
- * side-effecting / system-call function. Mirrors the pure decision in
- * kb_curator_grounding_contradicts(), streaming callee rows so we never have
- * to buffer the whole edge set. Returns 1 (and fills reason_out with the
- * offending callee) on contradiction, else 0. Conservative: if the payload
- * does not claim "no side effects", or no structural edges are known, it
- * returns 0 and the artifact commits normally. */
+ * The separately supervised kb-synthesis module owns the grounding policy.
+ * Stream the unbounded call graph into its bounded wire contract in order,
+ * stopping at the first contradiction. Returns 1 with the offending callee,
+ * 0 for a clean module decision, and -1 when query, encoding, transport, or
+ * response validation fails. Failure never falls back to an in-process rule. */
 static int ccu_payload_contradicts_structure(const ccu_job_t *job, const cJSON *payload,
                                              char *reason_out, size_t reason_len)
 {
    if (reason_out && reason_len > 0)
       reason_out[0] = '\0';
 
-   if (!kb_curator_payload_claims_no_side_effects(payload))
-      return 0;
-
    void *conn = db2_conn();
    if (!conn)
-      return 0;
+      return -1;
 
    static const char *sql = "SELECT cc.callee"
                             " FROM code_calls cc"
@@ -583,26 +586,74 @@ static int ccu_payload_contradicts_structure(const ccu_job_t *job, const cJSON *
    char err[CCU_ERRBUF] = "";
    aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
    if (!st)
-      return 0;
+      return -1;
 
    aimee_pg_bind_text(st, "?1", job->project);
    aimee_pg_bind_text(st, "?2", job->file_path);
    aimee_pg_bind_text(st, "?3", job->symbol);
 
-   int contradicted = 0;
-   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   char callee_values[AIMEE_KB_SYNTHESIS_CALLEE_COUNT_MAX][AIMEE_KB_SYNTHESIS_TEXT_MAX + 1u];
+   const char *callees[AIMEE_KB_SYNTHESIS_CALLEE_COUNT_MAX];
+   uint32_t callee_count = 0;
+   int sent_batch = 0;
+   int step_rc;
+   while ((step_rc = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
    {
       const char *callee = aimee_pg_column_text(st, 0);
-      if (callee && kb_curator_callee_is_side_effecting(callee))
+      if (!callee)
+         callee = "";
+      size_t callee_len = strlen(callee);
+      if (callee_len > AIMEE_KB_SYNTHESIS_TEXT_MAX)
+      {
+         aimee_pg_finalize(st);
+         return -1;
+      }
+      memcpy(callee_values[callee_count], callee, callee_len + 1u);
+      callees[callee_count] = callee_values[callee_count];
+      callee_count++;
+      if (callee_count < AIMEE_KB_SYNTHESIS_CALLEE_COUNT_MAX)
+         continue;
+
+      aimee_kb_synthesis_grounding_decision_t decision;
+      if (kb_curator_grounding_decide(payload, callees, callee_count, &decision) != 0)
+      {
+         aimee_pg_finalize(st);
+         return -1;
+      }
+      if (decision.contradicts)
       {
          if (reason_out && reason_len > 0)
-            snprintf(reason_out, reason_len, "%s", callee);
-         contradicted = 1;
-         break;
+            snprintf(reason_out, reason_len, "%s", decision.reason);
+         aimee_pg_finalize(st);
+         return 1;
       }
+      callee_count = 0;
+      sent_batch = 1;
    }
+   if (step_rc != AIMEE_PG_DONE)
+   {
+      aimee_pg_finalize(st);
+      return -1;
+   }
+
+   if (callee_count == 0 && sent_batch)
+   {
+      aimee_pg_finalize(st);
+      return 0;
+   }
+
+   aimee_kb_synthesis_grounding_decision_t decision;
+   int decision_rc = kb_curator_grounding_decide(payload, callees, callee_count, &decision);
    aimee_pg_finalize(st);
-   return contradicted;
+   if (decision_rc != 0)
+      return -1;
+   if (decision.contradicts)
+   {
+      if (reason_out && reason_len > 0)
+         snprintf(reason_out, reason_len, "%s", decision.reason);
+      return 1;
+   }
+   return 0;
 }
 
 /* ── Artifact write ──────────────────────────────────────────────────────── */
@@ -684,7 +735,18 @@ static int ccu_write_artifacts(const ccu_job_t *job, cJSON *artifacts_arr)
       /* Structural-grounding gate: reject pre-commit if the payload claims no
        * side effects but the call graph proves otherwise (deep-curator AC#7). */
       char ground_reason[128] = "";
-      if (ccu_payload_contradicts_structure(job, payload_j, ground_reason, sizeof(ground_reason)))
+      int grounding =
+          ccu_payload_contradicts_structure(job, payload_j, ground_reason, sizeof(ground_reason));
+      if (grounding < 0)
+      {
+         aimee_log(LOG_WARN, "kb.curator.extract_code",
+                   "grounding module unavailable or returned an invalid decision for symbol '%s' "
+                   "(job %lld)",
+                   job->symbol, (long long)job->job_id);
+         aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+         return -2;
+      }
+      if (grounding > 0)
       {
          char before_json[512];
          snprintf(before_json, sizeof(before_json),
@@ -866,9 +928,11 @@ int kb_curator_extract_code_unit_one(const kb_curator_extract_opts_t *opts)
 
    if (n_written < 0)
    {
-      aimee_log(LOG_WARN, "kb.curator.extract_code", "artifact write failed for job %lld",
+      const char *failure =
+          n_written == -2 ? "grounding module decision failed" : "artifact write failed";
+      aimee_log(LOG_WARN, "kb.curator.extract_code", "%s for job %lld", failure,
                 (long long)job.job_id);
-      ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, "artifact write failed");
+      ccu_mark_retry_or_fail(job.job_id, job.attempts, opts->max_attempts, failure);
       return 1;
    }
 

@@ -155,7 +155,14 @@ int resolve_main_repo_root(const char *dir, char *out, size_t out_len)
 /* Resolve to the current checkout's top-level directory. In a worktree this is
  * the worktree root, not the shared main repo, so per-worktree verify state is
  * recorded alongside the checkout that ran the verification. */
-static int resolve_verify_root(const char *dir, char *out, size_t out_len)
+/* The git toplevel for `dir` (or the ambient cwd when NULL), and NOTHING else.
+ *
+ * Split out of resolve_verify_root because the difference between "this is a
+ * repository" and "this is merely a directory" is the whole question when
+ * choosing which candidate root to verify. resolve_verify_root deliberately
+ * falls back to a plain directory, which is right for its callers and useless
+ * for ranking candidates. Returns 0 only when git answered. */
+int verify_git_toplevel(const char *dir, char *out, size_t out_len)
 {
    char cmd[MAX_PATH_LEN + 64];
    int rc;
@@ -176,6 +183,13 @@ static int resolve_verify_root(const char *dir, char *out, size_t out_len)
       return 0;
    }
    free(top);
+   return -1;
+}
+
+static int resolve_verify_root(const char *dir, char *out, size_t out_len)
+{
+   if (verify_git_toplevel(dir, out, out_len) == 0)
+      return 0;
 
    if (dir && dir[0])
    {
@@ -464,6 +478,56 @@ int project_primary_branch(const char *project_root, char *out, size_t out_len)
    }
    fclose(f);
    return found ? 0 : -1;
+}
+
+/* Say WHY there is no verify config, on the error path only.
+ *
+ * generate_project_yaml collapses five distinct causes into a single -1: no
+ * resolvable root, no Makefile, make not runnable, no recognised targets, and a
+ * config that could not be written. The message shown to operators asserted two
+ * of them ("no Makefile found, or no recognized targets") and named neither the
+ * root it searched nor which of the two it actually hit.
+ *
+ * That message is wrong far more often than it looks. Measured in this repo,
+ * which HAS src/Makefile and a verify-local target that find_makefile_subdir
+ * handles explicitly: `aimee git verify` reports "no Makefile found" from both
+ * the repository root and src/. The Makefile was never the problem. verify_root
+ * comes from the server's thread-local cwd via the session's worktree mapping,
+ * so when that mapping does not cover the caller's checkout, verify resolves a
+ * DIFFERENT directory and truthfully finds no Makefile in it. An operator
+ * reading "no Makefile found" goes looking at a Makefile that is sitting right
+ * there, which is the one place the answer is not.
+ *
+ * So name the path. A wrong root is obvious the moment it is printed, and
+ * unguessable until then. Re-deriving the cause here rather than threading an
+ * out-param through verify_load_config keeps the cost on the failure path,
+ * where a few stat() calls are free and a diagnosis is the entire point. */
+void verify_config_unavailable_reason(const char *verify_root, char *out, size_t out_len)
+{
+   if (!verify_root || !verify_root[0])
+   {
+      snprintf(out, out_len,
+               "no repository root could be resolved for this session, so there was nowhere "
+               "to look for a Makefile.");
+      return;
+   }
+
+   char subdir[MAX_PATH_LEN];
+   if (find_makefile_subdir(verify_root, subdir, sizeof(subdir)) != 0)
+   {
+      snprintf(out, out_len,
+               "no Makefile at %s/Makefile or %s/src/Makefile. If that is not the repository "
+               "you meant, verify resolved it from this session's worktree mapping rather "
+               "than your shell's directory -- pass path=<repo> to target it explicitly.",
+               verify_root, verify_root);
+      return;
+   }
+
+   snprintf(out, out_len,
+            "%s%s%s/Makefile exists but declares no target aimee recognises (verify-local, "
+            "lint, all, check-linking, unit-tests, test, build-integrity), or `make -pn` "
+            "could not be run there.",
+            verify_root, subdir[0] ? "/" : "", subdir);
 }
 
 /* Open the project.yaml for the given project. Looks only at
@@ -1534,16 +1598,47 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    else
       is_async = (jasync && cJSON_IsTrue(jasync)); /* others: sync unless explicitly async */
 
-   /* The dispatch layer (dispatch_git_tool) already called mcp_chdir_git_root() which
-    * read the 'path' arg, applied the session's worktree mapping, and set the
-    * thread-local run_cmd CWD to the correct worktree.  resolve_verify_root(NULL, ...)
-    * picks that up via run_cmd, so we get the worktree path even when the caller passed
-    * path=<main-repo-root>. */
+   /* WHICH REPOSITORY ARE WE VERIFYING.
+    *
+    * This used to be resolve_verify_root(NULL, ...) alone, on the reasoning that
+    * dispatch_git_tool had already called mcp_chdir_git_root() to point the
+    * thread-local cwd at the session's mapped worktree. That holds on the MCP
+    * dispatch path. It does not hold on every path into this handler, and when it
+    * does not, resolve_verify_root falls back to getcwd() and confidently returns
+    * the SERVER PROCESS's own directory.
+    *
+    * Measured: `aimee git verify` resolved /var/lib/aimee -- aimee-server's home,
+    * not a repository at all -- and reported no Makefile there. Passing an explicit
+    * path=<repo> changed nothing, because the 'path' argument was never read here.
+    * The advice to pass it, which this file now prints, was advice to do something
+    * that did not work.
+    *
+    * Ordered by how much each candidate proves about itself:
+    *
+    *   1. ambient cwd, IF it is a git root -- the mapped worktree, preserving the
+    *      original intent that a session's worktree beats a caller-supplied
+    *      main-repo root
+    *   2. the explicit `path` argument -- the caller said so, and on the CLI route
+    *      this is the user's actual shell directory (marshal_git_verify sends it)
+    *   3. resolve_verify_root's own fallback, so behaviour is unchanged when
+    *      neither of the above resolves
+    *
+    * Being a git root is the discriminator because it is the only one of these
+    * that cannot be true by accident. */
    char project_root[MAX_PATH_LEN] = "";
-   const char *verify_root =
-       (resolve_verify_root(NULL, project_root, sizeof(project_root)) == 0 && project_root[0])
-           ? project_root
-           : NULL;
+   const cJSON *jpath = cJSON_GetObjectItemCaseSensitive(args, "path");
+   const char *path_arg =
+       (cJSON_IsString(jpath) && jpath->valuestring[0]) ? jpath->valuestring : NULL;
+
+   const char *verify_root = NULL;
+   if (verify_git_toplevel(NULL, project_root, sizeof(project_root)) == 0 && project_root[0])
+      verify_root = project_root;
+   else if (path_arg && verify_git_toplevel(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
+   else if (resolve_verify_root(path_arg, project_root, sizeof(project_root)) == 0 &&
+            project_root[0])
+      verify_root = project_root;
 
    /* Cross-project scope gate. When the target is not the session's current
     * project and cross-project verify is disabled (default), do not run, gate,
@@ -1702,9 +1797,14 @@ cJSON *handle_git_verify(server_ctx_t *server_ctx, cJSON *args, const char *sess
    {
       if (json_out)
          return verify_json_status("unavailable", "no-verify-config", 0);
-      return mcp_text("error: no verify config available — auto-generation failed (no Makefile "
-                      "found, or no recognized targets). Create "
-                      "~/.config/aimee/projects/<project>/project.yaml manually.");
+      char why[768];
+      verify_config_unavailable_reason(verify_root, why, sizeof(why));
+      char msg[1024];
+      snprintf(msg, sizeof(msg),
+               "error: no verify config available — %s Create "
+               "~/.config/aimee/projects/<project>/project.yaml manually to override.",
+               why);
+      return mcp_text(msg);
    }
 
    if (is_async && server_ctx)

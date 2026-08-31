@@ -7,10 +7,10 @@
 
 #include "cJSON.h"
 #include "wfe_advance.h"
-#include "wfe_binding.h" /* db1_wfe_binding_get */
-#include "wfe_engine.h"  /* wfe_engine_advance */
-#include "wfe_enforce.h" /* dial */
-#include "wfe_store.h"   /* db1_work_item_get, lifecycle events */
+#include "wfe_binding.h"          /* db1_wfe_binding_get */
+#include "wfe_engine.h"           /* wfe_engine_advance */
+#include "wfe_enforce.h"          /* dial */
+#include "db1_client/wfe_store.h" /* db1_work_item_get, lifecycle events */
 
 /* Audit actor + record kind for a driver-applied advance (distinct from the
  * engine's own "advance" event, so the nonce scan below never confuses them). */
@@ -146,12 +146,18 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
          actual_state = wi.state;
          last_advance_nonce(bound_wi, last_nonce, sizeof last_nonce);
       }
-      /* g == 0: binding row references a vanished work-item -> decide() sees empty
+      /* g == 0: binding row references a vanished work-item; the module sees empty
        * state/stage and returns STALE (safe: never advances). */
    }
 
-   wfe_advance_outcome_t oc =
-       wfe_advance_decide(bound_wi, &a, actual_stage, actual_state, last_nonce);
+   wfe_advance_outcome_t oc = WFE_ADV_BADARGS;
+   if (wfe_advance_decide(bound_wi, &a, actual_stage, actual_state, last_nonce, &oc) != 0)
+   {
+      if (wi_found)
+         audit(bound_wi, actual_stage, "module_error", &a, "");
+      write_result(out, out_n, result_obj("error", a.work_item_id));
+      return 0;
+   }
 
    if (oc != WFE_ADV_OK)
    {
@@ -169,7 +175,7 @@ int wfe_advance_request_run(const char *session_id, const char *args_json, char 
    /* OK: advance exactly one engine step under the engine's own invariants. The
     * driver never writes run-state / gate.deliver directly.
     *
-    * Concurrency contract: decide()'s CAS + this advance are not one atomic txn, so
+    * Concurrency contract: the module decision's CAS + this advance are not one atomic txn, so
     * two TRULY concurrent advances of the same work-item that both observed the same
     * stage could double-execute a node (wfe_engine_advance reads current_stage before
     * its own txn -- the same property the autonomous single-runner scheduler relies

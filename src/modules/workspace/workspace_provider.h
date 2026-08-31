@@ -3,6 +3,11 @@
 
 #include <stddef.h>
 
+#define DELEGATE_DETACHED_CHANNEL_DOWN_JSON                                                        \
+   "{\"stdout\":\"\",\"stderr\":\"detached workspace reverse-channel unavailable: the serving "    \
+   "client is not connected -- a background/durable delegate cannot run shell tools against a "    \
+   "client-served (detached) workspace\",\"exit_code\":-1}"
+
 /* Resource provider behind a workspace handle (workspace-resource-plane
  * proposal, Phase 1).
  *
@@ -77,6 +82,24 @@ struct workspace_provider
     * success, -1 on open/write/close error. */
    int (*write_all)(const workspace_provider_t *p, const char *path, const char *data, size_t len);
 
+   /* Append `len` bytes of `data` to `path`, creating it when absent. Same
+    * error contract as write_all.
+    *
+    * Exists so a payload larger than one request can be reassembled where it
+    * lands, rather than held whole in memory first: a workspace patch is bounded
+    * by the size of a working tree, not by anything the transport can pick, so
+    * "raise the request cap" only moves the number that will be wrong next. The
+    * caller writes chunk 0 with write_all (truncating any partial from an
+    * abandoned run) and every later chunk with this.
+    *
+    * OPTIONAL — may be NULL. The container backend exposes only a whole-file
+    * write_file(), so an append there would have to read-modify-write, and its
+    * NUL-terminated wire would truncate binary content in the process. A caller
+    * that needs append must check for NULL and refuse rather than assume it, and
+    * only the shared provider (which is what the mirror tier writes through)
+    * implements it today. */
+   int (*append)(const workspace_provider_t *p, const char *path, const char *data, size_t len);
+
    /* Fill `*st` for `path`. Always returns 0; st->exists is 0 when absent. */
    int (*stat)(const workspace_provider_t *p, const char *path, ws_stat_t *st);
 
@@ -104,6 +127,15 @@ struct workspace_provider
       mcp_git shell-string call sites. `shared` runs it locally via run_cmd; a
       future `detached` provider marshals it to the client-side runner. */
    char *(*exec_shell)(const workspace_provider_t *p, const char *cmd, int *exit_code);
+
+   /* Optional timeout-aware form of exec_shell. `timeout_ms <= 0` means no
+      provider deadline. Callers that expose a bounded shell/script contract
+      should prefer this hook when it is present and fall back to exec_shell for
+      older/shared providers. Container providers implement it by forwarding the
+      deadline to their delegate backend, so a docker exec cannot outlive the
+      tool call that launched it. */
+   char *(*exec_shell_timeout)(const workspace_provider_t *p, const char *cmd, int timeout_ms,
+                               int *exit_code);
 
    /* Run `argv` (NULL-terminated) with `stdin_data` (`stdin_len` bytes, may be
     * NULL/0) written to the child's stdin, in working directory `cwd` (NULL =

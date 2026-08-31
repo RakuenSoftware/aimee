@@ -1,5 +1,9 @@
 # Proposal: optimization surface residual decision points
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Completed:** 2026-06-09
 - **Split from:** `docs/proposals/done/optimization-surface.md`

@@ -22,11 +22,17 @@ int agent_save_config_after_removal(const agent_config_t *cfg);
  * (over-long or non-identifier) names out of agents.json and the model list.
  * Returns 1 if valid, 0 otherwise. */
 int agent_name_valid(const char *name);
+
+/* Reject an endpoint that is really a mis-parsed flag (leading '-'). `agent add`'s
+ * first three arguments are positional, so a flag in the endpoint slot used to be
+ * stored as the address and only surfaced at `agent probe`. Narrow on purpose: a
+ * scheme requirement would reject host:port forms this command has always taken. */
+int agent_endpoint_valid(const char *endpoint);
 const char *agent_config_path(void);
 agent_t *agent_route(agent_config_t *cfg, const char *role);
 agent_t *agent_route_at_tier(agent_config_t *cfg, const char *role, int tier);
 /* The two system settings routing actually consults. This used to be a whole
- * config_t threaded through for exactly these two booleans -- callers had to hold
+ * legacy_config_record threaded through for exactly these two booleans -- callers had to hold
  * the 750 KB struct, and a reader could not tell which of its ~600 fields
  * mattered. Populate with agent_route_policy_current(). */
 typedef struct
@@ -39,8 +45,8 @@ typedef struct
 void agent_route_policy_current(agent_route_policy_t *out);
 
 agent_t *agent_route_with_caps(agent_config_t *cfg, const char *role,
-                               const agent_route_policy_t *sys_cfg,
-                               unsigned required_caps, int min_context);
+                               const agent_route_policy_t *sys_cfg, unsigned required_caps,
+                               int min_context);
 
 /* Same, but for a packet of a declared SCOPE. An agent whose max_scope ceiling is
  * below the packet's scope is excluded, and unlike min_context that exclusion is
@@ -61,6 +67,35 @@ agent_t *agent_route_with_caps_scoped(agent_config_t *cfg, const char *role,
                                       const agent_route_policy_t *policy, unsigned required_caps,
                                       int min_context, agent_scope_t scope);
 agent_t *agent_find(agent_config_t *cfg, const char *name);
+
+/* REGISTRY ACCESSORS: ask for the one agent you need, not the whole registry.
+ *
+ * The overwhelming majority of callers do the same three lines -- declare an
+ * agent_config_t, agent_load_config() into it, agent_find() one agent -- and
+ * agent_config_t is 350,968 bytes. Every such lookup therefore costs a stat(), a
+ * 343 KB memset (which touches every page) and a 343 KB memcpy out of a cache
+ * that already holds exactly the answer. There are 262 by-value declarations of
+ * this struct in the tree, on paths including routing, workflows and roundtable,
+ * so the copies land on request threads and churn straight into per-thread
+ * malloc arenas.
+ *
+ * These read the cached registry IN PLACE under its existing lock and copy out a
+ * single agent_t (16,720 bytes) -- ~21x less per lookup, and no memset at all.
+ * The slow path (cache cold or stale) still performs one full load, because that
+ * is genuinely a load; it just does not happen per request.
+ *
+ * Return 0 and fill `out` on success, non-zero when no such agent exists. `out`
+ * is untouched on failure. */
+int agent_registry_find(const char *name, agent_t *out);
+
+/* As agent_default_primary, against the cached registry. */
+int agent_registry_default_primary(agent_t *out);
+
+/* Resolve the standard OpenAI/Anthropic request `model` field. `aimee` (or an
+ * omitted field) selects the configured primary; every other value is the exact
+ * registered agent name and never silently falls back. The selected agent must
+ * be enabled. This is the shared ingress contract for all client wire formats. */
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out);
 /* Select the default "primary" agent for ingress paths that don't name a model:
  * an explicitly configured default when it is enabled, else the first enabled
  * agent, else NULL. Never returns a disabled agent. */
@@ -75,6 +110,20 @@ int agent_is_available_for_routing(const agent_t *agent);
 typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
                                         uint32_t *selected_index);
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
+/* Test/bench seam: clear the provider AND the latched authority, so a suite can
+ * exercise the built-in balancer after installing one. Daemons never call it. */
+void agent_reset_route_selection_authority(void);
+/* Did the last routing attempt fail because the selection authority could not be
+ * consulted, rather than because no agent was eligible? Callers use it to report
+ * the real fault instead of blaming the roster. */
+int agent_route_last_was_module_fault(void);
+/* The one place a failed route is turned into words. Every caller that renders
+ * a NULL from agent_route (or a -1 from delegate_pick_for_role) has to draw the
+ * same distinction, and each one that spelled the message itself got it wrong
+ * the same way: an operator sent to audit an agent roster that is fine. Writes
+ * the routing-fault wording when the selection authority could not be consulted
+ * and the empty-roster wording otherwise. */
+void agent_route_failure_message(const char *role, char *buf, size_t len);
 
 /* Why an agent is not a routable delegate. Mirrors the decision order of
  * agent_is_available_for_routing so callers can surface the ACTUAL reason
@@ -180,6 +229,14 @@ int agent_routing_primary_turn(void);
  * Kimi over Anthropic). Never use it for auth, headers, or request building. */
 const char *agent_catalog_provider(const agent_t *agent);
 
+/* Effective per-model limits: the operator's DECLARED value when they set one
+ * (tested by AGENT_DECL_*, so a declared 0 counts), else the model catalog.
+ * 0 means unknown. Use these rather than reaching for model_context_window() /
+ * model_max_output() directly -- the catalog half is being removed, and these
+ * are where it lives. */
+int agent_declared_context_window(const agent_t *agent);
+int agent_declared_max_output(const agent_t *agent);
+
 /* Registration prefix of a route-target name: everything before the first ':'.
  * Provider-general registration names its targets `<registration>:<model>`, so
  * this identifies siblings sharing credentials, endpoint and wire protocol —
@@ -211,12 +268,42 @@ int agent_has_role(const agent_t *agent, const char *role);
 int agent_supports_persona(const agent_t *agent, const char *persona);
 int agent_is_exec_role(const agent_t *agent, const char *role);
 void agent_expand_env(const char *src, char *dst, size_t dst_len);
+
+/* The agent's API key AS A SECRET, resolved on demand.
+ *
+ * agents.json may carry either a literal key or a "$VAR" reference. The config
+ * module stores whatever is on disk VERBATIM and never resolves it, so the
+ * registry -- a 350,968-byte struct that is copied per lookup and cached in
+ * memory for the process's lifetime -- holds a reference rather than a
+ * credential. Resolution happens here, in the module that owns credentials,
+ * at the moment of use.
+ *
+ * Returns 1 and fills `out` when a key is available, 0 otherwise (`out` is left
+ * empty). Callers own the copy and should runtime_secret_wipe() it when done. */
+int agent_api_key_secret(const agent_t *agent, char *out, size_t out_len);
+
 int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len);
 /* An explicit, actionable reason the LAST agent_resolve_auth call failed (e.g.
  * codex REAUTH_REQUIRED), or NULL. Lets the delegate/chat error path surface a
  * remedy instead of a generic provider 401 (D6). Thread-local to the turn. */
 const char *agent_request_auth_error(void);
 int agent_has_resolvable_credentials(const agent_t *agent);
+
+/* Does the server vault hold any credential filed under this PROVIDER's name?
+ *
+ * The provider-level twin of agent_has_resolvable_credentials(). It exists
+ * because provider availability used to be decided solely by
+ * runtime_secret_has(env_var), and that table is loaded from one agent namespace
+ * ("environment") for a hardcoded list of AIMEE_* names — so a key stored the
+ * way an operator stores one, `aimee vault set minimax api_key ...`, was
+ * invisible and `provider list` reported [no key] over a populated vault.
+ *
+ * Matching is case-insensitive on the name: provider ids are lowercase literals
+ * in the catalogue while a vault entry carries whatever the operator typed.
+ * Returns 1 when a credential exists, 0 otherwise and on any vault error, so a
+ * failure to read reads as "not configured" rather than a false positive. */
+int vault_provider_has_credential(const char *provider_name);
+
 void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len);
 
 /* Per-turn Codex OAuth creds supplied by the thin client (its ~/.codex/auth.json

@@ -77,7 +77,7 @@ static void test_anthropic_profile_headers(void)
 static void test_mistral_fetch_requires_key(void)
 {
    model_provider_t *p = model_provider_get("mistral");
-   char **models = NULL;
+   provider_model_t *models = NULL;
    int n = -1;
    unsetenv("MISTRAL_API_KEY");
    assert(p->fetch_models(p, &models, &n) == -1);
@@ -98,7 +98,7 @@ static void test_fetch_models_requires_provider_keys(void)
    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
    {
       model_provider_t *p = model_provider_get(cases[i].provider);
-      char **models = NULL;
+      provider_model_t *models = NULL;
       int n = -1;
       assert(p != NULL);
       assert(p->fetch_models != NULL);

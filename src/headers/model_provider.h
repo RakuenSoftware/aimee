@@ -5,6 +5,7 @@
 #define DEC_MODEL_PROVIDER_H 1
 
 #include "failover.h"
+#include "provider_model.h"
 
 #ifdef __cplusplus
 extern "C"
@@ -60,9 +61,15 @@ extern "C"
 
       const char **default_headers; /* NULL-terminated key,val,key,val,... pairs */
 
-      /* Fetch live model catalog. Returns 0 on success; caller frees each
-       * string in *models_out and then *models_out itself. */
-      int (*fetch_models)(model_provider_t *p, char ***models_out, int *n_out);
+      /* Fetch live model catalog. Returns 0 on success; caller frees
+       * *models_out with free() (one contiguous block, no owned pointers).
+       *
+       * Populate every field the provider actually publishes and LEAVE THE REST
+       * ZERO. 0 means "not published", not zero-capacity — most
+       * OpenAI-compatible endpoints return ids and nothing else, and a fetch
+       * that invented a limit would overwrite the operator's declared value
+       * with a guess. See provider_model.h. */
+      int (*fetch_models)(model_provider_t *p, provider_model_t **models_out, int *n_out);
 
       /* Optional provider-owned failure classifier. Return 1 and set *out when
        * the provider recognizes an error body/status; return 0 to fall back to

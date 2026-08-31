@@ -58,7 +58,7 @@ Start at the [documentation index](docs/README.md).
 | Document | Use it for |
 |----------|------------|
 | [Quickstart](docs/QUICKSTART.md) | Install, enroll, verify. |
-| [What's new](docs/WHATS_NEW.md) | Everything 0.3.0 changed, and what it removed. |
+| [What's new](docs/WHATS_NEW.md) | Everything 0.4.0 changed, and what it removed. |
 | [Upgrading](docs/UPGRADING.md) | Move from v0.2.192. One-way, so read it first. |
 | [Manual](MANUAL.md) | Day-to-day use and operations. |
 | [Architecture](docs/ARCHITECTURE.md) | Processes, storage, trust, request flow. |

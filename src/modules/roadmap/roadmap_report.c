@@ -6,11 +6,11 @@
 #include "roadmap_report.h"
 #include "roadmap.h"
 #include "headers/platform_path.h"
-#include "db2/artifacts.h"
-#include "db2/db_postgres.h"
-#include "db2/db2_internal.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
 #include "headers/dstr.h"
-#include "db1/roadmap_runtime.h"
+#include "db1_client/roadmap_runtime.h"
 #include "cJSON.h"
 
 #include <stdio.h>
@@ -75,7 +75,7 @@ int roadmap_report_write(const char *roadmap_id)
    const char *rm_phase = "";
    rdm_dispatch_t disp;
    memset(&disp, 0, sizeof(disp));
-   if (rdm_dispatch_get(roadmap_id, &disp) == 0)
+   if (db1_roadmap_dispatch_get(roadmap_id, &disp) == 0)
    {
       rm_status = disp.status;
       rm_phase = disp.phase;

@@ -13,7 +13,7 @@
  * Pre-audit (P0): the codebase had no render-boundary prompt sanitizer before
  * this. `strip_llm_private_scaffold` (util.c) strips model scaffolding from OUR
  * OWN output; `server/tool_schema_sanitizer.c` normalizes tool-call JSON schemas;
- * `shell_escape` (util.c) quotes for a shell. None sanitizes untrusted corpus
+ * `shell_quote` (util.c) quotes for a shell. None sanitizes untrusted corpus
  * text for prompt rendering — so this is a new, owned boundary, not a fork.
  *
  * Two layers (roundtable R1): STRICT VALIDATORS reject structured fields that

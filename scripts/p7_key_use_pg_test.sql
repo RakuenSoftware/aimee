@@ -104,7 +104,7 @@ BEGIN
   IF (SELECT count(*) FROM org_vault_key_use_intent WHERE team_id=970711)<>1 THEN
     RAISE EXCEPTION 'P7 key-use FAIL: intent cardinality mismatch';
   END IF;
-  IF (SELECT count(*) FROM kb_audit_event WHERE action='vault.key_use' AND
+  IF (SELECT count(*) FROM kb_audit_outbox WHERE action='vault.key_use' AND
       subject='team:970711|bedrock|primary')<>1 THEN
     RAISE EXCEPTION 'P7 key-use FAIL: WORM audit cardinality mismatch';
   END IF;
@@ -141,7 +141,7 @@ LANGUAGE plpgsql AS $$ BEGIN
   IF NEW.action='vault.key_use' THEN RAISE EXCEPTION 'forced key-use WORM failure'; END IF;
   RETURN NEW;
 END $$;
-CREATE TRIGGER p7_key_use_force_audit_failure BEFORE INSERT ON kb_audit_event
+CREATE TRIGGER p7_key_use_force_audit_failure BEFORE INSERT ON kb_audit_outbox
 FOR EACH ROW EXECUTE FUNCTION p7_key_use_force_audit_failure();
 
 SET ROLE aimee_kb_runtime;
@@ -159,7 +159,7 @@ BEGIN
   END;
 END $$;
 RESET ROLE;
-DROP TRIGGER p7_key_use_force_audit_failure ON kb_audit_event;
+DROP TRIGGER p7_key_use_force_audit_failure ON kb_audit_outbox;
 DROP FUNCTION p7_key_use_force_audit_failure();
 DO $$ BEGIN
   IF EXISTS(SELECT 1 FROM org_vault_key_use_intent WHERE team_id=970711 AND

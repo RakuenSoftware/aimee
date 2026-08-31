@@ -1,0 +1,495 @@
+/* cross_repo_stats.c: DB-backed stats / data-gathering for the cross-repo
+ * resolver (S3). Portable SQL over db2 (Postgres in prod; sqlite test shim).
+ * Feeds the pure S2a/S2b core. See cross_repo_stats.h and
+ * docs/proposals/pending/cross-repo-dependency-graph.md §3.3/§4.1. */
+
+#include "cross_repo_stats.h"
+
+#include "aimee.h"
+#include "db2.h"
+#include "db_postgres.h"
+#include "../support/db2_log.h"
+
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+
+#define CR_LOG_TAG "cross_repo"
+#define CR_ERRBUF  256
+
+static void *cr_conn(void)
+{
+   return db2_conn();
+}
+
+/* ---- FNV-1a 64-bit ------------------------------------------------------- */
+
+static uint64_t fnv1a_init(void)
+{
+   return 1469598103934665603ULL;
+}
+
+static uint64_t fnv1a_add(uint64_t h, const char *s)
+{
+   if (!s)
+      return h;
+   for (const unsigned char *p = (const unsigned char *)s; *p; p++)
+   {
+      h ^= (uint64_t)*p;
+      h *= 1099511628211ULL;
+   }
+   /* a field separator so ("ab","c") and ("a","bc") differ */
+   h ^= 0x1fULL;
+   h *= 1099511628211ULL;
+   return h;
+}
+
+/* ---- small query helpers ------------------------------------------------- */
+
+/* Run a single-column COUNT/scalar query with up to two text binds; returns the
+ * int64 in *out. Pass NULL for an unused bind. Returns 0 on success, -1 error. */
+static int cr_scalar(void *conn, const char *sql, const char *b1, const char *b2, int64_t *out)
+{
+   char err[CR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   if (b1)
+      aimee_pg_bind_text(st, "?1", b1);
+   if (b2)
+      aimee_pg_bind_text(st, "?2", b2);
+   int64_t v = 0;
+   int rc = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      v = aimee_pg_column_int64(st, 0);
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   if (rc == 0 && out)
+      *out = v;
+   return rc;
+}
+
+/* ---- distinctiveness stats (§3.3) ---------------------------------------- */
+
+int db2_cross_repo_distinct_stats(const char *symbol, const char *caller_repo,
+                                  xrepo_distinct_stats_t *out)
+{
+   void *conn = cr_conn();
+   if (!conn || !symbol || !caller_repo || !out)
+      return -1;
+   memset(out, 0, sizeof(*out));
+
+   int64_t v = 0;
+   /* callee in >= ? trusted repos */
+   if (cr_scalar(conn,
+                 "SELECT COUNT(DISTINCT p.id) FROM code_calls cc "
+                 "JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
+                 "WHERE cc.callee=?1 AND p.trust='trusted' AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
+                 symbol, NULL, &v) != 0)
+      return -1;
+   out->callee_repo_count = (int)v;
+
+   /* defined in >= ? trusted repos. Positive match on kind='definition' (the
+    * convention db2_code_index_term_find uses) rather than a negative kind<>'route'
+    * exclusion, so a future terms.kind value can't silently inflate the count. */
+   if (cr_scalar(conn,
+                 "SELECT COUNT(DISTINCT p.id) FROM terms t "
+                 "JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
+                 "WHERE t.name=?1 AND t.kind='definition' AND p.trust='trusted'"
+                 " AND p.lifecycle_state='current' AND f.generation=p.current_generation",
+                 symbol, NULL, &v) != 0)
+      return -1;
+   out->definer_repo_count = (int)v;
+
+   /* caller-file percentage: files of A using S as a callee / total files of A */
+   int64_t num = 0, denom = 0;
+   if (cr_scalar(conn,
+                 "SELECT COUNT(DISTINCT f.id) FROM code_calls cc "
+                 "JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
+                 "WHERE p.name=?1 AND cc.callee=?2 AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
+                 caller_repo, symbol, &num) != 0)
+      return -1;
+   if (cr_scalar(conn,
+                 "SELECT COUNT(*) FROM files f JOIN projects p ON p.id = f.project_id "
+                 "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                 " AND f.generation=p.current_generation",
+                 caller_repo, NULL, &denom) != 0)
+      return -1;
+   out->caller_file_pct = denom > 0 ? (int)((num * 100) / denom) : 0;
+   return 0;
+}
+
+/* ---- blocked_symbols (§3.3) ---------------------------------------------- */
+
+int db2_cross_repo_symbol_blocked(const char *symbol, const char *lang)
+{
+   void *conn = cr_conn();
+   if (!conn || !symbol)
+      return -1;
+   char err[CR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "SELECT 1 FROM blocked_symbols WHERE word = ?1 AND (lang = ?2 OR lang = '') LIMIT 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", symbol);
+   aimee_pg_bind_text(st, "?2", lang ? lang : "");
+   int blocked = aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW ? 1 : 0;
+   aimee_pg_finalize(st);
+   return blocked;
+}
+
+int db2_cross_repo_recompute_blocked_symbols(int k, int m, int len_min)
+{
+   void *conn = cr_conn();
+   if (!conn || k <= 0 || m <= 0 || len_min <= 0)
+      return -1;
+   char err[CR_ERRBUF] = "";
+
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   int ok = 1;
+   /* Bump the version INSIDE the transaction (UPDATE then read), not a
+    * read-before-BEGIN of prev+1: the UPDATE takes the row lock so two concurrent
+    * recomputes serialize and can't both commit the same version (no PK collision
+    * / backward step). UPDATE+SELECT is portable (avoids UPDATE ... RETURNING,
+    * which older sqlite shims lack). */
+   int64_t ver = 0;
+   if (aimee_pg_exec(conn,
+                     "UPDATE cross_repo_meta SET blocked_symbols_version = "
+                     "blocked_symbols_version + 1 WHERE id = 1",
+                     err, sizeof(err)) != 0)
+      ok = 0;
+   if (ok && cr_scalar(conn, "SELECT blocked_symbols_version FROM cross_repo_meta WHERE id = 1",
+                       NULL, NULL, &ver) != 0)
+      ok = 0;
+   if (ok && aimee_pg_exec(conn, "DELETE FROM blocked_symbols", err, sizeof(err)) != 0)
+      ok = 0;
+
+   /* Frequency-derived blocks over TRUSTED repos: callee in >= k repos, or
+    * defined in >= m repos. length >= len_min so we don't store short names
+    * (those are excluded by the distinctiveness len gate at query time). */
+   if (ok)
+   {
+      /* DELETE above clears the table, and the UNION selects only distinct names
+       * (so the two arms can't produce duplicate (word,'') rows) -- no ON CONFLICT
+       * needed, which also keeps the statement portable to the sqlite shim. */
+      aimee_pg_stmt_t *st = aimee_pg_prepare(
+          conn,
+          "INSERT INTO blocked_symbols (word, lang, reason, version) "
+          "SELECT name, '', 'frequency', ?3 FROM ("
+          "  SELECT cc.callee AS name FROM code_calls cc "
+          "    JOIN files f ON f.id = cc.file_id JOIN projects p ON p.id = f.project_id "
+          "    WHERE p.trust='trusted' AND p.lifecycle_state='current'"
+          "      AND f.generation=p.current_generation AND length(cc.callee) >= ?4 "
+          "    GROUP BY cc.callee HAVING COUNT(DISTINCT p.id) >= ?1 "
+          "  UNION "
+          "  SELECT t.name AS name FROM terms t "
+          "    JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
+          "    WHERE p.trust='trusted' AND p.lifecycle_state='current'"
+          "      AND f.generation=p.current_generation"
+          "      AND t.kind='definition' AND length(t.name)>=?4 "
+          "    GROUP BY t.name HAVING COUNT(DISTINCT p.id) >= ?2"
+          ") q",
+          err, sizeof(err));
+      if (!st)
+         ok = 0;
+      else
+      {
+         aimee_pg_bind_int(st, "?1", k);
+         aimee_pg_bind_int(st, "?2", m);
+         aimee_pg_bind_int64(st, "?3", ver);
+         aimee_pg_bind_int(st, "?4", len_min);
+         if (aimee_pg_step(st, err, sizeof(err)) < 0)
+            ok = 0;
+         aimee_pg_finalize(st);
+      }
+   }
+
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      LOG_ERROR(CR_LOG_TAG, "blocked_symbols recompute failed: %s", err);
+      return -1;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      return -1;
+
+   int64_t n = 0;
+   (void)cr_scalar(conn, "SELECT COUNT(*) FROM blocked_symbols", NULL, NULL, &n);
+   return (int)n;
+}
+
+/* ---- meta / hashes (§4.1) ------------------------------------------------ */
+
+int db2_cross_repo_meta_read(int64_t *trust_epoch, int64_t *blocked_symbols_version,
+                             char *repo_set_hash, size_t cap)
+{
+   void *conn = cr_conn();
+   if (!conn)
+      return -1;
+   char err[CR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn,
+       "SELECT trust_epoch, blocked_symbols_version, repo_set_hash FROM cross_repo_meta "
+       "WHERE id = 1",
+       err, sizeof(err));
+   if (!st)
+      return -1;
+   int rc = -1;
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      if (trust_epoch)
+         *trust_epoch = aimee_pg_column_int64(st, 0);
+      if (blocked_symbols_version)
+         *blocked_symbols_version = aimee_pg_column_int64(st, 1);
+      if (repo_set_hash && cap)
+         snprintf(repo_set_hash, cap, "%s", aimee_pg_column_text(st, 2));
+      rc = 0;
+   }
+   aimee_pg_finalize(st);
+   return rc;
+}
+
+/* Hash one ordered single-column query's rows into the running FNV state. */
+static int cr_hash_query(void *conn, const char *sql, const char *bind, uint64_t *h)
+{
+   char err[CR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn, sql, err, sizeof(err));
+   if (!st)
+      return -1;
+   if (bind)
+      aimee_pg_bind_text(st, "?1", bind);
+   int step;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+      *h = fnv1a_add(*h, aimee_pg_column_text(st, 0));
+   aimee_pg_finalize(st);
+   return step < 0 ? -1 : 0;
+}
+
+int db2_cross_repo_repo_symbol_hash(const char *project, char *out, size_t cap)
+{
+   void *conn = cr_conn();
+   if (!conn || !project || !out || cap < 17)
+      return -1;
+   uint64_t h = fnv1a_init();
+   /* terms (name|kind), exports (name), imports (name) -- ordered for determinism. */
+   if (cr_hash_query(conn,
+                     "SELECT t.name || '|' || t.kind FROM terms t "
+                     "JOIN files f ON f.id = t.file_id JOIN projects p ON p.id = f.project_id "
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
+                     project, &h) != 0)
+      return -1;
+   if (cr_hash_query(conn,
+                     "SELECT 'E:' || e.name FROM file_exports e "
+                     "JOIN files f ON f.id = e.file_id JOIN projects p ON p.id = f.project_id "
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
+                     project, &h) != 0)
+      return -1;
+   if (cr_hash_query(conn,
+                     "SELECT 'I:' || i.name FROM file_imports i "
+                     "JOIN files f ON f.id = i.file_id JOIN projects p ON p.id = f.project_id "
+                     "WHERE p.name=?1 AND p.lifecycle_state='current'"
+                     " AND f.generation=p.current_generation ORDER BY 1",
+                     project, &h) != 0)
+      return -1;
+   snprintf(out, cap, "%016llx", (unsigned long long)h);
+   return 0;
+}
+
+int db2_cross_repo_repo_set_hash(char *out, size_t cap)
+{
+   void *conn = cr_conn();
+   if (!conn || !out || cap < 17)
+      return -1;
+   char err[CR_ERRBUF] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT name,trust FROM projects"
+                                          " WHERE lifecycle_state='current' ORDER BY name",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+   uint64_t h = fnv1a_init();
+   int step;
+   int rc = 0;
+   while ((step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
+   {
+      const char *name = aimee_pg_column_text(st, 0);
+      const char *trust = aimee_pg_column_text(st, 1);
+      char sym[17] = "";
+      if (db2_cross_repo_repo_symbol_hash(name, sym, sizeof(sym)) != 0)
+      {
+         rc = -1;
+         break;
+      }
+      h = fnv1a_add(h, name);
+      h = fnv1a_add(h, trust);
+      h = fnv1a_add(h, sym);
+   }
+   aimee_pg_finalize(st);
+   if (rc != 0 || step < 0)
+      return -1;
+   snprintf(out, cap, "%016llx", (unsigned long long)h);
+
+   /* persist into cross_repo_meta */
+   aimee_pg_stmt_t *up = aimee_pg_prepare(
+       conn, "UPDATE cross_repo_meta SET repo_set_hash = ?1 WHERE id = 1", err, sizeof(err));
+   if (up)
+   {
+      aimee_pg_bind_text(up, "?1", out);
+      (void)aimee_pg_step(up, err, sizeof(err));
+      aimee_pg_finalize(up);
+   }
+   return 0;
+}
+
+/* ---- S7: per-repo trust write + audit ------------------------------------ */
+
+int db2_cross_repo_set_trust(const char *project, const char *new_trust, const char *actor,
+                             const char *request_id, char *prior_out, size_t prior_cap,
+                             int *changed_out)
+{
+   if (prior_out && prior_cap)
+      prior_out[0] = '\0';
+   if (changed_out)
+      *changed_out = 0;
+   void *conn = cr_conn();
+   if (!conn || !project || !project[0] || !new_trust ||
+       (strcmp(new_trust, "trusted") != 0 && strcmp(new_trust, "untrusted") != 0))
+      return -1;
+   char err[CR_ERRBUF] = "";
+
+   if (aimee_pg_exec(conn, "BEGIN", err, sizeof(err)) != 0)
+      return -1;
+
+   int ok = 1, found = 0;
+   char prior[16] = "";
+
+   /* Prior trust + existence check. (Single-tenant admin write: a plain SELECT
+    * then UPDATE is fine; the txn keeps the multi-row write atomic.) */
+   aimee_pg_stmt_t *sel =
+       aimee_pg_prepare(conn, "SELECT trust FROM projects WHERE name = ?1", err, sizeof(err));
+   if (!sel)
+      ok = 0;
+   else
+   {
+      aimee_pg_bind_text(sel, "?1", project);
+      int sr = aimee_pg_step(sel, err, sizeof(err));
+      if (sr == AIMEE_PG_ROW)
+      {
+         const char *t = aimee_pg_column_text(sel, 0);
+         snprintf(prior, sizeof(prior), "%s", t ? t : "");
+         found = 1;
+      }
+      else if (sr < 0)
+         ok = 0;
+      aimee_pg_finalize(sel);
+   }
+
+   if (ok && !found)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      return 1; /* no such project */
+   }
+
+   int changed = ok && found && strcmp(prior, new_trust) != 0;
+
+   int64_t epoch_before = 0, epoch_after = 0;
+   if (ok && cr_scalar(conn, "SELECT trust_epoch FROM cross_repo_meta WHERE id = 1", NULL, NULL,
+                       &epoch_before) != 0)
+      ok = 0;
+   epoch_after = epoch_before;
+
+   /* Apply the change + bump trust_epoch only on a real transition, so a no-op
+    * re-assert doesn't needlessly invalidate the frequency model. */
+   if (ok && changed)
+   {
+      aimee_pg_stmt_t *up = aimee_pg_prepare(conn, "UPDATE projects SET trust = ?2 WHERE name = ?1",
+                                             err, sizeof(err));
+      if (!up)
+         ok = 0;
+      else
+      {
+         aimee_pg_bind_text(up, "?1", project);
+         aimee_pg_bind_text(up, "?2", new_trust);
+         if (aimee_pg_step(up, err, sizeof(err)) < 0)
+            ok = 0;
+         aimee_pg_finalize(up);
+      }
+      if (ok && aimee_pg_exec(
+                    conn, "UPDATE cross_repo_meta SET trust_epoch = trust_epoch + 1 WHERE id = 1",
+                    err, sizeof(err)) != 0)
+         ok = 0;
+      if (ok && cr_scalar(conn, "SELECT trust_epoch FROM cross_repo_meta WHERE id = 1", NULL, NULL,
+                          &epoch_after) != 0)
+         ok = 0;
+   }
+
+   /* repo_set_hash stamp at change time (best-effort for the audit row). */
+   char rsh[64] = "";
+   if (ok)
+   {
+      aimee_pg_stmt_t *hs = aimee_pg_prepare(
+          conn, "SELECT repo_set_hash FROM cross_repo_meta WHERE id = 1", err, sizeof(err));
+      if (!hs)
+         ok = 0;
+      else
+      {
+         if (aimee_pg_step(hs, err, sizeof(err)) == AIMEE_PG_ROW)
+         {
+            const char *h = aimee_pg_column_text(hs, 0);
+            snprintf(rsh, sizeof(rsh), "%s", h ? h : "");
+         }
+         aimee_pg_finalize(hs);
+      }
+   }
+
+   /* Audit every call (epoch before==after on a no-op). */
+   if (ok)
+   {
+      aimee_pg_stmt_t *au = aimee_pg_prepare(
+          conn,
+          "INSERT INTO cross_repo_trust_audit (project, actor, prior_trust, new_trust, "
+          "trust_epoch_before, trust_epoch_after, repo_set_hash, request_id) "
+          "VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+          err, sizeof(err));
+      if (!au)
+         ok = 0;
+      else
+      {
+         aimee_pg_bind_text(au, "?1", project);
+         aimee_pg_bind_text(au, "?2", actor ? actor : "");
+         aimee_pg_bind_text(au, "?3", prior);
+         aimee_pg_bind_text(au, "?4", new_trust);
+         aimee_pg_bind_int64(au, "?5", epoch_before);
+         aimee_pg_bind_int64(au, "?6", epoch_after);
+         aimee_pg_bind_text(au, "?7", rsh);
+         aimee_pg_bind_text(au, "?8", request_id ? request_id : "");
+         if (aimee_pg_step(au, err, sizeof(err)) < 0)
+            ok = 0;
+         aimee_pg_finalize(au);
+      }
+   }
+
+   if (!ok)
+   {
+      (void)aimee_pg_exec(conn, "ROLLBACK", err, sizeof(err));
+      LOG_ERROR(CR_LOG_TAG, "trust write failed for %s: %s", project, err);
+      return -1;
+   }
+   if (aimee_pg_exec(conn, "COMMIT", err, sizeof(err)) != 0)
+      return -1;
+
+   if (prior_out && prior_cap)
+      snprintf(prior_out, prior_cap, "%s", prior);
+   if (changed_out)
+      *changed_out = changed;
+   return 0;
+}

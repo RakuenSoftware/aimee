@@ -30,6 +30,9 @@ nodes:
       plan: split.out
     params:
       fanout: max
+      # Shadow-select admitted learned regressions; activation remains an
+      # explicit operator decision after selector calibration.
+      admitted_regressions: observe
     next: freeze
   - id: freeze
     block: freeze
@@ -45,6 +48,7 @@ nodes:
       # Use a named reviewer and bound the review -> split loop.
       reviewer: contrarian
       max_rounds: 3
+      blocker_convergence: observe
     on_pass: rt_gate
     on_fail: split
   # Require the configured roundtable and quorum before delivery.
@@ -62,6 +66,7 @@ nodes:
           - reviewer
       quorum: 4
       max_rounds: 6
+      blocker_convergence: observe
     on_pass: deliver
     on_fail: split
   # Deliver only from the roundtable pass edge.

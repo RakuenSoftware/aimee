@@ -43,6 +43,51 @@ extern "C"
    int memory_pii_should_inject(rel_sensitivity_t sens, double confidence,
                                 int turn_requests_sensitive);
 
+   /* Turn classifier: returns 0 and sets *requests_sensitive to 0 or 1, or
+    * non-zero if it could not produce an answer. */
+   typedef int (*memory_pii_turn_classifier_fn)(const char *turn_text,
+                                                int *requests_sensitive);
+
+   /* Route the turn classification through `classifier` (the memory module over
+    * the bus) instead of scanning in-process. Pass NULL to go back to the local
+    * scan.
+    *
+    * A registered classifier is authoritative, and unlike the write gate there
+    * is no way to defer: the answer is a plain 0/1 with no third state, and the
+    * recall path has to proceed either way. So a failure fails CLOSED -- the
+    * turn is treated as NOT asking for sensitive information, which withholds
+    * PII rather than leaking it. The cost of a broken module is missing facts,
+    * never an exposed one; falling back to the local scan would instead make a
+    * broken module invisible. */
+   void memory_pii_register_turn_classifier(memory_pii_turn_classifier_fn classifier);
+
+   /* Classify a whole block of relations at once. Writes `count` tiers into
+    * `out`. Returns 0, or -1 if no answer could be produced.
+    *
+    * Batched because the recall path gates every candidate fact it read: the
+    * round trips are the cost, not the classifying. With no classifier
+    * registered this is exactly memory_pii_rel_sensitivity in a loop.
+    *
+    * A -1 means the caller learned nothing about these relations. It must NOT
+    * treat that as "all normal" — withhold the block and let the failure
+    * surface. */
+   int memory_pii_rel_sensitivity_batch(const char *const *rel_types, int count,
+                                        rel_sensitivity_t *out);
+
+   /* Batch classifier: returns 0 and fills `out`, or non-zero if it could not
+    * answer for the whole batch. Partial answers are not a thing — a block is
+    * classified or it is not. */
+   typedef int (*memory_pii_sensitivity_batch_fn)(const char *const *rel_types, int count,
+                                                  rel_sensitivity_t *out);
+
+   /* Route batch classification through `classifier` (the memory module over the
+    * bus). Pass NULL to go back to the local table.
+    *
+    * Authoritative like the others: a failure is reported as a failure, never
+    * quietly answered from the local table, which would make a broken module
+    * look healthy. */
+   void memory_pii_register_sensitivity_batch(memory_pii_sensitivity_batch_fn classifier);
+
 #ifdef __cplusplus
 }
 #endif

@@ -8,8 +8,8 @@
  *   aimee identity snapshot [--out DIR]
  *   aimee identity diff A.json B.json [--flip-threshold 0.3]
  *
- * The charter is operator-authored and immutable at runtime — no
- * setter exists; editing aimee.yaml is the only path. The working
+ * The charter is operator-authored and immutable through this command; the
+ * external config module owns its document and mutation policy. The working
  * profile is mutable-but-gated: observations accumulate until a
  * sample-count threshold commits a value, so single-turn reactions
  * can't flip it. */
@@ -17,7 +17,7 @@
 #include "aimee.h"
 #include "commands.h"
 #include "cmd_review.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "working_profile.h"
 #include "cJSON.h"
 #include "platform_path.h"
@@ -148,10 +148,10 @@ static void identity_show(app_ctx_t *ctx)
    int total = config_charter_safety_axioms_count() + config_charter_hard_constraints_count() +
                config_charter_values_count() + config_charter_tone_boundaries_count();
    if (total == 0)
-      printf("Charter: (none configured — add a `charter:` block to aimee.yaml)\n");
+      printf("Charter: (none configured — configure a charter through the config module)\n");
    else
    {
-      printf("Charter (immutable, loaded from aimee.yaml):\n");
+      printf("Charter (immutable, loaded from the config module):\n");
       print_section("Safety axioms", config_charter_safety_axioms,
                     config_charter_safety_axioms_count());
       print_section("Hard constraints", config_charter_hard_constraints,
@@ -256,8 +256,8 @@ static void identity_working_profile_observe(app_ctx_t *ctx, int argc, char **ar
 
 static void identity_working_profile(app_ctx_t *ctx, int argc, char **argv)
 {
-   if (db1_init(config_db1_path()) != 0)
-      fatal("identity working-profile: could not initialize DB1");
+   if (!db1_store_ready())
+      fatal("identity working-profile: DB1 store unavailable");
 
    if (argc < 1)
    {
@@ -315,8 +315,8 @@ static void identity_snapshot(app_ctx_t *ctx, int argc, char **argv)
    }
    if (platform_mkdir_p(out_dir, 0755) != 0)
       fatal("identity snapshot: could not create %s: %s", out_dir, strerror(errno));
-   if (db1_init(config_db1_path()) != 0)
-      fatal("identity snapshot: could not initialize DB1");
+   if (!db1_store_ready())
+      fatal("identity snapshot: DB1 store unavailable");
    cJSON *snap = identity_snapshot_build();
    if (!snap)
       fatal("identity snapshot: could not build snapshot");

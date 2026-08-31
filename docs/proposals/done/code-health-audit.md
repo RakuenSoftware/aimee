@@ -1,5 +1,9 @@
 # Proposal: graph-derived code-health audit (`aimee code audit`)
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** done
 - **Status refreshed:** 2026-06-09
 - **Split lineage:** residual follow-up folded into this done record.
@@ -24,4 +28,4 @@ The residual follow-up is complete.
 
 ## Verification Notes
 
-Verified in-tree evidence: `src/kb/kb_curator_index_code_unit.c`, `src/db2/schema.sql`, `src/db2/schema_sqlite.sql`, `src/db2/pgvec_transport.c`, `src/kb/kb_service_graph.c`, `src/kb/kb_service.c`, `src/db2/kb_service_backend.h`, and `src/cli_code_audit.c`.
+Verified in-tree evidence: `src/kb/kb_curator_index_code_unit.c`, `src/modules/db2/c/schema.sql`, `src/modules/db2/c/schema_sqlite.sql`, `src/modules/db2/c/pgvec_transport.c`, `src/kb/kb_service_graph.c`, `src/kb/kb_service.c`, `src/modules/db2/c/kb_service_backend.h`, and `src/cli_code_audit.c`.

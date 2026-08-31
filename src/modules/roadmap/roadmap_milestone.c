@@ -5,10 +5,10 @@
 
 #include "aimee.h"
 #include "roadmap_milestone.h"
-#include "db1/roadmap_runtime.h"
-#include "db2/artifacts.h"
-#include "db2/db_postgres.h"
-#include "db2/db2_internal.h"
+#include "db1_client/roadmap_runtime.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
 #include "headers/agent_exec.h"
 #include "headers/agent_config.h"
 #include "headers/dstr.h"
@@ -110,7 +110,7 @@ int roadmap_milestone_all_done(const char *roadmap_id, const char *parent_id, co
 
       /* Check DB1 state. */
       rdm_unit_dispatch_t u;
-      if (rdm_unit_get(roadmap_id, uid, &u) != 0)
+      if (db1_roadmap_unit_get(roadmap_id, uid, &u) != 0)
       {
          cJSON_Delete(payload);
          aimee_pg_finalize(st);

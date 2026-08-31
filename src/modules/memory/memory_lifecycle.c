@@ -7,12 +7,12 @@
 #include "aimee.h"
 #include "util.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/memory_lifecycle.h"
+#include "modules/db2/c/memory_lifecycle.h"
 #include "dogfood.h"
 #include "log.h"
-#endif
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
+#include "memory_context_internal.h"
 #include <ctype.h>
 #include <math.h>
 #include <stdlib.h>
@@ -80,7 +80,7 @@ int memory_detect_commitment_shape(const char *content, char *shape_out, size_t 
        "by next week", "by 2026",    "by 2027",       NULL};
    for (int i = 0; date_markers[i]; i++)
    {
-      if (strstr(lc, date_markers[i]))
+      if (memory_keyword_present(lc, date_markers[i]))
       {
          if (shape_out && shape_out_len > 0)
             snprintf(shape_out, shape_out_len, "%s", "date");
@@ -95,7 +95,7 @@ int memory_detect_commitment_shape(const char *content, char *shape_out, size_t 
                                             "next month", "this month", "in a few days", NULL};
    for (int i = 0; relative_markers[i]; i++)
    {
-      if (strstr(lc, relative_markers[i]))
+      if (memory_keyword_present(lc, relative_markers[i]))
       {
          if (shape_out && shape_out_len > 0)
             snprintf(shape_out, shape_out_len, "%s", "relative");
@@ -113,43 +113,6 @@ int memory_detect_commitment_shape(const char *content, char *shape_out, size_t 
    return 1;
 }
 
-#if defined(AIMEE_DB2_DISABLED)
-/* Lifecycle mutations and alert queries are DB2-owned. Server code should
- * access them through aimee-kb RPCs, not by linking DB2 lifecycle helpers. */
-int memory_transition_lifecycle(int64_t memory_id, const char *new_state,
-                                const char *archive_reason)
-{
-   (void)memory_id;
-   (void)new_state;
-   (void)archive_reason;
-   return -1;
-}
-
-int memory_mark_pending(int64_t memory_id, int ttl_days)
-{
-   (void)memory_id;
-   (void)ttl_days;
-   return -1;
-}
-
-int memory_lifecycle_sweep_expired(void)
-{
-   return 0;
-}
-
-int memory_lifecycle_counts(memory_lifecycle_counts_t *out)
-{
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-cJSON *memory_alerts(const char *since)
-{
-   (void)since;
-   return NULL;
-}
-#else
 /* --- State machine ---
  *
  * Transitions are whitelisted rather than inferred. Invalid transitions
@@ -247,8 +210,27 @@ int memory_lifecycle_sweep_expired(void)
    return archived;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void lifecycle_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.lifecycle", "lifecycle counts are unavailable: the relational store is "
+                                "unreachable, so the counts cannot be reported rather than "
+                                "being genuinely zero");
+}
+
 int memory_lifecycle_counts(memory_lifecycle_counts_t *out)
 {
+   if (!db2_conn())
+   {
+      lifecycle_warn_store_unreachable();
+      return -1;
+   }
    if (!out)
       return -1;
    db2_memory_lifecycle_counts_t db_counts;
@@ -361,4 +343,3 @@ cJSON *memory_alerts(const char *since)
    dogfood_log_moment_live("memory_alerts", since, NULL, 0, NULL);
    return bundle;
 }
-#endif

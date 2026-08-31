@@ -1,4 +1,5 @@
 #include "kb_mgmt_endpoint.h"
+#include "ip_transition.h"
 #include <aimee/core/connection/control.h>
 #include <aimee/core/connection/socket.h>
 #include <arpa/inet.h>
@@ -113,14 +114,14 @@ int kb_mgmt_sockaddr_permitted(const struct sockaddr *addr, socklen_t len)
       return v4_permitted(((const struct sockaddr_in *)addr)->sin_addr.s_addr);
    if (addr->sa_family != AF_INET6 || len < sizeof(struct sockaddr_in6))
       return 0;
-   const unsigned char *b = ((const struct sockaddr_in6 *)addr)->sin6_addr.s6_addr;
-   static const unsigned char mapped[12] = {0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0xff, 0xff};
-   if (memcmp(b, mapped, sizeof(mapped)) == 0)
-   {
-      uint32_t v4;
-      memcpy(&v4, b + 12, sizeof(v4));
-      return v4_permitted(v4);
-   }
+   const struct in6_addr *in6 = &((const struct sockaddr_in6 *)addr)->sin6_addr;
+   const unsigned char *b = in6->s6_addr;
+   /* A transition address names an IPv4 endpoint; judge it as that IPv4.
+    * Checking only v4-mapped here left NAT64, 6to4, Teredo and v4-compatible
+    * spellings of an internal address permitted -- see headers/ip_transition.h. */
+   uint32_t embedded = 0;
+   if (ip_embedded_ipv4(in6, &embedded))
+      return v4_permitted(htonl(embedded));
    int all_zero = 1;
    for (int i = 0; i < 16; i++)
       all_zero &= b[i] == 0;

@@ -1,7 +1,7 @@
 #include "kb_http_releases.h"
 #include "kb_http_ws.h"
-#include "db2/kb_docs.h"
-#include "db2/kb_releases.h"
+#include "modules/db2/c/kb_docs.h"
+#include "modules/db2/c/kb_releases.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

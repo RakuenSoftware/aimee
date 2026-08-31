@@ -1,49 +1,28 @@
-/* git_pr_ci_grade.c: pure aggregation of GitHub check-runs / combined-status
- * payloads into one CI verdict (split from git_pr_api.c so the grader links —
- * and unit-tests — without the HTTP/credential stack). */
+/* git_pr_ci_grade.c: the CI verdict the merge gate trusts.
+ *
+ * Split from git_pr_api.c so it links — and unit-tests — without the
+ * HTTP/credential stack. The aggregation itself has since moved to the git
+ * module (server-go/modules/git/ci_grade.go); what stays here is the request,
+ * the ruling, and the pure predicate below, which is a handful of comparisons
+ * on the merge path and would gain nothing from a round trip.
+ *
+ * The conflict-vs-lost-race predicate that used to sit here went with the merge
+ * into the module: the message is now read where it arrives instead of being
+ * re-derived from a rendered error string. */
 #include "git_pr_api.h"
 
 #include "cJSON.h"
+#include "headers/module_json_call.h"
 
-#include <ctype.h>
+#include <aimee/git/module_api.h>
 #include <string.h>
 
-/* Case-insensitive substring search. Not strcasestr(): that is a GNU extension,
- * and this file is deliberately built into minimal test binaries that do not
- * define _GNU_SOURCE. */
-static const char *ci_grade_casestr(const char *hay, const char *needle)
-{
-   if (!hay || !needle || !needle[0])
-      return NULL;
-   for (const char *h = hay; *h; h++)
-   {
-      const char *a = h, *b = needle;
-      while (*a && *b && tolower((unsigned char)*a) == tolower((unsigned char)*b))
-      {
-         a++;
-         b++;
-      }
-      if (!*b)
-         return h;
-   }
-   return NULL;
-}
-
-int git_pr_merge_err_is_conflict(const char *err)
-{
-   if (!err || !err[0])
-      return 0;
-   /* GitHub's conflict wording, observed live: "Pull Request has merge
-    * conflicts". Match the distinctive noun phrase rather than the whole
-    * sentence, so a reworded message ("has merge conflict", "merge conflicts
-    * detected") still classifies.
-    *
-    * "conflict" alone is deliberately NOT matched: HTTP 409 is literally named
-    * "Conflict" and its lost-race messages can carry the bare word, and that is
-    * exactly the case that must stay retryable. Requiring the pair keeps the
-    * predicate from terminating runs that a retry would have won. */
-   return ci_grade_casestr(err, "merge conflict") != NULL;
-}
+/* A forge's check-runs payload for a busy repository is the largest thing this
+ * carries; the module body cap bounds it. */
+#define GIT_PR_CI_GRADE_MAX_BODY (1024u * 1024u)
+/* The caller already spent two HTTP round trips reaching the forge, so a short
+ * bus deadline here only converts a slow module into a refused merge. */
+#define GIT_PR_CI_GRADE_TIMEOUT_MS 10000
 
 int git_pr_ci_permits_merge(git_pr_ci_t ci)
 {
@@ -64,84 +43,42 @@ int git_pr_ci_permits_merge(git_pr_ci_t ci)
    return 0; /* unreachable for a valid enum; fail closed regardless */
 }
 
-/* One check run / one legacy status context graded into the aggregate. */
-static void ci_fold(const char *status, const char *conclusion, int *pending, int *failed,
-                    int *seen)
-{
-   (*seen)++;
-   if (status && strcmp(status, "completed") != 0)
-   {
-      (*pending)++;
-      return;
-   }
-   if (!conclusion || !conclusion[0])
-   {
-      (*pending)++;
-      return;
-   }
-   if (strcmp(conclusion, "success") == 0 || strcmp(conclusion, "neutral") == 0 ||
-       strcmp(conclusion, "skipped") == 0)
-      return;
-   (*failed)++; /* failure / cancelled / timed_out / action_required / stale */
-}
-
-/* A payload that was PROVIDED must parse into the shape we expect. NONE means "the
- * forge reported no CI", which git_pr_ci_permits_merge() treats as mergeable — so it
- * must never be reachable from "we could not read the answer". An unparseable or
- * unexpected body is ERROR (undetermined), which refuses. Both still park the gate.ci
- * node identically (live_ci_status maps NONE and ERROR alike to WFE_CI_NONE), so this
- * distinction costs that path nothing and closes a fail-open on the merge path. */
+/* The grading itself now lives in the git MODULE (server-go/modules/git,
+ * ci_grade.go) and is reached as bus stage AIMEE_GIT_STAGE_CI_GRADE. Parsing an
+ * untrusted forge payload is feature work; the C core carries the message and
+ * applies the ruling.
+ *
+ * The verdict crosses the wire as a NAME, not as the git_pr_ci_t integer: the
+ * enum could be renumbered on one side of the boundary and silently change
+ * meaning on the other.
+ *
+ * Fail-closed twice over. An unreachable module, a malformed reply or an
+ * unrecognised verdict all yield ERROR, never NONE -- NONE means "the forge
+ * reported no CI", which git_pr_ci_permits_merge() lets through, so it must not
+ * be reachable from "we could not get an answer". git is a REQUIRED module, so
+ * an absent one is a broken deployment rather than a supported configuration. */
 git_pr_ci_t git_pr_ci_grade_json(const char *check_runs_json, const char *combined_status_json)
 {
-   int pending = 0, failed = 0, seen = 0;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return GIT_PR_CI_ERROR;
+   cJSON_AddStringToObject(request, "check_runs", check_runs_json ? check_runs_json : "");
+   cJSON_AddStringToObject(request, "combined_status",
+                           combined_status_json ? combined_status_json : "");
 
-   if (check_runs_json && check_runs_json[0])
-   {
-      cJSON *cr = cJSON_Parse(check_runs_json);
-      const cJSON *runs = cr ? cJSON_GetObjectItem(cr, "check_runs") : NULL;
-      if (!cJSON_IsArray(runs)) /* unparseable, or not a check-runs payload */
-      {
-         cJSON_Delete(cr);
-         return GIT_PR_CI_ERROR;
-      }
-      const cJSON *r = NULL;
-      cJSON_ArrayForEach(r, runs)
-      {
-         const cJSON *st = cJSON_GetObjectItem(r, "status");
-         const cJSON *co = cJSON_GetObjectItem(r, "conclusion");
-         ci_fold(cJSON_IsString(st) ? st->valuestring : NULL,
-                 cJSON_IsString(co) ? co->valuestring : NULL, &pending, &failed, &seen);
-      }
-      cJSON_Delete(cr);
-   }
+   cJSON *reply =
+       aimee_module_json_call(AIMEE_GIT_EVENT_CI_GRADE, AIMEE_GIT_STAGE_CI_GRADE, request,
+                              GIT_PR_CI_GRADE_MAX_BODY, GIT_PR_CI_GRADE_TIMEOUT_MS, NULL);
+   if (!reply)
+      return GIT_PR_CI_ERROR;
 
-   if (seen == 0) /* no check runs: the legacy combined status decides */
-   {
-      if (!combined_status_json || !combined_status_json[0])
-         return GIT_PR_CI_NONE; /* nothing reported anywhere */
-      cJSON *cs = cJSON_Parse(combined_status_json);
-      const cJSON *statuses = cs ? cJSON_GetObjectItem(cs, "statuses") : NULL;
-      if (!cJSON_IsArray(statuses)) /* unparseable, or not a combined-status payload */
-      {
-         cJSON_Delete(cs);
-         return GIT_PR_CI_ERROR;
-      }
-      if (cJSON_GetArraySize(statuses) > 0)
-      {
-         const cJSON *state = cJSON_GetObjectItem(cs, "state");
-         const char *v = cJSON_IsString(state) ? state->valuestring : "";
-         git_pr_ci_t g = strcmp(v, "success") == 0   ? GIT_PR_CI_SUCCESS
-                         : strcmp(v, "pending") == 0 ? GIT_PR_CI_PENDING
-                                                     : GIT_PR_CI_FAILURE;
-         cJSON_Delete(cs);
-         return g;
-      }
-      cJSON_Delete(cs);
-      return GIT_PR_CI_NONE; /* genuinely zero checks */
-   }
-   if (failed > 0)
-      return GIT_PR_CI_FAILURE;
-   if (pending > 0)
-      return GIT_PR_CI_PENDING;
-   return GIT_PR_CI_SUCCESS;
+   const cJSON *verdict = cJSON_GetObjectItemCaseSensitive(reply, "verdict");
+   const char *name = cJSON_IsString(verdict) ? verdict->valuestring : "";
+   git_pr_ci_t graded = strcmp(name, "success") == 0   ? GIT_PR_CI_SUCCESS
+                        : strcmp(name, "pending") == 0 ? GIT_PR_CI_PENDING
+                        : strcmp(name, "failure") == 0 ? GIT_PR_CI_FAILURE
+                        : strcmp(name, "none") == 0    ? GIT_PR_CI_NONE
+                                                       : GIT_PR_CI_ERROR;
+   cJSON_Delete(reply);
+   return graded;
 }

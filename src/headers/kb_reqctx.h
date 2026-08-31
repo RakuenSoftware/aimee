@@ -3,8 +3,9 @@
  * The request router (kb_http_route_ex) resolves the caller's actor principal
  * after verification and stashes it here so tenant-aware handlers (e.g. the
  * /v1/team routes) can read it without threading it through every signature.
- * Set at request start, cleared at request end. Slice-4 minimal form (actor only);
- * the transport principal + full composite context wire in with P2's egress path. */
+ * The actor may come from a KB-verified caller credential or from canonical caller
+ * context carried over a fully authenticated service transport. Set at request
+ * start and cleared at request end. */
 #ifndef DEC_KB_REQCTX_H
 #define DEC_KB_REQCTX_H 1
 
@@ -21,6 +22,15 @@ extern "C"
 
    /* The current actor, or NULL if none set / unauthenticated. */
    const kb_principal_t *kb_reqctx_actor(void);
+
+   /* The KB-resolved service+caller context for a content read. This is copied
+    * in only after authoritative membership intersection succeeds. */
+   void kb_reqctx_set_resolved(const kb_request_context_t *resolved);
+   const kb_request_context_t *kb_reqctx_resolved(void);
+
+   /* Install service-asserted caller context without allowing it to conflict
+    * with an actor already proved by the request credential. */
+   int kb_reqctx_apply_asserted(const kb_principal_t *actor, const kb_request_context_t *resolved);
 
    /* Verified credential scope for the current request.  Unlike actor identity,
     * scoped service credentials deliberately have no actor principal, but code

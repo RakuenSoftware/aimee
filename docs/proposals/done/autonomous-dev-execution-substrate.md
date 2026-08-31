@@ -1,9 +1,13 @@
 # Autonomous Development Execution Substrate: build · verify · push · validate · accept
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** **DONE** (shipped to `testing`, filed 2026-06-28). All five components
   are implemented. The mechanical acceptance block below is green
   (`scripts/dev-accept.py eval` → `passed`). The deployment/hardware **end-to-end**
-  (criterion 5 — a real zero-human-step run that opens + merges a live PR) is
+  (criterion 5; A real zero-human-step run that opens + merges a live PR) is
   **deferred-conjoint** to [full-autonomous-development.md](full-autonomous-development.md):
   this proposal ships the execution-plane **primitives**; that proposal wires them into
   the wfe driver loop. See the `deferred` block under Acceptance. **`done/` ≠ GA:**
@@ -11,40 +15,39 @@
   never auto-claimed.
 - **Closeout (2026-06-28).** The remaining open work named in the 2026-06-23 status
   was completed once a docker-capable host was available:
-  - **§1 structured contract** — `handle_git_verify` now emits `format=json`
+  - **§1 structured contract**: `handle_git_verify` now emits `format=json`
     `{schema_version, verdict, reason, steps:[{name, tier, status, exit, seconds, log}]}`
     with `unavailable` kept distinct from `passed` (closes the silent false-pass for the
     driver); optional per-step `tier:`. Unit-tested (`unit-test-git-verify-contract`).
-  - **§1 ephemeral runner** — `docker/dev-runner/Dockerfile` (pinned CI toolchain,
+  - **§1 ephemeral runner**: `docker/dev-runner/Dockerfile` (pinned CI toolchain,
     validated: `make -j all server` + `make lint` build clean inside) +
     `scripts/dev-verify-runner.sh` (ephemeral, `--network=none`, cap-drop, non-root,
     resource-limited, toolchain pin-check, exit→verdict mapping) +
     `scripts/dev-runner-pin.json`.
-  - **§3 tier router + §4 acceptance execution + §5 active auto-file** —
-    `scripts/dev-accept.py` runs each acceptance `check` on its tier (mechanical/
+  - **§3 tier router + §4 acceptance execution + §5 active auto-file**: `scripts/dev-accept.py` runs each acceptance `check` on its tier (mechanical/
     integration local or in the §1 runner; deployment/hardware dispatched to GH Actions
     or, if author-declared deferred, skipped-declared and non-blocking), computes a
     deterministic verdict, and (only on `passed`) git-mv's pending→done with reference
     fixups. Unit-tested (`make -C src dev-accept-check`).
   - **§2** was already done (#641). **Criterion 5** is the conjoint acceptance of the
     pair and closes in full-autonomous-development.md.
-- **Implementation status (2026-06-23) — reconciled against the tree.** This
+- **Implementation status (2026-06-23), reconciled against the tree.** This
   proposal was drafted in a webchat workspace that had **no toolchain** and was
   **unaware of two subsystems that already implement its core**. Grounding it
   against the real `aimee` checkout (which *does* carry `make`/`gcc`/`clang-format-19`/
   `psql`) shows most of the substrate already exists; the named blockers were
   largely **environmental**, not missing code. Per-component status:
-  - **§1 build-and-verify runner — ALREADY IMPLEMENTED.** `aimee git verify`
+  - **§1 build-and-verify runner, ALREADY IMPLEMENTED.** `aimee git verify`
     (`git_verify.c` / `git_verify_ops.c`) is the callable verify gate: it
     **auto-generates** `.aimee/project.yaml` from the project's Makefile on first
     run (`find_makefile_subdir` detects aimee's `src/Makefile`; it prefers a
-    `verify-local` target — which aimee defines as `lint check-linking` +
+    `verify-local` target, which aimee defines as `lint check-linking` +
     `unit-tests`), runs the steps **dependency-aware** with
     per-step pass/fail + timing, gates push/PR via `verify_gate_blocks`
     (already wired into `mcp_git_write.c` + `guardrails_orchestrator.c`, `enforce`
     flag, tree-hash freshness so squash/rebase stays verified). When no `verify:`
     section exists it **degrades to a no-op gate** (`verify_check` returns 1 = no
-    gate; push allowed) — safe for humans, but the proposal's stricter
+    gate; push allowed), safe for humans, but the proposal's stricter
     `unavailable` *status* (so the autonomous driver never reads "unconfigured" as a
     pass, and a structured `{tier,step,status,log_ref}` shape) is **part of the
     residual**, alongside the **ephemeral sandboxed runner image** (Docker) + the
@@ -53,34 +56,34 @@
     does not: the structured driver-facing contract + the sandboxed runner.
     (Blocker 1 "no in-environment build/verify" was the webchat workspace lacking a
     toolchain, not a missing gate.)
-  - **§2 vault-backed forge push + PR — DONE.** `git_cred_inject_build_env_for_repo`
+  - **§2 vault-backed forge push + PR, DONE.** `git_cred_inject_build_env_for_repo`
     is the single credential policy every git op routes through (vault-first:
     broker → per-host server vault → webuser vault → server identity; injects
     `GH_TOKEN` + `GIT_ASKPASS`); push was centralised in #605 and the last two
     drifted call sites (`mcp_git_run`, `ws_mirror_git_runner`) in **PR #641 (P2,
     testing `af0418d`)**, now guarded by `scripts/check-git-cred-centralized.py`.
     Blocker 2's "git_push ignores the vault / manual token decryption" is closed.
-    Residual: **per-PR audit attribution to the work item** — a §2-scope item, but it
+    Residual: **per-PR audit attribution to the work item**. A §2-scope item, but it
     needs the driver's work-item context, so it lands with the driver packet (P4).
-  - **§4 machine-checkable acceptance — schema gate SHIPPED (PR #639, P1, testing
+  - **§4 machine-checkable acceptance, schema gate SHIPPED (PR #639, P1, testing
     `c412f23`).** `scripts/check-proposal-reconcile.py` parses + validates the
     `acceptance:` block (`id`/`tier`/`check`, tiers, unique id) in `make lint`.
     Residual: **executing** each check on its tier + the all-green **auto-file to
     `done/`** (needs §1's runner + §3 dispatch).
-  - **§5 proposal↔code reconciliation — detection SHIPPED (PR #639, P1, testing
+  - **§5 proposal↔code reconciliation, detection SHIPPED (PR #639, P1, testing
     `c412f23`).** The same `scripts/check-proposal-reconcile.py` flags state↔folder
     drift (shipped-but-unfiled) + premise-drift, report-only. Residual: the
     **active** auto-file/move (P5), gated on machine-acceptance.
-  - **§3 validation tiers + deployment harness — OPEN.** The `mechanical`/
+  - **§3 validation tiers + deployment harness. OPEN.** The `mechanical`/
     `integration` tier is `aimee git verify`; the **`deployment`/`hardware` CI-matrix
     dispatch** (trigger + gate on the Actions matrix) and the tier router are the
     real new work, and need CI/Docker the agent host can't supply.
 
   **Net:** §2 done; §1 core + §4-schema + §5-detection done (this run + #639/#641);
-  the open work is the **integration** — CI-matrix dispatch (§3), per-tier
+  the open work is the **integration**, CI-matrix dispatch (§3), per-tier
   acceptance *execution* + auto-file (§4/§5), the ephemeral sandboxed runner image
-  (§1), and wiring these into the `full-autonomous-development` driver (§5/criterion 5)
-  — all **deployment/CI/Docker-tier**, deferred to an environment that can exercise
+  (§1), and wiring these into the `full-autonomous-development` driver (§5/criterion 5).
+All **deployment/CI/Docker-tier**, deferred to an environment that can exercise
   them. The prose below is the original proposal, kept for context; read it through
   this status.
 - **Scope:** deterministic / autonomous-dev plumbing. Not an intelligence-surface
@@ -90,19 +93,19 @@
 - **Author:** JBailes (drafted by the engineer agent during an autonomous
   proposal-completion run, 2026-06-21).
 - **Origin:** a live attempt to drive `docs/proposals/pending/` to completion
-  fully autonomously. The development loop itself works — one slice was taken
+  fully autonomously. The development loop itself works. One slice was taken
   plan → roundtable → implement → roundtable → verify → PR → green CI → merge
   (ingress-compression P0, PR #585). But the run could **not** be sustained
   end-to-end without human intervention, and several proposals are **structurally
   unclosable** in the agent's environment. This proposal names those blockers and
   fixes them.
 
-## Problem — why "complete all proposals autonomously" currently fails
+## Problem: why "complete all proposals autonomously" currently fails
 
 Concrete blockers hit during the run, in order of severity:
 
 1. **No in-environment build/verify.** The server/webchat workspace has no
-   toolchain — `make`, `gcc`/`cc`/`clang`, and `docker` are all absent. A C change
+   toolchain, `make`, `gcc`/`cc`/`clang`, and `docker` are all absent. A C change
    cannot be compiled, unit-tested, or linted where the agent runs. The run only
    proceeded because a human hand-provisioned an external Proxmox build host and
    pasted an SSH key. **Mechanical verification is impossible in-env**, so the
@@ -122,27 +125,27 @@ Concrete blockers hit during the run, in order of severity:
    live-server re-provision on the `.254` box (auto-vault criterion 5), a running
    embedder+kb stack (embedder-runtime-fetch-autodim §2), multi-arch image
    publish (unified-llm-container, curator-llm). There is no harness the agent can
-   drive to perform — or formally defer — these checks, so those proposals can
+   drive to perform (or formally defer) these checks, so those proposals can
    never reach a defensible "done" autonomously.
 
 4. **No machine-checkable definition of done.** Acceptance criteria are prose
    requiring human judgment. The agent cannot deterministically decide
    "this proposal is complete," so it must either over-claim (dishonest) or stall
    (not autonomous). Half of `pending/` turned out to be **already shipped but
-   never filed to `done/`** — there is no reconciliation between implemented code
+   never filed to `done/`**. There is no reconciliation between implemented code
    and proposal state, so the loop burns effort re-triaging.
 
 5. **Premise drift between proposals and the tree.** A proposal's plan can assume
    a code shape that no longer exists (e.g. ingress-compression P1a specifies a
    "blank-line/whitespace collapse" fold, but the resident code form is already a
-   single collapsed line — the fold is a no-op). Nothing keeps proposals grounded
+   single collapsed line. The fold is a no-op). Nothing keeps proposals grounded
    against the evolving tree, so an autonomous implementer hits design forks that
    silently need a human.
 
 6. **Review-gate reliability/throughput.** The roundtable is the designated review
    gate, but it degrades on large prompts (a ~22 KB review returned 0 items,
    deadline-hit; ~12–16 KB ran a single round), is slow (~5–7 min/run), and 401s
-   when the delegate vault is empty — i.e. the review capability itself depends on
+   when the delegate vault is empty, i.e. the review capability itself depends on
    blocker (2)/auto-vault. A loop that reviews many proposals needs a bounded,
    reliable gate.
 
@@ -156,7 +159,7 @@ deployment-tier acceptance criterion.
 Give the autonomous driver (and aimee's engineer delegates) a first-class,
 in-process substrate so that, for any proposal whose acceptance criteria are
 mechanically or integration-checkable, the system can go from intake to a merged
-PR and a `done/` filing **with zero human steps** — and, for criteria that
+PR and a `done/` filing **with zero human steps**, and, for criteria that
 genuinely require deployment or physical hardware, **dispatch the existing CI/CD
 matrix and gate on it**, or stop at an explicit, labelled validation gate rather
 than guessing.
@@ -168,14 +171,14 @@ Five components. Each is independently shippable; together they close the loop.
 ### §1 Build-and-verify runner (fixes blocker 1)
 
 A callable verify gate the driver invokes on a work-item worktree, returning
-structured `{tier, step, status, log_ref}` — never a human shell.
+structured `{tier, step, status, log_ref}`, never a human shell.
 
-- **Runner image** — a pinned image carrying the CI toolchain (`gcc make
+- **Runner image**: a pinned image carrying the CI toolchain (`gcc make
   clang-format-19 libpq postgresql-client …`, mirroring `.github/workflows/ci.yml`)
   so a run reproduces CI locally.
 - **Two provisioning modes**, config-selected: (a) a **managed runner pool**
   (long-lived container/CT, reused across runs) or (b) an **ephemeral provisioner**
-  that stands a runner up per job and tears it down — the Proxmox-CT / `docker run`
+  that stands a runner up per job and tears it down. The Proxmox-CT / `docker run`
   pattern proven manually during the run, formalised behind one interface.
 - **Steps** = `build` (`make -j all server`), `unit` (`make unit-tests`), `lint`
   (`make lint`), each with a structured pass/fail + captured log. This is the
@@ -191,8 +194,8 @@ ad-hoc crypto.
 
 - `git_ops` push and the forge vtable's `open`/`merge` resolve the
   **server-principal** `git` / `host:github.com` credential through the existing
-  `vault_service_get_server_wrap` path and inject it via a credential helper —
-  the same token the agent decrypted by hand for PR #585, now used in-process.
+  `vault_service_get_server_wrap` path and inject it via a credential helper,
+the same token the agent decrypted by hand for PR #585, now used in-process.
 - Honour branch policy automatically: cut PR branches off `origin/testing`,
   **squash** to `testing` with the `(#NNN)` convention, **no `Co-Authored-By`
   trailers** (the required `no-coauthor-trailers` check), human-only promotion to
@@ -208,7 +211,7 @@ Classify every acceptance check into a tier and route it:
 | `mechanical` | build, unit, lint | §1 runner, in-loop |
 | `integration` | live server/kb/db2 e2e, migrate smoke | ephemeral stack (§1 runner + postgres), in-loop |
 | `deployment` | multi-arch image publish, `.254` re-provision | dispatch the GitHub Actions matrix / release pipeline; gate on its conclusion |
-| `hardware` | Windows/macOS `https://` connect, real-device run | dispatch the platform CI legs; if a check needs physical hardware CI can't supply, it becomes an explicit, tracked `validation-pending` gate — never auto-claimed |
+| `hardware` | Windows/macOS `https://` connect, real-device run | dispatch the platform CI legs; if a check needs physical hardware CI can't supply, it becomes an explicit, tracked `validation-pending` gate: never auto-claimed |
 
 The driver runs `mechanical`/`integration` itself, **dispatches** `deployment`/
 `hardware` to CI/CD (it can already trigger and read the Actions matrix that
@@ -217,7 +220,7 @@ labelled human gate. No tier is ever silently marked passed.
 
 ### §4 Machine-checkable acceptance (fixes blocker 4)
 
-An optional `acceptance:` block in a proposal's front matter — a list of
+An optional `acceptance:` block in a proposal's front matter, a list of
 `{id, tier, check}` where `check` is a runnable command / test id / CI job name.
 
 ```yaml
@@ -230,7 +233,7 @@ The driver evaluates each check on its tier (§3) and computes a deterministic
 verdict. **All-green across the applicable tiers ⇒ the proposal is auto-filed to
 `done/`** (with the link-graph fixups `check-proposal-links` requires); a partial
 result reports exactly which `id` is open and why. Proposals keep their prose
-criteria; the block is the executable shadow of them. Back-fill is incremental —
+criteria; the block is the executable shadow of them. Back-fill is incremental,
 unannotated proposals fall back to today's human judgement.
 
 ### §5 Proposal ↔ code reconciliation (fixes blockers 4, 5)
@@ -238,8 +241,8 @@ unannotated proposals fall back to today's human judgement.
 A reconciler (`aimee dev reconcile`, also a lint check) that:
 
 - flags **shipped-but-unfiled** proposals (acceptance block all-green but
-  `state ≠ done`) — this run found ~6;
-- flags **premise drift** — a proposal/plan that names a symbol, path, or
+  `state ≠ done`). This run found ~6;
+- flags **premise drift**, a proposal/plan that names a symbol, path, or
   function that no longer resolves in the tree (e.g. a fold over a code shape that
   changed), so design forks surface as a report instead of a silent stall;
 - keeps `docs/PROPOSALS.md` honest against the directory state.
@@ -250,7 +253,7 @@ A reconciler (`aimee dev reconcile`, also a lint check) that:
    verify gate with **no human-provisioned host**, returning structured per-step
    results; absence of a runner reports `unavailable`, not a pass.
 2. The driver pushes a branch and opens **and** squash-merges a PR to `testing`
-   using the **vaulted** forge credential — no manual token decryption, branch
+   using the **vaulted** forge credential, no manual token decryption, branch
    policy + `no-coauthor-trailers` honoured, all actions audited.
 3. Acceptance blocks are machine-evaluated per tier; a fully-green proposal is
    auto-filed to `done/` with link-graph fixups; `deployment`/`hardware` tiers are
@@ -275,7 +278,7 @@ validates this block; later packets execute each `check` on its tier):
 
 The `deployment`/`hardware` criteria (criterion 5: a real zero-human-step PR
 roundtrip + merge) are author-declared **deferred** to the sibling control-plane
-proposal — `dev-accept.py` records them `skipped-declared` (non-blocking) so this
+proposal, `dev-accept.py` records them `skipped-declared` (non-blocking) so this
 proposal's mechanical acceptance can file to `done/`, while the live e2e is never
 auto-claimed here:
 
@@ -286,24 +289,24 @@ auto-claimed here:
 
 ## Risks
 
-- **Arbitrary build execution.** The runner executes repo build scripts — sandbox
+- **Arbitrary build execution.** The runner executes repo build scripts, sandbox
   it (no network beyond package mirrors, no secrets mounted into the build env,
   ephemeral FS) so a poisoned build can't exfiltrate or persist.
-- **Forge-credential blast radius.** The push path holds a `repo`-scoped PAT —
-  keep it server-principal-only, audit every use, never log it, prefer a
+- **Forge-credential blast radius.** The push path holds a `repo`-scoped PAT.
+Keep it server-principal-only, audit every use, never log it, prefer a
   short-lived/installation token where possible.
 - **Over-trusting machine acceptance.** Promotion to `main` stays human; the
   `deployment`/`hardware` tiers are never auto-claimed; a green mechanical tier is
   necessary, not sufficient, for those proposals.
 - **Reconciler false positives** on premise drift (a renamed-but-equivalent
-  symbol) — report-only, never auto-edits a proposal.
+  symbol). Report-only, never auto-edits a proposal.
 - **Runner ≠ CI drift.** Pin the runner image to the CI toolchain versions and
   fail the gate if they diverge, so a local pass that CI would fail can't ship.
 
 ## Relationship to existing proposals
 
 - [full-autonomous-development.md](full-autonomous-development.md) owns the **wfe
-  lifecycle, scheduler, and intake** — the *control plane*. This proposal owns the
+  lifecycle, scheduler, and intake**, the *control plane*. This proposal owns the
   **build/verify/push/validate/accept execution plane** that control plane drives.
   full-autonomous-dev's `exec_implement` "verify via mechanical/review/adversarial
   gates" and `exec_pr_open` "git push + forge open" are exactly §1 and §2 here;

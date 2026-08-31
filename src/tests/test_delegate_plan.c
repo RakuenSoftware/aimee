@@ -172,34 +172,63 @@ static void test_changes_table_splits_multi_path_cell(void)
 
 static void test_changes_table_canonicalizes_schema_paths(void)
 {
-   const char *proposal =
-       "# Proposal: Cron DB Schema\n"
-       "\n"
-       "### Changes\n"
-       "| File | Change |\n"
-       "|------|--------|\n"
-       "| `src/db1/db1_schema.sql` | Add cron job tables. |\n"
-       "| `src/db2/db2_schema.sql`, `src/db2/db2_schema_sqlite.sql` | Mirror tables. |\n"
-       "\n"
-       "## Acceptance Criteria\n"
-       "- [ ] Delegates receive existing schema files.\n";
+   const char *proposal = "# Proposal: Cron DB Schema\n"
+                          "\n"
+                          "### Changes\n"
+                          "| File | Change |\n"
+                          "|------|--------|\n"
+                          "| `src/db2/db2_schema.sql`, "
+                          "`src/db2/db2_schema_sqlite.sql` | Mirror tables. |\n"
+                          "\n"
+                          "## Acceptance Criteria\n"
+                          "- [ ] Delegates receive existing schema files.\n";
 
    char err[256] = "";
    cJSON *plan = delegate_plan_build_from_text("docs/p.md", proposal, err, sizeof(err));
    assert(plan != NULL);
-   assert(num(plan, "implementation_packet_count") == 3);
+   assert(num(plan, "implementation_packet_count") == 2);
 
    cJSON *packets = arr(plan, "packets");
-   assert(
-       str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"), "src/db1/schema.sql"));
-   assert(
-       str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"), "src/db2/schema.sql"));
-   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 2), "owned_files"),
-                           "src/db2/schema_sqlite.sql"));
-   assert(
-       str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "read_context"), "src/db1/schema.sql"));
+   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
+                           "src/modules/db2/c/schema.sql"));
+   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
+                           "src/modules/db2/c/schema_sqlite.sql"));
+   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "read_context"),
+                           "src/modules/db2/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_changes_table_canonicalizes_schema_paths\n");
+}
+
+/* DB1's schema was one file, src/modules/db1/schema.sql, and the planner used to
+ * rewrite the legacy src/db1/db1_schema.sql spelling to it. The Go store
+ * replaced that file with one per family, so there is no single path to name and
+ * the rewrite is gone.
+ *
+ * What matters is that the legacy path is REPORTED rather than dropped. A
+ * rewrite to a path that no longer exists made the planner classify it missing
+ * and silently omit its packet, so a proposal touching the store's schema lost
+ * work with no diagnostic. Leaving it alone surfaces it. */
+static void test_legacy_db1_schema_path_is_reported_not_rewritten(void)
+{
+   const char *proposal = "# Proposal: Store Schema\n"
+                          "\n"
+                          "### Changes\n"
+                          "| File | Change |\n"
+                          "|------|--------|\n"
+                          "| `src/db1/db1_schema.sql` | Add cron job tables. |\n"
+                          "\n"
+                          "## Acceptance Criteria\n"
+                          "- [ ] A path that no longer exists is named, not dropped.\n";
+
+   char err[256] = "";
+   cJSON *plan = delegate_plan_build_from_text("docs/p.md", proposal, err, sizeof(err));
+   assert(plan != NULL);
+   /* Unchanged: no rewrite to a file the migration deleted. */
+   assert(str_arr_contains(arr(plan, "missing_owned_files"), "src/db1/db1_schema.sql"));
+   /* And it does not appear under the path it used to be rewritten to. */
+   assert(!str_arr_contains(arr(plan, "missing_owned_files"), "src/modules/db1/schema.sql"));
+   cJSON_Delete(plan);
+   printf("  PASS: test_legacy_db1_schema_path_is_reported_not_rewritten\n");
 }
 
 static void test_schema_path_canonicalization_ignores_near_misses(void)
@@ -209,8 +238,8 @@ static void test_schema_path_canonicalization_ignores_near_misses(void)
                           "### Changes\n"
                           "| File | Change |\n"
                           "|------|--------|\n"
-                          "| `my_src/db1/db1_schema.sql` (new) | Leave unrelated path alone. |\n"
-                          "| `src/db1/schema.sql` | Already canonical. |\n"
+                          "| `my_src/db2/db2_schema.sql` (new) | Leave unrelated path alone. |\n"
+                          "| `src/modules/db2/c/schema.sql` | Already canonical. |\n"
                           "\n"
                           "## Acceptance Criteria\n"
                           "- [ ] Only exact legacy schema paths are rewritten.\n";
@@ -222,9 +251,9 @@ static void test_schema_path_canonicalization_ignores_near_misses(void)
 
    cJSON *packets = arr(plan, "packets");
    assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 0), "owned_files"),
-                           "my_src/db1/db1_schema.sql"));
-   assert(
-       str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"), "src/db1/schema.sql"));
+                           "my_src/db2/db2_schema.sql"));
+   assert(str_arr_contains(arr(cJSON_GetArrayItem(packets, 1), "owned_files"),
+                           "src/modules/db2/c/schema.sql"));
    cJSON_Delete(plan);
    printf("  PASS: test_schema_path_canonicalization_ignores_near_misses\n");
 }
@@ -524,6 +553,7 @@ int main(void)
    test_plan_flags_overlapping_owned_files();
    test_changes_table_splits_multi_path_cell();
    test_changes_table_canonicalizes_schema_paths();
+   test_legacy_db1_schema_path_is_reported_not_rewritten();
    test_schema_path_canonicalization_ignores_near_misses();
    test_acceptance_criteria_preserve_wrapped_lines();
    test_plan_falls_back_to_backticked_paths();

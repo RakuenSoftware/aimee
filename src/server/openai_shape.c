@@ -945,6 +945,13 @@ int openai_format_chat_completion_tool_calls(const char *id, const char *model,
    cJSON_AddNumberToObject(usage, "completion_tokens", (double)parsed->completion_tokens);
    cJSON_AddNumberToObject(usage, "total_tokens",
                            (double)(parsed->prompt_tokens + parsed->completion_tokens));
+   /* Chat-completions spells the cached-input detail `prompt_tokens_details`,
+    * where the Responses API spells it `input_tokens_details`. Same quantity,
+    * different sibling name -- so it needs its own line here rather than the
+    * shared Responses helper. */
+   cJSON *ptd = cJSON_AddObjectToObject(usage, "prompt_tokens_details");
+   if (ptd)
+      cJSON_AddNumberToObject(ptd, "cached_tokens", (double)parsed->cache_read_tokens);
 
    char *s = cJSON_PrintUnformatted(root);
    cJSON_Delete(root);
@@ -1212,6 +1219,35 @@ int openai_format_text_completion(const char *id, const char *model, const char 
 
 /* ── openai_format_response (Responses API) ──────────────────────────────── */
 
+/* Attach a Responses-shaped `usage` block, INCLUDING the cached-input detail.
+ *
+ * cached_tokens is the portion of prompt_tokens the provider served from its
+ * prompt cache. It is NOT a flat counter: OpenAI reports it in a sibling object
+ * (`input_tokens_details.cached_tokens`), and a usage block that enumerates only
+ * the flat fields drops it silently -- the field is not missing from the input,
+ * it is missing from the enumeration, so nothing errors and no test that asserts
+ * the flat counters notices.
+ *
+ * That is not hypothetical: it is why every benchmark cell run through this
+ * gateway reported cache_read=0 while every other arm reported 89-95%. The
+ * client (Codex) can only bill what we hand it, so an omitted field reads as
+ * "prompt caching never worked" and prices the whole conversation at the
+ * uncached rate. Emitted unconditionally, even at zero, so a client can tell a
+ * genuine cache miss from a build that does not report caching at all. */
+static void add_responses_usage(cJSON *parent, int prompt_tokens, int completion_tokens,
+                                int cached_tokens)
+{
+   cJSON *usage = cJSON_AddObjectToObject(parent, "usage");
+   if (!usage)
+      return;
+   cJSON_AddNumberToObject(usage, "input_tokens", (double)prompt_tokens);
+   cJSON_AddNumberToObject(usage, "output_tokens", (double)completion_tokens);
+   cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
+   cJSON *details = cJSON_AddObjectToObject(usage, "input_tokens_details");
+   if (details)
+      cJSON_AddNumberToObject(details, "cached_tokens", (double)cached_tokens);
+}
+
 /* Build a `response` object (caller owns the returned cJSON, or NULL on OOM).
  * status is e.g. "completed" or "in_progress". When with_output != 0 the
  * assistant output message + content part + usage are included; otherwise the
@@ -1219,7 +1255,8 @@ int openai_format_text_completion(const char *id, const char *model, const char 
  * response just after creation). */
 static cJSON *build_response_object(const char *id, const char *model, const char *output_text,
                                     long created, int prompt_tokens, int completion_tokens,
-                                    const char *status, int with_output, const char *object_type)
+                                    int cached_tokens, const char *status, int with_output,
+                                    const char *object_type)
 {
    cJSON *root = cJSON_CreateObject();
    if (!root)
@@ -1267,13 +1304,7 @@ static cJSON *build_response_object(const char *id, const char *model, const cha
    cJSON_AddStringToObject(part, "text", output_text ? output_text : "");
    cJSON_AddItemToObject(part, "annotations", cJSON_CreateArray());
 
-   cJSON *usage = cJSON_AddObjectToObject(root, "usage");
-   if (usage)
-   {
-      cJSON_AddNumberToObject(usage, "input_tokens", (double)prompt_tokens);
-      cJSON_AddNumberToObject(usage, "output_tokens", (double)completion_tokens);
-      cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
-   }
+   add_responses_usage(root, prompt_tokens, completion_tokens, cached_tokens);
    return root;
 }
 
@@ -1292,23 +1323,26 @@ static int emit_json(cJSON *root, char *resp, int cap)
 }
 
 int openai_format_response(const char *id, const char *model, const char *output_text, long created,
-                           int prompt_tokens, int completion_tokens, char *resp, int cap)
+                           int prompt_tokens, int completion_tokens, int cached_tokens, char *resp,
+                           int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   cJSON *root = build_response_object(id, model, output_text, created, prompt_tokens,
-                                       completion_tokens, "completed", 1, "response");
+   cJSON *root =
+       build_response_object(id, model, output_text, created, prompt_tokens, completion_tokens,
+                             cached_tokens, "completed", 1, "response");
    return emit_json(root, resp, cap);
 }
 
 int openai_format_run(const char *id, const char *model, const char *output_text, long created,
-                      int prompt_tokens, int completion_tokens, const char *status, char *resp,
-                      int cap)
+                      int prompt_tokens, int completion_tokens, int cached_tokens,
+                      const char *status, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   cJSON *root = build_response_object(id, model, output_text, created, prompt_tokens,
-                                       completion_tokens, status ? status : "completed", 1, "run");
+   cJSON *root =
+       build_response_object(id, model, output_text, created, prompt_tokens, completion_tokens,
+                             cached_tokens, status ? status : "completed", 1, "run");
    return emit_json(root, resp, cap);
 }
 
@@ -1323,7 +1357,8 @@ int openai_format_responses_created(const char *id, const char *model, long crea
    if (!root)
       return -1;
    cJSON_AddStringToObject(root, "type", "response.created");
-   cJSON *obj = build_response_object(id, model, "", created, 0, 0, "in_progress", 0, "response");
+   cJSON *obj =
+       build_response_object(id, model, "", created, 0, 0, 0, "in_progress", 0, "response");
    if (!obj)
    {
       cJSON_Delete(root);
@@ -1350,7 +1385,7 @@ int openai_format_responses_delta(const char *item_id, const char *delta, char *
 
 int openai_format_responses_completed(const char *id, const char *model, const char *output_text,
                                       long created, int prompt_tokens, int completion_tokens,
-                                      char *resp, int cap)
+                                      int cached_tokens, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
@@ -1359,7 +1394,7 @@ int openai_format_responses_completed(const char *id, const char *model, const c
       return -1;
    cJSON_AddStringToObject(root, "type", "response.completed");
    cJSON *obj = build_response_object(id, model, output_text, created, prompt_tokens,
-                                      completion_tokens, "completed", 1, "response");
+                                      completion_tokens, cached_tokens, "completed", 1, "response");
    if (!obj)
    {
       cJSON_Delete(root);
@@ -1379,7 +1414,7 @@ int openai_format_responses_failed(const char *id, const char *model, long creat
       return -1;
    cJSON_AddStringToObject(root, "type", "response.failed");
    /* Base response object (output:[] is fine; Codex reads only response.error). */
-   cJSON *obj = build_response_object(id, model, "", created, 0, 0, "failed", 0, "response");
+   cJSON *obj = build_response_object(id, model, "", created, 0, 0, 0, "failed", 0, "response");
    if (!obj)
    {
       cJSON_Delete(root);
@@ -1404,7 +1439,7 @@ int openai_format_responses_incomplete(const char *id, const char *model, long c
    if (!root)
       return -1;
    cJSON_AddStringToObject(root, "type", "response.incomplete");
-   cJSON *obj = build_response_object(id, model, "", created, 0, 0, "incomplete", 0, "response");
+   cJSON *obj = build_response_object(id, model, "", created, 0, 0, 0, "incomplete", 0, "response");
    if (!obj)
    {
       cJSON_Delete(root);
@@ -1450,8 +1485,8 @@ cJSON *openai_responses_message_item(const char *item_id, const char *text, cons
 }
 
 cJSON *openai_responses_function_call_item(const char *item_id, const char *call_id,
-                                           const char *name, const char *arguments,
-                                           const char *status)
+                                           const char *name, const char *tool_namespace,
+                                           const char *arguments, const char *status)
 {
    cJSON *item = cJSON_CreateObject();
    if (!item)
@@ -1460,6 +1495,10 @@ cJSON *openai_responses_function_call_item(const char *item_id, const char *call
    cJSON_AddStringToObject(item, "type", "function_call");
    cJSON_AddStringToObject(item, "status", status ? status : "completed");
    cJSON_AddStringToObject(item, "name", name ? name : "");
+   /* Only when the call actually has one: a plain tool carries no `namespace`, and
+    * emitting an empty one would claim a group that does not exist. */
+   if (tool_namespace && tool_namespace[0])
+      cJSON_AddStringToObject(item, "namespace", tool_namespace);
    cJSON_AddStringToObject(item, "call_id", call_id ? call_id : "");
    cJSON_AddStringToObject(item, "arguments", arguments ? arguments : "");
    return item;
@@ -1504,25 +1543,28 @@ int openai_format_responses_msg_item_done(const char *item_id, const char *text,
 }
 
 int openai_format_responses_fc_item_added(const char *item_id, const char *call_id,
-                                          const char *name, int output_index, char *resp, int cap)
+                                          const char *name, const char *tool_namespace,
+                                          int output_index, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   return emit_output_item_event(
-       "response.output_item.added", output_index,
-       openai_responses_function_call_item(item_id, call_id, name, "", "in_progress"), resp, cap);
+   return emit_output_item_event("response.output_item.added", output_index,
+                                 openai_responses_function_call_item(
+                                     item_id, call_id, name, tool_namespace, "", "in_progress"),
+                                 resp, cap);
 }
 
 int openai_format_responses_fc_item_done(const char *item_id, const char *call_id, const char *name,
-                                         const char *arguments, int output_index, char *resp,
-                                         int cap)
+                                         const char *tool_namespace, const char *arguments,
+                                         int output_index, char *resp, int cap)
 {
    if (!resp || cap <= 0)
       return -1;
-   return emit_output_item_event(
-       "response.output_item.done", output_index,
-       openai_responses_function_call_item(item_id, call_id, name, arguments, "completed"), resp,
-       cap);
+   return emit_output_item_event("response.output_item.done", output_index,
+                                 openai_responses_function_call_item(item_id, call_id, name,
+                                                                     tool_namespace, arguments,
+                                                                     "completed"),
+                                 resp, cap);
 }
 
 int openai_format_responses_fc_args_delta(const char *item_id, int output_index, const char *delta,
@@ -1560,7 +1602,8 @@ int openai_format_responses_fc_args_done(const char *item_id, int output_index,
  * message. */
 int openai_format_responses_completed_items(const char *id, const char *model, long created,
                                             cJSON *output_arr, int prompt_tokens,
-                                            int completion_tokens, char *resp, int cap)
+                                            int completion_tokens, int cached_tokens, char *resp,
+                                            int cap)
 {
    if (!resp || cap <= 0)
    {
@@ -1588,13 +1631,7 @@ int openai_format_responses_completed_items(const char *id, const char *model, l
    cJSON_AddStringToObject(r, "model", model ? model : "");
    cJSON_AddStringToObject(r, "status", "completed");
    cJSON_AddItemToObject(r, "output", output_arr ? output_arr : cJSON_CreateArray());
-   cJSON *usage = cJSON_AddObjectToObject(r, "usage");
-   if (usage)
-   {
-      cJSON_AddNumberToObject(usage, "input_tokens", (double)prompt_tokens);
-      cJSON_AddNumberToObject(usage, "output_tokens", (double)completion_tokens);
-      cJSON_AddNumberToObject(usage, "total_tokens", (double)(prompt_tokens + completion_tokens));
-   }
+   add_responses_usage(r, prompt_tokens, completion_tokens, cached_tokens);
    return emit_json(root, resp, cap);
 }
 
@@ -1680,12 +1717,14 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
       {
          const char *name = parsed->calls[i].name;
          const char *cid = parsed->calls[i].id;
+         const char *ns = parsed->calls[i].tool_namespace;
          const char *args = parsed->calls[i].arguments ? parsed->calls[i].arguments : "{}";
          char fc_id[80];
          snprintf(fc_id, sizeof(fc_id), "%s-fc-%d", id, i);
 
          char added[256];
-         if (openai_format_responses_fc_item_added(fc_id, cid, name, i, added, sizeof(added)) > 0)
+         if (openai_format_responses_fc_item_added(fc_id, cid, name, ns, i, added, sizeof(added)) >
+             0)
             emit(ctx, "response.output_item.added", added);
 
          size_t acap = strlen(args) * 6 + 256;
@@ -1699,32 +1738,35 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
             free(af);
          }
 
-         size_t dcap = strlen(args) * 6 + strlen(name) + strlen(cid) + 512;
+         size_t dcap = strlen(args) * 6 + strlen(name) + strlen(ns) + strlen(cid) + 512;
          char *df = malloc(dcap);
          if (df)
          {
-            if (openai_format_responses_fc_item_done(fc_id, cid, name, args, i, df, (int)dcap) > 0)
+            if (openai_format_responses_fc_item_done(fc_id, cid, name, ns, args, i, df, (int)dcap) >
+                0)
                emit(ctx, "response.output_item.done", df);
             free(df);
          }
          if (output)
-            cJSON_AddItemToArray(
-                output, openai_responses_function_call_item(fc_id, cid, name, args, "completed"));
+            cJSON_AddItemToArray(output, openai_responses_function_call_item(fc_id, cid, name, ns,
+                                                                             args, "completed"));
       }
 
       /* ccap: 4096 base (envelope/usage) + id/model, plus per call: args worst-
-       * case JSON-escaped (×6 — a byte can expand to \uXXXX) + name + call_id +
-       * 256 slack for that item's JSON keys/braces/commas/status/fc_id suffix. */
+       * case JSON-escaped (×6 — a byte can expand to \uXXXX) + name + namespace +
+       * call_id + 256 slack for that item's JSON keys/braces/commas/status/fc_id
+       * suffix. */
       size_t ccap = 4096 + strlen(id ? id : "") + strlen(model ? model : "");
       for (int i = 0; i < n; i++)
          ccap += (parsed->calls[i].arguments ? strlen(parsed->calls[i].arguments) : 0) * 6 +
-                 strlen(parsed->calls[i].name) + strlen(parsed->calls[i].id) + 256;
+                 strlen(parsed->calls[i].name) + strlen(parsed->calls[i].tool_namespace) +
+                 strlen(parsed->calls[i].id) + 256;
       char *cf = malloc(ccap);
       if (cf)
       {
-         if (openai_format_responses_completed_items(id, model, created, output,
-                                                     parsed->prompt_tokens,
-                                                     parsed->completion_tokens, cf, (int)ccap) > 0)
+         if (openai_format_responses_completed_items(
+                 id, model, created, output, parsed->prompt_tokens, parsed->completion_tokens,
+                 parsed->cache_read_tokens, cf, (int)ccap) > 0)
             emit(ctx, "response.completed", cf);
          free(cf);
       }
@@ -1739,6 +1781,7 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
       cJSON *empty_output = cJSON_CreateArray();
       int pt = parsed ? parsed->prompt_tokens : 0;
       int ct = parsed ? parsed->completion_tokens : 0;
+      int cr = parsed ? parsed->cache_read_tokens : 0;
       size_t ccap = 4096 + strlen(id ? id : "") + strlen(model ? model : "");
       char *cf = malloc(ccap);
       if (cf)
@@ -1746,8 +1789,8 @@ void openai_responses_emit_policed(const parsed_response_t *parsed, const char *
          /* completed_items takes ownership of empty_output (attaches it to
           * the response object it serializes, and frees it on every error
           * path), so we must NOT delete it here — that was a double free. */
-         if (openai_format_responses_completed_items(id, model, created, empty_output, pt, ct, cf,
-                                                     (int)ccap) > 0)
+         if (openai_format_responses_completed_items(id, model, created, empty_output, pt, ct, cr,
+                                                     cf, (int)ccap) > 0)
             emit(ctx, "response.completed", cf);
          free(cf);
       }

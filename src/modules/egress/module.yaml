@@ -1,0 +1,35 @@
+{
+  "descriptor_version": 1,
+  "id": "egress",
+  "dependencies": [
+    "audit",
+    "module-runtime"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/egress/credential.go",
+    "server-go/modules/egress/egress.go",
+    "server-go/modules/egress/http.go",
+    "server-go/modules/egress/secret_resolver.go",
+    "server-go/modules/egress/sse.go"
+  ],
+  "go_tests": [
+    "server-go/modules/egress/credential_test.go",
+    "server-go/modules/egress/egress_test.go",
+    "server-go/modules/egress/http_test.go",
+    "server-go/modules/egress/secret_resolver_test.go",
+    "server-go/modules/egress/ssrf_test.go",
+    "server-go/modules/egress/sse_test.go"
+  ],
+  "public_headers": [
+    "src/modules/egress/include/aimee/egress/module_api.h"
+  ],
+  "private_headers": [
+  ],
+  "docs": [
+    "docs/modules/egress.md"
+  ]
+}

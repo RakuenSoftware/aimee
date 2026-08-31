@@ -6,6 +6,7 @@
 #include "session_compact.h"
 #include "headers/compact_prune.h"
 #include "agent_protocol.h"
+#include "economizer.h" /* event-bus client for the Go-owned record path */
 #include "cJSON.h"
 #include <ctype.h>
 #include <stdarg.h>
@@ -336,7 +337,7 @@ static void append_flashback_json(char *buf, size_t *pos, size_t cap, cJSON *roo
 /* Build a structured text summary of messages[start_idx .. end_idx-1].
  * Writes the result into buf (length SESSION_COMPACT_SUMMARY_MAX). */
 static void build_summary(const cJSON *messages, int start_idx, int end_idx, char *buf,
-                          size_t buf_len)
+                          size_t buf_len, int from_record)
 {
    if (!buf || buf_len == 0)
       return;
@@ -389,7 +390,16 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
       }
    }
 
-   cJSON *flashback = flashback_build(messages, start_idx, end_idx);
+   /* The record path falls back to the prose scan if it cannot allocate, so a
+    * summary is never emptied by an allocation failure. */
+   char *closet_block = NULL;
+   int closet_evict = ECON_MODULE_CLOSET_EVICT_NONE;
+   cJSON *flashback = NULL;
+   if (from_record)
+      flashback =
+          econ_module_record_build(messages, start_idx, end_idx, &closet_block, &closet_evict);
+   if (!flashback)
+      flashback = flashback_build(messages, start_idx, end_idx);
    cJSON *files = flashback ? cJSON_GetObjectItem(flashback, "files_modified") : NULL;
    cJSON *errors = flashback ? cJSON_GetObjectItem(flashback, "errors_encountered") : NULL;
    cJSON *decisions = flashback ? cJSON_GetObjectItem(flashback, "decisions_made") : NULL;
@@ -460,6 +470,23 @@ static void build_summary(const cJSON *messages, int start_idx, int end_idx, cha
 
    append_format(tmp, &pos, sizeof(tmp), "## Relevant Files\n");
    append_array_items(tmp, &pos, sizeof(tmp), files, "None recorded.");
+
+   /* Conserved coordinates: shas, uuids, refs, handles and key=value pairs kept
+    * BYTE-EXACT from the discarded turns, so the agent can still address what it
+    * can no longer see. A coordinate that did not fit is announced rather than
+    * silently dropped — that announcement is the whole point of COORD_EVICT_FAIL. */
+   if (closet_block && closet_block[0])
+   {
+      append_format(tmp, &pos, sizeof(tmp), "## Conserved Coordinates\n");
+      append_truncated(tmp, &pos, sizeof(tmp), closet_block, 1600);
+      append_format(tmp, &pos, sizeof(tmp), "\n\n");
+   }
+   if (closet_evict == ECON_MODULE_CLOSET_EVICT_FAIL)
+      append_format(tmp, &pos, sizeof(tmp),
+                    "- NOTE: some identifiers could not be conserved within the budget; "
+                    "re-read the source before relying on any identifier not listed above.\n\n");
+   free(closet_block);
+
    append_flashback_json(tmp, &pos, sizeof(tmp), flashback);
    cJSON_Delete(flashback);
 
@@ -652,8 +679,8 @@ int session_compact(cJSON *messages, const session_compact_config_t *cfg,
    compact_prune_tool_results(messages, summary_start, summary_end, 0);
 
    /* Step 3: build summary of messages[summary_start..summary_end) */
-   build_summary(messages, summary_start, summary_end, local_out.summary,
-                 sizeof(local_out.summary));
+   build_summary(messages, summary_start, summary_end, local_out.summary, sizeof(local_out.summary),
+                 cfg ? cfg->from_record : 0);
 
    /* Step 4: insert a boundary marker message right after messages[0].
     * We build the JSON object first, then splice it in. */
@@ -740,7 +767,10 @@ int session_compact_focused(const char *topic, char *out, size_t out_len)
    cJSON_AddStringToObject(asst_msg, "content", "Acknowledged.");
    cJSON_AddItemToArray(messages, asst_msg);
 
-   build_summary(messages, 0, 1, out, out_len);
+   /* Legacy derivation: this builds a synthetic 2-message conversation purely to
+    * render an "Active Task" heading from a topic string. There is no recorded
+    * history behind it, so there is nothing for the record path to read. */
+   build_summary(messages, 0, 1, out, out_len, 0);
    cJSON_Delete(messages);
    return 0;
 }

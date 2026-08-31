@@ -6,6 +6,7 @@
 #include <aimee/core/connection/endpoint.h>
 #include "kb_client_cache.h"
 #include "kb_client_internal.h"
+#include "kb_client_pii.h"
 #include "kb_client_mtls.h"
 #include "agent_exec.h"
 #include "cli_client.h"
@@ -54,7 +55,16 @@ __attribute__((weak)) char *kb_client_mtls_request(const char *method, const cha
    return NULL;
 }
 
-static dependency_breaker_t g_kb_dependency = DEPENDENCY_BREAKER_INITIALIZER;
+/* One breaker per operation CLASS, not one for the whole dependency.
+ *
+ * Bulk ingestion and interactive reads have nothing to say about each other's
+ * health: a slow or failing corpus ingest is not evidence that a symbol lookup
+ * will fail, and sharing a failure budget meant one could suppress the other
+ * process-wide. That is what happened -- ingest scans tripped the single
+ * breaker and every unrelated KB call was refused with a 503 that never left
+ * this process, while the KB was healthy and answering. */
+static dependency_breaker_t g_kb_dependency[KB_DEP_CLASS_COUNT] = {DEPENDENCY_BREAKER_INITIALIZER,
+                                                                   DEPENDENCY_BREAKER_INITIALIZER};
 static int64_t (*g_kb_dependency_clock)(void);
 #if defined(_MSC_VER)
 static __declspec(thread) kb_client_result_status_t g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
@@ -83,6 +93,22 @@ static int64_t kb_dependency_now_ms(void)
    if (g_kb_dependency_clock)
       return g_kb_dependency_clock();
    return (int64_t)time(NULL) * 1000;
+}
+
+/* Which failure budget a path draws on. Bulk means work whose duration is a
+ * property of the corpus rather than of the service being healthy: ingestion
+ * and embedding. Everything else is interactive and must stay answerable while
+ * bulk work is struggling. */
+kb_dependency_class_t kb_dependency_class_for_path(const char *path)
+{
+   if (!path || !path[0])
+      return KB_DEP_INTERACTIVE;
+   static const char *bulk[] = {"/v1/code/scan", "/v1/code/build", "/v1/code/embed", "/v1/ingest",
+                                "/v1/kb/build"};
+   for (size_t i = 0; i < sizeof(bulk) / sizeof(bulk[0]); i++)
+      if (strncmp(path, bulk[i], strlen(bulk[i])) == 0)
+         return KB_DEP_BULK;
+   return KB_DEP_INTERACTIVE;
 }
 
 kb_client_result_status_t kb_client_last_result_status(void)
@@ -120,7 +146,10 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
       return;
    memset(out, 0, sizeof(*out));
    dependency_breaker_snapshot_t snap;
-   dependency_breaker_snapshot(&g_kb_dependency, kb_dependency_now_ms(), &snap);
+   /* Interactive is what an operator means by "is the KB answering". A bulk
+    * ingest budget that is open does not make the service unreachable, and
+    * reporting it here is what made status contradict the next command. */
+   dependency_breaker_snapshot(&g_kb_dependency[KB_DEP_INTERACTIVE], kb_dependency_now_ms(), &snap);
    const char *state =
        !snap.open ? "closed"
                   : (snap.probe_inflight || snap.retry_after_ms == 0 ? "half_open" : "open");
@@ -133,9 +162,10 @@ void kb_client_dependency_health(kb_client_dependency_health_t *out)
    out->suppressed_calls = snap.suppressed_calls;
 }
 
-void kb_client_dependency_reset_for_tests(void)
+void kb_client_dependency_reset(void)
 {
-   dependency_breaker_reset(&g_kb_dependency);
+   for (int i = 0; i < KB_DEP_CLASS_COUNT; i++)
+      dependency_breaker_reset(&g_kb_dependency[i]);
    g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
    snprintf(g_kb_last_dependency, sizeof(g_kb_last_dependency), "%s", "kb");
    g_kb_last_observed_generation = 0;
@@ -143,6 +173,11 @@ void kb_client_dependency_reset_for_tests(void)
    g_kb_last_observed_dimension = 0;
    g_kb_last_current_dimension = 0;
    g_kb_last_retry_after_ms = 0;
+}
+
+void kb_client_dependency_reset_for_tests(void)
+{
+   kb_client_dependency_reset();
 }
 
 void kb_client_dependency_set_clock_for_tests(int64_t (*now_ms)(void))
@@ -253,7 +288,7 @@ static kb_client_result_status_t kb_classify_json_result(const char *path, const
    return result;
 }
 
-static int kb_transport_begin(int *status_out)
+static int kb_transport_begin(const char *path, int *status_out)
 {
    if (status_out)
       *status_out = -1;
@@ -267,7 +302,8 @@ static int kb_transport_begin(int *status_out)
    g_kb_last_suppressed = 0;
    int64_t now_ms = kb_dependency_now_ms();
    int64_t retry_after = 0;
-   if (dependency_breaker_allow(&g_kb_dependency, now_ms, &retry_after))
+   kb_dependency_class_t cls = kb_dependency_class_for_path(path);
+   if (dependency_breaker_allow(&g_kb_dependency[cls], now_ms, &retry_after))
       return 1;
 
    /* Carry the breaker's own retry window into the typed error. Discarding it
@@ -311,17 +347,43 @@ static void kb_capture_result_metadata(const char *response)
 /* Report success, and log the close so an outage has a visible end as well as a
  * visible start. Silent recovery left an operator unable to tell a healed
  * dependency from one that simply had not been called again. */
-static void kb_transport_recovered(int64_t now_ms)
+static void kb_transport_recovered_class(kb_dependency_class_t cls, int64_t now_ms)
 {
    dependency_breaker_snapshot_t before;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
-   dependency_breaker_report_success(&g_kb_dependency, now_ms);
+   dependency_breaker_snapshot(&g_kb_dependency[cls], now_ms, &before);
+   dependency_breaker_report_success(&g_kb_dependency[cls], now_ms);
    if (before.open)
       LOG_INFO("server.kb", "knowledge service reachable again after %u open interval(s)",
                before.open_count);
 }
 
+/* A call that spent its whole budget and got nothing is a TIMEOUT, not evidence
+ * the dependency is down. The transport cannot tell them apart -- a read timeout
+ * and a refused connection both surface as status -1 with no body -- but the
+ * caller knows what it allowed, so elapsed time separates them: failing fast
+ * means nobody answered, failing at the deadline means someone is still working.
+ *
+ * This mattered because a slow ingest scan was recorded as an outage, three of
+ * them opened the shared breaker, and every unrelated KB call was then
+ * suppressed with a 503 that never left the process. */
+int kb_transport_call_timed_out(int http_status, const char *response, int64_t elapsed_ms,
+                                int timeout_ms)
+{
+   if (response || http_status > 0 || timeout_ms <= 0)
+      return 0;
+   return elapsed_ms >= (int64_t)timeout_ms * 9 / 10;
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms);
+
 static void kb_transport_complete(const char *path, const char *response, int http_status)
+{
+   kb_transport_complete_timed(path, response, http_status, 0, 0);
+}
+
+static void kb_transport_complete_timed(const char *path, const char *response, int http_status,
+                                        int64_t elapsed_ms, int timeout_ms)
 {
    int64_t now_ms = kb_dependency_now_ms();
    int valid = 0;
@@ -330,7 +392,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       kb_capture_result_metadata(response);
    if (http_status == 401 || http_status == 403)
    {
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = KB_CLIENT_RESULT_UNAUTHORIZED;
       return;
    }
@@ -340,7 +402,7 @@ static void kb_transport_complete(const char *path, const char *response, int ht
       /* The KB is reachable and truthfully reported one of its own optional
        * dependencies. Keep that typed outage from suppressing unrelated KB
        * operations through the transport breaker. */
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = classified;
       return;
    }
@@ -348,14 +410,14 @@ static void kb_transport_complete(const char *path, const char *response, int ht
    {
       /* A typed unavailable body means the KB answered but one of its own
        * dependencies did not; do not trip the KB transport breaker. */
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = classified;
       return;
    }
    if (http_status >= 400 && http_status < 500 && http_status != 408 && http_status != 425 &&
        http_status != 429)
    {
-      kb_transport_recovered(now_ms);
+      kb_transport_recovered_class(kb_dependency_class_for_path(path), now_ms);
       g_kb_last_result = valid ? classified : KB_CLIENT_RESULT_UNAVAILABLE;
       return;
    }
@@ -366,13 +428,21 @@ static void kb_transport_complete(const char *path, const char *response, int ht
     * Log the transition into the open state — not every suppressed call — so a
     * sustained outage costs one line per backoff window rather than one per
     * request. */
+   if (kb_transport_call_timed_out(http_status, response, elapsed_ms, timeout_ms))
+   {
+      /* The caller's budget ran out. The KB may well still be working on it, so
+       * this says nothing about reachability and must not open the breaker. */
+      g_kb_last_result = KB_CLIENT_RESULT_UNAVAILABLE;
+      return;
+   }
+   kb_dependency_class_t fail_cls = kb_dependency_class_for_path(path);
    dependency_breaker_snapshot_t before;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &before);
-   dependency_breaker_report_failure(&g_kb_dependency, now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
-                                     DEPENDENCY_BREAKER_DEFAULT_BASE_MS,
-                                     DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
+   dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &before);
+   dependency_breaker_report_failure(
+       &g_kb_dependency[fail_cls], now_ms, DEPENDENCY_BREAKER_DEFAULT_THRESHOLD,
+       DEPENDENCY_BREAKER_DEFAULT_BASE_MS, DEPENDENCY_BREAKER_DEFAULT_MAX_MS);
    dependency_breaker_snapshot_t after;
-   dependency_breaker_snapshot(&g_kb_dependency, now_ms, &after);
+   dependency_breaker_snapshot(&g_kb_dependency[fail_cls], now_ms, &after);
    if (after.open && !before.open)
       LOG_WARN("server.kb",
                "knowledge service unreachable (%s %s); suppressing calls for %lldms after %u "
@@ -512,37 +582,38 @@ char *kb_client_health_json(void)
    return body;
 }
 
-/* Cached read of the KB's advertised typed-facts capability (proposal §8).
- * aimee-server gates per-turn fact injection on THIS instead of owning
- * typed_facts_enabled itself — the KB is the single source of truth. Short TTL so
- * a facts-off deployment does not fetch /v1/health every turn; a console/config
- * change is picked up within the TTL. Benign cross-thread race on the cache (worst
- * case: a couple of extra fetches). On transport failure the last-known value (or
- * off) is kept, so a briefly-unreachable KB never spuriously injects. */
-int kb_client_typed_facts_enabled(void)
+char *kb_client_agent_surfaces_json(void)
 {
-   static int cached = -1; /* -1 = never fetched */
-   static time_t fetched_at = 0;
-   const int TTL_S = 15;
-   time_t now = time(NULL);
-   if (cached >= 0 && (now - fetched_at) < TTL_S)
-      return cached;
-   int v = cached >= 0 ? cached : 0;
-   char *h = kb_client_health_json();
-   if (h)
+   int http_status = 0;
+   char *body = kb_client_v1_get_json("/v1/capabilities", CLIENT_DEFAULT_TIMEOUT_MS, &http_status);
+   if (!body || http_status < 200 || http_status >= 300)
    {
-      cJSON *j = cJSON_Parse(h);
-      free(h);
-      if (j)
-      {
-         v = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "typed_facts_enabled")) ? 1 : 0;
-         cJSON_Delete(j);
-      }
+      free(body);
+      return NULL;
    }
-   cached = v;
-   fetched_at = now;
-   return v;
+
+   cJSON *root = cJSON_Parse(body);
+   free(body);
+   cJSON *surfaces = root ? cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces") : NULL;
+   char *projection = cJSON_IsObject(surfaces) ? cJSON_PrintUnformatted(surfaces) : NULL;
+   cJSON_Delete(root);
+   return projection;
 }
+
+/* kb_client_typed_facts_enabled() lived here and is gone.
+ *
+ * It fetched the KB's advertised `typed_facts_enabled` on a 15s TTL, because the
+ * KB owned the master gate and was the single source of truth for it. The gate
+ * is retired, so there was nothing left to ask: the round trip had one possible
+ * answer, and a function that always returns 1 keeps the SHAPE of an option that
+ * no longer exists -- something a later reader can gate on again.
+ *
+ * Deleting it also deletes a failure mode that mattered more than the fetch. The
+ * cached read defaulted to OFF and kept the last-known value on transport
+ * failure, so a briefly-unreachable KB -- or a first turn before any successful
+ * fetch -- silently suppressed per-turn fact injection with nothing logged. The
+ * old comment called that "never spuriously injects"; the other side of it was
+ * "sometimes silently stops injecting". */
 
 /* §2c: POST /v1/reembed {confirm, force, dry_run} — the dim-change reset. Returns
  * the raw response JSON (caller frees), or NULL on transport failure; *status_out
@@ -561,6 +632,38 @@ char *kb_client_reembed(int confirm, int force, int dry_run, int target_dim, int
    if (target_dim > 0)
       cJSON_AddNumberToObject(req, "target_dim", target_dim);
    char *resp = kb_client_v1_post_json_keep_error("/v1/reembed", req, 120000, status_out);
+   cJSON_Delete(req);
+   return resp;
+}
+
+char *kb_client_subject_erasure_begin(const char *request_id, const char *subject,
+                                      cJSON *session_ids, int *status_out)
+{
+   if (!request_id || !request_id[0] || !subject || !subject[0] || !cJSON_IsArray(session_ids))
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "request_id", request_id);
+   cJSON_AddStringToObject(req, "subject", subject);
+   cJSON_AddItemReferenceToObject(req, "session_ids", session_ids);
+   char *resp = kb_client_v1_post_json_keep_error("/v1/privacy/erase-subject/begin", req, 120000,
+                                                  status_out);
+   cJSON_Delete(req);
+   return resp;
+}
+
+char *kb_client_subject_erasure_complete(const char *request_id, int64_t db1_count, int *status_out)
+{
+   if (!request_id || !request_id[0] || db1_count < 0)
+      return NULL;
+   cJSON *req = cJSON_CreateObject();
+   if (!req)
+      return NULL;
+   cJSON_AddStringToObject(req, "request_id", request_id);
+   cJSON_AddNumberToObject(req, "db1_count", (double)db1_count);
+   char *resp = kb_client_v1_post_json_keep_error("/v1/privacy/erase-subject/complete", req, 120000,
+                                                  status_out);
    cJSON_Delete(req);
    return resp;
 }
@@ -584,6 +687,35 @@ char *kb_client_curator_json(void)
    return out ? out : kb_status_unavailable_json("curator status serialization failed");
 }
 
+/* Flatten a JSON array of strings into a newline-separated buffer, truncating at
+ * the buffer rather than overrunning it. Extracted when `blockers` joined
+ * `warnings` and the second caller made a copy-paste of the pointer arithmetic
+ * the obvious alternative. A non-array (including a missing key, which is how an
+ * older kb answers) leaves the buffer untouched. */
+static void kb_client_join_strings(cJSON *arr, char *buf, size_t cap)
+{
+   if (!cJSON_IsArray(arr) || !buf || cap == 0)
+      return;
+   size_t pos = 0;
+   cJSON *item;
+   cJSON_ArrayForEach(item, arr)
+   {
+      if (!cJSON_IsString(item))
+         continue;
+      if (pos > 0 && pos < cap - 1)
+         buf[pos++] = '\n';
+      size_t rem = cap - pos - 1;
+      if (rem == 0)
+         break;
+      size_t len = strlen(item->valuestring);
+      if (len > rem)
+         len = rem;
+      memcpy(buf + pos, item->valuestring, len);
+      pos += len;
+      buf[pos] = '\0';
+   }
+}
+
 int kb_client_health(kb_health_t *out)
 {
    if (!out)
@@ -605,8 +737,18 @@ int kb_client_health(kb_health_t *out)
    if (!resp)
       return -1;
 
+   /* process_ok means SOMETHING ANSWERED, which is the only thing this check can
+    * honestly establish. It used to demand status == "ok" exactly and return -1
+    * otherwise — so the moment the kb learned to say "degraded", a kb that was up
+    * and telling us precisely what was wrong would have been reported to every
+    * caller as unreachable, and its blockers discarded unread. The verdict is
+    * carried in out->status for callers to act on; it is not this function's job
+    * to turn a diagnosis into a transport failure.
+    *
+    * Any status string counts as an answer. An unparseable or non-200 response
+    * has already returned -1 above, which is the real "did not answer". */
    cJSON *s = cJSON_GetObjectItemCaseSensitive(resp, "status");
-   if (!cJSON_IsString(s) || strcmp(s->valuestring, "ok") != 0)
+   if (!cJSON_IsString(s))
    {
       cJSON_Delete(resp);
       return -1;
@@ -643,6 +785,7 @@ int kb_client_health(kb_health_t *out)
    COPY_INT(pgvec_indexed, "pgvec_indexed_vectors");
    COPY_BOOL(embed_ok, "embed_ok");
    COPY_STR(embed_command, "embed_command");
+   COPY_STR(status, "status");
    COPY_INT(freshness_days, "freshness_days");
    COPY_STR(last_ingest_at, "last_ingest_at");
    COPY_INT(chunk_count, "chunk_count");
@@ -669,28 +812,10 @@ int kb_client_health(kb_health_t *out)
 #undef COPY_INT
 #undef COPY_STR
 
-   cJSON *warns = cJSON_GetObjectItemCaseSensitive(resp, "warnings");
-   if (cJSON_IsArray(warns))
-   {
-      size_t pos = 0;
-      cJSON *w;
-      cJSON_ArrayForEach(w, warns)
-      {
-         if (!cJSON_IsString(w))
-            continue;
-         if (pos > 0 && pos < sizeof(out->warnings) - 1)
-            out->warnings[pos++] = '\n';
-         size_t rem = sizeof(out->warnings) - pos - 1;
-         if (rem == 0)
-            break;
-         size_t wlen = strlen(w->valuestring);
-         if (wlen > rem)
-            wlen = rem;
-         memcpy(out->warnings + pos, w->valuestring, wlen);
-         pos += wlen;
-         out->warnings[pos] = '\0';
-      }
-   }
+   kb_client_join_strings(cJSON_GetObjectItemCaseSensitive(resp, "warnings"), out->warnings,
+                          sizeof(out->warnings));
+   kb_client_join_strings(cJSON_GetObjectItemCaseSensitive(resp, "blockers"), out->blockers,
+                          sizeof(out->blockers));
 
    cJSON_Delete(resp);
 
@@ -1076,15 +1201,21 @@ char *kb_client_memory_directive_create_json(const char *question, const char *t
    if (!question || !question[0])
       return kb_error_json("memory.directive_create requires question");
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "question", question);
-   if (topic && topic[0])
-      cJSON_AddStringToObject(req, "topic", topic);
+   /* question, topic and cause are prose the kb persists; entity and file are
+    * handles the caller resolves against later, so a redacted form would point
+    * at nothing -- those withhold outright. */
+   if (kb_client_pii_identifier_sensitive(entity) || kb_client_pii_identifier_sensitive(file) ||
+       kb_client_pii_add_string_required(req, "question", question) != 0 ||
+       kb_client_pii_add_string(req, "topic", topic) != 0 ||
+       kb_client_pii_add_string(req, "cause", cause) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (entity && entity[0])
       cJSON_AddStringToObject(req, "entity", entity);
    if (file && file[0])
       cJSON_AddStringToObject(req, "file", file);
-   if (cause && cause[0])
-      cJSON_AddStringToObject(req, "cause", cause);
    cJSON_AddNumberToObject(req, "priority", priority);
    if (session && session[0])
       cJSON_AddStringToObject(req, "session", session);
@@ -1099,8 +1230,11 @@ char *kb_client_memory_directive_resolve_json(int64_t id, int64_t with_memory, c
    cJSON_AddNumberToObject(req, "id", (double)id);
    if (with_memory > 0)
       cJSON_AddNumberToObject(req, "with_memory", (double)with_memory);
-   if (note && note[0])
-      cJSON_AddStringToObject(req, "note", note);
+   if (kb_client_pii_add_string(req, "note", note) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    return kb_v1_action_request("memory.directive_resolve", req);
 }
 
@@ -1145,12 +1279,17 @@ char *kb_client_curiosity_create_json(const char *gap_type, const char *target_e
 {
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "gap_type", gap_type ? gap_type : "");
+   /* evidence quotes the material that raised the gap -- the field most likely
+    * to carry a verbatim span of whatever the session was handling. */
+   if (kb_client_pii_identifier_sensitive(target_entity) ||
+       kb_client_pii_add_string(req, "target_topic", target_topic) != 0 ||
+       kb_client_pii_add_string(req, "evidence", evidence) != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (target_entity && target_entity[0])
       cJSON_AddStringToObject(req, "target_entity", target_entity);
-   if (target_topic && target_topic[0])
-      cJSON_AddStringToObject(req, "target_topic", target_topic);
-   if (evidence && evidence[0])
-      cJSON_AddStringToObject(req, "evidence", evidence);
    cJSON_AddNumberToObject(req, "importance", importance);
    cJSON_AddNumberToObject(req, "novelty", novelty);
    if (source_session && source_session[0])
@@ -1199,8 +1338,14 @@ char *kb_client_note_create_json(const char *title, const char *content, const c
                                  const char *author)
 {
    cJSON *req = cJSON_CreateObject();
-   cJSON_AddStringToObject(req, "title", title ? title : "");
-   cJSON_AddStringToObject(req, "content", content ? content : "");
+   /* A note is nothing but persisted prose. Tags are lookup handles. */
+   if (kb_client_pii_identifier_sensitive(tags) ||
+       kb_client_pii_add_string_required(req, "title", title ? title : "") != 0 ||
+       kb_client_pii_add_string_required(req, "content", content ? content : "") != 0)
+   {
+      cJSON_Delete(req);
+      return kb_client_pii_withheld_json();
+   }
    if (tags && tags[0])
       cJSON_AddStringToObject(req, "tags", tags);
    if (author && author[0])
@@ -1252,6 +1397,41 @@ char *kb_client_learning_list_proposals_json(const char *state, const char *sink
    if (limit > 0)
       cJSON_AddNumberToObject(req, "limit", limit);
    return kb_v1_learning_action_request("learning.list_proposals", req);
+}
+
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (window_days > 0)
+      cJSON_AddNumberToObject(req, "window_days", window_days);
+   return kb_v1_learning_action_request("learning.endogeneity", req);
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON_AddNumberToObject(req, "id", id);
+   if (fate && fate[0])
+      cJSON_AddStringToObject(req, "fate", fate);
+   if (reason && reason[0])
+      cJSON_AddStringToObject(req, "reason", reason);
+   return kb_v1_learning_action_request("learning.fate", req);
+}
+
+char *kb_client_learning_resolve_json(int budget)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (budget > 0)
+      cJSON_AddNumberToObject(req, "budget", budget);
+   return kb_v1_learning_action_request("learning.resolve", req);
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   cJSON *req = cJSON_CreateObject();
+   if (decision_point && decision_point[0])
+      cJSON_AddStringToObject(req, "decision_point", decision_point);
+   return kb_v1_learning_action_request("learning.policy_select", req);
 }
 
 static char *kb_v1_learning_mutate(const char *method, int id)
@@ -1540,12 +1720,12 @@ static const char *kb_client_v1_auth_header(char *buf, size_t buf_len)
 static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int timeout_ms,
                                          int *status_out, int keep_error)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
    char *body_json = body ? cJSON_PrintUnformatted(body) : strdup("{}");
    if (!body_json)
    {
-      dependency_breaker_cancel_probe(&g_kb_dependency);
+      dependency_breaker_cancel_probe(&g_kb_dependency[kb_dependency_class_for_path(path)]);
       return NULL;
    }
 
@@ -1554,8 +1734,10 @@ static char *kb_client_v1_post_json_impl(const char *path, cJSON *body, int time
    {
       int local_status = -1;
       int *wire_status = status_out ? status_out : &local_status;
+      int64_t started_ms = kb_dependency_now_ms();
       char *r = kb_client_mtls_request_timeout("POST", path, body_json, timeout_ms, wire_status);
-      kb_transport_complete(path, r, *wire_status);
+      kb_transport_complete_timed(path, r, *wire_status, kb_dependency_now_ms() - started_ms,
+                                  timeout_ms);
       free(body_json);
       if (*wire_status < 200 || *wire_status >= 300 || !r)
       {
@@ -1621,7 +1803,7 @@ char *kb_client_v1_post_body(const char *path, const char *body, int timeout_ms,
 char *kb_client_v1_post_body_with_type(const char *path, const char *body, const char *content_type,
                                        int timeout_ms, int *status_out)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
 
    if (kb_client_mtls_configured())
@@ -1671,7 +1853,7 @@ char *kb_client_v1_post_body_with_type(const char *path, const char *body, const
 
 char *kb_client_v1_get_json(const char *path, int timeout_ms, int *status_out)
 {
-   if (!kb_transport_begin(status_out))
+   if (!kb_transport_begin(path, status_out))
       return NULL;
 
    /* Distributed mode: a configured remote kb (AIMEE_KB_CONN) is reached over
@@ -1782,11 +1964,30 @@ char *kb_client_search_json_scoped_ex(const char *project, int all_projects, con
    if (fusion_mode_override && fusion_mode_override[0])
       cJSON_AddStringToObject(body, "fusion_mode", fusion_mode_override);
    int http_status = -1;
-   char *resp =
-       kb_client_v1_post_json("/v1/search", body, KB_CLIENT_SEARCH_TIMEOUT_MS, &http_status);
+   /* Preserve a structured KB refusal.  The search caller can then surface the
+    * precise authorization or scope failure instead of replacing it with a
+    * generic HTTP-status message, which is essential for managed deployments. */
+   char *resp = kb_client_v1_post_json_keep_error("/v1/search", body, KB_CLIENT_SEARCH_TIMEOUT_MS,
+                                                  &http_status);
    cJSON_Delete(body);
    if (resp)
    {
+      if (http_status < 200 || http_status >= 300)
+      {
+         char detail[256] = "knowledge service search was rejected";
+         cJSON *error_body = cJSON_Parse(resp);
+         const cJSON *error =
+             error_body ? cJSON_GetObjectItemCaseSensitive(error_body, "error") : NULL;
+         const cJSON *message =
+             error_body ? cJSON_GetObjectItemCaseSensitive(error_body, "message") : NULL;
+         if (cJSON_IsString(error) && error->valuestring[0])
+            snprintf(detail, sizeof(detail), "%s", error->valuestring);
+         else if (cJSON_IsString(message) && message->valuestring[0])
+            snprintf(detail, sizeof(detail), "%s", message->valuestring);
+         free(resp);
+         cJSON_Delete(error_body);
+         return kb_typed_error_json(kb_client_last_result_status(), detail);
+      }
       if (have_key)
          kb_cache_put(cache_key, resp);
       return resp;

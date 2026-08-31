@@ -15,7 +15,9 @@
     "src/modules/protocols/acp/acp_server.c",
     "src/modules/protocols/mcp/mcp_client.c",
     "src/modules/protocols/mcp/mcp_client_registry.c",
+    "src/modules/protocols/mcp/mcp_osv_gate.c",
     "src/modules/protocols/mcp/mcp_skill_tools.c",
+    "src/modules/protocols/mcp/mcp_group_tool.c",
     "src/modules/protocols/mcp/mcp_tool_profile.c",
     "src/modules/protocols/mcp/mcp_tools.c",
     "src/modules/protocols/mcp/mcp_tools_extended.c",
@@ -29,6 +31,7 @@
     "src/modules/protocols/include/aimee/protocols/acp/acp_server.h",
     "src/modules/protocols/include/aimee/protocols/mcp/mcp_client.h",
     "src/modules/protocols/include/aimee/protocols/mcp/mcp_client_registry.h",
+    "src/modules/protocols/include/aimee/protocols/mcp/mcp_osv_gate.h",
     "src/modules/protocols/include/aimee/protocols/mcp/mcp_tools.h"
   ],
   "tests": [

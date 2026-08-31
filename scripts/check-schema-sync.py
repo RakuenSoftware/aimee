@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 """Verify the DB2 shim schema and the DB2 native schema cover the same set
-of tables, and that the DB1 schema only contains DB1-owned tables.
+of tables, and that the store's schema only contains DB1-owned tables.
+
+The store's schema is server-go/modules/aimee/families/schema_*.sql, one file
+per family, since DB1 became a Go module.
 
 After the 3db split, the DB2 shim schema used by tests lives in
-src/db2/schema_sqlite.sql; production DB2 uses src/db2/schema.sql.
+src/modules/db2/c/schema_sqlite.sql; production DB2 uses src/modules/db2/c/schema.sql.
 Drift between those two files breaks the DB2 shim test path.
 
 Run via `make schema-sync-check` (or directly during CI). Exits non-zero on
@@ -21,9 +24,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DB1_SCHEMA = ROOT / "src" / "db1" / "schema.sql"
-DB2_SCHEMA_PG = ROOT / "src" / "db2" / "schema.sql"
-DB2_SCHEMA_SQLITE = ROOT / "src" / "db2" / "schema_sqlite.sql"
+# The store's schema, one file per family since it became a Go module. Was a
+# single src/modules/db1/schema.sql.
+STORE_SCHEMA_DIR = ROOT / "server-go" / "modules" / "aimee" / "families"
+DB2_SCHEMA_PG = ROOT / "src" / "modules" / "db2" / "c" / "schema.sql"
+DB2_SCHEMA_SQLITE = ROOT / "src" / "modules" / "db2" / "c" / "schema_sqlite.sql"
 
 # CREATE TABLE [IF NOT EXISTS] <name> ( ... ). `name` may be quoted or bare.
 TABLE_RE = re.compile(
@@ -49,10 +54,20 @@ DB2_SHIM_ONLY_LEXICAL_INDEX_TABLES = {
 # DB1-local user/session/runtime tables. These belong only in the DB1 schema;
 # the DB2 schemas (sqlite shim and postgres) must not create them.
 DB1_ONLY_TABLES = {
+    # pki_certs and pki_mtls_ramp were created lazily by pki_store.c with
+    # CREATE TABLE IF NOT EXISTS and never appeared in a schema file, so this
+    # check could not see them. The Go store declares them, so it can.
+    "pki_certs",
+    "pki_mtls_ramp",
+    # economizer_state was a labelled row in `checkpoints` in the C store and is
+    # its own table in the Go one -- only the newest row per session is ever
+    # read, which is a table with a primary key, not a log to filter.
+    "economizer_state",
     "agent_cache",
     "agent_jobs",
     "agent_log",
     "branch_ownership",
+    "session_feature_branch",
     "clarify_qa",
     "clarify_sessions",
     "checkpoints",
@@ -63,6 +78,10 @@ DB1_ONLY_TABLES = {
     # local runtime cache: never replicated, never shared, safe to drop.
     "web_page_cache",
     "context_snapshots",
+    # Persisted retrieval hysteresis. The turn counter and firing events stay
+    # with the DB1-owned conversation rather than resetting with a C process.
+    "context_activation_turns",
+    "context_activation_events",
     "cost_fold_log",
     "cron_job_runs",
     "cron_jobs",
@@ -73,6 +92,8 @@ DB1_ONLY_TABLES = {
     "diagnoses",
     "diagnosis_items",
     "env_capabilities",
+    "approach_failures",
+    "eval_candidates",
     "eval_results",
     "execution_plans",
     "execution_trace",
@@ -94,6 +115,9 @@ DB1_ONLY_TABLES = {
     "remote_client_grants",
     "project_clones",
     "server_sessions",
+    # Cross-store subject-erasure retry journal. It retains only an irreversible
+    # subject digest and the committed DB1 deletion count.
+    "db1_subject_erasure_request",
     "server_mgmt_nonce",
     "server_mgmt_status_hwm",
     "server_management_jti",
@@ -148,6 +172,14 @@ DB1_ONLY_TABLES = {
     "lifecycle_work_item",
     "lifecycle_event",
     "lifecycle_stage_attempt",
+    # The rest of the workflow engine's own tables. These were created by the Go
+    # WFE against DB1's file rather than declared here, which is why they are a
+    # late addition to a list that is otherwise as old as the tables: DB1 owned
+    # the store but not the schema, and the drift did not show up because
+    # nothing declared them to drift from.
+    "wfe_convergence",
+    "wfe_frozen_create",
+    "lifecycle_delegate_job",
     # primary-as-manager: interactive session <-> work-item binding (per-user, DB1-owned)
     "workflow_binding",
     # webchat tab -> Claude --resume id binding (per-user, DB1-owned)
@@ -170,7 +202,13 @@ def extract_tables(path: Path) -> set[str]:
 
 
 def main() -> int:
-    db1_tables = extract_tables(DB1_SCHEMA)
+    store_schemas = sorted(STORE_SCHEMA_DIR.glob("schema_*.sql"))
+    if not store_schemas:
+        print(f"schema-sync: no store schema files under {STORE_SCHEMA_DIR}")
+        return 1
+    db1_tables = set()
+    for schema in store_schemas:
+        db1_tables |= extract_tables(schema)
     db2_shim_tables = extract_tables(DB2_SCHEMA_SQLITE)
     db2_native_tables = extract_tables(DB2_SCHEMA_PG)
 
@@ -200,28 +238,28 @@ def main() -> int:
         return 0
 
     if db1_unexpected:
-        print("schema drift: non-DB1 tables present in src/db1/schema.sql:")
+        print(f"schema drift: non-DB1 tables present in {STORE_SCHEMA_DIR}/schema_*.sql:")
         for name in sorted(db1_unexpected):
             print(f"  - {name}")
     if db1_only_in_db2_native:
-        print("schema drift: DB1-only tables present in src/db2/schema.sql:")
+        print("schema drift: DB1-only tables present in src/modules/db2/c/schema.sql:")
         for name in sorted(db1_only_in_db2_native):
             print(f"  - {name}")
     if db1_only_in_db2_shim:
-        print("schema drift: DB1-only tables present in src/db2/schema_sqlite.sql:")
+        print("schema drift: DB1-only tables present in src/modules/db2/c/schema_sqlite.sql:")
         for name in sorted(db1_only_in_db2_shim):
             print(f"  - {name}")
     if missing_in_native:
         print(
-            "schema drift: tables in src/db2/schema_sqlite.sql but missing "
-            "in src/db2/schema.sql:"
+            "schema drift: tables in src/modules/db2/c/schema_sqlite.sql but missing "
+            "in src/modules/db2/c/schema.sql:"
         )
         for name in sorted(missing_in_native):
             print(f"  - {name}")
     if missing_in_shim:
         print(
-            "schema drift: tables in src/db2/schema.sql but missing "
-            "in src/db2/schema_sqlite.sql:"
+            "schema drift: tables in src/modules/db2/c/schema.sql but missing "
+            "in src/modules/db2/c/schema_sqlite.sql:"
         )
         for name in sorted(missing_in_shim):
             print(f"  - {name}")

@@ -10,13 +10,14 @@
 #include "kb_curator_sidecar.h"
 #include "kb_curator_llm.h"
 #include "aimee.h"
-#include "config.h" /* config_current_mode, aimee_mode_t, config_load */
+#include "config.h" /* config_current_mode, aimee_mode_t, legacy_config_read */
 #include "cJSON.h"
 #include "log.h"
-#include "db2/artifacts.h"
-#include "db2/db2_internal.h"
-#include "db2/db_postgres.h"
-#include "db2/feature_rows.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_tenant.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/feature_rows.h"
 #include "kb_mdl.h"
 
 #include <pthread.h> /* reclaim throttle is shared across the doc workers */
@@ -130,11 +131,9 @@ static int ce_claim_job(ce_job_t *out)
                             " WHERE id = ("
                             "   SELECT id FROM kb_async_jobs"
                             "   WHERE kind = 'extract_doc' AND status = 'pending'"
-                            "     AND EXISTS (SELECT 1 FROM kb_documents d"
-                            "       JOIN projects p ON p.name=d.project"
-                            "       WHERE d.id=kb_async_jobs.document_id"
-                            "         AND p.lifecycle_state='current'"
-                            "         AND d.generation=p.current_generation)"
+                            "     AND EXISTS (SELECT 1 FROM projects p"
+                            "       WHERE p.name=kb_async_jobs.project"
+                            "         AND p.lifecycle_state='current')"
                             /* Skip jobs still serving their retry backoff. '' is
                              * "never failed" and must always be claimable. */
                             "     AND (next_attempt_at = '' OR next_attempt_at <= ?1)"
@@ -370,7 +369,16 @@ static void ce_reclaim_stale_running(int max_attempts)
        "                       ELSE last_error END,"
        "     updated_at = pg_now_text()"
        " WHERE kind = 'extract_doc' AND status = 'running'"
-       "   AND claimed_at <> '' AND claimed_at < pg_now_text(?2)",
+       "   AND claimed_at <> ''"
+       /* Compare the lease by VALUE, not as raw text. pg_now_text() is canonical
+        * ISO, but a row claimed before that became canonical still carries the
+        * space separator, and a text compare decides at character 10 where ' '
+        * (0x20) sorts below 'T' (0x54) -- so a legacy row read as older than any
+        * same-date threshold and its live lease was reclaimed out from under it.
+        * Lease horizons are minutes, so "same date" is the normal case here, not
+        * an edge. */
+       "   AND rtrim(replace(claimed_at,'T',' '),'Z')"
+       "     < rtrim(replace(pg_now_text(?2),'T',' '),'Z')",
        err, sizeof(err));
    if (!st)
    {
@@ -564,7 +572,14 @@ int kb_curator_extract_one(const kb_curator_extract_opts_t *opts)
              "claimed extract_doc job %lld for doc %lld project '%s'", (long long)job.job_id,
              (long long)job.document_id, job.project);
 
-   if (ce_fetch_document(&job) != 0)
+   int scope_rc = db2_maintenance_job_enter(DB2_MAINTENANCE_CURATOR, job.project);
+   int read_scope = scope_rc == 0 ? db2_maintenance_scope_begin_current() : scope_rc;
+   int fetch_rc = read_scope < 0 ? -1 : ce_fetch_document(&job);
+   if (read_scope == 1 && db2_maintenance_scope_commit() != 0)
+      fetch_rc = -1;
+   if (scope_rc == 0)
+      db2_maintenance_job_leave();
+   if (fetch_rc != 0)
    {
       aimee_log(LOG_WARN, "kb.curator.extract", "doc %lld not found for job %lld; marking failed",
                 (long long)job.document_id, (long long)job.job_id);

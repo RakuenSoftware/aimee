@@ -7,17 +7,19 @@
 #include <time.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db.h"
 #include <aimee/audit/obs_bus.h> /* obs_bus_flush — gsem_record records guardrail events async now */
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "server/obs_bus_adapter.h"
 #include <aimee/workspace/workspace.h>
+#include "db1_client/session_state.h" /* db1_session_state_delete -- teardown only */
 #include "session_worktree_key.h"
 #include "modules/workspace/workspace_turn.h" /* workspace_turn_set_container_bound_for_test */
+#include "platform_path.h"
 #include "platform_test_util.h"
 #include "modules/git/git_verify.h"
+#include "support/git_module_fixture.h"
 
 /* Per-case in-memory DB2 backing for test bodies that round-trip
  * memory-subsystem state. The shim helper owns the sqlite handle and
@@ -74,7 +76,8 @@ static void vy_set_global_yaml(const char *project_dir, const char *yaml)
       {
          g_vy_home_was_set = 0;
       }
-      snprintf(g_vy_fake_home, sizeof(g_vy_fake_home), "/tmp/aimee-test-home-XXXXXX");
+      snprintf(g_vy_fake_home, sizeof(g_vy_fake_home), "%s/aimee-test-home-XXXXXX",
+               platform_tmpdir());
       assert(mkdtemp(g_vy_fake_home) != NULL);
       setenv("HOME", g_vy_fake_home, 1);
    }
@@ -121,6 +124,9 @@ static void test_classify_sensitive(void)
 
    c = classify_path("server.key");
    assert(c.severity == SEV_BLOCK);
+
+   c = classify_path(".env.local");
+   assert(c.severity == SEV_BLOCK);
 }
 
 static void test_classify_database(void)
@@ -139,6 +145,15 @@ static void test_classify_safe(void)
 
    c = classify_path("src/handler.c");
    assert(c.severity == SEV_GREEN);
+
+   c = classify_path(".env.example");
+   assert(c.severity == SEV_GREEN);
+
+   c = classify_path("config/.env.sample");
+   assert(c.severity == SEV_GREEN);
+
+   c = classify_path("templates/.env.template");
+   assert(c.severity == SEV_GREEN);
 }
 
 static void write_file_text(const char *path, const char *content)
@@ -151,7 +166,7 @@ static void write_file_text(const char *path, const char *content)
 
 static void with_temp_policy_path(char *path, size_t path_len)
 {
-   snprintf(path, path_len, "/tmp/test-guardrails-policy-XXXXXX.json");
+   snprintf(path, path_len, "%s/test-guardrails-policy-XXXXXX.json", platform_tmpdir());
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    close(fd);
@@ -210,7 +225,8 @@ static void test_is_write_command(void)
 static void test_policy_file_overrides_defaults(void)
 {
    char policy_path[256];
-   char deny_dir[] = "/tmp/test-guardrails-deny-XXXXXX";
+   char deny_dir[256];
+   snprintf(deny_dir, sizeof deny_dir, "%s/test-guardrails-deny-XXXXXX", platform_tmpdir());
    char denied_file[512];
    with_temp_policy_path(policy_path, sizeof(policy_path));
    assert(mkdtemp(deny_dir) != NULL);
@@ -243,11 +259,46 @@ static void test_policy_file_overrides_defaults(void)
    assert(is_write_command("brew install jq") == 1);
 
    char resolved[MAX_PATH_LEN];
-   assert(guardrails_validate_file_path(denied_file, resolved, sizeof(resolved)) != NULL);
+   assert(guardrails_check_sensitive_path(denied_file, resolved, sizeof(resolved)) != NULL);
 
    clear_temp_policy_path(policy_path);
    unlink(denied_file);
    rmdir(deny_dir);
+}
+
+static void test_sensitive_path_bounds_and_nonexistent_basename(void)
+{
+   char root[512];
+   snprintf(root, sizeof(root), "%s/test-guardrails-path-XXXXXX", platform_tmpdir());
+   assert(platform_mkdtemp(root) != NULL);
+
+   char path[MAX_PATH_LEN];
+   snprintf(path, sizeof(path), "%s", root);
+   for (int i = 0; i < 4; i++)
+   {
+      size_t used = strlen(path);
+      assert(used + 82 < sizeof(path));
+      path[used++] = '/';
+      memset(path + used, 'a' + i, 80);
+      path[used + 80] = '\0';
+      assert(mkdir(path, 0700) == 0);
+   }
+
+   char ordinary[MAX_PATH_LEN];
+   assert(snprintf(ordinary, sizeof(ordinary), "%s/file.txt", path) < (int)sizeof(ordinary));
+   char small[256];
+   memset(small, 0xa5, sizeof(small));
+   assert(guardrails_check_sensitive_path(ordinary, small, sizeof(small)) != NULL);
+
+   char dotenv[MAX_PATH_LEN];
+   assert(snprintf(dotenv, sizeof(dotenv), "%s/.env", path) < (int)sizeof(dotenv));
+   char resolved[MAX_PATH_LEN];
+   write_file_text(dotenv, "SECRET=value\n");
+   assert(guardrails_check_sensitive_path(dotenv, resolved, sizeof(resolved)) != NULL);
+   assert(unlink(dotenv) == 0);
+   assert(guardrails_check_sensitive_path(dotenv, resolved, sizeof(resolved)) != NULL);
+
+   platform_test_rmrf(root);
 }
 
 static void test_policy_file_reloads_on_change(void)
@@ -478,7 +529,8 @@ static void test_worktree_detect_base_branch_active(void)
 {
    /* A new worktree must be rooted on the repository's DEFAULT branch
     * (origin/HEAD), NOT on whatever feature branch is currently checked out. */
-   char tmpdir[] = "/tmp/test_wt_branch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_branch_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_active: mkdtemp failed, skipping\n");
@@ -526,7 +578,8 @@ static void test_worktree_detect_base_branch_local_default(void)
     * fallback is REMOVED -- a stale or unrelated local branch is exactly how a session
     * inherited work it did not author. Default is now a hard failure, and the local
     * branch is reachable only by explicitly opting in. */
-   char tmpdir[] = "/tmp/test_wt_localdef_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_localdef_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_local_default: mkdtemp failed, skipping\n");
@@ -606,7 +659,8 @@ static void test_worktree_detect_base_branch_master_fallback(void)
 {
    /* No remote default and no "main" -- the chain's last rung is "master". A repo
     * predating the main rename must still resolve rather than refuse. */
-   char tmpdir[] = "/tmp/test_wt_master_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_master_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_master_fallback: mkdtemp failed, "
@@ -634,7 +688,8 @@ static void test_worktree_detect_base_branch_main_precedes_master(void)
 {
    /* Both main and master exist, no remote default. Order is main THEN master, so a
     * repo carrying a legacy master branch alongside main must still pick main. */
-   char tmpdir[] = "/tmp/test_wt_bothdef_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_bothdef_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_main_precedes_master: mkdtemp failed, "
@@ -665,7 +720,8 @@ static void test_worktree_detect_base_branch_configured_beats_remote(void)
    /* The configured value is rung ONE: it must win even when a remote default exists.
     * The existing configured-value assertions run in a remote-less fixture, so they
     * cannot distinguish "configured won" from "fell through to the same name". */
-   char tmpdir[] = "/tmp/test_wt_cfgwins_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_cfgwins_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_configured_beats_remote: mkdtemp failed, "
@@ -714,7 +770,8 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
     * An operator's explicit ref is deliberately NOT rewritten: they named a ref, and if
     * they want the remote one they write "origin/main". This test pins both halves so
     * the asymmetry is a decision on record rather than an accident. */
-   char tmpdir[] = "/tmp/test_wt_remotepref_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_wt_remotepref_XXXXXX", platform_tmpdir());
    if (mkdtemp(tmpdir) == NULL)
    {
       fprintf(stderr, "test_worktree_detect_base_branch_prefers_remote_ref: mkdtemp failed, "
@@ -755,6 +812,82 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
    (void)system(cmd);
 }
 
+/* --- feature-branch targeting: a session's PRs base on aimee/feat/<slug> so a
+ * feature's slices accumulate on one branch instead of each aiming at the
+ * repository's default branch. */
+
+static void feature_fixture_registry(const char *root, const char *sid, const char *work_name,
+                                     char *wt_out, size_t wt_out_len)
+{
+   char dir[512], path[600], wt[600], cmd[700];
+   snprintf(dir, sizeof(dir), "%s/.aimee/worktrees", root);
+   snprintf(wt, sizeof(wt), "%s/%s/main", dir, sid);
+   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", wt);
+   (void)system(cmd);
+   snprintf(path, sizeof(path), "%s/registry.tsv", dir);
+   FILE *f = fopen(path, "a");
+   assert(f != NULL);
+   /* repo, worktree, branch, sid, work_name, base */
+   fprintf(f, "%s\t%s\taimee/session/%s\t%s\t%s\torigin/main\n", root, wt, sid, sid, work_name);
+   fclose(f);
+   if (wt_out && wt_out_len)
+      snprintf(wt_out, wt_out_len, "%s", wt);
+}
+
+static void test_feature_branch_suggest_from_work_name(void)
+{
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_feat_derive_XXXXXX", platform_tmpdir());
+   if (mkdtemp(tmpdir) == NULL)
+   {
+      fprintf(stderr, "test_feature_branch_suggest_from_work_name: mkdtemp failed, skipping\n");
+      return;
+   }
+
+   char branch[128], wt[600];
+   /* A path with no registry row -> no suggestion. The caller then leaves the base to
+    * the server rather than inventing one. */
+   assert(feature_branch_suggest(tmpdir, branch, sizeof(branch)) == -1);
+   assert(branch[0] == '\0');
+
+   feature_fixture_registry(tmpdir, "sid1", "Human Trigger Workflows", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
+
+   /* Resolvable from a path INSIDE the worktree, not only its root -- that is what a
+    * tool's cwd actually looks like. */
+   char inner[700];
+   snprintf(inner, sizeof(inner), "%s/src/modules", wt);
+   assert(feature_branch_suggest(inner, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/human-trigger-workflows") == 0);
+
+   /* Punctuation and repeated separators collapse to a single dash; case folds. */
+   feature_fixture_registry(tmpdir, "sid2", "Fix:  vault__audit (v2)!!", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strcmp(branch, "aimee/feat/fix-vault-audit-v2") == 0);
+
+   /* Longer than the 40-char slug cap -> truncated, still a valid branch. */
+   feature_fixture_registry(tmpdir, "sid3", "an extremely long feature name that runs well past",
+                            wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == 0);
+   assert(strncmp(branch, "aimee/feat/", 11) == 0);
+   assert(strlen(branch + 11) <= 40);
+   assert(branch[strlen(branch) - 1] != '-');
+
+   /* Nothing usable survives slugging -> unresolvable, NOT a branch named after
+    * the punctuation. */
+   feature_fixture_registry(tmpdir, "sid4", "!!! ---", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
+
+   /* Non-ASCII with no ASCII alnum: same rule, no guess. */
+   feature_fixture_registry(tmpdir, "sid5", "日本語", wt, sizeof(wt));
+   assert(feature_branch_suggest(wt, branch, sizeof(branch)) == -1);
+
+   char cmd[512];
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", tmpdir);
+   (void)system(cmd);
+}
+
 /* --- session_isolation_target: catches the regression where concurrent
  * claude sessions share a main checkout because the SessionStart hook
  * failed to create/point them at per-session managed worktrees. */
@@ -762,7 +895,8 @@ static void test_worktree_detect_base_branch_remote_preference_scope(void)
 static void session_isolation_make_repo(char *tmpdir, size_t tmpdir_len)
 {
    /* mkdtemp template MUST live in caller's stack — strncpy so len is safe */
-   char tmpl[] = "/tmp/test_sess_iso_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/test_sess_iso_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpl) != NULL);
    snprintf(tmpdir, tmpdir_len, "%s", tmpl);
 
@@ -916,7 +1050,8 @@ static void test_session_isolation_creates_new_worktree_from_existing_worktree(v
 
 static void test_session_isolation_skips_when_not_a_git_repo(void)
 {
-   char tmpdir[] = "/tmp/test_sess_iso_nogit_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/test_sess_iso_nogit_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char target[MAX_PATH_LEN];
@@ -1218,7 +1353,7 @@ static void test_worktree_mapping_roundtrip(void)
    free(loaded);
 }
 
-/* app_ctx_t used to carry a config_t*, and this asserted it round-tripped. The
+/* app_ctx_t used to carry a legacy_config_record*, and this asserted it round-tripped. The
  * field is gone -- commands read config through the module -- so what is left
  * worth asserting is that the struct still zero-initialises cleanly, which is
  * what every command handler relies on. */
@@ -1469,6 +1604,8 @@ static void test_known_subagent_tools_blocked(void)
                            "\"prompt\":\"Find the installer code\","
                            "\"description\":\"Find installer\"}",
                            &state, MODE_APPROVE, "/tmp", msg, sizeof(msg));
+   if (rc != 2)
+      fprintf(stderr, "Agent subagent guard returned %d: %s\n", rc, msg);
    assert(rc == 2);
    assert(strstr(msg, "BLOCKED") != NULL);
    assert(strstr(msg, "guardrails") != NULL);
@@ -1731,7 +1868,7 @@ static void test_write_file_targeting_worktree_allows_stale_cwd(void)
 static void test_external_feature_checkout_allows_writes(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-external-feature-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-external-feature-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1763,7 +1900,7 @@ static void test_external_feature_checkout_allows_writes(void)
 static void test_external_default_checkout_blocks_writes(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-external-main-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-external-main-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1797,7 +1934,7 @@ static void test_external_default_checkout_blocks_writes(void)
 static void test_shell_in_main_checkout_forced_to_worktree(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-force-main-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-force-main-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1857,7 +1994,7 @@ static void test_path_tool_redirect_is_cwd_independent(void)
     * path slipped through unrewritten and the write landed in the source
     * checkout, scattering edits across two trees. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-cwdindep-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-cwdindep-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -1984,7 +2121,12 @@ static void test_git_commands_allowed_by_default(void)
    char tmpdir[512];
    snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-git-XXXXXX", platform_tmpdir());
    assert(platform_mkdtemp(tmpdir) != NULL);
+   const char *home_env = getenv("HOME");
+   char *saved_home = home_env ? strdup(home_env) : NULL;
    platform_setenv("HOME", tmpdir);
+   char audit_home[640];
+   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
+   assert(platform_mkdir_p(audit_home, 0700) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
 
    guardrails_open_test_sqlite();
@@ -2014,9 +2156,16 @@ static void test_git_commands_allowed_by_default(void)
 
    platform_unsetenv("AIMEE_NO_CACHE");
    guardrails_close_test_sqlite();
-   char cmd[512];
-   snprintf(cmd, sizeof(cmd), "rm -rf %s", tmpdir);
-   (void)system(cmd);
+   if (saved_home)
+   {
+      platform_setenv("HOME", saved_home);
+      free(saved_home);
+   }
+   else
+   {
+      platform_unsetenv("HOME");
+   }
+   platform_test_rmrf(tmpdir);
 }
 
 static void test_bash_command_guard_warns(void)
@@ -2074,18 +2223,7 @@ static void test_bash_command_guard_warns(void)
 
 static void write_skill_dispatch_advisory_config(int enabled)
 {
-   const char *home = getenv("HOME");
-   assert(home && home[0]);
-   char dir[512];
-   snprintf(dir, sizeof(dir), "%s/.config/aimee", home);
-   char cmd[1024];
-   snprintf(cmd, sizeof(cmd), "mkdir -p '%s'", dir);
-   assert(system(cmd) == 0);
-
-   char path[640];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", dir);
-   write_file_text(path, enabled ? "skills:\n  dispatch:\n    advisory: true\n"
-                                 : "skills:\n  dispatch:\n    advisory: false\n");
+   assert(config_set_skills_dispatch_advisory(enabled) == 0);
 }
 
 static void test_skill_dispatch_find_symbols_advisory(void)
@@ -2381,18 +2519,17 @@ static void test_semantic_advisory_pre_tool_check(void)
        getenv("AIMEE_ANTIPATTERNS_BYPASS") ? strdup(getenv("AIMEE_ANTIPATTERNS_BYPASS")) : NULL;
    platform_setenv("HOME", tmpdir);
    platform_unsetenv("AIMEE_HOME");
+   char audit_home[640];
+   snprintf(audit_home, sizeof(audit_home), "%s/.config/aimee", tmpdir);
+   assert(platform_mkdir_p(audit_home, 0700) == 0);
    platform_setenv("AIMEE_NO_CACHE", "1");
    platform_setenv("AIMEE_ANTIPATTERNS_BYPASS", "1");
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   assert(config_load(&cfg) == 0);
-   snprintf(cfg.guardrails_semantic_mode, sizeof(cfg.guardrails_semantic_mode), "advisory");
-   snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
-            "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
-            "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
-            "\"evidence\":{\"explanation\":\"test\"}}'");
-   assert(config_save(&cfg) == 0);
+   assert(config_set("guardrails_semantic_mode", "advisory") == 0);
+   assert(config_set("guardrails_semantic_command",
+                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.83},"
+                     "\"labels\":[\"verification_bypass\"],\"recommendation\":\"prompt\"},"
+                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
 
    session_state_t state;
    memset(&state, 0, sizeof(state));
@@ -2417,11 +2554,10 @@ static void test_semantic_advisory_pre_tool_check(void)
    assert(strstr(msg, "advisory mode") != NULL);
 
    /* Still advisory mode: a "block" recommendation must be downgraded to a prompt. */
-   snprintf(cfg.guardrails_semantic_command, sizeof(cfg.guardrails_semantic_command),
-            "printf '%%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
-            "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
-            "\"evidence\":{\"explanation\":\"test\"}}'");
-   assert(config_save(&cfg) == 0);
+   assert(config_set("guardrails_semantic_command",
+                     "printf '%s' '{\"outputs\":{\"risk\":{\"overall\":0.95},"
+                     "\"labels\":[\"destructive_change\"],\"recommendation\":\"block\"},"
+                     "\"evidence\":{\"explanation\":\"test\"}}'") == 0);
 
    msg[0] = '\0';
    snprintf(payload, sizeof(payload),
@@ -2817,7 +2953,7 @@ static void test_verify_gate_blocks_bash_git_push(void)
    /* Set up a temp git repo with global project.yaml enforce: true
     * and no .last-verify record.  Expect git push to be BLOCKED. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-push-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-push-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2867,7 +3003,7 @@ static void test_verify_gate_blocks_bash_gh_pr_create(void)
 {
    /* Same setup, verify gate should also block gh pr create. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-pr-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-pr-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2917,7 +3053,7 @@ static void test_verify_gate_pr_create_uses_head_commit_not_worktree(void)
     * the real failure, belongs to a stale/foreign worktree). Prior to the fix the
     * gate hashed the working tree and blocked. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-prhead-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-prhead-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -2982,7 +3118,7 @@ static void test_verify_gate_not_enforced_without_enforce_flag(void)
 {
    /* With enforce: false, git push must NOT be blocked by the verify gate. */
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-vg-noblock-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-vg-noblock-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -3035,8 +3171,8 @@ static void test_verify_gate_worktree_uses_own_last_verify(void)
     * file keyed by the main repo's basename). Verify state lives at
     * <main>/.aimee/.last-verify and is found from any worktree CWD. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-wt-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-wt-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-wt-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-wt-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3106,8 +3242,8 @@ static void test_verify_gate_uses_tool_workdir(void)
     * instead of the hook process cwd, otherwise a verified worktree push is
     * checked against the original checkout. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-workdir-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-workdir-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-workdir-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-workdir-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3187,8 +3323,8 @@ static void test_verify_gate_push_branch_uses_branch_worktree(void)
    /* Even if verify can resolve the branch's linked worktree, the session cwd
     * must itself be in a worktree before writes are allowed. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-branch-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-branch-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-branch-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-branch-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3248,8 +3384,8 @@ static void test_verify_gate_push_head_refspec_uses_destination_worktree(void)
    /* HEAD refspec routing resolves the destination branch worktree and forces
     * the command to run there. */
    char maindir[256], wtdir[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-headref-main-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-vg-headref-WT-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-headref-main-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-vg-headref-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(wtdir) != NULL);
 
@@ -3309,8 +3445,8 @@ static void test_verify_gate_push_registered_worktree_from_nonrepo_cwd(void)
    /* Registered worktrees resolve the verify target and force the command to run
     * in that checkout even when the hook cwd is unrelated. */
    char maindir[256], nonrepo[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-reg-main-XXXXXX");
-   snprintf(nonrepo, sizeof(nonrepo), "/tmp/aimee-test-vg-reg-cwd-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-reg-main-XXXXXX", platform_tmpdir());
+   snprintf(nonrepo, sizeof(nonrepo), "%s/aimee-test-vg-reg-cwd-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(nonrepo) != NULL);
 
@@ -3336,6 +3472,16 @@ static void test_verify_gate_push_registered_worktree_from_nonrepo_cwd(void)
 
    char wt_path[MAX_PATH_LEN];
    assert(worktree_sibling_path(maindir, sid, NULL, wt_path, sizeof(wt_path)) == 0);
+
+   /* Server-side provisioning is invisible to the source checkout too. The
+    * registry and checkout store are repository-local state, not user files. */
+   char status_cmd[1024], source_status[512] = "";
+   snprintf(status_cmd, sizeof(status_cmd),
+            "git -C '%s' status --porcelain=v1 --untracked-files=all", maindir);
+   FILE *status_fp = popen(status_cmd, "r");
+   assert(status_fp != NULL);
+   assert(fgets(source_status, sizeof(source_status), status_fp) == NULL);
+   assert(pclose(status_fp) == 0);
 
    char *wt_hash = verify_compute_file_hash(wt_path);
    assert(wt_hash != NULL);
@@ -3383,8 +3529,8 @@ static void test_verify_gate_pr_create_registered_worktree_from_nonrepo_cwd(void
    /* Registered worktrees resolve the PR target and force the command to run in
     * that checkout even when the hook cwd is an unrelated repo. */
    char maindir[256], nonrepo[256];
-   snprintf(maindir, sizeof(maindir), "/tmp/aimee-test-vg-prreg-main-XXXXXX");
-   snprintf(nonrepo, sizeof(nonrepo), "/tmp/aimee-test-vg-prreg-cwd-XXXXXX");
+   snprintf(maindir, sizeof(maindir), "%s/aimee-test-vg-prreg-main-XXXXXX", platform_tmpdir());
+   snprintf(nonrepo, sizeof(nonrepo), "%s/aimee-test-vg-prreg-cwd-XXXXXX", platform_tmpdir());
    assert(mkdtemp(maindir) != NULL);
    assert(mkdtemp(nonrepo) != NULL);
 
@@ -3462,9 +3608,9 @@ static void test_verify_gate_pr_create_registered_worktree_from_nonrepo_cwd(void
 static void test_git_push_delete_skips_merged_pr_gate(void)
 {
    char tmpdir[256], fake_bin[256], wtdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-delete-XXXXXX");
-   snprintf(fake_bin, sizeof(fake_bin), "/tmp/aimee-test-push-delete-bin-XXXXXX");
-   snprintf(wtdir, sizeof(wtdir), "/tmp/aimee-test-push-delete-WT-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-delete-XXXXXX", platform_tmpdir());
+   snprintf(fake_bin, sizeof(fake_bin), "%s/aimee-test-push-delete-bin-XXXXXX", platform_tmpdir());
+   snprintf(wtdir, sizeof(wtdir), "%s/aimee-test-push-delete-WT-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    assert(mkdtemp(fake_bin) != NULL);
    assert(mkdtemp(wtdir) != NULL);
@@ -3529,7 +3675,7 @@ static void test_git_push_delete_skips_merged_pr_gate(void)
 static void test_git_push_delete_does_not_skip_later_push_gate(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-delete-chain-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-delete-chain-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -3565,7 +3711,7 @@ static void test_git_push_delete_does_not_skip_later_push_gate(void)
 static void test_bash_git_push_detection_ignores_quoted_text(void)
 {
    char tmpdir[256];
-   snprintf(tmpdir, sizeof(tmpdir), "/tmp/aimee-test-push-quoted-XXXXXX");
+   snprintf(tmpdir, sizeof(tmpdir), "%s/aimee-test-push-quoted-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cmd[1024];
@@ -3749,11 +3895,17 @@ int main(void)
    unlink(db_path);
    assert(db1_init(db_path) == 0);
    assert(server_obs_bus_configure() == 0);
+   /* The verify gate reads its ledger from the git module, so the module has
+    * to be up or every verify assertion below fails on a correctly closed
+    * gate rather than on what it means to test. After the suite's own bus
+    * configuration, not before: reconfiguring a running bus is refused. */
+   git_module_fixture_start();
    /* anti_patterns is DB2 (Postgres). */
 
    test_classify_sensitive();
    test_classify_database();
    test_classify_safe();
+   test_sensitive_path_bounds_and_nonexistent_basename();
    test_classify_path_traversal();
    test_classify_edge_cases();
    test_is_write_command();
@@ -3781,6 +3933,7 @@ int main(void)
    test_worktree_detect_base_branch_main_precedes_master();
    test_worktree_detect_base_branch_configured_beats_remote();
    test_worktree_detect_base_branch_remote_preference_scope();
+   test_feature_branch_suggest_from_work_name();
    test_session_isolation_creates_and_returns_worktree();
    test_session_isolation_sanitizes_malicious_sid();
    test_session_isolation_skips_when_already_in_same_session_worktree();

@@ -1,6 +1,6 @@
 /* cmd_infra.c: infrastructure commands (git, worktree, dashboard, webchat, workspace) */
 #include "aimee.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "agent_exec.h"
 #include "agent_config.h"
 #include "aux_router.h"
@@ -9,7 +9,7 @@
 #include <aimee/workspace/workspace.h>
 #include "commands.h"
 #include "dashboard.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "memory.h"
 #include "platform_process.h"
 #include "platform_random.h"
@@ -130,7 +130,14 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
        * "does the CLI context carry a config" guard no longer decides anything. */
       msg = aux_call("commit_message", prompt, 128);
 
-      /* Fall back to cheapest configured agent */
+      /* Fall back to the cheapest configured agent.
+       *
+       * This said "cheapest" and then took agents[0], which is registry order,
+       * not cost order -- and it took it without checking agent_count, so an
+       * empty roster handed a zeroed agent_t to the executor and the request
+       * went out with no endpoint. Ask the router: it applies cost order and
+       * eligibility, and it is the seam the routing module owns, so a routing
+       * outage refuses here too instead of quietly using whatever sits first. */
       if (!msg)
       {
          agent_config_t acfg;
@@ -138,8 +145,14 @@ static cJSON *git_sub_commit(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
          memset(&result, 0, sizeof(result));
          if (agent_load_config(&acfg) == 0)
          {
-            agent_t *ag = &acfg.agents[0];
-            if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
+            agent_t *ag = agent_route(&acfg, "execute");
+            if (!ag)
+            {
+               char why[256];
+               agent_route_failure_message("execute", why, sizeof(why));
+               fprintf(stderr, "Auto-message unavailable: %s\n", why);
+            }
+            else if (agent_execute(ag, NULL, prompt, 128, 0.0, &result) == 0)
                msg = result.response;
          }
       }
@@ -372,6 +385,70 @@ static cJSON *git_sub_diff(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
    return handle_git_diff_summary(args);
 }
 
+/* Ask an interactive operator which feature branch this PR should target, and record
+ * the answer for the rest of the session.
+ *
+ * PRs default to the session's feature branch rather than the repository's default
+ * branch. A person at a terminal gets to name it -- they know what the feature is
+ * called, and the derived name is only a guess off the session's work name. Everything
+ * non-interactive (an agent, a hook, CI) falls through silently to that derivation,
+ * which happens server-side. Never blocks: a declined or unusable answer just leaves
+ * `base` unset, and the server resolves it. */
+static void pr_prompt_feature_base(cJSON *args)
+{
+   if (cJSON_GetObjectItemCaseSensitive(args, "base"))
+      return; /* explicit --base: nothing to ask */
+   if (!isatty(STDIN_FILENO) || !isatty(STDOUT_FILENO))
+      return;
+
+   char cwd[MAX_PATH_LEN];
+   if (!getcwd(cwd, sizeof(cwd)))
+      return;
+
+   if (strcmp(config_pr_base_mode(), "default_branch") == 0)
+      return; /* opted out: no feature branch is in play */
+
+   char derived[256];
+   int have_suggestion = (feature_branch_suggest(cwd, derived, sizeof(derived)) == 0);
+   if (have_suggestion)
+      printf("Feature branch for this PR [%s]: ", derived);
+   else
+      printf("Feature branch for this PR (aimee/feat/<name>, blank to skip): ");
+   fflush(stdout);
+
+   char line[256];
+   if (!fgets(line, sizeof(line), stdin))
+   {
+      printf("\n");
+      return;
+   }
+   line[strcspn(line, "\r\n")] = '\0';
+   const char *answer = line;
+   while (*answer == ' ' || *answer == '\t')
+      answer++;
+
+   /* Blank accepts the suggestion; with no suggestion it declines, and the request
+    * goes without a base for the server to resolve. */
+   char branch[300];
+   if (!answer[0])
+   {
+      if (!have_suggestion)
+         return;
+      snprintf(branch, sizeof(branch), "%s", derived);
+   }
+   /* A bare name is the common answer; qualify it so the operator does not have to
+    * remember the prefix. */
+   else if (strncmp(answer, "aimee/feat/", 11) == 0)
+      snprintf(branch, sizeof(branch), "%s", answer);
+   else
+      snprintf(branch, sizeof(branch), "aimee/feat/%s", answer);
+
+   /* Sent as an explicit base rather than written anywhere here: the server records it
+    * against this session (db1), so later PRs inherit it without asking again. Writing
+    * it on this side would put the answer on a filesystem the server may not share. */
+   cJSON_AddStringToObject(args, "base", branch);
+}
+
 static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
 {
    if (argc < 1)
@@ -400,6 +477,7 @@ static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
             cJSON_AddStringToObject(args, "body", body);
          if (base)
             cJSON_AddStringToObject(args, "base", base);
+         pr_prompt_feature_base(args);
       }
       else if (strcmp(action, "edit") == 0)
       {
@@ -460,6 +538,8 @@ static cJSON *git_sub_pr(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
             cJSON_AddBoolToObject(args, "wait", 1);
          }
       }
+      else if (strcmp(action, "ready") == 0)
+         pr_prompt_feature_base(args); /* ready opens a PR too, so it needs a base */
    }
    return handle_git_pr(args);
 }
@@ -620,6 +700,104 @@ static cJSON *git_sub_clone(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
    return handle_git_clone(args);
 }
 
+/* The history-integration commands. Each takes its target ref positionally and
+ * continue/abort/skip as a bare word, because that is how they are spoken:
+ * `aimee git merge origin/testing`, `aimee git rebase --continue`. */
+static cJSON *git_sub_integrate(cJSON *args, int argc, char **argv, cJSON *(*handler)(cJSON *),
+                                const char *what)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      const char *a = argv[i];
+      while (*a == '-')
+         a++;
+      if (strcmp(a, "continue") == 0 || strcmp(a, "abort") == 0 || strcmp(a, "skip") == 0)
+         cJSON_AddStringToObject(args, "action", a);
+      else if (strcmp(argv[i], "--keep-conflicts") == 0)
+         cJSON_AddBoolToObject(args, "abort_on_conflict", 0);
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "ref", argv[i]);
+   }
+   if (!cJSON_GetObjectItemCaseSensitive(args, "ref") &&
+       !cJSON_GetObjectItemCaseSensitive(args, "action"))
+   {
+      fprintf(stderr,
+              "Usage: aimee git %s <ref>            (start one)\n"
+              "       aimee git %s continue|abort   (drive one that hit a conflict)\n"
+              "Add --keep-conflicts to stop in the conflicted state instead of undoing.\n",
+              what, what);
+      return NULL;
+   }
+   return handler(args);
+}
+
+static cJSON *git_sub_merge(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_merge, "merge");
+}
+
+static cJSON *git_sub_rebase(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   /* rebase's target is `base`; the handler accepts either name. */
+   return git_sub_integrate(args, argc, argv, handle_git_rebase, "rebase");
+}
+
+static cJSON *git_sub_cherry_pick(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_cherry_pick, "cherry-pick");
+}
+
+static cJSON *git_sub_revert(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   return git_sub_integrate(args, argc, argv, handle_git_revert, "revert");
+}
+
+static cJSON *git_sub_sync(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "--merge") == 0)
+         cJSON_AddStringToObject(args, "mode", "merge");
+      else if (argv[i][0] != '-')
+         cJSON_AddStringToObject(args, "base", argv[i]);
+   }
+   return handle_git_sync(args);
+}
+
+static cJSON *git_sub_add(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   cJSON *files = NULL;
+   for (int i = 0; i < argc; i++)
+   {
+      if (strcmp(argv[i], "-A") == 0 || strcmp(argv[i], "--all") == 0)
+         cJSON_AddBoolToObject(args, "all", 1);
+      else if (argv[i][0] != '-')
+      {
+         if (!files)
+            files = cJSON_AddArrayToObject(args, "files");
+         cJSON_AddItemToArray(files, cJSON_CreateString(argv[i]));
+      }
+   }
+   if (!files && !cJSON_GetObjectItemCaseSensitive(args, "all"))
+   {
+      fprintf(stderr, "Usage: aimee git add <paths...>\n"
+                      "       aimee git add -A\n");
+      return NULL;
+   }
+   return handle_git_add(args);
+}
+
+static cJSON *git_sub_switch(app_ctx_t *ctx, cJSON *args, int argc, char **argv)
+{
+   if (argc < 1)
+   {
+      fprintf(stderr, "Usage: aimee git switch <branch>\n");
+      return NULL;
+   }
+   cJSON_AddStringToObject(args, "ref", argv[0]);
+   return handle_git_switch(args);
+}
+
 typedef cJSON *(*git_sub_fn)(app_ctx_t *ctx, cJSON *args, int argc, char **argv);
 
 static const struct
@@ -643,6 +821,14 @@ static const struct
     {"reset", git_sub_reset},
     {"restore", git_sub_restore},
     {"clone", git_sub_clone},
+    {"merge", git_sub_merge},
+    {"rebase", git_sub_rebase},
+    {"cherry-pick", git_sub_cherry_pick},
+    {"cherry_pick", git_sub_cherry_pick},
+    {"revert", git_sub_revert},
+    {"sync", git_sub_sync},
+    {"add", git_sub_add},
+    {"switch", git_sub_switch},
     {NULL, NULL},
 };
 
@@ -651,7 +837,8 @@ void cmd_git(app_ctx_t *ctx, int argc, char **argv)
    if (argc < 1)
    {
       fprintf(stderr, "Usage: aimee git <status|commit|push|pull|fetch|branch|log|diff|"
-                      "pr|issue|stash|tag|reset|restore|clone|verify>\n");
+                      "pr|issue|stash|tag|reset|restore|clone|verify|\n"
+                      "                 merge|rebase|sync|cherry-pick|revert|add|switch>\n");
       return;
    }
 
@@ -773,14 +960,10 @@ static time_t parse_db_timestamp_utc(const char *s)
 {
    if (!s || !s[0])
       return (time_t)-1;
-   struct tm tmv;
-   memset(&tmv, 0, sizeof(tmv));
-   if (sscanf(s, "%d-%d-%d %d:%d:%d", &tmv.tm_year, &tmv.tm_mon, &tmv.tm_mday, &tmv.tm_hour,
-              &tmv.tm_min, &tmv.tm_sec) != 6)
-      return (time_t)-1;
-   tmv.tm_year -= 1900;
-   tmv.tm_mon -= 1;
-   return timegm(&tmv);
+   /* Shared parser (space form only here before). Keep this function's -1
+    * sentinel: its callers distinguish "no timestamp" from a real value. */
+   time_t parsed = parse_utc_ts(s);
+   return parsed > 0 ? parsed : (time_t)-1;
 }
 
 static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
@@ -790,7 +973,6 @@ static void session_subcmd_list(app_ctx_t *ctx, int argc, char **argv)
    (void)argv;
 
    {
-      db1_init(config_db1_path());
    }
 
    db1_session_state_summary_t rows[128];
@@ -846,8 +1028,6 @@ static void session_subcmd_clean(app_ctx_t *ctx, int argc, char **argv)
 
    int threshold = (config_worktree_stale_secs() > 0) ? config_worktree_stale_secs()
                                                       : CONFIG_DEFAULT_STALE_SESSION_SECS;
-
-   db1_init(config_db1_path());
 
    db1_session_state_summary_t rows[256];
    int total = db1_session_state_list(rows, 256);
@@ -1150,20 +1330,71 @@ static void repo_name_from_url(const char *url, char *out, size_t outlen)
 
 /* Register abs_path as a workspace, discover + index projects, and print results.
  * Shared by both the plain-path and --repo flows. Returns project count or -1. */
-static int register_and_index(app_ctx_t *ctx, const char *abs_path)
+static void workspace_project_identity(const char *root, int collision_safe, char *out,
+                                       size_t out_len)
+{
+   const char *base = strrchr(root, '/');
+   base = (base && base[1]) ? base + 1 : root;
+   snprintf(out, out_len, "%s", base);
+   if (!collision_safe)
+      return;
+
+   project_info_t indexed[256];
+   int count = kb_client_index_list(indexed, 256);
+   int name_collision = 0;
+   for (int i = 0; i < count; i++)
+   {
+      if (strcmp(indexed[i].root, root) == 0)
+      {
+         snprintf(out, out_len, "%s", indexed[i].name);
+         return;
+      }
+      if (strcmp(indexed[i].name, base) == 0)
+         name_collision = 1;
+   }
+   if (!name_collision)
+      return;
+
+   /* Stable path-derived identity only when the human name is already occupied.
+    * This preserves familiar names in the common case while preventing two
+    * unrelated checkouts named `api` from aliasing in the canonical index. */
+   unsigned long hash = 2166136261u;
+   for (const unsigned char *p = (const unsigned char *)root; *p; p++)
+      hash = (hash ^ *p) * 16777619u;
+   snprintf(out, out_len, "%s-%08lx", base, hash & 0xfffffffful);
+}
+
+static int workspace_project_ready(const char *name, const char *root)
+{
+   project_info_t indexed[256];
+   int count = kb_client_index_list(indexed, 256);
+   for (int i = 0; i < count; i++)
+      if (strcmp(indexed[i].name, name) == 0 && strcmp(indexed[i].root, root) == 0)
+         return 1;
+   return 0;
+}
+
+static int register_and_index(app_ctx_t *ctx, const char *abs_path, int prepare)
 {
    int add_rc = config_workspace_add(abs_path, NULL, NULL, NULL);
+   /* Already registered is the state the caller asked for, so it is not an
+    * error. Failing here made `workspace add` non-idempotent, and scripted
+    * setup issues it unconditionally: re-running any automation that had
+    * already registered its path aborted at setup with exit 1, before doing
+    * any work. Fall through to discovery so a repeat run still re-indexes,
+    * which is the half of the command that actually matters on a second call.
+    *
+    * This is the same read-your-writes hazard documented for `workspace
+    * remove` in server_state.c -- a state change a caller cannot immediately
+    * act on is worse than a slow one. */
    if (add_rc == -2)
-   {
-      fprintf(stderr, "workspace: already registered: %s\n", abs_path);
-      return -1;
-   }
-   if (add_rc == -3)
+      fprintf(stderr, "workspace: already registered: %s (re-indexing)\n", abs_path);
+   else if (add_rc == -3)
    {
       fprintf(stderr, "workspace: maximum workspace count reached (64)\n");
       return -1;
    }
-   if (add_rc != 0)
+   if (add_rc != 0 && add_rc != -2)
    {
       fprintf(stderr, "workspace: failed to save config\n");
       return -1;
@@ -1178,40 +1409,77 @@ static int register_and_index(app_ctx_t *ctx, const char *abs_path)
       return -1;
    }
 
-   fprintf(stderr, "workspace: added %s (%d project(s) discovered)\n", abs_path, count);
+   fprintf(stderr, "workspace: %s %s (%d project(s) discovered)\n",
+           add_rc == -2 ? "re-indexed" : "added", abs_path, count);
 
+   char project_names[MAX_DISCOVERED_PROJECTS][128] = {{0}};
+   int project_ready[MAX_DISCOVERED_PROJECTS] = {0};
+   int all_ready = count > 0;
    for (int i = 0; i < count; i++)
    {
-      const char *name = strrchr(projects[i], '/');
-      name = name ? name + 1 : projects[i];
+      workspace_project_identity(projects[i], prepare, project_names[i], sizeof(project_names[i]));
+      const char *name = project_names[i];
       fprintf(stderr, "  indexing: %s\n", name);
       kb_client_index_scan_result_t res;
       if (kb_client_index_scan(name, projects[i], 0, &res) != 0)
+      {
          fprintf(stderr, "    knowledge service unavailable — skipped\n");
+         all_ready = 0;
+      }
       else if (res.skipped)
          fprintf(stderr, "    skipped (%s)\n", res.reason[0] ? res.reason : "unknown");
+
+      /* The scan path may enqueue work behind a service boundary. `prepare` is
+       * the atomic session-facing command, so it does not return until the
+       * exact name/root pair is readable (or the bounded readiness window
+       * expires). Ordinary `add` keeps its historical non-waiting behavior. */
+      if (prepare)
+      {
+         for (int attempt = 0; attempt < 100 && !project_ready[i]; attempt++)
+         {
+            project_ready[i] = workspace_project_ready(name, projects[i]);
+            if (!project_ready[i])
+               usleep(100000);
+         }
+         if (!project_ready[i])
+            all_ready = 0;
+      }
+      else
+         project_ready[i] = 1;
    }
 
    if (ctx->json_output)
    {
       cJSON *obj = cJSON_CreateObject();
       cJSON_AddStringToObject(obj, "path", abs_path);
+      cJSON_AddStringToObject(obj, "host_path", abs_path);
+      cJSON_AddStringToObject(obj, "index_root", abs_path);
+      cJSON_AddStringToObject(obj, "workspace_state", add_rc == -2 ? "reused" : "registered");
       cJSON_AddNumberToObject(obj, "projects", count);
+      cJSON_AddBoolToObject(obj, "ready", all_ready);
+      cJSON *details = cJSON_AddArrayToObject(obj, "project_details");
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *detail = cJSON_CreateObject();
+         cJSON_AddStringToObject(detail, "project", project_names[i]);
+         cJSON_AddStringToObject(detail, "root", projects[i]);
+         cJSON_AddBoolToObject(detail, "ready", project_ready[i]);
+         cJSON_AddItemToArray(details, detail);
+      }
       emit_json_ctx(obj, ctx->json_fields, ctx->response_profile);
    }
    else
    {
       for (int i = 0; i < count; i++)
       {
-         const char *name = strrchr(projects[i], '/');
-         name = name ? name + 1 : projects[i];
-         fprintf(stderr, "  %s\n", name);
+         fprintf(stderr, "  %s%s\n", project_names[i],
+                 prepare ? (project_ready[i] ? " (ready)" : " (not ready)") : "");
       }
    }
    return count;
 }
 
-static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
+static void workspace_cmd_add_impl(app_ctx_t *ctx, int argc, char **argv, int prepare)
 {
    /* Parse flags: --repo <url> [--path <dest>] */
    opt_parsed_t opts;
@@ -1284,15 +1552,16 @@ static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
          return;
       }
 
-      register_and_index(ctx, dest);
+      register_and_index(ctx, dest, prepare);
       return;
    }
 
    /* Plain path */
    if (opt_pos(&opts, 0) == NULL)
    {
-      fprintf(stderr, "Usage: aimee workspace add <path>\n");
-      fprintf(stderr, "       aimee workspace add --repo <url> [--path <dest>]\n");
+      fprintf(stderr, "Usage: aimee workspace %s <path>\n", prepare ? "prepare" : "add");
+      fprintf(stderr, "       aimee workspace %s --repo <url> [--path <dest>]\n",
+              prepare ? "prepare" : "add");
       return;
    }
 
@@ -1310,7 +1579,17 @@ static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
       return;
    }
 
-   register_and_index(ctx, abs);
+   register_and_index(ctx, abs, prepare);
+}
+
+static void workspace_cmd_add(app_ctx_t *ctx, int argc, char **argv)
+{
+   workspace_cmd_add_impl(ctx, argc, argv, 0);
+}
+
+static void workspace_cmd_prepare(app_ctx_t *ctx, int argc, char **argv)
+{
+   workspace_cmd_add_impl(ctx, argc, argv, 1);
 }
 
 static void workspace_cmd_list(app_ctx_t *ctx, int argc, char **argv)
@@ -1402,6 +1681,7 @@ static void workspace_cmd_remove(app_ctx_t *ctx, int argc, char **argv)
 
 static const subcmd_t cmd_workspace_subs[] = {
     {"add", "add a workspace", workspace_cmd_add},
+    {"prepare", "register, index, and wait until a workspace is readable", workspace_cmd_prepare},
     {"list", "list workspaces", workspace_cmd_list},
     {"remove", "remove a workspace", workspace_cmd_remove},
     {NULL, NULL, NULL},
@@ -1411,7 +1691,7 @@ void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
 {
    if (argc < 1)
    {
-      fprintf(stderr, "Usage: aimee workspace <add|list|remove> [options]\n");
+      fprintf(stderr, "Usage: aimee workspace <add|prepare|list|remove> [options]\n");
       return;
    }
 
@@ -1422,7 +1702,7 @@ void cmd_workspace(app_ctx_t *ctx, int argc, char **argv)
    if (subcmd_dispatch(cmd_workspace_subs, sub, ctx, argc, argv) != 0)
    {
       fprintf(stderr, "Unknown workspace subcommand: %s\n", sub);
-      fprintf(stderr, "Usage: aimee workspace <add|list|remove> [options]\n");
+      fprintf(stderr, "Usage: aimee workspace <add|prepare|list|remove> [options]\n");
    }
 }
 

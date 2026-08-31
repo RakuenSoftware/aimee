@@ -2,19 +2,18 @@
  * helpers + memory_retrieval_confidence. Extracted from memory_logic.c. */
 #include "aimee.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/rules.h"
-#endif
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/rules.h"
 #include "modules/learning/learning_evidence.h"
 #include "memory.h"
+#include "memory_activation.h"
 #include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "cJSON.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "platform_process.h"
-#include <aimee/workspace/workspace.h>
 #include "kb.h"
 #include <ctype.h>
 #include <limits.h>
@@ -28,17 +27,12 @@
 /* Check if a window's session has any L2 memories (high-value indicator) */
 static int window_has_l2_link(int64_t window_id)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)window_id;
-   return 0;
-#else
    char session_id[128];
    if (!db1_window_session_id)
       return 0;
    if (db1_window_session_id(window_id, session_id, sizeof(session_id)) != 1 || !session_id[0])
       return 0;
    return db2_memory_count_l2_for_session(session_id) > 0;
-#endif
 }
 
 /* Compute quality-scaled term retention count for a window */
@@ -127,28 +121,56 @@ static const char *session_keywords[] = {
     "what happened",   "how did",      "tell me about",      "recap",          "summary of",
     "session summary", "what went on", "what was discussed", "what did we do", NULL};
 
+/* Right-hand boundary test for a keyword match. A keyword may be followed by a
+ * non-letter (a whole-token match) or by a common inflectional suffix, so "deploy"
+ * still matches "deployed" and "deploying". An arbitrary letter continuation is
+ * rejected — that is what let "add" match "address", "new" match "newsletter",
+ * "count" match "country" and "account", and "fix" match "fixture". These lists
+ * feed intent scoring and the recall-bundle kind budgets, so a false hit reweights
+ * what the model is shown. */
+static int keyword_tail_ok(const char *tail)
+{
+   if (!isalpha((unsigned char)tail[0]))
+      return 1;
+   static const char *const inflections[] = {"s", "es", "ed", "d", "ing", NULL};
+   for (int i = 0; inflections[i]; i++)
+   {
+      size_t n = strlen(inflections[i]);
+      if (strncasecmp(tail, inflections[i], n) == 0 && !isalpha((unsigned char)tail[n]))
+         return 1;
+   }
+   return 0;
+}
+
+/* 1 iff |needle| occurs in |haystack| on both a left and a right word boundary.
+ * Case-insensitive. Multi-word needles work unchanged — only the outer edges are
+ * checked, so "how many" still matches inside a sentence.
+ * Declared in memory_context_internal.h; also used by memory_core_scope_embed.c
+ * and memory_lifecycle.c, which had the same unbounded-strstr keyword lists. */
+int memory_keyword_present(const char *haystack, const char *needle)
+{
+   if (!haystack || !needle || !needle[0])
+      return 0;
+   size_t nlen = strlen(needle);
+   for (const char *p = haystack; *p; p++)
+   {
+      if (strncasecmp(p, needle, nlen) != 0)
+         continue;
+      /* Left boundary: previous char must not be a letter. */
+      if (p != haystack && isalpha((unsigned char)p[-1]))
+         continue;
+      if (keyword_tail_ok(p + nlen))
+         return 1;
+   }
+   return 0;
+}
+
 static int count_keyword_matches(const char *text, const char **keywords)
 {
    int count = 0;
    for (int i = 0; keywords[i]; i++)
-   {
-      /* Case-insensitive substring search */
-      const char *p = text;
-      int klen = (int)strlen(keywords[i]);
-      while (*p)
-      {
-         if (strncasecmp(p, keywords[i], klen) == 0)
-         {
-            /* Check word boundary: previous char must not be alpha */
-            if (p == text || !isalpha((unsigned char)p[-1]))
-            {
-               count++;
-               break;
-            }
-         }
-         p++;
-      }
-   }
+      if (memory_keyword_present(text, keywords[i]))
+         count++;
    return count;
 }
 
@@ -175,7 +197,7 @@ int has_temporal_markers(const char *text)
 
    for (int i = 0; temporal_phrases[i]; i++)
    {
-      if (strstr(buf, temporal_phrases[i]))
+      if (memory_keyword_present(buf, temporal_phrases[i]))
          return 1;
    }
    return 0;
@@ -199,7 +221,7 @@ int memory_is_session_query(const char *task_hint)
 
    for (int k = 0; session_keywords[k]; k++)
    {
-      if (strstr(lower, session_keywords[k]))
+      if (memory_keyword_present(lower, session_keywords[k]))
          return 1;
    }
    return 0;
@@ -234,11 +256,11 @@ memory_query_shape_t memory_classify_deriver_shape(const char *query)
    lower[i] = '\0';
 
    for (int k = 0; quantitative_keywords[k]; k++)
-      if (strstr(lower, quantitative_keywords[k]))
+      if (memory_keyword_present(lower, quantitative_keywords[k]))
          return MEM_SHAPE_QUANTITATIVE;
 
    for (int k = 0; interval_keywords[k]; k++)
-      if (strstr(lower, interval_keywords[k]))
+      if (memory_keyword_present(lower, interval_keywords[k]))
          return MEM_SHAPE_TEMPORAL_INTERVAL;
 
    return MEM_SHAPE_UNKNOWN;
@@ -291,9 +313,28 @@ static int days_between(const char *earlier, const char *later)
  *     report min/max/avg gap and, if there is a "reference" date in the query
  *     (today = now_local_iso8601), the time since the most recent event.
  */
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void derive_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.context", "fact derivation is unavailable: the relational store is "
+                              "unreachable, so no facts are derived, which reads the same as "
+                              "a query that supports none");
+}
+
 int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_count,
                         memory_derived_facts_t *out)
 {
+   if (!db2_conn())
+   {
+      derive_warn_store_unreachable();
+      return 0;
+   }
    if (!out)
       return 0;
    memset(out, 0, sizeof(*out));
@@ -311,7 +352,6 @@ int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_coun
    char dates[MAX_DATES][32];
    int date_count = 0;
 
-#if !defined(AIMEE_DB2_DISABLED)
    for (int i = 0; i < cand_count && date_count < MAX_DATES; i++)
    {
       db2_memory_relation_date_row_t drows[64];
@@ -322,10 +362,6 @@ int memory_derive_facts(const char *query, int64_t *candidate_ids, int cand_coun
          date_count++;
       }
    }
-#else
-   (void)candidate_ids;
-   (void)cand_count;
-#endif
 #undef MAX_DATES
 
    /* Also scan memories for temporal fields in the content/key. */
@@ -797,89 +833,94 @@ static int recall_approx_tokens(cJSON *obj)
 /* Fill one recall section from a pre-fetched row array. Returns count
  * appended. Each row gets a `why` field so the explain surface can surface
  * injection reasons. */
-#if !defined(AIMEE_DB2_DISABLED)
 static int recall_fill_from_rows(const db2_memory_cand_row_t *src_rows, int src_count, cJSON *arr,
-                                 const char *why, int max_rows)
+                                 const char *why, int max_rows,
+                                 const memory_activation_t *activation, int *activation_held)
 {
    if (!src_rows || !arr)
       return 0;
    int n = 0;
-   for (int i = 0; i < src_count && n < max_rows; i++)
-   {
-      cJSON *row = cJSON_CreateObject();
-      if (!row)
-         break;
-      cJSON_AddNumberToObject(row, "memory_id", (double)src_rows[i].id);
-      cJSON_AddStringToObject(row, "tier", src_rows[i].tier);
-      cJSON_AddStringToObject(row, "kind", src_rows[i].kind);
-      cJSON_AddStringToObject(row, "key", src_rows[i].key);
-      cJSON_AddStringToObject(row, "text", src_rows[i].content);
-      cJSON_AddStringToObject(row, "why", why ? why : "");
-      cJSON_AddItemToArray(arr, row);
-      n++;
-   }
+   /* Sticky candidates receive the section's small hysteresis reserve first;
+    * the ordinary relevance order fills what remains. With no loaded state,
+    * pass zero admits nothing and pass one is byte-for-byte the old order. */
+   for (int pass = 0; pass < 2 && n < max_rows; pass++)
+      for (int i = 0; i < src_count && n < max_rows; i++)
+      {
+         int sticky = memory_activation_is_sticky(activation, src_rows[i].id,
+                                                  src_rows[i].activation_sticky_turns);
+         if ((pass == 0) != sticky)
+            continue;
+         /* Relevance is the section query above this helper. The remaining gate
+          * order is fixed: delay -> cooldown -> suppression -> inject. Fetchers
+          * supply more rows than the section cap so a held row is backfilled by
+          * the next eligible candidate rather than silently shrinking recall. */
+         if (memory_activation_is_delayed(activation, src_rows[i].activation_delay_turns) ||
+             memory_activation_in_cooldown(activation, src_rows[i].id,
+                                           src_rows[i].activation_cooldown_turns) ||
+             src_rows[i].activation_suppressed)
+         {
+            if (activation_held)
+               (*activation_held)++;
+            continue;
+         }
+         cJSON *row = cJSON_CreateObject();
+         if (!row)
+            break;
+         cJSON_AddNumberToObject(row, "memory_id", (double)src_rows[i].id);
+         /* Only rows emitted from DB2's memory table participate in activation
+          * bookkeeping.  The server later merges user-local DB1 rows into some
+          * of these same sections, where numeric IDs are from a different ID
+          * space and must never be recorded as DB2 memory activations. */
+         cJSON_AddBoolToObject(row, "activation_managed", 1);
+         cJSON_AddStringToObject(row, "tier", src_rows[i].tier);
+         cJSON_AddStringToObject(row, "kind", src_rows[i].kind);
+         cJSON_AddStringToObject(row, "key", src_rows[i].key);
+         cJSON_AddStringToObject(row, "text", src_rows[i].content);
+         cJSON_AddStringToObject(row, "why", sticky ? "sticky activation" : (why ? why : ""));
+         cJSON_AddItemToArray(arr, row);
+         n++;
+      }
    return n;
 }
-#endif
 
 /* Section 1: identity facts. */
-static int recall_fill_identity(cJSON *arr, int max_rows)
+static int recall_fill_identity(cJSON *arr, int max_rows, const memory_activation_t *activation,
+                                int *activation_held)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)arr;
-   (void)max_rows;
-   return 0;
-#else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "identity key prefix", max_rows);
-#endif
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_IDENTITY, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "identity key prefix", max_rows, activation,
+                                activation_held);
 }
 
 /* Section 2: stable preferences. */
-static int recall_fill_preferences(cJSON *arr, int max_rows)
+static int recall_fill_preferences(cJSON *arr, int max_rows, const memory_activation_t *activation,
+                                   int *activation_held)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)arr;
-   (void)max_rows;
-   return 0;
-#else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_PREFERENCES, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "stable preference", max_rows);
-#endif
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_PREFERENCES, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "stable preference", max_rows, activation,
+                                activation_held);
 }
 
 /* Section 3: active project / task context. */
-static int recall_fill_active_context(cJSON *arr, int max_rows)
+static int recall_fill_active_context(cJSON *arr, int max_rows,
+                                      const memory_activation_t *activation, int *activation_held)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)arr;
-   (void)max_rows;
-   return 0;
-#else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_ACTIVE_CONTEXT, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "recent active context", max_rows);
-#endif
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_ACTIVE_CONTEXT, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "recent active context", max_rows, activation,
+                                activation_held);
 }
 
 /* Section 4: open commitments. */
-static int recall_fill_open_commitments(cJSON *arr, int max_rows)
+static int recall_fill_open_commitments(cJSON *arr, int max_rows,
+                                        const memory_activation_t *activation, int *activation_held)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)arr;
-   (void)max_rows;
-   return 0;
-#else
    db2_memory_cand_row_t rows[64];
-   int cap = max_rows > 64 ? 64 : max_rows;
-   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_OPEN_COMMITMENTS, rows, cap);
-   return recall_fill_from_rows(rows, n, arr, "pending commitment", max_rows);
-#endif
+   int n = db2_memory_list_recall_section(DB2_MEM_RECALL_OPEN_COMMITMENTS, rows, 64);
+   return recall_fill_from_rows(rows, n, arr, "pending commitment", max_rows, activation,
+                                activation_held);
 }
 
 /* Section 5: triggered prospective memories. Delegates to the existing
@@ -952,11 +993,6 @@ static int recall_fill_directives(const char *task_hint, cJSON *arr, int max_row
  * in every recall bundle, before identity and preferences. */
 static int recall_fill_always_on_rules(cJSON *arr, int max_rows)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)arr;
-   (void)max_rows;
-   return 0;
-#else
    rule_t rules[32];
    int cap = max_rows > 32 ? 32 : max_rows;
    int n = db2_rules_list_hard(rules, cap);
@@ -973,7 +1009,6 @@ static int recall_fill_always_on_rules(cJSON *arr, int max_rows)
       cJSON_AddItemToArray(arr, row);
    }
    return n;
-#endif
 }
 
 /* Drop items from the end of a section until the overall bundle fits
@@ -990,7 +1025,6 @@ static void recall_truncate_section(cJSON *bundle, cJSON *arr, int limit_tokens)
    }
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 /* Collect unique memory_id values from all recall sections for attribution. */
 static int recall_collect_ids(const cJSON *bundle, int64_t *out, int max)
 {
@@ -1013,9 +1047,14 @@ static int recall_collect_ids(const cJSON *bundle, int64_t *out, int max)
    }
    return n;
 }
-#endif
 
 cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
+{
+   return memory_recall_activated(task_hint, limit_tokens, session_start, NULL);
+}
+
+cJSON *memory_recall_activated(const char *task_hint, int limit_tokens, int session_start,
+                               const memory_activation_t *activation)
 {
 
    if (limit_tokens <= 0)
@@ -1072,13 +1111,15 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
    int cap_reminders = session_start ? 5 : 3;
    int cap_directives = session_start ? 5 : 2;
 
+   int activation_held = 0;
    recall_fill_always_on_rules(always_on_rules, cap_rules);
-   recall_fill_identity(identity, cap_identity);
-   recall_fill_preferences(preferences, cap_preferences);
-   recall_fill_active_context(active_context, cap_active);
-   recall_fill_open_commitments(open_commitments, cap_commitments);
+   recall_fill_identity(identity, cap_identity, activation, &activation_held);
+   recall_fill_preferences(preferences, cap_preferences, activation, &activation_held);
+   recall_fill_active_context(active_context, cap_active, activation, &activation_held);
+   recall_fill_open_commitments(open_commitments, cap_commitments, activation, &activation_held);
    recall_fill_reminders(task_hint, reminders, cap_reminders);
    recall_fill_directives(task_hint, directives, cap_directives);
+   cJSON_AddNumberToObject(bundle, "activation_held", activation_held);
 
    /* Trim order inverts priority — directives/reminders/commitments/rules
     * get trimmed first so identity and preferences survive under pressure.
@@ -1098,7 +1139,6 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
    cJSON_AddNumberToObject(bundle, "approx_tokens", recall_approx_tokens(bundle));
    cJSON_AddNumberToObject(bundle, "elapsed_ms", ms);
 
-#if !defined(AIMEE_DB2_DISABLED)
    {
       int64_t ids[256];
       int n_ids = recall_collect_ids(bundle, ids, 256);
@@ -1108,7 +1148,6 @@ cJSON *memory_recall(const char *task_hint, int limit_tokens, int session_start)
       if (ev_id[0])
          cJSON_AddStringToObject(bundle, "retrieval_event_id", ev_id);
    }
-#endif
 
    return bundle;
 }

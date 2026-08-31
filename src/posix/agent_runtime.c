@@ -9,6 +9,7 @@
 #include <aimee/translation/aimee_backend.h> /* anthropic_backend_parse / openai_backend_parse */
 #include <aimee/ir/aimee_ir.h>               /* aimee_response_t + block accessors */
 #include "tool_call_args.h"                  /* assistant_message arg normalize/sanitize */
+#include "tool_args_coerce.h"                /* tool_args_canonicalize_json */
 #include "agent_exec.h"
 #include "agent_protocol.h"
 #include "agent_runtime_messages.h"
@@ -19,9 +20,12 @@
 #include <aimee/delegates/delegate_xml_fallback.h>
 #include <aimee/gateway/gateway_delegate.h>
 #include <aimee/gateway/gateway_policy.h>
+#include "gw_stage_governance.h"
 #include "http_retry.h"
 #include "economizer.h"
-#include "economizer_wire_snapshot.h"
+#include "economizer_module_client.h"
+#include "token_tracker.h"
+#include "wire_fence.h"
 #include "log.h"
 #include "middleware.h"
 #include "model_registry.h"
@@ -35,6 +39,7 @@
 #include "cJSON.h"
 #include <ctype.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <signal.h>
 #include <sys/select.h>
 #include <sys/wait.h>
@@ -72,6 +77,14 @@ void db1_agent_job_heartbeat(int job_id);
 void db1_agent_job_heartbeat_ext(int job_id, const char *current_tool, int api_call_count);
 int db1_agent_job_is_cancelled(int job_id);
 int db1_delegation_spawn_stop_reason(const char *delegation_id, char *out, size_t out_sz);
+
+/* The agent loop declares a local `char session_id[128]` for the ephemeral-SSH id,
+ * which shadows the global session_id() accessor inside that function. Reach the
+ * conversation id through this alias rather than renaming a buffer the SSH paths use. */
+static const char *econ_conversation_id(void)
+{
+   return session_id();
+}
 const char *delegation_active_id(void);
 
 static int agent_delegation_stopped(char *buf, size_t bufsz)
@@ -90,7 +103,7 @@ static int agent_delegation_stopped(char *buf, size_t bufsz)
 }
 
 /* Apply the SAFE contract at the authenticated local-tool completion boundary.
- * The result has not crossed a provider boundary yet. econ_json_compact removes
+ * The result has not crossed a provider boundary yet. The Go economizer removes
  * only RFC 8259 whitespace outside strings and succeeds only when strictly
  * shorter; malformed/non-JSON output remains byte-identical. */
 static char *agent_economize_fresh_tool_result(char *result)
@@ -104,7 +117,7 @@ static char *agent_economize_fresh_tool_result(char *result)
 
    uint8_t *compacted = NULL;
    size_t compacted_len = 0;
-   if (econ_json_compact(result, strlen(result), &compacted, &compacted_len) != ECON_JSON_OK)
+   if (econ_module_json_compact(result, strlen(result), &compacted, &compacted_len) != 0)
       return result;
    (void)compacted_len; /* output is NUL-terminated for the existing tool-result surface */
    free(result);
@@ -175,6 +188,65 @@ static int agent_tool_result_usable(const char *result)
       }
    }
    return usable;
+}
+
+static int agent_progress_tool_is_mutation(const char *name)
+{
+   if (!name)
+      return 0;
+   return strcmp(name, "write_file") == 0 || strcmp(name, "edit_file") == 0 ||
+          strcmp(name, "edit_symbol") == 0 || strcmp(name, "apply_patch") == 0;
+}
+
+/* Convert a tool call into the stable identity consumed by the dependency-free
+ * liveness state machine. read_file receives range-aware treatment; other
+ * retrievals use their canonical argument JSON, which still catches a call
+ * revisited after unrelated work. */
+static void agent_progress_retrieval(const char *name, const char *arguments, char *target,
+                                     size_t target_sz, int *range_start, int *range_end,
+                                     int *has_range)
+{
+   if (target && target_sz)
+      target[0] = '\0';
+   if (range_start)
+      *range_start = 0;
+   if (range_end)
+      *range_end = 0;
+   if (has_range)
+      *has_range = 0;
+   if (!name || !arguments || !target || target_sz == 0)
+      return;
+
+   if (strcmp(name, "read_file") == 0)
+   {
+      cJSON *root = cJSON_Parse(arguments);
+      if (root)
+      {
+         cJSON *path = cJSON_GetObjectItemCaseSensitive(root, "path");
+         cJSON *offset = cJSON_GetObjectItemCaseSensitive(root, "offset");
+         cJSON *limit = cJSON_GetObjectItemCaseSensitive(root, "limit");
+         if (cJSON_IsString(path) && path->valuestring)
+            snprintf(target, target_sz, "%s", path->valuestring);
+         if (cJSON_IsNumber(offset) && cJSON_IsNumber(limit) && limit->valuedouble > 0)
+         {
+            long long start = offset->valuedouble < 0 ? 0 : (long long)offset->valuedouble;
+            long long end = start + (long long)limit->valuedouble - 1;
+            if (start > INT_MAX)
+               start = INT_MAX;
+            if (end > INT_MAX)
+               end = INT_MAX;
+            if (range_start)
+               *range_start = (int)start;
+            if (range_end)
+               *range_end = (int)end;
+            if (has_range)
+               *has_range = 1;
+         }
+         cJSON_Delete(root);
+      }
+   }
+   if (!target[0])
+      snprintf(target, target_sz, "%.255s", arguments);
 }
 
 static int agent_bootstrap_repository_evidence(cJSON *messages, int turn, int timeout_ms,
@@ -249,6 +321,9 @@ static void maybe_compact_before_request(const agent_t *agent, cJSON *messages,
    session_compact_config_t scfg;
    memset(&scfg, 0, sizeof(scfg));
    scfg.compact_pct = compact_pct;
+   /* session_compact stays a pure function of its inputs, so the derivation choice
+    * is resolved here rather than read from global config inside the compactor. */
+   scfg.from_record = config_compact_from_record();
 
    int estimated_tokens = request_prompt_token_estimate(messages, system_prompt);
    if (session_compact_pressure(estimated_tokens, 0, context_window, &scfg) !=
@@ -410,7 +485,32 @@ native_provider_http:
 
    struct timespec loop_start;
    clock_gettime(CLOCK_MONOTONIC, &loop_start);
-   int total_timeout_ms = agent->timeout_ms * 4;
+   int configured_total_timeout_ms = agent_loop_total_timeout_ms(agent->timeout_ms, 0);
+   int total_timeout_ms =
+       agent_loop_total_timeout_ms(agent->timeout_ms, agent->tool_loop_timeout_ms_cap);
+
+   /* A stage cap can be SMALLER than one viable call, and nothing checked that.
+    * The loop then stops on its first iteration and reports the budget as
+    * exhausted after a few milliseconds. Seen in production as:
+    *
+    *   tool loop budget exhausted (elapsed=97ms effective=57759ms
+    *                               configured=720000ms stage_remaining_cap=57759ms)
+    *
+    * Nothing was exhausted -- 57.7s never covered the 60s minimum call, so the
+    * delegate could not have started. Refusing here says that plainly instead of
+    * blaming a budget the turn never got to spend, and it costs no model call.
+    * The roundtable path already preflights its phase budget this way. */
+   if (agent_loop_window_too_small(agent->timeout_ms, total_timeout_ms))
+   {
+      int minimum =
+          agent->timeout_ms < AGENT_LOOP_MIN_CALL_MS ? agent->timeout_ms : AGENT_LOOP_MIN_CALL_MS;
+      snprintf(out->error, sizeof(out->error),
+               "stage window too small to start a delegate call (effective=%dms minimum=%dms "
+               "configured=%dms stage_remaining_cap=%dms)",
+               total_timeout_ms, minimum, configured_total_timeout_ms,
+               agent->tool_loop_timeout_ms_cap);
+      return -1;
+   }
 
    /* Ephemeral SSH setup */
    char ephemeral_key[MAX_PATH_LEN] = {0};
@@ -452,9 +552,10 @@ native_provider_http:
       eff_network.tunnel_mgr = network->tunnel_mgr;
 
    /* Build context-rich system prompt */
-   int current_code_only = agent_tools_role_current_code_only(role);
-   char *assembled_sys = agent_build_exec_context_ex(
-       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), system_prompt,
+   /* Read, not derived: the permission was resolved when the run was configured. */
+   int current_code_only = !agent_tools_knowledge_write_allowed();
+   char *assembled_sys = agent_build_exec_context_for_role(
+       agent, has_ephemeral_ssh ? &eff_network : (network ? network : NULL), role, system_prompt,
        current_code_only);
    const char *sys = assembled_sys ? assembled_sys : system_prompt;
    if (!sys || !sys[0])
@@ -567,7 +668,10 @@ native_provider_http:
    char last_tool_result[512] = {0};
    int repeat_count = 0;
    int total_repeat_triggers =
-       0;   /* circuit breaker: aborts after LIVENESS_REPEAT_ABORT_THRESHOLD */
+       0; /* circuit breaker: aborts after LIVENESS_REPEAT_ABORT_THRESHOLD */
+   liveness_progress_state_t progress;
+   liveness_progress_init(&progress);
+   int progress_enabled = delegate_role_is_write(budget_role);
    (void)0; /* transient retries handled by http_retry_post */
 
    /* Adaptive context refresh: more frequent for complex tasks (many tool calls),
@@ -594,11 +698,6 @@ native_provider_http:
    mw_pipeline_t mw_pipeline;
    mw_pipeline_cfgs_t mw_cfgs;
    mw_pipeline_build(&mw_pipeline, &mw_cfgs, &agent->middleware, mw_max_turns, agent->model);
-
-   /* Persistent only within this agent loop; AGGRESSIVE may freeze a reduced
-    * prefix across turns. SAFE never enters context_reduce. */
-   reduce_state_t agent_reduce_state;
-   memset(&agent_reduce_state, 0, sizeof(agent_reduce_state));
 
    while (turn < max_t)
    {
@@ -627,7 +726,14 @@ native_provider_http:
                              (now_ts.tv_nsec - loop_start.tv_nsec) / 1000000);
       if (elapsed_ms > total_timeout_ms)
       {
-         snprintf(out->error, sizeof(out->error), "total timeout exceeded (%dms)", elapsed_ms);
+         if (agent->tool_loop_timeout_ms_cap > 0)
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop total timeout exceeded (elapsed=%dms effective=%dms "
+                     "configured=%dms stage_remaining_cap=%dms)",
+                     elapsed_ms, total_timeout_ms, configured_total_timeout_ms,
+                     agent->tool_loop_timeout_ms_cap);
+         else
+            snprintf(out->error, sizeof(out->error), "total timeout exceeded (%dms)", elapsed_ms);
          break;
       }
 
@@ -656,7 +762,10 @@ native_provider_http:
          {
             aimee_log(LOG_INFO, "agent", "middleware: compact requested: %s", mw_res.reason);
             session_compact_result_t sc_result;
-            session_compact(messages, NULL, &sc_result);
+            session_compact_config_t mw_scfg;
+            memset(&mw_scfg, 0, sizeof(mw_scfg));
+            mw_scfg.from_record = config_compact_from_record();
+            session_compact(messages, &mw_scfg, &sc_result);
             if (sc_result.compacted)
             {
                aimee_log(LOG_INFO, "agent",
@@ -730,8 +839,9 @@ native_provider_http:
       /* A final-only turn cannot satisfy an evidence gate. Keep read-only tools
        * available until one actually succeeds; provider tool_choice is a request,
        * not an enforcement boundary, and some compatible endpoints ignore it. */
-      if (agent_required_evidence_keep_tools(agent->require_initial_tool_call,
-                                             successful_tool_calls))
+      if (agent_evidence_gate_defers_final_turn(agent->require_initial_tool_call,
+                                                successful_tool_calls,
+                                                final_mode == LIVENESS_FINAL_RESPONSE_HARD))
       {
          final_instruction_turn = 0;
          final_text_only_turn = 0;
@@ -751,49 +861,114 @@ native_provider_http:
       /* AGGRESSIVE opts into the existing lossy context reducers on OpenAI-family
        * routes. SAFE never touches previously sent history, and native Anthropic
        * history is never reduced because its exact prefix controls cache reuse. */
-      reduce_result_t agent_reduce_result;
-      memset(&agent_reduce_result, 0, sizeof(agent_reduce_result));
+      /* Context reduction now lives in the Go economizer module and is reached
+       * over the event bus (stage economizer-reduce, kind 11009). This side
+       * resolves config and persists state; every decision is the module's.
+       *
+       * FAIL-OPEN: an unreachable module leaves `reduced` NULL and the turn runs
+       * on its original context. Losing the economizer costs tokens; failing the
+       * turn costs the user's work. */
+      cJSON *reduced_messages = NULL;
+      econ_module_result_t econ_res;
+      memset(&econ_res, 0, sizeof econ_res);
       int reduce_active = 0;
       {
          econ_preset_t preset;
          econ_preset_current(&preset);
-         /* The closet denylist is a borrowed pointer stored in rcfg and read
-          * after the reduce runs, so it is copied out of the accessor buffer. */
          char closet_denylist[CONFIG_COPY_MAX];
          config_coord_closet_denylist_copy(closet_denylist, sizeof(closet_denylist));
          if (!anthropic && (preset.history_fold || preset.compress))
          {
-            reduce_config_t rcfg;
-            memset(&rcfg, 0, sizeof rcfg);
-            rcfg.delegate_seam = 1;
-            rcfg.history_fold = preset.history_fold && !chatgpt;
-            rcfg.compress = preset.compress;
-            rcfg.freeze_guard_enabled = 1;
-            rcfg.freeze_guard_horizon = preset.freeze_guard_horizon;
-            rcfg.fold.retained_msgs = config_fold_retained_msgs();
-            rcfg.fold.min_fold_msgs = config_fold_min_fold_msgs();
-            rcfg.fold.reasoning_excerpt_bytes = config_fold_excerpt_bytes();
-            rcfg.fold.compact_head_bytes = config_compact_head_bytes();
-            rcfg.fold.compact_tail_bytes = config_compact_tail_bytes();
-            rcfg.fold.register_enabled = config_fold_register_enabled();
-            rcfg.fold.closet.enabled = config_coord_closet_enabled();
-            rcfg.fold.closet.budget_bytes = config_coord_closet_budget_bytes();
-            rcfg.fold.closet.max_ratio_pct = config_coord_closet_max_ratio_pct();
-            rcfg.fold.closet.denylist = closet_denylist[0] ? closet_denylist : NULL;
-            agent_reduce_state.reduced = 0;
-            agent_reduce_state.turn = turn;
-            if (context_reduce(messages, sys, fb_agent.model, NULL, REDUCE_SEAM_DELEGATE, &rcfg,
-                               &agent_reduce_state, &agent_reduce_result) == 0 &&
-                agent_reduce_result.mutated && agent_reduce_result.messages)
-               reduce_active = 1;
-            else if (!reduce_active)
+            econ_module_request_t mreq;
+            memset(&mreq, 0, sizeof mreq);
+            /* The fold is reachable on its own, not only via the AGGRESSIVE
+             * preset: fold.enabled had zero live callers before, so the only way
+             * to turn it on was a tier that also enables wire mutation.
+             *
+             * THE CHATGPT ROUTE FOLDS TOO. It was excluded in #913 as "unverified"
+             * rather than as known-broken, and the exclusion then outlived the
+             * doubt that motivated it: chatgpt is what a codex-provider deployment
+             * actually uses, so excluding it meant the fold never ran there at all.
+             * Measured on CT 403 with the module attached and mode=aggressive, the
+             * same request cost an IDENTICAL 38826 prompt tokens with the
+             * economizer attached and detached — the lever was structurally
+             * unreachable on the only route the box uses.
+             *
+             * The original doubt was about SHAPE: folded turns are {role, content}
+             * with a string content, and agent_build_request_responses forwards
+             * `input` without converting to typed items. The Responses API accepts
+             * that string shorthand, which is why this is safe, and it is verified
+             * live against the real backend rather than argued from the spec. */
+            mreq.history_fold = preset.history_fold || config_fold_enabled();
+            mreq.compress = preset.compress;
+            mreq.freeze_guard_enabled = 1;
+            mreq.freeze_guard_horizon = preset.freeze_guard_horizon;
+            mreq.retained_msgs = config_fold_retained_msgs();
+            mreq.min_fold_msgs = config_fold_min_fold_msgs();
+            mreq.excerpt_bytes = config_fold_excerpt_bytes();
+            mreq.compact_head_bytes = config_compact_head_bytes();
+            mreq.compact_tail_bytes = config_compact_tail_bytes();
+            mreq.register_enabled = config_fold_register_enabled();
+            mreq.closet_enabled = config_coord_closet_enabled();
+            mreq.closet_budget_bytes = config_coord_closet_budget_bytes();
+            mreq.closet_max_ratio_pct = config_coord_closet_max_ratio_pct();
+            mreq.closet_denylist = closet_denylist[0] ? closet_denylist : NULL;
+            mreq.recall_enabled = config_fold_recall_enabled();
+            mreq.recall_ttl_turns = config_fold_recall_ttl_turns();
+            mreq.recall_inject = config_fold_recall_inject();
+            /* Name the conversation and let the module keep its own reducer
+             * state under it. A run is one agent invocation but a conversation
+             * spans several, so without a stable name every user turn would
+             * re-derive the fold boundary and start with an EMPTY page table --
+             * a coordinate evicted in the previous run would be unrecoverable.
+             *
+             * Strictly the session id, and NULL when there is none: a shared or
+             * guessed name here would serve one conversation another's context. */
+            mreq.state_key = econ_conversation_id();
+
+            /* The freeze guardrail prices each cache tier; the module does the
+             * arithmetic, this side supplies the rates. */
             {
-               context_reduce_result_free(&agent_reduce_result);
-               memset(&agent_reduce_result, 0, sizeof agent_reduce_result);
+               token_usage_t w = {0}, in = {0}, rd = {0};
+               w.cache_write_tokens = 1000;
+               in.input_tokens = 1000;
+               rd.cache_read_tokens = 1000;
+               int priced = 0;
+               double wc = token_estimate_cost_ex(fb_agent.model, &w, &priced);
+               if (priced)
+               {
+                  mreq.priced = 1;
+                  mreq.write_cost = wc;
+                  mreq.input_cost = token_estimate_cost_ex(fb_agent.model, &in, NULL);
+                  mreq.read_cost = token_estimate_cost_ex(fb_agent.model, &rd, NULL);
+               }
             }
+
+            int econ_rc = econ_module_reduce(messages, sys, ECON_MODULE_SEAM_DELEGATE, &mreq,
+                                             &reduced_messages, &econ_res);
+            if (econ_rc == 0 && econ_res.mutated && reduced_messages)
+               reduce_active = 1;
+            /* Same line the gateway seam emits, for the same reason: the delegate
+             * seam recorded NOTHING about what a reduction saved.
+             * agent_record_reduce_ledger was deleted as having no callers and
+             * nothing replaced it, so the only way to tell whether the fold had run
+             * was to diff token counts between two deploys. reused=1 means the
+             * freeze held and the prefix was byte-identical to last turn. */
+            if (econ_rc != 0)
+               aimee_log(LOG_INFO, "economizer.delegate",
+                         "seam=delegate UNREACHED call_result=%d (1=capability_absent: nothing "
+                         "is serving the reduce stage) -- turn ran on its original context",
+                         econ_res.call_result);
+            else
+               aimee_log(LOG_INFO, "economizer.delegate",
+                         "seam=delegate mutated=%d reason=%s baseline=%d reduced=%d removed=%d "
+                         "folded=%d retained=%d reused=%d",
+                         econ_res.mutated, econ_res.reason[0] ? econ_res.reason : "none",
+                         econ_res.baseline_tokens, econ_res.reduced_tokens, econ_res.removed_tokens,
+                         econ_res.folded_msgs, econ_res.retained_msgs, econ_res.reused_boundary);
          }
       }
-      cJSON *eff_messages = reduce_active ? agent_reduce_result.messages : messages;
+      cJSON *eff_messages = reduce_active ? reduced_messages : messages;
 
       /* Build request (use fb_agent which may have fallback model after turn 0) */
       cJSON *req;
@@ -819,13 +994,15 @@ native_provider_http:
       {
          snprintf(out->error, sizeof(out->error), "gateway request pipeline failed");
          cJSON_Delete(req);
-         context_reduce_result_free(&agent_reduce_result);
+         cJSON_Delete(reduced_messages);
+         econ_module_result_free(&econ_res);
          break;
       }
 
       char *body = cJSON_PrintUnformatted(req);
       cJSON_Delete(req);
-      context_reduce_result_free(&agent_reduce_result);
+      cJSON_Delete(reduced_messages);
+      econ_module_result_free(&econ_res);
       if (!body)
       {
          snprintf(out->error, sizeof(out->error), "failed to build request");
@@ -848,8 +1025,16 @@ native_provider_http:
           agent_loop_per_call_timeout_ms(agent->timeout_ms, total_timeout_ms, elapsed_ms);
       if (per_call < 0)
       {
-         snprintf(out->error, sizeof(out->error), "tool loop budget exhausted (%dms of %dms used)",
-                  elapsed_ms, total_timeout_ms);
+         if (agent->tool_loop_timeout_ms_cap > 0)
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop budget exhausted (elapsed=%dms effective=%dms configured=%dms "
+                     "stage_remaining_cap=%dms)",
+                     elapsed_ms, total_timeout_ms, configured_total_timeout_ms,
+                     agent->tool_loop_timeout_ms_cap);
+         else
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop budget exhausted (%dms of %dms used)", elapsed_ms,
+                     total_timeout_ms);
          free(body);
          break;
       }
@@ -865,14 +1050,14 @@ native_provider_http:
                                         api_call_count);
       }
       int economizer_active = config_present() && econ_mode_current() != ECON_MODE_OFF;
-      econ_wire_route_t wire_route = anthropic                   ? ECON_WIRE_ANTHROPIC_MESSAGES
-                                     : chatgpt                   ? ECON_WIRE_OPENAI_RESPONSES
-                                     : strstr(url, "/responses") ? ECON_WIRE_OPENAI_RESPONSES
-                                                                 : ECON_WIRE_OPENAI_CHAT;
-      econ_wire_snapshot_t *wire_snapshot = NULL;
-      econ_wire_bytes_t wire_body;
-      if (econ_wire_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
-                           &wire_body) != 0)
+      wire_fence_route_t wire_route = anthropic                   ? WIRE_FENCE_ANTHROPIC_MESSAGES
+                                      : chatgpt                   ? WIRE_FENCE_OPENAI_RESPONSES
+                                      : strstr(url, "/responses") ? WIRE_FENCE_OPENAI_RESPONSES
+                                                                  : WIRE_FENCE_OPENAI_CHAT;
+      wire_fence_t *wire_snapshot = NULL;
+      wire_fence_bytes_t wire_body;
+      if (wire_fence_select(economizer_active, wire_route, body, strlen(body), &wire_snapshot,
+                            &wire_body) != 0)
       {
          snprintf(out->error, sizeof(out->error), "economizer wire fence unavailable");
          free(body);
@@ -888,7 +1073,7 @@ native_provider_http:
             db1_agent_job_heartbeat_ext(dj, "", api_call_count);
       }
       free(body);
-      econ_wire_snapshot_destroy(wire_snapshot);
+      wire_fence_destroy(wire_snapshot);
 
       /* Model fallback on first turn: if 400, retry with fallback_model */
       if (http_status == 400 && turn == 0 && fb_agent.fallback_model[0])
@@ -922,10 +1107,10 @@ native_provider_http:
                if (dj > 0)
                   db1_agent_job_heartbeat_ext(dj, "model", api_call_count);
             }
-            econ_wire_snapshot_t *fb_snapshot = NULL;
-            econ_wire_bytes_t fb_wire_body;
-            if (econ_wire_select(economizer_active, wire_route, fb_body, strlen(fb_body),
-                                 &fb_snapshot, &fb_wire_body) != 0)
+            wire_fence_t *fb_snapshot = NULL;
+            wire_fence_bytes_t fb_wire_body;
+            if (wire_fence_select(economizer_active, wire_route, fb_body, strlen(fb_body),
+                                  &fb_snapshot, &fb_wire_body) != 0)
             {
                snprintf(out->error, sizeof(out->error),
                         "economizer wire fence unavailable for fallback");
@@ -942,7 +1127,7 @@ native_provider_http:
                   db1_agent_job_heartbeat_ext(dj, "", api_call_count);
             }
             free(fb_body);
-            econ_wire_snapshot_destroy(fb_snapshot);
+            wire_fence_destroy(fb_snapshot);
          }
       }
 
@@ -1117,26 +1302,40 @@ native_provider_http:
       }
       free(response_body);
 
-      /* Universal-gateway P4 (response side): police a denied tool_use the model
-       * emitted anyway. Shape-agnostic — operates on the normalized parsed_response_t,
-       * so it covers every provider. Config-gated internally and gated
-       * to delegate calls here: the primary spawns delegates via the very Task/Subagent
-       * tool this would drop, so policing the primary's response would neuter aimee's
-       * own delegation. Drop count discarded, as in the ingress (anthropic_http.c). */
+      /* Universal-gateway P4 (response side): ask the event-bus governance module
+       * about a denied tool_use the model emitted anyway. Shape-agnostic — the
+       * returned decision is applied to normalized parsed_response_t. This stays
+       * gated to delegate calls: the primary spawns delegates via the very
+       * Task/Subagent tool this policy would drop, so applying it to the primary's
+       * response would neuter aimee's own delegation. */
       int denied_calls = 0;
       char denied_tool[64] = "";
       if (role != NULL)
       {
-         for (int i = 0; i < parsed.call_count; i++)
+         int original_call_count = parsed.call_count;
+         if (original_call_count < 0)
+            original_call_count = 0;
+         else if (original_call_count > AGENT_MAX_TOOL_CALLS)
+            original_call_count = AGENT_MAX_TOOL_CALLS;
+         char original_tool_names[AGENT_MAX_TOOL_CALLS][sizeof(parsed.calls[0].name)];
+         for (int i = 0; i < original_call_count; i++)
+            snprintf(original_tool_names[i], sizeof(original_tool_names[i]), "%s",
+                     parsed.calls[i].name);
+
+         int governance_tri = config_present() ? config_module_governance() : -1;
+         denied_calls = gw_response_run_governance(
+             &parsed, config_module_enabled(governance_tri, gw_response_governance_enabled()),
+             gateway_prevent_subagents_enabled());
+
+         int kept_index = 0;
+         for (int i = 0; i < original_call_count && !denied_tool[0]; i++)
          {
-            if (gateway_policy_is_denied_tool(parsed.calls[i].name))
-            {
-               if (!denied_tool[0])
-                  snprintf(denied_tool, sizeof denied_tool, "%s", parsed.calls[i].name);
-               denied_calls++;
-            }
+            if (kept_index < parsed.call_count &&
+                strcmp(original_tool_names[i], parsed.calls[kept_index].name) == 0)
+               kept_index++;
+            else
+               snprintf(denied_tool, sizeof denied_tool, "%s", original_tool_names[i]);
          }
-         gateway_policy_police_parsed_response(&parsed);
       }
 
       /* Log response trace */
@@ -1471,6 +1670,37 @@ native_provider_http:
       /* Notify auto-snapshot context of the current turn so file writes can be grouped */
       agent_tools_begin_turn(turn);
 
+      liveness_progress_action_t progress_action = LIVENESS_PROGRESS_NONE;
+
+      /* Canonicalize each call's arguments ONCE, here, before anything reads
+       * them.
+       *
+       * The alternative is what this replaced: validation normalized a copy it
+       * discarded, the dispatcher normalized differently and executed THAT, and
+       * in between execution-policy and the audit record both saw the raw
+       * arguments. So the authorizer could permit one shape while the tool ran
+       * another, and the ledger recorded a call that never executed.
+       *
+       * Rewriting in place is what makes that structural rather than a rule to
+       * remember: `arguments` is owned by parsed_response_t and freed by
+       * agent_free_parsed_response, so every reader below — the rounds-to-resume
+       * observer, tool_validate, policy_check_tool, directive_check_tool, the
+       * executor, the audit record and the stuck-detection signature — sees the
+       * same bytes without each having to opt in. A reader added later cannot
+       * miss it.
+       *
+       * The assistant message keeps the model's original arguments: that is the
+       * model's own turn in the transcript, not a description of what ran. */
+      for (int i = 0; i < parsed.call_count; i++)
+      {
+         char *canonical = tool_args_canonicalize_json(
+             agent_tool_get_schema_cached(parsed.calls[i].name), parsed.calls[i].arguments);
+         if (!canonical)
+            continue; /* unparseable JSON: leave it for tool_validate to report */
+         free(parsed.calls[i].arguments);
+         parsed.calls[i].arguments = canonical;
+      }
+
       /* Rounds-to-resume accounting: judge what the model ASKED for, before the
        * tools run — a re-derivation is a re-derivation whether or not it
        * succeeds. Observation only; nothing here steers the loop. */
@@ -1640,8 +1870,10 @@ native_provider_http:
             if (dj > 0)
                db1_agent_job_heartbeat_ext(dj, parsed.calls[i].name, api_call_count);
          }
+         agent_tools_set_effect_authorized(1);
          char *result_str = dispatch_tool_call_ctx(parsed.calls[i].name, parsed.calls[i].arguments,
                                                    agent->timeout_ms);
+         agent_tools_set_effect_authorized(0);
          result_str = agent_economize_fresh_tool_result(result_str);
          {
             int dj = agent_get_durable_job_id();
@@ -1656,6 +1888,19 @@ native_provider_http:
          int usable_tool_result = agent_tool_result_usable(result_str);
          if (usable_tool_result)
             successful_tool_calls++;
+
+         if (progress_enabled)
+         {
+            char target[LIVENESS_PROGRESS_TARGET_MAX];
+            int range_start = 0, range_end = 0, has_range = 0;
+            agent_progress_retrieval(parsed.calls[i].name, parsed.calls[i].arguments, target,
+                                     sizeof(target), &range_start, &range_end, &has_range);
+            liveness_progress_action_t observed = liveness_progress_observe(
+                &progress, parsed.calls[i].name, target, range_start, range_end, has_range,
+                usable_tool_result, agent_progress_tool_is_mutation(parsed.calls[i].name));
+            if (observed > progress_action)
+               progress_action = observed;
+         }
 
          /* Track consecutive tool errors for mw_stall_detect */
          if (result_str && strncmp(result_str, "error", 5) == 0)
@@ -1722,6 +1967,32 @@ native_provider_http:
          {
             cJSON_Delete(anth_results);
          }
+      }
+
+      if (progress_action == LIVENESS_PROGRESS_ABORT)
+      {
+         snprintf(out->error, sizeof(out->error),
+                  "no-progress circuit breaker tripped after %d successful calls without an "
+                  "edit (%d repeated or overlapping retrievals)",
+                  progress.calls_since_mutation, progress.duplicate_hits);
+         agent_free_parsed_response(&parsed);
+         break;
+      }
+      if (progress_action == LIVENESS_PROGRESS_CHECKPOINT ||
+          progress_action == LIVENESS_PROGRESS_ESCALATE)
+      {
+         char progress_hint[768];
+         liveness_format_progress_hint(&progress, progress_action, progress_hint,
+                                       sizeof(progress_hint));
+         cJSON *hint = cJSON_CreateObject();
+         cJSON_AddStringToObject(hint, "role", "user");
+         cJSON_AddStringToObject(hint, "content", progress_hint);
+         cJSON_AddItemToArray(messages, hint);
+         aimee_log(LOG_WARN, "agent.progress",
+                   "checkpoint=%d calls_without_edit=%d duplicate_retrievals=%d",
+                   progress.checkpoints, progress.calls_since_mutation, progress.duplicate_hits);
+         if (refresh_interval > 2)
+            refresh_interval = 2;
       }
 
       /* Stuck detection: if the agent calls the same tool with the same args
@@ -1865,7 +2136,6 @@ native_provider_http:
    cJSON_Delete(tools);
    cJSON_Delete(messages);
    free(assembled_sys);
-
    /* Cleanup ephemeral SSH */
    if (has_ephemeral_ssh)
       agent_ssh_cleanup(network, ephemeral_key, session_id);

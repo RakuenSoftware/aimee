@@ -117,15 +117,28 @@ const char *worktree_for_cwd(const session_state_t *state, const char *cwd);
  * is resolvable -- callers must then refuse to create the worktree rather than guess. */
 int worktree_detect_base_branch(const char *git_root, char *buf, size_t buf_len);
 
+/* SUGGEST a feature branch name (aimee/feat/<slug>) for the session working in
+ * `wt_path`, derived from the work_name the launcher recorded in the worktree
+ * registry. `wt_path` is the worktree or any path inside it; the owning row is found
+ * by walking up, as the attention guard does. Returns 0 with `buf` filled, -1 when
+ * nothing usable can be derived.
+ *
+ * A SUGGESTION, not a lookup: this reads a file under the checkout, so only a caller
+ * running where the checkout is may use it (the CLI). The PR path runs on
+ * aimee-server, which cannot see a detached or mirrored workspace's directory, and
+ * must use feature_branch_for_session() (db1) instead. */
+int feature_branch_suggest(const char *wt_path, char *buf, size_t buf_len);
+
 /* Count active aimee-managed worktrees for git_root. */
 int count_active_worktrees_for_root(const char *git_root);
 
 /* Decide whether the session needs to relocate into its per-session
  * worktree for isolation. Returns 1 and fills `target` with the worktree
  * path when cwd is inside a main (non-aimee) git checkout; returns 0 when
- * cwd is already inside an aimee-managed worktree, is not in a git repo, or
- * the path/creation lookup fails. When create_if_missing is non-zero the
- * worktree is created on demand (idempotent; reuses an existing one). */
+ * cwd is already inside an aimee-managed worktree or is not in a git repo.
+ * Returns -1 when an applicable worktree cannot be resolved or created. When
+ * create_if_missing is non-zero the worktree is created on demand (idempotent;
+ * reuses an existing one). */
 int session_isolation_target(const char *cwd, const char *sid, char *target, size_t target_len,
                              int create_if_missing);
 

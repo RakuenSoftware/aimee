@@ -15,16 +15,16 @@
 #include "roadmap_milestone.h"
 #include "roadmap_reassess.h"
 #include "roadmap_report.h"
-#include "db1/roadmap_runtime.h"
+#include "db1_client/roadmap_runtime.h"
 #include "roadmap.h"
 #include <aimee/delegates/delegate_launch.h>
 #include "headers/dstr.h"
 #include "headers/util.h"
 #include "headers/agent_config.h"
 #include "headers/agent_exec.h"
-#include "db2/artifacts.h"
-#include "db2/db_postgres.h"
-#include "db2/db2_internal.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/db_postgres.h"
+#include "modules/db2/c/db2_internal.h"
 #include "cJSON.h"
 
 /* Maximum bytes captured from a verification command. */
@@ -234,7 +234,7 @@ static int sync_units_to_dispatch(const char *roadmap_id)
          level = lj->valuestring;
       if (cJSON_IsString(pj))
          policy = pj->valuestring;
-      rdm_unit_ensure(roadmap_id, uid, level, policy);
+      db1_roadmap_unit_ensure(roadmap_id, uid, level, policy);
       cJSON_Delete(p);
       n++;
    }
@@ -285,15 +285,15 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
    cfg_defaults(cfg_in, &cfg);
 
    /* Ensure the roadmap dispatch row exists in DB1. */
-   rdm_dispatch_upsert(roadmap_id, "balanced", cfg.require_slice_discussion,
-                       cfg.budget_ceiling_tokens);
-   rdm_dispatch_set_status(roadmap_id, "running", NULL);
+   db1_roadmap_dispatch_upsert(roadmap_id, "balanced", cfg.require_slice_discussion,
+                               cfg.budget_ceiling_tokens);
+   db1_roadmap_dispatch_set_status(roadmap_id, "running", NULL);
 
    /* Sync plan_unit artifacts → rdm_unit_dispatch rows. */
    if (sync_units_to_dispatch(roadmap_id) != 0)
    {
       write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_ERROR);
-      rdm_dispatch_set_status(roadmap_id, "error", "failed to sync units from DB2");
+      db1_roadmap_dispatch_set_status(roadmap_id, "error", "failed to sync units from DB2");
       return -1;
    }
 
@@ -306,7 +306,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
    {
       /* 1. Check for external pause/stop. */
       rdm_dispatch_t drow;
-      if (rdm_dispatch_get(roadmap_id, &drow) == 0)
+      if (db1_roadmap_dispatch_get(roadmap_id, &drow) == 0)
       {
          if (strcmp(drow.status, "paused") == 0)
          {
@@ -323,13 +323,13 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
       /* 2. Safety guards. */
       if (cfg.soft_timeout_s > 0 && now_s() - start_s >= cfg.soft_timeout_s)
       {
-         rdm_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_TIMEOUT);
+         db1_roadmap_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_TIMEOUT);
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_TIMEOUT);
          return 0;
       }
       if (cfg.max_iterations > 0 && iterations >= cfg.max_iterations)
       {
-         rdm_dispatch_set_status(roadmap_id, "paused", "max_iterations");
+         db1_roadmap_dispatch_set_status(roadmap_id, "paused", "max_iterations");
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_PAUSED);
          return 0;
       }
@@ -337,10 +337,10 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
 
       /* 3. Select next ready leaf task. */
       char unit_id[64] = "";
-      int sel = rdm_unit_select_next(roadmap_id, unit_id, sizeof(unit_id));
+      int sel = db1_roadmap_unit_select_next(roadmap_id, unit_id, sizeof(unit_id));
       if (sel < 0)
       {
-         rdm_dispatch_set_status(roadmap_id, "error", "unit select failed");
+         db1_roadmap_dispatch_set_status(roadmap_id, "error", "unit select failed");
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_ERROR);
          return -1;
       }
@@ -375,7 +375,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
             free(verdict);
          }
 
-         rdm_dispatch_set_status(roadmap_id, "done", ROADMAP_AUTO_EXIT_ALL_COMPLETE);
+         db1_roadmap_dispatch_set_status(roadmap_id, "done", ROADMAP_AUTO_EXIT_ALL_COMPLETE);
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_ALL_COMPLETE);
          fprintf(stderr, "aimee: roadmap auto: complete for %s\n", roadmap_id);
          return 0;
@@ -384,7 +384,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
       /* 4. Stuck-loop detection. */
       if (stuck_check(&stuck, unit_id))
       {
-         rdm_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_STUCK);
+         db1_roadmap_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_STUCK);
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_STUCK);
          fprintf(stderr, "aimee: roadmap auto: stuck on unit %s — pausing\n", unit_id);
          return 0;
@@ -394,14 +394,14 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
       cJSON *payload = load_unit_payload(unit_id);
       if (!payload)
       {
-         rdm_unit_set_state(roadmap_id, unit_id, "blocked");
+         db1_roadmap_unit_set_state(roadmap_id, unit_id, "blocked");
          fprintf(stderr, "aimee: roadmap auto: could not load payload for unit %s\n", unit_id);
          continue;
       }
 
       /* 6. Claim the unit. */
-      rdm_unit_claim(roadmap_id, unit_id, "roadmap_auto", cfg.cwd ? cfg.cwd : "");
-      rdm_dispatch_set_phase(roadmap_id, "execute");
+      db1_roadmap_unit_claim(roadmap_id, unit_id, "roadmap_auto", cfg.cwd ? cfg.cwd : "");
+      db1_roadmap_dispatch_set_phase(roadmap_id, "execute");
       fprintf(stderr, "aimee: roadmap auto: dispatching unit %s\n", unit_id);
 
       /* 7. Build and dispatch the delegate work packet. */
@@ -417,7 +417,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
          if (lrc == 0)
          {
             dispatch_ok = 1;
-            rdm_unit_set_coord_job(roadmap_id, unit_id, launch_res.job_id);
+            db1_roadmap_unit_set_coord_job(roadmap_id, unit_id, launch_res.job_id);
          }
          else
          {
@@ -428,7 +428,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
 
       if (!dispatch_ok)
       {
-         rdm_unit_finish(roadmap_id, unit_id, "blocked", "", "dispatch failed");
+         db1_roadmap_unit_finish(roadmap_id, unit_id, "blocked", "", "dispatch failed");
          cJSON_Delete(payload);
          continue;
       }
@@ -437,7 +437,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
       int verify_pass = 0;
       for (int attempt = 0; attempt < cfg.max_verify_retries; attempt++)
       {
-         rdm_unit_increment_verify_attempts(roadmap_id, unit_id);
+         db1_roadmap_unit_increment_verify_attempts(roadmap_id, unit_id);
          int vrc = verify_unit(payload);
          if (vrc == 0)
          {
@@ -464,20 +464,20 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
       if (!verify_pass)
       {
          fprintf(stderr, "aimee: roadmap auto: unit %s moved to needs_review\n", unit_id);
-         rdm_unit_finish(roadmap_id, unit_id, "needs_review", "",
-                         "verification exhausted after retries");
+         db1_roadmap_unit_finish(roadmap_id, unit_id, "needs_review", "",
+                                 "verification exhausted after retries");
          /* The loop could continue with other independent units; for the
           * single-track baseline we pause so a human can review. */
          cJSON_Delete(payload);
-         rdm_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_VERIFY_EXHAUSTED);
+         db1_roadmap_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_VERIFY_EXHAUSTED);
          write_exit(exit_reason, exit_reason_len, ROADMAP_AUTO_EXIT_VERIFY_EXHAUSTED);
          return 0;
       }
 
       /* 9. Persist result and refresh projections. */
-      rdm_unit_finish(roadmap_id, unit_id, "done", "verified", "");
+      db1_roadmap_unit_finish(roadmap_id, unit_id, "done", "verified", "");
       roadmap_projections_write(roadmap_id);
-      rdm_unit_heartbeat(roadmap_id, unit_id);
+      db1_roadmap_unit_heartbeat(roadmap_id, unit_id);
       fprintf(stderr, "aimee: roadmap auto: unit %s done\n", unit_id);
 
       /* 10. Milestone gate: check if the parent slice — and then its parent
@@ -520,7 +520,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
                if (verdict && strcmp(verdict, "pass") == 0)
                {
                   fprintf(stderr, "aimee: roadmap auto: milestone %s gate: pass\n", milestone_id);
-                  rdm_unit_set_state(roadmap_id, milestone_id, "done");
+                  db1_roadmap_unit_set_state(roadmap_id, milestone_id, "done");
                }
                else
                {
@@ -528,7 +528,7 @@ int roadmap_auto_run(const char *roadmap_id, const roadmap_auto_cfg_t *cfg_in, c
                   fprintf(stderr, "aimee: roadmap auto: milestone %s gate: %s — reopening\n",
                           milestone_id, v);
                   /* Reopen: reset the milestone to pending so the loop re-examines it. */
-                  rdm_unit_set_state(roadmap_id, milestone_id, "pending");
+                  db1_roadmap_unit_set_state(roadmap_id, milestone_id, "pending");
                }
                free(verdict);
             }
@@ -544,7 +544,7 @@ int roadmap_auto_pause(const char *roadmap_id)
 {
    if (!roadmap_id || !roadmap_id[0])
       return -1;
-   return rdm_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_PAUSED);
+   return db1_roadmap_dispatch_set_status(roadmap_id, "paused", ROADMAP_AUTO_EXIT_PAUSED);
 }
 
 int roadmap_auto_resume(const char *roadmap_id, const roadmap_auto_cfg_t *cfg, char *exit_reason,
@@ -557,7 +557,7 @@ int roadmap_auto_stop(const char *roadmap_id)
 {
    if (!roadmap_id || !roadmap_id[0])
       return -1;
-   return rdm_dispatch_set_status(roadmap_id, "stopped", ROADMAP_AUTO_EXIT_STOPPED);
+   return db1_roadmap_dispatch_set_status(roadmap_id, "stopped", ROADMAP_AUTO_EXIT_STOPPED);
 }
 
 int roadmap_auto_status(const char *roadmap_id, int json_output)
@@ -565,7 +565,7 @@ int roadmap_auto_status(const char *roadmap_id, int json_output)
    if (!roadmap_id || !roadmap_id[0])
       return -1;
    rdm_dispatch_t d;
-   if (rdm_dispatch_get(roadmap_id, &d) != 0)
+   if (db1_roadmap_dispatch_get(roadmap_id, &d) != 0)
       return -1;
    if (json_output)
    {

@@ -1,5 +1,9 @@
 # P7-reseal-d1 recovery, guard, and completion foundations
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** delivered and validated on PostgreSQL 17 plus swtpm (CT260), with
   default and ASAN/UBSAN builds; only fail-closed startup epoch synchronization
   is wired in production, with no recovery/rotation caller or operator enablement.
@@ -200,7 +204,7 @@ evidence, and evidence loss fail the table constraint. Exact terminal replay
 matches operation, consumed fence, failure class, source phase, preserved
 evidence, and deterministic outbox row before consulting the advanced live fence.
 Earlier transition replays use `failure_from_state` plus the applicable
-resealed/completed checkpoint to prove the requested transition really committed
+resealed/completed checkpoint to prove the requested transition committed
 before quarantine; full digests alone are not accepted as provenance.
 
 All new functions remain owner/migration-orchestrator only: pinned search path,

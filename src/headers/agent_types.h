@@ -1,6 +1,7 @@
 #ifndef DEC_AGENT_TYPES_H
 #define DEC_AGENT_TYPES_H 1
 
+#include <limits.h>
 #include <pthread.h>
 #include <sys/types.h>
 
@@ -98,6 +99,38 @@ static inline int agent_loop_per_call_timeout_ms(int agent_timeout_ms, int total
    if (remaining < min_call)
       return -1;
    return agent_timeout_ms < remaining ? agent_timeout_ms : remaining;
+}
+
+/* Would this delegate be refused before its first call? A workflow stage cap may
+ * be smaller than one viable call, in which case the loop stops immediately and
+ * blames a budget it never got to spend. Callers preflight with this so the
+ * refusal is stated honestly (and costs no model call). Pure -- unit-tested. */
+static inline int agent_loop_window_too_small(int agent_timeout_ms, int total_timeout_ms)
+{
+   return agent_loop_per_call_timeout_ms(agent_timeout_ms, total_timeout_ms, 0) < 0;
+}
+
+/* Whole tool-loop budget for one delegate. The configured per-call timeout keeps
+ * its existing four-call ceiling, while a positive request cap may only reduce
+ * that budget. Workflow callers use the cap to leave time for post-delegate
+ * verification before their stage deadline. */
+static inline int agent_loop_total_timeout_ms(int agent_timeout_ms, int request_cap_ms)
+{
+   int configured =
+       agent_timeout_ms > INT_MAX / 4 ? INT_MAX : (agent_timeout_ms > 0 ? agent_timeout_ms * 4 : 0);
+   if (request_cap_ms > 0 && (configured <= 0 || request_cap_ms < configured))
+      return request_cap_ms;
+   return configured;
+}
+
+/* Apply a positive enclosing-request cap to one backend wait. Unlike the
+ * configured timeout resolver above, a cap may replace an otherwise unbounded
+ * CLI wait but can never lengthen a shorter configured timeout. */
+static inline int agent_timeout_cap_ms(int timeout_ms, int request_cap_ms)
+{
+   if (request_cap_ms > 0 && (timeout_ms <= 0 || request_cap_ms < timeout_ms))
+      return request_cap_ms;
+   return timeout_ms;
 }
 
 /* Effective per-call timeout for a delegate run. A delegate must NEVER run with
@@ -213,6 +246,20 @@ typedef struct agent_middleware_cfg
    int context_window;   /* explicit context window override; 0=auto-detect from model */
 } agent_middleware_cfg_t;
 
+/* Which per-model numbers the operator declared. See agent_t.declared.
+ *
+ * A bit means "the operator stated this value", NOT "the value is non-zero" --
+ * that distinction is the whole point: it lets a free model declare 0 and an
+ * unconfigured one stay silent, which one number cannot express on its own. */
+enum
+{
+   AGENT_DECL_PRICE_IN = 1u << 0,
+   AGENT_DECL_PRICE_OUT = 1u << 1,
+   AGENT_DECL_PRICE_CACHED = 1u << 2,
+   AGENT_DECL_CONTEXT_WINDOW = 1u << 3,
+   AGENT_DECL_MAX_OUTPUT = 1u << 4,
+};
+
 typedef struct agent_ablation_flags
 {
    int configured;        /* 0 = production/default path; treat all guardrails as enabled */
@@ -305,6 +352,27 @@ typedef struct
    double price_in_per_mtok;
    double price_out_per_mtok;
    double price_cached_per_mtok;
+   /* Which of the numeric fields above (and max_output / middleware.context_window
+    * below) the operator actually DECLARED, as AGENT_DECL_* bits.
+    *
+    * The fields alone cannot express this. Their documented convention is "0 =
+    * unset, fall back to the catalog", which conflates a genuinely free model
+    * with an undeclared one and caps a declared-as-0 value at unusable. That was
+    * survivable only while a catalog sat underneath to answer; once operator
+    * declaration is the authoritative source, "the operator said 0" and "the
+    * operator said nothing" have to be different states.
+    *
+    * Set at load from KEY PRESENCE in agents.json rather than from the value, so
+    * an existing config (no key) stays undeclared and nothing changes meaning
+    * under an upgrade. Serialization is driven off these bits, so a declared 0
+    * round-trips instead of vanishing on the next save. */
+   unsigned declared;
+   /* Output-token ceiling for this model, when the operator declares one.
+    * Meaningful only with AGENT_DECL_MAX_OUTPUT set -- 0 is a legal declared
+    * value in the same way a 0 price is. Distinct from max_tokens, which is the
+    * per-REQUEST cap this deployment asks for; this is what the model will
+    * actually emit. */
+   int max_output;
    /* Hardest work this agent may be given. UNSET (the default, so every existing
     * config is unchanged) means no ceiling. Declared by the operator, who knows
     * their local model's limits better than any benchmark would: a small local
@@ -329,6 +397,9 @@ typedef struct
    int cost_tier;
    int max_tokens;
    int timeout_ms;
+   /* Per-invocation whole tool-loop cap supplied by an enclosing workflow
+    * deadline. Runtime-only: never loaded from or written to agents.json. */
+   int tool_loop_timeout_ms_cap;
    int enabled;
    int tools_enabled;
    /* Per-invocation runtime policy (never serialized): require the first
@@ -386,11 +457,21 @@ typedef struct
    agent_t agents[MAX_AGENTS];
    int agent_count;
    char default_agent[MAX_AGENT_NAME];
+   /* Preferred seat for unpinned delegate turns. This is deliberately separate
+    * from default_agent: choosing a local worker must not replace the user's
+    * primary chat model. If unavailable or ineligible for the requested role,
+    * normal capability/cost routing remains the fallback. */
+   char default_delegate[MAX_AGENT_NAME];
    char fallback_chain[MAX_FALLBACK][MAX_AGENT_NAME];
    int fallback_count;
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* One absolute per-request budget shared by the primary route, credential
+    * retries, configured fallbacks, and same-tier fallbacks. Runtime-only: the
+    * deadline is CLOCK_MONOTONIC milliseconds and is never serialized. */
+   int tool_loop_timeout_ms_cap;
+   int64_t tool_loop_deadline_ms;
    agent_network_t network;
    agent_tunnel_mgr_t tunnel_mgr;
    agent_ablation_flags_t ablation;

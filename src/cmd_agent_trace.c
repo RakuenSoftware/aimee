@@ -6,14 +6,14 @@
 #include "commands.h"
 #include "cmd_agent_delegate_impl.h"
 #include "cJSON.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <dirent.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
 /* Defined in cmd_agent_delegate.c */
-void generate_task_id(char *buf, size_t len);
+int generate_task_id(char *buf, size_t len);
 
 /* --- cmd_dispatch (formerly cmd_queue) --- */
 
@@ -73,7 +73,8 @@ void cmd_dispatch(app_ctx_t *ctx, int argc, char **argv)
          int task_timeout = (to && cJSON_IsNumber(to)) ? to->valueint : global_timeout;
 
          char task_id[64];
-         generate_task_id(task_id, sizeof(task_id));
+         if (generate_task_id(task_id, sizeof(task_id)) != 0)
+            continue;
          char result_path[MAX_PATH_LEN];
          snprintf(result_path, sizeof(result_path), "%s/%s.json", tasks_dir, task_id);
 
@@ -220,7 +221,7 @@ void cmd_trace(app_ctx_t *ctx, int argc, char **argv)
 
    if (argc < 1)
       fatal("usage: aimee trace list|show <turn>");
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       fatal("trace: could not initialize DB1");
 
    if (strcmp(argv[0], "list") == 0)
@@ -268,7 +269,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
 
    if (strcmp(argv[0], "list") == 0)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("jobs list: could not initialize DB1");
       db1_agent_job_t jobs[20];
       int n = db1_agent_job_list_recent(jobs, 20, 0); /* list view omits prompt/result */
@@ -288,7 +289,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
    }
    else if ((strcmp(argv[0], "status") == 0 || strcmp(argv[0], "show") == 0) && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("jobs status: could not initialize DB1");
       int jid = atoi(argv[1]);
       db1_agent_job_t job;
@@ -316,7 +317,7 @@ void cmd_jobs(app_ctx_t *ctx, int argc, char **argv)
    }
    else if (strcmp(argv[0], "cancel") == 0 && argc >= 2)
    {
-      if (db1_init(config_db1_path()) != 0)
+      if (!db1_store_ready())
          fatal("jobs cancel: could not initialize DB1");
       int jid = atoi(argv[1]);
       db1_agent_job_update(jid, "cancelled", 0, NULL);

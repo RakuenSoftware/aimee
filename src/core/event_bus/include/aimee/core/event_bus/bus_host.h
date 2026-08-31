@@ -36,7 +36,7 @@
 /* Outbound patterns authorized for an externally admitted slot. Replies and
  * cancellation are authorized from the host's pending-correlation table; only
  * fresh notifications and requests need manifest grants. */
-#define BUS_GRANT_NOTIFY 0x01u
+#define BUS_GRANT_NOTIFY  0x01u
 #define BUS_GRANT_REQUEST 0x02u
 
 typedef struct
@@ -51,9 +51,18 @@ typedef struct
 typedef void (*bus_tap_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
                            uint32_t payload_len);
 
+/* Rare loss-only observer. Unlike the full-stream tap this is never called for
+ * ordinary traffic: only BUS_KIND_OVERFLOW and BUS_KIND_PRODUCER_REAPED reach
+ * it. Daemons use it to escape loss evidence into a durable audit sink without
+ * putting durability work (or even a capture-enabled branch) on dispatch's hot
+ * path. */
+typedef void (*bus_loss_fn)(void *ctx, const bus_frame_t *frame, const uint8_t *payload,
+                            uint32_t payload_len);
+
 typedef struct
 {
    int in_use;
+   uint32_t principal_class;
    uint32_t principal_ref;
    int qpair_fd;
    bus_region_t qpair_region; /* host RW mapping of this client's queue pair */
@@ -112,12 +121,31 @@ typedef struct
    uint32_t dst_slot;
 } bus_overflow_t;
 
-/* An outstanding request, so a reply can be routed back to its requester. */
+/* The block-held event discarded when its producer departs. The old control
+ * event had no payload, so it proved that *something* was reaped but did not
+ * name the event the comment promised to name. */
+typedef struct
+{
+   uint64_t lost_seq;
+   uint32_t lost_kind;
+   uint32_t src_slot;
+} bus_producer_reaped_t;
+
+/* An outstanding request, so a reply can be routed back to its requester.
+ *
+ * Correlation ids are chosen by each client for itself, so they are unique only
+ * within one client: two clients calling the same server will eventually pick
+ * the same number. The host therefore keeps both -- the requester's id, and a
+ * host-assigned id that is unique across the bus and is the only one the server
+ * ever sees. Requests are rewritten to server_correlation_id on the way out and
+ * replies back to correlation_id on the way in, so each caller sees its own
+ * numbering and the server can key its work on something unambiguous. */
 typedef struct
 {
    int in_use;
    int request_open;
    uint64_t correlation_id;
+   uint64_t server_correlation_id;
    uint32_t requester;
    uint32_t server;
 } bus_pending_t;
@@ -153,10 +181,13 @@ typedef struct bus_host
 
    bus_kind_t kinds[BUS_HOST_MAX_KINDS];
    bus_pending_t pending[BUS_HOST_MAX_PENDING];
-   uint64_t seq; /* host-assigned monotonic dispatch order */
+   uint64_t seq;                     /* host-assigned monotonic dispatch order */
+   uint64_t next_server_correlation; /* host-unique ids handed to servers */
 
    bus_tap_fn tap;
    void *tap_ctx;
+   bus_loss_fn loss;
+   void *loss_ctx;
 } bus_host_t;
 
 typedef enum
@@ -191,6 +222,12 @@ void bus_host_destroy(bus_host_t *h);
 bus_host_result_t bus_host_serve_attach(bus_host_t *h, int conn_fd);
 bus_host_result_t bus_host_serve_attach_ex(bus_host_t *h, int conn_fd, uint32_t *slot_out);
 
+/* Release one admitted slot immediately. Runtime owners use this only after an
+ * OS-backed process handle proves the client has exited; ordinary liveness
+ * remains heartbeat-reaped. The caller must hold the same host lock used for
+ * attach, pump, and reap. */
+bus_host_result_t bus_host_release_slot(bus_host_t *h, uint32_t slot);
+
 /* Install the daemon-owned capability binder. Admission authenticates the
  * request before allocation; this hook runs after a slot exists but before its
  * descriptors are granted, and may subscribe/serve only the kinds authorized
@@ -218,6 +255,9 @@ const char *bus_attach_status_name(bus_attach_status_t s);
 
 /* Set the governance/audit tap. Pass NULL to clear. */
 void bus_host_set_tap(bus_host_t *h, bus_tap_fn fn, void *ctx);
+
+/* Set the rare loss observer. Pass NULL to clear. */
+void bus_host_set_loss_sink(bus_host_t *h, bus_loss_fn fn, void *ctx);
 
 /* Register `slot` as an authorized observer of `event_kind` (its notifications).
  * Subscription is the authorization: a client never receives a kind it did not

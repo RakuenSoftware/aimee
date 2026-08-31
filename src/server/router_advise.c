@@ -24,12 +24,12 @@
 #include "cJSON.h"
 #include <aimee/gateway/gateway_pipeline.h> /* gw_request_t — the shared gateway seam */
 #include "ingress_preinject.h"              /* query-from-messages + per-turn id */
-#include "interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "wfe_autonomous_route.h" /* S4: clamp/floor policy */
 #include "wfe_bind_ingress.h"
 #include "wfe_enforce.h"
 #include "wfe_router.h"
-#include "wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
+#include "db1_client/wfe_store.h" /* db1_lifecycle_event_add -- S4 route audit */
 
 /* ~1 in N DEFER turns get the LLM classifier telemetry call. */
 #define ROUTER_SAMPLE_ONE_IN_N 5
@@ -89,7 +89,8 @@ static void *classify_thread(void *arg)
          char payload[512];
          wfe_router_advisory_payload(&d, WFE_PREFILTER_DEFER, 1 /* sampled */, ms, payload,
                                      sizeof payload);
-         ie_record(a->session_id, IE_GUARDRAIL_DECISION, "router-s1", payload, "classifier");
+         db1_interaction_event_record(a->session_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
+                                      "router-s1", payload, "classifier");
          free(res.response);
       }
    }
@@ -126,7 +127,8 @@ static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char
    char payload[512];
    wfe_router_advisory_payload(&d, pf, 0 /* not sampled */, -1.0 /* classifier not run inline */,
                                payload, sizeof payload);
-   ie_record(corr_id, IE_GUARDRAIL_DECISION, "router-s1", payload, "advisory");
+   db1_interaction_event_record(corr_id, ie_event_type_name(IE_GUARDRAIL_DECISION), "router-s1",
+                                payload, "advisory");
 
    /* S2: if the enforcement dial is on AND the routed workflow is enforced, log
     * the advisory enforce decision. The dial is env-gated and default-OFF (unset
@@ -142,7 +144,8 @@ static wfe_prefilter_outcome_t router_advise_log(const char *corr_id, const char
          char ep[256];
          snprintf(ep, sizeof ep, "{\"workflow\":\"%s\",\"enforced\":1,\"stage\":\"%s\"}",
                   d.workflow_id, wfe_enforce_stage_name(estage));
-         ie_record(corr_id, IE_GUARDRAIL_DECISION, "enforce-s2", ep, "advisory");
+         db1_interaction_event_record(corr_id, ie_event_type_name(IE_GUARDRAIL_DECISION),
+                                      "enforce-s2", ep, "advisory");
       }
    }
    return pf;

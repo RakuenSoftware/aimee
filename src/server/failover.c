@@ -3,7 +3,7 @@
 #include "failover.h"
 #include "util.h"
 #include "cJSON.h"
-#include "db1/interaction_events.h"
+#include "db1_client/interaction_events.h"
 #include "model_provider.h"
 
 #include <ctype.h>
@@ -251,8 +251,8 @@ int failover_record_event(const char *session_id, const char *provider, const ch
    if (!payload_json)
       return -1;
 
-   int rc =
-       ie_record(session_id, IE_FAILOVER_EVENT, "system", payload_json, recovered ? "ok" : "error");
+   int rc = db1_interaction_event_record(session_id, ie_event_type_name(IE_FAILOVER_EVENT),
+                                         "system", payload_json, recovered ? "ok" : "error");
    free(payload_json);
    return rc;
 }

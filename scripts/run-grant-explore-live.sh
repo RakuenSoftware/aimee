@@ -102,11 +102,11 @@ trap cleanup EXIT
 step "Provisioning $db"
 snapshot_owner_role
 runuser -u postgres -- dropdb --force --if-exists "$db" >/dev/null 2>&1
-runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/db2/schema_roles.sql >/dev/null 2>&1
+runuser -u postgres -- psql -q -v ON_ERROR_STOP=1 -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 runuser -u postgres -- createdb -O aimee_kb_owner "$db" || fail "createdb"
 psqlq -c 'CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm;' \
   || fail "extensions"
-psqlq -f src/db2/schema_roles.sql >/dev/null 2>&1
+psqlq -f src/modules/db2/c/schema_roles.sql >/dev/null 2>&1
 psqlq -c 'GRANT USAGE, CREATE ON SCHEMA public TO aimee_kb_owner' >/dev/null 2>&1
 
 step "Starting aimee-kb (dev shape: owner role, schema applied at boot)"
@@ -207,8 +207,8 @@ step "INVARIANT: the schema survived and nothing injected"
 # If any of the above had been interpolated rather than bound, the table would be gone.
 [ -n "$(rows "SELECT 1 FROM pg_tables WHERE tablename='kb_write_tier_grant'")" ] \
   || fail "kb_write_tier_grant NO LONGER EXISTS -- SQL injection succeeded"
-[ -n "$(rows "SELECT 1 FROM pg_tables WHERE tablename='kb_audit_event'")" ] \
-  || fail "kb_audit_event no longer exists -- SQL injection succeeded"
+[ -n "$(rows "SELECT 1 FROM pg_tables WHERE tablename='kb_audit_outbox'")" ] \
+  || fail "kb_audit_outbox no longer exists -- SQL injection succeeded"
 echo "  both tables intact"
 
 step "INVARIANT: every hostile subject above was refused, and none was stored"
@@ -286,7 +286,7 @@ grep -q 'rejected request bearing a spoofable' "$kb_log" \
 # header is simply inert. The property that actually matters is therefore NOT "every X-Aimee-*
 # header is rejected" but "no header can change WHO kb acts as" -- which is what this asserts,
 # using a non-admin value that would be plainly visible in the audit row if it were honoured.
-audit_before=$(rows "SELECT count(*) FROM kb_audit_event WHERE action='authz.write_tier.set'")
+audit_before=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action='authz.write_tier.set'")
 code=$(curl -s -o /dev/null -w '%{http_code}' -X POST \
   -H "Authorization: Bearer $AIMEE_KB_API_BEARER_TOKEN" \
   -H "Content-Type: application/json" -H "X-Aimee-Identity-Key: alice" \
@@ -300,12 +300,12 @@ if [ "$code" = "200" ]; then
   gb=$(rows "SELECT granted_by FROM kb_write_tier_grant WHERE subject='oidc:test:hdrprobe'")
   [ "$gb" = "owner" ] \
     || fail "the header (or the request's granted_by) changed the recorded granter to '$gb'"
-  act=$(rows "SELECT actor_principal FROM kb_audit_event WHERE action='authz.write_tier.set'
-                ORDER BY seq DESC LIMIT 1")
+  act=$(rows "SELECT actor_principal FROM kb_audit_outbox WHERE action='authz.write_tier.set'
+                ORDER BY outbox_id DESC LIMIT 1")
   [ "$act" = "owner" ] || fail "the header changed the AUDITED actor to '$act'"
   echo "  granter=owner and audited actor=owner, so neither the header nor granted_by was honoured"
 else
-  audit_after=$(rows "SELECT count(*) FROM kb_audit_event WHERE action='authz.write_tier.set'")
+  audit_after=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action='authz.write_tier.set'")
   [ "$audit_before" = "$audit_after" ] || fail "a refused request still wrote an audit row"
   echo "  refused, and no audit row was written"
 fi
@@ -345,7 +345,7 @@ echo "  carol still full"
 ################################################################################
 step "GROUP 4: integrity -- the audit log is append-only, the ceiling is reported"
 ################################################################################
-step "kb_audit_event rejects UPDATE and DELETE"
+step "kb_audit_outbox rejects UPDATE and DELETE"
 # WORM by trigger. If either succeeds, the audit trail is not evidence of anything.
 #
 # THE TRIGGERS ARE `FOR EACH ROW`, so a statement that matches nothing never fires one and
@@ -356,27 +356,27 @@ for trg in kb_audit_no_update kb_audit_no_delete kb_audit_no_truncate; do
   [ -n "$(rows "SELECT 1 FROM pg_trigger WHERE tgname='$trg' AND NOT tgisinternal")" ] \
     || fail "the $trg WORM trigger is not installed"
 done
-n_audit=$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")
+n_audit=$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")
 [ "${n_audit:-0}" -ge 1 ] \
   || fail "no write-tier audit rows exist yet, so a WORM test here would assert nothing"
 echo "  $n_audit audit row(s) present, all three triggers installed"
 
-before_actors=$(rows "SELECT string_agg(actor_principal,',' ORDER BY seq) FROM kb_audit_event
+before_actors=$(rows "SELECT string_agg(actor_principal,',' ORDER BY outbox_id) FROM kb_audit_outbox
                         WHERE action LIKE 'authz.write_tier%'")
-if psqlq -c "UPDATE kb_audit_event SET actor_principal='tampered'
+if psqlq -c "UPDATE kb_audit_outbox SET actor_principal='tampered'
                WHERE action LIKE 'authz.write_tier%'" >/dev/null 2>&1; then
-  fail "kb_audit_event allowed an UPDATE"
+  fail "kb_audit_outbox allowed an UPDATE"
 fi
-if psqlq -c "DELETE FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'" >/dev/null 2>&1; then
-  fail "kb_audit_event allowed a DELETE"
+if psqlq -c "DELETE FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'" >/dev/null 2>&1; then
+  fail "kb_audit_outbox allowed a DELETE"
 fi
 # Belt and braces: even if a future trigger returned NULL instead of raising, the rows must be
 # byte-identical to what they were before the attempts.
-after_actors=$(rows "SELECT string_agg(actor_principal,',' ORDER BY seq) FROM kb_audit_event
+after_actors=$(rows "SELECT string_agg(actor_principal,',' ORDER BY outbox_id) FROM kb_audit_outbox
                        WHERE action LIKE 'authz.write_tier%'")
 [ "$before_actors" = "$after_actors" ] \
   || fail "the audit rows CHANGED despite the statements being refused"
-[ "$(rows "SELECT count(*) FROM kb_audit_event WHERE action LIKE 'authz.write_tier%'")" = "$n_audit" ] \
+[ "$(rows "SELECT count(*) FROM kb_audit_outbox WHERE action LIKE 'authz.write_tier%'")" = "$n_audit" ] \
   || fail "audit rows were removed despite the DELETE being refused"
 echo "  both refused, and the rows are unchanged"
 

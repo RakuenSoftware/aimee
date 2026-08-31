@@ -54,6 +54,20 @@ else
   make -C src ../aimee ../aimee-server >/dev/null
 fi
 
+# --- the DB1 module ---------------------------------------------------------
+# The daemon holds no store: it reaches DB1 over the module bus, so without the
+# module every family is unreachable. That is not a degraded run -- the pki
+# family failing makes the mTLS ramp self-test fail, TLS is then disabled, and
+# this harness times out waiting for a listener that was never coming.
+# `make all` does not build the module, so build it here.
+# The multicall binary; the store and postgres are two names for it.
+DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module"
+CONFIG_MODULE_BUILT="$REPO/src/build/obj/aimee-module-config"
+if [[ ! -x "$DB1_MODULE_BUILT" || ! -x "$CONFIG_MODULE_BUILT" ]]; then
+  bold "==> Building the store and config modules"
+  make -C src build/obj/aimee-module build/obj/aimee-module-config >/dev/null
+fi
+
 # --- server: scratch home, TLS listener, first-boot Vault bearer ------------
 SERVER_HOME="$(mktemp -d)"
 CLIENT_HOME="$(mktemp -d)"
@@ -62,11 +76,125 @@ CLIENT_HOME="$(mktemp -d)"
 sed "s/8740/${HTTP_PORT}/; s/8743/${TLS_PORT}/" \
     deploy/container/aimee-server.yaml > "$SERVER_HOME/aimee.yaml"
 
+# The grant the supervisor would write, taken from the generated bundle so the
+# served kinds cannot drift from what the module actually serves.
+DB1_MODULE="$SERVER_HOME/aimee-module-aimee"
+PG_MODULE="$SERVER_HOME/aimee-module-postgres"
+CONFIG_MODULE="$SERVER_HOME/aimee-module-config"
+MODULE_BUS_SOCK="$SERVER_HOME/server-module-bus.sock"
+module_pid=""
+config_module_pid=""
+install -m0755 "$DB1_MODULE_BUILT" "$DB1_MODULE"
+install -m0755 "$CONFIG_MODULE_BUILT" "$CONFIG_MODULE"
+mkdir -p "$SERVER_HOME/modules.d/server"
+DB1_GRANT="$REPO/src/build/obj/module-bundle/grants/server/aimee.grant"
+if [[ ! -r "$DB1_GRANT" ]]; then
+  python3 "$REPO/scripts/export_c_repositories.py" \
+    --runtime-bundle "$REPO/src/build/obj/module-bundle" >/dev/null 2>&1 || true
+fi
+if [[ ! -r "$DB1_GRANT" ]]; then
+  red "no generated store grant at $DB1_GRANT; run scripts/export_c_repositories.py"
+  exit 1
+fi
+sed "s|^executable=.*|executable=$DB1_MODULE|" "$DB1_GRANT" \
+  >"$SERVER_HOME/modules.d/server/aimee.grant"
+install -m0755 "$DB1_MODULE_BUILT" "$PG_MODULE"
+# Both grants come from the SAME generated bundle the store's grant above
+# does, rather than being written out here: the refs and kinds are derived from
+# src/modules/process-contracts.json, and a copy transcribed into this file
+# goes stale silently. The store's outbound ref moved from 68 to 69 in a merge;
+# a heredoc here would still say 68 while every other site said 69.
+#
+# The postgres module serves the SQL stage the store calls; the store's OUTBOUND
+# principal is what is allowed to call it. A serve grant admits what a module
+# answers, not what it asks for, so the second is not implied by the first --
+# without it the store attaches and then finds no backend, which reads exactly
+# like a broken store.
+BUNDLE_GRANTS="$REPO/src/build/obj/module-bundle/grants/server"
+for grant_name in postgres aimee-postgres; do
+  if [[ "$grant_name" == postgres ]]; then
+    grant_exe="$PG_MODULE"
+  else
+    grant_exe="$DB1_MODULE"
+  fi
+  if [[ ! -r "$BUNDLE_GRANTS/$grant_name.grant" ]]; then
+    red "no generated $grant_name grant at $BUNDLE_GRANTS/$grant_name.grant"
+    exit 1
+  fi
+  sed "s|^executable=.*|executable=$grant_exe|" \
+    "$BUNDLE_GRANTS/$grant_name.grant" \
+    >"$SERVER_HOME/modules.d/server/$grant_name.grant"
+done
+CONFIG_GRANT="$REPO/src/build/obj/module-bundle/grants/server/config.grant"
+if [[ ! -r "$CONFIG_GRANT" ]]; then
+  red "no generated config grant at $CONFIG_GRANT"
+  exit 1
+fi
+sed "s|^executable=.*|executable=$CONFIG_MODULE|" "$CONFIG_GRANT" \
+  >"$SERVER_HOME/modules.d/server/config.grant"
+
+# Armed BEFORE the daemon, waiting for the socket the daemon is about to create.
+# The daemon runs its mTLS ramp self-test once, at startup, and that needs the
+# pki family; a module attaching afterwards is already too late.
+start_module() {
+  stop_module
+  # Migrations and ordinary operations are separate capabilities. Refuse an
+  # incomplete fixture here, before the module can turn it into an opaque
+  # "store unavailable" startup failure.
+  if [[ -z "${AIMEE_STORE_URL:-}" || -z "${AIMEE_STORE_MIGRATION_URL:-}" ]]; then
+    red "AIMEE_STORE_URL and AIMEE_STORE_MIGRATION_URL are both required"
+    exit 1
+  fi
+  local migration_url="$AIMEE_STORE_MIGRATION_URL"
+  (
+    deadline=$((SECONDS + WAIT_SECONDS))
+    while (( SECONDS < deadline )); do
+      if [[ -S "$MODULE_BUS_SOCK" ]]; then
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" \
+          AIMEE_STORE_MIGRATION_URL="$migration_url" "$PG_MODULE" "$MODULE_BUS_SOCK" &
+        AIMEE_STORE_URL="${AIMEE_STORE_URL:-}" \
+          AIMEE_STORE_MIGRATION_URL="$migration_url" exec "$DB1_MODULE" "$MODULE_BUS_SOCK"
+      fi
+      sleep 0.1
+    done
+    echo "module: the bus socket never appeared" >&2
+  ) >>"$SERVER_HOME/module.log" 2>&1 &
+  module_pid=$!
+  (
+    deadline=$((SECONDS + WAIT_SECONDS))
+    while (( SECONDS < deadline )); do
+      if [[ -S "$MODULE_BUS_SOCK" ]]; then
+        AIMEE_HOME="$SERVER_HOME" exec "$CONFIG_MODULE" "$MODULE_BUS_SOCK"
+      fi
+      sleep 0.1
+    done
+    echo "config module: the bus socket never appeared" >&2
+  ) >>"$SERVER_HOME/config-module.log" 2>&1 &
+  config_module_pid=$!
+}
+stop_module() {
+  if [[ -n "$module_pid" ]]; then
+    kill "$module_pid" 2>/dev/null || true
+    wait "$module_pid" 2>/dev/null || true
+    module_pid=""
+  fi
+  if [[ -n "$config_module_pid" ]]; then
+    kill "$config_module_pid" 2>/dev/null || true
+    wait "$config_module_pid" 2>/dev/null || true
+    config_module_pid=""
+  fi
+}
+
 server_pid=""
 first_start=1
 cleanup() {
+  stop_module
   [[ -n "$server_pid" ]] && kill "$server_pid" 2>/dev/null || true
-  rm -rf "$SERVER_HOME" "$CLIENT_HOME"
+  if [[ "${AIMEE_E2E_KEEP:-0}" == 1 ]]; then
+    printf 'kept server home: %s\nkept client home: %s\n' "$SERVER_HOME" "$CLIENT_HOME"
+  else
+    rm -rf "$SERVER_HOME" "$CLIENT_HOME"
+  fi
 }
 trap cleanup EXIT
 
@@ -74,6 +202,7 @@ ulimit -S -s 65536 || true # server worker threads need a 64 MB stack
 
 bold "==> Starting aimee-server (TLS :${TLS_PORT}, Vault first-boot bearer)"
 start_server() {
+  start_module
   if [[ "$first_start" == 1 ]]; then
     AIMEE_HOME="$SERVER_HOME" AIMEE_DB1_URL="sqlite://${SERVER_HOME}/aimee.db" \
       AIMEE_SERVER_HTTP_BIND=1 AIMEE_API_BEARER_TOKEN="$PRIMARY" \
@@ -151,9 +280,14 @@ AIMEE_HOME="$CLIENT_HOME" "$AIMEE_BIN" remote status >/dev/null 2>&1 \
 
 # Restart from the same persistent home. The only server-side copy capable of
 # authenticating the client is now the encrypted Vault entry.
+# The module attaches to a socket the daemon owns, so a daemon restart takes its
+# attachment with it. Stop it and clear the stale socket; start_server arms a
+# fresh one against the socket the new daemon creates.
+stop_module
 kill "$server_pid" 2>/dev/null || true
 wait "$server_pid" 2>/dev/null || true
 server_pid=""
+rm -f "$MODULE_BUS_SOCK"
 start_server
 AIMEE_HOME="$CLIENT_HOME" "$AIMEE_BIN" remote status >/dev/null 2>&1 \
   && ok "Vault-backed bearer and enrolled client survive server restart" \
@@ -175,5 +309,13 @@ st="$(curl -sk --max-time 10 -o /dev/null -w '%{http_code}' \
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"
-[[ "$FAIL" == 0 ]] || exit 1
+if [[ "$FAIL" != 0 ]]; then
+  printf '%s\n' '--- server log ---'
+  tail -40 "$SERVER_HOME/server.log" 2>/dev/null || true
+  printf '%s\n' '--- DB1 module log ---'
+  tail -20 "$SERVER_HOME/module.log" 2>/dev/null || true
+  printf '%s\n' '--- config module log ---'
+  tail -20 "$SERVER_HOME/config-module.log" 2>/dev/null || true
+  exit 1
+fi
 green "thin-client Vault enrollment works end to end."

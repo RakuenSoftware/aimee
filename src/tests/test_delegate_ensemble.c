@@ -12,6 +12,10 @@
 
 /* --- stubs for agent exec functions --- */
 
+/* Deadline for test_roundtable_deadline_returns_best_so_far. Paired with the
+ * g_parallel_mode == 4 sleep below, which must be comfortably longer. */
+#define ROUNDTABLE_DEADLINE_TEST_MS 200
+
 static int g_parallel_mode = 0; /* 0=all, 1=only-first, 9=last-fails, 10=first-fails,
                                  * 11=first seat fails only on the first fan-out */
 static int g_aggregator_mode = 0;
@@ -114,7 +118,10 @@ int agent_run_parallel(agent_config_t *cfg, agent_task_t *tasks, int count, agen
    }
    if (g_parallel_mode == 4)
    {
-      struct timespec ts = {0, 3000000};
+      /* Must outlast ROUNDTABLE_DEADLINE_TEST_MS by enough that the post-panel
+       * deadline check cannot miss, however the scheduler behaves. See the
+       * comment on that constant. */
+      struct timespec ts = {0, 400000000};
       nanosleep(&ts, NULL);
    }
    for (int i = 0; i < count; i++)
@@ -1909,9 +1916,19 @@ static void test_roundtable_deadline_returns_best_so_far(void)
    opts.mode = ROUNDTABLE_DRAFT;
    opts.turns = ROUNDTABLE_PARALLEL;
    /* One round exercises the post-panel deadline capture: there is no next
-    * loop-top check to set deadline_hit for us. */
+    * loop-top check to set deadline_hit for us.
+    *
+    * The deadline has to sit in a window: ABOVE whatever wall clock passes
+    * between the run starting and the loop-top check (delegate_ensemble.c
+    * breaks there with rounds_run still 0 if the deadline has already gone),
+    * and BELOW the panel's duration, so the check after the panel does fire.
+    * At deadline_ms=1 the lower bound was a scheduling accident -- on a loaded
+    * box the loop-top check lost the race and this asserted rounds_run == 1
+    * against a run that never got to round one. 200ms tolerates any plausible
+    * scheduling delay; the mock panel sleeps twice that, so the upper bound
+    * holds by construction rather than by timing luck. */
    opts.max_rounds = 1;
-   opts.deadline_ms = 1;
+   opts.deadline_ms = ROUNDTABLE_DEADLINE_TEST_MS;
    roundtable_result_t result;
    int rc = delegate_roundtable_run(&acfg, &cfg, "draft until deadline", &opts, &result);
    assert(rc == 0);
@@ -1922,9 +1939,39 @@ static void test_roundtable_deadline_returns_best_so_far(void)
    printf("  test_roundtable_deadline_returns_best_so_far: ok\n");
 }
 
+/* A ONE-SEAT PANEL MUST NOT RUN THE CHAIR PASS.
+ *
+ * The chair pass arbitrates between seats that disagree; with one reviewer it is
+ * an extra delegate call and an extra failure mode. Measured: a one-seat
+ * completeness review returned a correct blocking finding, the chair then died
+ * on "unknown persona 'chairman'", and roundtable_status reported the whole run
+ * FAILED -- a caller polling it discards findings that were right.
+ *
+ * Gated at the USE SITE, not at config load: a preset overlay is applied after
+ * ensemble_panel_from_config and would put chair_synthesis back. */
+static void test_one_seat_panel_skips_chair_pass(void)
+{
+   ensemble_panel_t p;
+   memset(&p, 0, sizeof(p));
+   p.chair_synthesis = 1;
+
+   p.reference_count = 1;
+   assert(!(p.chair_synthesis && p.reference_count > 1));
+
+   p.reference_count = 2;
+   assert(p.chair_synthesis && p.reference_count > 1);
+
+   /* Off stays off regardless of seat count. */
+   p.chair_synthesis = 0;
+   p.reference_count = 5;
+   assert(!(p.chair_synthesis && p.reference_count > 1));
+   printf("  PASS: one-seat panel skips the chair pass\n");
+}
+
 int main(void)
 {
    printf("delegate_ensemble tests\n");
+   test_one_seat_panel_skips_chair_pass();
    test_ensemble_null_args();
    test_ensemble_basic();
    test_ensemble_cost_cap();

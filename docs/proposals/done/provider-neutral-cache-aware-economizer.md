@@ -1,9 +1,13 @@
 # Provider-specific, proof-gated economizer implementation proposal
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 > **Archived complete (2026-07-26).** The scoped implementation and safety gates are
 > present on `testing` with dedicated tests.
 
-- **State:** DONE — delivered scope archived 2026-07-26.
+- **State:** DONE. Delivered scope archived 2026-07-26.
 - **Review status:** CONVERGED (final review aligned, zero issues)
 - **Date:** 2026-07-22
 - **Normative gate:** `provider-neutral-economizer-safety-spec.md`
@@ -176,7 +180,7 @@ The production registry initially contains zero entries. The only implementation
 - denial when membership is absent, stale, or ambiguous.
 
 The signature covers the complete registry and every membership tuple, including provider, endpoint,
-pinned model snapshot, tokenizer, transform ID, and transform version—not only version counters.
+pinned model snapshot, tokenizer, transform ID, and transform version, not only version counters.
 
 Transform algorithms, provenance capabilities, MIME/schema rules, semantic contracts, property tests,
 and enablement are not authorized here. Each transform requires a separate proposal and converged
@@ -235,7 +239,7 @@ or a cacheability change is indeterminate. Unknown residency is full-priced for 
 other unknown semantics are not residency and remain indeterminate.
 Both alternatives use the same pinned canonical JSON serializer, including identical key ordering,
 whitespace, escaping, system/message block order, and unknown-field preservation. The protected
-serialized byte ranges—not decoded semantic objects—are compared for exact equality.
+serialized byte ranges, not decoded semantic objects, are compared for exact equality.
 
 ## Immutable wire-snapshot fence
 
@@ -296,7 +300,7 @@ reduction, effective savings rate, or equivalent under another name.
 
 ## Implementation slices
 
-### Slice 0 — baseline and removal
+### Slice 0: baseline and removal
 
 1. Capture byte-exact off-mode goldens across OpenAI Responses/Chat Completions and Anthropic Messages.
 2. Remove 4xx restore/resend before enabling any new planner path.
@@ -307,27 +311,27 @@ reduction, effective savings rate, or equivalent under another name.
 6. Regenerate and explicitly reapprove goldens whenever a pinned model snapshot, tokenizer, provider
    contract, or serializer changes; unreviewed drift blocks release.
 
-### Slice 1 — types, registry, and fence
+### Slice 1: types, registry, and fence
 
 1. Add checked money, named token buckets, scenario arrays, reason codes, and affine proof ownership.
 2. Add the signed empty registry and exact membership/generation validation.
 3. Implement `econ_wire_snapshot` as the immutable empty-registry dispatch fence.
 
-### Slice 2 — OpenAI local planner skeleton
+### Slice 2: OpenAI local planner skeleton
 
 1. Parse canonical API shapes, explicit cache layout, pinned model/tokenizer, and local price contract.
 2. Enumerate symmetric ordinary/read/write/no-write/output/long-context scenarios.
 3. Implement the strict `>272000` operator and guard-band denial.
 4. Keep mutation unreachable because registry membership is empty.
 
-### Slice 3 — Anthropic local planner skeleton
+### Slice 3: Anthropic local planner skeleton
 
 1. Parse canonical block layout, marker coverage, TTL, pinned model/tokenizer, and local price contract.
 2. Enumerate symmetric ordinary/read/5m-write/1h-write/output/long-context scenarios.
 3. Reject unknown fields, server-tool semantics, aliases, remote token counting, and boundary changes.
 4. Keep mutation unreachable because registry membership is empty.
 
-### Slice 4 — offline verification
+### Slice 4: offline verification
 
 1. Exercise planners only in separately linked test binaries against recorded provider requests and usage objects.
 2. Verify bounds, drift incidents, and adapter disablement without attaching candidates to live calls.

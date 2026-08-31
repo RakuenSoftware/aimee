@@ -1,6 +1,10 @@
 # P5-C1a strict management token and durable replay barrier
 
-- **State:** DONE — implementation and adversarial branch review converged; CT260 production and focused gates passed.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Implementation and adversarial branch review converged; CT260 production and focused gates passed.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §3.
 - **Depends on:** P5-B3c distinct management listener.
 - **Followed by:** P5-C1b primary/WORM action authority and P5-C2 signed JWKS rotation.

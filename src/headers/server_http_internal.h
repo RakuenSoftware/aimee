@@ -12,6 +12,7 @@
  * were file-local statics shared by textual .inc inclusion. */
 /* promoted cross-TU (former .inc statics) */
 int conn_offload(int fd, int is_tcp, int is_tls, int is_management);
+void handle_conn_inline(int fd, int is_tcp);
 int server_http_management_health_route(const char *method, const char *path);
 int server_http_management_route(const char *method, const char *path);
 int server_http_management_action_route(const char *method, const char *path);
@@ -51,6 +52,7 @@ int route_roundtable_set_active(const char *body, char *resp, int cap);
 void send_rate_limited(int fd, int retry_after, const char *request_id);
 void send_response(int fd, int status, const char *body, const char *request_id);
 void handle_session_events(int fd, const char *id_in, const char *request_id);
+void server_http_sse_live_run(int fd, const char *body, server_http_responses_stream_fn handler);
 
 extern atomic_int g_conn_live;
 extern atomic_int g_management_conn_live;
@@ -67,6 +69,7 @@ void handle_conn(int fd, int is_tcp, int is_management);
 /* promoted cross-TU (former .inc statics) */
 int emit(char *resp, int cap, cJSON *obj);
 int err_json(char *resp, int cap, int status, const char *msg);
+int server_http_declared_status(const char *json);
 int write_all_fd(int fd, const char *buf, int len);
 void write_sse_headers(int fd, const char *request_id);
 
@@ -132,6 +135,65 @@ typedef struct
 
 typedef int (*route_handler_fn)(const route_req_t *rq, char *resp, int cap);
 
+/* Request bodies are one JSON document, not a JSON prefix. cJSON_Parse accepts
+ * a valid value followed by arbitrary bytes, which let `{} {}` reach every
+ * generic /v1 dispatch route and perform the first object's mutation. Keep the
+ * check transport-wide so bespoke, synchronous, and async handlers share the
+ * same framing contract. Empty bodies remain valid for no-argument routes. */
+static inline int server_http_json_body_is_single_value(const char *body, int body_len)
+{
+   if (!body || body_len == 0)
+      return 1;
+   if (body_len < 0)
+      return 0;
+   const char *end = NULL;
+   cJSON *parsed = cJSON_ParseWithOpts(body, &end, 0);
+   if (!parsed)
+      return 0;
+   cJSON_Delete(parsed);
+   while (end && (*end == ' ' || *end == '\t' || *end == '\r' || *end == '\n'))
+      end++;
+   return end == body + body_len;
+}
+
+typedef enum
+{
+   RM_EXACT,  /* path == entry->path */
+   RM_PREFIX, /* path == entry->path + <id> ( + entry->suffix ), <id> one segment */
+} route_match_kind_t;
+
+/* One row of the /v1 route registry. `op`, when non-NULL, derives the required
+ * capability from the NDJSON method twin (server_capability_for_method) so the
+ * HTTP route inherits exactly its socket-method capability; otherwise `caps` is
+ * used verbatim. `handler` is NULL for streaming routes (see file header). */
+typedef struct
+{
+   const char *verb;   /* "GET" / "POST" / "PUT" / "DELETE" */
+   const char *path;   /* exact path, or static prefix for RM_PREFIX */
+   const char *suffix; /* trailing segment for RM_PREFIX (e.g. "/stop"), else NULL */
+   route_match_kind_t kind;
+   const char *op;           /* NDJSON method twin for cap derivation, or NULL */
+   uint32_t caps;            /* required caps when op == NULL */
+   route_handler_fn handler; /* buffered handler, or NULL for streaming routes */
+} http_route_t;
+
+/* The /v1 route registry (server_http_routes.c). Shared so the CLI manifest
+ * handler can enumerate it from the sibling TU rather than keeping a second
+ * copy of what the server can do — the same reason the thin client stopped
+ * carrying one. NULL-verb terminated. */
+extern const http_route_t g_v1_routes[];
+int rh_dispatch_op(const route_req_t *rq, char *resp, int cap);
+int rh_command_invoke(const route_req_t *rq, char *resp, int cap);
+int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap);
+int rh_cli_manifest(const route_req_t *rq, char *resp, int cap);
+
+/* First slab for a request body. Bodies are overwhelmingly small, so this is the
+ * only allocation most requests ever make; http_body_reserve (server_http_body.c)
+ * doubles from here as bytes actually arrive, rather than trusting the declared
+ * Content-Length. */
+#define HTTP_BODY_INITIAL_ALLOC (64u * 1024u)
+char *http_read_body(int fd, const char *prefix, int prefix_len, int declared, int *out_len);
+
 /* Narrow request-scoped keepalive used by the P5 management challenge. */
 void server_http_keepalive_set(int enabled);
 int server_http_keepalive_peek(void);
@@ -145,9 +207,14 @@ uint32_t server_http_enrollment_caps(uint32_t caps, int is_tcp, int mtls_authent
 void server_http_gzip_set(int enabled);
 int server_http_gzip_peek(void);
 
+/* One access-log line per served request (server_http_response.c). Demotes the
+ * shapes that are noise BY DESIGN — see the definition — so the log stays
+ * readable; everything else logs at INFO as before. */
+void server_http_log_access(const char *method, const char *path, int status,
+                            const char *request_id);
+
 /* PC2: CI webhook route handler (defined in server_ci_route.c). */
 int rh_dev_ci_event(const route_req_t *rq, char *resp, int cap);
-
 
 /* Workflow Actions lifecycle + project-file-browser route adapters + the shared
  * unsigned-long query-param helper — defined in server_http_config_routes.c
@@ -183,6 +250,7 @@ int rh_server_forensics(const route_req_t *rq, char *resp, int cap);
  * (relocated out of server_http_routes.c to stay under the line-check
  * ceiling). Referenced by the route table in server_http_routes.c. */
 int git_surface_enabled(void); /* AIMEE_WEBCHAT_GIT gate shared by every git route */
+int rh_curiosity(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_org_repos(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_clone_org(const route_req_t *rq, char *resp, int cap);
@@ -194,5 +262,13 @@ int rh_workspace_session_dir(const route_req_t *rq, char *resp, int cap);
 int rh_workspace_editor(const route_req_t *rq, char *resp, int cap);
 int rh_git_credentials(const route_req_t *rq, char *resp, int cap);
 int rh_git_sshkey(const route_req_t *rq, char *resp, int cap);
+
+/* Max flag arguments workspace_add_flag_args can write: --provider/--remote/--head. */
+#define WS_ADD_FLAG_ARGS_MAX 6
+
+/* Build the `workspace.add` flag arguments for a REST workspace registration.
+ * See the definition in workspace_register_args.c. Returns the count written. */
+int workspace_add_flag_args(const char *provider, const char *remote, const char *head,
+                            const char *out[], int out_cap);
 
 #endif /* SERVER_HTTP_INTERNAL_H */

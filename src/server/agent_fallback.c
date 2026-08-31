@@ -141,6 +141,18 @@ int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const c
             continue;
          }
 
+         int remaining = agent_request_tool_loop_remaining_ms(cfg);
+         if (remaining < 0)
+         {
+            snprintf(out->error, sizeof(out->error),
+                     "tool loop total timeout exceeded across delegate retry/fallback attempts");
+            rc = -1;
+            break;
+         }
+         if (remaining > 0 &&
+             (peer->tool_loop_timeout_ms_cap <= 0 || peer->tool_loop_timeout_ms_cap > remaining))
+            peer->tool_loop_timeout_ms_cap = remaining;
+
          peer->write_capable = enforce_writes && delegate_role_is_write(role) ? 1 : 0;
 
          free(out->response);

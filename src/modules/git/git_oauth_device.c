@@ -285,13 +285,23 @@ int oauth_dev_poll(oauth_dev_provider_t p, const char *host, const char *princip
    int rc;
    if (cJSON_IsString(at) && at->valuestring[0])
    {
-      git_host_cred_set(cred_host, at->valuestring);
+      /* Storing is part of completing the sign-in, not a side effect of it: a
+       * provider handing us a token and the vault keeping it fail separately,
+       * and reporting success on the first alone silently leaves the host with
+       * no credential. */
+      int stored = git_host_cred_set(cred_host, at->valuestring) == 0;
       memset(at->valuestring, 0, strlen(at->valuestring)); /* wipe before free */
       pthread_mutex_lock(&g_lock);
       g_device_code[0] = '\0';
       g_client_id[0] = '\0';
       pthread_mutex_unlock(&g_lock);
-      rc = 1;
+      if (stored)
+         rc = 1;
+      else
+      {
+         snprintf(err, errlen, "could not store the %s token", cred_host);
+         rc = -1;
+      }
    }
    else if (cJSON_IsString(e) && (strcmp(e->valuestring, "authorization_pending") == 0 ||
                                   strcmp(e->valuestring, "slow_down") == 0))

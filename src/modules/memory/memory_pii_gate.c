@@ -25,10 +25,24 @@ static int ci_contains(const char *hay, const char *needle)
    return 0;
 }
 
+static memory_pii_turn_classifier_fn g_turn_classifier;
+
+void memory_pii_register_turn_classifier(memory_pii_turn_classifier_fn classifier)
+{
+   g_turn_classifier = classifier;
+}
+
 int memory_pii_turn_requests_sensitive(const char *turn_text)
 {
    if (!turn_text || !turn_text[0])
       return 0;
+   if (g_turn_classifier)
+   {
+      int requests_sensitive = 0;
+      if (g_turn_classifier(turn_text, &requests_sensitive) != 0)
+         return 0; /* no answer: fail closed, withhold rather than leak */
+      return requests_sensitive ? 1 : 0;
+   }
    /* Cues that the user is explicitly asking for a sensitive attribute. Kept
     * specific enough to avoid incidental matches. */
    static const char *cues[] = {"address",    "phone",           "email",           "birthday",
@@ -98,6 +112,25 @@ rel_sensitivity_t memory_pii_rel_sensitivity(const char *rel_type)
    if (def)
       return def->sensitivity;
    return pii_unknown_rel_sensitivity(norm[0] ? norm : rel_type);
+}
+
+static memory_pii_sensitivity_batch_fn g_sensitivity_batch;
+
+void memory_pii_register_sensitivity_batch(memory_pii_sensitivity_batch_fn classifier)
+{
+   g_sensitivity_batch = classifier;
+}
+
+int memory_pii_rel_sensitivity_batch(const char *const *rel_types, int count,
+                                     rel_sensitivity_t *out)
+{
+   if (!rel_types || !out || count <= 0)
+      return -1;
+   if (g_sensitivity_batch)
+      return g_sensitivity_batch(rel_types, count, out) == 0 ? 0 : -1;
+   for (int i = 0; i < count; i++)
+      out[i] = memory_pii_rel_sensitivity(rel_types[i]);
+   return 0;
 }
 
 int memory_pii_should_inject(rel_sensitivity_t sens, double confidence, int turn_requests_sensitive)

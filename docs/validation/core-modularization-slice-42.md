@@ -24,7 +24,7 @@ The descriptor now declares what lives under `src/modules/learning/`:
 - Two direct tests: `src/tests/test_learning_bundle.c` and `src/tests/test_learning_metrics.c`.
 - `docs/modules/learning.md`.
 
-DB2 persistence for learning (`src/db2/db2_learning.h`, `src/db2/learning_synth_ops.c`) and the KB
+DB2 persistence for learning (`src/modules/db2/c/db2_learning.h`, `src/modules/db2/c/learning_synth_ops.c`) and the KB
 synthesis lane remain outside the module root and are physical-ownership debt the document already
 records; the descriptor claims only what is module-local.
 
@@ -32,13 +32,13 @@ records; the descriptor claims only what is module-local.
 
 No `src/modules/learning/include/aimee/learning/` directory exists, so all four headers are at the
 module root and are declared in `private_headers`. `check_module_header_layout.py` constrains only
-*declared* `public_headers` — they must live under the canonical include tree — and retired include
+*declared* `public_headers` (they must live under the canonical include tree) and retired include
 spellings; it neither requires a module to declare a public header nor objects to headers at the module
 root. The completeness latch treats `public_headers` as an explicit audited claim outside set-equality.
 So the private-header declaration is accurate to the layout that exists and is accepted by every check.
 
 `learning.h` is nonetheless the module's public API in practice: it is included repository-wide via the
-`-Imodules/learning` search path as `"learning.h"`, including by `src/headers/aimee.h`, `src/db2/db2_learning.h`,
+`-Imodules/learning` search path as `"learning.h"`, including by `src/headers/aimee.h`, `src/modules/db2/c/db2_learning.h`,
 `kb/kb_mining.c`, `kb/kb_service.c`, and tests. Declaring it as a `public_header` today would require it
 to sit under the canonical include tree, which the layout checker enforces, so that path forces a
 file move and roughly six repository-wide include rewrites into this slice. The declare-then-latch split
@@ -51,16 +51,16 @@ the private label. The slice-decision roundtable confirmed this scoping.
 
 Every declared source has tracked production consumers:
 
-- `learning_router.c` — the router and proposal API (`learning_router_enabled`,
+- `learning_router.c`: the router and proposal API (`learning_router_enabled`,
   `learning_router_record_signal`, `learning_list_proposals`, `learning_accept_proposal`,
   `learning_metrics_commit_ratio`, and the JSON marshalling), called by `src/cmd_learning.c`,
-  `src/cmd_rules.c`, `src/db2/kb_service_backend_agent.c`, and the config layer.
-- `learning_bundle.c` — called by `src/db2/artifacts.c`, `src/db2/learning_synth_ops.c`,
+  `src/cmd_rules.c`, `src/modules/db2/c/kb_service_backend_agent.c`, and the config layer.
+- `learning_bundle.c`: called by `src/modules/db2/c/artifacts.c`, `src/modules/db2/c/learning_synth_ops.c`,
   `src/kb/kb_learning_synth.c`, `src/kb/kb_learning_version.c`, `src/kb/kb_curator_drain.c`,
   `src/kb/kb_service_workers.c`, `src/modules/config/config_learning.c`, and
   `src/modules/delegates/delegate_prompt.c`.
-- `learning_evidence.c` — called by `src/db2/kb_service_backend_agent.c` and `src/kb/kb_service_agent.c`.
-- `learning_implicit.c` — called by `src/db2/kb_service_backend_agent.c`, `src/dogfood.c`, and
+- `learning_evidence.c`: called by `src/modules/db2/c/kb_service_backend_agent.c` and `src/kb/kb_service_agent.c`.
+- `learning_implicit.c`: called by `src/modules/db2/c/kb_service_backend_agent.c`, `src/dogfood.c`, and
   `src/server/openai_chat.c`.
 
 Make's `DATA_SRCS` compiles all four sources and carries the `-Imodules/learning` include path. CMake
@@ -76,8 +76,8 @@ membership.
 
 Make registers four `unit-test-learning-*` targets. Only two are the module's:
 
-- `test_learning_bundle.c` — the evidence-bundle builder, `learning_bundle.c`. Learning-owned.
-- `test_learning_metrics.c` — the router metrics through the public learning API. Learning-owned.
+- `test_learning_bundle.c`: the evidence-bundle builder, `learning_bundle.c`. Learning-owned.
+- `test_learning_metrics.c`: the router metrics through the public learning API. Learning-owned.
 
 The other two are KB tests carrying the `learning` name: `test_learning_synth.c` exercises
 `kb/kb_learning_synth.c` and links `learning_bundle.o` only as a dependency, and
@@ -91,8 +91,8 @@ CTest registers none of the four, consistent with learning being outside the thi
 
 ## Why declare without latching
 
-The latch asserts the descriptor exhaustively covers the module root. That is true today — the module
-root holds exactly these four sources and four headers — so the latch would pass. It is deferred anyway
+The latch asserts the descriptor exhaustively covers the module root. That is true today. The module
+root holds exactly these four sources and four headers, so the latch would pass. It is deferred anyway
 because declaring the files and asserting completeness are distinct claims, and the roundtable required
 the completeness audit to review declarations merged on their own first rather than authored in the same
 change. The validator accepts a declared-but-unlatched descriptor: it checks each declared path exists
@@ -103,8 +103,8 @@ and resolves within the module, and enforces set-equality only when `ownership_c
 The declaration is covered by the existing descriptor validation: every declared path must exist and
 resolve within the module, and the regenerated test-registration baseline pins the two learning tests'
 per-suite registration. The empty-domain guard from slice 39 does not apply, because the module root is
-not empty. The latch mutation coverage — source removal, private-header removal, planted files, cleared
-latch — is deferred to slice 43, where `ownership_complete` is set and those mutations become
+not empty. The latch mutation coverage, source removal, private-header removal, planted files, cleared
+latch, is deferred to slice 43, where `ownership_complete` is set and those mutations become
 meaningful.
 
 ## Verification

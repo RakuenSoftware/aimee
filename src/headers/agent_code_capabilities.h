@@ -11,8 +11,9 @@
 #define AIMEE_CODE_TOOL_INDEX                "index"
 #define AIMEE_CODE_TOOL_PREVIEW_BLAST_RADIUS "preview_blast_radius"
 
-#define AIMEE_CODE_INDEX_COMMAND_HYBRID  "hybrid"
-#define AIMEE_CODE_INDEX_COMMAND_PREVIEW "preview"
+#define AIMEE_CODE_INDEX_COMMAND_HYBRID      "hybrid"
+#define AIMEE_CODE_INDEX_COMMAND_INVESTIGATE "investigate"
+#define AIMEE_CODE_INDEX_COMMAND_PREVIEW     "preview"
 
 #define AIMEE_CODE_SCOPE_CURRENT "current"
 #define AIMEE_CODE_SCOPE_ALL     "all"

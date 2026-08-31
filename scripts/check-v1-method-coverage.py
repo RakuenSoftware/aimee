@@ -81,6 +81,12 @@ EXCLUDED: set = {
 def dispatch_methods() -> set:
     """Method names registered in server_dispatch_table[]."""
     text = DISPATCH.read_text(encoding="utf-8")
+    # Rows live in server/server_dispatch_defs_data.h; splice them in so the
+    # initializer body is complete before matching.
+    rows = DISPATCH.parent / "server_dispatch_defs_data.h"
+    if rows.exists():
+        text = text.replace('#include "server/server_dispatch_defs_data.h"',
+                            rows.read_text(encoding="utf-8"))
     m = re.search(r"server_dispatch_table\[\]\s*=\s*\{(.*?)\n\};", text, re.S)
     if not m:
         print("check-v1-method-coverage: FAIL — could not find server_dispatch_table[]")

@@ -9,7 +9,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_link_artifacts.h"
 
 /* Controllable stubs for the embed + vector-NN deps (the sqlite shim has no
@@ -188,6 +188,9 @@ static void test_semantic_below_threshold(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_link_artifacts"))
+      return 0;
+
    test_empty();
    test_seeded_links();
    test_normalized_links();

@@ -9,6 +9,7 @@
 #include "aimee_client.h"
 #include "cli_client.h"
 #include "cJSON.h"
+#include "util.h"
 #include "wfe_def.h"
 
 #ifndef _WIN32
@@ -61,10 +62,40 @@ static void print_blocks(void)
    }
 }
 
+/* Load a workflow named the way `aimee workflow list` prints it, or by path.
+ *
+ * `list` prints bare filenames out of $AIMEE_HOME/workflows ("build.yaml"),
+ * while `show` and `validate` opened the argument relative to the CWD -- so the
+ * obvious composition, read a name from `list` and hand it to `show`, answered
+ * "workflow: build.yaml: cannot open (No such file or directory)" for a file
+ * that plainly exists and that `list` had just called valid.
+ *
+ * The path as given is still tried FIRST and its error is the one reported, so
+ * an explicit path keeps behaving exactly as before -- including a real parse
+ * error in a local file, which must not be masked by a same-named workflow in
+ * the home directory. The fallback applies only to a bare name (no separator)
+ * that does not resolve as given, which is precisely the `list` output. */
 static int load_or_report(const char *path, wfe_def_t **out)
 {
    char err[256];
    wfe_def_t *def = wfe_def_load_file(path, err, sizeof err);
+
+   if (!def && path && path[0] && !strchr(path, '/') && !strchr(path, '\\'))
+   {
+      FILE *probe = fopen(path, "r");
+      if (probe)
+         fclose(probe); /* it exists here: the error was real, keep it */
+      else
+      {
+         char alt[1024];
+         char alt_err[256];
+         snprintf(alt, sizeof alt, "%s/workflows/%s", aimee_home(), path);
+         wfe_def_t *from_home = wfe_def_load_file(alt, alt_err, sizeof alt_err);
+         if (from_home)
+            def = from_home;
+      }
+   }
+
    if (!def)
    {
       fprintf(stderr, "workflow: %s\n", err);
@@ -160,8 +191,7 @@ static int cmd_list(void)
 #endif
 }
 
-static const char *TEMPLATE = "name: %s\n"
-                              "start: draft\n"
+static const char *TEMPLATE = "start: draft\n"
                               "nodes:\n"
                               "  - id: draft\n"
                               "    block: author.proposal\n"
@@ -207,7 +237,8 @@ static int cmd_new(const char *path)
    char *dot = strrchr(name, '.');
    if (dot)
       *dot = '\0';
-   fprintf(f, TEMPLATE, name);
+   fprintf(f, "name: %s\n", name);
+   fputs(TEMPLATE, f);
    fclose(f);
    printf("created %s (edit, then `aimee workflow validate %s`)\n", path, path);
    return 0;
@@ -365,6 +396,26 @@ static int cmd_run(int argc, char **argv, int json_output)
    cJSON *req = cJSON_CreateObject();
    cJSON_AddStringToObject(req, "workflow", workflow);
    cJSON_AddStringToObject(req, "proposal_md", proposal);
+   /* A file-backed proposal can participate in source.archive, but only when
+    * its name is already a safe repo-relative pending-proposal path. Message,
+    * stdin, absolute, and parent-relative inputs intentionally remain ordinary
+    * manual submissions with no repository source to retire. */
+   if (proposal_file && strcmp(proposal_file, "-") != 0 && !aimee_path_is_absolute(proposal_file))
+   {
+      size_t source_len = strlen(proposal_file);
+      char *normalized = malloc(source_len + 1);
+      if (normalized)
+      {
+         for (size_t i = 0; i <= source_len; i++)
+            normalized[i] = proposal_file[i] == '\\' ? '/' : proposal_file[i];
+         const char *source = normalized;
+         while (source[0] == '.' && source[1] == '/')
+            source += 2;
+         if (strncmp(source, "docs/proposals/pending/", 23) == 0 && !strstr(source, "/../"))
+            cJSON_AddStringToObject(req, "source_path", source);
+         free(normalized);
+      }
+   }
    if (repo && repo[0])
       cJSON_AddStringToObject(req, "repo", repo);
    char *body = cJSON_PrintUnformatted(req);

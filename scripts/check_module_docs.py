@@ -214,6 +214,8 @@ def run(root: Path, modules: Path, docs: Path, status_path: Path) -> str:
     doc_paths = sorted(docs.rglob("*.md"))
     for path in doc_paths:
         _safe_path(root, path, "module document")
+        if path == docs / "README.md":
+            continue
         if path.parent != docs or path.stem not in known_ids:
             raise DocError(f"{path}: orphan or non-canonical module document")
     lines = []

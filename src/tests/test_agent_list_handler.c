@@ -17,6 +17,9 @@
 #include "platform_path.h"
 #include "platform_test_util.h"
 #include "agent_exec.h"
+#include "server.h"
+#include "vault_capability.h"
+#include "vault_service.h"
 
 /* --- capture layer: stub the transport so we can read what the handler sent --- */
 
@@ -26,7 +29,7 @@ static char g_last_error[256];
 /* server_send_ok is a static inline in server.h that calls this and then frees
  * resp itself, so this stub must NOT delete resp — it only snapshots it. Same
  * contract the real transport and every other handler test rely on. */
-int server_send_response(void *conn, cJSON *resp)
+int server_send_response(server_conn_t *conn, cJSON *resp)
 {
    (void)conn;
    if (g_last_response)
@@ -35,7 +38,7 @@ int server_send_response(void *conn, cJSON *resp)
    return 0;
 }
 
-int server_send_error(void *conn, const char *message, const char *request_id)
+int server_send_error(server_conn_t *conn, const char *message, const char *request_id)
 {
    (void)conn;
    (void)request_id;
@@ -48,7 +51,7 @@ int server_send_error(void *conn, const char *message, const char *request_id)
  * the same buffer: these tests assert on the message, and the kind is asserted
  * where it decides an HTTP status (runtime-web's TestRPCErrorStatus...). */
 char g_last_error_kind[64];
-int server_send_error_kind(void *conn, const char *kind, const char *message,
+int server_send_error_kind(server_conn_t *conn, const char *kind, const char *message,
                            const char *request_id)
 {
    (void)conn;
@@ -58,11 +61,30 @@ int server_send_error_kind(void *conn, const char *kind, const char *message,
    return 0;
 }
 
-/* The real handler under test. Declared here to avoid dragging server.h. */
-int handle_agent_list(void *ctx, void *conn, cJSON *req);
-int handle_agent_probe(void *ctx, void *conn, cJSON *req);
-int handle_agent_roles(void *ctx, void *conn, cJSON *req);
-int handle_agent_personas(void *ctx, void *conn, cJSON *req);
+/* Key writes are outside this handler test's scope, but referencing agent.add
+ * and agent.set retains their key branch at link time. Keep those seams inert. */
+int vault_agent_key_server_seal_allowed(attested_transport_t transport)
+{
+   (void)transport;
+   return 1;
+}
+
+vault_status_t vault_service_set_server(const char *agent, const char *cred, const char *secret)
+{
+   (void)agent;
+   (void)cred;
+   (void)secret;
+   return VAULT_OK;
+}
+
+void vault_audit_server_write(const server_conn_t *conn, const char *agent, const char *cred,
+                              const char *secret)
+{
+   (void)conn;
+   (void)agent;
+   (void)cred;
+   (void)secret;
+}
 
 /* Probe transport seams. This target intentionally links no production agent
  * transport: the handler's observable response and backend selection are under
@@ -157,6 +179,7 @@ static void reset_capture(void)
       cJSON_Delete(g_last_response);
    g_last_response = NULL;
    g_last_error[0] = '\0';
+   g_last_error_kind[0] = '\0';
    g_cli_calls = g_http_calls = g_execute_failure = 0;
    memset(&g_executed_agent, 0, sizeof(g_executed_agent));
 }
@@ -189,7 +212,36 @@ static void test_load_failure_is_an_error_not_empty(void)
    /* Must NOT be a silent success with an empty roster. */
    assert(g_last_response == NULL);
    assert(g_last_error[0] != '\0');
+   assert(strcmp(g_last_error_kind, SERVER_ERR_NOT_FOUND) == 0);
    printf("  PASS: a config load failure returns an error, not an empty roster\n");
+}
+
+static void test_malformed_config_is_unavailable(void)
+{
+   set_home_empty();
+   write_agents("{not-json");
+   reset_capture();
+
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+
+   assert(g_last_response == NULL);
+   assert(strstr(g_last_error, "could not be loaded") != NULL);
+   assert(strcmp(g_last_error_kind, SERVER_ERR_UNAVAILABLE) == 0);
+   printf("  PASS: a malformed existing config is unavailable, not an upstream 502\n");
+}
+
+static void test_local_requires_endpoint_as_invalid_argument(void)
+{
+   set_home_empty();
+   reset_capture();
+   cJSON *req = cJSON_CreateObject();
+
+   assert(handle_agent_local(NULL, NULL, req) == 0);
+
+   cJSON_Delete(req);
+   assert(strcmp(g_last_error, "model.local requires endpoint") == 0);
+   assert(strcmp(g_last_error_kind, SERVER_ERR_INVALID_ARGUMENT) == 0);
+   printf("  PASS: model.local missing endpoint is an invalid argument\n");
 }
 
 static void test_empty_config_is_ok_with_empty_array(void)
@@ -226,8 +278,37 @@ static void test_populated_config_lists_agents(void)
    printf("  PASS: a populated config lists its agents\n");
 }
 
+static void test_delegate_default_is_independent_and_persists(void)
+{
+   set_home_empty();
+   write_agents("{\"default_agent\":\"a1\",\"agents\":["
+                "{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m1\","
+                "\"roles\":[\"code\"]},"
+                "{\"name\":\"qwen\",\"provider\":\"openai\",\"model\":\"qwen\","
+                "\"roles\":[\"all\"]}]}\n");
+   reset_capture();
+
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   cJSON_AddItemToArray(args, cJSON_CreateString("qwen"));
+   cJSON_AddItemToArray(args, cJSON_CreateString("--delegate-default"));
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   assert(strcmp(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(g_last_response, "default_agent")),
+                 "a1") == 0);
+   assert(strcmp(cJSON_GetStringValue(
+                     cJSON_GetObjectItemCaseSensitive(g_last_response, "default_delegate")),
+                 "qwen") == 0);
+   printf("  PASS: preferred delegate is independent from primary and persists\n");
+}
+
 /* primary_only survives parse -> agent_load_config -> server_agent_to_json (the
- * /v1/agent/list surface the Web GUI reads to render the checkbox). An agent that
+ * /v1/model/list surface the Web GUI reads to render the checkbox). An agent that
  * omits the field defaults to false. */
 static void test_primary_only_round_trips(void)
 {
@@ -410,6 +491,190 @@ static cJSON *args_request(const char *a, const char *b)
    return req;
 }
 
+static cJSON *args_request_array(const char *const *values, int count)
+{
+   cJSON *req = cJSON_CreateObject();
+   cJSON *args = cJSON_AddArrayToObject(req, "args");
+   for (int i = 0; i < count; i++)
+      cJSON_AddItemToArray(args, cJSON_CreateString(values[i]));
+   return req;
+}
+
+/* The Providers UI writes per-model values through agent.set. The distinction
+ * this pins is the one a bare number cannot carry: a price of 0 that the
+ * operator STATED (a free or subscription seat) versus a price nobody stated.
+ * Both read as 0; only the declared flag separates them, and if the handler
+ * loses that flag the config layer drops the statement on its next save. */
+static void test_set_declares_prices_and_limits(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"]}]}\n");
+   reset_capture();
+   /* --price-in 0 is the statement "this seat is free"; --price-out is simply
+    * not mentioned, which states nothing. */
+   const char *args[] = {"a1",    "--context-window", "200000", "--max-output",
+                         "64000", "--price-in",       "0"};
+   cJSON *req = args_request_array(args, 7);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+
+   /* The declared capacities survive and report themselves as the operator's. */
+   assert(cJSON_GetObjectItemCaseSensitive(a1, "effective_context_window")->valueint == 200000);
+   assert(cJSON_GetObjectItemCaseSensitive(a1, "effective_max_output")->valueint == 64000);
+   assert(
+       strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "context_window_source")),
+              "declared") == 0);
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "max_output_source")),
+                 "declared") == 0);
+
+   /* The stated-free price is flagged; the unmentioned one is not. Without the
+    * flag these two are the same byte. */
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_in_declared")));
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_out_declared")));
+   printf("  PASS: agent set records declared prices and limits\n");
+}
+
+/* A capacity of 0 is not a capacity. The Agents edit form always sends
+ * "--context-window 0" for an unset field, so keying the declaration on the
+ * option being PRESENT would stamp an explicit 0 into every config it touched
+ * and assert a limit nobody chose. */
+static void test_set_zero_capacity_is_not_a_declaration(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"]}]}\n");
+   reset_capture();
+   const char *args[] = {"a1", "--context-window", "0"};
+   cJSON *req = args_request_array(args, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0');
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   /* Not "declared" -- either resolved from the catalog, or honestly unknown. */
+   const char *src =
+       cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(a1, "context_window_source"));
+   assert(src && strcmp(src, "declared") != 0);
+   printf("  PASS: a zero capacity is not recorded as a declaration\n");
+}
+
+/* A price that does not parse must not be accepted as 0 -- that would assert
+ * "this model is free" from a typo, which is a worse outcome than ignoring it. */
+static void test_set_rejects_unparseable_price(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"]}]}\n");
+   reset_capture();
+   const char *args[] = {"a1", "--price-in", "abc"};
+   cJSON *req = args_request_array(args, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_in_declared")));
+   printf("  PASS: an unparseable price is not accepted as free\n");
+}
+
+/* Clearing a field in the UI must actually clear it. agent.set is a PATCH, so
+ * an omitted option changes nothing -- which means "I no longer state this"
+ * cannot be expressed by omission. An option present with an EMPTY value is
+ * that withdrawal, and the UI sends all three prices for exactly this reason. */
+static void test_set_empty_price_withdraws_the_declaration(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"code\"],\"price_in_per_mtok\":3.0}]}\n");
+   reset_capture();
+   const char *declared[] = {"a1", "--price-in", "0"};
+   cJSON *req = args_request_array(declared, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *a1 = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(g_last_response, "agents"), 0);
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_in_declared")));
+
+   /* Now withdraw it. */
+   reset_capture();
+   const char *cleared[] = {"a1", "--price-in", ""};
+   req = args_request_array(cleared, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   a1 = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(g_last_response, "agents"), 0);
+   assert(!cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(a1, "price_in_declared")));
+   printf("  PASS: an empty price withdraws the declaration\n");
+}
+
+/* Review is gate authority, not a generic model capability. Registering an
+ * agent without --roles must not silently authorize it; explicitly naming the
+ * review role still does. */
+static void test_add_requires_explicit_review_role(void)
+{
+   set_home_empty();
+   reset_capture();
+   const char *plain[] = {"plain", "http://model.test/v1", "model"};
+   cJSON *req = args_request_array(plain, 3);
+   assert(handle_agent_add(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   assert(response_has_role("code"));
+   assert(!response_has_role("review"));
+
+   set_home_empty();
+   reset_capture();
+   const char *reviewer[] = {"reviewer", "http://model.test/v1", "model", "--roles", "code,review"};
+   req = args_request_array(reviewer, 5);
+   assert(handle_agent_add(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   assert(response_has_role("code") && response_has_role("review"));
+   printf("  PASS: agent add requires an explicit review role\n");
+}
+
+/* The Agents UI always sends --roles, including an empty string when every chip
+ * is off. That empty value used to expand to the full default set and silently
+ * re-enable review. It must round-trip as an empty role list. */
+static void test_set_empty_roles_stays_empty(void)
+{
+   set_home_empty();
+   write_agents("{\"agents\":[{\"name\":\"a1\",\"provider\":\"anthropic\",\"model\":\"m\","
+                "\"roles\":[\"review\"]}]}\n");
+   reset_capture();
+   const char *clear[] = {"a1", "--roles", ""};
+   cJSON *req = args_request_array(clear, 3);
+   assert(handle_agent_set(NULL, NULL, req) == 0);
+   cJSON_Delete(req);
+   assert(g_last_error[0] == '\0' && g_last_response != NULL);
+   cJSON *roles = cJSON_GetObjectItemCaseSensitive(g_last_response, "roles");
+   assert(cJSON_IsArray(roles) && cJSON_GetArraySize(roles) == 0);
+
+   reset_capture();
+   assert(handle_agent_list(NULL, NULL, NULL) == 0);
+   cJSON *agents = cJSON_GetObjectItemCaseSensitive(g_last_response, "agents");
+   cJSON *a1 = cJSON_GetArrayItem(agents, 0);
+   roles = cJSON_GetObjectItemCaseSensitive(a1, "roles");
+   assert(cJSON_IsArray(roles) && cJSON_GetArraySize(roles) == 0);
+   printf("  PASS: agent set preserves an explicitly empty role selection\n");
+}
+
 /* `agent roles <name>` with no csv reads as a query and was the only way to ask
  * what an agent's roles were — but it RESET the agent to the default list,
  * silently dropping every role outside it (notably the `all` wildcard). Run
@@ -467,6 +732,7 @@ static void test_roles_csv_sets_and_reset_restores_defaults(void)
    cJSON_Delete(req);
    assert(g_last_error[0] == '\0');
    assert(response_has_role("summarize") && response_has_role("code"));
+   assert(!response_has_role("review"));
    /* --reset is the default set, which does not include the wildcard. */
    assert(!response_has_role("all"));
    printf("  PASS: agent roles csv sets, --reset restores defaults\n");
@@ -500,14 +766,23 @@ int main(void)
 {
    printf("agent_list_handler:\n");
    test_load_failure_is_an_error_not_empty();
+   test_malformed_config_is_unavailable();
+   test_local_requires_endpoint_as_invalid_argument();
    test_empty_config_is_ok_with_empty_array();
    test_populated_config_lists_agents();
+   test_delegate_default_is_independent_and_persists();
    test_primary_only_round_trips();
    test_cli_probe_uses_backend_executor_and_config_discovery();
    test_cli_probe_failure_and_no_run_are_observable();
    test_unknown_backend_fails_closed();
    test_http_probe_preserves_discovery_and_plain_execution();
    test_list_exposes_catalog_identity_and_pricing();
+   test_add_requires_explicit_review_role();
+   test_set_empty_roles_stays_empty();
+   test_set_declares_prices_and_limits();
+   test_set_zero_capacity_is_not_a_declaration();
+   test_set_rejects_unparseable_price();
+   test_set_empty_price_withdraws_the_declaration();
    test_roles_without_csv_reports_and_does_not_write();
    test_roles_csv_sets_and_reset_restores_defaults();
    test_personas_without_csv_reports_and_does_not_write();

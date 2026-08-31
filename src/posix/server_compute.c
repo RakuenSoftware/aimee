@@ -10,7 +10,7 @@
 #include "cli_codex.h"
 #include "cli_session.h" /* cli_session_set_stream_cb — incremental tmux CLI streaming */
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "webchat_live.h" /* db1_webchat_live_set — mirror the live turn for browser polling */
 #include "log.h"
 #include "primary_session_adapter.h"
@@ -540,9 +540,13 @@ static void chat_stream_worker_codex(compute_ctx_t *cctx, const char *message,
 
 static void chat_agent_add_default_roles(agent_t *ag)
 {
-   const char *roles[] = {"code", "review", "explain", "refactor", "draft", "execute"};
+   /* These agents are synthesized from legacy provider settings, not from an
+    * operator role selection. Review gate authority must therefore stay off
+    * until the agent is explicitly registered with the review role. */
+   const char *roles[] = {"code", "explain", "refactor", "draft", "execute"};
    ag->role_count = 0;
-   for (int i = 0; i < 6 && ag->role_count < MAX_AGENT_ROLES; i++)
+   for (int i = 0; i < (int)(sizeof(roles) / sizeof(roles[0])) && ag->role_count < MAX_AGENT_ROLES;
+        i++)
       snprintf(ag->roles[ag->role_count++], sizeof(ag->roles[0]), "%s", roles[i]);
 }
 
@@ -817,9 +821,19 @@ static void chat_stream_worker_agent(compute_ctx_t *cctx, const char *message, c
     * share one checkout and clobber each other. No-op when cwd is not a git repo
     * or is already a managed worktree (session_isolation_target guards both). */
    char session_wt[MAX_PATH_LEN];
-   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
-       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
-                                1 /*create_if_missing*/))
+   int isolation_rc = 0;
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0])
+      isolation_rc = session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                              1 /*create_if_missing*/);
+   if (isolation_rc < 0)
+   {
+      workspace_turn_unbind_active();
+      free(system_prompt);
+      compute_error(cctx, "could not initialize isolated session workspace");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (isolation_rc == 1)
       use_cwd = session_wt;
    if (aimee_path_is_absolute(use_cwd) && !strstr(use_cwd, "/.."))
       run_cmd_set_cwd(use_cwd);
@@ -1006,9 +1020,19 @@ static void chat_stream_worker_primary_session(compute_ctx_t *cctx, const char *
     * created on demand — so concurrent sessions on the same project never share a
     * checkout. No-op when cwd is not a git repo / already a managed worktree. */
    char session_wt[MAX_PATH_LEN];
-   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0] &&
-       session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
-                                1 /*create_if_missing*/))
+   int isolation_rc = 0;
+   if (!eff_cwd && !detached_bound && aimee_sid && aimee_sid[0])
+      isolation_rc = session_isolation_target(use_cwd, aimee_sid, session_wt, sizeof(session_wt),
+                                              1 /*create_if_missing*/);
+   if (isolation_rc < 0)
+   {
+      workspace_turn_unbind_active();
+      free(system_prompt);
+      compute_error(cctx, "could not initialize isolated session workspace");
+      compute_ctx_free(cctx);
+      return;
+   }
+   if (isolation_rc == 1)
       use_cwd = session_wt;
 
    stream_event(cctx, "turn_start", NULL, NULL);
@@ -1065,14 +1089,10 @@ static int chat_provider_uses_codex_cli(const char *provider)
    if (strcmp(provider, "codex") != 0)
       return 0;
 
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0)
+   agent_t ag;
+   if (agent_registry_find("codex", &ag) != 0)
       return 1;
-
-   agent_t *ag = agent_find(&acfg, "codex");
-   if (!ag)
-      return 1;
-   return !agent_adapter_agent_is_direct(ag);
+   return !agent_adapter_agent_is_direct(&ag);
 }
 
 static int chat_provider_uses_primary_session(const char *provider)

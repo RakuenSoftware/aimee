@@ -14,6 +14,7 @@
  * tags the result by content hash, and reuses it on later turns; the delegate then
  * RUNS that image `--network none`. The per-workspace/global forms are `image:` only. */
 
+#include <aimee/delegates/delegate_launch_args.h>
 #include <aimee/delegates/delegate_sandbox_image.h>
 
 #include "aimee.h" /* MAX_PATH_LEN */
@@ -45,6 +46,10 @@ typedef struct
    char from[128];                /* build: base image */
    char dockerfile[MAX_PATH_LEN]; /* build: path to a Dockerfile (repo-relative or abs) */
    char *packages_df;             /* build: generated Dockerfile text (from+packages); owned */
+   /* ...and the tag naming it. Both come from ONE answer: a tag derived
+    * separately from the text it is supposed to name is how an image gets
+    * built under a name that describes something else. */
+   char packages_tag[SBX_TAG_MAX];
 } sandbox_spec_t;
 
 static void sandbox_spec_free(sandbox_spec_t *s)
@@ -63,71 +68,6 @@ static const char *resolve_docker_bin(void)
 }
 
 /* --- pure helpers (also unit-tested) --- */
-
-static int package_name_valid(const char *pkg)
-{
-   if (!pkg || !pkg[0])
-      return 0;
-   if (!(isalnum((unsigned char)pkg[0])))
-      return 0;
-   for (const char *c = pkg; *c; c++)
-   {
-      if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '+' || *c == ':' ||
-            *c == '-'))
-         return 0;
-   }
-   return 1;
-}
-
-int delegate_sandbox_dockerfile_from_packages(const char *base, const char *const *pkgs, int npkgs,
-                                              char *out, size_t cap)
-{
-   if (!out || cap == 0)
-      return -1;
-   out[0] = '\0';
-   if (!base || !base[0])
-      return -1;
-   /* Base image ref may contain '/' and ':' (registry/repo:tag) — allow those too. */
-   for (const char *c = base; *c; c++)
-   {
-      if (!(isalnum((unsigned char)*c) || *c == '.' || *c == '_' || *c == '+' || *c == ':' ||
-            *c == '-' || *c == '/'))
-         return -1;
-   }
-
-   char pkglist[4096];
-   size_t pos = 0;
-   for (int i = 0; i < npkgs; i++)
-   {
-      if (!package_name_valid(pkgs[i]))
-         return -1;
-      int n = snprintf(pkglist + pos, sizeof(pkglist) - pos, "%s%s", pos ? " " : "", pkgs[i]);
-      if (n < 0 || (size_t)n >= sizeof(pkglist) - pos)
-         return -1;
-      pos += (size_t)n;
-   }
-
-   int n;
-   if (npkgs > 0)
-      n = snprintf(out, cap,
-                   "FROM %s\n"
-                   "RUN apt-get update && apt-get install -y --no-install-recommends %s && "
-                   "rm -rf /var/lib/apt/lists/*\n",
-                   base, pkglist);
-   else
-      n = snprintf(out, cap, "FROM %s\n", base);
-   return (n > 0 && (size_t)n < cap) ? 0 : -1;
-}
-
-void delegate_sandbox_content_tag(const char *content, char *tag, size_t cap)
-{
-   char hex[HMEM_HASH_HEX_LEN];
-   hmem_sha256_hex(content ? content : "", content ? strlen(content) : 0, hex);
-   hex[12] = '\0';
-   snprintf(tag, cap, "aimee-sbx:%s", hex);
-}
-
-/* --- docker ops (impure) --- */
 
 static int docker_image_exists(const char *tag)
 {
@@ -171,10 +111,10 @@ static pthread_mutex_t g_build_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Ensure the build spec's image exists (build once, cached), writing its tag to
  * out[cap]. Returns 0 on success, -1 on failure. */
-static int ensure_built(const char *dockerfile_text, char *out, size_t cap)
+static int ensure_built(const char *tag, const char *dockerfile_text, char *out, size_t cap)
 {
-   char tag[SBX_TAG_MAX];
-   delegate_sandbox_content_tag(dockerfile_text, tag, sizeof(tag));
+   if (!tag || !tag[0] || !dockerfile_text)
+      return -1;
 
    pthread_mutex_lock(&g_build_lock);
    int ok = docker_image_exists(tag) || docker_build(tag, dockerfile_text) == 0;
@@ -187,57 +127,6 @@ static int ensure_built(const char *dockerfile_text, char *out, size_t cap)
 
 /* --- cache management (list + gc of aimee-sbx:* images) --- */
 
-/* Parse a `docker image ls` CreatedAt field ("2026-07-15 12:34:56 +0000 UTC")
- * into a UTC epoch. Docker always emits the local-daemon time with an explicit
- * offset; we read the wall-clock fields and the numeric offset and normalise to
- * UTC ourselves (no timegm/strptime, so no feature-macro or TZ dependence).
- * Returns 0 on success, -1 if the leading "Y-M-D H:M:S" does not parse. Pure. */
-int delegate_sandbox_parse_created_epoch(const char *created, long long *out)
-{
-   if (!created || !out)
-      return -1;
-   int y, mo, d, h, mi, s;
-   char sign = '+';
-   int oh = 0, om = 0;
-   int fields =
-       sscanf(created, "%d-%d-%d %d:%d:%d %c%2d%2d", &y, &mo, &d, &h, &mi, &s, &sign, &oh, &om);
-   if (fields < 6)
-      return -1;
-   if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || s < 0 ||
-       s > 60)
-      return -1;
-   /* days from 1970-01-01 to y-mo-d (proleptic Gregorian), via a civil-days algorithm. */
-   int yy = (mo <= 2) ? y - 1 : y;
-   int era = (yy >= 0 ? yy : yy - 399) / 400;
-   unsigned yoe = (unsigned)(yy - era * 400);
-   unsigned doy = (unsigned)((153 * (mo + (mo > 2 ? -3 : 9)) + 2) / 5 + d - 1);
-   unsigned doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-   long long days = (long long)era * 146097 + (long long)doe - 719468;
-   long long epoch = days * 86400 + h * 3600 + mi * 60 + s;
-   if (fields >= 7)
-   {
-      long long off = (long long)oh * 3600 + (long long)om * 60;
-      epoch += (sign == '-') ? off : -off; /* subtract the offset to reach UTC */
-   }
-   *out = epoch;
-   return 0;
-}
-
-#define SBX_IMG_MAX 512
-
-typedef struct
-{
-   char tag[128];
-   char id[80];
-   char created[48];
-   char size[32];
-   long long created_epoch;
-   int in_use;
-} sbx_img_t;
-
-/* True when a container (running or stopped) references image ref `ref`. `used`
- * is the newline-joined `docker ps -a` image column. Matches a whole line only,
- * so "aimee-sbx:ab" never matches "aimee-sbx:abcd". Pure. */
 static int sbx_ref_in_use(const char *ref, const char *used)
 {
    if (!ref || !*ref || !used)
@@ -257,15 +146,16 @@ static int sbx_ref_in_use(const char *ref, const char *used)
    return 0;
 }
 
-static int sbx_epoch_desc(const void *a, const void *b)
+#define SBX_IMG_MAX 512
+typedef struct
 {
-   long long ea = ((const sbx_img_t *)a)->created_epoch;
-   long long eb = ((const sbx_img_t *)b)->created_epoch;
-   return (eb > ea) - (eb < ea); /* most-recent first */
-}
+   char tag[128];
+   char id[80];
+   char created[48];
+   char size[32];
+   int in_use;
+} sbx_img_t;
 
-/* Enumerate every aimee-sbx:* image, newest first, marking in-use. Returns the
- * count (>=0) into *n and 0, or -1 if the docker daemon is unreachable. */
 static int sbx_collect(sbx_img_t *imgs, int cap, int *n)
 {
    *n = 0;
@@ -314,14 +204,14 @@ static int sbx_collect(sbx_img_t *imgs, int cap, int *n)
       snprintf(im->tag, sizeof(im->tag), "%s", f_tag);
       snprintf(im->created, sizeof(im->created), "%s", f_created);
       snprintf(im->size, sizeof(im->size), "%s", f_size ? f_size : "");
-      im->created_epoch = 0;
-      delegate_sandbox_parse_created_epoch(im->created, &im->created_epoch);
       im->in_use = !ps_ok || sbx_ref_in_use(im->tag, used) || sbx_ref_in_use(im->id, used);
       (*n)++;
    }
    free(out);
    free(used);
-   qsort(imgs, (size_t)*n, sizeof(imgs[0]), sbx_epoch_desc);
+   /* NOT sorted here. Recency ordering is part of the keep-the-most-recent
+    * rule, so the module does it and returns verdicts in the order it was
+    * given. Sorting again here would be a second ordering to disagree with. */
    return 0;
 }
 
@@ -377,27 +267,6 @@ static int docker_image_rm(const char *tag)
    return rc;
 }
 
-int delegate_sandbox_gc_should_remove(int in_use, int index, int keep_min, long long created_epoch,
-                                      long long now, long max_age_secs, const char **reason_out)
-{
-   const char *reason;
-   int remove = 0;
-   if (in_use)
-      reason = "in-use";
-   else if (index < keep_min)
-      reason = "kept-recent";
-   else if (created_epoch > 0 && (now - created_epoch) < max_age_secs)
-      reason = "within-max-age";
-   else
-   {
-      remove = 1;
-      reason = "aged-out";
-   }
-   if (reason_out)
-      *reason_out = reason;
-   return remove;
-}
-
 int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **report_json_out)
 {
    if (report_json_out)
@@ -421,12 +290,49 @@ int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **rep
    int removed = 0, kept = 0;
    cJSON *arr = cJSON_CreateArray();
 
-   /* imgs is newest-first; index < keep_min is a protected recent image. */
+   /* The whole inventory in one call: the decision is positional -- "keep the
+    * keep_min most recent" -- so the ORDERING is part of the rule and is done
+    * module-side. Nothing here re-sorts; the verdicts come back in the order
+    * the images were sent. */
+   size_t req_cap = AIMEE_DELEGATES_IMGGC_HEADER_LEN + (size_t)n * (12 + 2 * 512) + 64;
+   size_t resp_cap = 8 + (size_t)n * 64 + 64;
+   uint8_t *gc_req = malloc(req_cap);
+   uint8_t *gc_resp = malloc(resp_cap);
+   size_t gc_resp_len = 0;
+   int judged = -1;
+   if (gc_req && gc_resp)
+   {
+      size_t at = aimee_delegates_imggc_request_begin((unsigned)n, keep_min, now, max_age_secs,
+                                                      gc_req, req_cap);
+      for (int i = 0; at && i < n; i++)
+         at = aimee_delegates_imggc_request_add(gc_req, req_cap, at, imgs[i].tag, imgs[i].created,
+                                                imgs[i].in_use);
+      if (at)
+         judged = delegate_image_gc_judge(gc_req, at, gc_resp, resp_cap, &gc_resp_len);
+   }
+   free(gc_req);
+   if (judged != 0)
+   {
+      /* No verdict: keep everything. An image kept costs disk; an image deleted
+       * on a policy nothing applied costs a rebuild of something that may be in
+       * use right now. */
+      free(gc_resp);
+      free(imgs);
+      cJSON_Delete(arr);
+      return -1;
+   }
+
    for (int i = 0; i < n; i++)
    {
-      const char *reason;
-      int remove = delegate_sandbox_gc_should_remove(
-          imgs[i].in_use, i, keep_min, imgs[i].created_epoch, now, max_age_secs, &reason);
+      char reason_buf[64] = "";
+      int remove = 0;
+      if (aimee_delegates_imggc_response_at(gc_resp, gc_resp_len, (unsigned)i, &remove, reason_buf,
+                                            sizeof(reason_buf)) != 0)
+      {
+         remove = 0;
+         snprintf(reason_buf, sizeof(reason_buf), "unjudged");
+      }
+      const char *reason = reason_buf;
 
       if (remove && !dry_run && docker_image_rm(imgs[i].tag) != 0)
       {
@@ -448,6 +354,7 @@ int delegate_sandbox_gc(long max_age_secs, int keep_min, int dry_run, char **rep
          cJSON_AddItemToArray(arr, o);
       }
    }
+   free(gc_resp);
    free(imgs);
 
    if (report_json_out && arr)
@@ -540,11 +447,12 @@ static int project_yaml_sandbox_spec(const char *cwd, char *repo_root, size_t ro
                   argv[argc++] = p->valuestring;
             }
          }
-         char df[DOCKERFILE_MAX];
-         if (delegate_sandbox_dockerfile_from_packages(from->valuestring, argv, argc, df,
-                                                       sizeof(df)) == 0)
+         char df[DOCKERFILE_MAX], tag[SBX_TAG_MAX];
+         if (delegate_image_spec_resolve(from->valuestring, argv, argc, NULL, tag, sizeof(tag), df,
+                                         sizeof(df)) == 0)
          {
             out->packages_df = safe_strdup(df);
+            snprintf(out->packages_tag, sizeof(out->packages_tag), "%s", tag);
             snprintf(out->from, sizeof(out->from), "%s", from->valuestring);
             found = out->packages_df ? 0 : -1;
          }
@@ -619,13 +527,12 @@ static int apply_learned_overlay(const char *cwd, const char *base, char *out, s
    const char *argv[SBX_LEARN_MAX];
    for (int i = 0; i < n; i++)
       argv[i] = pk[i];
-   char df[DOCKERFILE_MAX];
-   if (delegate_sandbox_dockerfile_from_packages(base, argv, n, df, sizeof(df)) != 0)
+   char df[DOCKERFILE_MAX], tag[SBX_TAG_MAX], built[SBX_TAG_MAX];
+   if (delegate_image_spec_resolve(base, argv, n, NULL, tag, sizeof(tag), df, sizeof(df)) != 0)
       return -1;
-   char tag[SBX_TAG_MAX];
-   if (ensure_built(df, tag, sizeof(tag)) != 0)
+   if (ensure_built(tag, df, built, sizeof(built)) != 0)
       return -1; /* build failed -> caller uses base */
-   snprintf(out, cap, "%s", tag);
+   snprintf(out, cap, "%s", built);
    return 0;
 }
 
@@ -659,8 +566,9 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
          }
          else if (spec.packages_df)
          {
+            /* The tag came back with the text it names; it is not re-derived. */
             char tag[SBX_TAG_MAX];
-            if (ensure_built(spec.packages_df, tag, sizeof(tag)) == 0)
+            if (ensure_built(spec.packages_tag, spec.packages_df, tag, sizeof(tag)) == 0)
             {
                snprintf(base, sizeof(base), "%s", tag);
                have_base = 1; /* from+packages: learned may augment on top */
@@ -669,9 +577,15 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap)
          else if (spec.dockerfile[0])
          {
             overlay_ok = 0; /* explicit Dockerfile: respect it, even if it fails to build */
+            /* A Dockerfile the operator committed: carried whole to be NAMED,
+             * because the tag's shape must exist in one place or the same
+             * content resolves to two names and nothing is ever reused. */
             char *df = read_dockerfile(repo_root, spec.dockerfile);
-            char tag[SBX_TAG_MAX];
-            if (df && ensure_built(df, tag, sizeof(tag)) == 0)
+            char tag[SBX_TAG_MAX], named[DOCKERFILE_MAX];
+            if (df &&
+                delegate_image_spec_resolve(NULL, NULL, 0, df, tag, sizeof(tag), named,
+                                            sizeof(named)) == 0 &&
+                ensure_built(tag, named, tag, sizeof(tag)) == 0)
             {
                snprintf(base, sizeof(base), "%s", tag);
                have_base = 1;

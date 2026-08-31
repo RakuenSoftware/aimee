@@ -54,7 +54,7 @@ jobs:
     outputs:
       version: ${{ steps.bump.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -119,7 +119,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
           fetch-tags: true
@@ -142,6 +142,17 @@ jobs:
     uses: ./.github/workflows/release-thin-client.yml
     permissions:
       contents: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  # Synthesis sidecars are built by publish-llm.yml, outside publish-images.yml.
+  # Promote the already-tested pinned manifests; a release must not rebuild them.
+  llm-images:
+    needs: [version, tag]
+    uses: ./.github/workflows/publish-llm.yml
+    permissions:
+      contents: read
+      packages: write
     with:
       version: ${{ needs.version.outputs.version }}
 
@@ -173,19 +184,19 @@ jobs:
   # same number instead of silently skipping it. Every step is `|| true` so this
   # cleanup can never mask the original failure, and the run still reports it.
   rollback-tag:
-    needs: [version, tag, thin-clients, images]
-    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled')
+    needs: [version, tag, thin-clients, images, llm-images]
+    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled' || needs.llm-images.result == 'failure' || needs.llm-images.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Delete the tag and any partial release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v${{ needs.version.outputs.version }}"
-          echo "::warning::release $tag did not complete (images=${{ needs.images.result }}, thin-clients=${{ needs.thin-clients.result }}); removing the tag so the version is not claimed"
+          echo "::warning::release $tag did not complete (images=${{ needs.images.result }}, thin-clients=${{ needs.thin-clients.result }}, llm-images=${{ needs.llm-images.result }}); removing the tag so the version is not claimed"
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
           git push origin --delete "$tag" 2>/dev/null || true
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then

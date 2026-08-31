@@ -1,11 +1,8 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
 #include "memory_core_internal.h"
-#include "db2/memory_scope_query.h"
+#include "modules/db2/c/memory_scope_query.h"
 /* memory_core_search.c: split from memory_core.c into a real translation unit
  * (was memory_core_search.inc, textually included only to stay under the
  * line-check ceiling). Cross-TU declarations live in the module header. */
@@ -14,27 +11,28 @@
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -333,8 +331,27 @@ void memory_expand_synonyms(const char *query, char *out, size_t out_len)
    }
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void search_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search", "lexical fact search is unavailable: the relational store is "
+                             "unreachable, so the query returns no matches rather than "
+                             "finding none");
+}
+
 int memory_find_facts_like(const char *query, int limit, memory_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      search_warn_store_unreachable();
+      return 0;
+   }
    return db2_memory_find_facts_like(query, limit, out, max);
 }
 
@@ -833,6 +850,15 @@ memory_query_shape_t memory_query_shape(const char *raw_query, const char *norm_
    return MEM_SHAPE_UNKNOWN;
 }
 
+/* Defined with the intent keyword sets below. */
+static int memory_query_any_term(const char *norm, const char *const *terms);
+
+/* Dependency-shaped phrasings that route to the graph. Whole-token/phrase matched:
+ * "fixes" as a substring also fired on "prefixes" and "suffixes", routing ordinary
+ * code questions into a graph-only plan with semantic retrieval disabled. */
+static const char *const route_graph_terms[] = {"what calls", "who calls", "depends on",
+                                                "callers",    "fixes",     NULL};
+
 memory_query_route_t memory_query_route(const char *raw_query, const char *norm_query,
                                         memory_query_shape_t shape)
 {
@@ -840,10 +866,13 @@ memory_query_route_t memory_query_route(const char *raw_query, const char *norm_
    if (memory_is_profile_query(raw_query))
       return MEM_ROUTE_HYBRID;
 
-   if ((raw_query && (strcasestr(raw_query, "what calls") || strcasestr(raw_query, "who calls") ||
-                      strcasestr(raw_query, "depends on") || strcasestr(raw_query, "fixes"))) ||
-       (norm_query && (strstr(norm_query, "callers") || strstr(norm_query, "depends on"))))
-      return MEM_ROUTE_GRAPH;
+   {
+      const char *src = (raw_query && raw_query[0]) ? raw_query : norm_query;
+      char norm[512];
+      normalize_key(src ? src : "", norm, sizeof(norm));
+      if (norm[0] && memory_query_any_term(norm, route_graph_terms))
+         return MEM_ROUTE_GRAPH;
+   }
 
    if ((raw_query && strstr(raw_query, "`")) || memory_query_is_code_like(raw_query) ||
        memory_query_is_code_like(norm_query))
@@ -914,7 +943,12 @@ int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_p
       else
          out->route = memory_query_route(query, norm_query, out->shape);
    }
-   out->graph_hops = (out->route == MEM_ROUTE_GRAPH) ? 2 : 1;
+   /* Two hops on every route. A one-hop expansion only reaches memories attached to
+    * a seed's immediate neighbours, which misses the bridged evidence graph fusion
+    * exists to find ("A worked on B, B owns C" answers a question about A and C).
+    * The second ring is decayed by pow(0.5, hop-1) in memory_graph_edge_score, so it
+    * ranks below first-ring evidence rather than displacing it. */
+   out->graph_hops = 2;
    out->semantic_enabled = (out->route != MEM_ROUTE_LEXICAL && out->route != MEM_ROUTE_GRAPH);
 
    switch (out->route)
@@ -1001,32 +1035,60 @@ int memory_query_plan(const char *query, int limit, int hard_cap, memory_query_p
    return 0;
 }
 
+/* Intent keyword sets, matched as whole tokens or whole phrases against the
+ * normalized query — never as substrings. Substring matching classified "update the
+ * candidate ranker" as TEMPORAL ("date" inside "candidate"), and "ago" inside
+ * "Chicago", "day" inside "birthday", "time" inside "sometimes" all fired the same
+ * way. Intent drives memory_unit_kind_intent_boost(), so a false TEMPORAL ranks a
+ * code question as if it asked when something happened.
+ *
+ * Weekday names are listed explicitly: they used to reach TEMPORAL only by accident,
+ * as substrings of the bare "day" needle, and dropping them with the substring match
+ * would have lost real temporal recall. */
+static const char *const intent_temporal_terms[] = {
+    "when",     "what time", "what day", "date",      "dated",     "before",     "after",
+    "between",  "since",     "until",    "last week", "next week", "last month", "next month",
+    "ago",      "year",      "month",    "day",       "time",      "today",      "yesterday",
+    "tomorrow", "latest",    "recent",   "earliest",  "monday",    "tuesday",    "wednesday",
+    "thursday", "friday",    "saturday", "sunday",    NULL};
+
+static const char *const intent_procedural_terms[] = {"how",      "steps", "procedure",
+                                                      "workflow", "setup", NULL};
+
+static const char *const intent_entity_terms[] = {"who", "person", "people", "team", "owner", NULL};
+
+/* 1 iff any term in |terms| occurs in |norm| as a whole token or whole phrase. */
+static int memory_query_any_term(const char *norm, const char *const *terms)
+{
+   for (int i = 0; terms[i]; i++)
+      if (memory_query_has_term(norm, terms[i]))
+         return 1;
+   return 0;
+}
+
 memory_query_intent_t memory_query_intent(const char *raw_query, const char *norm_query)
 {
-   if ((raw_query &&
-        (strstr(raw_query, "when") || strstr(raw_query, "When") || strstr(raw_query, "what time") ||
-         strstr(raw_query, "What time") || strstr(raw_query, "what day") ||
-         strstr(raw_query, "What day") || strstr(raw_query, "date") || strstr(raw_query, "dated") ||
-         strstr(raw_query, "before") || strstr(raw_query, "after") ||
-         strstr(raw_query, "between") || strstr(raw_query, "since") || strstr(raw_query, "until") ||
-         strstr(raw_query, "last week") || strstr(raw_query, "next week") ||
-         strstr(raw_query, "last month") || strstr(raw_query, "next month") ||
-         strstr(raw_query, "ago"))) ||
-       (norm_query && (strstr(norm_query, "year") || strstr(norm_query, "month") ||
-                       strstr(norm_query, "day") || strstr(norm_query, "time") ||
-                       strstr(norm_query, "today") || strstr(norm_query, "yesterday") ||
-                       strstr(norm_query, "tomorrow") || strstr(norm_query, "latest") ||
-                       strstr(norm_query, "recent") || strstr(norm_query, "earliest"))))
+   /* Callers disagree about the second argument — several pass the raw query twice
+    * (memory_core_search.c:592, memory_core_search_c.c:631, :641) — so normalize
+    * here rather than trusting it to already be normalize_key() output. One
+    * normalized buffer also retires the old raw/norm split and the "when"/"When"
+    * case duplication, since normalize_key() lowercases. */
+   const char *src = (raw_query && raw_query[0]) ? raw_query : norm_query;
+   if (!src || !src[0])
+      return MEM_QUERY_GENERAL;
+
+   char norm[512];
+   normalize_key(src, norm, sizeof(norm));
+   if (!norm[0])
+      return MEM_QUERY_GENERAL;
+
+   if (memory_query_any_term(norm, intent_temporal_terms))
       return MEM_QUERY_TEMPORAL;
 
-   if ((raw_query && (strstr(raw_query, "how ") || strstr(raw_query, "How ") ||
-                      strstr(raw_query, "steps") || strstr(raw_query, "procedure"))) ||
-       (norm_query && (strstr(norm_query, "workflow") || strstr(norm_query, "setup"))))
+   if (memory_query_any_term(norm, intent_procedural_terms))
       return MEM_QUERY_PROCEDURAL;
 
-   if ((raw_query && (strstr(raw_query, "who ") || strstr(raw_query, "Who ") ||
-                      strstr(raw_query, "person") || strstr(raw_query, "people"))) ||
-       (norm_query && (strstr(norm_query, "team") || strstr(norm_query, "owner"))))
+   if (memory_query_any_term(norm, intent_entity_terms))
       return MEM_QUERY_ENTITY;
 
    return MEM_QUERY_GENERAL;

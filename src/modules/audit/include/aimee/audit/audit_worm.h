@@ -15,7 +15,7 @@
  *               detail, key_id, prev_hash, row_hash)
  *
  *   seq        1..N, gap-free (allocated MAX(seq)+1 inside the write txn)
- *   ts         RFC3339-UTC, ADVISORY — excluded from row_hash, not an ordering key
+ *   ts         RFC3339-UTC, bound into the current v2-full row_hash; not an ordering key
  *   row_hash   SHA256( AUDIT_WORM_DOMAIN "\n" prev_hash "\n" canonical(record) )
  *   prev_hash  the previous row's row_hash; for seq=1 the genesis is 32 zero bytes
  *              rendered as 64 hex '0's (AUDIT_WORM_GENESIS_PREV)
@@ -50,6 +50,17 @@ extern "C"
    int audit_worm_append(const char *actor_role, const char *actor_principal, const char *action,
                          const char *subject, const char *verdict, const char *detail);
 
+   /* Append one event from a durable producer outbox. event_id must be stable
+    * across retries and ts is the producer's original timestamp. Repeating an
+    * event_id with byte-identical fields returns the original sequence without
+    * appending another row; reusing it for different evidence fails closed.
+    * The event ID is bound into the row hash. This is the shared delivery seam
+    * used by the aimee-kb WORM worker. */
+   int audit_worm_append_idempotent(const char *event_id, const char *ts,
+                                    const char *actor_role, const char *actor_principal,
+                                    const char *action, const char *subject, const char *verdict,
+                                    const char *detail, long long *seq_out);
+
    /* Recompute the whole chain: for every row verify row_hash, prev_hash linkage,
     * and gap-free seq. Returns 0 if intact; -1 on the first break, writing a
     * human-readable reason into err (if non-NULL). MAC checkpoints extend this in
@@ -74,6 +85,13 @@ extern "C"
     * uncheckpointed-tail signal. Returns one of AUDIT_WORM_VERIFY_*; writes a reason
     * into err on RED and fills head_seq / last_ckpt_seq when non-NULL. */
    int audit_worm_verify(char *err, size_t errlen, long *head_seq, long *last_ckpt_seq);
+
+   /* Startup admission shared by aimee-server and aimee-kb-worm. Verify the
+    * existing chain and checkpoint MACs before the process accepts work, reject
+    * any RED store, and checkpoint an intact non-empty head so the admitted
+    * state is fully attested. Returns 0 only after a GREEN verification. */
+   int audit_worm_startup_verify(char *err, size_t errlen, long *head_seq,
+                                 long *last_ckpt_seq);
 
    /* Verify a sealed snapshot file (read-only) with the same chain + MAC checks.
     * 0 if intact, -1 on the first break (reason in err). */

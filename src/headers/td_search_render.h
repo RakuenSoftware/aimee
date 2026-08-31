@@ -8,6 +8,24 @@
 #include "cJSON.h"
 #include <stdint.h>
 
+/* Retrieval is not a boolean.  A healthy empty result, a degraded dependency,
+ * and a malformed/failed response lead to different next actions. */
+typedef enum
+{
+   TD_RETRIEVAL_FOUND = 0,
+   TD_RETRIEVAL_EMPTY,
+   TD_RETRIEVAL_DEGRADED,
+   TD_RETRIEVAL_FAILED
+} td_retrieval_outcome_t;
+
+const char *td_retrieval_outcome_name(td_retrieval_outcome_t outcome);
+
+/* Render a bounded, machine-readable continuation offer.  It is advice, not an
+ * authorization: policy_recheck is always true and authorized is always false.
+ * The returned string is owned by the caller. */
+char *td_render_retrieval_continuation(td_retrieval_outcome_t outcome, const char *source,
+                                       const char *query, const char *message);
+
 /* Render a /v1/search hits array into a concise text block for the tool result.
  * Returns a malloc'd string (caller frees), or NULL on OOM. A NULL/empty/non-array
  * `hits` yields a "no results" line rather than an error. */

@@ -28,6 +28,7 @@
 #include <sys/types.h>
 
 #include "presence.h" /* PRESENCE_SESSION_ID_MAX / _TURN_ID_MAX / PRESENCE_MAX */
+#include <aimee/core/turn_integrity.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -45,6 +46,7 @@ extern "C"
       pid_t child_pid;
       int reaped;
       int in_use;
+      ti_turn_manifest_t integrity;
    } turn_entry_t;
 
    /* Initialize the global registry. Idempotent; call at server startup. */

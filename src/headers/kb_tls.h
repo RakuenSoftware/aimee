@@ -16,11 +16,17 @@
 
 #define KB_TLS_PEER_ISSUER_MAX KB_PKI_ISSUER_MAX
 #define KB_TLS_PEER_SERIAL_MAX KB_PKI_SERIAL_MAX
+/* Maximum token text stored in the 4096-byte process-secret slot. */
+#define KB_TLS_BEARER_TOKEN_MAX 4095
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
+
+   /* True only when the PEM leaf carries exactly one EKU and it is the
+    * requested role (serverAuth when server_role=1, clientAuth otherwise). */
+   int kb_tls_cert_has_exact_role(const char *cert_pem, int server_role);
 
    /* Build an mTLS SERVER context: presents (server_cert_pem, server_key_pem),
     * trusts ca_cert_pem to verify CLIENT certs, and REQUIRES a valid client cert
@@ -58,6 +64,10 @@ extern "C"
     * The plaintext listener path is unaffected. Exposed for unit testing the
     * full mTLS request path over a socketpair. */
    void kb_tls_serve_conn(int fd, SSL_CTX *ctx);
+
+   /* Test-only seam for the host PAM verifier used by the service-identity
+    * layer. Passing NULL restores the production pam_check_credentials path. */
+   void kb_tls_set_pam_check_for_test(int (*check)(const char *, const char *));
 
    /* --- the kb mTLS listener (distributed mode) --- */
 
@@ -163,8 +173,8 @@ extern "C"
     * the presented cert). The new key never leaves the client. Returns 0 on
     * success, -1 on connect / TLS / renew failure. */
    int kb_tls_renew(const char *host, int port, const char *ca_cert_pem, const char *cur_cert_pem,
-                    const char *cur_key_pem, char *cert_out, size_t cert_cap, char *key_out,
-                    size_t key_cap);
+                    const char *cur_key_pem, const char *authorization, char *cert_out,
+                    size_t cert_cap, char *key_out, size_t key_cap);
 
 #ifdef __cplusplus
 }

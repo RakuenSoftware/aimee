@@ -52,6 +52,22 @@ static int module_key_provider(const response_dedup_key_inputs_t *in, char *out,
               : -1;
 }
 
+static int failing_key_provider(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
+{
+   (void)in;
+   if (out && out_cap > 0)
+      out[0] = '\0';
+   return -1;
+}
+
+static int empty_key_provider(const response_dedup_key_inputs_t *in, char *out, size_t out_cap)
+{
+   (void)in;
+   if (out && out_cap > 0)
+      out[0] = '\0';
+   return 0;
+}
+
 static void test_key_isolation(void)
 {
    char k1[256], k2[256], k3[256], k4[256], k5[256], k6[256], k7[256];
@@ -66,33 +82,34 @@ static void test_key_isolation(void)
                                        .body = "{\"x\":1}",
                                        .context = "ctx",
                                        .behavior_flags = "cs0 rc0"};
-   response_dedup_key(&base, k1, sizeof(k1));
+   assert(response_dedup_key(&base, k1, sizeof(k1)) == 0);
+   assert(strcmp(k1, "uid:1|45fd46a03cb4a28da3227155fec20a71") == 0);
 
    /* Different principal -> different key (no cross-account reads). */
    response_dedup_key_inputs_t v = base;
    v.principal = "uid:2";
-   response_dedup_key(&v, k2, sizeof(k2));
+   assert(response_dedup_key(&v, k2, sizeof(k2)) == 0);
    /* Different body. */
    v = base;
    v.body = "{\"x\":2}";
-   response_dedup_key(&v, k3, sizeof(k3));
+   assert(response_dedup_key(&v, k3, sizeof(k3)) == 0);
    /* Different pre-injected context, identical body. */
    v = base;
    v.context = "ctx-NEW";
-   response_dedup_key(&v, k4, sizeof(k4));
+   assert(response_dedup_key(&v, k4, sizeof(k4)) == 0);
    /* Different RESOLVED model — same requested-but-resolved-different must not
     * collide (the core finding-2 fix). */
    v = base;
    v.model = "gpt-4o-mini";
-   response_dedup_key(&v, k5, sizeof(k5));
+   assert(response_dedup_key(&v, k5, sizeof(k5)) == 0);
    /* Different resolved provider. */
    v = base;
    v.provider = "azure";
-   response_dedup_key(&v, k6, sizeof(k6));
+   assert(response_dedup_key(&v, k6, sizeof(k6)) == 0);
    /* Different behaviour-config flags. */
    v = base;
    v.behavior_flags = "cs1 rc0";
-   response_dedup_key(&v, k7, sizeof(k7));
+   assert(response_dedup_key(&v, k7, sizeof(k7)) == 0);
 
    assert(strcmp(k1, k2) != 0);
    assert(strcmp(k1, k3) != 0);
@@ -103,21 +120,44 @@ static void test_key_isolation(void)
 
    /* Identical inputs -> identical key (deterministic). */
    char k1b[256];
-   response_dedup_key(&base, k1b, sizeof(k1b));
+   assert(response_dedup_key(&base, k1b, sizeof(k1b)) == 0);
    assert(strcmp(k1, k1b) == 0);
 
    /* Empty principal collapses to a stable "anon" marker, not an empty field. */
    response_dedup_key_inputs_t anon = base;
    anon.principal = "";
    char ka[256];
-   response_dedup_key(&anon, ka, sizeof(ka));
+   assert(response_dedup_key(&anon, ka, sizeof(ka)) == 0);
    assert(strncmp(ka, "anon|", 5) == 0);
 
-   /* NULL inputs -> empty key, no crash. */
+   /* Invalid inputs fail and leave no usable key. */
    char kn[8] = "x";
-   response_dedup_key(NULL, kn, sizeof(kn));
+   assert(response_dedup_key(NULL, kn, sizeof(kn)) == -1);
    assert(kn[0] == '\0');
    PASS("dedup: key isolation incl. resolved backend + flags");
+}
+
+static void test_key_provider_required(void)
+{
+   response_dedup_key_inputs_t in = {.principal = "uid:1", .idempotency_key = "idem-a"};
+   char key[64] = "stale";
+
+   response_dedup_register_key_provider(NULL);
+   assert(response_dedup_key(&in, key, sizeof(key)) == -1);
+   assert(key[0] == '\0');
+
+   response_dedup_register_key_provider(failing_key_provider);
+   strcpy(key, "stale");
+   assert(response_dedup_key(&in, key, sizeof(key)) == -1);
+   assert(key[0] == '\0');
+
+   response_dedup_register_key_provider(empty_key_provider);
+   strcpy(key, "stale");
+   assert(response_dedup_key(&in, key, sizeof(key)) == -1);
+   assert(key[0] == '\0');
+
+   response_dedup_register_key_provider(module_key_provider);
+   PASS("dedup: event-bus key provider is required");
 }
 
 static void test_get_put_roundtrip(void)
@@ -187,7 +227,7 @@ static void test_long_inputs_bounded_and_hit(void)
                                      .context = "ctx",
                                      .behavior_flags = "cs0 rc0"};
    char key[512];
-   response_dedup_key(&in, key, sizeof(key));
+   assert(response_dedup_key(&in, key, sizeof(key)) == 0);
    /* The composed key fits a cache slot (well under 192 bytes) despite the long
     * inputs, because the discriminators are digested to a fixed width. */
    assert(strlen(key) < 192);
@@ -198,7 +238,7 @@ static void test_long_inputs_bounded_and_hit(void)
    /* Re-derive the key from identical inputs and confirm it HITS (it would miss
     * if either the stored or lookup key were silently truncated). */
    char key2[512];
-   response_dedup_key(&in, key2, sizeof(key2));
+   assert(response_dedup_key(&in, key2, sizeof(key2)) == 0);
    assert(strcmp(key, key2) == 0);
    assert(response_dedup_get(key2, 1001, &out, NULL) == 1);
    assert(out && strcmp(out, "CACHED-LONG") == 0);
@@ -230,6 +270,7 @@ int main(void)
 {
    printf("response_dedup: unit tests\n");
    response_dedup_register_key_provider(module_key_provider);
+   test_key_provider_required();
    test_key_isolation();
    test_get_put_roundtrip();
    test_ttl_expiry();

@@ -8,8 +8,8 @@
 
 #include "aimee.h"
 #include "cJSON.h"
-#include "db2/artifacts.h"
-#include "db2/learning_synth_ops.h"
+#include "modules/db2/c/artifacts.h"
+#include "modules/db2/c/learning_synth_ops.h"
 #include "modules/learning/learning_bundle.h"
 #include "log.h"
 #include "platform_process.h" /* platform_exec_pipe */

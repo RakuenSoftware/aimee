@@ -33,9 +33,28 @@ class RemoteHandler(http.server.BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length:
             self.rfile.read(length)
-        body = json.dumps(
-            {"status": "ok", "agents": [], "any_delegate_available": False}
-        ).encode()
+        # The client asks the server which methods it routes before it can route
+        # anything (GET /v1/cli/manifest); it no longer carries a compiled-in
+        # map. A stand-in server therefore has to answer that too, or every
+        # command fails before the request under test is ever made. Only the
+        # methods this test drives need rows.
+        if self.path.startswith("/v1/cli/manifest"):
+            body = json.dumps(
+                {
+                    "manifest_version": 1,
+                    "server_version": "stub",
+                    "routes": [
+                        {"op": "model.list", "verb": "GET", "path": "/v1/models"},
+                        {"op": "agent.list", "verb": "GET", "path": "/v1/agents"},
+                        {"op": "memory.search", "verb": "POST", "path": "/v1/memory/search"},
+                        {"op": "config.show", "verb": "GET", "path": "/v1/config"},
+                    ],
+                }
+            ).encode()
+        else:
+            body = json.dumps(
+                {"status": "ok", "agents": [], "any_delegate_available": False}
+            ).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -204,7 +223,13 @@ def main() -> int:
             reachable = (
                 ["hooks", "pre"],
                 ["hooks", "post"],
-                ["session-start"],
+                # session-start is deliberately NOT here. It no longer dispatches
+                # to the server: the launcher owns session id, worktree and cwd
+                # before the host starts, and session guidance is prepended at
+                # model ingress instead of being assembled per client. What is
+                # left is a local publish of the host session id, so "must reach
+                # the remote" no longer describes it. The exclusivity half still
+                # holds trivially -- it contacts nothing.
                 ["optimize", "points"],
                 ["optimize", "baseline", "--point", "router"],
             )
@@ -213,6 +238,16 @@ def main() -> int:
                 special = run_client(binary, home, f"tcp:127.0.0.1:{port}", command)
                 assert RemoteHandler.count() > before, (command, special.stderr)
                 assert sentinel.contacts_after_settle() == 0, f"{command} contacted local UDS"
+
+            # session-start is now local-only, and that is a contract in its own
+            # right: it must reach NEITHER the remote nor the local socket. A
+            # regression that reintroduced per-client assembly here would show
+            # up as a request to one of the two.
+            before = RemoteHandler.count()
+            local_only = run_client(binary, home, f"tcp:127.0.0.1:{port}", ["session-start"])
+            assert local_only.returncode == 0, (local_only.stdout, local_only.stderr)
+            assert RemoteHandler.count() == before, "session-start contacted the remote"
+            assert sentinel.contacts_after_settle() == 0, "session-start contacted local UDS"
 
             for command in reachable:
                 failed = run_client(binary, home, f"tcp:127.0.0.1:{unused_tcp_port()}", command)

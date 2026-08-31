@@ -24,8 +24,17 @@
 #ifndef DEC_WFE_AUTONOMOUS_ROUTE_H
 #define DEC_WFE_AUTONOMOUS_ROUTE_H 1
 
-/* The autonomous omitted-workflow floor: a full-spine enforced workflow. */
+/* The autonomous omitted-workflow floor: a full-spine enforced workflow.
+ * Mirrored as AutonomousFloor in server-go/modules/workflows/autonomous.go; both
+ * sides assert the value so they cannot drift. */
 #define WFE_AUTONOMOUS_FLOOR "managed-change"
+
+/* The sweep human-gate floor, mirrored as SweepWorkflowFloor module-side. */
+#define WFE_SWEEP_WORKFLOW_FLOOR "manual-review"
+
+/* Longest workflow id the clamp will hold. A name that does not fit is treated
+ * as not selectable rather than truncated into a different lane. */
+#define WFE_AUTONOMOUS_ID_MAX 128
 
 /* 1 if a router-selected workflow may be AUTO-selected for an autonomous run.
  * The predicate is the catalog `enforced` flag: by the I2 loader invariant an

@@ -17,18 +17,18 @@ jobs:
   benchmark:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - name: Install dependencies
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0
-          until sudo apt-get update -q; do
+          until timeout 240 sudo apt-get update -q; do
             i=$((i + 1))
             [ "$i" -ge 5 ] && break
             echo "apt-get update retry $i (transient repo failure)"
             sleep $((i * 4))
           done
-          sudo apt-get install -y -q gcc make \
+          timeout 240 sudo apt-get install -y -q gcc make \
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev \
             libp11-kit-dev libpq-dev
       - name: Build benchmark
@@ -40,7 +40,7 @@ jobs:
             --check benchmarks/baseline.json
       - name: Upload benchmark result
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: performance-benchmark-${{ github.sha }}
           path: ${{ runner.temp }}/benchmark-current.json

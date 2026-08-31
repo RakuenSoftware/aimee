@@ -19,6 +19,7 @@
 #include "../headers/agent_protocol.h"
 #include "../headers/anthropic_ingress.h"
 #include <aimee/delegates/delegate_driver.h>
+#include "gw_stage_governance.h"
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -52,16 +53,46 @@ static const char *g_stream_payload;
  * buffered P2c test. NULL = empty "{}" (regression-canary default). */
 static const char *g_response_body;
 static int g_response_status;
-/* P2c policy gate. The real config_load is stubbed to honor this global;
+/* P2c policy gate. The real legacy_config_read is stubbed to honor this global;
  * flip g_prevent to 1 to enable the streaming-side tool policing. */
 static int g_prevent;
 /* Tool-use fixtures for parsed_with_tool_uses (the driver parse_response
  * stub reads `g_tool_uses_json` and synthesizes a populated parsed struct). */
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
+static const char *g_response_content;
+
+static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+                                         uint32_t tool_count, const char *stop_reason,
+                                         aimee_governance_decision_t *decision)
+{
+   memset(decision, 0, sizeof(*decision));
+   decision->keep_mask = aimee_governance_mask_for_count(tool_count);
+   snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+            stop_reason ? stop_reason : "");
+   if (!policy_active)
+      return 0;
+   decision->keep_mask = 0;
+   for (uint32_t i = 0; i < tool_count; ++i)
+   {
+      int denied =
+          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
+          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+      if (denied)
+         decision->drop_count++;
+      else
+         decision->keep_mask |= 1u << i;
+   }
+   uint32_t kept = tool_count - decision->drop_count;
+   if (!decision->stop_reason[0] || kept == 0)
+      snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+               kept > 0 ? "tool_use" : "end_turn");
+   return 0;
+}
 
 static void reset_capture(void)
 {
+   gw_response_governance_register_provider(governance_event_bus_provider);
    free(g_last_body);
    g_last_body = NULL;
    free(g_last_extra);
@@ -73,6 +104,7 @@ static void reset_capture(void)
    g_prevent = 0;
    g_tool_uses_json = NULL;
    g_upstream_stop_reason = NULL;
+   g_response_content = NULL;
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -96,6 +128,40 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
 agent_t *agent_default_primary(agent_config_t *cfg)
 {
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
+/* Registry accessors (see agent_config.h): the production ones read a cached
+ * registry in place; here they answer from this file's stubbed loader so the
+ * test's fixture still decides the outcome. */
+int agent_registry_find(const char *name, agent_t *out)
+{
+   agent_config_t cfg;
+   if (!name || !out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_find(&cfg, name);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_default_primary(agent_t *out)
+{
+   agent_config_t cfg;
+   if (!out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_default_primary(&cfg);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -246,38 +312,10 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    (void)source;
    (void)usage_kind;
 }
-/* Context economizer (gateway seam) is default-off and not under test here; the
- * shadow-mode hook in messages_run_request_pipeline references these three, so stub
- * them as no-ops to keep the minimal P2c link from pulling the economizer + its
- * db1/token_tracker dependency chain. */
-#include "context_reduce.h"
-int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
-                   const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
-                   reduce_state_t *st, reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)session_id;
-   (void)seam;
-   (void)cfg;
-   (void)st;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return 0;
-}
-void context_reduce_result_free(reduce_result_t *out)
-{
-   (void)out;
-}
-void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
-                                const char *agent_name, const char *role)
-{
-   (void)r;
-   (void)model;
-   (void)agent_name;
-   (void)role;
-}
+/* The context_reduce / result_free / reduce-ledger stubs that stood here are gone:
+ * the C reducer moved to the Go economizer module, so messages_run_request_pipeline
+ * references none of those symbols any more and the minimal P2c link stays minimal
+ * without them. */
 void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
                                const char *requested_model, const char *stop_reason,
                                int prompt_tokens, int completion_tokens, int cache_write_tokens,
@@ -317,6 +355,8 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
    memset(out, 0, sizeof(*out));
    if (g_upstream_stop_reason)
       snprintf(out->stop_reason, sizeof(out->stop_reason), "%s", g_upstream_stop_reason);
+   if (g_response_content)
+      out->content = strdup(g_response_content);
    arr = g_tool_uses_json ? cJSON_Parse(g_tool_uses_json) : NULL;
    if (!cJSON_IsArray(arr))
    {
@@ -342,23 +382,7 @@ static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response
    cJSON_Delete(arr);
 }
 
-/* Minimal config_load stub (the real one depends on the YAML loader,
- * out of scope for this minimal-link test). Mirrors test_anthropic_http_p2c.c. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These mirror what the stub above produced — prevent_subagents
+/* Accessor stubs mirror this fixture's policy — prevent_subagents
  * tracks g_prevent, pin_model was left zeroed — so assertions are unchanged. */
 int config_gateway_prevent_subagents(void)
 {
@@ -370,7 +394,7 @@ int config_gateway_pin_model(void)
    return 0;
 }
 
-/* Same migration for the economizer seam: the config_load stub above leaves the
+/* The economizer fixture leaves the
  * economizer zeroed, so the live-config form must report OFF. */
 int econ_mode_current(void)
 {
@@ -748,6 +772,82 @@ static void test_streaming_openai_policy_off_is_byte_neutral(void)
    PASS("streaming_openai_policy_off_is_byte_neutral");
 }
 
+/* An Anthropic client can stream against an OpenAI-compatible delegate. Once
+ * that ordinary session has edited code, completion inspection needs the whole
+ * response before any bytes reach the client. This pins the branch condition:
+ * an armed turn is buffered even when subagent policing is off. */
+static void assert_streaming_armed_completion_is_buffered(const char *driver_name)
+{
+   const delegate_driver_t driver = {.name = driver_name, .parse_response = parsed_with_tool_uses};
+   replay_cap_t cap;
+
+   reset_capture();
+   g_driver = &driver;
+   g_tool_uses_json = "[]";
+   g_upstream_stop_reason = "end_turn";
+   g_response_content =
+       "The same vulnerability exists in another handler, but I left it unchanged. Want me to "
+       "fix it?";
+
+   memset(&cap, 0, sizeof(cap));
+   messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
+                   "\"tools\":[{\"name\":\"Bash\",\"input_schema\":{\"type\":\"object\","
+                   "\"properties\":{\"command\":{\"type\":\"string\"}}}}],"
+                   "\"messages\":[{\"role\":\"user\",\"content\":\"repair it\"},"
+                   "{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\",\"id\":\"e1\","
+                   "\"name\":\"Bash\",\"input\":{\"command\":\"cat > app/file.py\"}}]},"
+                   "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+                   "\"tool_use_id\":\"e1\",\"content\":\"ok\"}]}]}",
+                   replay_capture, &cap);
+
+   int saw_gate_tool = 0;
+   int saw_gate_marker = 0;
+   for (int i = 0; i < cap.count; i++)
+   {
+      if (strcmp(cap.events[i], "content_block_start") == 0 &&
+          strstr(cap.data[i], "\"type\":\"tool_use\"") && strstr(cap.data[i], "\"name\":\"Bash\""))
+         saw_gate_tool = 1;
+      if (strstr(cap.data[i], AIMEE_COMPLETION_CALL_PREFIX))
+         saw_gate_marker = 1;
+   }
+   assert(saw_gate_tool);
+   assert(saw_gate_marker);
+
+   reset_capture();
+}
+
+static void test_streaming_armed_completion_is_provider_neutral(void)
+{
+   assert_streaming_armed_completion_is_buffered("openai");
+   assert_streaming_armed_completion_is_buffered("anthropic");
+   PASS("streaming_armed_completion_is_provider_neutral");
+}
+
+static void test_native_completion_followup_reaches_provider_system(void)
+{
+   const delegate_driver_t driver = {.name = "anthropic", .parse_response = parsed_with_tool_uses};
+   replay_cap_t cap;
+
+   reset_capture();
+   g_driver = &driver;
+   g_stream_payload = "event: message_stop\ndata: {}\n\n";
+   memset(&cap, 0, sizeof(cap));
+   messages_stream("{\"model\":\"ignored\",\"max_tokens\":16,\"stream\":true,"
+                   "\"system\":\"existing system\","
+                   "\"messages\":[{\"role\":\"assistant\",\"content\":[{\"type\":\"tool_use\","
+                   "\"id\":\"call_aimee_completion_42\",\"name\":\"Bash\","
+                   "\"input\":{\"command\":\"true\"}}]},"
+                   "{\"role\":\"user\",\"content\":[{\"type\":\"tool_result\","
+                   "\"tool_use_id\":\"call_aimee_completion_42\",\"content\":\"\"}]}]}",
+                   replay_capture, &cap);
+
+   assert(g_last_body != NULL);
+   assert(strstr(g_last_body, "existing system") != NULL);
+   assert(strstr(g_last_body, "aimee-completion-policy") != NULL);
+   reset_capture();
+   PASS("native_completion_followup_reaches_provider_system");
+}
+
 int main(void)
 {
    printf("test_anthropic_http_streaming_p2c:\n");
@@ -759,14 +859,15 @@ int main(void)
    test_streaming_openai_police_drops_subagent_tool_use();
    test_streaming_openai_police_on_no_tool_use_passthrough();
    test_streaming_openai_policy_off_is_byte_neutral();
+   test_streaming_armed_completion_is_provider_neutral();
+   test_native_completion_followup_reaches_provider_system();
    printf("anthropic_http_streaming_p2c: OK\n");
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+/* This policing integration fixture explicitly enables
+ * the governance module; the module's unspecified production default is
+ * covered by test_response_governance_stage.c. */
 int config_present(void)
 {
    return 1;
@@ -774,7 +875,7 @@ int config_present(void)
 
 int config_module_governance(void)
 {
-   return -1;
+   return 1;
 }
 
 int config_ingress_preinject_anthropic_enabled(void)

@@ -5,13 +5,13 @@
 #define _GNU_SOURCE
 #endif
 #include "server_http_internal.h"
+#include "server_http_routes_workspace.h"
 #include "server_http.h"
 #include "shadow_mirror.h"
 #include "server.h"         /* CAP_* / CAPS_* capability bits, server_capability_for_method */
 #include "server_conn_io.h" /* transport-aware fd I/O (native-TLS phase 1) */
 #include "server_tls.h"     /* native TLS termination (phase 1b) */
 #include "modules/workspace/workspace_runner_registry.h" /* ws_runner_registry_poll/_respond for the /v1 reverse channel */
-#include "modules/git/forge_credentials.h" /* forge_cred_install for the /v1 token-install route */
 #include <time.h>
 #include "persona.h"
 #include "role_templates.h"
@@ -40,8 +40,8 @@
 #include "server_mgmt_audit.h"
 #include "server_runtime_identity.h"
 #include "kb_client_mtls.h"
-#include "server_workflow_api.h" /* W7: /v1/workflow read+author handlers */
-#include "wfe_http_proxy.h"      /* public workflow routes -> private Go control plane */
+#include "server_workflow_api.h"  /* W7: /v1/workflow read+author handlers */
+#include "workflow_control_bus.h" /* public workflow routes -> the workflows control stage */
 #include "cJSON.h"
 #include <arpa/inet.h>
 #include <errno.h>
@@ -89,38 +89,17 @@ __attribute__((weak)) int server_agent_management_set_enabled(const char *name, 
 #include <openssl/evp.h>
 #include <openssl/sha.h>
 #include <openssl/rand.h>
-#include "router_advise.h" /* S4: router_autonomous_pick/_audit for dev-submit parity */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify — resume the autonomy driver */
-#include "wfe_approval.h"  /* wfe_approval_record/present — human-gate approval */
-#include "wfe_store.h"     /* db1_work_item_* — gate approve/reject */
-#include <sys/stat.h>      /* mkdir for the proposal artifact dir */
-#include <time.h>          /* unique proposal artifact filename */
+#include "router_advise.h"        /* S4: router_autonomous_pick/_audit for dev-submit parity */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify — resume the autonomy driver */
+#include "wfe_approval.h"         /* wfe_approval_record/present — human-gate approval */
+#include "db1_client/wfe_store.h" /* db1_work_item_* — gate approve/reject */
+#include <sys/stat.h>             /* mkdir for the proposal artifact dir */
+#include <time.h>                 /* unique proposal artifact filename */
 
 /* route_req_t + route_handler_fn now live in server_http_internal.h (shared so
  * server_ci_route.c can define its own handler). */
 
-typedef enum
-{
-   RM_EXACT,  /* path == entry->path */
-   RM_PREFIX, /* path == entry->path + <id> ( + entry->suffix ), <id> one segment */
-} route_match_kind_t;
-
 static int mgmt_hex_key(const char *hex, unsigned char key[32]);
-
-/* One row of the /v1 route registry. `op`, when non-NULL, derives the required
- * capability from the NDJSON method twin (server_capability_for_method) so the
- * HTTP route inherits exactly its socket-method capability; otherwise `caps` is
- * used verbatim. `handler` is NULL for streaming routes (see file header). */
-typedef struct
-{
-   const char *verb;   /* "GET" / "POST" / "PUT" / "DELETE" */
-   const char *path;   /* exact path, or static prefix for RM_PREFIX */
-   const char *suffix; /* trailing segment for RM_PREFIX (e.g. "/stop"), else NULL */
-   route_match_kind_t kind;
-   const char *op;           /* NDJSON method twin for cap derivation, or NULL */
-   uint32_t caps;            /* required caps when op == NULL */
-   route_handler_fn handler; /* buffered handler, or NULL for streaming routes */
-} http_route_t;
 
 /* ── route handler adapters ───────────────────────────────────────────────
  * Thin uniform-signature wrappers over the existing route_* helpers so a single
@@ -225,7 +204,7 @@ static server_mgmt_endpoint_jti_result_t management_jti(void *ctx,
        c->issued_at,
        c->expires_at,
    };
-   server_management_jti_result_t rc = server_management_jti_consume(&token, rq->now);
+   server_management_jti_result_t rc = db1_management_jti_consume(&token, rq->now);
    return rc == SERVER_MANAGEMENT_JTI_OK       ? SERVER_MGMT_JTI_OK
           : rc == SERVER_MANAGEMENT_JTI_REPLAY ? SERVER_MGMT_JTI_REPLAY
                                                : SERVER_MGMT_JTI_FAILED;
@@ -253,7 +232,7 @@ static int management_apply(void *ctx, const server_mgmt_action_t *a)
    uint32_t required = server_capability_for_method(a->action);
    if (!required)
       return 1;
-   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "agent.enable")) == 0
+   return server_agent_management_set_enabled(a->agent, !strcmp(a->action, "model.enable")) == 0
               ? 0
               : 1;
 }
@@ -561,11 +540,6 @@ static int rh_roadmap(const route_req_t *rq, char *resp, int cap)
    (void)rq;
    return route_json_provider(g_roadmap_provider, resp, cap, "roadmap");
 }
-static int rh_curiosity(const route_req_t *rq, char *resp, int cap)
-{
-   (void)rq;
-   return route_json_provider(g_curiosity_provider, resp, cap, "curiosity");
-}
 static int rh_notes(const route_req_t *rq, char *resp, int cap)
 {
    (void)rq;
@@ -579,8 +553,30 @@ static int rh_kb_search(const route_req_t *rq, char *resp, int cap)
 }
 static int rh_memory_recall(const route_req_t *rq, char *resp, int cap)
 {
-   return route_native_post(g_memory_recall_handler, rq->body, resp, cap,
-                            "memory recall is not available on this server");
+   /* Recall activation is session-local state in DB1.  The HTTP parser already
+    * captures the credential-bound aimee-session-id for this request; bind it
+    * around the synchronous native handler so the DB1 snapshot and subsequent
+    * activation record use the caller's conversation rather than a worker's
+    * process-derived fallback id. */
+   const char *sid = server_http_identity_session_hdr();
+   int bound = sid && sid[0];
+   /* session_id_set_override owns a 64-byte buffer. Reject rather than
+    * truncate, because two long caller ids that share a prefix must not share
+    * cooldown state. */
+   if (bound && (!is_safe_id(sid) || strlen(sid) >= 64))
+   {
+      snprintf(resp, (size_t)cap,
+               "{\"error\":{\"message\":\"invalid aimee-session-id\","
+               "\"type\":\"invalid_request_error\"}}");
+      return 400;
+   }
+   if (bound)
+      session_id_set_override(sid);
+   int status = route_native_post(g_memory_recall_handler, rq->body, resp, cap,
+                                  "memory recall is not available on this server");
+   if (bound)
+      session_id_clear_override();
+   return status;
 }
 static int rh_notes_search(const route_req_t *rq, char *resp, int cap)
 {
@@ -1218,7 +1214,7 @@ static int rh_wf_proposal(const route_req_t *rq, char *resp, int cap)
  * server_dispatch against the connection caps (g_rpc_conn_caps). Only safe for
  * single-response methods (the buffered HTTP listener must not block): streaming
  * or foreground-blocking methods must not use this. */
-static int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
+int rh_dispatch_op(const route_req_t *rq, char *resp, int cap)
 {
    if (!rq->op || !rq->op[0])
       return err_json(resp, cap, 500, "route has no dispatch method");
@@ -1492,7 +1488,7 @@ int server_http_submit_op_run(const char *op_method, const char *body_json, uint
    return submit_op_run_internal(op_method, body_json, conn_caps, 1, resp, cap);
 }
 
-static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
+int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
 {
    return submit_op_run_internal(rq->op, rq->body, g_rpc_conn_caps, 0, resp, cap);
 }
@@ -1503,153 +1499,6 @@ static int rh_dispatch_op_async(const route_req_t *rq, char *resp, int cap)
  * (REST body) and the {id}-bearing get/remove need bespoke shaping rather than
  * rh_dispatch_op. The {id} segment is the workspace's absolute path, carried
  * percent-encoded so its '/'s survive as one path segment. */
-
-static int ws_hex(char c)
-{
-   if (c >= '0' && c <= '9')
-      return c - '0';
-   if (c >= 'a' && c <= 'f')
-      return c - 'a' + 10;
-   if (c >= 'A' && c <= 'F')
-      return c - 'A' + 10;
-   return -1;
-}
-
-/* Percent-decode `in` into `out` (cap bytes incl. NUL); a malformed %XX is
- * copied literally. Returns out. */
-static char *ws_pct_decode(const char *in, char *out, size_t cap)
-{
-   size_t o = 0;
-   for (size_t i = 0; in && in[i] && o + 1 < cap; i++)
-   {
-      int hi, lo;
-      if (in[i] == '%' && (hi = ws_hex(in[i + 1])) >= 0 && (lo = ws_hex(in[i + 2])) >= 0)
-      {
-         out[o++] = (char)((hi << 4) | lo);
-         i += 2;
-      }
-      else
-      {
-         out[o++] = in[i];
-      }
-   }
-   if (cap)
-      out[o] = '\0';
-   return out;
-}
-
-/* Build {"method":m,"args":[arg0, extra...]} and run it through the loopback
- * bridge (same path + conn caps as rh_dispatch_op). */
-static int ws_dispatch_args(const char *method, const char *arg0, const char *const *extra,
-                            int extra_n, char *resp, int cap)
-{
-   cJSON *req = cJSON_CreateObject();
-   if (!req)
-      return err_json(resp, cap, 500, "out of memory");
-   cJSON_AddStringToObject(req, "method", method);
-   cJSON *args = cJSON_AddArrayToObject(req, "args");
-   if (arg0)
-      cJSON_AddItemToArray(args, cJSON_CreateString(arg0));
-   for (int i = 0; i < extra_n; i++)
-      cJSON_AddItemToArray(args, cJSON_CreateString(extra[i]));
-   char *line = cJSON_PrintUnformatted(req);
-   cJSON_Delete(req);
-   if (!line)
-      return err_json(resp, cap, 500, "out of memory");
-   int rc = loopback_rpc(line, (int)strlen(line), resp, cap, g_rpc_conn_caps);
-   free(line);
-   return rc;
-}
-
-/* POST /v1/workspaces — register {root_hint|root|path, provider?}. */
-static int rh_workspaces_register(const route_req_t *rq, char *resp, int cap)
-{
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : cJSON_CreateObject();
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jroot = cJSON_GetObjectItemCaseSensitive(body, "root_hint");
-   if (!cJSON_IsString(jroot))
-      jroot = cJSON_GetObjectItemCaseSensitive(body, "root");
-   if (!cJSON_IsString(jroot))
-      jroot = cJSON_GetObjectItemCaseSensitive(body, "path");
-   const char *root = (cJSON_IsString(jroot) && jroot->valuestring) ? jroot->valuestring : "";
-   const cJSON *jprov = cJSON_GetObjectItemCaseSensitive(body, "provider");
-   const char *provider = (cJSON_IsString(jprov) && jprov->valuestring) ? jprov->valuestring : "";
-   int rc;
-   if (!root[0])
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "missing root_hint");
-   }
-   if (provider[0])
-   {
-      const char *extra[2] = {"--provider", provider};
-      rc = ws_dispatch_args("workspace.add", root, extra, 2, resp, cap);
-   }
-   else
-   {
-      rc = ws_dispatch_args("workspace.add", root, NULL, 0, resp, cap);
-   }
-   cJSON_Delete(body);
-   return rc;
-}
-
-/* GET /v1/workspaces/{id} — manifest for the percent-encoded path id. */
-static int rh_workspace_get(const route_req_t *rq, char *resp, int cap)
-{
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   return ws_dispatch_args("workspace.get", path, NULL, 0, resp, cap);
-}
-
-/* DELETE /v1/workspaces/{id} — deregister the percent-encoded path id. */
-static int rh_workspace_remove(const route_req_t *rq, char *resp, int cap)
-{
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   return ws_dispatch_args("workspace.remove", path, NULL, 0, resp, cap);
-}
-
-static int rh_workspace_forge_token(const route_req_t *rq, char *resp, int cap)
-{
-   if (!git_surface_enabled())
-      return err_json(resp, cap, 503, "the git surface is disabled on this server");
-   char path[MAX_PATH_LEN];
-   ws_pct_decode(rq->id, path, sizeof(path));
-   if (!path[0])
-      return err_json(resp, cap, 400, "missing workspace id");
-   cJSON *body = (rq->body && rq->body[0]) ? cJSON_Parse(rq->body) : NULL;
-   if (!body || !cJSON_IsObject(body))
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "invalid JSON body");
-   }
-   const cJSON *jtok = cJSON_GetObjectItemCaseSensitive(body, "token");
-   const cJSON *jscope = cJSON_GetObjectItemCaseSensitive(body, "scope");
-   const cJSON *jttl = cJSON_GetObjectItemCaseSensitive(body, "ttl_seconds");
-   const char *token = (cJSON_IsString(jtok) && jtok->valuestring) ? jtok->valuestring : NULL;
-   const char *scope =
-       (cJSON_IsString(jscope) && jscope->valuestring) ? jscope->valuestring : "project";
-   long ttl = cJSON_IsNumber(jttl) ? (long)jttl->valuedouble : 3600;
-   if (!token || !token[0])
-   {
-      cJSON_Delete(body);
-      return err_json(resp, cap, 400, "missing token");
-   }
-   int rc = forge_cred_install(path, token, scope, ttl, (long)time(NULL));
-   cJSON_Delete(body);
-   if (rc != 0)
-      return err_json(resp, cap, 400, "invalid token / scope / ttl, or registry full");
-   snprintf(resp, (size_t)cap, "{\"ok\":true}");
-   return 200;
-}
 
 /* POST /v1/chat/live {session_id, since_rev} — the browser's polling source of
  * truth for an in-flight turn. The server mirrors the tmux pane scrape into the
@@ -1727,7 +1576,8 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
       cJSON_Delete(body);
       return err_json(resp, cap, 400, "missing workspace_id");
    }
-   cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS);
+   int unserved = 0; /* poll paces an unserved tree itself; see its header */
+   cJSON *op = ws_runner_registry_poll(wsid, V1_RUNNER_POLL_MS, &unserved);
    cJSON_Delete(body);
 
    cJSON *out = cJSON_CreateObject();
@@ -1738,6 +1588,10 @@ static int rh_runner_poll(const route_req_t *rq, char *resp, int cap)
    }
    cJSON_AddBoolToObject(out, "ok", 1);
    cJSON_AddBoolToObject(out, "have_op", op != NULL);
+   /* Distinct from have_op: "there is no work" vs "there is no runner". A
+    * client that knows the difference can stop or warn instead of polling a
+    * tree that will never answer. */
+   cJSON_AddBoolToObject(out, "served", !unserved);
    if (op)
       cJSON_AddItemToObject(out, "op", op); /* transfers ownership */
    char *s = cJSON_PrintUnformatted(out);
@@ -1772,7 +1626,7 @@ static int rh_runner_respond(const route_req_t *rq, char *resp, int cap)
 /* ── the registry ─────────────────────────────────────────────────────────
  * Rows are matched first-to-last; matches are mutually exclusive across
  * (verb, path, suffix), so order is not significant for correctness. */
-static const http_route_t g_v1_routes[] = {
+const http_route_t g_v1_routes[] = {
     /* Public: liveness, capability advertisement, model catalog, contract. */
     {"GET", "/v1/health", NULL, RM_EXACT, NULL, 0, rh_health},
     {"GET", "/v1/ready", NULL, RM_EXACT, NULL, 0, rh_ready},
@@ -1791,6 +1645,11 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/capabilities", NULL, RM_EXACT, NULL, 0, rh_capabilities},
     {"GET", "/v1/models", NULL, RM_EXACT, NULL, 0, rh_models},
     {"GET", "/v1/openapi.json", NULL, RM_EXACT, NULL, 0, rh_openapi},
+    /* The client's route map. Public for the same reason the OpenAPI document
+     * is: it describes the surface, it grants nothing, and a client that cannot
+     * read it cannot address the server at all — so gating it would make an
+     * auth failure look like a missing command. */
+    {"GET", "/v1/cli/manifest", NULL, RM_EXACT, NULL, 0, rh_cli_manifest},
     {"GET", "/v1/openapi.yaml", NULL, RM_EXACT, NULL, 0, rh_openapi},
 
     /* Reads / queries — cap derived from the NDJSON twin where one exists, else
@@ -1801,10 +1660,13 @@ static const http_route_t g_v1_routes[] = {
      rh_dashboard_reminders},
     {"GET", "/v1/kb/status", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_status},
     {"GET", "/v1/kb/ingest/status", NULL, RM_EXACT, NULL, CAP_INDEX_READ, rh_kb_ingest_status},
-    /* Write-tier grant administration. UDS-only via v1_route_requires_uds, which refuses
-     * these over TCP regardless of bearer, tier or capability; CAP_GRANT_ADMIN is defence in
-     * depth. Not given an `op` twin, because there is no NDJSON socket method for grant
-     * administration and inventing one would create a second reachable path to it. */
+    /* There are no write-tier grant routes here, deliberately. This comment used
+     * to describe a UDS-only family that has since been removed: see
+     * v1_route_requires_uds, which kept the reason -- proxying grant
+     * administration meant aimee-server holding an administrative identity on
+     * aimee-kb, which a single-tenant data-plane service should not have.
+     * Grants are administered against aimee-kb's own /v1/write-tier-grants
+     * routes. The comment outlived the routes and read as if they were below. */
     {"GET", "/v1/kb/curator", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_kb_curator},
     {"GET", "/v1/agents", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_agents},
     {"GET", "/v1/roadmap", NULL, RM_EXACT, NULL, CAP_DASHBOARD_READ, rh_roadmap},
@@ -1821,6 +1683,9 @@ static const http_route_t g_v1_routes[] = {
      * exposed here. (memory.recall above keeps its bespoke native handler.) */
     {"POST", "/v1/memory/search", NULL, RM_EXACT, "memory.search", 0, rh_dispatch_op},
     {"POST", "/v1/memory/list", NULL, RM_EXACT, "memory.list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/review", NULL, RM_EXACT, "memory.review_list", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/reject", NULL, RM_EXACT, "memory.reject", 0, rh_dispatch_op},
+    {"POST", "/v1/memory/restore", NULL, RM_EXACT, "memory.restore", 0, rh_dispatch_op},
     {"GET", "/v1/memory/stats", NULL, RM_EXACT, "memory.stats", 0, rh_dispatch_op},
     {"POST", "/v1/memory/get", NULL, RM_EXACT, "memory.get", 0, rh_dispatch_op},
     {"POST", "/v1/memory/delete", NULL, RM_EXACT, "memory.delete", 0, rh_dispatch_op},
@@ -1835,6 +1700,12 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/set", NULL, RM_EXACT, "wm.set", 0, rh_dispatch_op},
     {"POST", "/v1/attempts/record", NULL, RM_EXACT, "attempt.record", 0, rh_dispatch_op},
     {"POST", "/v1/rules/delete", NULL, RM_EXACT, "rules.delete", 0, rh_dispatch_op},
+    /* Typed-fact correction surface (§3 / §4). Data-plane writes, so their ops are
+     * listed in g_v1_write_ops below — without that a caller holding only the
+     * shared bearer would reach them with no write grant at all. */
+    {"POST", "/v1/facts/retract", NULL, RM_EXACT, "facts.retract", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/merge", NULL, RM_EXACT, "entities.merge", 0, rh_dispatch_op},
+    {"POST", "/v1/entities/unmerge", NULL, RM_EXACT, "entities.unmerge", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/approve", NULL, RM_EXACT, "collab_rules.approve", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/reject", NULL, RM_EXACT, "collab_rules.reject", 0, rh_dispatch_op},
     {"POST", "/v1/collab_rules/retire", NULL, RM_EXACT, "collab_rules.retire", 0, rh_dispatch_op},
@@ -1849,7 +1720,11 @@ static const http_route_t g_v1_routes[] = {
      * (a write) is intentionally not exposed here. */
     {"POST", "/v1/index/find", NULL, RM_EXACT, "index.find", 0, rh_dispatch_op},
     {"POST", "/v1/index/list", NULL, RM_EXACT, "index.list", 0, rh_dispatch_op},
+    {"POST", "/v1/index/verify", NULL, RM_EXACT, "index.verify", 0, rh_dispatch_op},
     {"POST", "/v1/index/structure", NULL, RM_EXACT, "index.structure", 0, rh_dispatch_op},
+    {"POST", "/v1/index/span", NULL, RM_EXACT, "index.span", 0, rh_dispatch_op},
+    {"POST", "/v1/index/investigate", NULL, RM_EXACT, "index.investigate", 0, rh_dispatch_op},
+    {"POST", "/v1/index/hybrid", NULL, RM_EXACT, "index.hybrid", 0, rh_dispatch_op},
     {"POST", "/v1/index/find_callers", NULL, RM_EXACT, "index.find_callers", 0, rh_dispatch_op},
     {"POST", "/v1/index/deps", NULL, RM_EXACT, "index.deps", 0, rh_dispatch_op},
     {"POST", "/v1/index/blast_radius", NULL, RM_EXACT, "index.blast_radius", 0, rh_dispatch_op},
@@ -1885,6 +1760,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/hooks/pre", NULL, RM_EXACT, "hooks.pre", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/post", NULL, RM_EXACT, "hooks.post", 0, rh_dispatch_op},
     {"POST", "/v1/hooks/session_start", NULL, RM_EXACT, "hooks.session_start", 0, rh_dispatch_op},
+    {"POST", "/v1/hooks/session_end", NULL, RM_EXACT, "hooks.session_end", 0, rh_dispatch_op},
     /* Workspace-independent SessionStart brief for the remote thin client
      * (Proposal 1 Phase 1): side-effect-free build_session_context assembly,
      * distinct from /v1/sessions/brief (which reads a persisted brief). */
@@ -1900,6 +1776,7 @@ static const http_route_t g_v1_routes[] = {
     {"GET", "/v1/aux/config", NULL, RM_EXACT, "aux.config_show", 0, rh_dispatch_op},
     {"GET", "/v1/config", NULL, RM_EXACT, "config.show", 0, rh_dispatch_op},
     {"POST", "/v1/config/get", NULL, RM_EXACT, "config.get", 0, rh_dispatch_op},
+    {"GET", "/v1/config/deploy-env", NULL, RM_EXACT, "config.deploy_env", 0, rh_dispatch_op},
     {"POST", "/v1/config/set", NULL, RM_EXACT, "config.set", 0, rh_dispatch_op},
 
     /* cron.* family (op-parity P1 wave 1) — single-response, object-body
@@ -1945,6 +1822,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/delegate/run", NULL, RM_EXACT, "delegate", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/reply", NULL, RM_EXACT, "delegate.reply", 0, rh_dispatch_op},
     {"POST", "/v1/delegate/launch", NULL, RM_EXACT, "delegate.launch", 0, rh_dispatch_op},
+    {"POST", "/v1/delegate/reservation/forget", NULL, RM_EXACT, "delegate.reservation.forget", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/delegate/cancel_unassigned", NULL, RM_EXACT, "delegate.cancel_unassigned", 0,
+     rh_dispatch_op},
     {"POST", "/v1/delegate/backend_exec", NULL, RM_EXACT, "delegate.backend_exec", 0,
      rh_dispatch_op},
     {"GET", "/v1/job/list", NULL, RM_EXACT, "job.list", 0, rh_dispatch_op},
@@ -1955,25 +1836,49 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/jobs/status", NULL, RM_EXACT, "jobs.status", 0, rh_dispatch_op},
     {"POST", "/v1/jobs/logs", NULL, RM_EXACT, "jobs.logs", 0, rh_dispatch_op},
     {"POST", "/v1/jobs/cancel", NULL, RM_EXACT, "jobs.cancel", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/list", NULL, RM_EXACT, "agent.list", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/local", NULL, RM_EXACT, "agent.local", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/add", NULL, RM_EXACT, "agent.add", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/remove", NULL, RM_EXACT, "agent.remove", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/enable", NULL, RM_EXACT, "agent.enable", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/roles", NULL, RM_EXACT, "agent.roles", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/personas", NULL, RM_EXACT, "agent.personas", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/set", NULL, RM_EXACT, "agent.set", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/disable", NULL, RM_EXACT, "agent.disable", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/probe", NULL, RM_EXACT, "agent.probe", 0, rh_dispatch_op},
-    {"GET", "/v1/agent/stats", NULL, RM_EXACT, "agent.stats", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/draft", NULL, RM_EXACT, "agent.draft", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/setup", NULL, RM_EXACT, "agent.setup", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/setup_poll", NULL, RM_EXACT, "agent.setup_poll", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_start", NULL, RM_EXACT, "agent.cli_oauth_start", 0,
+    {"GET", "/v1/model/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
+    {"GET", "/v1/model/local", NULL, RM_EXACT, "model.local", 0, rh_dispatch_op},
+    {"POST", "/v1/model/add", NULL, RM_EXACT, "model.add", 0, rh_dispatch_op},
+    {"POST", "/v1/model/remove", NULL, RM_EXACT, "model.remove", 0, rh_dispatch_op},
+    {"POST", "/v1/model/enable", NULL, RM_EXACT, "model.enable", 0, rh_dispatch_op},
+    {"POST", "/v1/model/roles", NULL, RM_EXACT, "model.roles", 0, rh_dispatch_op},
+    {"POST", "/v1/model/personas", NULL, RM_EXACT, "model.personas", 0, rh_dispatch_op},
+    {"POST", "/v1/model/set", NULL, RM_EXACT, "model.set", 0, rh_dispatch_op},
+    {"POST", "/v1/model/disable", NULL, RM_EXACT, "model.disable", 0, rh_dispatch_op},
+    {"POST", "/v1/model/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
+    {"GET", "/v1/model/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
+    {"POST", "/v1/model/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/model/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
+    {"POST", "/v1/model/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0,
      rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_code", NULL, RM_EXACT, "agent.cli_oauth_code", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/cli_oauth_poll", NULL, RM_EXACT, "agent.cli_oauth_poll", 0, rh_dispatch_op},
-    {"POST", "/v1/agent/episodes", NULL, RM_EXACT, "agent.episodes", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_code", NULL, RM_EXACT, "model.cli_oauth_code", 0, rh_dispatch_op},
+    {"POST", "/v1/model/cli_oauth_poll", NULL, RM_EXACT, "model.cli_oauth_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/model/episodes", NULL, RM_EXACT, "model.episodes", 0, rh_dispatch_op},
+    /* Pre-rename spelling of the roster routes, kept because /v1 is a PUBLISHED
+     * contract (api/openapi-server-v1.yaml, the generated SDKs, third-party
+     * clients) and nothing required this path to be freed -- unlike the model
+     * routes, which the catalog had to vacate. They dispatch the same ops, so
+     * the two spellings cannot diverge in behaviour. */
+    {"GET", "/v1/agent/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
+    {"GET", "/v1/agent/local", NULL, RM_EXACT, "model.local", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/add", NULL, RM_EXACT, "model.add", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/remove", NULL, RM_EXACT, "model.remove", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/enable", NULL, RM_EXACT, "model.enable", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/roles", NULL, RM_EXACT, "model.roles", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/personas", NULL, RM_EXACT, "model.personas", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/set", NULL, RM_EXACT, "model.set", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/disable", NULL, RM_EXACT, "model.disable", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/probe", NULL, RM_EXACT, "model.probe", 0, rh_dispatch_op},
+    {"GET", "/v1/agent/stats", NULL, RM_EXACT, "model.stats", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/draft", NULL, RM_EXACT, "model.draft", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/setup", NULL, RM_EXACT, "model.setup", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/setup_poll", NULL, RM_EXACT, "model.setup_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_start", NULL, RM_EXACT, "model.cli_oauth_start", 0,
+     rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_code", NULL, RM_EXACT, "model.cli_oauth_code", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/cli_oauth_poll", NULL, RM_EXACT, "model.cli_oauth_poll", 0, rh_dispatch_op},
+    {"POST", "/v1/agent/episodes", NULL, RM_EXACT, "model.episodes", 0, rh_dispatch_op},
     {"GET", "/v1/episode/list", NULL, RM_EXACT, "episode.list", 0, rh_dispatch_op},
 
     /* provider.* / model.* / api.* (op-parity wave 3). */
@@ -1984,9 +1889,9 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/provider/set", NULL, RM_EXACT, "provider.set", 0, rh_dispatch_op},
     {"POST", "/v1/provider/quota", NULL, RM_EXACT, "provider.quota", 0, rh_dispatch_op},
     {"POST", "/v1/provider/test", NULL, RM_EXACT, "provider.test", 0, rh_dispatch_op},
-    {"GET", "/v1/model/list", NULL, RM_EXACT, "model.list", 0, rh_dispatch_op},
-    {"GET", "/v1/model/show", NULL, RM_EXACT, "model.show", 0, rh_dispatch_op},
-    {"POST", "/v1/model/refresh", NULL, RM_EXACT, "model.refresh", 0, rh_dispatch_op},
+    {"GET", "/v1/catalog/list", NULL, RM_EXACT, "catalog.list", 0, rh_dispatch_op},
+    {"GET", "/v1/catalog/show", NULL, RM_EXACT, "catalog.show", 0, rh_dispatch_op},
+    {"POST", "/v1/catalog/refresh", NULL, RM_EXACT, "catalog.refresh", 0, rh_dispatch_op},
     {"GET", "/v1/api/status", NULL, RM_EXACT, "api.status", 0, rh_dispatch_op},
     {"POST", "/v1/api/enable", NULL, RM_EXACT, "api.enable", 0, rh_dispatch_op},
     {"POST", "/v1/api/rotate_bearer", NULL, RM_EXACT, "api.rotate_bearer", 0, rh_dispatch_op},
@@ -2061,6 +1966,8 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/wm/get", NULL, RM_EXACT, "wm.get", 0, rh_dispatch_op},
     {"POST", "/v1/skills/autostub", NULL, RM_EXACT, "skill.autostub", 0, rh_dispatch_op},
     {"POST", "/v1/skills/eval", NULL, RM_EXACT, "skill.eval", 0, rh_dispatch_op},
+    {"POST", "/v1/skills/eval-exec", NULL, RM_EXACT, "skill.eval_exec", CAP_TOOL_EXECUTE,
+     rh_dispatch_op},
     {"POST", "/v1/skills/lifecycle", NULL, RM_EXACT, "skill.lifecycle", 0, rh_dispatch_op},
     {"POST", "/v1/skills/lint", NULL, RM_EXACT, "skill.lint", 0, rh_dispatch_op},
     {"POST", "/v1/skills/patch", NULL, RM_EXACT, "skill.patch", 0, rh_dispatch_op},
@@ -2084,6 +1991,26 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/worktree/gc", NULL, RM_EXACT, "worktree.gc", 0, rh_dispatch_op},
     {"POST", "/v1/aux/test", NULL, RM_EXACT, "aux.test", 0, rh_dispatch_op},
     {"GET", "/v1/eval/results", NULL, RM_EXACT, "eval.results", 0, rh_dispatch_op},
+    /* Synthesised regression candidates: bounded DB + filesystem work with no
+     * LLM step, so both the read and the write stay on the synchronous bridge. */
+    {"GET", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates", 0, rh_dispatch_op},
+    {"POST", "/v1/eval/candidates", NULL, RM_EXACT, "eval.candidates-update", 0, rh_dispatch_op},
+    /* Learning surfaces: advisory recall, measured credit, bounded drain. */
+    {"POST", "/v1/learning/approaches", NULL, RM_EXACT, "learning.approaches", 0, rh_dispatch_op},
+    {"GET", "/v1/learning/attribution", NULL, RM_EXACT, "learning.attribution", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/resolve", NULL, RM_EXACT, "learning.resolve", 0, rh_dispatch_op},
+    {"POST", "/v1/learning/fate", NULL, RM_EXACT, "learning.fate", 0, rh_dispatch_op},
+    /* Roundtable authoring pipelines. Every one of these is a DB-backed state
+     * machine (rtp_* accessors in server_pipeline.c) that returns the next action
+     * for the caller to take -- none of them runs a panel or any other LLM work
+     * inline -- so they belong on the synchronous bridge, not the async lane. */
+    {"GET", "/v1/pipeline/list", NULL, RM_EXACT, "pipeline.list", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/status", NULL, RM_EXACT, "pipeline.status", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/start", NULL, RM_EXACT, "pipeline.start", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/cancel", NULL, RM_EXACT, "pipeline.cancel", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/resume", NULL, RM_EXACT, "pipeline.resume", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/advance", NULL, RM_EXACT, "pipeline.advance", 0, rh_dispatch_op},
+    {"POST", "/v1/pipeline/gate", NULL, RM_EXACT, "pipeline.gate", 0, rh_dispatch_op},
     {"GET", "/v1/trigger/list", NULL, RM_EXACT, "trigger.list", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/status", NULL, RM_EXACT, "trigger.status", 0, rh_dispatch_op},
     {"POST", "/v1/trigger/fire", NULL, RM_EXACT, "trigger.fire", 0, rh_dispatch_op},
@@ -2092,6 +2019,7 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/launch/run", NULL, RM_EXACT, "launch.run", 0, rh_dispatch_op},
     {"GET", "/v1/server/info", NULL, RM_EXACT, "server.info", 0, rh_dispatch_op},
     {"GET", "/v1/server/health", NULL, RM_EXACT, "server.health", 0, rh_dispatch_op},
+    {"GET", "/v1/workers", NULL, RM_EXACT, "workers", 0, rh_dispatch_op},
 
     /* Long-running / LLM methods, exposed async (rh_dispatch_op_async): each
      * returns a queued run handle; poll GET /v1/runs/{id}. They must NOT use the
@@ -2104,6 +2032,7 @@ static const http_route_t g_v1_routes[] = {
      * the async lane like the rest: kb.reembed drops and recreates every derived
      * vector table, memory.embed re-embeds the memory corpus after it. */
     {"POST", "/v1/kb/reembed", NULL, RM_EXACT, "kb.reembed", 0, rh_dispatch_op_async},
+    {"POST", "/v1/kb/erase-subject", NULL, RM_EXACT, "kb.erase-subject", 0, rh_dispatch_op_async},
     {"POST", "/v1/memory/embed", NULL, RM_EXACT, "memory.embed", 0, rh_dispatch_op_async},
     {"POST", "/v1/graph/sync_code", NULL, RM_EXACT, "graph.sync_code", 0, rh_dispatch_op_async},
     {"POST", "/v1/index/scan", NULL, RM_EXACT, "index.scan", 0, rh_dispatch_op_async},
@@ -2168,6 +2097,10 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/dev/ci-event", NULL, RM_EXACT, NULL, 0, rh_dev_ci_event},
     {"POST", "/v1/runs", NULL, RM_EXACT, NULL, CAP_CHAT, rh_runs_post},
     {"POST", "/v1/runs/", "/stop", RM_PREFIX, NULL, CAP_CHAT, rh_runs_stop},
+    /* Registry-declared commands, including a plugin module's. RM_PREFIX so the
+     * "<group>.<verb>" method rides in the path, matching what GET /v1/cli/manifest
+     * advertises for these rows. */
+    {"POST", "/v1/commands/", NULL, RM_PREFIX, NULL, CAP_CHAT, rh_command_invoke},
     {"GET", "/v1/runs/", "/events", RM_PREFIX, NULL, CAP_SESSION_READ, NULL},
     {"GET", "/v1/runs/", NULL, RM_PREFIX, NULL, CAP_SESSION_READ, rh_runs_get},
 
@@ -2268,6 +2201,13 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/workspaces", NULL, RM_EXACT, "workspace.add", 0, rh_workspaces_register},
     {"POST", "/v1/workspace/clone", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_clone},
     {"POST", "/v1/workspace/git", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_workspace_git},
+    /* The client of a REMOTE server ships its working-tree patch here, so the
+     * mirror reconstructs the tree it actually has rather than a clean checkout
+     * at head. The NDJSON method existed from the start but had no /v1 twin,
+     * which made it reachable only over the local socket — i.e. never from the
+     * remote clients the mirror tier exists for. */
+    {"POST", "/v1/workspace/mirror-sync", NULL, RM_EXACT, "workspace.mirror-sync", 0,
+     rh_dispatch_op},
     /* Local mechanical forge bridge for the Go-owned WFE. The handler additionally
      * requires a kernel-attested uid: principal, making this route UDS-only. */
     {"POST", "/v1/internal/forge/execute", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE,
@@ -2310,8 +2250,6 @@ static const http_route_t g_v1_routes[] = {
     {"POST", "/v1/deploy/apply", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_apply},
     {"GET", "/v1/deploy/status", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_deploy_status},
     {"GET", "/v1/server/forensics", NULL, RM_EXACT, NULL, CAP_TOOL_EXECUTE, rh_server_forensics},
-    {"POST", "/v1/workspaces/", "/forge-token", RM_PREFIX, NULL, CAP_TOOL_EXECUTE,
-     rh_workspace_forge_token},
     {"GET", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.get", 0, rh_workspace_get},
     {"DELETE", "/v1/workspaces/", NULL, RM_PREFIX, "workspace.remove", 0, rh_workspace_remove},
 
@@ -2406,6 +2344,8 @@ uint32_t v1_route_caps_lookup(const char *method, const char *path)
  * `aimee workspace add` does registration (exempt) plus ingest, so the ingest half
  * now needs a `data` grant while registration keeps working with none. */
 static const char *const g_v1_write_ops[] = {"memory.store",
+                                             "memory.reject",
+                                             "memory.restore",
                                              "index.ingest",
                                              "work.add",
                                              "work.claim",
@@ -2414,6 +2354,9 @@ static const char *const g_v1_write_ops[] = {"memory.store",
                                              "wm.set",
                                              "attempt.record",
                                              "rules.delete",
+                                             "facts.retract",
+                                             "entities.merge",
+                                             "entities.unmerge",
                                              "collab_rules.approve",
                                              "collab_rules.reject",
                                              "collab_rules.retire",
@@ -2449,12 +2392,19 @@ int v1_route_dispatch(const char *method, const char *path, const char *body, in
       return err_json(resp, resp_cap, 400, "bad request");
    if ((strcmp(path, "/v1/workflow") == 0 || strncmp(path, "/v1/workflow/", 13) == 0) ||
        strcmp(path, "/v1/trigger/fire") == 0 || strcmp(path, "/v1/dev/submit") == 0)
-      return wfe_http_proxy_request(method, path, server_http_identity_query(), body, body_len,
-                                    server_http_identity_principal(), resp, resp_cap);
+   {
+      if (!server_http_json_body_is_single_value(body, body_len))
+         return err_json(resp, resp_cap, 400, "invalid JSON body");
+      return workflow_control_request(method, path, server_http_identity_query(), body, body_len,
+                                      server_http_identity_principal(),
+                                      (g_rpc_conn_caps & CAP_WORKFLOW_ADMIN) != 0, resp, resp_cap);
+   }
    char id[256];
    const http_route_t *e = route_match(method, path, id, sizeof(id));
    if (!e || !e->handler)
       return err_json(resp, resp_cap, 404, "not found");
+   if (!server_http_json_body_is_single_value(body, body_len))
+      return err_json(resp, resp_cap, 400, "invalid JSON body");
    route_req_t rq = {method, path, body, body_len, id, e->op};
    return e->handler(&rq, resp, resp_cap);
 }

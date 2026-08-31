@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"os"
@@ -12,36 +11,23 @@ import (
 	"testing"
 	"time"
 
-	_ "modernc.org/sqlite"
-
 	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
 )
 
 func execOnDB(t *testing.T, path, query string, args ...any) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(query, args...); err != nil {
-		t.Fatal(err)
-	}
+	db1test.Exec(t, path, query, args...)
 }
 
 // expireBudgetLease simulates a crashed owner whose reservation lease has run
 // out. Replay ownership is only transferable once the lease lapses.
 func expireBudgetLease(t *testing.T, path, workItemID string) {
 	t.Helper()
-	db, err := sql.Open("sqlite", "file:"+path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, workItemID); err != nil {
-		t.Fatal(err)
-	}
+	db1test.Exec(t, path,
+		`UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`,
+		workItemID)
 }
 
 type scriptedRunner struct {
@@ -98,6 +84,12 @@ type artifactRoutingRunner struct {
 
 type recoveringRunner struct{ calls int }
 
+type retryDetailRunner struct {
+	t      *testing.T
+	calls  int
+	detail string
+}
+
 type blockingSiblingRunner struct {
 	started chan StepRequest
 	release chan struct{}
@@ -126,6 +118,60 @@ func (r *recoveringRunner) Run(_ context.Context, _ StepRequest) (StepResult, er
 	return StepResult{Status: StepAdvanced}, nil
 }
 
+func (r *retryDetailRunner) Run(_ context.Context, req StepRequest) (StepResult, error) {
+	r.calls++
+	if r.calls == 1 {
+		return StepResult{Status: StepChanges, Detail: r.detail}, nil
+	}
+	if req.RetryDetail != r.detail {
+		r.t.Fatalf("retry detail=%q, want %q", req.RetryDetail, r.detail)
+	}
+	return StepResult{Status: StepAdvanced}, nil
+}
+
+func TestRetryPassesPreviousFailureDetailToRunner(t *testing.T) {
+	root := t.TempDir()
+	workflowDir := filepath.Join(root, "workflows")
+	if err := os.MkdirAll(workflowDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	definition := []byte("name: retry-detail\nstart: work\nnodes:\n  - id: work\n    block: author.proposal\n    on_fail: work\n    params:\n      max_rounds: 3\n")
+	if err := os.WriteFile(filepath.Join(workflowDir, "retry-detail.yaml"), definition, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	def, err := wfe.ParseDefinition(definition)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	artifacts, err := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := db1.CreateWorkItem{ID: "wi_retry_detail", Repo: "repo", ProposalPath: "proposal", WorkflowName: "retry-detail", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.CreateWorkItem(t.Context(), item); err != nil {
+		t.Fatal(err)
+	}
+	if err := artifacts.PutProposal(item.ID, []byte("proposal")); err != nil {
+		t.Fatal(err)
+	}
+	runner := &retryDetailRunner{t: t, detail: "verify failed: clang-format violation"}
+	workflowEngine, err := New(store, artifacts, workflowDir, runner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || result.Parked || result.NextStage != "work" {
+		t.Fatalf("first advance result=%+v err=%v", result, err)
+	}
+	if result, err := workflowEngine.Advance(t.Context(), item.ID); err != nil || !result.Terminal || result.State != "accepted" {
+		t.Fatalf("retry advance result=%+v err=%v", result, err)
+	}
+}
+
 func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) {
 	root := t.TempDir()
 	workflowDir := filepath.Join(root, "workflows")
@@ -140,7 +186,7 @@ func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +316,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +352,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 
 func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1.Open(path)
+	store, err := db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,7 +370,7 @@ func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1.Open(path)
+	store, err = db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +411,7 @@ func TestUncappedDuplicateAdvanceCannotShareOneInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -441,7 +487,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "aimee.db")
-	store, err := db1.Open(path)
+	store, err := db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +512,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1.Open(path)
+	store, err = db1test.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,7 +555,7 @@ func TestPreDispatchRunnerFailureDoesNotConsumeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -552,7 +598,7 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,7 +744,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -782,7 +828,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -851,7 +897,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -925,7 +971,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -997,7 +1043,7 @@ func TestUnmeasuredSpendIsChargedAtTheReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1048,7 +1094,7 @@ func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1107,7 +1153,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		store, err := db1.Open(filepath.Join(root, "aimee.db"))
+		store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1138,7 +1184,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err := store.ParkRunnerFailure(t.Context(), "wi_replay_lost_unresolved", "work", "o1", "runner_unavailable", "d", true, false, 0); err != nil {
 			t.Fatal(err)
 		}
-		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_unresolved")
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_replay_lost_unresolved")
 		out, err := eng.Advance(t.Context(), "wi_replay_lost_unresolved")
 		if err != nil || out.Parked || out.Ran {
 			t.Fatalf("expected a silent redispatch: out=%+v err=%v", out, err)
@@ -1157,7 +1203,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if allowed, err := store.ReconcileWorkflowBudget(t.Context(), "wi_replay_lost_actual", "o1", 0.3); err != nil || !allowed {
 			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
 		}
-		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=datetime('now','-1 minute') WHERE work_item_id=?`, "wi_replay_lost_actual")
+		execOnDB(t, dbPath, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_replay_lost_actual")
 		out, err := eng.Advance(t.Context(), "wi_replay_lost_actual")
 		if err != nil || !out.Parked || out.PauseReason != "replay_unrecoverable" {
 			t.Fatalf("expected park replay_unrecoverable: out=%+v err=%v", out, err)
@@ -1192,7 +1238,7 @@ func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1265,7 +1311,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1304,7 +1350,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 // delegate problem is fixed.
 func TestDelegateFailedIsOperatorResumable(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1368,7 +1414,7 @@ func TestParkSurvivesACancelledStepContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1530,7 +1576,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1.Open(filepath.Join(root, "aimee.db"))
+	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}

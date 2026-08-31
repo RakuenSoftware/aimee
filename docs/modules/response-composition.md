@@ -8,7 +8,7 @@ deterministic response deduplication key used by `aimee-server`. It does not own
 cross-document curation, which belongs to optional `kb-synthesis`, or roundtable-specific panel
 aggregation.
 
-## Process and bus boundary
+### Process and bus boundary
 
 `response-composition` is a separately shipped process attached to the server container's local event
 bus. It is not a network service, does not attach to the KB bus, and is never used as transport between
@@ -24,6 +24,12 @@ limit, deadline, and cancellation behavior.
 The live server registers only the event-bus-backed provider during startup. If the process is absent,
 returns malformed data, is cancelled, or misses the deadline, key generation fails closed and readiness
 reports `response-composition` as missing. The server does not retain a second local key implementation.
+
+The bounded deduplication-key process implementation now runs in the shared
+pure-Go module runtime. It preserves the RKEY/COMP schema, unusual historical
+FNV constants, C-string principal behavior, and exact golden output. The former
+C adapter remains a parity fixture. Broader response finalization is still a
+relocation boundary and has not been represented as migrated by this stage.
 
 ## Public contracts
 
@@ -53,14 +59,14 @@ while omission of optional `kb-synthesis` must leave ordinary memory-backed comp
 
 ## Configuration and activation
 
-`runtime_toggle.supported` is `false`: every supported interactive or agent profile requires response
+- `runtime_toggle.supported`: `false`; every supported interactive or agent profile requires response
 composition. Configuration tunes limits, caching placement, liveness, streaming, and delivery behavior
 rather than turning composition off. Configuration fields are valid only where a compiled response stage
 actually consumes them.
 
 ## Surfaces
 
-Surfaces include canonical IR response blocks and deltas, OpenAI/Anthropic wire responses, delegate final
+Surfaces include canonical `aimee_response_t` IR blocks and deltas, OpenAI/Anthropic wire responses, delegate final
 messages, streamed events, CLI/TUI output, and workflow/channel delivery. Roundtable synthesis and KB
 narrative endpoints are consumers or separate modules; their specialized prompts and artifacts are not
 the universal response-composition surface.
@@ -68,13 +74,13 @@ the universal response-composition surface.
 ## Data and migrations
 
 Normal composition is per-turn state and owns no independent durable database schema today. Transcripts,
-tool results, and usage are persisted by their owning modules. Relocation must preserve block ordering,
+tool results, and usage are persisted by their owning modules. Relocation of `aimee_response_t` handling must preserve block ordering,
 thinking/text separation, tool-call identity, stop reason, usage, streaming boundaries, and serialized
 bytes where parity baselines require them.
 
 ## Security and privacy
 
-Composition keeps reasoning blocks distinct from user-visible text, preserves provenance and scope on
+Composition keeps `AIMEE_BLK_THINKING` reasoning blocks distinct from user-visible text, preserves provenance and scope on
 recalled context, and never treats memory or skill text as authorization. Before delivery it must honor
 execution policy, redaction, route identity, and channel constraints. Diagnostics may describe structure
 without leaking hidden reasoning, credentials, or private context.
@@ -88,7 +94,7 @@ consumers receive the same `aimee_response_t` contract.
 
 ## Tests and failure behavior
 
-The process-handler test fixes the deduplication-key vectors and malformed-request behavior. Event-bus
+The `test_response_dedup` process-handler test fixes the deduplication-key vectors and malformed-request behavior. Event-bus
 runtime tests cover fragmented request/reply, cancellation, timeout, oversize draining, and capability
 absence. IR shape, OpenAI/Anthropic shape, gateway mutation/wire, streaming, liveness, and agent-runtime
 tests cover the broader composition path. Hidden reasoning must never be substituted as an answer merely
@@ -101,7 +107,7 @@ terminal events, liveness notices, and wire-shape tests to locate a failure. Dia
 provider parsing, IR assembly, tool continuation, finalization, translation, or delivery instead of using
 the ambiguous label `synthesis` for all of them.
 
-## Compatibility and publishing
+## Compatibility
 
 `aimee_response_t`, block order/types, stop reasons, tool IDs/arguments, usage, stream termination, module
 wire schemas, and public serializers are compatibility contracts. A wire-incompatible core change bumps

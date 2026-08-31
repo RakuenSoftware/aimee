@@ -48,12 +48,11 @@
 # later was a space change the guard refused, and the kb never started again. A kb with
 # no embedder cannot do the one thing it exists for, and saying so at startup is cheaper
 # than discovering it from bad answers.
-# Ask the binary, never the file. This used to parse aimee.yaml with a sed regex, which
-# hardcoded the config paths and assumed a top-level `embedding_model:` key — a second
-# reader of a setting config owns. It worked only because config_save happens to write
-# the key at root, and it failed SILENTLY: an unparsed key reads as "nothing selected".
+# Ask the pure-Go config process binary, never the file and never a native
+# configuration implementation. Before the KB daemon bus exists, its narrow
+# public-string bootstrap mode is the sole authoritative reader.
 read_cfg_embedding_model() {
-    aimee-kb --print-embedding-model 2>/dev/null || true
+    /usr/local/libexec/aimee-modules/aimee-module-config --get embedder_model 2>/dev/null || true
 }
 
 # Is this container starting the KB SERVICE, or running a one-shot that exits?
@@ -136,12 +135,36 @@ start_embedder() {
 # The mTLS material for the sidecar hop is issued by the kb at startup, not here;
 # see kb_synthesis_identity.c.
 
+# The PostgreSQL module is a separate process and deliberately cannot open the
+# KB's credential Vault.  For the embedded cluster its DSN contains no secret:
+# it is a local trust-authenticated Unix socket owned by this container.  Give
+# that exact DSN to the module instead of leaving health and all DB1-backed
+# operations permanently disconnected from the database the KB just started.
+configure_embedded_store_module() {
+    AIMEE_STORE_URL=$1
+    AIMEE_STORE_MIGRATION_URL=$2
+    export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
+}
+
 # Sourcing stops here: everything above is definitions, everything below starts a
 # container. tests/test_kb_entrypoint.sh uses this to exercise the embedder gate without
 # a PostgreSQL cluster, a Vault, or an image.
 [ -n "${AIMEE_KB_ENTRYPOINT_SOURCE_ONLY:-}" ] && return 0
 
 set -e
+
+# Operator control over which optional modules attach to the kb bus. Installed
+# path first, then alongside this script for a source checkout.
+optional_modules_lib=/usr/local/bin/optional-modules-lib.sh
+if [ ! -r "$optional_modules_lib" ]; then
+    kb_entrypoint_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
+    optional_modules_lib="$kb_entrypoint_dir/optional-modules-lib.sh"
+fi
+[ -r "$optional_modules_lib" ] || {
+    printf '[aimee-kb-entrypoint] fatal: optional-module helper is unavailable\n' >&2
+    exit 2
+}
+. "$optional_modules_lib"
 
 # Kubernetes/Docker credential environment is first-boot transport only. Record
 # the non-secret external-DB decision, seal every credential-shaped value into
@@ -161,6 +184,7 @@ case "${1:-}" in
 esac
 : "${AIMEE_HOME:=/var/lib/aimee}"
 export AIMEE_HOME
+export AIMEE_EGRESS_CREDENTIAL_HELPER=/usr/local/bin/aimee-kb
 [ -n "${AIMEE_DB2_URL:-}" ] && external_db=1
 aimee-kb --bootstrap-vault-env
 _secret_names=$(aimee-kb --list-credential-env-names)
@@ -215,6 +239,8 @@ start_modules() {
     done
     chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
     chmod 0600 "$AIMEE_HOME/modules.d/kb/"*.grant 2>/dev/null || true
+    # Apply the operator's AIMEE_MODULE_<ID> choices over the shipped manifest.
+    MODULE_MANIFEST="$(apply_optional_modules kb "$MODULE_MANIFEST" "$AIMEE_HOME")"
     module-supervisor.sh kb "$AIMEE_MODULE_BUS_SOCKET" "$MODULE_MANIFEST" &
     module_supervisor_pid=$!
 }
@@ -257,9 +283,18 @@ if [ "$external_db" -eq 0 ]; then
     # (it chowns the server identity it installs), and PostgreSQL forbids running
     # the SERVER as root, not connecting to one as root. Refusing here failed
     # managed server identity enrollment on every clean install.
-    if "$PGBIN/pg_isready" --host="$PGSOCK" --quiet 2>/dev/null; then
+    if "$PGBIN/pg_isready" --host="$PGSOCK" --username=aimee --dbname=postgres \
+            --quiet 2>/dev/null; then
         echo "aimee-kb: PostgreSQL already running on $PGSOCK; using it instead of" \
              "starting a second cluster" >&2
+        # Enrollment and informational one-shots share the live KB's volume,
+        # not its bus identity. Starting a second module supervisor here makes
+        # every module attach under a principal the serving KB already owns, so
+        # the bus correctly denies them and enrollment fails. The binary can
+        # reach the shared local-trust socket directly; run only that one-shot.
+        if ! kb_is_serving "$@"; then
+            exec aimee-kb "$@"
+        fi
         start_embedder "$@"
         run_kb_with_modules "$@"
         exit $?
@@ -352,22 +387,62 @@ if [ "$external_db" -eq 0 ]; then
     else
         embedded_dsn="postgresql:///$DB?host=$PGSOCK"
     fi
+    # The Go store keeps DDL off its ordinary SQL pool even in the self-contained
+    # image. Local trust authentication needs no passwords, but it still uses two
+    # distinct PostgreSQL roles so a compromised runtime module cannot migrate.
+    "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_migrator') THEN
+    CREATE ROLE aimee_store_migrator LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+    CREATE ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+END $$;
+ALTER ROLE aimee_store_migrator LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+ALTER ROLE aimee_store_runtime LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+GRANT CONNECT ON DATABASE aimee_shared TO aimee_store_migrator, aimee_store_runtime;
+GRANT USAGE, CREATE ON SCHEMA public TO aimee_store_migrator;
+GRANT USAGE ON SCHEMA public TO aimee_store_runtime;
+REVOKE CREATE ON SCHEMA public FROM aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime;
+ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
+  GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;
+SQL
+    embedded_store_runtime_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_store_runtime"
+    embedded_store_migration_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_store_migrator"
+    configure_embedded_store_module "$embedded_store_runtime_dsn" \
+        "$embedded_store_migration_dsn"
     AIMEE_DB2_URL="$embedded_dsn" aimee-kb --bootstrap-vault-env
 
-    start_embedder "$@"
-    start_modules
-
-    # Not exec: the trap above has to outlive the kb so the cluster shuts down
-    # cleanly. Forward the stop signal so the kb still gets its own shutdown.
-    aimee-kb "$@" &
-    kb=$!
-    trap 'kill -TERM "$kb" 2>/dev/null || true; stop_modules' HUP INT TERM
+    # The self-contained tier still runs audit construction in a separate OS
+    # process and under a separate PostgreSQL role. Local trust auth means this
+    # is not the hardened credential boundary (that requires the external
+    # worker service), but it preserves the process/control-flow split and keeps
+    # the development image functional without giving aimee-kb a worker thread.
+    "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_kb_worm_worker') THEN
+    CREATE ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS;
+  END IF;
+END $$;
+ALTER ROLE aimee_kb_worm_worker LOGIN NOINHERIT NOBYPASSRLS
+  NOCREATEDB NOCREATEROLE NOSUPERUSER NOREPLICATION;
+SQL
+    embedded_worm_dsn="postgresql:///$DB?host=$PGSOCK&user=aimee_kb_worm_worker"
 
     # POSIX sh has no portable wait -n. Monitor both children, including Linux
     # zombies: kill -0 still succeeds for a dead-but-unreaped postmaster, which
     # previously left the container running unhealthy forever after PostgreSQL
-    # crashed. Either child is load-bearing, so stop its peer and let the
-    # container restart them together.
+    # crashed. The same check also puts a hard bound on a KB whose worker
+    # threads do not drain after TERM.
     process_alive() {
         _pid=$1
         kill -0 "$_pid" 2>/dev/null || return 1
@@ -376,12 +451,90 @@ if [ "$external_db" -eq 0 ]; then
         [ "$_stat_state" != Z ]
     }
 
+    start_embedded_worm() {
+        (
+            # aimee-kb owns schema migration. Wait until the bounded claim/ack
+            # API exists, then install exactly the worker grants and drop every
+            # direct storage/function capability before authenticating as it.
+            while process_alive "$kb"; do
+                if "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet --tuples-only \
+                    --command="SELECT to_regprocedure('aimee_kb_worm_api.claim(integer)') IS NOT NULL AND to_regprocedure('aimee_kb_worm_api.ack(bigint,bigint)') IS NOT NULL" \
+                    2>/dev/null | grep -q t; then
+                    break
+                fi
+                sleep 0.1
+            done
+            process_alive "$kb" || exit 1
+            "$PGBIN/psql" "$embedded_dsn" --no-psqlrc --quiet >/dev/null <<'SQL'
+  -- Revoking the role itself is not enough: PostgreSQL grants schema public
+  -- USAGE to PUBLIC by default, and privileges inherited through PUBLIC cannot
+  -- be denied per-role.  The embedded cluster's database owner retains access
+  -- through pg_database_owner; close the inherited path before asserting that
+  -- the worker can resolve only its private API schema.
+  REVOKE USAGE ON SCHEMA public FROM PUBLIC;
+  REVOKE ALL ON SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON SCHEMA aimee_kb_worm_api FROM PUBLIC;
+  GRANT USAGE ON SCHEMA aimee_kb_worm_api TO aimee_kb_worm_worker;
+  REVOKE ALL ON ALL TABLES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM aimee_kb_worm_worker;
+  REVOKE ALL ON ALL FUNCTIONS IN SCHEMA aimee_kb_worm_api FROM aimee_kb_worm_worker;
+  GRANT EXECUTE ON FUNCTION aimee_kb_worm_api.claim(INTEGER),
+    aimee_kb_worm_api.ack(BIGINT,BIGINT) TO aimee_kb_worm_worker;
+SQL
+            mkdir -p "$AIMEE_HOME/audit"
+            exec env AIMEE_WORM_DB2_URL="$embedded_worm_dsn" \
+                AIMEE_WORM_PATH="$AIMEE_HOME/audit/kb-worm-live.db" \
+                aimee-kb-worm
+        ) &
+        worm=$!
+    }
+
+    start_embedder "$@"
+    start_modules
+
+    # Not exec: the trap above has to outlive the kb so the cluster shuts down
+    # cleanly. Forward the stop signal so the kb still gets its own shutdown.
+    aimee-kb "$@" &
+    kb=$!
+    start_embedded_worm
+    shutdown_embedded() {
+        # A signal trap that only forwards to the KB returns to the monitor loop
+        # below. Docker then reaches its stop timeout and SIGKILLs PID 1 plus the
+        # still-running postmaster, forcing WAL recovery on every ordinary
+        # restart. Make shutdown terminal and keep all children inside the same
+        # bounded lifecycle. Reset the traps first so the explicit exit below
+        # cannot run this handler a second time.
+        trap - EXIT HUP INT TERM
+        kill -TERM "$worm" 2>/dev/null || true
+        kill -TERM "$kb" 2>/dev/null || true
+        stop_modules
+        "$PGBIN/pg_ctl" --pgdata="$PGDATA" --mode=fast --wait --silent stop || true
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 30 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 3s; forcing shutdown after database stop" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
+        wait "$worm" 2>/dev/null || true
+        wait "$kb" 2>/dev/null || true
+    }
+    trap 'shutdown_embedded' EXIT
+    trap 'shutdown_embedded; exit 0' HUP INT TERM
+
+    # Either child is load-bearing, so stop its peer and let the container
+    # restart them together.
     first=
     while [ -z "$first" ]; do
         if ! process_alive "$kb"; then
             first=kb
         elif ! process_alive "$pg_pid"; then
             first=postgres
+        elif ! process_alive "$worm"; then
+            first=worm
         else
             sleep 0.1
         fi
@@ -389,6 +542,7 @@ if [ "$external_db" -eq 0 ]; then
 
     if [ "$first" = postgres ]; then
         echo "aimee-kb: embedded PostgreSQL exited; restarting the KB container as one unit" >&2
+        kill -TERM "$worm" 2>/dev/null || true
         kill -TERM "$kb" 2>/dev/null || true
         # A database failure can leave worker threads blocked in libpq while
         # the kb is trying to shut down.  Do not let PID 1 wait forever: that
@@ -404,7 +558,25 @@ if [ "$external_db" -eq 0 ]; then
             kill -KILL "$kb" 2>/dev/null || true
         fi
         wait "$kb" 2>/dev/null || true
+        wait "$worm" 2>/dev/null || true
         wait "$pg_pid" 2>/dev/null || true
+        exit 1
+    fi
+
+    if [ "$first" = worm ]; then
+        echo "aimee-kb: WORM audit worker exited; restarting the KB container as one unit" >&2
+        kill -TERM "$kb" 2>/dev/null || true
+        _stop_ticks=0
+        while process_alive "$kb" && [ "$_stop_ticks" -lt 50 ]; do
+            sleep 0.1
+            _stop_ticks=$((_stop_ticks + 1))
+        done
+        if process_alive "$kb"; then
+            echo "aimee-kb: KB did not stop after 5s following WORM worker exit; forcing shutdown" >&2
+            kill -KILL "$kb" 2>/dev/null || true
+        fi
+        wait "$kb" 2>/dev/null || true
+        wait "$worm" 2>/dev/null || true
         exit 1
     fi
 

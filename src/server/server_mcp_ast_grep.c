@@ -7,11 +7,11 @@
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"
 #include "commands.h"
-#include "db2/curiosity.h"
+#include "modules/db2/c/curiosity.h"
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "dashboard.h"
 #include "aimee/protocols/mcp/mcp_tools.h"
@@ -50,26 +50,82 @@
 
 /* --- ast_grep_search --- */
 
-/* Resolve the sg (ast-grep) binary path.
- * Checks ~/.local/bin/sg first (where install.sh places it), then falls back
- * to "sg" in PATH via execvp. Returns a pointer to a static buffer. */
+/* Is `candidate` really ast-grep? `--version` prints "ast-grep <semver>". */
+static int is_ast_grep(const char *candidate)
+{
+   const char *argv[] = {candidate, "--version", NULL};
+   char *out = NULL;
+   int rc = safe_exec_capture(argv, &out, 4096);
+   int ok = (rc == 0) && out && strstr(out, "ast-grep") != NULL;
+   free(out);
+   return ok;
+}
+
+/* Resolve the ast-grep binary, VERIFYING it is ast-grep before returning it.
+ * NULL when no ast-grep is installed, so the caller can say so.
+ *
+ * `sg` IS ALSO A STANDARD LINUX COMMAND -- util-linux's set-group-ID runner --
+ * and it is present on essentially every distro. The old resolver checked
+ * ~/.local/bin/sg and otherwise fell back to bare "sg", so on any box without
+ * ast-grep installed, execvp found /usr/bin/sg instead. What happened next was
+ * worse than an error:
+ *
+ *   util-linux sg rejects --json and writes to stderr; safe_exec_capture merges
+ *   stderr into the captured output, so `output` is NON-empty; the not-found
+ *   guard is (rc == 127 || (!output && rc != 0)) and neither half fires; the
+ *   error text is then parsed as NDJSON, matches nothing, and the tool answers
+ *   "No matches found."
+ *
+ * A wrong binary reported as a clean empty result. An agent asking "does this
+ * pattern repeat anywhere" was told no, authoritatively, on a machine where the
+ * search never ran. That is the worst possible failure for a search tool, and it
+ * is invisible in a transcript.
+ *
+ * So: prefer the unambiguous name (ast-grep), accept sg only where it verifies,
+ * and verify with --version rather than trusting the filename. Cached after the
+ * first resolution -- the probe costs one subprocess per process lifetime. */
 static const char *ast_grep_binary(void)
 {
    static char path[MAX_PATH_LEN];
-   if (path[0])
-      return path;
+   static int resolved = 0;
+   if (resolved)
+      return path[0] ? path : NULL;
+   resolved = 1;
 
    const char *home = platform_home_dir();
+   char home_ast[MAX_PATH_LEN] = "";
+   char home_sg[MAX_PATH_LEN] = "";
    if (home && home[0])
    {
-      snprintf(path, sizeof(path), "%s/.local/bin/sg", home);
-      if (access(path, X_OK) == 0)
-         return path;
+      snprintf(home_ast, sizeof(home_ast), "%s/.local/bin/ast-grep", home);
+      snprintf(home_sg, sizeof(home_sg), "%s/.local/bin/sg", home);
    }
 
-   /* Fall back to name-only; execvp will search PATH */
-   snprintf(path, sizeof(path), "sg");
-   return path;
+   /* Explicit paths first (an install we placed), then PATH names. "ast-grep"
+    * before "sg" because only the latter collides with util-linux. */
+   const char *candidates[] = {home_ast[0] ? home_ast : NULL, home_sg[0] ? home_sg : NULL,
+                               "ast-grep", "sg", NULL};
+   for (int i = 0; candidates[i]; i++)
+   {
+      if (strchr(candidates[i], '/') && access(candidates[i], X_OK) != 0)
+         continue; /* an explicit path that is not there */
+      if (!is_ast_grep(candidates[i]))
+         continue;
+      snprintf(path, sizeof(path), "%s", candidates[i]);
+      return path;
+   }
+   path[0] = '\0';
+   return NULL;
+}
+
+/* Expose resolution so the tool surface can withhold ast_grep_search when no
+ * ast-grep exists. Advertising a search that cannot run is the same defect as
+ * advertising delegate tools with delegation off: the agent spends a call to
+ * learn the capability is absent, and before the resolver was fixed it did not
+ * even learn that -- it was told there were no matches. */
+int ast_grep_available(void)
+{
+   return ast_grep_binary() != NULL;
 }
 
 #define AST_GREP_MAX_OUTPUT (256 * 1024)
@@ -90,7 +146,24 @@ cJSON *tool_ast_grep_search(cJSON *args)
    const char *path = (cJSON_IsString(jpath) && jpath->valuestring[0]) ? jpath->valuestring : ".";
 
    const char *sg = ast_grep_binary();
-   const char *argv[] = {sg, "--json", "--pattern", pattern, "--lang", lang, path, NULL};
+   if (!sg)
+      return text_content(
+          "error: ast-grep is not installed (a `sg` on PATH that is util-linux's "
+          "set-group-ID command does not count, and is why this used to answer 'No matches "
+          "found' instead). Install the release asset for your platform from "
+          "https://github.com/ast-grep/ast-grep/releases/latest into ~/.local/bin "
+          "(x86_64 Linux: app-x86_64-unknown-linux-gnu.zip, which unzips to "
+          "ast-grep and sg)");
+   /* --json=stream, NOT bare --json. The parser below is line-oriented (it takes
+    * each line starting with '{' as one match), and bare --json emits a single
+    * PRETTY-PRINTED array: indented lines, none of which start with '{'. So a
+    * search that matched dozens of times parsed to zero and answered
+    * "No matches found." -- the same lie this tool told when the binary was
+    * missing entirely, and when the binary was util-linux's `sg`.
+    *
+    * Verified on ast-grep 0.45.1: `--json` gives "[\n  {\n    \"text\": ...",
+    * `--json=stream` gives one complete JSON object per line. */
+   const char *argv[] = {sg, "--json=stream", "--pattern", pattern, "--lang", lang, path, NULL};
 
    char *output = NULL;
    int rc = safe_exec_capture(argv, &output, AST_GREP_MAX_OUTPUT);
@@ -99,10 +172,10 @@ cJSON *tool_ast_grep_search(cJSON *args)
    if (rc == 127 || (!output && rc != 0))
    {
       free(output);
-      return text_content("error: ast-grep binary (sg) not found. "
-                          "Install it with: curl -fsSL "
-                          "https://github.com/ast-grep/ast-grep/releases/latest/download/"
-                          "sg-x86_64-unknown-linux-musl.tar.gz | tar xz -C ~/.local/bin");
+      return text_content("error: ast-grep failed to run. Install the release asset for "
+                          "your platform from "
+                          "https://github.com/ast-grep/ast-grep/releases/latest into "
+                          "~/.local/bin");
    }
 
    if (!output || !output[0])
@@ -169,7 +242,28 @@ cJSON *tool_ast_grep_search(cJSON *args)
       line = end + 1;
    }
 
+   int had_output = output && output[0] != '\0';
    free(output);
+
+   /* "No matches found" MUST mean the search ran and matched nothing -- never
+    * that we could not read the answer.
+    *
+    * This tool has now answered that sentence wrongly three separate times: when
+    * the resolved binary was util-linux's `sg`, when no ast-grep was installed at
+    * all, and when ast-grep's --json emitted a pretty-printed array the
+    * line-oriented parser below could not read. Each time it looked exactly like
+    * a clean negative result, and an agent asking "does this pattern repeat
+    * anywhere" was told no, authoritatively, on a search that never happened.
+    *
+    * ast-grep with --json=stream prints NOTHING when there are no matches. So
+    * non-empty output that parses to zero matches is not a negative result, it
+    * is a format we do not understand -- and saying so is the difference between
+    * a bug that gets fixed and a bug that gets believed. */
+   if (match_count == 0 && had_output)
+      return text_content(
+          "error: ast-grep produced output this tool could not parse -- expected one JSON "
+          "object per line (--json=stream). This is a format mismatch, NOT an empty result: "
+          "do not read it as 'no matches'.");
 
    if (match_count == 0)
       return text_content("No matches found.");

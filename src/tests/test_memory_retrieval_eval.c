@@ -1,5 +1,6 @@
 /* test_memory_retrieval_eval.c: unit tests for corpus-based memory retrieval evaluation */
 #include <assert.h>
+#include "modules/db2/c/db2_test_shim.h"
 #include <sqlite3.h>
 #include "platform_test_util.h"
 #include <math.h>
@@ -8,15 +9,15 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
 #include "agent_eval.h"
-#include "db2.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
+#include "modules/db2/c/db2.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_vectors.h"
 #include "config.h"
 #include "agent_eval_internal.h"
 
@@ -97,7 +98,9 @@ static void test_recall_zero(void)
 /* Write a minimal JSON corpus to a temp file and return the path. Caller frees. */
 static char *write_temp_corpus(const char *json)
 {
-   char *path = strdup("/tmp/test_corpus_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_corpus_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    write(fd, json, strlen(json));
@@ -108,7 +111,9 @@ static char *write_temp_corpus(const char *json)
 /* Write a minimal baseline JSON to a temp file and return the path. Caller frees. */
 static char *write_temp_baseline(const char *json)
 {
-   char *path = strdup("/tmp/test_baseline_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_baseline_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    assert(fd >= 0);
    write(fd, json, strlen(json));
@@ -185,9 +190,11 @@ static void test_fusion_surfaces_bridged_memory(void)
 {
    assert(mem_eval_open_temp_db() == 0);
 
-   config_t cfg;
-   config_load(&cfg);
-   const char *embed = cfg.embedder_command[0] ? cfg.embedder_command : MEMORY_EMBED_TEST_FIXTURE;
+   /* The product deliberately has no implicit embedder fallback. This retrieval
+    * test selects the explicit deterministic test backend by name. */
+   assert(setenv("EMBEDDER_URL", MEMORY_EMBED_TEST_FIXTURE, 1) == 0);
+
+   const char *embed = config_embedder_command_current(NULL);
 
    /* Base hit: lexically/semantically matches the query. */
    memory_t base;
@@ -195,12 +202,20 @@ static void test_fusion_surfaces_bridged_memory(void)
                         "nginx deployment listens on port 443", 0.9, "sess", &base) == 0);
    assert(memory_embed(base.id, embed) == 0);
 
-   /* Bridge: zero query-term overlap and intentionally NOT embedded, so the
-    * vector/lexical base retrieval can never reach it — only the graph
-    * expansion (which reads memory_entities directly) can. */
+   /* Bridge: zero query-term overlap. The write path embeds derived units, so
+    * remove both its top-level and unit points to make this a deliberately
+    * graph-only fixture on sqlite and real Postgres alike. */
    memory_t bridge;
    assert(memory_insert(TIER_L2, KIND_DECISION, "retry policy",
                         "we cap delegate retries at three attempts", 0.9, "sess", &bridge) == 0);
+   assert(pgvec_memory_vector_delete_point(bridge.id) == 0);
+   int64_t bridge_unit_ids[64];
+   int bridge_unit_count = db2_memory_unit_list_ids(
+       bridge.id, bridge_unit_ids, (int)(sizeof(bridge_unit_ids) / sizeof(bridge_unit_ids[0])));
+   assert(bridge_unit_count > 0);
+   for (int i = 0; i < bridge_unit_count; i++)
+      assert(pgvec_memory_vector_delete_point(PGVEC_MEMORY_VECTOR_UNIT_ID_OFFSET +
+                                              bridge_unit_ids[i]) == 0);
 
    /* Link both to a shared non-code canonical entity node whose key shares NO
     * token with the query, so plain entity-candidate retrieval can't reach the
@@ -240,6 +255,7 @@ static void test_fusion_surfaces_bridged_memory(void)
    assert(bridge_on && "fusion surfaces the graph-bridged memory");
 
    mem_eval_close_temp_db();
+   unsetenv("EMBEDDER_URL");
 }
 
 static void test_corpus_load_multi_expected(void)
@@ -386,7 +402,9 @@ static void test_baseline_load_save_roundtrip(void)
        .n_cases = 42,
    };
 
-   char *path = strdup("/tmp/test_baseline_rt_XXXXXX.json");
+   char path_tmpl[256];
+   snprintf(path_tmpl, sizeof path_tmpl, "%s/test_baseline_rt_XXXXXX.json", platform_tmpdir());
+   char *path = strdup(path_tmpl);
    int fd = mkstemps(path, 5);
    close(fd);
 
@@ -658,6 +676,44 @@ static void test_agent_eval_ablation_presets(void)
    assert(agent_eval_ablation_preset("definitely_not_a_preset", &flags) != 0);
 }
 
+static void test_agent_eval_manifest_comparability(void)
+{
+   eval_task_t tasks[1];
+   memset(tasks, 0, sizeof(tasks));
+   snprintf(tasks[0].name, sizeof(tasks[0].name), "manifest fixture");
+   snprintf(tasks[0].prompt, sizeof(tasks[0].prompt), "answer from evidence");
+   snprintf(tasks[0].role, sizeof(tasks[0].role), "review");
+   snprintf(tasks[0].success_check_type, sizeof(tasks[0].success_check_type), "contains");
+   snprintf(tasks[0].success_check_value, sizeof(tasks[0].success_check_value), "ok");
+
+   agent_eval_manifest_t a, b;
+   assert(agent_eval_manifest_build("suite", tasks, 1, "agent:model", 7, &a) == 0);
+   assert(agent_eval_manifest_build("suite", tasks, 1, "agent:model", 7, &b) == 0);
+   assert(strlen(a.dataset_hash) == 64 && strlen(a.target_hash) == 64);
+   assert(a.hardware_profile[0] && strcmp(a.harness_version, "2") == 0);
+   const char *reason = NULL;
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABLE);
+   assert(strcmp(reason, "comparable") == 0);
+
+   snprintf(b.hardware_profile, sizeof(b.hardware_profile), "different-machine");
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABLE);
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_LATENCY, &reason) ==
+          AGENT_EVAL_INCOMPARABLE);
+   assert(strcmp(reason, "hardware_changed") == 0);
+
+   b = a;
+   b.seed++;
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_INCOMPARABLE);
+   assert(strcmp(reason, "seed_changed") == 0);
+   b = a;
+   b.dataset_hash[0] = '\0';
+   assert(agent_eval_manifest_compare(&a, &b, AGENT_EVAL_COMPARE_QUALITY, &reason) ==
+          AGENT_EVAL_COMPARABILITY_UNKNOWN);
+}
+
 /* --- Golden smoke fixture for Phase 0 (effectiveness-weighted code vector graph) --- */
 
 /* 30 queries covering code/file, memory/recall, config/identity, agent/session,
@@ -721,6 +777,11 @@ int main(int argc, char **argv)
    int cli_rc = maybe_run_cli_mode(argc, argv, &handled);
    if (handled)
       return cli_rc;
+
+   /* The eval scratch store needs a disposable database when the test shim is
+    * backed by Postgres; a no-op under the sqlite shim, which makes its own
+    * in-memory handle. */
+   assert(db2_test_shim_prepare_eval_store() == 0);
 
    printf("test_mrr_hit_first... ");
    test_mrr_hit_first();
@@ -824,6 +885,10 @@ int main(int argc, char **argv)
 
    printf("test_agent_eval_ablation_presets... ");
    test_agent_eval_ablation_presets();
+   printf("ok\n");
+
+   printf("test_agent_eval_manifest_comparability... ");
+   test_agent_eval_manifest_comparability();
    printf("ok\n");
 
    printf("test_multi_hop_recall... ");

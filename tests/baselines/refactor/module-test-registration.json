@@ -28,26 +28,158 @@
     {
       "ctest": true,
       "make": true,
-      "module": "config",
-      "test": "src/tests/test_config.c"
+      "module": "db2",
+      "test": "src/tests/test_bus_db2_module.c"
     },
     {
       "ctest": false,
       "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_economizer.c"
+      "module": "db2",
+      "test": "src/tests/test_bus_db2_process.c"
     },
     {
       "ctest": false,
       "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_snapshot.c"
+      "module": "db2",
+      "test": "src/tests/test_db2_cert_serial_support.c"
     },
     {
       "ctest": false,
       "make": true,
-      "module": "config",
-      "test": "src/tests/test_config_surface.c"
+      "module": "db2",
+      "test": "src/tests/test_db2_cjson_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_cochange_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_audit_graph_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_import_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_code_match_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_dstr_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_extractor_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_log_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_management_read_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_model_validation_support.c"
+    },
+    {
+      "ctest": true,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_module_contract.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_module_init.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_node_kind_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_pii_classifier_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_pii_inject_gate_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_random_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_rel_enum_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_rel_seed_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_rel_type_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_runtime_config_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_sketch_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_text_support.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "db2",
+      "test": "src/tests/test_db2_time_support.c"
     },
     {
       "ctest": false,
@@ -66,18 +198,6 @@
       "make": true,
       "module": "delegates",
       "test": "src/tests/test_delegate_backend_docker.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_delegate_backend_local.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
-      "test": "src/tests/test_delegate_backend_ssh.c"
     },
     {
       "ctest": false,
@@ -113,12 +233,6 @@
       "ctest": false,
       "make": true,
       "module": "delegates",
-      "test": "src/tests/test_delegate_ephemeral_ws.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
       "test": "src/tests/test_delegate_handoff.c"
     },
     {
@@ -149,12 +263,6 @@
       "ctest": false,
       "make": true,
       "module": "delegates",
-      "test": "src/tests/test_delegate_xml_fallback.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "delegates",
       "test": "src/tests/test_gw_orch_delegates.c"
     },
     {
@@ -162,6 +270,12 @@
       "make": true,
       "module": "delegates",
       "test": "src/tests/test_panel_provider.c"
+    },
+    {
+      "ctest": false,
+      "make": true,
+      "module": "economizer",
+      "test": "src/tests/test_economizer_module_client.c"
     },
     {
       "ctest": false,
@@ -443,12 +557,6 @@
       "ctest": false,
       "make": true,
       "module": "memory",
-      "test": "src/tests/test_memory.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
       "test": "src/tests/test_memory_advanced.c"
     },
     {
@@ -474,12 +582,6 @@
       "make": true,
       "module": "memory",
       "test": "src/tests/test_memory_filter.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_health.c"
     },
     {
       "ctest": false,
@@ -593,12 +695,6 @@
       "ctest": false,
       "make": true,
       "module": "roundtable",
-      "test": "src/tests/test_roundtable_pipeline_capture.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "roundtable",
       "test": "src/tests/test_roundtable_pipeline_chunk.c"
     },
     {
@@ -634,14 +730,14 @@
     {
       "ctest": false,
       "make": true,
-      "module": "skills",
-      "test": "src/tests/test_skill.c"
+      "module": "runtime-web",
+      "test": "src/tests/test_server_error_kind.c"
     },
     {
       "ctest": false,
       "make": true,
       "module": "skills",
-      "test": "src/tests/test_skill_review.c"
+      "test": "src/tests/test_skill.c"
     },
     {
       "ctest": false,
@@ -758,18 +854,6 @@
       "test": "src/tests/test_wfe_advance.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_advance_exec.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_approval.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -779,37 +863,7 @@
       "ctest": false,
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_autonomy.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_bind_ingress.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_block_resolve.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_blocks.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_custom.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_delegate_seam.c"
     },
     {
       "ctest": true,
@@ -824,12 +878,6 @@
       "test": "src/tests/test_wfe_enforce.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_engine.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -840,18 +888,6 @@
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_failure_taxonomy.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_foreach.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_foreach_spawn.c"
     },
     {
       "ctest": false,
@@ -875,12 +911,6 @@
       "ctest": false,
       "make": true,
       "module": "workflows",
-      "test": "src/tests/test_wfe_manager_flow.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
       "test": "src/tests/test_wfe_native_gate.c"
     },
     {
@@ -896,12 +926,6 @@
       "test": "src/tests/test_wfe_replay_worktree.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_roundtable.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
@@ -914,28 +938,10 @@
       "test": "src/tests/test_wfe_router_catalog.c"
     },
     {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_safety.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_scheduler.c"
-    },
-    {
       "ctest": true,
       "make": true,
       "module": "workflows",
       "test": "src/tests/test_wfe_sliced_build.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workflows",
-      "test": "src/tests/test_wfe_webapi.c"
     },
     {
       "ctest": false,
@@ -984,18 +990,6 @@
       "make": true,
       "module": "workspace",
       "test": "src/tests/test_workspace_provider_detached.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workspace",
-      "test": "src/tests/test_workspace_runner_queue.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "workspace",
-      "test": "src/tests/test_workspace_runner_registry.c"
     },
     {
       "ctest": false,

@@ -54,12 +54,13 @@ void delegate_resolve_worktree(const char *cwd, const char *deleg_id, const char
  * structured IE_DELEGATE_EXIT event. Pure post-run side effect. */
 void delegate_record_exit_learning(const char *sid, const char *role, const agent_result_t *result,
                                    int rc, int max_turns, agent_config_t *acfg,
-                                   agent_t *target_agent);
+                                   agent_t *target_agent, const char *goal,
+                                   const char *source_ref);
 
 /* Detect a no-op write delegate (success reported but owned files / worktree /
  * HEAD unchanged). Returns 1 and fills err with the "treated as incomplete"
  * message; 0 otherwise (logging INFO for the benign cases). */
-int delegate_detect_noop_write(int is_write_role, int allows_writes, int handoff_json, int rc,
+int delegate_detect_noop_write(int writes_allowed, int handoff_json, int rc,
                                const char named_paths[][DELEGATE_DRIFT_PATH_MAX],
                                int named_path_count, const delegate_file_snapshot_t *pre_run_files,
                                const char *pre_run_head_sha, const char *worktree_path,

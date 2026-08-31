@@ -76,6 +76,12 @@ cli_transport_t cli_transport_parse(const char *s);
  * reads are mapped. */
 const char *cli_v1_route_for_method(const char *method, const char **verb_out);
 
+/* The queued sibling: a method whose POST returns a run handle to poll at
+ * GET /v1/runs/{id} rather than a final response. NULL when the method is not
+ * async. A method is in exactly one of the two, so a caller cannot mistake a run
+ * handle for a result. */
+const char *cli_v1_async_route_for_method(const char *method, const char **verb_out);
+
 /* {id}-bearing /v1 routes (PREFIX{id}SUFFIX, e.g. /v1/workspaces/{path},
  * /v1/sessions/{id}/attach). Returns the static prefix and fills the verb, the
  * suffix after {id}, and the request field carrying the id ("session_id"; NULL
@@ -169,6 +175,10 @@ int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const c
  * this client. start() returns 1 if a channel was started (remote configured),
  * 0 otherwise (incl. co-located). stop() tears it down. One channel per process. */
 int cli_workspace_reverse_channel_start(void);
+/* Refresh the active mirror snapshot from the client's current Git tree.
+ * Remote Git calls use this immediately before dispatch so a long-lived MCP
+ * bridge cannot keep operating on the checkout it saw at process startup. */
+int cli_workspace_reverse_channel_sync(void);
 void cli_workspace_reverse_channel_stop(void);
 
 /* Return the path to an already-running compatible server, or NULL if none
@@ -239,14 +249,54 @@ int cli_v1_remote_endpoint_is_network(void);
 char *cli_v1_client_endpoint(void);
 char *cli_v1_client_bearer(void);
 
+/* Report (once per process, on stderr) that a command needs an aimee-server and
+ * none is configured. There is no co-located fallback to take instead — see
+ * cli_v1_send. */
+void cli_v1_warn_no_endpoint(const char *method);
+
+/* The command catalogue the server sent: an array of
+ * {name, summary, tier, hidden_default?, subcommands?}, or NULL when no server
+ * answered. The client RENDERS this; it does not keep its own catalogue, so a
+ * command added server-side is discoverable without rebuilding the client.
+ * Borrowed — owned by the cached manifest. */
+const struct cJSON *cli_v1_manifest_commands(void);
+
+/* The dispatch rows the server sent: an array of
+ * {cmd, sub?, method, server_method?, extract?, timeout_ms?} mapping the words a
+ * user types to a method. An ABSENT `sub` is the NULL wildcard; a present, empty
+ * one matches only when no subcommand was given. NULL when no server answered.
+ * Borrowed -- owned by the cached manifest. */
+const struct cJSON *cli_v1_manifest_dispatch(void);
+
+/* 1 when the server says this method's request body is empty. Only an explicit
+ * "args":"none" counts; anything else leaves the decision to the client's own
+ * marshaller rather than sending an empty body for a command needing arguments. */
+int cli_v1_manifest_method_takes_no_args(const char *method);
+
+/* The server's argument spec for `method` (the `args` object of its marshal
+ * row), or NULL when it sent none or sent a shape this build cannot read.
+ * Borrowed from the cached manifest; do not free. */
+const struct cJSON *cli_v1_manifest_argspec(const char *method);
+
+/* TEST ONLY. Install a command manifest instead of fetching one from the server,
+ * so a unit test can exercise route lookup without a server. Takes ownership of
+ * `doc`. Never called outside tests; real invocations always fetch. */
+void cli_v1_manifest_set_for_test(struct cJSON *doc);
+
 /* Thin-client workspace push: when the configured endpoint is a remote
  * "tcp:host:port" the server cannot see this host's filesystem, so
  * `aimee workspace add <path>` resolves the path locally, registers it as a
  * `detached` workspace, and pushes the file contents to POST /v1/index/ingest;
  * `aimee index scan [path]` re-pushes (all detached workspaces when no path).
  * Return 0 on success. POSIX only (no-op error on Windows). */
-int cli_workspace_add_remote(const char *path);
+int cli_workspace_add_remote(const char *path, int prepare, int json_output);
 int cli_index_scan_remote(int argc, char **argv);
+
+/* Ensure a local repository is present in a remote server's code index. This
+ * is intentionally narrower than `workspace add`: it does not register the
+ * caller's live tree as an executable workspace; it only pushes source files
+ * when the remote index does not already contain this project/root pair. */
+int cli_index_ensure_remote(const char *root);
 
 /* Launch metadata parsed from server output */
 typedef struct
@@ -263,10 +313,18 @@ typedef struct
 /* Parse __LAUNCH__ metadata from server output.
  * Returns 1 if launch metadata was found and parsed, 0 otherwise. */
 int parse_launch_meta(const char *output, launch_meta_t *meta);
+/* Bind one session id and worktree, then exec the client in place. */
+int client_launch_exec(int argc, char **argv);
+
+/* Start any interactive client inside an Aimee-owned session worktree. The
+ * command after an optional `--` is exec'd in place, inheriting one stable
+ * AIMEE_SESSION_ID. This is the client-neutral cwd boundary; SessionStart hooks
+ * only rehydrate context and cannot mutate their parent process directory. */
+int client_launch_exec(int argc, char **argv);
 
 /* Client-local command handlers (run in the client so they see its working
  * tree). Defined in cmd_profile.c / cmd_manuscript.c. */
-int cmd_profile_run(int argc, char **argv);
+int cmd_profile_run(int argc, char **argv, int json_output);
 int cmd_manuscript_run(int argc, char **argv, int json_output);
 /* `aimee optimize` — bandit optimization loop (points/baseline/replay).
  * Dispatches optimize.export to GET /v1/optimize/export. Defined in cmd_optimize.c. */

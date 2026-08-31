@@ -101,12 +101,12 @@ export const SYNTHESIS_MODELS: SynthesisModelChoice[] = [
   {
     id: 'gemma-4-E4B-it',
     label: 'gemma-4-E4B-it',
-    blurb: 'The better model. 7.46 GB at UD-Q6_K_XL, deployed as the aimee-llm-e4b sidecar.',
+    blurb: 'The better model. 7.46 GB at UD-Q6_K_XL, deployed as the aimee-llm-e4b sidecar. Measured at 0.81 F1 extraction.',
   },
   {
     id: 'gemma-4-E2B-it',
     label: 'gemma-4-E2B-it',
-    blurb: '2.97 GB at UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, and weaker at extraction (0.72 F1 against 0.81).',
+    blurb: '2.62 GB at qat-UD-Q4_K_XL, deployed as aimee-llm-e2b. Faster, and weaker at extraction. Its quantisation-aware-trained weights measured +0.039 F1 over the plain Q4 build on a different gold set, but this exact requant has not been benchmarked, so no F1 is quoted for it.',
   },
 ];
 

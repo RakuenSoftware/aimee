@@ -1,8 +1,8 @@
 #define _POSIX_C_SOURCE 200809L
 #include "kb_management_runtime.h"
 #include "kb_management_action.h"
-#include "db2/management_action_journal.h"
-#include "db2/management_read_journal.h"
+#include "modules/db2/c/management_action_journal.h"
+#include "modules/db2/c/management_read_journal.h"
 
 #include "kb/http/kb_http_servers.h"
 #include "kb_mgmt_endpoint.h"

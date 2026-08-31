@@ -16,13 +16,10 @@
 #include "server_http.h" /* server_http_api_status_report */
 #include "config.h"      /* config_set / config_provider */
 #include <aimee/delegates/delegate_backend_docker.h>
-#include <aimee/delegates/delegate_backend_local.h>
-#include <aimee/delegates/delegate_backend_ssh.h>
 #include "server_delegate_monitor.h"
 #include "server_coord_dispatcher.h"
 #include "server_skill.h"
 #include "server_compute_impl.h"
-#include <aimee/skills/skill_review.h>
 #include "trigger_scheduler.h"
 #include "wfe_live_delegate.h"
 #include "wfe_scheduler.h"
@@ -40,7 +37,7 @@
 #include "model_provider.h"
 #include "runtime_secret.h"
 #include "model_registry.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -74,11 +71,27 @@ static const char *server_provider_first_env_var(const model_provider_t *p)
    return NULL;
 }
 
+/* The runtime-secret table checked below is NOT the whole credential store. It
+ * is loaded by vault_config_bootstrap.c from a single agent namespace
+ * ("environment") for a hardcoded list of AIMEE_* names, so a key stored the way
+ * an operator stores one — `aimee vault set minimax api_key ...`, filed under
+ * the provider's own name — never reaches it.
+ *
+ * Measured on a live server before the vault check existed: the vault held
+ * Minimax/api_key, Kimi/api_key, codex/oauth and claude/oauth, and
+ * `provider list --all` reported [no key] for every one of them.
+ *
+ * vault_provider_has_credential lives in the vault module rather than here,
+ * beside agent_has_resolvable_credentials, because that is where credential
+ * resolution was deliberately gathered so callers stop reaching into
+ * vault_service.h from outside it. */
 static int server_provider_has_credentials(const model_provider_t *p)
 {
    if (!p)
       return 0;
    if (p->auth_type && strcmp(p->auth_type, "none") == 0)
+      return 1;
+   if (vault_provider_has_credential(p->name))
       return 1;
    if (!p->env_vars)
       return 0;
@@ -90,18 +103,15 @@ static int server_provider_has_credentials(const model_provider_t *p)
    return 0;
 }
 
-static void server_provider_free_models(char **models, int n)
+static void server_provider_free_models(provider_model_t *models, int n)
 {
-   if (!models)
-      return;
-   for (int i = 0; i < n; i++)
-      free(models[i]);
-   free(models);
+   db1_model_catalog_free(models, n);
 }
 
 #define PROVIDER_MODEL_CATALOG_TTL_SECONDS 3600
 
-static int server_provider_models_cached(model_provider_t *p, char ***models_out, int *n_out)
+static int server_provider_models_cached(model_provider_t *p, provider_model_t **models_out,
+                                         int *n_out)
 {
    *models_out = NULL;
    *n_out = 0;
@@ -162,6 +172,12 @@ static int server_provider_is_configured(const model_provider_t *p, const char *
       return 0;
    if (selected_provider && selected_provider[0] && strcmp(p->name, selected_provider) == 0)
       return 1;
+   /* Putting a key in the vault under a provider's name IS the deliberate choice
+    * this function looks for. Without this, a provider configured only through
+    * the vault was missing from the default listing and reported [no key] under
+    * --all, so neither view mentioned the credential. */
+   if (vault_provider_has_credential(p->name))
+      return 1;
    if (!p->env_vars)
       return 0;
    for (int i = 0; p->env_vars[i]; i++)
@@ -211,10 +227,11 @@ int handle_provider_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(req, "name");
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
-      return server_send_error(conn, "provider name required", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "provider name required",
+                                    NULL);
    model_provider_t *p = model_provider_get(jname->valuestring);
    if (!p)
-      return server_send_error(conn, "provider not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "provider not found", NULL);
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
    cJSON_AddItemToObject(resp, "provider", server_provider_json(p));
@@ -228,16 +245,18 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
    cJSON *jname = cJSON_GetObjectItemCaseSensitive(req, "name");
    if (!cJSON_IsString(jname) || !jname->valuestring[0])
-      return server_send_error(conn, "provider name required", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "provider name required",
+                                    NULL);
    model_provider_t *p = model_provider_get(jname->valuestring);
    if (!p)
-      return server_send_error(conn, "provider not found", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "provider not found", NULL);
    if (!p->fetch_models)
-      return server_send_error(conn, "provider does not support model listing", NULL);
-   char **models = NULL;
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "provider does not support model listing", NULL);
+   provider_model_t *models = NULL;
    int n = 0;
    if (server_provider_models_cached(p, &models, &n) != 0)
-      return server_send_error(conn, "failed to fetch models", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to fetch models", NULL);
 
    cJSON *resp = cJSON_CreateObject();
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -245,8 +264,35 @@ int handle_provider_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON_AddBoolToObject(resp, "json", cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(req, "json")));
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < n; i++)
-      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i]));
+      cJSON_AddItemToArray(arr, cJSON_CreateString(models[i].id));
    cJSON_AddItemToObject(resp, "models", arr);
+
+   /* The same models with whatever the provider published ABOUT them. `models`
+    * stays a bare id array so existing callers are unaffected; this carries the
+    * limits the catalog record now holds.
+    *
+    * A field is emitted only when the provider actually published it: most
+    * OpenAI-compatible endpoints return ids and nothing else, and emitting 0
+    * would present "the provider did not say" as "this model has no context",
+    * which is the confusion this whole surface exists to remove. An operator
+    * reading this list needs to see which models come with real numbers and
+    * which they will have to state themselves. */
+   cJSON *details = cJSON_CreateArray();
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *m = cJSON_CreateObject();
+      cJSON_AddStringToObject(m, "id", models[i].id);
+      if (models[i].display_name[0])
+         cJSON_AddStringToObject(m, "display_name", models[i].display_name);
+      if (models[i].context_window > 0)
+         cJSON_AddNumberToObject(m, "context_window", models[i].context_window);
+      if (models[i].max_output > 0)
+         cJSON_AddNumberToObject(m, "max_output", models[i].max_output);
+      if (models[i].deprecated)
+         cJSON_AddBoolToObject(m, "deprecated", 1);
+      cJSON_AddItemToArray(details, m);
+   }
+   cJSON_AddItemToObject(resp, "details", details);
    cJSON_AddNumberToObject(resp, "count", n);
    server_provider_free_models(models, n);
    int rc = server_send_response(conn, resp);
@@ -271,7 +317,7 @@ int handle_provider_test(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       snprintf(message, sizeof(message), "%s: credentials available; no probe registered", p->name);
    else
    {
-      char **models = NULL;
+      provider_model_t *models = NULL;
       int n = 0;
       if (p->fetch_models(p, &models, &n) != 0)
          return server_send_error(conn, "provider probe failed", NULL);
@@ -423,14 +469,16 @@ int handle_model_show(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    {
       if (!model_capability_resolve_ref(name, resolved_provider, sizeof(resolved_provider),
                                         resolved_model, sizeof(resolved_model), &cap))
-         return server_send_error(conn, "model capability lookup failed", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND, "model capability lookup failed",
+                                       NULL);
    }
    else
    {
       if (!model || !model[0])
-         return server_send_error(conn, "model required", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "model required", NULL);
       if (!model_capability_get(provider, model, &cap))
-         return server_send_error(conn, "model capability metadata not found", NULL);
+         return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+                                       "model capability metadata not found", NULL);
    }
 
    cJSON *resp = cJSON_CreateObject();

@@ -2,12 +2,11 @@
  * Extracted from memory_advanced.c. */
 #include "aimee.h"
 #include "cJSON.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#endif
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
 #include "log.h"
 #include "memory.h"
 #include "memory_ontology.h"
@@ -113,10 +112,6 @@ int memory_episode_card_parse(const char *json, memory_episode_card_t *out)
  */
 int64_t memory_episode_card_generate(const char *source_session)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)source_session;
-   return 0;
-#else
    if (!source_session || !source_session[0])
       return 0;
    if (!config_memory_episode_summaries_enabled())
@@ -127,17 +122,29 @@ int64_t memory_episode_card_generate(const char *source_session)
 
    /* Collect session memories */
 #define MAX_SESSION_MEMS 200
-   db2_memory_id_content_row_t rows[MAX_SESSION_MEMS];
-   int mem_count =
-       db2_memory_session_id_content_list(source_session, MAX_SESSION_MEMS, rows, MAX_SESSION_MEMS);
-   if (mem_count <= 0)
+   db2_memory_id_content_row_t rows[MAX_SESSION_MEMS + 1];
+   int mem_count = db2_memory_session_id_content_list(source_session, MAX_SESSION_MEMS + 1, rows,
+                                                      MAX_SESSION_MEMS + 1);
+   if (mem_count <= 0 || mem_count > MAX_SESSION_MEMS)
+   {
+      if (mem_count > MAX_SESSION_MEMS)
+         LOG_WARN("memory.episode",
+                  "episode-card derivation refused for session %.96s: source cap %d reached",
+                  source_session, MAX_SESSION_MEMS);
       return 0;
+   }
    int64_t mem_ids[MAX_SESSION_MEMS];
    char *mem_texts[MAX_SESSION_MEMS];
    for (int i = 0; i < mem_count; i++)
    {
       mem_ids[i] = rows[i].id;
       mem_texts[i] = strdup(rows[i].content);
+   }
+   if (!memory_derived_sources_allowed(mem_ids, mem_count))
+   {
+      for (int i = 0; i < mem_count; i++)
+         free(mem_texts[i]);
+      return 0;
    }
 #undef MAX_SESSION_MEMS
 
@@ -183,7 +190,7 @@ int64_t memory_episode_card_generate(const char *source_session)
    }
 
    /* Build card text */
-   char card_text[2048];
+   char card_text[4096];
    snprintf(card_text, sizeof(card_text),
             "Episode: %s\n"
             "Participants: %s\n"
@@ -201,12 +208,24 @@ int64_t memory_episode_card_generate(const char *source_session)
    snprintf(key, sizeof(key), "episode:%s", source_session);
    memory_t m;
    memset(&m, 0, sizeof(m));
+   int episode_existed = db2_memory_key_exists(key) == 1;
    if (memory_insert(TIER_L2, KIND_EPISODE, key, card_text, 1.8, "episode_card", &m) != 0 ||
        m.id <= 0)
       return 0;
-
    /* Associate the synthetic memory with the session */
    db2_memory_set_source_session(m.id, source_session);
+
+   for (int i = 0; i < mem_count; i++)
+   {
+      char source_ref[48];
+      snprintf(source_ref, sizeof(source_ref), "memory:%lld", (long long)mem_ids[i]);
+      if (memory_lineage_insert("memory", m.id, "memory", source_ref, 1.0) < 0)
+      {
+         if (!episode_existed)
+            (void)memory_delete(m.id);
+         return 0;
+      }
+   }
 
    /* Insert memory_unit with is_episode_card=1 */
    db2_memory_unit_episode_card_insert(m.id, key, card_text);
@@ -228,7 +247,6 @@ int64_t memory_episode_card_generate(const char *source_session)
    aimee_log(LOG_INFO, "memory_episode", "episode card created for session %s (unit_id=%lld)",
              source_session, (long long)unit_id);
    return unit_id;
-#endif
 }
 
 /*
@@ -237,14 +255,7 @@ int64_t memory_episode_card_generate(const char *source_session)
  */
 int memory_episode_cards_query(const char *source_session, char **out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)source_session;
-   (void)out;
-   (void)max;
-   return 0;
-#else
    return db2_memory_episode_cards_query(source_session, out, max);
-#endif
 }
 
 /* --- Scene Clustering --- */
@@ -350,12 +361,7 @@ const char *memory_ontology_node_kind_to_text(memory_node_kind_t kind)
  * Static schema: (subject_kind, relation_id, object_kind) allowed triples.
  * NODE_OTHER = wildcard (any kind allowed for that position).
  */
-typedef struct
-{
-   memory_node_kind_t sk;
-   memory_relation_kind_t rel;
-   memory_node_kind_t ok;
-} schema_rule_t;
+typedef memory_ontology_rule_t schema_rule_t;
 
 static const schema_rule_t schema_rules[] = {{NODE_FILE, REL_CO_EDITED, NODE_FILE},
                                              {NODE_OTHER, REL_CO_DISCUSSED, NODE_OTHER},
@@ -377,6 +383,20 @@ static const schema_rule_t schema_rules[] = {{NODE_FILE, REL_CO_EDITED, NODE_FIL
                                              {NODE_OTHER, REL_SUMMARISES, NODE_OTHER},
                                              /* sentinel */
                                              {NODE_OTHER, REL_OTHER, NODE_OTHER}};
+
+int memory_ontology_rules(const memory_ontology_rule_t **out)
+{
+   /* The sentinel terminates the table and is not itself a rule, so it is
+    * excluded from the count -- publishing it would advertise
+    * (other, other, other), which reads as "anything goes". */
+   int n = 0;
+   while (!(schema_rules[n].sk == NODE_OTHER && schema_rules[n].rel == REL_OTHER &&
+            schema_rules[n].ok == NODE_OTHER))
+      n++;
+   if (out)
+      *out = schema_rules;
+   return n;
+}
 
 int memory_ontology_validate(memory_node_kind_t sk, memory_relation_kind_t rel,
                              memory_node_kind_t ok)
@@ -414,14 +434,6 @@ int memory_ontology_validate(memory_node_kind_t sk, memory_relation_kind_t rel,
 int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int max_hops,
                       graph_walk_entry_t *out, int max)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   (void)seed_entity;
-   (void)relation_mask;
-   (void)max_hops;
-   (void)out;
-   (void)max;
-   return 0;
-#else
    if (!seed_entity || !out || max <= 0)
       return 0;
 
@@ -447,8 +459,8 @@ int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int m
       for (int f = 0; f < frontier_n && count < max; f++)
       {
          const char *node = frontier[f];
-         db2_entity_edge_typed_t buf[50];
-         int n = db2_entity_edge_walk_step_typed(node, buf, 50);
+         db2_entity_edge_with_kinds_t buf[50];
+         int n = db2_entity_edge_walk_step_with_kinds(node, buf, 50);
 
          for (int b = 0; b < n && count < max; b++)
          {
@@ -502,5 +514,4 @@ int memory_graph_walk(const char *seed_entity, unsigned int relation_mask, int m
 
    return count;
 #undef WALK_MAX_FRONTIER
-#endif
 }

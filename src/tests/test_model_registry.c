@@ -7,6 +7,7 @@
 #include "aimee.h"
 #include "model_registry.h"
 #include "models_dev.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void test_alias_resolve(void)
 {
@@ -97,34 +98,45 @@ static void test_provider_detect(void)
 
 static void test_context_window(void)
 {
-   /* Anthropic: 200k */
-   assert(model_context_window("claude-opus-4-6") == 200000);
-   assert(model_context_window("claude-sonnet-4-6") == 200000);
+   /* Anthropic. These previously asserted 200000 across the board, which is the
+    * hand-written prefix table's value, not the model's: the 4.6 generation
+    * carries a 1M window. The old assertion agreed with the stale table rather
+    * than with the catalogue, so the suite stayed green while the fleet sized
+    * every Claude request at a fifth of the real window. Assert against the
+    * catalogue below (test_registry_agrees_with_catalog) rather than swapping
+    * one hardcoded number for another. */
+   assert(model_context_window("claude-opus-4-6") == 1000000);
+   assert(model_context_window("claude-sonnet-4-6") == 1000000);
    assert(model_context_window("claude-haiku-4-5-20251001") == 200000);
+   /* Not in the catalogue -- still served by the prefix-table fallback. */
    assert(model_context_window("claude-3-5-sonnet-20241022") == 200000);
 
    /* Claude 2: 100k */
    assert(model_context_window("claude-2.1") == 100000);
 
-   /* OpenAI */
-   assert(model_context_window("gpt-5.4") == 272000);
-   assert(model_context_window("gpt-5.3-codex") == 272000);
-   assert(model_context_window("gpt-5.2") == 272000);
+   /* OpenAI. The prefix table mapped the whole gpt-5.x family to 272000, which
+    * is not a context window at all -- it is the threshold where gpt-5.6-sol's
+    * price band steps up (see model_registry.h). The catalogue's real windows
+    * are larger and differ per model. */
+   assert(model_context_window("gpt-5.4") == 1050000);
+   assert(model_context_window("gpt-5.3-codex") == 400000);
+   assert(model_context_window("gpt-5.2") == 400000);
    assert(model_context_window("gpt-4o") == 128000);
    assert(model_context_window("gpt-4-turbo") == 128000);
-   assert(model_context_window("gpt-3.5-turbo") == 16384);
+   assert(model_context_window("gpt-3.5-turbo") == 16385);
    assert(model_context_window("o1") == 200000);
    assert(model_context_window("o3-mini") == 200000);
 
-   /* Gemini */
+   /* Gemini. 1.5-pro is not in the catalogue, so the prefix table still serves
+    * it; 2.5-pro is, and its real window is 1048576 rather than a round 1M. */
    assert(model_context_window("gemini-1.5-pro") == 1000000);
-   assert(model_context_window("gemini-2.5-pro") == 1000000);
+   assert(model_context_window("gemini-2.5-pro") == 1048576);
 
-   /* Mistral */
-   assert(model_context_window("mistral-large-latest") == 128000);
-   assert(model_context_window("mistral-small-latest") == 128000);
+   /* Mistral / MiniMax -- all previously rounded down by the prefix table. */
+   assert(model_context_window("mistral-large-latest") == 262144);
+   assert(model_context_window("mistral-small-latest") == 256000);
    assert(model_context_window("codestral-latest") == 256000);
-   assert(model_context_window("MiniMax-M2.7") == 200000);
+   assert(model_context_window("MiniMax-M2.7") == 204800);
 
    /* Unknown model returns 0 */
    assert(model_context_window("some-unknown-model") == 0);
@@ -132,15 +144,18 @@ static void test_context_window(void)
    assert(model_context_window(NULL) == 0);
 
    /* Case insensitive */
-   assert(model_context_window("Claude-Opus-4-6") == 200000);
+   assert(model_context_window("Claude-Opus-4-6") == 1000000);
    assert(model_context_window("GPT-4o") == 128000);
 }
 
 static void test_max_output(void)
 {
-   /* Static-table models return their pinned output ceiling. */
+   /* Catalogued models return the ceiling the catalogue publishes. gpt-4o's
+    * static row happened to match it (16384); claude-sonnet-4-6's did not --
+    * the static table pinned 8192 against a real ceiling of 128000, capping
+    * every Claude response at a sixteenth of what the model can emit. */
    assert(model_max_output("openai", "gpt-4o") == 16384);
-   assert(model_max_output("anthropic", "claude-sonnet-4-6") == 8192);
+   assert(model_max_output("anthropic", "claude-sonnet-4-6") == 128000);
 
    /* A CATALOGUED model returns the ceiling the catalog publishes, not an
     * inferred one. MiniMax-M3 and mistral-medium-latest used to sit here as
@@ -199,16 +214,30 @@ static void test_model_capability_get(void)
    assert(cap.flags & MODEL_CAP_VISION);
    assert(strcmp(cap.provider, "openai") == 0);
    assert(strcmp(cap.model_id, "gpt-4o") == 0);
-   assert(strcmp(cap.modalities, "text,image,audio") == 0);
+   /* The static row claimed audio; the catalogue publishes text/image/pdf for
+    * gpt-4o (audio input is a separate model family upstream), so the AUDIO flag
+    * is now clear and the derived string drops to "text,image".
+    * capability_set_modalities() emits only text / text,image / text,image,audio
+    * -- it has no PDF form -- so the PDF flag is set on the record but absent
+    * from this string. Modality caps are documented as best-effort routing
+    * preferences that the router relaxes when they would disable every
+    * candidate. */
+   assert(strcmp(cap.modalities, "text,image") == 0);
+   assert(cap.flags & MODEL_CAP_PDF);
    assert(cap.deprecated == 0);
 
    assert(model_capability_get("anthropic", "claude-opus-4-6", &cap) == 1);
-   assert(cap.context_window == 200000);
+   /* Was 200000/$15/$75 from the static table; the catalogue carries 1M and
+    * $5/$25. The static row outranked the catalogue, so cost-based routing saw
+    * Opus as 3x its real price. */
+   assert(cap.context_window == 1000000);
+   assert(cap.cost_in_per_mtok == 5.00);
+   assert(cap.cost_out_per_mtok == 25.00);
    assert(cap.flags & MODEL_CAP_REASONING);
    assert(cap.flags & MODEL_CAP_PDF);
 
    assert(model_capability_get("gemini", "gemini-2.5-pro", &cap) == 1);
-   assert(cap.context_window == 1000000);
+   assert(cap.context_window == 1048576); /* real window, not a rounded 1M */
    assert(cap.flags & MODEL_CAP_VISION);
    assert(cap.flags & MODEL_CAP_PDF);
 
@@ -218,7 +247,7 @@ static void test_model_capability_get(void)
    assert(strcmp(cap.modalities, "text") == 0);
 
    assert(model_capability_get("minimax", "MiniMax-M2.7", &cap) == 1);
-   assert(cap.context_window == 200000);
+   assert(cap.context_window == 204800);
    assert(cap.flags & MODEL_CAP_REASONING);
    assert(cap.flags & MODEL_CAP_TOOLS);
    assert(cap.flags & MODEL_CAP_STREAMING);
@@ -307,7 +336,8 @@ static void test_model_capability_helpers(void)
 
 static void test_model_capability_refresh_cache_and_overrides(void)
 {
-   char tmpdir[] = "/tmp/aimee-model-registry-XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee-model-registry-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char cache_home[512];
@@ -410,9 +440,56 @@ static void test_models_dev_stub(void)
    assert(models_dev_capability_get(NULL, NULL, NULL) == 0);
 }
 
+/* The invariant the previous tests could not express: where the catalogue
+ * carries a model, the registry must REPORT the catalogue's numbers rather than
+ * a hand-written approximation of them.
+ *
+ * This is deliberately written against the catalogue itself, not against
+ * literals. A test that asserted `== 1000000` would be the same mistake one
+ * release later: it would agree with whatever table someone typed, and go green
+ * while the two drifted apart. Enumerating the catalogue is also what proves the
+ * list walker works -- a zero-entry enumeration is exactly how this stayed
+ * hidden, so an empty catalogue fails the test rather than vacuously passing. */
+static void test_registry_agrees_with_catalog(void)
+{
+   static model_capability_t caps[1024];
+   int n = models_dev_cache_list(caps, 1024, 0, 0);
+   assert(n > 0 && "catalogue enumerated zero models -- the list walker is broken");
+   if (n > 1024)
+      n = 1024;
+
+   int checked = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (caps[i].context_window <= 0)
+         continue;
+
+      /* The window the rest of the fleet sizes requests with. */
+      assert(model_context_window(caps[i].model_id) == caps[i].context_window);
+
+      /* And the full capability record consumers route and price on. */
+      model_capability_t got;
+      memset(&got, 0, sizeof got);
+      assert(model_capability_get(caps[i].provider, caps[i].model_id, &got) == 1);
+      assert(got.context_window == caps[i].context_window);
+      assert(got.max_output == caps[i].max_output);
+      assert(got.cost_in_per_mtok == caps[i].cost_in_per_mtok);
+      assert(got.cost_out_per_mtok == caps[i].cost_out_per_mtok);
+      checked++;
+   }
+   assert(checked > 100 && "catalogue unexpectedly small; check the snapshot");
+}
+
 int main(void)
 {
    printf("model_registry: ");
+   /* First, before test_model_capability_refresh_cache_and_overrides() repoints
+    * HOME/XDG_CACHE_HOME at a temp dir. This invariant describes a pristine
+    * process reading the bundled snapshot; once the cache path is redirected,
+    * the enumerator and the capability set can legitimately read different
+    * files and disagreeing is not a defect. */
+   test_registry_agrees_with_catalog();
+   printf("registry_agrees_with_catalog OK, ");
    test_alias_resolve();
    printf("alias_resolve OK, ");
    test_provider_detect();
@@ -430,7 +507,6 @@ int main(void)
    test_model_capability_refresh_cache_and_overrides();
    printf("refresh OK\n");
    test_models_dev_stub();
-   printf("models_dev_stub OK\n");
    printf("models_dev_stub OK\n");
    return 0;
 }

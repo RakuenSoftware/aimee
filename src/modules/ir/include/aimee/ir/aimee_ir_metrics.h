@@ -49,6 +49,16 @@ typedef enum
    AIMEE_IR_M_RESP_MISMATCH,
    /* Shadow (response side): IR and legacy parsed the response identically. */
    AIMEE_IR_M_RESP_MATCH,
+   /* Observation: a relayed stream carried model reasoning the IR could read. This
+    * is the base rate that decides whether thought-triggered recall is worth
+    * building at all -- a provider or turn shape that never yields reasoning cannot
+    * be served by it. */
+   AIMEE_IR_M_REASONING_OBSERVED,
+   /* Observation: reasoning was seen but is INCOMPLETE -- either capped at the
+    * relay's buffer limit or abandoned mid-stream because the parser rejected an
+    * event. Counted separately from OBSERVED because incomplete reasoning must not
+    * be treated as a whole thought by anything matching against it. */
+   AIMEE_IR_M_REASONING_INCOMPLETE,
    AIMEE_IR_M__COUNT
 } aimee_ir_metric_t;
 

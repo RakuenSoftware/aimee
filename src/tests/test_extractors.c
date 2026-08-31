@@ -396,9 +396,52 @@ static void test_def_end_line(void)
    printf("def_end_line OK\n");
 }
 
+/* Python call sites: an f-string interpolation is code, and a def is not a call.
+ *
+ * Both of these were wrong in the regex extractor, which is the live path whenever
+ * tree-sitter is not compiled in. Together they made `index callers` lie about a
+ * three-call fixture: it dropped the f-string call site entirely and reported the
+ * definition as a caller of itself. That is the tool an agent is supposed to use to
+ * find the OTHER call sites before changing a function. */
+static void test_python_call_sites(void)
+{
+   call_ref_t calls[32];
+   call_ctx_t cc;
+   memset(&cc, 0, sizeof(cc));
+   cc.out = calls;
+   cc.max = 32;
+
+   py_call_line("def month_report_path(d):", 5, &cc);
+   py_call_line("    return f\"report-{end_of_month(d).isoformat()}.csv\"", 6, &cc);
+   py_call_line("def plain(d):", 8, &cc);
+   py_call_line("    return end_of_month(d)", 9, &cc);
+   py_call_line("    label = f\"{{literal}} {helper(d)}\"", 10, &cc);
+
+   int saw_fstring = 0, saw_plain = 0, saw_literal_brace_helper = 0, saw_self_edge = 0;
+   for (int i = 0; i < cc.count; i++)
+   {
+      if (strcmp(calls[i].callee, "end_of_month") == 0 && calls[i].line == 6 &&
+          strcmp(calls[i].caller, "month_report_path") == 0)
+         saw_fstring = 1;
+      if (strcmp(calls[i].callee, "end_of_month") == 0 && calls[i].line == 9)
+         saw_plain = 1;
+      if (strcmp(calls[i].callee, "helper") == 0 && calls[i].line == 10)
+         saw_literal_brace_helper = 1;
+      /* `def month_report_path(` must not be emitted as a call to itself. */
+      if (strcmp(calls[i].callee, "month_report_path") == 0)
+         saw_self_edge = 1;
+   }
+
+   assert(saw_fstring);              /* the call inside the f-string */
+   assert(saw_plain);                /* and the ordinary one still works */
+   assert(saw_literal_brace_helper); /* {{ }} is a literal brace, not an interpolation */
+   assert(!saw_self_edge);           /* the definition is not one of its own callers */
+}
+
 int main(void)
 {
    test_def_end_line();
+   test_python_call_sites();
    test_c_imports();
    test_python_import_identities();
    test_c_exports();

@@ -26,19 +26,15 @@ int delegate_sandbox_resolve_image(const char *cwd, char *out, size_t cap);
  * Each package name must match [A-Za-z0-9][A-Za-z0-9._+:-]* (no shell metacharacters
  * reach the build RUN). Returns 0 on success, -1 on an invalid package, empty base,
  * or truncation. */
-int delegate_sandbox_dockerfile_from_packages(const char *base, const char *const *pkgs, int npkgs,
-                                              char *out, size_t cap);
 
 /* Deterministic content-addressed image tag `aimee-sbx:<12-hex>` for `content`
  * (the Dockerfile text). Same content -> same tag, so a built image is reused. */
-void delegate_sandbox_content_tag(const char *content, char *tag, size_t cap);
 
 /* --- cache management (aimee-sbx:* images accumulate; these enumerate + prune) --- */
 
 /* Parse a `docker image ls` CreatedAt string ("2026-07-15 12:34:56 +0000 UTC") to a
  * UTC epoch (seconds). Returns 0 on success, -1 if it does not parse. Pure; exposed
  * for unit tests. */
-int delegate_sandbox_parse_created_epoch(const char *created, long long *out);
 
 /* The gc keep/remove decision for one image, factored out so it can be tested without
  * a docker daemon. `index` is the image's position in the newest-first ordering.
@@ -47,8 +43,6 @@ int delegate_sandbox_parse_created_epoch(const char *created, long long *out);
  * when it is not in use, is beyond the `keep_min` most-recent, and (if its
  * created_epoch is known, i.e. > 0) is at least `max_age_secs` old. A zero/unknown
  * created_epoch is treated as old enough to remove. Pure. */
-int delegate_sandbox_gc_should_remove(int in_use, int index, int keep_min, long long created_epoch,
-                                      long long now, long max_age_secs, const char **reason_out);
 
 /* List every build-from-spec image (tag prefix `aimee-sbx:`) as a JSON array
  * (caller frees). Each element:

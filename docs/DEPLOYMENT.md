@@ -15,17 +15,66 @@ boundary.
 ## Split stack
 
 ```bash
-docker compose -f deploy/compose/aimee.yaml up -d
+cp -n .env.example .env
+for v in ADMIN MIGRATOR RUNTIME; do
+  echo "AIMEE_STORE_${v}_PASSWORD=$(openssl rand -hex 32)" >> .env
+done
+export AIMEE_KB_API_BEARER_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+./scripts/aimee-compose-vault-bootstrap.sh -f deploy/compose/aimee.yaml all
+unset AIMEE_KB_API_BEARER_TOKEN AIMEE_KB_SERVICE_IDENTITY_TOKEN
+docker compose --env-file .env -f deploy/compose/aimee.yaml up -d
 ```
 
 Server and one KB are declared together, and no browser action needs to create them. The KB owns its
-embedding and synthesis role placements. Each role can run inside the KB container or use a remote
-endpoint supported by the selected profile. There is no separate inference service. This is the
-safer default when the server must not control Docker.
+embedding and synthesis role placements. Embedding runs in the KB image or its selected sidecar.
+Local synthesis uses a model-specific `aimee-llm` sidecar; remote synthesis uses an endpoint. This is intended
+as the safer default when the server must not control Docker.
+
+Use `all` so the connection bearer and application-identity token are sealed into both Vaults. The
+one-shot `aimee-server-identity` service then issues the server's separate client
+certificate before the long-lived server starts. Server-to-KB requests use all three checks over
+mTLS on the private Compose network. The KB's plain HTTP listener remains loopback-only for its
+container healthcheck and is not published on the host.
+
+**`--env-file .env` is not optional on this path.** Compose takes its project directory from the
+first `-f` file, so for `deploy/compose/aimee.yaml` it looks for `deploy/compose/.env` and never
+reads the one at the repository root. Without the flag the command fails on the store passwords even
+though the file exists. The root-level profiles need no flag, because their project directory
+already is the repository root.
 
 The one-KB Compose files are deployment profiles, not the fleet limit. The target architecture can
 route among several KB containers with explicit corpus, authority, and capability identity. Fleet
 routing is not integrated in this checkout; see [KB fleet and model placement](KB_FLEET.md).
+
+## The server's store database
+
+Every Compose file that runs `aimee-server` also runs `aimee-store-db`: a stock
+upstream `postgres:18` holding DB1, the tables the daemon keeps. It is a plain
+image on purpose. DB1 declares no extensions, so unlike DB2 it needs neither
+pgvector nor pgvectorscale, and any PostgreSQL an operator already supports will
+do.
+
+It is reached only across the Compose network and publishes no port. To use your
+own PostgreSQL instead, set `AIMEE_STORE_URL` and the bundled service goes
+unused:
+
+```bash
+export AIMEE_STORE_URL='postgres://user:password@host:5432/aimee_store'
+docker compose -f compose.server.yaml up -d
+```
+
+The bundled service still needs `AIMEE_STORE_ADMIN_PASSWORD`,
+`AIMEE_STORE_MIGRATOR_PASSWORD` and `AIMEE_STORE_RUNTIME_PASSWORD` to be set even when
+`AIMEE_STORE_URL` points elsewhere, because Compose interpolates every service it parses before it
+decides which to start. Generate them into `.env` as above.
+
+Create that database `ENCODING UTF8 TEMPLATE template0`. This is load-bearing
+rather than tidiness: the store bounds text with `octet_length`, and in a
+SQL_ASCII database `octet_length` and `char_length` are the same function, so
+every byte-limit `CHECK` would pass whether or not it held.
+
+One profile, one database: being PostgreSQL does not make DB1 shareable.
 
 ## External PostgreSQL
 
@@ -53,10 +102,9 @@ them synchronously, and exits before the service is created.
 
 ## Inference
 
-Embedding and synthesis belong to the KB that serves the request. A role can run inside its KB
-container or use a remote endpoint. Internal availability depends on the KB image and profile;
-remote placement needs an explicit endpoint and credential. No standalone inference container is
-part of either topology.
+Embedding and synthesis belong to the KB that serves the request. Embedding runs in the KB image or
+selected embedder sidecar. Local synthesis runs in a model-specific `aimee-llm` sidecar over mTLS;
+remote synthesis needs an explicit endpoint and credential.
 
 The KB must report explicit degradation when a configured inference stage is unavailable. It cannot
 claim a dense or synthesized result after silently skipping that stage.
@@ -69,7 +117,7 @@ Use the compose files and generated configuration as the source of truth. Typica
 | --- | ---: | --- |
 | browser | 8443 | user network, HTTPS |
 | server `/v1` | 8743 | enrolled clients only |
-| KB `/v1` | 8741 | deployment network only |
+| KB service mTLS | 8745 | deployment network only |
 | remote model endpoint | provider-defined | deployment network only |
 
 Do not publish PostgreSQL or a remote model endpoint unless a separate host needs it. Apply TLS and
@@ -80,11 +128,11 @@ service identity before crossing a trusted container network.
 Back up:
 
 - server config and DB1;
-- workflow SQLite and artifacts;
+- PostgreSQL-backed workflow state and filesystem artifacts;
 - KB PostgreSQL;
 - vault root-key or external custody metadata;
 - TLS enrollment and revocation state;
-- WORM ledger, seals, and off-host anchor state;
+- both persistent SQLite WORM ledgers, seals, and off-host anchor state;
 - workspace mirrors when rebuilding them is expensive.
 
 Use the KB export helper for the embedded database. Test a restore. `docker compose down -v` deletes
@@ -102,8 +150,39 @@ named volumes.
 - stream first-boot provider, git, database, and witness secrets into their owning Vault, then
   recreate/start long-lived services without credential environment mappings;
 - ship WORM evidence to an off-host witness when host compromise is in scope;
+- run exactly one KB WORM worker with its own persistent volume and credential;
 - alert on failed health, audit verification, witness lag, bus drops, database pressure, and agent
   reaping.
+
+### Git forge credential
+
+`aimee git pr` and the other forge API calls authenticate with one environment-wide
+token, held in the **server principal's** Vault as `(git, forge_token)`. It is the
+only slot those calls read, and nothing outside the server ever sees it: agents and
+sessions can use `aimee git`, but cannot read the token back out.
+
+Supply it at first boot as `AIMEE_FORGE_TOKEN`, which the server seals and then
+unsets. If a deployment came up without it, seal it afterwards instead of
+re-creating the stack. Run it as the Vault owner, the same way the webchat seal
+does, so the entry is not written by root:
+
+```bash
+# inside the server container
+printf '%s' "$TOKEN" | runuser -u aimee -- aimee-server --forge-vault-seal forge_token
+```
+
+No restart is needed: the next forge call reads the new value straight from
+Vault.
+
+The secret travels on stdin only, never argv or an environment mapping, so it
+cannot leak through a process list or `/proc`. Re-sealing replaces the value, so
+this is also how you rotate. Note that `aimee vault set git forge_token ...` is
+**not** a substitute: it stores under the calling principal, which the forge
+reader never consults.
+
+Symptom of a missing token: every `aimee git pr` action fails with
+`no github credential`, while `aimee git push` keeps working because it
+authenticates over SSH.
 
 ## Upgrade
 

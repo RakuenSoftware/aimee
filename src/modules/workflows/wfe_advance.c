@@ -1,10 +1,17 @@
-/* wfe_advance.c -- see wfe_advance.h. Pure: no engine / DB / gateway deps. */
+/* wfe_advance.c -- see wfe_advance.h. */
 #include "wfe_advance.h"
 
 #include <stdio.h>
 #include <string.h>
 
 #include "cJSON.h"
+
+static wfe_advance_decision_provider_fn g_decision_provider;
+
+void wfe_advance_register_decision_provider(wfe_advance_decision_provider_fn provider)
+{
+   g_decision_provider = provider;
+}
 
 /* Bounded id-charset guard: [A-Za-z0-9_-], 1..cap-1 chars. The work-item id
  * (wi_<hex>), the stage (a validated YAML node id), and the nonce all live in this
@@ -73,14 +80,6 @@ int wfe_advance_parse_args(const char *args_json, wfe_advance_args_t *out)
    return rc;
 }
 
-int wfe_advance_state_is_terminal(const char *state)
-{
-   if (!state || !state[0])
-      return 0;
-   return strcmp(state, "accepted") == 0 || strcmp(state, "rejected") == 0 ||
-          strcmp(state, "abandoned") == 0;
-}
-
 const char *wfe_advance_outcome_name(wfe_advance_outcome_t o)
 {
    switch (o)
@@ -101,34 +100,18 @@ const char *wfe_advance_outcome_name(wfe_advance_outcome_t o)
    return "badargs";
 }
 
-wfe_advance_outcome_t wfe_advance_decide(const char *bound_wi, const wfe_advance_args_t *a,
-                                         const char *actual_stage, const char *actual_state,
-                                         const char *last_nonce)
+int wfe_advance_decide(const char *bound_wi, const wfe_advance_args_t *a, const char *actual_stage,
+                       const char *actual_state, const char *last_nonce,
+                       wfe_advance_outcome_t *outcome)
 {
-   if (!a || !a->work_item_id[0] || !a->observed_stage[0])
-      return WFE_ADV_BADARGS;
-
-   /* Unbound, or the caller's session is bound to a DIFFERENT work-item than the
-    * one it is trying to advance (confused-deputy). Either way, refuse. */
-   if (!bound_wi || !bound_wi[0] || strcmp(bound_wi, a->work_item_id) != 0)
-      return WFE_ADV_UNBOUND;
-
-   /* Idempotent replay MUST be decided before TERMINAL and STALE: a genuine retry
-    * of an already-applied advance has both a stale observed_stage and (possibly)
-    * a work-item that has since gone terminal, yet it must read as a no-op, not an
-    * error. */
-   if (a->have_nonce && last_nonce && last_nonce[0] && strcmp(a->nonce, last_nonce) == 0)
-      return WFE_ADV_REPLAY;
-
-   if (wfe_advance_state_is_terminal(actual_state))
-      return WFE_ADV_TERMINAL;
-
-   /* CAS: the primary's observed stage must still be the work-item's current stage
-    * (a duplicate turn / a stage that already moved is rejected, not applied). */
-   if (!actual_stage || strcmp(a->observed_stage, actual_stage) != 0)
-      return WFE_ADV_STALE;
-
-   return WFE_ADV_OK;
+   if (!a || !outcome || !g_decision_provider)
+      return -1;
+   wfe_advance_outcome_t decision = WFE_ADV_BADARGS;
+   if (g_decision_provider(bound_wi, a, actual_stage, actual_state, last_nonce, &decision) != 0 ||
+       decision < WFE_ADV_OK || decision > WFE_ADV_BADARGS)
+      return -1;
+   *outcome = decision;
+   return 0;
 }
 
 const char *wfe_advance_tool_description(void)

@@ -7,16 +7,23 @@
 #include <stdint.h>
 #include <unistd.h>
 
+#include <openssl/buffer.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
 #include "config.h"
+#include "command_registry.h"
 #include "cJSON.h"
 #include "kb_http.h"
+#include "kb_route_acl.h"
 #include "kb_scope.h"
-#include "td_search_render.h"       /* consumer side of the /v1/search contract test */
-#include "kb/kb_surprising_judge.h" /* §4 judge stub seam (kb_surprising_verdict_t) */
-#include "db2/lifecycle.h"          /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
-#include "db2/code_project_lifecycle.h"
+#include "kb/http/kb_http_search.h"  /* kb_http_search_project_scope: "scope" parsing */
+#include "td_search_render.h"        /* consumer side of the /v1/search contract test */
+#include "kb/kb_surprising_judge.h"  /* §4 judge stub seam (kb_surprising_verdict_t) */
+#include "modules/db2/c/lifecycle.h" /* §2c: db2_reembed_* / db2_dim_change_reset stub types */
+#include "modules/db2/c/code_project_lifecycle.h"
 #include "rel_types.h"        /* REL_TYPE_NAME_MAX for the db2_ontology_* stubs below */
-#include "config_fields.h"    /* config_field_t for the pipeline-console stubs below */
 #include "embed_input_type.h" /* the memory_embed_text stub's polarity argument */
 #include "kb_service.h"
 #include "kb/kb_service_code_embed.h"
@@ -24,17 +31,80 @@
 #include "kb_service_backend.h"
 #include "kb_enroll.h"
 #include "kb_identity.h"
+#include "kb_reqctx.h"
 #include "kb_paths.h"
 #include "kb_pki.h"
 #include "kb_tls.h"
 #include "kb_client_mtls.h"
+#include "kb_blob_reconcile.h"
 #include "runtime_secret.h"
+
+#include <aimee/control-web/module_api.h>
+#include <aimee/core/event_bus/module_runtime.h>
+
+extern aimee_module_status_t aimee_control_web_module_handler(const aimee_module_invocation_t *,
+                                                              const uint8_t *, uint32_t, uint8_t *,
+                                                              uint32_t, uint32_t *, void *);
+
+static int self_signed_ec_cert(char *out, size_t cap)
+{
+   EVP_PKEY *key = EVP_EC_gen("prime256v1");
+   X509 *cert = X509_new();
+   BIO *bio = BIO_new(BIO_s_mem());
+   int ok = key && cert && bio && X509_set_version(cert, 2) == 1 &&
+            ASN1_INTEGER_set(X509_get_serialNumber(cert), 1) == 1 &&
+            X509_gmtime_adj(X509_getm_notBefore(cert), 0) &&
+            X509_gmtime_adj(X509_getm_notAfter(cert), 3600) && X509_set_pubkey(cert, key) == 1;
+   X509_NAME *name = ok ? X509_get_subject_name(cert) : NULL;
+   ok = ok && name &&
+        X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC, (const unsigned char *)"server.local",
+                                   -1, -1, 0) == 1 &&
+        X509_set_issuer_name(cert, name) == 1 && X509_sign(cert, key, EVP_sha256()) > 0 &&
+        PEM_write_bio_X509(bio, cert) == 1;
+   BUF_MEM *memory = NULL;
+   if (ok)
+      BIO_get_mem_ptr(bio, &memory);
+   ok = ok && memory && memory->length + 1 <= cap;
+   if (ok)
+   {
+      memcpy(out, memory->data, memory->length);
+      out[memory->length] = '\0';
+   }
+   else if (out && cap)
+      out[0] = '\0';
+   BIO_free(bio);
+   X509_free(cert);
+   EVP_PKEY_free(key);
+   return ok ? 0 : -1;
+}
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+static int control_web_module_provider(const char *method, const char *path, int *allowed)
+{
+   uint8_t request[AIMEE_CONTROL_WEB_REQUEST_LEN];
+   uint8_t response[AIMEE_CONTROL_WEB_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_CONTROL_WEB_STAGE_AUTHORIZE};
+   if (aimee_control_web_request_encode(AIMEE_CONTROL_WEB_TARGET_CONSOLE_ADMIN, method, path,
+                                        request, sizeof(request)) != 0 ||
+       aimee_control_web_module_handler(&invocation, request, sizeof(request), response,
+                                        sizeof(response), &response_len,
+                                        NULL) != AIMEE_MODULE_STATUS_OK)
+      return -1;
+   return aimee_control_web_response_decode(response, response_len, allowed);
+}
 
 extern int g_test_registry_heartbeat_allow;
 extern char g_test_registry_server_id[128], g_test_registry_issuer[601],
     g_test_registry_serial[129], g_test_registry_fingerprint[65];
 
-#include "db_postgres.h" /* aimee_pg_* types for the tenancy-route db2 stubs below */
+#include "db_postgres.h"        /* aimee_pg_* types for the tenancy-route db2 stubs below */
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* db2 accessor stubs: this test links the kb router but not the DB2 stack. The
  * tenancy routes hard-fail on the shim (aimee_pg_is_shim()=1) inside
@@ -67,6 +137,50 @@ void db2_lease_end(void)
 }
 void db2_lease_release_idle(void)
 {
+}
+
+static int g_erasure_begin_calls;
+static int g_erasure_complete_calls;
+static int g_erasure_reconcile_calls;
+
+int db2_subject_erasure_begin(const char *request_id, const char *subject,
+                              const char *sessions_json, int64_t *memory_count,
+                              int64_t *document_count, int *already_done)
+{
+   assert(strcmp(request_id, "erase-route-0123456789") == 0);
+   assert(strcmp(subject, "subject@example.test") == 0);
+   assert(strcmp(sessions_json, "[\"session-a\"]") == 0);
+   g_erasure_begin_calls++;
+   *memory_count = 2;
+   *document_count = 3;
+   *already_done = 0;
+   return 0;
+}
+
+int db2_subject_erasure_complete(const char *request_id, const char *actor, int64_t db1_count,
+                                 int *event_created)
+{
+   assert(strcmp(request_id, "erase-route-0123456789") == 0);
+   assert(actor && actor[0]);
+   assert(db1_count == 1);
+   g_erasure_complete_calls++;
+   *event_created = 1;
+   return 0;
+}
+
+int config_kb_pdf_blob_orphan_alarm_mb(void)
+{
+   return 64;
+}
+
+int kb_blob_reconcile_run(int alarm_mb, int grace_secs, kb_blob_recon_stats_t *out)
+{
+   assert(alarm_mb == 64);
+   assert(grace_secs == 0);
+   memset(out, 0, sizeof(*out));
+   out->orphans_unlinked = 4;
+   g_erasure_reconcile_calls++;
+   return 0;
 }
 /* /v1/health reports pool starvation, so the route layer now reads the pool.
  * A route test wants no real DB2: report an idle pool so health stays "ok" and
@@ -240,6 +354,27 @@ typedef struct
    const char *rel_path;
    const char *content;
 } canonical_index_file_input_t;
+
+typedef struct
+{
+   long long revision;
+   int files_indexed;
+   int files_retracted;
+} canonical_index_seal_result_t;
+
+#define CANONICAL_INDEX_VERIFY_EXAMPLES 16
+typedef struct
+{
+   long long index_revision;
+   int indexed_files;
+   int workspace_files;
+   int modified_files;
+   int missing_files;
+   int unindexed_files;
+   int unavailable;
+   int example_count;
+   char examples[CANONICAL_INDEX_VERIFY_EXAMPLES][256];
+} canonical_index_verify_result_t;
 
 typedef struct
 {
@@ -449,6 +584,8 @@ char *kb_service_ingest_status_json(void)
  * parses. Default 0 keeps every other test on the empty-results path. */
 static int g_test_search_populated = 0;
 static int g_test_search_scoped_all = 0;
+static int g_test_search_error = 0;
+static int g_test_search_malformed = 0;
 static char g_test_search_embedding[256];
 char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, const char *f)
 {
@@ -457,11 +594,16 @@ char *kb_search_json_ex(const char *p, const char *q, const char *e, int m, cons
    (void)m;
    (void)f;
    snprintf(g_test_search_embedding, sizeof(g_test_search_embedding), "%s", e ? e : "");
-   const char *src = g_test_search_populated
-                         ? "{\"fusion_mode\":\"rrf\",\"results\":[{\"project\":\"proj-alpha\","
-                           "\"file_path\":\"docs/alpha.md\","
-                           "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}"
-                         : "{\"fusion_mode\":\"rrf\",\"results\":[]}";
+   const char *src = "{\"fusion_mode\":\"rrf\",\"results\":[]}";
+   if (g_test_search_error)
+      src = "{\"error\":\"error: documentation query embedding failed; "
+            "server-side embedding configuration is unavailable\"}";
+   else if (g_test_search_malformed)
+      src = "{\"fusion_mode\":\"rrf\"}";
+   else if (g_test_search_populated)
+      src = "{\"fusion_mode\":\"rrf\",\"results\":[{\"project\":\"proj-alpha\","
+            "\"file_path\":\"docs/alpha.md\","
+            "\"content\":\"alpha excerpt body\",\"score\":0.875,\"doc_id\":4242}]}";
    char *r = malloc(strlen(src) + 1);
    if (r)
       strcpy(r, src);
@@ -567,20 +709,11 @@ int db2_probe_embedder_dim(int budget_ms, int *out)
       *out = 1024;
    return 0;
 }
-int config_resolve_embedder_dims(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-int config_embedder_dims_is_pinned(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-
-/* kb_http reads the pin through the no-arg form now; same answer as the
- * config_t stub above. */
 int config_embedder_dims_pinned_current(void)
+{
+   return 0;
+}
+int config_resolve_embedder_dims_current(void)
 {
    return 0;
 }
@@ -593,8 +726,8 @@ int db2_curator_invalidations_since(int64_t since_id, void *out, int max)
    return 0;
 }
 
-/* Ontology-console db2 stubs + config_save: the typed_facts ontology console added
- * these refs into kb_http_console.o; the real defs pull the whole db2/config stack,
+/* Ontology-console db2 stubs: the typed_facts ontology console added
+ * these refs into kb_http_console.o; the real defs pull the whole db2 stack,
  * so stub them link-only (this test exercises routing, not the ontology backend). */
 long db2_ontology_eval_count(const char *rel_type)
 {
@@ -631,15 +764,8 @@ int db2_ontology_reject(const char *rel_type)
    (void)rel_type;
    return 0;
 }
-int config_save(const config_t *cfg)
-{
-   (void)cfg;
-   return 0;
-}
-
-/* The console writes through config_set / config_set_typed_facts now instead of
- * mutating a config_t and calling config_save. Same contract as the stub above:
- * report success without touching a real config file. */
+/* The console writes through the module client. Report success without touching
+ * a real config file; this route test owns only the HTTP-facing contract. */
 int config_set(const char *key, const char *value)
 {
    (void)key;
@@ -647,17 +773,16 @@ int config_set(const char *key, const char *value)
    return 0;
 }
 
-int config_set_typed_facts(int enabled, int auto_promote, int promote_threshold)
+int config_set_typed_facts(int auto_promote, int promote_threshold)
 {
-   (void)enabled;
    (void)auto_promote;
    (void)promote_threshold;
    return 0;
 }
 
 /* Pipeline-console stubs: the console's /v1/console/pipeline routes pull in the
- * curator registry and the typed config-field accessors. The real defs drag in
- * the whole curator + config stack, so stub them here — this test exercises
+ * curator registry and config module client. The real defs drag in
+ * the whole curator stack, so stub them here — this test exercises
  * routing and the route's own key allowlist, not the curator itself. Two stage
  * shapes are enough for that: one toggleable, one embedder-gated (null key). */
 cJSON *kb_curator_stages_json(void)
@@ -677,23 +802,31 @@ cJSON *kb_curator_presets_json(void)
 {
    return cJSON_CreateArray();
 }
-static const config_field_t g_stub_field = {"stub",         0,   0, 0, CFG_BOOL, RELOAD_HOT,
-                                            FGROUP_RUNTIME, NULL};
-static const config_field_t g_stub_secret_field = {
-    "kb_api_bearer_token",      0, 1, 0, CFG_STRING, RELOAD_RESTART, FGROUP_RUNTIME,
-    "AIMEE_KB_API_BEARER_TOKEN"};
 static int g_stub_secret_configured;
 static int g_stub_secret_store_calls;
-const config_field_t *config_field_lookup(const char *key)
+static char g_stub_kb_api_bearer_token[4097] = "scope:service:aimee-server:token-one";
+static char g_test_pam_password[64] = "server-password";
+static char g_test_outbound_caller[577] = "";
+const char *request_context_caller_subject(void)
+{
+   return g_test_outbound_caller;
+}
+static int test_pam_check_credentials(const char *user, const char *password)
+{
+   return user && password &&
+          (strcmp(user, "aimee-server") == 0 || strcmp(user, "other-service") == 0) &&
+          strcmp(password, g_test_pam_password) == 0;
+}
+static int stub_config_key_known(const char *key)
 {
    /* Only the keys the pipeline route may touch resolve; anything else is
     * "unknown" so the route's own allowlist is what is under test. */
    if (!key)
-      return NULL;
+      return 0;
    if (strcmp(key, "kb_api_bearer_token") == 0)
-      return &g_stub_secret_field;
+      return 1;
    if (strncmp(key, "kb_curator_", 11) == 0 || strcmp(key, "kb_evidence_embed_enabled") == 0)
-      return &g_stub_field;
+      return 1;
    /* The KB-owned settings surface (KB_SETTINGS) plus the server-owned keys the
     * 403 cases probe — all real config keys, so the route's OWN allowlist is
     * what those assertions exercise, not a lookup miss. */
@@ -702,33 +835,33 @@ const config_field_t *config_field_lookup(const char *key)
        strncmp(key, "css_", 4) == 0 || strcmp(key, "typed_facts_enabled") == 0 ||
        strcmp(key, "ocr_command") == 0 || strcmp(key, "tsr_command") == 0 ||
        strcmp(key, "db2_url") == 0)
-      return &g_stub_field;
-   return NULL;
+      return 1;
+   return 0;
 }
-const char *config_field_secret_name(const config_field_t *f)
+
+cJSON *config_client_value_copy(const char *key)
 {
-   return f ? f->secret_name : NULL;
-}
-cJSON *config_field_public_value_json(const config_t *cfg, const config_field_t *f)
-{
-   (void)cfg;
-   if (config_field_secret_name(f))
+   if (!stub_config_key_known(key))
+      return NULL;
+   if (!strcmp(key, "kb_api_bearer_token"))
       return cJSON_CreateBool(g_stub_secret_configured);
+   if (!strcmp(key, "kb_curator_stage_order"))
+      return cJSON_CreateString("extract_docs");
    return cJSON_CreateBool(0);
 }
 
-/* The console renders values through the live-config form now; same answer. */
-cJSON *config_field_public_value_json_current(const config_field_t *f)
+int config_client_key_is_secret(const char *key)
 {
-   return config_field_public_value_json(NULL, f);
+   return key && !strcmp(key, "kb_api_bearer_token");
 }
 
-/* Typed-facts knobs the console echoes back, read through accessors now.
- * Mirror the values this file's config_load stub sets (all zero/off). */
-int config_typed_facts_enabled(void)
+const char *config_client_secret_name(const char *key)
 {
-   return 0;
+   return config_client_key_is_secret(key) ? "AIMEE_KB_API_BEARER_TOKEN" : NULL;
 }
+
+/* Typed-facts knobs the console echoes back, read through accessors.
+ * config_typed_facts_enabled is gone: the layer has no master gate. */
 int config_kb_typed_facts_auto_promote_enabled(void)
 {
    return 0;
@@ -744,14 +877,6 @@ int config_secret_store(const char *name, const char *value)
    g_stub_secret_configured = value && value[0] ? 1 : 0;
    return 0;
 }
-int config_field_set_value(config_t *cfg, const config_field_t *f, const char *value)
-{
-   (void)cfg;
-   (void)f;
-   /* Mirror the real parser's contract: bools accept only true/false text. */
-   return (value && (strcmp(value, "true") == 0 || strcmp(value, "false") == 0)) ? 0 : -1;
-}
-
 int index_find(const char *id, void *out, int max)
 {
    (void)id;
@@ -1053,9 +1178,15 @@ static db2_kb_service_async_queue_stats_t g_queue_status = {
 static db2_kb_service_async_queue_stats_t g_drain_status = {
     .pending = 1, .running = 0, .done = 10, .failed = 1, .total = 12, .processed = 3};
 static char g_drain_embed_cmd[64];
+static char g_drain_claimed_by[128];
 static int g_drain_timeout;
 static const char *g_drain_collection;
 static int g_drain_rc;
+
+const char *session_id(void)
+{
+   return "test-http-session";
+}
 static int g_job_get_rc = 1;
 static int64_t g_job_get_id;
 static int g_db_initialized = 1;
@@ -1157,14 +1288,15 @@ int db2_kb_service_async_queue_status(db2_kb_service_async_queue_stats_t *out)
    return 0;
 }
 
-int db2_kb_service_async_queue_drain(const char *embedding_cmd, int timeout_secs,
-                                     const char *vector_collection,
+int db2_kb_service_async_queue_drain(const char *claimed_by, const char *embedding_cmd,
+                                     int timeout_secs, const char *vector_collection,
                                      db2_kb_service_vector_upsert_fn vector_upsert,
                                      void *vector_upsert_ctx,
                                      db2_kb_service_async_queue_stats_t *out)
 {
    (void)vector_upsert;
    (void)vector_upsert_ctx;
+   snprintf(g_drain_claimed_by, sizeof(g_drain_claimed_by), "%s", claimed_by);
    snprintf(g_drain_embed_cmd, sizeof(g_drain_embed_cmd), "%s", embedding_cmd);
    g_drain_timeout = timeout_secs;
    g_drain_collection = vector_collection;
@@ -1312,6 +1444,57 @@ int canonical_index_scan_files(const char *name, const char *root_label,
    return g_code_scan_files_rc;
 }
 
+int canonical_index_scan_begin(const char *name, const char *root_label, const char *scan_id,
+                               long long *baseline_revision_out)
+{
+   (void)name;
+   (void)root_label;
+   (void)scan_id;
+   if (baseline_revision_out)
+      *baseline_revision_out = 0;
+   return 0;
+}
+
+int canonical_index_scan_stage(const char *scan_id, const canonical_index_file_input_t *files,
+                               int file_count, int *accepted_out)
+{
+   (void)scan_id;
+   (void)files;
+   if (accepted_out)
+      *accepted_out = file_count;
+   return 0;
+}
+
+int canonical_index_scan_seal(const char *scan_id, int expected_files,
+                              canonical_index_seal_result_t *out)
+{
+   (void)scan_id;
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->revision = 1;
+      out->files_indexed = expected_files;
+   }
+   return 0;
+}
+
+int canonical_index_scan_abort(const char *scan_id)
+{
+   (void)scan_id;
+   return 0;
+}
+
+int canonical_index_verify_project(const char *name, const char *root, int deep,
+                                   canonical_index_verify_result_t *out)
+{
+   (void)name;
+   (void)root;
+   (void)deep;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
 int db2_kb_runtime_state_set_now(const char *key)
 {
    if (key && strcmp(key, "last_ingest_at") == 0)
@@ -1335,46 +1518,18 @@ void kb_curator_queue_code_units_for_project(const char *project, const char *ro
 /* §2c: flips kb.reembed_on_dim_change for the /v1/reembed 403/proceed gate test. */
 static int g_test_reembed_enabled = 0;
 static double g_precision_floor = 0.0; /* §4 surprising self-suppress floor (0 = off) */
-int config_load(config_t *cfg)
-{
-   memset(cfg, 0, sizeof(*cfg));
-   cfg->kb_reembed_on_dim_change = g_test_reembed_enabled;
-   cfg->kb_curator_extract_docs_enabled = 1;
-   cfg->kb_curator_extract_code_enabled = 1;
-   cfg->demotion_enabled = 1;
-   cfg->demotion_n_min = 2;
-   cfg->demotion_window = 64;
-   cfg->demotion_half_life_days = 30.0;
-   cfg->workspace_count = 1;
-   snprintf(cfg->workspaces[0], sizeof(cfg->workspaces[0]), "/workspace");
-   /* §5 hybrid RRF weights: mirror config_set_defaults so /v1/code/hybrid fuses
-    * both signals at equal weight (a 0 weight would disable a signal). */
-   cfg->code_hybrid_weight_code = 1.0;
-   cfg->code_hybrid_weight_graph = 1.0;
-   cfg->code_hybrid_weight_vector = 1.0;
-   cfg->code_hybrid_weight_memory = 1.0;
-   cfg->code_hybrid_rrf_k = 60.0;
-   cfg->code_surprising_precision_floor = g_precision_floor;
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These return exactly what the stub above puts in the struct, so
- * the assertions below are unchanged. */
+/* Accessor stubs for route-local policy controls. */
 int config_present(void)
 {
-   return 1; /* the config_load stub above always succeeds */
+   return 1;
 }
 
-/* Ingress compression gate: memset-0 in the struct the stub above fills. */
 int config_ingress_compress_enabled(void)
 {
    return 0;
 }
 
-/* §4 surprising-links precision floor and judge command. The struct above leaves
- * both at zero/empty: floor <= 0 disables self-suppress, and an empty judge
- * command is what the hermetic judge stub below expects. */
+/* §4 surprising-links precision floor and judge command. */
 double config_code_surprising_precision_floor(void)
 {
    return g_precision_floor;
@@ -1387,14 +1542,13 @@ size_t config_kb_curator_judge_command_copy(char *out, size_t n)
    return n;
 }
 
-/* §2c reembed-on-dim-change gate: mirrors the struct the stub above fills, so a
- * case that flips g_test_reembed_enabled moves both seams together. */
+/* §2c reembed-on-dim-change gate. */
 int config_kb_reembed_on_dim_change(void)
 {
    return g_test_reembed_enabled;
 }
 
-/* §5 hybrid RRF weights + rank constant, mirroring the struct above. */
+/* §5 hybrid RRF weights + rank constant. */
 double config_code_hybrid_weight_code(void)
 {
    return 1.0;
@@ -1422,7 +1576,7 @@ double config_code_hybrid_rrf_k(void)
 
 int config_code_trust_actuation_enabled(void)
 {
-   return 0; /* §3 actuation gate: memset-0 in the struct above */
+   return 0;
 }
 
 int config_kb_curator_extract_docs_enabled(void)
@@ -1440,30 +1594,18 @@ const char *config_workspaces(int index)
    return index == 0 ? "/workspace" : "";
 }
 
-const char *config_embedder_command(const config_t *cfg, const char *requested)
+const char *config_embedder_command_current(const char *requested)
 {
    if (requested && requested[0])
       return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
    const char *url = getenv("EMBEDDER_URL");
    if (url && url[0])
       return url;
    url = getenv("SYNTHESIS_ENDPOINT");
-   if (url && url[0])
-      return url;
-   return ""; /* nothing selected: no embedder, no fabricated name */
+   return url && url[0] ? url : "";
 }
 
-/* The config_t-free form callers use now. Same resolution order, minus the
- * struct the caller no longer holds: request > env > nothing. */
-const char *config_embedder_command_current(const char *requested)
-{
-   return config_embedder_command(NULL, requested);
-}
-
-/* kb_intel_payload reads the demotion knobs through accessors now. Mirror the
- * values the config_load stub above sets, so both seams agree. */
+/* kb_intel_payload reads the demotion knobs through accessors. */
 int config_demotion_enabled(void)
 {
    return 1;
@@ -1496,9 +1638,8 @@ char *kb_ranker_export_view_json(const char *subject_kind, const char *feature_s
    return strdup("{\"status\":\"ok\",\"n_rows\":0,\"rows\":[]}");
 }
 
-int kb_ranker_fit_run(const config_t *cfg, char *id_out, int id_out_len, char **report_out)
+int kb_ranker_fit_run(char *id_out, int id_out_len, char **report_out)
 {
-   (void)cfg;
    if (id_out && id_out_len > 0)
       id_out[0] = '\0';
    if (report_out)
@@ -2057,12 +2198,29 @@ static void test_capabilities(void)
    assert(status == 200);
    assert(strstr(buf, "capabilities") != NULL);
    assert(strstr(buf, "memory") != NULL);
+   cJSON *root = cJSON_Parse(buf);
+   cJSON *surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   assert(cJSON_IsObject(surfaces));
+   assert(cJSON_IsArray(cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only")));
+   cJSON_Delete(root);
+
+   aimee_command_registry_reset();
+   assert(aimee_agent_surface_register("kb_future", AIMEE_SURFACE_MCP, "kb-future") == 0);
+   status = kb_http_route("GET", "/v1/capabilities", NULL, NULL, buf, sizeof(buf));
+   assert(status == 200);
+   root = cJSON_Parse(buf);
+   surfaces = cJSON_GetObjectItemCaseSensitive(root, "agent_surfaces");
+   cJSON *mcp_only = cJSON_GetObjectItemCaseSensitive(surfaces, "mcp_only");
+   assert(cJSON_GetArraySize(mcp_only) == 1);
+   assert(strcmp(cJSON_GetArrayItem(mcp_only, 0)->valuestring, "kb_future") == 0);
+   cJSON_Delete(root);
+   aimee_command_registry_reset();
 }
 
 /* ── db2_enrollment_* stubs (satisfy refs from kb_http.o + kb_http_accounts.o +
  *    kb_tls_serve.o) with a single canned row so the accounts routes can be
  *    exercised without a live DB2. ─────────────────────────────────────────── */
-#include "db2/enrollments.h"
+#include "modules/db2/c/enrollments.h"
 #include "kb_identity.h"
 static int g_stub_revoked_calls = 0;
 static char g_stub_enrollment_expires_at[32];
@@ -2169,14 +2327,14 @@ int db2_console_oidc_put(const db2_console_oidc_t *in)
  * under config_default_dir(); stub it to a temp dir for the test. */
 const char *config_default_dir(void)
 {
-   return "/tmp";
+   return platform_tmpdir();
 }
 
 /* ── db2 governance stubs (decision_log + audit read) for kb_http_governance.o ─
  * Note: we do NOT include db2/artifacts.h (it re-declares db2_artifact_* which
  * this file already stubs with different signatures). Mirror just the audit row
  * struct — layout must match db2/artifacts.h. */
-#include "db2/decision_log.h"
+#include "modules/db2/c/decision_log.h"
 typedef struct
 {
    char id[64];
@@ -2329,6 +2487,15 @@ static void test_team_routes(void)
    s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer scope:project:x:secret",
                         "scope:project:x:secret", "{\"name\":\"t\"}", 12, buf, sizeof(buf));
    assert(s == 401);
+   kb_principal_t asserted;
+   assert(kb_principal_from_host_account("alice", &asserted) == 0);
+   s = kb_http_route_ex_with_actor(
+       "POST", "/v1/team", NULL, "Bearer scope:service:aimee-server:secret",
+       "scope:service:aimee-server:secret", "{\"name\":\"t\"}", 12, &asserted, buf, sizeof(buf));
+   assert(s == 503); /* asserted actor reached the SQLite tenant guard */
+   s = kb_http_route_ex_with_actor("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret",
+                                   "{\"name\":\"t\"}", 12, &asserted, buf, sizeof(buf));
+   assert(s == 403 && strstr(buf, "caller context conflicts"));
    /* Missing name -> 400 before any DB work (owner bearer). */
    s = kb_http_route_ex("POST", "/v1/team", NULL, "Bearer owner-secret", "owner-secret", "{}", 2,
                         buf, sizeof(buf));
@@ -2484,6 +2651,25 @@ static void test_console_overview(void)
    assert(s2 == 405);
 }
 
+static void test_console_admin_requires_authorization_module(void)
+{
+   const char *token = "scope:console-admin:test:secret";
+   const char *auth = "Bearer scope:console-admin:test:secret";
+   char buf[256];
+
+   kb_route_acl_register_authorization_provider(NULL);
+   int status = kb_http_route_ex("GET", "/v1/console/overview", NULL, auth, token, NULL, 0, buf,
+                                 sizeof(buf));
+   assert(status == 503);
+   assert(strstr(buf, "control-web authorization unavailable") != NULL);
+
+   kb_route_acl_register_authorization_provider(control_web_module_provider);
+   status = kb_http_route_ex("POST", "/v1/console/overview", NULL, auth, token, NULL, 0, buf,
+                             sizeof(buf));
+   assert(status == 403);
+   assert(strstr(buf, "not permitted") != NULL);
+}
+
 static void test_console_pipeline(void)
 {
    /* GET returns the registry + presets + current config in one envelope. */
@@ -2533,6 +2719,37 @@ static void test_console_pipeline(void)
    printf("  PASS: console pipeline (registry + key allowlist)\n");
 }
 
+static void test_console_memories(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[2048];
+   int status =
+       kb_http_route_ex("GET", "/v1/console/memories", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"schema\":\"console.memories.v1\"") != NULL);
+   assert(strstr(buf, "\"memories\"") != NULL);
+
+   const char *reject = "{\"memory_id\":42,\"action\":\"reject\",\"reason\":\"wrong extraction\"}";
+   test_kb_fact_actor_set(1);
+   status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, reject,
+                             (int)strlen(reject), buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"action\":\"reject\"") != NULL);
+
+   const char *restore = "{\"memory_id\":42,\"action\":\"restore\"}";
+   status = kb_http_route_ex("POST", "/v1/console/memories/review", NULL, NULL, NULL, restore,
+                             (int)strlen(restore), buf, sizeof(buf));
+   assert(status == 200);
+   assert(strstr(buf, "\"action\":\"restore\"") != NULL);
+
+   assert(kb_http_route_ex("POST", "/v1/console/memories", NULL, NULL, NULL, "{}", 2, buf,
+                           sizeof(buf)) == 405);
+   assert(kb_http_route_ex("GET", "/v1/console/memories/review", NULL, NULL, NULL, NULL, 0, buf,
+                           sizeof(buf)) == 405);
+   test_kb_fact_actor_set(0);
+   printf("  PASS: console memory review (list + reject + restore)\n");
+}
+
 static void test_console_settings(void)
 {
    g_stub_secret_configured = 0;
@@ -2561,9 +2778,11 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("GET", "/v1/console/settings/config", NULL, NULL, NULL, NULL, 0, b2,
                            sizeof(b2)) == 405);
 
-   /* typed_facts_enabled is KB-owned but belongs to the Typed Facts page, not
-    * this surface — so the settings route refuses it like any other key it does
-    * not own. */
+   /* typed_facts_enabled is refused here, and now for a second reason: the
+    * master gate is retired entirely, so there is no such option to set. The
+    * key stays in this surface's refusal list deliberately -- a stale caller
+    * that still sends it must be told no rather than have it silently accepted
+    * and dropped. */
    const char *tf = "{\"key\":\"typed_facts_enabled\",\"value\":true}";
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, tf,
                            (int)strlen(tf), b2, sizeof(b2)) == 403);
@@ -2598,6 +2817,26 @@ static void test_console_settings(void)
    assert(kb_http_route_ex("POST", "/v1/console/settings/config", NULL, NULL, NULL, "{}", 2, b2,
                            sizeof(b2)) == 400);
    printf("  PASS: console settings (kb-owned key allowlist)\n");
+}
+
+static void test_console_evidence_operator_boundary(void)
+{
+   extern void test_kb_fact_actor_set(int enabled);
+   char buf[1024];
+   const char *body = "{\"action\":\"review.list\",\"limit\":25}";
+   test_kb_fact_actor_set(0);
+   int s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body,
+                            (int)strlen(body), buf, sizeof(buf));
+   assert(s == 403);
+   assert(strstr(buf, "authenticated operator required") != NULL);
+   test_kb_fact_actor_set(1);
+   s = kb_http_route_ex("POST", "/v1/console/evidence", NULL, NULL, NULL, body, (int)strlen(body),
+                        buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"ok\":true") != NULL);
+   s = kb_http_route_ex("GET", "/v1/console/evidence", NULL, NULL, NULL, NULL, 0, buf, sizeof(buf));
+   assert(s == 405);
+   test_kb_fact_actor_set(0);
 }
 
 static void test_intelligence_calibration_readiness(void)
@@ -2680,7 +2919,8 @@ static void test_enroll_route(void)
    /* Redirect the kb config dir (where the CA + token store live) to a temp dir
     * so the mint does not touch the real config. Must be set before the first
     * kb_default_config_dir() call — /v1/enroll is its only route-side caller. */
-   char tmp[] = "/tmp/aimee_enroll_route_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee_enroll_route_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    setenv("AIMEE_HOME", tmp, 1);
 
@@ -2753,7 +2993,8 @@ static char *make_route_csr(void)
  * without the owner bearer. Mints via /v1/enroll, then redeems. */
 static void test_enroll_redeem_route(void)
 {
-   char tmp[] = "/tmp/aimee_redeem_route_XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee_redeem_route_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    setenv("AIMEE_HOME", tmp, 1);
    const char *cfg = kb_default_config_dir(); /* cached (this tmp, or an earlier test's) */
@@ -2841,8 +3082,8 @@ static void *mtls_serve_thread(void *a)
 }
 
 /* client connects with client_ctx, sends `req`, returns the response. */
-static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
-                         size_t cap)
+static void mtls_request_raw(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
+                             size_t cap)
 {
    int sv[2];
    assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
@@ -2871,6 +3112,32 @@ static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *r
    pthread_join(th, NULL);
    close(sv[0]);
    close(sv[1]);
+}
+
+#define TEST_KB_AUTH_HEADER                                                                        \
+   "Authorization: Bearer token-one\r\n"                                                           \
+   "X-Aimee-Service-Authorization: Basic "                                                         \
+   "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n"
+
+/* Ordinary test requests carry the enrolled service bearer. Tests of missing
+ * and invalid bearing call mtls_request_raw directly. */
+static void mtls_request(SSL_CTX *server_ctx, SSL_CTX *client_ctx, const char *req, char *resp,
+                         size_t cap)
+{
+   const char *line_end = strstr(req, "\r\n");
+   if (!line_end)
+   {
+      mtls_request_raw(server_ctx, client_ctx, req, resp, cap);
+      return;
+   }
+   size_t prefix = (size_t)(line_end + 2 - req);
+   size_t total = strlen(req) + strlen(TEST_KB_AUTH_HEADER) + 1;
+   char *authorized = malloc(total);
+   assert(authorized);
+   memcpy(authorized, req, prefix);
+   snprintf(authorized + prefix, total - prefix, "%s%s", TEST_KB_AUTH_HEADER, line_end + 2);
+   mtls_request_raw(server_ctx, client_ctx, authorized, resp, cap);
+   free(authorized);
 }
 
 /* Read one Content-Length-framed response without waiting for connection close. */
@@ -2917,6 +3184,31 @@ typedef struct
    int ok;
 } mtls_pool_request_arg_t;
 
+static const kb_pki_ca_t *g_rotation_test_ca;
+
+static int test_kb_client_renew(const char *host, int port, const char *ca_cert_pem,
+                                const char *cur_cert_pem, const char *cur_key_pem,
+                                const char *authorization, char *cert_out, size_t cert_cap,
+                                char *key_out, size_t key_cap)
+{
+   (void)host;
+   (void)port;
+   (void)ca_cert_pem;
+   (void)cur_cert_pem;
+   (void)cur_key_pem;
+   const char *base = "Authorization: Bearer token-two\r\n"
+                      "X-Aimee-Service-Authorization: Basic "
+                      "YWltZWUtc2VydmVyOnNlcnZlci1wYXNzd29yZA==\r\n";
+   assert(authorization && strncmp(authorization, base, strlen(base)) == 0);
+   if (strcmp(authorization, base) != 0)
+      assert(strstr(authorization, "X-Aimee-Server-ID: managed-") &&
+             strstr(authorization, "X-Aimee-Team-ID: 42\r\n"));
+   return g_rotation_test_ca
+              ? kb_pki_issue_client_cert(g_rotation_test_ca, KB_SERVER_CLIENT_SCOPE,
+                                         60L * 60 * 24 * 90, cert_out, cert_cap, key_out, key_cap)
+              : -1;
+}
+
 static void *mtls_pool_request_thread(void *opaque)
 {
    mtls_pool_request_arg_t *arg = opaque;
@@ -2935,6 +3227,8 @@ static void *mtls_pool_request_thread(void *opaque)
 
 static void test_mtls_serve(void)
 {
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    extern void test_kb_enrollment_authority_set(int status);
    kb_pki_ca_t ca;
    assert(kb_pki_ca_generate(&ca) == 0);
@@ -2942,7 +3236,7 @@ static void test_mtls_serve(void)
    assert(kb_pki_issue_server_cert(&ca, "kb.local", 3600, scert, sizeof(scert), skey,
                                    sizeof(skey)) == 0);
    char ccert[KB_PKI_CERT_PEM_MAX], ckey[KB_PKI_KEY_PEM_MAX];
-   assert(kb_pki_issue_client_cert(&ca, "project:alpha", 3600, ccert, sizeof(ccert), ckey,
+   assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, ccert, sizeof(ccert), ckey,
                                    sizeof(ckey)) == 0);
    SSL_CTX *sctx = kb_tls_server_ctx(ca.cert_pem, scert, skey);
    SSL_CTX *cctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
@@ -2957,9 +3251,122 @@ static void test_mtls_serve(void)
    assert(strstr(resp, "\"status\":\"ok\""));
    assert(strstr(resp, "Connection: close"));
 
-   /* Scoped mTLS credentials must not acquire an owner actor merely because
-    * their certificate is valid. The grant handler therefore refuses this
-    * project certificate before it reaches the Postgres-only tenant gate. */
+   /* A valid client certificate is not a bearer substitute. Missing and wrong
+    * service bearers both fail before the health route runs. */
+   mtls_request_raw(sctx, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "service bearer required"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+
+   /* A missing KB-side bearer authority is a retryable configuration failure,
+    * never an open-auth downgrade. */
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "503 Service Unavailable") &&
+          strstr(resp, "service bearer authority is not configured"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer wrong-token\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "service bearer required"));
+   assert(!strstr(resp, "\"status\":\"ok\""));
+
+   /* mTLS plus the rotating bearer is still only two layers. A missing or bad
+    * OIDC/PAM service identity fails before routing. */
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "OIDC or PAM service identity"));
+
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Basic "
+                    "b3RoZXItc2VydmljZTpzZXJ2ZXItcGFzc3dvcmQ=\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "service identity does not match client certificate"));
+
+   /* The self-contained managed stack has no external IdP or mutable host PAM
+    * database. Its independently rotating application token is still scoped to
+    * the enrolled certificate identity and is checked as the third layer. */
+   assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                               "scope:service:aimee-server:application-secret") == 0);
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Bearer application-secret\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "200 OK") && strstr(resp, "\"status\":\"ok\""));
+   assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                               "scope:service:other-service:application-secret") == 0);
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Bearer application-secret\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "service identity does not match client certificate"));
+   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: uid:1000\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+   /* aimee-server may assert only a distinct PAM/host account. It cannot turn
+    * an asserted string into OIDC proof, nor name its own service account as
+    * the caller. OIDC must arrive as the original signed caller token. */
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: oidc:idp:user\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Caller-Subject: aimee-server\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request") && strstr(resp, "invalid caller identity"));
+
+   /* Content reads have no service-only/background bypass. Until the separate
+    * background-reader policy is decided, a fully authenticated service with
+    * an exact server/team binding but no caller still fails closed. */
+   mtls_request_raw(sctx, cctx,
+                    "POST /v1/search HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Server-ID: srv-a\r\nX-Aimee-Team-ID: 1\r\n"
+                    "Content-Length: 2\r\nConnection: close\r\n\r\n{}",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "403 Forbidden") &&
+          strstr(resp, "an authenticated content caller is required"));
+   assert(!strstr(resp, "results"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Team-ID: not-a-team\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "X-Aimee-Team-ID: 1\r\nX-Aimee-Team-ID: 2\r\nConnection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "400 Bad Request"));
+   mtls_request_raw(sctx, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n"
+                    "Authorization: Bearer token-one\r\n"
+                    "X-Aimee-Service-Authorization: Basic d3Jvbmc6Y3JlZGVudGlhbA==\r\n"
+                    "Connection: close\r\n\r\n",
+                    resp, sizeof(resp));
+   assert(strstr(resp, "401 Unauthorized") && strstr(resp, "OIDC or PAM service identity"));
+
+   /* Matching scoped transport and bearer identities remain data-plane only;
+    * neither can acquire an owner actor from the other. */
    {
       const char *grant = "{\"server_id\":\"srv-a\",\"team_id\":1,\"subject\":\"owner\","
                           "\"tier\":\"full\",\"granted_by\":\"owner\"}";
@@ -2973,11 +3380,9 @@ static void test_mtls_serve(void)
       assert(strstr(resp, "authentication required"));
    }
 
-   /* The wizard-managed server certificate is intentionally unscoped. It is
-    * the authenticated owner hop behind the server's UDS-only grant command,
-    * so it must reach the tenant gate as owner rather than arrive actor-less.
-    * This shim-backed test then returns 503 at the expected Postgres gate; 401
-    * would prove the mTLS-to-owner bridge regressed again. */
+   /* A bare-CN client certificate cannot widen the independently verified
+    * service bearer into an owner. Certificate identity authenticates the
+    * transport; route authority comes from the bearer verifier. */
    {
       char owner_cert[KB_PKI_CERT_PEM_MAX], owner_key[KB_PKI_KEY_PEM_MAX];
       assert(kb_pki_issue_client_cert(&ca, "p5-server-client", 3600, owner_cert, sizeof(owner_cert),
@@ -2992,8 +3397,8 @@ static void test_mtls_serve(void)
                "Connection: close\r\n\r\n%s",
                strlen(grant), grant);
       mtls_request(sctx, owner_ctx, req, resp, sizeof(resp));
-      assert(strstr(resp, "503 Service Unavailable"));
-      assert(!strstr(resp, "authentication required"));
+      assert(strstr(resp, "403 Forbidden"));
+      assert(strstr(resp, "service identity does not match client certificate"));
       SSL_CTX_free(owner_ctx);
    }
 
@@ -3009,13 +3414,26 @@ static void test_mtls_serve(void)
       assert(c);
       SSL_set_fd(c, sv[1]);
       assert(SSL_connect(c) == 1);
-      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      const char *with_caller = "GET /v1/team HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                                "X-Aimee-Caller-Subject: alice\r\n\r\n";
+      assert(SSL_write(c, with_caller, (int)strlen(with_caller)) == (int)strlen(with_caller));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "503 Service Unavailable") && strstr(resp, "Connection: keep-alive"));
+
+      const char *without_caller =
+          "GET /v1/team HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
+      assert(SSL_write(c, without_caller, (int)strlen(without_caller)) ==
+             (int)strlen(without_caller));
+      assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
+      assert(strstr(resp, "401 Unauthorized") && strstr(resp, "Connection: keep-alive"));
+
+      const char *first = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
       assert(SSL_write(c, first, (int)strlen(first)) == (int)strlen(first));
       assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
       assert(strstr(resp, "200 OK") && strstr(resp, "Connection: keep-alive"));
 
       test_kb_enrollment_authority_set(0);
-      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n\r\n";
+      const char *second = "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER "\r\n";
       assert(SSL_write(c, second, (int)strlen(second)) == (int)strlen(second));
       assert(mtls_read_response(c, resp, sizeof(resp)) > 0);
       assert(strstr(resp, "403 Forbidden") && strstr(resp, "Connection: close"));
@@ -3089,15 +3507,15 @@ static void test_mtls_serve(void)
       assert(strstr(resp, "403 Forbidden"));
    }
 
-   /* a CROSS-scope request (project=otherproj) is denied 403 — the scope came
-    * from the client certificate (project:alpha), not the request. */
+   /* The certificate CN is transport identity, not route authorization. It no
+    * longer manufactures a project-scoped bearer for the router. Content
+    * project selection is resolved from caller context in the next slice. */
    mtls_request(sctx, cctx,
                 "GET /v1/health?status=1&project=otherproj HTTP/1.1\r\nConnection: close\r\n\r\n",
                 resp, sizeof(resp));
-   assert(strstr(resp, "403"));
-   assert(strstr(resp, "forbidden"));
+   assert(strstr(resp, "200 OK"));
 
-   /* same-scope (project=alpha) is allowed. */
+   /* A matching name is likewise irrelevant to this non-content health route. */
    mtls_request(sctx, cctx,
                 "GET /v1/health?status=1&project=alpha HTTP/1.1\r\nConnection: close\r\n\r\n", resp,
                 sizeof(resp));
@@ -3169,6 +3587,7 @@ static void test_mtls_serve(void)
 
    SSL_CTX_free(sctx);
    SSL_CTX_free(cctx);
+   kb_tls_set_pam_check_for_test(NULL);
 }
 
 /* connect to 127.0.0.1:port, do an mTLS request, return the response. */
@@ -3209,6 +3628,7 @@ static void mtls_tcp_request(int port, SSL_CTX *client_ctx, const char *req, cha
  * and serves /v1 with the scope taken from the client cert. */
 static void test_mtls_listener(void)
 {
+   kb_tls_set_pam_check_for_test(test_pam_check_credentials);
    extern void test_kb_enrollment_authority_set(int status);
    /* Production passes kb_default_config_dir() as the listener data_dir, and the
     * bootstrap endpoints (/v1/enroll/ca, /renew) read the CA from there — so use
@@ -3224,6 +3644,9 @@ static void test_mtls_listener(void)
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
 
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   assert(kb_mtls_start(0, cfg, "localhost") == -1);
+   assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "0", 1);
    assert(kb_mtls_start(0, cfg, "localhost") == -1);
    setenv("AIMEE_KB_MTLS_MAX_CONNECTIONS", "8", 1);
@@ -3255,13 +3678,15 @@ static void test_mtls_listener(void)
 
    /* a client cert issued by the (now pinned) CA. */
    char ccert[KB_PKI_CERT_PEM_MAX], ckey[KB_PKI_KEY_PEM_MAX];
-   assert(kb_pki_issue_client_cert(&ca, "project:beta", 3600, ccert, sizeof(ccert), ckey,
+   assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, ccert, sizeof(ccert), ckey,
                                    sizeof(ckey)) == 0);
    SSL_CTX *cctx = kb_tls_client_ctx(ca.cert_pem, ccert, ckey);
    assert(cctx);
 
    char resp[8192];
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "200 OK"));
    assert(strstr(resp, "\"status\":\"ok\""));
@@ -3269,8 +3694,9 @@ static void test_mtls_listener(void)
    /* the high-level client dialer reaches the same listener with its cert. */
    int st = -1;
    char rbody[4096];
-   assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET", "/v1/health",
-                                NULL, rbody, sizeof(rbody), &st) == 0);
+   assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "GET",
+                                     "/v1/health", NULL, TEST_KB_AUTH_HEADER, rbody, sizeof(rbody),
+                                     &st) == 0);
    if (st != 200)
       fprintf(stderr, "high-level mTLS health status=%d body=%s\n", st, rbody);
    assert(st == 200);
@@ -3293,8 +3719,9 @@ static void test_mtls_listener(void)
       memcpy(body + prefix + padding_len, "\"}", 3);
       assert(strlen(body) > 64 * 1024 && strlen(body) < 1024 * 1024);
       g_test_registry_heartbeat_allow = 1;
-      assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "POST",
-                                   "/v1/server/heartbeat", body, rbody, sizeof(rbody), &st) == 0);
+      assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "POST",
+                                        "/v1/server/heartbeat", body, TEST_KB_AUTH_HEADER, rbody,
+                                        sizeof(rbody), &st) == 0);
       assert(st == 200 && strstr(rbody, "\"ok\":true"));
       g_test_registry_heartbeat_allow = 0;
       free(body);
@@ -3307,11 +3734,11 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
    assert(persistent);
    int reusable = 0;
-   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 0, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 0,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(st == 200 && reusable == 1 && strstr(rbody, "\"status\":\"ok\""));
-   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, NULL, 1, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(persistent, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(st == 200 && reusable == 0 && strstr(rbody, "\"status\":\"ok\""));
    kb_tls_client_conn_close(persistent);
 
@@ -3319,8 +3746,8 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open("localhost", port, ca.cert_pem, ccert, ckey);
    assert(bounded);
    char tiny_response[4];
-   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, NULL, 1, tiny_response,
-                                     sizeof(tiny_response), &st, &reusable) == -1);
+   assert(kb_tls_client_conn_request(bounded, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     tiny_response, sizeof(tiny_response), &st, &reusable) == -1);
    assert(reusable == 0);
    kb_tls_client_conn_close(bounded);
 
@@ -3334,8 +3761,8 @@ static void test_mtls_listener(void)
    assert(kb_tls_client_conn_set_timeout(NULL, 600000) == -1);
    assert(kb_tls_client_conn_set_timeout(session_one, 0) == -1);
    assert(kb_tls_client_conn_set_timeout(session_one, 600000) == 0);
-   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, NULL, 0, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(session_one, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 0,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    assert(reusable == 1);
    SSL_SESSION *saved_session = kb_tls_client_conn_get1_session(session_one);
    assert(saved_session);
@@ -3344,8 +3771,8 @@ static void test_mtls_listener(void)
        kb_tls_client_conn_open_session("localhost", port, shared_client_ctx, saved_session);
    assert(session_two);
    assert(kb_tls_client_conn_session_reused(session_two) == 1);
-   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, NULL, 1, rbody,
-                                     sizeof(rbody), &st, &reusable) == 0);
+   assert(kb_tls_client_conn_request(session_two, "GET", "/v1/health", NULL, TEST_KB_AUTH_HEADER, 1,
+                                     rbody, sizeof(rbody), &st, &reusable) == 0);
    kb_tls_client_conn_close(session_two);
    SSL_SESSION_free(saved_session);
    SSL_CTX_free(shared_client_ctx);
@@ -3353,22 +3780,26 @@ static void test_mtls_listener(void)
    /* Primary authority is consulted before dispatch. Unknown/revoked peers are
     * forbidden and an authority outage is retryable but never fail-open. */
    test_kb_enrollment_authority_set(0);
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "403 Forbidden"));
    assert(!strstr(resp, "\"status\":\"ok\""));
    test_kb_enrollment_authority_set(-1);
-   mtls_tcp_request(port, cctx, "GET /v1/health HTTP/1.1\r\nHost: kb\r\nConnection: close\r\n\r\n",
+   mtls_tcp_request(port, cctx,
+                    "GET /v1/health HTTP/1.1\r\nHost: kb\r\n" TEST_KB_AUTH_HEADER
+                    "Connection: close\r\n\r\n",
                     resp, sizeof(resp));
    assert(strstr(resp, "503 Service Unavailable"));
    assert(!strstr(resp, "\"status\":\"ok\""));
    test_kb_enrollment_authority_set(1);
-   /* the dialer's request carries the client cert's scope (project:beta): a
-    * cross-scope request is denied. */
-   assert(kb_tls_client_request("localhost", port, ca.cert_pem, ccert, ckey, "GET",
-                                "/v1/health?status=1&project=otherproj", NULL, rbody, sizeof(rbody),
-                                &st) == 0);
-   assert(st == 403);
+   /* Certificate CN does not manufacture route scope; the service bearer is
+    * the independently verified route credential. */
+   assert(kb_tls_client_request_auth("localhost", port, ca.cert_pem, ccert, ckey, "GET",
+                                     "/v1/health?status=1&project=otherproj", NULL,
+                                     TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
+   assert(st == 200);
 
    /* FULL CLIENT ENROLLMENT: mint a token into the listener's store, build the
     * connection string, and run kb_tls_enroll — TOFU CA pin + CSR + redeem in
@@ -3377,7 +3808,7 @@ static void test_mtls_listener(void)
       char store[400];
       snprintf(store, sizeof(store), "%s/kb-enroll-tokens", cfg);
       char token[KB_ENROLL_TOKEN_MAX];
-      assert(kb_enroll_store_issue(store, "project:gamma", token, sizeof(token)) == 0);
+      assert(kb_enroll_store_issue(store, KB_SERVER_CLIENT_SCOPE, token, sizeof(token)) == 0);
       char conn[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token, conn, sizeof(conn)) > 0);
 
@@ -3386,14 +3817,14 @@ static void test_mtls_listener(void)
       assert(strcmp(eca, ca.cert_pem) == 0);                      /* pinned the right CA */
       assert(kb_pki_verify_client_cert(ca.cert_pem, ecert) == 1); /* issued cert chains */
 
-      /* the freshly-enrolled identity dials the kb with its scope (project:gamma). */
-      assert(kb_tls_client_request("localhost", port, eca, ecert, ekey, "GET", "/v1/health", NULL,
-                                   rbody, sizeof(rbody), &st) == 0);
+      /* The freshly enrolled transport identity still needs the service bearer. */
+      assert(kb_tls_client_request_auth("localhost", port, eca, ecert, ekey, "GET", "/v1/health",
+                                        NULL, TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
       assert(st == 200);
-      assert(kb_tls_client_request("localhost", port, eca, ecert, ekey, "GET",
-                                   "/v1/health?status=1&project=elsewhere", NULL, rbody,
-                                   sizeof(rbody), &st) == 0);
-      assert(st == 403); /* scope from the enrolled cert is enforced */
+      assert(kb_tls_client_request_auth("localhost", port, eca, ecert, ekey, "GET",
+                                        "/v1/health?status=1&project=elsewhere", NULL,
+                                        TEST_KB_AUTH_HEADER, rbody, sizeof(rbody), &st) == 0);
+      assert(st == 200);
       remove(store);
    }
 
@@ -3403,16 +3834,33 @@ static void test_mtls_listener(void)
       char store2[400];
       snprintf(store2, sizeof(store2), "%s/kb-enroll-tokens", cfg);
       char token2[KB_ENROLL_TOKEN_MAX];
-      assert(kb_enroll_store_issue(store2, "project:delta", token2, sizeof(token2)) == 0);
+      assert(kb_enroll_store_issue(store2, KB_SERVER_CLIENT_SCOPE, token2, sizeof(token2)) == 0);
       char conn2[600];
       assert(kb_enroll_conn_string_build("localhost", port, fp, token2, conn2, sizeof(conn2)) > 0);
 
       char identity_file[160];
-      snprintf(identity_file, sizeof(identity_file), "/tmp/aimee-kb-client-identity-%ld.json",
-               (long)getpid());
+      char server_identity_file[160];
+      snprintf(identity_file, sizeof(identity_file), "%s/aimee-kb-client-identity-%ld.json",
+               platform_tmpdir(), (long)getpid());
+      snprintf(server_identity_file, sizeof(server_identity_file),
+               "%s/aimee-thinclient-server-identity-%ld.pem", platform_tmpdir(), (long)getpid());
       unlink(identity_file);
+      unlink(server_identity_file);
       kb_client_mtls_set_identity_path_for_test(identity_file);
+      kb_client_mtls_set_server_identity_path_for_test(server_identity_file);
+      char thinclient_cert[KB_PKI_CERT_PEM_MAX], thinclient_key[KB_PKI_KEY_PEM_MAX];
+      assert(kb_pki_issue_server_cert(&ca, "server.local", 3600, thinclient_cert,
+                                      sizeof(thinclient_cert), thinclient_key,
+                                      sizeof(thinclient_key)) == 0);
+      FILE *server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
       assert(runtime_secret_store("AIMEE_KB_CONN", conn2) == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-one") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-one") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
       int st2 = -1;
@@ -3420,6 +3868,21 @@ static void test_mtls_listener(void)
       assert(st2 == 200);
       assert(r && strstr(r, "\"status\":\"ok\""));
       free(r);
+
+      /* Managed installs use the independently scoped opaque application
+       * identity and have no host PAM account. Exercise the real client header
+       * builder and listener together, then restore PAM for its rotation cases. */
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_USERNAME");
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_PASSWORD");
+      assert(runtime_secret_store("AIMEE_KB_SERVICE_IDENTITY_TOKEN",
+                                  "scope:service:aimee-server:managed-application") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200);
+      assert(r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_USERNAME", "aimee-server") == 0);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       struct stat identity_stat;
       assert(stat(identity_file, &identity_stat) == 0 && S_ISREG(identity_stat.st_mode));
       assert((identity_stat.st_mode & 0777) == 0600 && identity_stat.st_uid == geteuid());
@@ -3432,6 +3895,58 @@ static void test_mtls_listener(void)
       identity_json[identity_n] = '\0';
       assert(strstr(identity_json, "\"version\":1") && strstr(identity_json, "PRIVATE KEY"));
       assert(strstr(identity_json, token2) == NULL); /* never persist the one-time credential */
+
+      /* The appliance HTTPS identity is P-256 while managed KB enrollment
+       * deliberately issues an RSA client identity. OpenSSL cannot compare
+       * cross-algorithm keys with EVP_PKEY_eq(), but the algorithms themselves
+       * prove non-reuse. This is the exact managed-appliance pairing. */
+      char ec_server_cert[KB_PKI_CERT_PEM_MAX];
+      assert(self_signed_ec_cert(ec_server_cert, sizeof(ec_server_cert)) == 0);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(ec_server_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+      kb_client_mtls_reset_for_test();
+      int mixed_key_status = -1;
+      char *mixed_key = kb_client_mtls_request("GET", "/v1/health", NULL, &mixed_key_status);
+      assert(mixed_key_status == 200 && mixed_key && strstr(mixed_key, "\"status\":\"ok\""));
+      free(mixed_key);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+
+      /* Absence is not evidence of separation. Once server->KB is configured,
+       * the thinclient-facing counterpart must remain installed and readable. */
+      assert(unlink(server_identity_file) == 0);
+      kb_client_mtls_reset_for_test();
+      int missing_pair_status = -1;
+      char *missing_pair = kb_client_mtls_request("GET", "/v1/health", NULL, &missing_pair_status);
+      assert(missing_pair == NULL && missing_pair_status == -1);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+
+      /* The thinclient-facing server cert and the KB-facing client cert are
+       * separate bundles. Reusing the enrolled client key across them is
+       * rejected even though each path validates its own certificate. */
+      cJSON *saved_identity = cJSON_Parse(identity_json);
+      cJSON *saved_client_cert =
+          saved_identity ? cJSON_GetObjectItemCaseSensitive(saved_identity, "cert") : NULL;
+      assert(cJSON_IsString(saved_client_cert));
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream &&
+             fputs(saved_client_cert->valuestring, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
+      cJSON_Delete(saved_identity);
+      kb_client_mtls_reset_for_test();
+      int collision_status = -1;
+      char *collision = kb_client_mtls_request("GET", "/v1/health", NULL, &collision_status);
+      assert(collision == NULL && collision_status == -1);
+      assert(kb_pki_issue_server_cert(&ca, "server.local", 3600, thinclient_cert,
+                                      sizeof(thinclient_cert), thinclient_key,
+                                      sizeof(thinclient_key)) == 0);
+      server_identity_stream = fopen(server_identity_file, "w");
+      assert(server_identity_stream && fputs(thinclient_cert, server_identity_stream) >= 0 &&
+             fclose(server_identity_stream) == 0);
 
       /* A REFUSAL MUST ARRIVE WITH ITS REASON. The transport used to return NULL for
        * any non-2xx, which made kb_client_v1_post_json_keep_error a no-op on this
@@ -3474,6 +3989,39 @@ static void test_mtls_listener(void)
       assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
       assert(pool_exhausted == 0);
 
+      /* A managed KB restart leaves an apparently reusable socket in the
+       * server pool. The first read must discard that dead connection and
+       * reconnect immediately; waiting for a process restart or idle reaper
+       * turns a recovered KB into a prolonged user-visible outage. */
+      unsigned long handshakes_before_listener_restart = 0, resumed_before_listener_restart = 0;
+      kb_client_mtls_tls_stats(&handshakes_before_listener_restart,
+                               &resumed_before_listener_restart);
+      kb_mtls_stop();
+      assert(kb_mtls_start(port, cfg, "localhost") == 0);
+      assert(kb_mtls_bound_port() == port);
+      r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      unsigned long handshakes_after_listener_restart = 0, resumed_after_listener_restart = 0;
+      kb_client_mtls_tls_stats(&handshakes_after_listener_restart, &resumed_after_listener_restart);
+      assert(handshakes_after_listener_restart == handshakes_before_listener_restart + 1);
+      assert(resumed_after_listener_restart >= resumed_before_listener_restart);
+
+      unsigned long caller_handshakes = 0, caller_resumed = 0;
+      kb_client_mtls_tls_stats(&caller_handshakes, &caller_resumed);
+      snprintf(g_test_outbound_caller, sizeof(g_test_outbound_caller), "%s", "alice");
+      r = kb_client_mtls_request("GET", "/v1/team", NULL, &st2);
+      assert(st2 == 503 && r);
+      free(r);
+      g_test_outbound_caller[0] = '\0';
+      r = kb_client_mtls_request("GET", "/v1/team", NULL, &st2);
+      assert(st2 == 401 && r);
+      free(r);
+      unsigned long caller_handshakes_after = 0, caller_resumed_after = 0;
+      kb_client_mtls_tls_stats(&caller_handshakes_after, &caller_resumed_after);
+      assert(caller_handshakes_after == caller_handshakes &&
+             caller_resumed_after == caller_resumed);
+
       enum
       {
          POOL_TEST_CLIENTS = 16
@@ -3507,6 +4055,137 @@ static void test_mtls_listener(void)
       unsigned long pool_handshakes = 0, pool_resumed = 0;
       kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
       assert(pool_handshakes >= 1 && pool_resumed <= pool_handshakes);
+
+      /* Rotate the independently configured service bearer while the mTLS
+       * connection remains pooled. The next request must read and present the
+       * new token without opening another TLS connection. */
+      unsigned long handshakes_before_bearer_rotation = pool_handshakes;
+      unsigned long resumed_before_bearer_rotation = pool_resumed;
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-two");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-two") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-two") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+
+      /* The PAM credential is also fetched on every request. Rotate it under
+       * the same pooled TLS connection, then restore it for the renewal probe. */
+      snprintf(g_test_pam_password, sizeof(g_test_pam_password), "%s", "rotated-password");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "rotated-password") == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+      snprintf(g_test_pam_password, sizeof(g_test_pam_password), "%s", "server-password");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
+
+      /* Exercise the exact shared 4096-byte secret slot (4095 token bytes plus
+       * NUL), including the verified scope prefix, so client and server cannot
+       * silently disagree at the boundary. */
+      static const char bearer_scope[] = "scope:service:aimee-server:";
+      char long_token[KB_TLS_BEARER_TOKEN_MAX + 1];
+      size_t long_token_len = KB_TLS_BEARER_TOKEN_MAX - strlen(bearer_scope);
+      memset(long_token, 'x', long_token_len);
+      long_token[long_token_len] = '\0';
+      assert(snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token), "%s%s",
+                      bearer_scope, long_token) == KB_TLS_BEARER_TOKEN_MAX);
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", long_token) == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN", g_stub_kb_api_bearer_token) == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_handshakes == handshakes_before_bearer_rotation);
+      assert(pool_resumed == resumed_before_bearer_rotation);
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-two");
+      assert(runtime_secret_store("AIMEE_KB_CLIENT_BEARER_TOKEN", "token-two") == 0);
+      assert(runtime_secret_store("AIMEE_KB_API_BEARER_TOKEN",
+                                  "scope:service:aimee-server:token-two") == 0);
+
+      /* Rotate only the server-to-KB pair while an old pooled connection and
+       * resumable session exist. Renewal must persist a fresh keypair, drain
+       * the old generation, open a full new handshake, and leave the separate
+       * thinclient-facing server identity untouched. */
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *before_rotation = cJSON_Parse(identity_json);
+      cJSON *before_cert =
+          before_rotation ? cJSON_GetObjectItemCaseSensitive(before_rotation, "cert") : NULL;
+      cJSON *before_key =
+          before_rotation ? cJSON_GetObjectItemCaseSensitive(before_rotation, "key") : NULL;
+      assert(cJSON_IsString(before_cert) && cJSON_IsString(before_key));
+      char *old_cert = strdup(before_cert->valuestring);
+      char *old_key = strdup(before_key->valuestring);
+      assert(old_cert && old_key);
+      cJSON_Delete(before_rotation);
+      char thinclient_before[KB_PKI_CERT_PEM_MAX], thinclient_after[KB_PKI_CERT_PEM_MAX];
+      server_identity_stream = fopen(server_identity_file, "r");
+      assert(server_identity_stream);
+      size_t thinclient_n =
+          fread(thinclient_before, 1, sizeof(thinclient_before) - 1, server_identity_stream);
+      assert(!ferror(server_identity_stream) && feof(server_identity_stream));
+      fclose(server_identity_stream);
+      thinclient_before[thinclient_n] = '\0';
+
+      unsigned long handshakes_before_rotation = pool_handshakes;
+      unsigned long resumed_before_rotation = pool_resumed;
+      g_rotation_test_ca = &ca;
+      kb_client_mtls_set_renew_for_test(test_kb_client_renew);
+      kb_client_mtls_set_renew_window_for_test(60L * 60 * 24 * 180);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      kb_client_mtls_set_renew_window_for_test(-1);
+      kb_client_mtls_set_renew_for_test(NULL);
+      g_rotation_test_ca = NULL;
+      assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
+      free(r);
+
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *after_rotation = cJSON_Parse(identity_json);
+      cJSON *after_cert =
+          after_rotation ? cJSON_GetObjectItemCaseSensitive(after_rotation, "cert") : NULL;
+      cJSON *after_key =
+          after_rotation ? cJSON_GetObjectItemCaseSensitive(after_rotation, "key") : NULL;
+      assert(cJSON_IsString(after_cert) && cJSON_IsString(after_key));
+      assert(strcmp(old_cert, after_cert->valuestring) != 0);
+      assert(strcmp(old_key, after_key->valuestring) != 0);
+      cJSON_Delete(after_rotation);
+      OPENSSL_cleanse(old_key, strlen(old_key));
+      free(old_key);
+      free(old_cert);
+
+      server_identity_stream = fopen(server_identity_file, "r");
+      assert(server_identity_stream);
+      thinclient_n =
+          fread(thinclient_after, 1, sizeof(thinclient_after) - 1, server_identity_stream);
+      assert(!ferror(server_identity_stream) && feof(server_identity_stream));
+      fclose(server_identity_stream);
+      thinclient_after[thinclient_n] = '\0';
+      assert(strcmp(thinclient_before, thinclient_after) == 0);
+
+      kb_client_mtls_pool_stats(&pool_total, &pool_idle, &pool_busy, &pool_waiters,
+                                &pool_exhausted);
+      kb_client_mtls_tls_stats(&pool_handshakes, &pool_resumed);
+      assert(pool_total == 1 && pool_idle == 1 && pool_busy == 0 && pool_waiters == 0);
+      assert(pool_handshakes == handshakes_before_rotation + 1);
+      assert(pool_resumed == resumed_before_rotation);
+
       /* Disabling live restores one-shot requests and drains every idle socket. */
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
@@ -3529,6 +4208,7 @@ static void test_mtls_listener(void)
       cJSON_AddNumberToObject(managed, "port", port);
       cJSON_AddStringToObject(managed, "server_id", "managed-server-test");
       cJSON_AddNumberToObject(managed, "team_id", 42);
+      cJSON_AddStringToObject(managed, "management_marker", "preserve-across-renewal");
       cJSON_AddStringToObject(managed, "ca", ca.cert_pem);
       cJSON_AddStringToObject(managed, "cert", ccert);
       cJSON_AddStringToObject(managed, "key", ckey);
@@ -3547,13 +4227,57 @@ static void test_mtls_listener(void)
       assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
                                              &managed_team) == 1);
       assert(strcmp(managed_server, "managed-server-test") == 0 && managed_team == 42);
+      r = kb_client_mtls_request("POST", "/v1/search", "{}", &st2);
+      assert(st2 == 403 && r && strstr(r, "an authenticated content caller is required"));
+      free(r);
+      g_rotation_test_ca = &ca;
+      kb_client_mtls_set_renew_for_test(test_kb_client_renew);
       r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      kb_client_mtls_set_renew_for_test(NULL);
+      g_rotation_test_ca = NULL;
       assert(st2 == 200 && r && strstr(r, "\"status\":\"ok\""));
       free(r);
+      identity_stream = fopen(identity_file, "r");
+      assert(identity_stream);
+      identity_n = fread(identity_json, 1, sizeof(identity_json) - 1, identity_stream);
+      assert(!ferror(identity_stream) && feof(identity_stream));
+      fclose(identity_stream);
+      identity_json[identity_n] = '\0';
+      cJSON *rotated_managed = cJSON_Parse(identity_json);
+      cJSON *rotated_version =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "version") : NULL;
+      cJSON *rotated_state =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "state") : NULL;
+      cJSON *rotated_server =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "server_id") : NULL;
+      cJSON *rotated_team =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "team_id") : NULL;
+      cJSON *rotated_marker =
+          rotated_managed ? cJSON_GetObjectItemCaseSensitive(rotated_managed, "management_marker")
+                          : NULL;
+      assert(cJSON_IsNumber(rotated_version) && rotated_version->valuedouble == 2);
+      assert(cJSON_IsString(rotated_state) && strcmp(rotated_state->valuestring, "ready") == 0);
+      assert(cJSON_IsString(rotated_server) &&
+             strcmp(rotated_server->valuestring, "managed-server-test") == 0);
+      assert(cJSON_IsNumber(rotated_team) && rotated_team->valuedouble == 42);
+      assert(cJSON_IsString(rotated_marker) &&
+             strcmp(rotated_marker->valuestring, "preserve-across-renewal") == 0);
+      cJSON_Delete(rotated_managed);
 
       kb_client_mtls_set_identity_path_for_test(NULL);
+      kb_client_mtls_set_server_identity_path_for_test(NULL);
+      runtime_secret_remove("AIMEE_KB_CLIENT_BEARER_TOKEN");
+      runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+      snprintf(g_stub_kb_api_bearer_token, sizeof(g_stub_kb_api_bearer_token),
+               "scope:service:aimee-server:token-one");
+      int missing_bearer_status = -1;
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &missing_bearer_status);
+      assert(r == NULL && missing_bearer_status == KB_CLIENT_ERR_AUTH_REQUIRED);
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_USERNAME");
+      runtime_secret_remove("AIMEE_KB_CLIENT_PAM_PASSWORD");
       assert(kb_client_mtls_configured() == 0);
       unlink(identity_file);
+      unlink(server_identity_file);
       remove(store2);
    }
 
@@ -3562,8 +4286,8 @@ static void test_mtls_listener(void)
       /* a 1-hour cert expires within 2 hours, not within 1 second; the 10y CA
        * is not near expiry. */
       char sc[KB_PKI_CERT_PEM_MAX], sk[KB_PKI_KEY_PEM_MAX];
-      assert(kb_pki_issue_client_cert(&ca, "project:beta", 3600, sc, sizeof(sc), sk, sizeof(sk)) ==
-             0);
+      assert(kb_pki_issue_client_cert(&ca, KB_SERVER_CLIENT_SCOPE, 3600, sc, sizeof(sc), sk,
+                                      sizeof(sk)) == 0);
       assert(kb_tls_cert_expires_within(sc, 7200) == 1);
       assert(kb_tls_cert_expires_within(sc, 1) == 0);
       assert(kb_tls_cert_expires_within(ca.cert_pem, 60L * 60 * 24 * 14) == 0);
@@ -3571,8 +4295,8 @@ static void test_mtls_listener(void)
       /* With no authoritative enrollment DB in this unit fixture, renewal is
        * refused before a new certificate can escape. */
       char nc[KB_PKI_CERT_PEM_MAX], nk[KB_PKI_KEY_PEM_MAX];
-      assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, nc, sizeof(nc), nk,
-                          sizeof(nk)) != 0);
+      assert(kb_tls_renew("localhost", port, ca.cert_pem, ccert, ckey, TEST_KB_AUTH_HEADER, nc,
+                          sizeof(nc), nk, sizeof(nk)) != 0);
    }
 
    SSL_CTX_free(cctx);
@@ -3588,6 +4312,7 @@ static void test_mtls_listener(void)
    remove(cp);
    snprintf(cp, sizeof(cp), "%s/kb-ca", cfg);
    rmdir(cp);
+   kb_tls_set_pam_check_for_test(NULL);
 }
 
 static void test_head_method(void)
@@ -4142,6 +4867,62 @@ static void test_code_callers_ok(void)
    assert(strstr(buf, "\"caller\":\"caller_fn\"") != NULL);
    assert(strstr(buf, "\"line\":44") != NULL);
    assert(strstr(buf, "\"next_cursor\":null") != NULL);
+}
+
+/* "scope" has exactly three shapes and they are easy to conflate, because the
+ * absent case and the wrong-type case both leave no usable string. Absent must
+ * behave as "current", a valid keyword must pass through, and a present but
+ * non-string value must be a 400 -- never quietly treated as the default.
+ *
+ * Pinned here because the parse was reordered to validate before reading
+ * js->valuestring (it read the value first and only then tested the pointer,
+ * which cppcheck reported as a possible null dereference). The reorder is meant
+ * to be behaviour-preserving; this is what says so.
+ *
+ * With no verified credential and no project in the body, "current" resolves to
+ * no active project and the route asks the caller to be explicit (409). That is
+ * the success-shaped path here: it proves the value parsed as "current" rather
+ * than being rejected as malformed. */
+static void test_search_scope_absent_valid_and_wrong_type(void)
+{
+   char project[256], buf[4096];
+   int all = -1;
+
+   /* Absent behaves exactly as an explicit "current". */
+   assert(kb_http_search_project_scope("{}", project, sizeof(project), &all, buf, sizeof(buf)) ==
+          409);
+   assert(strstr(buf, "scope_required") != NULL);
+   assert(kb_http_search_project_scope("{\"scope\":\"current\"}", project, sizeof(project), &all,
+                                       buf, sizeof(buf)) == 409);
+   assert(strstr(buf, "scope_required") != NULL);
+
+   /* "current" with a project resolves. */
+   all = -1;
+   assert(kb_http_search_project_scope("{\"scope\":\"current\",\"project\":\"proj-alpha\"}",
+                                       project, sizeof(project), &all, buf, sizeof(buf)) == 0);
+   assert(all == 0);
+   assert(strcmp(project, "proj-alpha") == 0);
+
+   /* "all" resolves without a project and sets the flag. */
+   all = -1;
+   assert(kb_http_search_project_scope("{\"scope\":\"all\"}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 0);
+   assert(all == 1);
+
+   /* Present but not a string: rejected as malformed, not defaulted. A JSON
+    * null is a real cJSON item rather than a missing key, so it lands here and
+    * not on the absent path above. */
+   assert(kb_http_search_project_scope("{\"scope\":7}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 400);
+   assert(kb_http_search_project_scope("{\"scope\":null}", project, sizeof(project), &all, buf,
+                                       sizeof(buf)) == 400);
+
+   /* A string that is neither keyword is a 400 too. */
+   assert(kb_http_search_project_scope("{\"scope\":\"sideways\"}", project, sizeof(project), &all,
+                                       buf, sizeof(buf)) == 400);
+   assert(strstr(buf, "invalid_scope") != NULL);
+
+   printf("  search scope: absent behaves as current, wrong type rejected\n");
 }
 
 static void test_code_scope_all_keeps_active_project_first(void)
@@ -4906,7 +5687,12 @@ static void test_code_scan_skips_unchanged_branch(void)
    assert(strstr(buf, "default branch unchanged") != NULL);
 }
 
-/* Branch moved (stored != current) -> scan runs and the new SHA is persisted. */
+/* Branch moved (stored != current) -> the walk is QUEUED rather than skipped.
+ * The SHA is deliberately NOT persisted here: the route has not done the walk,
+ * and recording it would claim the project was indexed at that SHA before any
+ * of the work ran -- a later failure would then leave the claim standing and
+ * every !force scan would skip a project that was never ingested. The worker
+ * records it after the walk succeeds. */
 static void test_code_scan_runs_on_branch_move(void)
 {
    char buf[512];
@@ -4921,8 +5707,9 @@ static void test_code_scan_runs_on_branch_move(void)
                             sizeof(buf));
    g_branch_sha[0] = '\0';
    assert(s == 200);
-   assert(strstr(buf, "\"skipped\":false") != NULL);
-   assert(strcmp(g_runtime_state_set_val, "tree-bbb") == 0); /* persisted for next time */
+   assert(strstr(buf, "\"skipped\":false") != NULL); /* not declined: accepted and queued */
+   assert(strstr(buf, "\"queued\":true") != NULL);
+   assert(g_runtime_state_set_val[0] == '\0'); /* the worker persists it, not the route */
 }
 
 /* Under the worktree opt-in the branch-SHA gate is bypassed: even an unchanged
@@ -4984,17 +5771,34 @@ static void test_code_scan_ok(void)
    g_code_scan_rc = 5;
    g_code_scan_inspected = 12;
    g_code_scan_force = 0;
+   g_code_scan_project[0] = '\0';
+   g_ingest_project[0] = '\0';
+   g_ingest_root[0] = '\0';
+   g_ingest_force = 0;
+   g_ingest_priority = -1;
    g_curator_code_queued = 0;
    const char *body = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp/repo\",\"force\":true}";
    int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, body, (int)strlen(body), buf,
                             sizeof(buf));
+   /* A root_path scan QUEUES the walk; it does not perform it on this request
+    * thread. Doing it inline held a db2 connection for the whole walk and made
+    * the caller wait out a timeout it could not size -- which was then recorded
+    * as the KB being unreachable. The route's promise is that the files are
+    * queued and ready to be ingested, so it answers immediately with no counts. */
    assert(s == 200);
    assert(strstr(buf, "\"status\":\"ok\"") != NULL);
-   assert(strstr(buf, "\"files\":5") != NULL);
-   assert(strstr(buf, "\"inspected\":12") != NULL);
-   assert(strcmp(g_code_scan_project, "proj-alpha") == 0);
-   assert(strcmp(g_code_scan_root_path, "/tmp/repo") == 0);
-   assert(g_code_scan_force == 1);
+   assert(strstr(buf, "\"reason\":\"queued\"") != NULL);
+   assert(strstr(buf, "\"skipped\":false") != NULL); /* accepted, not declined */
+   assert(strstr(buf, "\"queued\":true") != NULL);
+   assert(strstr(buf, "\"files\":0") != NULL);
+   /* The inline scanner is NOT called for this path any more. */
+   assert(g_code_scan_project[0] == '\0');
+   /* The work reached the queue, with the caller's project, root and force, at
+    * interactive priority because someone is waiting on the result. */
+   assert(strcmp(g_ingest_project, "proj-alpha") == 0);
+   assert(strcmp(g_ingest_root, "/tmp/repo") == 0);
+   assert(g_ingest_force == 1);
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
    /* A scan INDEXES; it does not curate. Curation is enqueued by the embed stage
     * once the project is fully embedded, so the pipeline order is
     * indexed -> embedded -> curated rather than indexed -> curated (racing embed).
@@ -5114,6 +5918,42 @@ static void test_code_scan_pushed_files_rejects_invalid_item(void)
    assert(strstr(buf, "invalid files array") != NULL);
 }
 
+static void test_code_scan_phases_and_verify_states(void)
+{
+   char buf[1024];
+   g_db_initialized = 1;
+   const char *begin = "{\"project\":\"proj-alpha\",\"root_path\":\"remote\",\"phase\":\"begin\","
+                       "\"scan_id\":\"scan-1\"}";
+   int s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, begin, (int)strlen(begin),
+                            buf, sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"phase\":\"begin\"") != NULL);
+   const char *stage = "{\"project\":\"proj-alpha\",\"phase\":\"stage\",\"scan_id\":\"scan-1\","
+                       "\"files\":[{\"rel_path\":\"a.c\",\"content\":\"int a;\"}]}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, stage, (int)strlen(stage), buf,
+                        sizeof(buf));
+   assert(s == 200 && strstr(buf, "\"accepted\":1") != NULL);
+   const char *seal = "{\"project\":\"proj-alpha\",\"phase\":\"seal\",\"scan_id\":\"scan-1\","
+                      "\"expected_files\":1}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, seal, (int)strlen(seal), buf,
+                        sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"index_state\":\"current\"") != NULL);
+   assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
+   assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
+   /* Sealing publishes the source snapshot only. Code-unit curation belongs to
+    * the background embed stage; keeping it off this request is what makes a
+    * repository-scale seal return when publication commits. */
+   assert(g_curator_code_queued == 0);
+
+   const char *verify = "{\"project\":\"proj-alpha\",\"root_path\":\"/tmp\",\"phase\":\"verify\","
+                        "\"deep\":true}";
+   s = kb_http_route_ex("POST", "/v1/code/scan", NULL, NULL, NULL, verify, (int)strlen(verify), buf,
+                        sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"workspace_state\":\"matched\"") != NULL);
+   assert(strstr(buf, "\"verification\":\"content_hash\"") != NULL);
+}
+
 static void test_code_scan_db_unavailable(void)
 {
    char buf[256];
@@ -5126,60 +5966,14 @@ static void test_code_scan_db_unavailable(void)
    g_db_initialized = 1;
 }
 
-static void test_code_build_ok(void)
-{
-   char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   g_code_scan_rc = 0;
-   g_runtime_state_set_now = 0;
-   g_code_embed_refresh_rc = 0;
-   g_code_embed_estimated = 4;
-   g_code_embed_embedded = 3;
-   g_code_embed_skipped = 1;
-   g_doc_refresh_rc = 2;
-   g_doc_backfill_rc = 1;
-   const char *body =
-       "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\","
-       "\"force\":true}";
-   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
-                            buf, sizeof(buf));
-   assert(s == 200);
-   assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
-   /* /v1/code/build now also runs the canonical scan (matches the async ingest path). */
-   assert(strcmp(g_code_scan_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_embed_cmd, "embed-a") == 0);
-   assert(g_kb_build_force == 1);
-   assert(strcmp(g_code_embed_project, "proj-alpha") == 0);
-   assert(strcmp(g_doc_refresh_project, "proj-alpha") == 0);
-   assert(g_runtime_state_set_now == 1);
-   assert(strstr(buf, "\"files_scanned\":9") != NULL);
-   assert(strstr(buf, "\"embeddings_added\":11") != NULL);
-}
-
-static void test_code_build_rejects_partial_project_embedding(void)
-{
-   char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   g_code_scan_rc = 0;
-   g_code_embed_refresh_rc = 0;
-   g_code_embed_estimated = 4;
-   g_code_embed_embedded = 2;
-   g_code_embed_skipped = 1;
-   const char *body = "{\"path\":\"/client/repo\",\"project\":\"thin-client\"}";
-   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
-                            buf, sizeof(buf));
-   assert(s == 503);
-   assert(strstr(buf, "project code embedding refresh failed") != NULL);
-
-   g_code_embed_estimated = 0;
-   g_code_embed_embedded = 0;
-   g_code_embed_skipped = 0;
-}
+/* test_code_build_ok, test_code_build_rejects_partial_project_embedding and
+ * test_maintenance_repair_ok were REMOVED, not ported: they asserted that /v1/code/build did the
+ * work inline (kb_build called with the caller's path, a 503 when inline code embedding came back
+ * partial). That contract is gone -- the route commits the work to the queue and answers
+ * immediately, and embedding completes when it completes. Keeping them adapted would have pinned
+ * the shape that made a long build report itself as a failure. The replacements are
+ * test_code_build_queues_instead_of_embedding_inline and
+ * test_maintenance_repair_queues_too. */
 
 static void test_code_update_ok(void)
 {
@@ -5302,6 +6096,7 @@ static void test_drain_ok(void)
                             sizeof(buf));
    assert(s == 200);
    assert(strcmp(g_drain_embed_cmd, "test-embed") == 0);
+   assert(strcmp(g_drain_claimed_by, "test-http-session") == 0);
    assert(g_drain_timeout == 9);
    assert(strcmp(g_drain_collection, "kb-test") == 0);
    assert(strstr(buf, "\"processed\":3") != NULL);
@@ -5439,6 +6234,17 @@ static void test_service_scope_is_data_plane_not_admin(void)
                         sizeof(buf));
    assert(s != 403);
 
+   /* MAY: explicitly search across the tenant's projects. Managed server
+    * callers have no project-scoped credential to supply, so rejecting
+    * scope=all here makes the CLI's prescribed fallback unusable. */
+   s = kb_http_route_ex("GET", "/v1/code/find", "identifier=foo&scope=all", svc_auth, svc_tok, NULL,
+                        0, buf, sizeof(buf));
+   assert(s != 403);
+   const char *search_all = "{\"query\":\"needle\",\"scope\":\"all\"}";
+   s = kb_http_route_ex("POST", "/v1/search", NULL, svc_auth, svc_tok, search_all,
+                        (int)strlen(search_all), buf, sizeof(buf));
+   assert(s != 403);
+
    /* MUST NOT: any maintenance route. This is the boundary that makes a service
     * credential worth issuing instead of the owner token. */
    static const char *const admin_routes[] = {
@@ -5514,23 +6320,40 @@ static void test_maintenance_routes_are_owner_gated(void)
    assert(s == 403);
 }
 
-static void test_maintenance_repair_ok(void)
+static void test_subject_erasure_routes_are_owner_gated_and_idempotent(void)
 {
    char buf[1024];
-   g_db_initialized = 1;
-   g_pgvec_ensure_rc = 0;
-   g_kb_build_rc = 0;
-   const char *body =
-       "{\"path\":\"/tmp/kb\",\"project\":\"proj-alpha\",\"embedding_command\":\"embed-a\"}";
-   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
-                            (int)strlen(body), buf, sizeof(buf));
+   const char *begin = "{\"request_id\":\"erase-route-0123456789\","
+                       "\"subject\":\"subject@example.test\","
+                       "\"session_ids\":[\"session-a\"]}";
+   int s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL,
+                            "Bearer scope:project:x:secret", "scope:project:x:secret", begin,
+                            (int)strlen(begin), buf, sizeof(buf));
+   assert(s == 403);
+   assert(g_erasure_begin_calls == 0);
+
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/begin", NULL, OWNER_AUTH, OWNER_TOK,
+                        begin, (int)strlen(begin), buf, sizeof(buf));
    assert(s == 200);
-   assert(strcmp(g_kb_build_path, "/tmp/kb") == 0);
-   assert(strcmp(g_kb_build_project, "proj-alpha") == 0);
-   assert(strcmp(g_kb_build_embed_cmd, "embed-a") == 0);
-   assert(g_kb_build_force == 1);
-   assert(strstr(buf, "\"files_scanned\":9") != NULL);
-   assert(strstr(buf, "\"embeddings_added\":5") != NULL);
+   assert(g_erasure_begin_calls == 1);
+   assert(strstr(buf, "\"memory_count\":2") != NULL);
+   assert(strstr(buf, "\"document_count\":3") != NULL);
+
+   const char *invalid_complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1.5}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        invalid_complete, (int)strlen(invalid_complete), buf, sizeof(buf));
+   assert(s == 400);
+   assert(g_erasure_complete_calls == 0);
+   assert(g_erasure_reconcile_calls == 0);
+
+   const char *complete = "{\"request_id\":\"erase-route-0123456789\",\"db1_count\":1}";
+   s = kb_http_route_ex("POST", "/v1/privacy/erase-subject/complete", NULL, OWNER_AUTH, OWNER_TOK,
+                        complete, (int)strlen(complete), buf, sizeof(buf));
+   assert(s == 200);
+   assert(g_erasure_complete_calls == 1);
+   assert(g_erasure_reconcile_calls == 1);
+   assert(strstr(buf, "\"event_created\":true") != NULL);
+   assert(strstr(buf, "\"orphan_blobs_unlinked\":4") != NULL);
 }
 
 static void test_maintenance_repair_missing_project(void)
@@ -6141,6 +6964,32 @@ static void test_search_scope_all_keeps_active_project_first(void)
    assert(strstr(buf, "\"project\":\"proj-other\"") != NULL);
 }
 
+static void test_search_backend_error_is_503(void)
+{
+   char buf[1024];
+   g_test_search_error = 1;
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   g_test_search_error = 0;
+   assert(s == 503);
+   assert(strstr(buf, "query embedding failed") != NULL);
+   assert(strstr(buf, "\"hits\"") == NULL);
+}
+
+static void test_search_malformed_backend_response_is_503(void)
+{
+   char buf[1024];
+   g_test_search_malformed = 1;
+   const char *body = "{\"query\":\"foo\",\"project\":\"proj-alpha\"}";
+   int s = kb_http_route_ex("POST", "/v1/search", NULL, NULL, NULL, body, (int)strlen(body), buf,
+                            sizeof(buf));
+   g_test_search_malformed = 0;
+   assert(s == 503);
+   assert(strstr(buf, "invalid search backend response") != NULL);
+   assert(strstr(buf, "\"hits\"") == NULL);
+}
+
 /* A managed KB normally has no raw embedding_command in aimee.yaml: the
  * wizard supplies SYNTHESIS_ENDPOINT. Search must resolve that deployment default
  * before entering the ranked backend, or it silently queries a 1024-dim corpus
@@ -6532,6 +7381,146 @@ static void test_http_listener_concurrent_requests(void)
    kb_http_stop();
 }
 
+static void test_http_listener_refuses_unsafe_public_bind(void)
+{
+   int port = reserve_tcp_port();
+   assert(setenv("AIMEE_KB_HTTP_BIND", "1", 1) == 0);
+   assert(kb_http_start(port, NULL) == KB_HTTP_START_UNSAFE_BIND);
+   assert(unsetenv("AIMEE_KB_HTTP_BIND") == 0);
+
+   /* A refused start must close its socket and leave the listener reusable. */
+   assert(kb_http_start(port, NULL) == KB_HTTP_START_OK);
+   kb_http_stop();
+}
+
+static void test_http_listener_classifies_port_collision(void)
+{
+   int fd = socket(AF_INET, SOCK_STREAM, 0);
+   assert(fd >= 0);
+   struct sockaddr_in sa;
+   memset(&sa, 0, sizeof(sa));
+   sa.sin_family = AF_INET;
+   sa.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+   sa.sin_port = 0;
+   assert(bind(fd, (struct sockaddr *)&sa, sizeof(sa)) == 0);
+   assert(listen(fd, 1) == 0);
+   socklen_t n = sizeof(sa);
+   assert(getsockname(fd, (struct sockaddr *)&sa, &n) == 0);
+
+   assert(kb_http_start(ntohs(sa.sin_port), NULL) == KB_HTTP_START_ADDRESS_IN_USE);
+   close(fd);
+}
+
+/* ---- embedding is asynchronous, full stop ------------------------------------
+ *
+ * RED-GREEN. /v1/code/build used to do the whole build inline: doc embedding,
+ * canonical scan, then code embedding. On a 3825-file checkout that is minutes
+ * of embedder time held open on one HTTP request, and the first bound anywhere
+ * in that chain to expire turned a build that was progressing normally into a
+ * hard failure -- observed as "knowledge service /v1/code/build did not respond"
+ * with the embedder logging BrokenPipeError after the kb dropped a connection
+ * whose embed batch had merely taken longer than the client's patience.
+ *
+ * A build's cost is a property of the CORPUS, not of the service being healthy.
+ * So the route commits the work and answers immediately; the queue worker does
+ * the same build -- doc vectors, canonical index, AND code vectors -- and it
+ * completes when it completes.
+ *
+ * INTERACTIVE priority is load-bearing: an explicit build must jump the periodic
+ * sweep. Starvation behind the global backlog is what made someone inline this
+ * work in the first place, and priority is the fix for that, not blocking. */
+static void test_code_build_queues_instead_of_embedding_inline(void)
+{
+   char buf[1024];
+   g_ingest_root[0] = 0;
+   g_db_initialized = 1;
+   g_pgvec_ensure_rc = 0;
+   g_ingest_force = 0;
+   g_ingest_priority = -1;
+   g_ingest_project[0] = '\0';
+   const char *body = "{\"path\":\"/tmp/repo\",\"project\":\"proj-build\",\"force\":true}";
+   int s = kb_http_route_ex("POST", "/v1/code/build", NULL, NULL, NULL, body, (int)strlen(body),
+                            buf, sizeof(buf));
+   assert(s == 200);
+   assert(strstr(buf, "\"queued\":true") != NULL);
+   /* The work was handed to the queue, not done here. */
+   assert(strcmp(g_ingest_project, "proj-build") == 0);
+   assert(strcmp(g_ingest_root, "/tmp/repo") == 0);
+   assert(g_ingest_force == 1);
+   /* An explicit request must not sit behind the periodic sweep. */
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+}
+
+/* Repair embeds too, so it queues on the same grounds: an operator gets a
+ * durable commitment, not a request held open across minutes of embedder time
+ * that reports failure the moment a bound expires. */
+static void test_maintenance_repair_queues_too(void)
+{
+   char buf[1024];
+   g_ingest_root[0] = 0;
+   g_db_initialized = 1;
+   g_pgvec_ensure_rc = 0;
+   g_ingest_force = 0;
+   g_ingest_priority = -1;
+   g_ingest_project[0] = '\0';
+   const char *body = "{\"path\":\"/tmp/repo\",\"project\":\"proj-repair\"}";
+   /* Maintenance is owner-only; the credential is orthogonal to the async
+    * change but the route rightly refuses without it. */
+   int s = kb_http_route_ex("POST", "/v1/maintenance/repair", NULL, OWNER_AUTH, OWNER_TOK, body,
+                            (int)strlen(body), buf, sizeof(buf));
+   assert(s == 200);
+   assert(strcmp(g_ingest_project, "proj-repair") == 0);
+   /* Repair is always a forced rebuild; that must survive the hand-off. */
+   assert(g_ingest_force == 1);
+   assert(g_ingest_priority == DB2_KB_INGEST_PRIO_INTERACTIVE);
+}
+
+static void test_content_read_identity_boundary(void)
+{
+   assert(kb_http_is_content_read("POST", "/v1/search"));
+   assert(kb_http_is_content_read("GET", "/v1/artifacts/a"));
+   assert(kb_http_is_content_read("GET", "/v1/code/context"));
+   assert(kb_http_is_content_read("GET", "/v1/pdf/page"));
+   assert(kb_http_is_content_read("POST", "/v1/entities/search"));
+   assert(kb_http_is_content_read("POST", "/v1/implements"));
+   assert(kb_http_is_content_read("POST", "/v1/synthesize"));
+   assert(kb_http_is_content_read("POST", "/v1/contradictions"));
+   assert(kb_http_is_content_read("GET", "/v1/docs/a"));
+   assert(kb_http_is_content_read("GET", "/v1/review"));
+   assert(kb_http_is_content_read("GET", "/v1/releases/active"));
+   assert(!kb_http_is_content_read("GET", "/v1/health"));
+   assert(!kb_http_is_content_read("GET", "/v1/search"));
+   assert(!kb_http_is_content_read("POST", "/v1/code/context"));
+   assert(!kb_http_is_content_read("POST", "/v1/ingest"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/scan"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/project/purge"));
+   assert(!kb_http_is_content_read("GET", "/v1/code/repo-trust"));
+   assert(!kb_http_is_content_read("POST", "/v1/code/build"));
+   assert(!kb_http_is_content_read("POST", "/v1/docs/manifest"));
+   assert(!kb_http_is_content_read("GET", "/v1/docs/manifest"));
+   assert(!kb_http_is_content_read("GET", "/v1/docs"));
+   assert(!kb_http_is_content_read("GET", "/v1/code"));
+
+   kb_request_context_t resolved;
+   memset(&resolved, 0, sizeof(resolved));
+   assert(kb_principal_from_host_account("aimee-server", &resolved.transport) == 0);
+   assert(kb_principal_from_host_account("alice", &resolved.actor) == 0);
+   resolved.has_transport = 1;
+   resolved.has_actor = 1;
+   resolved.teams[0] = 7;
+   resolved.n_teams = 1;
+   resolved.billing_team = 7;
+   char buf[256];
+   int status = kb_http_route_ex_with_context(
+       "POST", "/v1/search", NULL, "Bearer scope:service:aimee-server:secret",
+       "scope:service:aimee-server:secret", "{}", 2, &resolved, buf, sizeof(buf));
+   assert(status == 400); /* identity is installed before request validation */
+   const kb_request_context_t *active = kb_reqctx_resolved();
+   assert(active && active->billing_team == 7 && active->has_transport && active->has_actor);
+   kb_reqctx_clear();
+   assert(kb_reqctx_resolved() == NULL);
+}
+
 int main(void)
 {
    /* Match kb_main's process contract. TLS readiness probes deliberately open
@@ -6539,6 +7528,7 @@ int main(void)
     * close, and the default SIGPIPE disposition would kill the fixture instead
     * of letting OpenSSL report the failed connection. */
    signal(SIGPIPE, SIG_IGN);
+   kb_route_acl_register_authorization_provider(control_web_module_provider);
    printf("kb_http_routes: ");
 
    test_health();
@@ -6547,8 +7537,11 @@ int main(void)
    test_version();
    test_capabilities();
    test_console_overview();
+   test_console_admin_requires_authorization_module();
    test_console_pipeline();
+   test_console_memories();
    test_console_settings();
+   test_console_evidence_operator_boundary();
    test_accounts_routes();
    test_mint_scope_restriction();
    test_team_routes();
@@ -6563,16 +7556,21 @@ int main(void)
    test_mtls_listener();
    test_http_body_too_large_413();
    test_http_listener_concurrent_requests();
+   test_http_listener_refuses_unsafe_public_bind();
+   test_http_listener_classifies_port_collision();
    test_bearer_auth_ok();
    test_bearer_auth_missing();
    test_bearer_auth_wrong();
    test_head_method();
    test_method_not_allowed();
+   test_content_read_identity_boundary();
 
    test_curator_routes();
    test_invalidations_route();
    test_search_ok();
    test_search_scope_all_keeps_active_project_first();
+   test_search_backend_error_is_503();
+   test_search_malformed_backend_response_is_503();
    test_search_uses_managed_embedder();
    test_search_hits_tool_contract();
    test_search_503_while_reembed_in_progress();
@@ -6596,6 +7594,7 @@ int main(void)
    test_code_search_ok();
    test_code_callers_missing_symbol();
    test_code_callers_ok();
+   test_search_scope_absent_valid_and_wrong_type();
    test_code_scope_all_keeps_active_project_first();
    test_code_hybrid_ok();
    test_code_hybrid_memory_leg();
@@ -6641,9 +7640,8 @@ int main(void)
    test_code_scan_missing_root_path();
    test_code_scan_pushed_files_ok();
    test_code_scan_pushed_files_rejects_invalid_item();
+   test_code_scan_phases_and_verify_states();
    test_code_scan_db_unavailable();
-   test_code_build_ok();
-   test_code_build_rejects_partial_project_embedding();
    test_code_update_ok();
    test_ingest_enqueue_ok();
    test_ingest_status_ok();
@@ -6659,7 +7657,7 @@ int main(void)
    test_scoped_token_cannot_ingest_all_projects();
    test_service_scope_is_data_plane_not_admin();
    test_maintenance_routes_are_owner_gated();
-   test_maintenance_repair_ok();
+   test_subject_erasure_routes_are_owner_gated_and_idempotent();
    test_maintenance_repair_missing_project();
    test_maintenance_reconcile_ok();
    test_maintenance_clear_ok();
@@ -6704,6 +7702,8 @@ int main(void)
    test_search_facet_scope_all_keeps_active_project_first();
    test_search_no_filters_not_facet();
 
+   test_code_build_queues_instead_of_embedding_inline();
+   test_maintenance_repair_queues_too();
    printf("ok\n");
    return 0;
 }

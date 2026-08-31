@@ -25,6 +25,69 @@ Current contracts:
 - [IR](ir.md), [translation](translation.md), [response composition](response-composition.md),
   and [protocols](protocols.md);
 - [gateway](gateway.md), [runtime web](runtime-web.md), [control web](control-web.md), and
-  [vault](vault.md).
+  [vault](vault.md);
+- [aimee](aimee.md), [economizer](economizer.md), [egress](egress.md),
+  [observability](observability.md), and [sandbox](sandbox.md);
+- [db2](db2.md) and [postgres](postgres.md). The server PostgreSQL tier is documented separately
+  as the [DB1 storage boundary](../DB1.md).
 
 See the [technical reference](../../src/README.md) for the process and source map.
+
+## Turning optional modules on and off
+
+The canonical inventory splits modules into **required** and **optional**
+(`tests/baselines/modules/canonical-inventory.yaml`). Required modules always
+run: a deployment without `memory` or `routing` is not a smaller deployment, it
+is a broken one, so only the optional set is operator-controlled.
+
+Classification is independent of a module's **principal ref**. The ref is
+declared per module in the same file (`principal_refs`) rather than derived from
+position, because it is the module's permanent identity: grants match on it and
+event kinds are carved from it as `4096 + ref*256 + stage`. Deriving it from
+position meant promoting a module from optional to required renumbered every
+module after it, moving ten modules' event kinds and every grant naming them,
+for a change that is nothing at runtime.
+
+A ref is **retired, never recycled**. When a module goes away its number is added
+to `retired_principal_refs` and is never issued again, so a grant or a capture
+that still names it can never come to mean a different module.
+
+Set `AIMEE_MODULE_<ID>`, where `<ID>` is the module id uppercased with `-`
+replaced by `_`:
+
+| Value | Effect |
+|---|---|
+| `1`, `true`, `on`, `yes` | the module runs, even if the image shipped it off |
+| `0`, `false`, `off`, `no` | the module does not run, even if the image shipped it on |
+| unset or empty | keep whatever the image shipped |
+
+```sh
+AIMEE_MODULE_ROUNDTABLE=1     # turn the review panel on
+AIMEE_MODULE_KB_SYNTHESIS=1   # kb-placed module
+```
+
+Optional modules by placement:
+
+- **server**: `governance`, `roundtable`, `benchmarks`, `runtime-web`, `economizer`
+- **kb**: `kb-synthesis`, `control-web`, `benchmarks`, `postgres`
+
+Required modules are not part of this control surface. In particular, `sandbox`
+is always active and there is no supported `AIMEE_MODULE_SANDBOX` setting.
+
+The setting is read at container start by `deploy/container/optional-modules-lib.sh`,
+which rewrites a copy of the shipped module manifest before
+`module-supervisor.sh` reads it. The manifest baked into the image is never
+edited in place. A change takes effect on the next start.
+
+Two specifics worth knowing:
+
+- **`workflows` is not gated here.** It is optional and server-placed, but it is
+  hosted by `/usr/local/bin/aimee-wfe` rather than the module-runtime multicall
+  binary, and is governed by `AIMEE_WFE_ENGINE`. `AIMEE_MODULE_WORKFLOWS` would
+  silently do nothing, so it is deliberately not accepted.
+- **`runtime-web` follows the browser UI.** If `AIMEE_RUNTIME_WEB_ENABLED=0` and
+  you say nothing about the module, the module is turned off too, because it would
+  have nothing to serve. An explicit `AIMEE_MODULE_RUNTIME_WEB` overrides that.
+
+Asking for a module that is not present in the image logs a warning and changes
+nothing, rather than failing the start.

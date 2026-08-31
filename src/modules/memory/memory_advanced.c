@@ -9,22 +9,23 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "config.h"
-#include "db1.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/anti_patterns.h"
-#include "db2/bandit.h"
-#include "db2/decision_log.h"
-#include "db2/feedback.h"
-#include "db2/memory_briefing.h"
-#include "db2/memory_query.h"
-#include "db2/memory_relations.h"
-#include "db2/rules.h"
-#include "db2/tasks.h"
-#endif
+#include "db1_client/db1.h"
+#include "modules/db2/c/anti_patterns.h"
+#include "modules/db2/c/bandit.h"
+#include "modules/db2/c/decision_log.h"
+#include "modules/db2/c/feedback.h"
+#include "modules/db2/c/memory_briefing.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/rules.h"
+#include "modules/db2/c/tasks.h"
 #include "dogfood.h"
+#include "integrity.h"
 #include "kb_reasoning.h"
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
+#include "memory_context_internal.h"
 #include "memory_ontology.h"
 #include "platform_process.h"
 #include <ctype.h>
@@ -33,106 +34,6 @@
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-
-#if defined(AIMEE_DB2_DISABLED)
-int anti_pattern_extract_from_feedback(void)
-{
-   return 0;
-}
-
-int anti_pattern_extract_from_failures(void)
-{
-   return 0;
-}
-
-int anti_pattern_escalate(int hit_threshold)
-{
-   (void)hit_threshold;
-   return 0;
-}
-
-int memory_supersede(int64_t old_id, const char *new_content, double confidence,
-                     const char *session_id, memory_t *out)
-{
-   (void)old_id;
-   (void)new_content;
-   (void)confidence;
-   (void)session_id;
-   (void)out;
-   return -1;
-}
-
-int memory_fact_history(const char *key, memory_t *out, int max)
-{
-   (void)key;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_check_drift(int64_t task_id, const char *file_path, const char *command,
-                       drift_result_t *out)
-{
-   (void)task_id;
-   (void)file_path;
-   (void)command;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
-}
-
-int memory_learn_style(void)
-{
-   return 0;
-}
-
-int memory_get_provenance(int64_t memory_id, provenance_entry_t *out, int max)
-{
-   (void)memory_id;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_link_create(int64_t source_id, int64_t target_id, const char *relation)
-{
-   (void)source_id;
-   (void)target_id;
-   (void)relation;
-   return -1;
-}
-
-int memory_link_query(int64_t memory_id, memory_link_t *out, int max)
-{
-   (void)memory_id;
-   (void)out;
-   (void)max;
-   return 0;
-}
-
-int memory_link_delete(int64_t link_id)
-{
-   (void)link_id;
-   return -1;
-}
-
-cJSON *memory_briefing(int limit_tokens)
-{
-   if (limit_tokens <= 0)
-      limit_tokens = MEMORY_BRIEFING_DEFAULT_LIMIT_TOKENS;
-
-   cJSON *bundle = cJSON_CreateObject();
-   if (!bundle)
-      return NULL;
-   cJSON_AddNumberToObject(bundle, "limit_tokens", limit_tokens);
-   cJSON_AddItemToObject(bundle, "key_facts", cJSON_CreateArray());
-   cJSON_AddItemToObject(bundle, "recent_activity", cJSON_CreateArray());
-   cJSON_AddItemToObject(bundle, "active_entities", cJSON_CreateArray());
-   cJSON_AddNumberToObject(bundle, "approx_tokens", 0);
-   return bundle;
-}
-
-#else
 
 static const char *memory_briefing_style(void)
 {
@@ -278,12 +179,22 @@ int anti_pattern_escalate(int hit_threshold)
 int memory_supersede(int64_t old_id, const char *new_content, double confidence,
                      const char *session_id, memory_t *out)
 {
-   if (old_id <= 0)
+   if (old_id <= 0 || !new_content || !new_content[0])
       return -1;
+   integrity_result_t integrity;
+   if (integrity_ingress_decide(new_content, INTEGRITY_SOURCE_AGENT_MESSAGE, "memory", 1,
+                                &integrity))
+      return -4;
 
    memory_t old_mem;
    if (memory_get(old_id, &old_mem) != 0)
       return -1;
+   char epistemic_kind[32] = "world_fact";
+   (void)db2_memory_epistemic_kind(old_id, epistemic_kind, sizeof(epistemic_kind));
+   if (strcmp(epistemic_kind, "episode") == 0 || strcmp(epistemic_kind, "experience") == 0)
+      return -2; /* immutable observation: caller must offer annotation */
+   if (strcmp(epistemic_kind, "instruction") == 0 || strcmp(epistemic_kind, "policy") == 0)
+      return -3; /* normative content is revoked, never silently corrected */
 
    int version = db2_memory_count_versions(old_mem.key) + 1;
 
@@ -295,8 +206,9 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    if (db2_memory_set_versioned_key(old_id, versioned_key, ts) != 0)
       return -1;
 
-   int rc = memory_insert(old_mem.tier, old_mem.kind, old_mem.key, new_content, confidence,
-                          session_id, out);
+   int rc = memory_insert_epistemic_ex(old_mem.tier, old_mem.kind, epistemic_kind, old_mem.key,
+                                       new_content, "", confidence, session_id,
+                                       MEMORY_AUTHORITY_MODEL, out);
    if (rc != 0)
       return -1;
 
@@ -314,8 +226,55 @@ int memory_supersede(int64_t old_id, const char *new_content, double confidence,
    return 0;
 }
 
+int memory_retire(int64_t id, const char *session_id)
+{
+   if (id <= 0)
+      return -1;
+
+   memory_t old_mem;
+   if (memory_get(id, &old_mem) != 0)
+      return -1;
+
+   /* Same versioning move as the first half of memory_supersede(), minus the
+    * replacement insert: the row keeps its content but is renamed out of the
+    * live key and stamped valid_until, so recall for `key` no longer returns it
+    * while memory_fact_history() still does. */
+   int version = db2_memory_count_versions(old_mem.key) + 1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+
+   char versioned_key[560];
+   snprintf(versioned_key, sizeof(versioned_key), "%s#v%d", old_mem.key, version);
+   if (db2_memory_set_versioned_key(id, versioned_key, ts) != 0)
+      return -1;
+
+   add_provenance(id, session_id, "retire", "retired without replacement");
+   memory_audit_emit("memory.retire", id, NULL, NULL, NULL, 0.0, session_id);
+   return 0;
+}
+
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void adv_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.advanced", "fact history is unavailable: the relational store is "
+                               "unreachable, so history queries return nothing, which is "
+                               "indistinguishable from a key that has none");
+}
+
 int memory_fact_history(const char *key, memory_t *out, int max)
 {
+   if (!db2_conn())
+   {
+      adv_warn_store_unreachable();
+      return 0;
+   }
    if (!key)
       return 0;
    char norm[512];
@@ -466,12 +425,15 @@ static const style_dimension_t style_dimensions[] = {
      "User values well-organized, structured responses"},
 };
 
-#define STYLE_DIMENSION_COUNT           (sizeof(style_dimensions) / sizeof(style_dimensions[0]))
+#define STYLE_DIMENSION_COUNT (sizeof(style_dimensions) / sizeof(style_dimensions[0]))
 
 static int match_keywords(const char *text, const char *const keywords[])
 {
    for (int k = 0; keywords[k]; k++)
-      if (strstr(text, keywords[k]))
+      /* Whole-word: as a bare substring the positive marker "structured" matched
+       * inside the negative marker "unstructured", so any text complaining about
+       * unstructured output scored BOTH sides of the structure dimension. */
+      if (memory_keyword_present(text, keywords[k]))
          return 1;
    return 0;
 }
@@ -756,8 +718,6 @@ cJSON *memory_briefing(int limit_tokens)
    return bundle;
 }
 
-#endif
-
 /* --- Aggregation-Aware Query Routing ---
  *
  * See memory.h for the public contract.  Detection is a tight structural
@@ -999,7 +959,6 @@ int memory_detect_aggregation_shape(const char *query, memory_aggregation_hint_t
  * content.  Falls back to the longest plural-ended token when nothing
  * singular survives so single-noun queries like "list all meetings"
  * still get a non-empty keyword. */
-#if !defined(AIMEE_DB2_DISABLED)
 static void agg_extract_fallback_keyword(const char *query, char *out, size_t out_len)
 {
    if (!out || out_len == 0)
@@ -1070,7 +1029,6 @@ static void agg_extract_fallback_keyword(const char *query, char *out, size_t ou
       out[copy] = '\0';
    }
 }
-#endif
 
 int memory_aggregate(const memory_aggregation_hint_t *hint, const char *query, int max_items,
                      memory_t *out, int max, int *truncated)
@@ -1080,11 +1038,6 @@ int memory_aggregate(const memory_aggregation_hint_t *hint, const char *query, i
    if (!out || max <= 0 || !hint)
       return 0;
 
-#if defined(AIMEE_DB2_DISABLED)
-   (void)query;
-   (void)max_items;
-   return 0;
-#else
    if (max_items <= 0)
       max_items = MEMORY_AGGREGATION_DEFAULT_MAX_ITEMS;
    if (max_items > max)
@@ -1097,5 +1050,4 @@ int memory_aggregate(const memory_aggregation_hint_t *hint, const char *query, i
       agg_extract_fallback_keyword(query, keyword, sizeof(keyword));
 
    return db2_memory_aggregate(entity_seed, keyword[0] ? keyword : NULL, out, max_items, truncated);
-#endif
 }

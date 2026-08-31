@@ -16,7 +16,7 @@
 #include "aimee.h"
 #include "cmd_memory_internal.h"
 #include "commands.h"
-#include "db2/curiosity.h"
+#include "modules/db2/c/curiosity.h"
 #include "kb_client.h"
 #include "cJSON.h"
 #include <stdio.h>

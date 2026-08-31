@@ -1,5 +1,9 @@
 # P5-D2b bounded safe configuration projection and P5 close-out
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 - **State:** completed and roundtable-converged; validated on real PostgreSQL 17, the CT260/CT262
   required-mTLS topology, ASAN/UBSAN, and deterministic fuzz gates.
 - **Parent:** `tiered-llm-p5-oidc-control-plane.md`, §§2–4.
@@ -18,7 +22,7 @@ Add exactly one second consumer of D2a's management-read primitive:
 - console: an OIDC-only, read-only safe-config drill-down.
 
 The response is constructed from five typed policy/posture values that already exist in
-`config_t`. It never returns raw configuration and never redacts a larger object. This is the
+`legacy_config_record`. It never returns raw configuration and never redacts a larger object. This is the
 terminal P5 read selector. The closed selector set becomes exactly `{agents,config}`; widening it
 requires a new plan plus an adversarial roundtable even if a future change appears to be only a
 CHECK-constraint edit.
@@ -45,11 +49,11 @@ The five config fields and their source mappings are frozen:
 
 | Wire key | Source | Closed wire value |
 |---|---|---|
-| `mtls` | `config_t.server_api_mtls` | `off`, `optional`, or `required` for source 0, 1, or 2 |
-| `remote_writes` | `config_t.server_api_remote_writes` | `off`, `data`, or `full` for source 0, 1, or 2 |
-| `client_transport` | `config_t.server_api_client_transport` | empty or `socket` emits `socket`; otherwise exactly `http` or `auto` |
-| `cli_session_forwarding` | `config_t.server_api_cli_session_forwarding` | JSON boolean; source must be exactly 0 or 1 |
-| `require_aimee_git` | `config_t.require_aimee_git` | JSON boolean; source must be exactly 0 or 1 |
+| `mtls` | `legacy_config_record.server_api_mtls` | `off`, `optional`, or `required` for source 0, 1, or 2 |
+| `remote_writes` | `legacy_config_record.server_api_remote_writes` | `off`, `data`, or `full` for source 0, 1, or 2 |
+| `client_transport` | `legacy_config_record.server_api_client_transport` | empty or `socket` emits `socket`; otherwise exactly `http` or `auto` |
+| `cli_session_forwarding` | `legacy_config_record.server_api_cli_session_forwarding` | JSON boolean; source must be exactly 0 or 1 |
+| `require_aimee_git` | `legacy_config_record.require_aimee_git` | JSON boolean; source must be exactly 0 or 1 |
 
 Any unrecognized source enum, unterminated string, non-boolean integer, or config load failure
 fails the complete response as `unavailable`; it never substitutes a default other than the
@@ -59,9 +63,9 @@ encoded completely in memory, capped at 32 KiB, emitted once, and never truncate
 JSON member order is the exact order in the example so fixtures are deterministic.
 
 The projector receives a dedicated record containing only the five source values. In the running
-server, the source loader calls the existing `config_load(config_t *)` API. That API is explicitly
+server, the source loader calls the existing `legacy_config_read(legacy_config_record *)` API. That API is explicitly
 the public active-config read: after `config_snapshot_init` it delegates to
-`config_snapshot_get`, which copies one coherent POD `config_t` slot under the existing seqlock
+`config_snapshot_get`, which copies one coherent POD `legacy_config_record` slot under the existing seqlock
 and retries if a reload publication races it. It therefore reports the active validated runtime
 configuration, not an independently reread disk file, and does not parse, normalize, resolve
 environment, run commands, mutate globals, traverse a caller path, or publish configuration.
@@ -69,25 +73,25 @@ environment, run commands, mutate globals, traverse a caller path, or publish co
 management listener is unavailable, so the loader never falls back to file semantics here.
 
 P5-D2b0 must first repair the existing two-slot snapshot implementation: a sequence retry alone
-does not prevent a second consecutive publication from reusing an ordinary `config_t` slot while
+does not prevent a second consecutive publication from reusing an ordinary `legacy_config_record` slot while
 a reader is still copying it, which is a C data race even if the reader later retries. D2b may rely
 on `config_snapshot_get` only after D2b0 adds reader lifetime pinning (or an equivalently reviewed
 RCU/locking design) and a ThreadSanitizer gate with consecutive publishers and full-structure
 readers. This prerequisite is a separate, tightly scoped merge so the concurrency primitive is
 validated independently of the disclosure path.
 
-After the coherent, reader-pinned `config_load` copy succeeds, the loader copies only the five named members into
-the dedicated record and cleanses the local `config_t`. No filename, source selector, reload
-request, or caller-selected input exists in this API. The projector never receives `config_t`, a
+After the coherent, reader-pinned `legacy_config_read` copy succeeds, the loader copies only the five named members into
+the dedicated record and cleanses the local `legacy_config_record`. No filename, source selector, reload
+request, or caller-selected input exists in this API. The projector never receives `legacy_config_record`, a
 `cJSON` source node, YAML text, a filename, or a generic key/value map. Adding a field to
-`config_t` cannot widen the wire type. Tests race snapshot publication against reads and require
+`legacy_config_record` cannot widen the wire type. Tests race snapshot publication against reads and require
 each result to match one complete before-or-after five-field tuple, never a mixture. They also
 prove the getter cannot cause a publish/reload, file read, command, network call, or environment
 resolution. Canary tests place values in bearer token, client-CA path, provider/model endpoints,
 commands, environment-shaped members, prompts, personas, tool policy, and other source members and
 prove none is reachable through the getter or JSON round trip.
 
-The authoritative source declarations are exactly `config_t.server_api_mtls`,
+The authoritative source declarations are exactly `legacy_config_record.server_api_mtls`,
 `server_api_remote_writes`, `server_api_client_transport[16]`,
 `server_api_cli_session_forwarding`, and `require_aimee_git` in
 `src/modules/config/config.h`. Their parser keys are respectively `aimee.api.mtls`,
@@ -103,7 +107,7 @@ globs, mounts, working directories, provider/model configuration, personas, role
 instructions, tool policy, templates, cron state or jobs, telemetry configuration, raw YAML/JSON,
 and secret-shaped placeholders. Numeric rate/event-stream settings are not in this slice. The
 roundtable's suggested `log_level`, config-level `max_parallel`, feature/cron flags, telemetry
-redaction flag, and HTTP timeout fields do not exist in the authoritative `config_t` contract and
+redaction flag, and HTTP timeout fields do not exist in the authoritative `legacy_config_record` contract and
 are rejected rather than invented. A `cron_jobs_present` flag would itself add a side channel and
 is also excluded.
 
@@ -215,7 +219,7 @@ executable ten-step ordering.
   ASAN/UBSAN.
 - Active-snapshot tests initialize two distinct validated configs, race publication/reload with
   the getter, and accept only a coherent old or new five-field tuple. Assert the getter uses
-  `config_load`/`config_snapshot_get`, never `config_load_file`, performs no publish or global
+  `legacy_config_read`/`config_snapshot_get`, never `config_load_file`, performs no publish or global
   mutation, and triggers no file, environment, command, or network source action.
 - The prerequisite D2b0 gate runs the full-slot reader against multiple consecutive publications
   under ThreadSanitizer (or an equivalent data-race detector), not only functional tuple checks.

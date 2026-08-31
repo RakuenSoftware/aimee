@@ -9,16 +9,17 @@
 #include <string.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "memory.h"
 #include "session_briefing.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static char *make_tmpdir(void)
 {
    char *tmp = malloc(64);
    assert(tmp);
-   snprintf(tmp, 64, "/tmp/test_session_briefing_XXXXXX");
+   snprintf(tmp, 64, "%s/test_session_briefing_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    return tmp;
 }
@@ -89,8 +90,11 @@ int main(void)
                        "Body.\n");
       char *limited = session_briefing_render_skill_index(root, 1);
       assert(limited != NULL);
-      assert(strstr(limited, "- project-first: Use when proving index limit behavior.") != NULL);
-      assert(strstr(limited, "- find-symbols:") == NULL);
+      /* Unsigned project skills are agent authority and default-denied. They
+       * also must not consume the display limit and hide a trusted skill. */
+      assert(strstr(limited, "- project-first:") == NULL);
+      assert(strstr(limited, "- find-symbols: Use when locating where a symbol is defined.") !=
+             NULL);
       free(limited);
 
       rm_rf(root);

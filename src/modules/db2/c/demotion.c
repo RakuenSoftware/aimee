@@ -1,0 +1,908 @@
+/* db2/demotion.c: retrieval attribution evidence and demotion profiles.
+ * See docs/proposals/done/outcome-driven-demotion-and-poison-resilience.md */
+
+#include "demotion.h"
+#include "artifacts.h"
+#include "db2_internal.h"
+#include "db_postgres.h"
+#include "memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "aimee.h"
+
+#include <cJSON.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* auditable-correctness P1.5 (D3): the retrieval_event carries a UNIFIED typed
+ * `surfaced_refs` list — [{type,...,v}] — as the source of truth. Memory rows are
+ * {type:"memory", id:<int64>, v:<updated_at>}; code refs are {type:"code",
+ * ref:"code:<project>:<file_path>", v:<content_hash>}. The legacy `surfaced_ids`
+ * and `surfaced_items` arrays are kept as DERIVED projections of the memory-typed
+ * entries, so every existing reader (trace, provenance, demotion) is byte-identical.
+ * make_memory_ref / project_memory_refs / ensure_surfaced_refs keep that invariant;
+ * the writer and both merges go through them. */
+
+/* Event-payload read buffer for the merges (~900 refs). On overflow by_turn
+ * truncates → the CAS old-value can't match → -1 (fail-safe). */
+#define MERGE_EVENT_PAYLOAD_CAP 65536
+
+/* {type:"memory", id, v} — v captured now (omitted when unresolved, mirroring the
+ * legacy contract: a missing version means "unknown", not drift). */
+static cJSON *make_memory_ref(int64_t id)
+{
+   cJSON *r = cJSON_CreateObject();
+   if (!r)
+      return NULL;
+   cJSON_AddStringToObject(r, "type", "memory");
+   cJSON_AddNumberToObject(r, "id", (double)id);
+   char version[64] = "";
+   if (db2_memory_provenance_by_id(id, NULL, 0, NULL, 0, version, sizeof(version)) == 1 &&
+       version[0])
+      cJSON_AddStringToObject(r, "v", version);
+   return r;
+}
+
+/* Regenerate surfaced_ids + surfaced_items from the memory-typed entries of
+ * surfaced_refs (the unified source of truth), so the back-compat projections
+ * always match after any mutation. */
+static void project_memory_refs(cJSON *p)
+{
+   cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
+   if (!cJSON_IsArray(refs))
+      return; /* nothing to project from — leave any existing projections intact */
+   /* Build the replacements as DETACHED arrays first, then swap them in only once
+    * both exist — so an allocation failure never leaves the event with the old
+    * projections deleted and no replacements (no destruction window). */
+   cJSON *ids = cJSON_CreateArray();
+   cJSON *items = cJSON_CreateArray();
+   if (!ids || !items)
+   {
+      cJSON_Delete(ids);
+      cJSON_Delete(items);
+      return;
+   }
+   int n = cJSON_GetArraySize(refs);
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *r = cJSON_GetArrayItem(refs, i);
+      cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+      cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
+      if (!cJSON_IsString(t) || strcmp(t->valuestring, "memory") != 0 || !cJSON_IsNumber(idj))
+         continue;
+      cJSON_AddItemToArray(ids, cJSON_CreateNumber(idj->valuedouble));
+      cJSON *it = cJSON_CreateObject();
+      cJSON_AddNumberToObject(it, "id", idj->valuedouble);
+      cJSON *v = cJSON_GetObjectItemCaseSensitive(r, "v");
+      if (cJSON_IsString(v) && v->valuestring)
+         cJSON_AddStringToObject(it, "v", v->valuestring);
+      cJSON_AddItemToArray(items, it);
+   }
+   cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_ids");
+   cJSON_DeleteItemFromObjectCaseSensitive(p, "surfaced_items");
+   cJSON_AddItemToObject(p, "surfaced_ids", ids);
+   cJSON_AddItemToObject(p, "surfaced_items", items);
+}
+
+/* Return p's surfaced_refs array, back-filling it from the legacy surfaced_ids/
+ * surfaced_items of an event written before the unified model (migration-on-read).
+ * Returns NULL only on allocation failure. */
+static cJSON *ensure_surfaced_refs(cJSON *p)
+{
+   cJSON *refs = cJSON_GetObjectItemCaseSensitive(p, "surfaced_refs");
+   if (cJSON_IsArray(refs))
+      return refs;
+   refs = cJSON_AddArrayToObject(p, "surfaced_refs");
+   if (!refs)
+      return NULL;
+   cJSON *ids = cJSON_GetObjectItemCaseSensitive(p, "surfaced_ids");
+   cJSON *items = cJSON_GetObjectItemCaseSensitive(p, "surfaced_items");
+   int n = cJSON_IsArray(ids) ? cJSON_GetArraySize(ids) : 0;
+   for (int i = 0; i < n; i++)
+   {
+      cJSON *e = cJSON_GetArrayItem(ids, i);
+      if (!cJSON_IsNumber(e))
+         continue;
+      int64_t id = (int64_t)e->valuedouble;
+      cJSON *r = cJSON_CreateObject();
+      if (!r)
+         continue;
+      cJSON_AddStringToObject(r, "type", "memory");
+      cJSON_AddNumberToObject(r, "id", (double)id);
+      if (cJSON_IsArray(items)) /* preserve the legacy point-in-time v */
+      {
+         int m = cJSON_GetArraySize(items);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *it = cJSON_GetArrayItem(items, j);
+            cJSON *iid = it ? cJSON_GetObjectItemCaseSensitive(it, "id") : NULL;
+            if (cJSON_IsNumber(iid) && (int64_t)iid->valuedouble == id)
+            {
+               cJSON *v = cJSON_GetObjectItemCaseSensitive(it, "v");
+               if (cJSON_IsString(v) && v->valuestring)
+                  cJSON_AddStringToObject(r, "v", v->valuestring);
+               break;
+            }
+         }
+      }
+      cJSON_AddItemToArray(refs, r);
+   }
+   return refs;
+}
+
+/* Compare-and-swap the event payload: land newpayload only if the row's payload
+ * still equals oldpayload (no concurrent change). Returns 1 if updated, 0 if no row
+ * matched (a concurrent merge changed it, or the event was deleted), -1 on error.
+ * Shared by both merges so the CAS retry contract is identical. */
+static int cas_update_event_payload(void *conn, const char *ev_id, const char *oldpayload,
+                                    const char *newpayload)
+{
+   if (!conn || !ev_id || !oldpayload || !newpayload)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "UPDATE artifacts SET payload = ?1 WHERE id = ?2 AND payload = ?3", err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", newpayload);
+   aimee_pg_bind_text(st, "?2", ev_id);
+   aimee_pg_bind_text(st, "?3", oldpayload);
+   int step = aimee_pg_step(st, err, sizeof(err));
+   int changes = aimee_pg_stmt_changes(st);
+   aimee_pg_finalize(st);
+   if (step != AIMEE_PG_DONE)
+      return -1;
+   return changes > 0 ? 1 : 0;
+}
+
+int db2_demotion_retrieval_event_write(const char *query_fingerprint, const char *role,
+                                       const int64_t *surfaced_ids, int n_surfaced, char *id_out,
+                                       int id_out_len)
+{
+   char id[64];
+   db2_artifact_gen_id(id, sizeof(id));
+
+   /* Build the unified surfaced_refs (all memory at create), then derive the
+    * back-compat surfaced_ids/surfaced_items projections from it (D3/P1.5). */
+   cJSON *p = cJSON_CreateObject();
+   if (!p)
+      return -1;
+   cJSON_AddStringToObject(p, "query_fingerprint", query_fingerprint ? query_fingerprint : "");
+   cJSON_AddStringToObject(p, "role", role ? role : "");
+   cJSON *refs = cJSON_AddArrayToObject(p, "surfaced_refs");
+   /* surfaced_ids may be NULL (proactive/no-surface events); guard so n is 0. */
+   for (int i = 0; surfaced_ids && refs && i < n_surfaced; i++)
+   {
+      cJSON *r = make_memory_ref(surfaced_ids[i]);
+      if (r)
+         cJSON_AddItemToArray(refs, r);
+   }
+   project_memory_refs(p);
+   char *payload = cJSON_PrintUnformatted(p);
+   cJSON_Delete(p);
+   if (!payload)
+      return -1;
+
+   int rc = db2_artifact_write(id, "retrieval_event", "proposed", "system", "", "", 1.0, payload);
+   free(payload);
+   if (rc != 0)
+      return -1;
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+int db2_demotion_retrieval_event_write_turn(const char *turn_id, const char *query_fingerprint,
+                                            const char *role, const int64_t *surfaced_ids,
+                                            int n_surfaced, char *id_out, int id_out_len)
+{
+   char id[64];
+   if (db2_demotion_retrieval_event_write(query_fingerprint, role, surfaced_ids, n_surfaced, id,
+                                          sizeof(id)) != 0)
+      return -1;
+
+   /* Stamp the caller-visible turn_id (single follow-up UPDATE, like the
+    * attribution writer stamps model_version). NOTE: the INSERT + this UPDATE are
+    * not one transaction — a crash between them leaves a NULL-stamped event,
+    * recoverable on the turn's retry (first-wins preserved). On a duplicate
+    * turn_id the partial unique index makes this UPDATE fail; we then return the
+    * AUTHORITATIVE event's id (so callers attribute to the reachable event, not
+    * this orphan) — the closest P1 gets to the P1.5 idempotent merge. */
+   if (turn_id && turn_id[0])
+   {
+      void *conn = db2_conn();
+      if (conn)
+      {
+         char err[256] = "";
+         aimee_pg_stmt_t *st = aimee_pg_prepare(
+             conn, "UPDATE artifacts SET turn_id = ?1 WHERE id = ?2", err, sizeof(err));
+         if (st)
+         {
+            aimee_pg_bind_text(st, "?1", turn_id);
+            aimee_pg_bind_text(st, "?2", id);
+            int rc = aimee_pg_step(st, err, sizeof(err));
+            aimee_pg_finalize(st);
+            if (rc != AIMEE_PG_DONE) /* duplicate turn_id (unique conflict) */
+            {
+               char auth[64];
+               if (db2_demotion_retrieval_event_by_turn(turn_id, auth, sizeof(auth), NULL, 0) == 1)
+               {
+                  if (id_out && id_out_len > 0)
+                     snprintf(id_out, (size_t)id_out_len, "%s", auth);
+                  return 0;
+               }
+            }
+         }
+      }
+   }
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+int db2_demotion_retrieval_event_by_turn(const char *turn_id, char *id_out, int id_out_len,
+                                         char *payload_out, int payload_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (payload_out && payload_out_len > 0)
+      payload_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+   char err[256] = "";
+   aimee_pg_stmt_t *st =
+       aimee_pg_prepare(conn,
+                        "SELECT id, payload FROM artifacts"
+                        " WHERE kind = 'retrieval_event' AND turn_id = ?1 LIMIT 1",
+                        err, sizeof(err));
+   if (!st)
+      return -1;
+   aimee_pg_bind_text(st, "?1", turn_id);
+   int rc = aimee_pg_step(st, err, sizeof(err));
+   int found = 0;
+   if (rc == AIMEE_PG_ROW)
+   {
+      found = 1;
+      if (id_out && id_out_len > 0)
+         snprintf(id_out, (size_t)id_out_len, "%s", aimee_pg_column_text(st, 0));
+      if (payload_out && payload_out_len > 0)
+         snprintf(payload_out, (size_t)payload_out_len, "%s", aimee_pg_column_text(st, 1));
+   }
+   aimee_pg_finalize(st);
+   /* Distinguish a DB error (-1) from a genuine no-event (0): /v1/audit/trace
+    * must report evidence_unavailable on failure, never a falsely-empty trace. */
+   if (rc == AIMEE_PG_ERR)
+      return -1;
+   return found;
+}
+
+int db2_demotion_retrieval_event_merge_turn(const char *turn_id, const char *query_fingerprint,
+                                            const char *role, const int64_t *surfaced_ids,
+                                            int n_surfaced, char *id_out, int id_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   /* auditable-correctness P1.5 (D14): the two-writer idempotent merge. A turn's
+    * retrieval_event may be contributed to by more than one surface (the memory
+    * recall AND the code-search surface). The first writer creates the event; any
+    * later writer MERGES its surfaced refs into that same event rather than being
+    * dropped (the plain write_turn dup path only returns the existing id). Dedup by
+    * id makes it idempotent — re-merging the same refs is a no-op.
+    *
+    * Concurrency: a compare-and-swap retry loop (budget of 5 attempts; on exhaustion
+    * returns -1). The UPDATE lands only if the row's payload still equals what we
+    * read; a concurrent merge (or the event being deleted) yields 0 rows-affected,
+    * so we re-read and retry. The CREATE path also loops: after write_turn we
+    * `continue` and re-merge, so even if we lost a create race (write_turn wrote an
+    * un-stamped orphan and returned the winner's id) our refs still land in the
+    * canonical event on the next pass. Portable across Postgres and the sqlite shim
+    * (no FOR UPDATE / jsonb needed). */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   /* One heap buffer reused across retries (~900 refs); avoids a large per-iteration
+    * stack frame. If a payload ever exceeds it, by_turn truncates → the CAS old-value
+    * can't match → retries exhaust → -1 (fail-safe, never a silent partial write). */
+   char *payload = malloc(MERGE_EVENT_PAYLOAD_CAP);
+   if (!payload)
+      return -1;
+
+   int result = -1;
+   for (int attempt = 0; attempt < 5; attempt++)
+   {
+      char ev_id[64] = "";
+      payload[0] = '\0';
+      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                    MERGE_EVENT_PAYLOAD_CAP);
+      if (rc < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (rc == 0)
+      {
+         /* No event yet — create it, then re-read IN THIS iteration so the merge
+          * below still runs (even on the last retry) and our refs land even if a
+          * concurrent writer won the create race. */
+         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, surfaced_ids,
+                                                     n_surfaced, NULL, 0) != 0)
+         {
+            result = -1;
+            break;
+         }
+         payload[0] = '\0';
+         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                   MERGE_EVENT_PAYLOAD_CAP);
+         if (rc != 1) /* created but not readable (raced away) — fail this call */
+         {
+            result = -1;
+            break;
+         }
+      }
+
+      cJSON *p = payload[0] ? cJSON_Parse(payload) : NULL;
+      if (!p)
+      {
+         result = -1; /* present row, unparseable payload — surface the error */
+         break;
+      }
+      /* Merge into the unified surfaced_refs (migrating a legacy event on read). */
+      cJSON *refs = ensure_surfaced_refs(p);
+      if (!refs)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      int added = 0;
+      int oom = 0;
+      for (int i = 0; surfaced_ids && i < n_surfaced; i++)
+      {
+         int64_t id = surfaced_ids[i];
+         if (id <= 0) /* non-positive ids are ignored (documented in the header) */
+            continue;
+         /* dedup: skip memory refs already on the event (idempotency). Only memory-
+          * typed entries are compared, so a code ref never falsely matches. */
+         int present = 0, m = cJSON_GetArraySize(refs);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *r = cJSON_GetArrayItem(refs, j);
+            cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+            cJSON *idj = cJSON_GetObjectItemCaseSensitive(r, "id");
+            if (cJSON_IsString(t) && strcmp(t->valuestring, "memory") == 0 && cJSON_IsNumber(idj) &&
+                (int64_t)idj->valuedouble == id)
+            {
+               present = 1;
+               break;
+            }
+         }
+         if (present)
+            continue;
+         cJSON *r = make_memory_ref(id);
+         if (!r) /* allocation failure — abort rather than silently drop a ref */
+         {
+            oom = 1;
+            break;
+         }
+         cJSON_AddItemToArray(refs, r);
+         added++;
+      }
+      if (oom)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      if (added > 0)
+         project_memory_refs(p); /* keep the back-compat projections in sync */
+
+      if (added == 0)
+      {
+         /* All refs already present — idempotent no-op, no write needed. */
+         cJSON_Delete(p);
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+
+      char *newpayload = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      if (!newpayload)
+      {
+         result = -1;
+         break;
+      }
+
+      /* CAS: land the update only if the payload is still the value we merged from. */
+      int cas = cas_update_event_payload(conn, ev_id, payload, newpayload);
+      free(newpayload);
+      if (cas < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (cas > 0)
+      {
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+      /* 0 rows: concurrent merge or the event vanished — re-read and retry. */
+   }
+   free(payload);
+   return result;
+}
+
+int db2_demotion_retrieval_event_merge_refs_turn(const char *turn_id, const char *query_fingerprint,
+                                                 const char *role, const char *const *types,
+                                                 const char *const *refs_in,
+                                                 const char *const *versions, int n_refs,
+                                                 char *id_out, int id_out_len)
+{
+   if (id_out && id_out_len > 0)
+      id_out[0] = '\0';
+   if (!turn_id || !turn_id[0])
+      return -1;
+
+   /* auditable-correctness P1.5 (D3/D14): merge TYPED refs ({type, ref, v}, e.g.
+    * code:<project>:<file_path> with v=content_hash) into the turn's unified
+    * surfaced_refs, deduped by (type, ref). Same CAS retry + create-then-merge as
+    * the int64 merge; the create path reuses write_turn to make a bare turn event
+    * (with dup-race handling), after which the typed refs merge on the next pass. */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char *payload = malloc(MERGE_EVENT_PAYLOAD_CAP);
+   if (!payload)
+      return -1;
+
+   int result = -1;
+   for (int attempt = 0; attempt < 5; attempt++)
+   {
+      char ev_id[64] = "";
+      payload[0] = '\0';
+      int rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                    MERGE_EVENT_PAYLOAD_CAP);
+      if (rc < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (rc == 0)
+      {
+         /* No event yet — create a bare turn event (reusing write_turn's dup-race
+          * handling), then re-read IN THIS iteration so the typed merge below runs
+          * even on the last retry. */
+         if (db2_demotion_retrieval_event_write_turn(turn_id, query_fingerprint, role, NULL, 0,
+                                                     NULL, 0) != 0)
+         {
+            result = -1;
+            break;
+         }
+         payload[0] = '\0';
+         rc = db2_demotion_retrieval_event_by_turn(turn_id, ev_id, sizeof(ev_id), payload,
+                                                   MERGE_EVENT_PAYLOAD_CAP);
+         if (rc != 1) /* created but not readable (raced away) — fail this call */
+         {
+            result = -1;
+            break;
+         }
+      }
+
+      cJSON *p = payload[0] ? cJSON_Parse(payload) : NULL;
+      if (!p)
+      {
+         result = -1;
+         break;
+      }
+      cJSON *refs = ensure_surfaced_refs(p);
+      if (!refs)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      int added = 0, oom = 0;
+      for (int i = 0; i < n_refs; i++)
+      {
+         const char *type = types ? types[i] : NULL;
+         const char *ref = refs_in ? refs_in[i] : NULL;
+         if (!type || !type[0] || !ref || !ref[0]) /* require a typed identity */
+            continue;
+         /* memory refs are id-keyed and belong to merge_turn (this path dedups by
+          * ref string, which a memory entry lacks) — skip them defensively. */
+         if (strcmp(type, "memory") == 0)
+            continue;
+         /* dedup by (type, ref) — a typed ref never collides with a memory entry
+          * (which has no "ref" field). Idempotent. */
+         int present = 0, m = cJSON_GetArraySize(refs);
+         for (int j = 0; j < m; j++)
+         {
+            cJSON *r = cJSON_GetArrayItem(refs, j);
+            cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "type");
+            cJSON *rf = cJSON_GetObjectItemCaseSensitive(r, "ref");
+            if (cJSON_IsString(t) && strcmp(t->valuestring, type) == 0 && cJSON_IsString(rf) &&
+                strcmp(rf->valuestring, ref) == 0)
+            {
+               present = 1;
+               break;
+            }
+         }
+         if (present)
+            continue;
+         cJSON *r = cJSON_CreateObject();
+         if (!r)
+         {
+            oom = 1;
+            break;
+         }
+         cJSON_AddStringToObject(r, "type", type);
+         cJSON_AddStringToObject(r, "ref", ref);
+         const char *v = versions ? versions[i] : NULL;
+         if (v && v[0])
+            cJSON_AddStringToObject(r, "v", v);
+         cJSON_AddItemToArray(refs, r);
+         added++;
+      }
+      if (oom)
+      {
+         cJSON_Delete(p);
+         result = -1;
+         break;
+      }
+
+      /* typed refs don't change the memory-only legacy projections, but a migrated
+       * legacy event still needs them rebuilt so surfaced_ids/items exist. */
+      if (added > 0)
+         project_memory_refs(p);
+
+      if (added == 0)
+      {
+         cJSON_Delete(p);
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+
+      char *newpayload = cJSON_PrintUnformatted(p);
+      cJSON_Delete(p);
+      if (!newpayload)
+      {
+         result = -1;
+         break;
+      }
+      int cas = cas_update_event_payload(conn, ev_id, payload, newpayload);
+      free(newpayload);
+      if (cas < 0)
+      {
+         result = -1;
+         break;
+      }
+      if (cas > 0)
+      {
+         if (id_out && id_out_len > 0)
+            snprintf(id_out, (size_t)id_out_len, "%s", ev_id);
+         result = 0;
+         break;
+      }
+      /* 0 rows: concurrent change — re-read and retry. */
+   }
+   free(payload);
+   return result;
+}
+
+int db2_demotion_retrieval_attribution_write(const char *retrieval_event_id,
+                                             int64_t surfaced_row_id, const char *verdict,
+                                             double weight)
+{
+   if (!retrieval_event_id || !verdict)
+      return -1;
+
+   char id[64];
+   db2_artifact_gen_id(id, sizeof(id));
+
+   /* scope_id = string(surfaced_row_id) for fast lookup by row. */
+   char scope_id_buf[32];
+   snprintf(scope_id_buf, sizeof(scope_id_buf), "%lld", (long long)surfaced_row_id);
+
+   char payload[512];
+   snprintf(payload, sizeof(payload),
+            "{\"retrieval_event_id\":\"%s\",\"surfaced_row_id\":%lld,\"verdict\":\"%s\","
+            "\"weight\":%.6f}",
+            retrieval_event_id, (long long)surfaced_row_id, verdict, weight);
+
+   int rc = db2_artifact_write(id, "retrieval_attribution", "proposed", "memory", scope_id_buf, "",
+                               1.0, payload);
+   if (rc != 0)
+      return -1;
+
+   /* Stamp model_version = retrieval_event_id for FK-style linking queries. */
+   void *conn = db2_conn();
+   if (!conn)
+      return 0; /* written, but can't stamp event link — tolerable */
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(
+       conn, "UPDATE artifacts SET model_version = ?1 WHERE id = ?2", err, sizeof(err));
+   if (st)
+   {
+      aimee_pg_bind_text(st, "?1", retrieval_event_id);
+      aimee_pg_bind_text(st, "?2", id);
+      aimee_pg_step(st, err, sizeof(err));
+      aimee_pg_finalize(st);
+   }
+   return 0;
+}
+
+/* Timestamp parsing is shared (parse_utc_ts in util.c). This file used to keep
+ * its own copy that matched only "YYYY-MM-DD HH:MM:SS", and these columns also
+ * hold the ISO spelling that now_utc() writes. The mismatch was silent and it
+ * mattered here more than anywhere: an unparsed stamp returns 0, the epoch,
+ * which this decay treats as ancient -- so a memory used minutes ago decayed as
+ * though it had never been used. */
+
+/* Verdict contribution: accepted → +w, negative verdicts → -w, irrelevant → 0. */
+static double verdict_sign(const char *verdict)
+{
+   if (!verdict)
+      return 0.0;
+   if (strcmp(verdict, DEMOTION_VERDICT_ACCEPTED) == 0)
+      return 1.0;
+   if (strcmp(verdict, DEMOTION_VERDICT_CORRECTED) == 0 ||
+       strcmp(verdict, DEMOTION_VERDICT_CONTRADICTED) == 0 ||
+       strcmp(verdict, DEMOTION_VERDICT_ROLLED_BACK) == 0)
+      return -1.0;
+   return 0.0; /* irrelevant or unknown */
+}
+
+double db2_demotion_score(int64_t row_id, int window_size, double half_life_days, int n_min)
+{
+   if (window_size <= 0)
+      window_size = 64;
+   if (half_life_days <= 0.0)
+      half_life_days = 30.0;
+   if (n_min <= 0)
+      n_min = 5;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return NAN;
+
+   char scope_id_buf[32];
+   snprintf(scope_id_buf, sizeof(scope_id_buf), "%lld", (long long)row_id);
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT id, payload, created_at FROM artifacts"
+                                          " WHERE kind = 'retrieval_attribution' AND scope_id = ?1"
+                                          " ORDER BY created_at DESC"
+                                          " LIMIT ?2",
+                                          err, sizeof(err));
+   if (!st)
+      return NAN;
+
+   aimee_pg_bind_text(st, "?1", scope_id_buf);
+   aimee_pg_bind_int(st, "?2", window_size);
+
+   time_t now = time(NULL);
+   double score = 0.0;
+   int n_valid = 0;
+   double ln2 = 0.693147180559945;
+   char(*touched_ids)[64] = calloc((size_t)window_size, sizeof(*touched_ids));
+   int touched_n = 0;
+
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *artifact_id = aimee_pg_column_text(st, 0);
+      const char *payload_str = aimee_pg_column_text(st, 1);
+      const char *created_at = aimee_pg_column_text(st, 2);
+      if (touched_ids && artifact_id && artifact_id[0] && touched_n < window_size)
+         snprintf(touched_ids[touched_n++], sizeof(touched_ids[0]), "%s", artifact_id);
+
+      if (!payload_str)
+         continue;
+
+      cJSON *p = cJSON_Parse(payload_str);
+      if (!p)
+         continue;
+
+      cJSON *jv = cJSON_GetObjectItemCaseSensitive(p, "verdict");
+      cJSON *jw = cJSON_GetObjectItemCaseSensitive(p, "weight");
+
+      if (cJSON_IsString(jv))
+      {
+         double w = cJSON_IsNumber(jw) ? jw->valuedouble : 1.0;
+         double sign = verdict_sign(jv->valuestring);
+
+         /* Time decay: exp(-ln2 * age_days / half_life_days). */
+         double age_days = 0.0;
+         if (created_at)
+         {
+            time_t ts = parse_utc_ts(created_at);
+            if (ts > 0 && now > ts)
+               age_days = difftime(now, ts) / 86400.0;
+         }
+         double decay = exp(-ln2 * age_days / half_life_days);
+
+         score += sign * w * decay;
+         n_valid++;
+      }
+      cJSON_Delete(p);
+   }
+   aimee_pg_finalize(st);
+   /* Scoring consumes retrieval-attribution artifacts; stamp those reads after
+    * the SELECT is finalized so temporal maintenance sees active evidence. */
+   for (int i = 0; i < touched_n; i++)
+      db2_artifact_touch(touched_ids[i]);
+   free(touched_ids);
+
+   if (n_valid < n_min)
+      return NAN;
+   return score;
+}
+
+int db2_demotion_profile_write(const char *memory_class, const char *scope_kind,
+                               const char *scope_id, const char *payload_json, char *id_out,
+                               int id_out_len)
+{
+   if (!memory_class || !payload_json)
+      return -1;
+
+   char id[64];
+   db2_artifact_gen_id(id, sizeof(id));
+
+   int rc =
+       db2_artifact_write(id, "demotion_profile", "committed", scope_kind ? scope_kind : "global",
+                          scope_id ? scope_id : "", "", 1.0, payload_json);
+   if (rc != 0)
+      return -1;
+
+   /* Stamp target_surface = memory_class and committed_at. */
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char ts[32];
+   now_utc(ts, sizeof(ts));
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "UPDATE artifacts"
+                                          " SET target_surface = ?1,"
+                                          "     committed_at   = ?2"
+                                          " WHERE id = ?3",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+
+   aimee_pg_bind_text(st, "?1", memory_class);
+   aimee_pg_bind_text(st, "?2", ts);
+   aimee_pg_bind_text(st, "?3", id);
+   aimee_pg_step(st, err, sizeof(err));
+   aimee_pg_finalize(st);
+
+   if (id_out && id_out_len > 0)
+      snprintf(id_out, (size_t)id_out_len, "%s", id);
+   return 0;
+}
+
+static int demotion_try_read(void *conn, const char *memory_class, const char *scope_kind,
+                             const char *scope_id, char *buf, size_t len)
+{
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT id, payload FROM artifacts"
+                                          " WHERE kind = 'demotion_profile'"
+                                          "   AND target_surface = ?1"
+                                          "   AND scope_kind     = ?2"
+                                          "   AND scope_id       = ?3"
+                                          "   AND state          = 'committed'"
+                                          " ORDER BY committed_at DESC"
+                                          " LIMIT 1",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+
+   aimee_pg_bind_text(st, "?1", memory_class);
+   aimee_pg_bind_text(st, "?2", scope_kind ? scope_kind : "");
+   aimee_pg_bind_text(st, "?3", scope_id ? scope_id : "");
+
+   int found = 0;
+   char found_id[64] = "";
+   if (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   {
+      const char *id = aimee_pg_column_text(st, 0);
+      const char *payload = aimee_pg_column_text(st, 1);
+      if (payload)
+      {
+         snprintf(buf, len, "%s", payload);
+         snprintf(found_id, sizeof(found_id), "%s", id ? id : "");
+         found = 1;
+      }
+   }
+   aimee_pg_finalize(st);
+   if (found && found_id[0])
+      db2_artifact_touch(found_id);
+   return found ? 0 : -1;
+}
+
+int db2_demotion_profile_read(const char *memory_class, const char *scope_kind,
+                              const char *scope_id, char *buf, size_t len)
+{
+   void *conn = db2_conn();
+   if (!conn || !memory_class || !buf || len == 0)
+      return -1;
+
+   /* 1. Exact scope. */
+   if (demotion_try_read(conn, memory_class, scope_kind, scope_id, buf, len) == 0)
+      return 0;
+
+   /* 2. Scope-kind only. */
+   if (scope_id && scope_id[0] &&
+       demotion_try_read(conn, memory_class, scope_kind, "", buf, len) == 0)
+      return 0;
+
+   /* 3. Global fallback. */
+   if (scope_kind && scope_kind[0] &&
+       demotion_try_read(conn, memory_class, "global", "", buf, len) == 0)
+      return 0;
+
+   return -1;
+}
+
+int db2_demotion_candidates(int n_min, db2_demotion_candidate_t *out, int max)
+{
+   if (!out || max < 1)
+      return -1;
+
+   void *conn = db2_conn();
+   if (!conn)
+      return -1;
+
+   char err[256] = "";
+   aimee_pg_stmt_t *st = aimee_pg_prepare(conn,
+                                          "SELECT scope_id, COUNT(*) AS n"
+                                          " FROM artifacts"
+                                          " WHERE kind = 'retrieval_attribution'"
+                                          " GROUP BY scope_id"
+                                          " HAVING COUNT(*) >= ?1"
+                                          " LIMIT ?2",
+                                          err, sizeof(err));
+   if (!st)
+      return -1;
+
+   aimee_pg_bind_int(st, "?1", n_min > 0 ? n_min : 1);
+   aimee_pg_bind_int(st, "?2", max);
+
+   int filled = 0;
+   while (aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW && filled < max)
+   {
+      const char *sid = aimee_pg_column_text(st, 0);
+      int n = aimee_pg_column_int(st, 1);
+      if (sid && *sid)
+      {
+         out[filled].row_id = (int64_t)atoll(sid);
+         out[filled].attribution_n = n;
+         filled++;
+      }
+   }
+   aimee_pg_finalize(st);
+   return filled;
+}

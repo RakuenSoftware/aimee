@@ -12,6 +12,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <stdio.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
@@ -32,10 +33,14 @@ static cJSON *mcp_text(const char *text)
    return arr;
 }
 
-static cJSON *mcp_error(const char *fmt, const char *detail)
+static cJSON *mcp_error(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
+static cJSON *mcp_error(const char *fmt, ...)
 {
    char buf[1024];
-   snprintf(buf, sizeof(buf), fmt, detail);
+   va_list ap;
+   va_start(ap, fmt);
+   vsnprintf(buf, sizeof(buf), fmt, ap);
+   va_end(ap);
    return mcp_text(buf);
 }
 
@@ -52,19 +57,76 @@ static int mcp_git_config_reader(const char *key, char *out, size_t out_len, voi
       return 0;
    out[0] = '\0';
 
-   char cmd[256];
-   snprintf(cmd, sizeof(cmd), "git config --get %s 2>/dev/null", key);
+   char cmd[384];
+   snprintf(cmd, sizeof(cmd), "git config --local --get %s 2>/dev/null", key);
    int rc = 0;
    char *got = mcp_git_run(cmd, &rc);
-   if (!got)
-      return 0;
    if (rc == 0)
    {
-      snprintf(out, out_len, "%s", got);
+      snprintf(out, out_len, "%s", got ? got : "");
+      out[strcspn(out, "\r\n")] = '\0';
+   }
+   free(got);
+   if (out[0])
+      return 1;
+
+   /* Delegate launchers deliberately mask ambient Git config so untrusted raw
+    * git commands cannot inherit credential helpers, hooks, or transport
+    * settings. Identity is different: read only these caller-selected
+    * user.name/user.email keys from the operator's normal global config on the
+    * same workspace runner, then pass the values back as explicit `git -c`
+    * arguments. Unmasking this read cannot alter commit behaviour. */
+   snprintf(cmd, sizeof(cmd),
+            "unset GIT_CONFIG_NOSYSTEM GIT_CONFIG_SYSTEM GIT_CONFIG_GLOBAL; "
+            "git config --global --get %s 2>/dev/null",
+            key);
+   got = mcp_git_run(cmd, &rc);
+   if (rc == 0)
+   {
+      snprintf(out, out_len, "%s", got ? got : "");
       out[strcspn(out, "\r\n")] = '\0';
    }
    free(got);
    return out[0] ? 1 : 0;
+}
+
+/* See mcp_git.h. Commit AS THE CONFIGURED OPERATOR, or not at all.
+ *
+ * git_ops points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null, so git has no ambient
+ * identity to fall back on: aimee supplies one or the commit has no author.
+ * Refuse rather than invent a persona. A bot author is not free either, since
+ * GitHub adds a Co-authored-by trailer to the squash of any PR whose commits
+ * carry two distinct authors, and the standing directive forbids those.
+ *
+ * Shared because every path that CREATES a commit needs the same identity:
+ * git_commit, and the merge/rebase/cherry-pick/revert continuations. */
+int mcp_git_identity_flags(char *out, size_t out_len)
+{
+   if (!out || !out_len)
+      return -1;
+   out[0] = '\0';
+   char name[256] = "", email[256] = "";
+   int have = git_identity_resolve_with(agent_get_request_vault_principal(), mcp_git_config_reader,
+                                        NULL, name, sizeof(name), email, sizeof(email));
+   if (have <= 0)
+      return have;
+   char *esc_name = shell_quote(name);
+   char *esc_email = shell_quote(email);
+   snprintf(out, out_len, "-c user.name=%s -c user.email=%s", esc_name, esc_email);
+   free(esc_name);
+   free(esc_email);
+   return 1;
+}
+
+/* See mcp_git.h. */
+const char *mcp_git_identity_error(int rc)
+{
+   if (rc < 0)
+      return "error: could not read the git identity from the vault";
+   return "error: no git identity is configured, so this commit would have no author. "
+          "Set one on this checkout with `git config user.name` and `git config user.email` "
+          "(both, or neither takes effect), or seal AIMEE_GIT_AUTHOR_NAME and "
+          "AIMEE_GIT_AUTHOR_EMAIL into the vault to apply one everywhere.";
 }
 
 /* Return a standard error response for main branch protection.
@@ -82,6 +144,15 @@ static cJSON *main_branch_blocked(const char *operation)
 
 cJSON *handle_git_commit(cJSON *args)
 {
+   /* Before anything else: a commit into a mirror's server-side reconstruction is
+    * discarded on the client's next change, and used to be reported as a success with
+    * a SHA no reachable checkout contained. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("commit");
+      if (blocked)
+         return blocked;
+   }
+
    cJSON *jmsg = cJSON_GetObjectItemCaseSensitive(args, "message");
    if (!cJSON_IsString(jmsg) || !jmsg->valuestring[0])
       return mcp_text("error: 'message' parameter is required");
@@ -126,8 +197,8 @@ cJSON *handle_git_commit(cJSON *args)
             skipped++;
             continue;
          }
-         char *esc = shell_escape(f->valuestring);
-         int n = snprintf(add_cmd + cmd_len, sizeof(add_cmd) - cmd_len, " '%s'", esc);
+         char *esc = shell_quote(f->valuestring);
+         int n = snprintf(add_cmd + cmd_len, sizeof(add_cmd) - cmd_len, " %s", esc);
          free(esc);
          if (n < 0 || cmd_len + (size_t)n >= sizeof(add_cmd))
          {
@@ -175,37 +246,15 @@ cJSON *handle_git_commit(cJSON *args)
       free(out);
    }
 
-   /* Commit AS THE CONFIGURED OPERATOR, or not at all.
-    *
-    * git_ops points GIT_CONFIG_GLOBAL/SYSTEM at /dev/null, so git has no ambient
-    * identity to fall back on here: aimee supplies one or the commit has no
-    * author. Refuse rather than invent a persona. A bot author is not free
-    * either, since GitHub adds a Co-authored-by trailer to the squash of any PR
-    * whose commits carry two distinct authors, and the standing directive
-    * forbids those. */
-   char author_name[256] = "", author_email[256] = "";
-   int have_identity = git_identity_resolve_with(
-       agent_get_request_vault_principal(), mcp_git_config_reader, NULL, author_name,
-       sizeof(author_name), author_email, sizeof(author_email));
-   if (have_identity < 0)
-      return mcp_text("error: could not read the git identity from the vault");
-   if (have_identity == 0)
-      return mcp_text("error: no git identity is configured, so this commit would have no author. "
-                      "Set one on this checkout with `git config user.name` and "
-                      "`git config user.email` (both, or neither takes effect), or seal "
-                      "AIMEE_GIT_AUTHOR_NAME and AIMEE_GIT_AUTHOR_EMAIL into the vault to apply "
-                      "one everywhere.");
+   char ident[768];
+   int have_identity = mcp_git_identity_flags(ident, sizeof(ident));
+   if (have_identity <= 0)
+      return mcp_text(mcp_git_identity_error(have_identity));
 
-   char *esc_msg = shell_escape(jmsg->valuestring);
-   char *esc_name = shell_escape(author_name);
-   char *esc_email = shell_escape(author_email);
+   char *esc_msg = shell_quote(jmsg->valuestring);
    char commit_cmd[8192];
-   snprintf(commit_cmd, sizeof(commit_cmd),
-            "git -c user.name='%s' -c user.email='%s' commit -m '%s' 2>&1", esc_name, esc_email,
-            esc_msg);
+   snprintf(commit_cmd, sizeof(commit_cmd), "git %s commit -m %s 2>&1", ident, esc_msg);
    free(esc_msg);
-   free(esc_name);
-   free(esc_email);
 
    int rc;
    char *out = mcp_git_run(commit_cmd, &rc);
@@ -430,6 +479,11 @@ cJSON *handle_git_push(cJSON *args)
 
 cJSON *handle_git_pull(cJSON *args)
 {
+   {
+      cJSON *blocked = mcp_git_durability_guard("pull");
+      if (blocked)
+         return blocked;
+   }
    cJSON *jrebase = cJSON_GetObjectItemCaseSensitive(args, "rebase");
    int rebase = (jrebase && cJSON_IsTrue(jrebase)) ? 1 : 0;
 
@@ -506,7 +560,7 @@ cJSON *handle_git_clone(cJSON *args)
    cJSON *jbranch = cJSON_GetObjectItemCaseSensitive(args, "branch");
    cJSON *jdepth = cJSON_GetObjectItemCaseSensitive(args, "depth");
 
-   char *esc_url = shell_escape(jurl->valuestring);
+   char *esc_url = shell_quote(jurl->valuestring);
 
    char cmd[2048];
    int pos = snprintf(cmd, sizeof(cmd), "git clone");
@@ -515,8 +569,8 @@ cJSON *handle_git_clone(cJSON *args)
 
    if (cJSON_IsString(jbranch) && jbranch->valuestring[0])
    {
-      char *esc = shell_escape(jbranch->valuestring);
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " -b '%s'", esc);
+      char *esc = shell_quote(jbranch->valuestring);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " -b %s", esc);
       free(esc);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
@@ -529,15 +583,15 @@ cJSON *handle_git_clone(cJSON *args)
    }
 
    {
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " '%s'", esc_url);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " %s", esc_url);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
    }
 
    if (cJSON_IsString(jpath) && jpath->valuestring[0])
    {
-      char *esc = shell_escape(jpath->valuestring);
-      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " '%s'", esc);
+      char *esc = shell_quote(jpath->valuestring);
+      int n = snprintf(cmd + pos, sizeof(cmd) - (size_t)pos, " %s", esc);
       free(esc);
       if (n > 0 && (size_t)pos + (size_t)n < sizeof(cmd))
          pos += n;
@@ -566,6 +620,11 @@ cJSON *handle_git_clone(cJSON *args)
 
 cJSON *handle_git_reset(cJSON *args)
 {
+   {
+      cJSON *blocked = mcp_git_durability_guard("reset");
+      if (blocked)
+         return blocked;
+   }
    /* Fetch branch once — used for main guard and ownership check */
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
@@ -588,9 +647,9 @@ cJSON *handle_git_reset(cJSON *args)
    if (strcmp(mode, "soft") != 0 && strcmp(mode, "mixed") != 0 && strcmp(mode, "hard") != 0)
       return mcp_text("error: mode must be soft, mixed, or hard");
 
-   char *esc_ref = shell_escape(ref);
+   char *esc_ref = shell_quote(ref);
    char cmd[512];
-   snprintf(cmd, sizeof(cmd), "git reset --%s '%s' 2>&1", mode, esc_ref);
+   snprintf(cmd, sizeof(cmd), "git reset --%s %s 2>&1", mode, esc_ref);
    free(esc_ref);
 
    int rc;
@@ -620,10 +679,202 @@ cJSON *handle_git_reset(cJSON *args)
    return mcp_text(result);
 }
 
+/* --- git_add ---
+ *
+ * Staging as its own operation. git_commit stages what it is about to commit and
+ * nothing else (tracked files with -u, or the paths it was handed), so there was
+ * no way to stage a NEW file, or to stage now and commit later. Sensitive paths
+ * are dropped here exactly as git_commit drops them, and `all` is screened the
+ * same way — the screen runs against the resulting index, not against the
+ * caller's argument list, so `all` cannot sweep in a .env that a path list
+ * would have been refused. */
+cJSON *handle_git_add(cJSON *args)
+{
+   {
+      cJSON *blocked = mcp_git_durability_guard("add");
+      if (blocked)
+         return blocked;
+   }
+   char branch[256] = "";
+   get_current_branch(branch, sizeof(branch));
+   if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
+      return main_branch_blocked("add");
+   {
+      cJSON *blocked = branch_own_guard_for(branch, "add");
+      if (blocked)
+         return blocked;
+   }
+
+   cJSON *jfiles = cJSON_GetObjectItemCaseSensitive(args, "files");
+   cJSON *jall = cJSON_GetObjectItemCaseSensitive(args, "all");
+   int all = (jall && cJSON_IsTrue(jall)) ? 1 : 0;
+   int have_files = cJSON_IsArray(jfiles) && cJSON_GetArraySize(jfiles) > 0;
+
+   if (!all && !have_files)
+      return mcp_text("error: 'files' (array of paths) or 'all' (true, stages every change "
+                      "including new files) is required");
+
+   int skipped = 0;
+   char cmd[8192];
+   int pos;
+   if (all)
+   {
+      pos = snprintf(cmd, sizeof(cmd), "git add -A");
+   }
+   else
+   {
+      pos = snprintf(cmd, sizeof(cmd), "git add --");
+      int count = cJSON_GetArraySize(jfiles);
+      for (int i = 0; i < count; i++)
+      {
+         cJSON *f = cJSON_GetArrayItem(jfiles, i);
+         if (!cJSON_IsString(f))
+            continue;
+         if (is_sensitive_file(f->valuestring))
+         {
+            skipped++;
+            continue;
+         }
+         char *esc = shell_quote(f->valuestring);
+         pos = str_appendf(cmd, pos, (int)sizeof(cmd), " %s", esc);
+         free(esc);
+      }
+      if (pos <= (int)strlen("git add --"))
+         return mcp_text("error: every path given is a sensitive file (.env, credentials, keys); "
+                         "nothing was staged");
+   }
+   str_appendf(cmd, pos, (int)sizeof(cmd), " 2>&1");
+
+   int rc;
+   char *out = mcp_git_run(cmd, &rc);
+   if (rc != 0)
+   {
+      cJSON *r = mcp_error("error: git add failed: %s", out ? out : "unknown");
+      free(out);
+      return r;
+   }
+   free(out);
+
+   /* Screen the INDEX, not the argument list: `all` stages by pattern, so this is
+    * the only place that can see what it actually picked up. */
+   char unstaged[2048] = "";
+   int unstaged_n = mcp_git_unstage_sensitive(unstaged, sizeof(unstaged));
+
+   char *staged = mcp_git_run("git diff --cached --name-only 2>/dev/null", &rc);
+   int staged_n = 0;
+   if (staged)
+      for (const char *p = staged; *p; p++)
+         if (*p == '\n')
+            staged_n++;
+
+   char result[SUMMARY_MAX];
+   int rpos = snprintf(result, sizeof(result), "staged %d file(s)", staged_n);
+   if (skipped)
+      rpos =
+          str_appendf(result, rpos, (int)sizeof(result),
+                      "\nwarning: skipped %d sensitive path(s) (.env, credentials, keys)", skipped);
+   if (unstaged_n)
+      rpos = str_appendf(result, rpos, (int)sizeof(result),
+                         "\nwarning: unstaged %d sensitive "
+                         "file(s) that `all` had picked up: %s",
+                         unstaged_n, unstaged);
+   if (staged && staged[0])
+      rpos = str_appendf(result, rpos, (int)sizeof(result), "\n%s", staged);
+   (void)rpos;
+   free(staged);
+   return mcp_text(result);
+}
+
+/* See mcp_git.h. Kept next to git_add because that is what needs it: `add -A`
+ * stages by pattern, and git_commit only screens paths it was handed. */
+int mcp_git_unstage_sensitive(char *report, size_t report_len)
+{
+   if (report && report_len)
+      report[0] = '\0';
+   int rc = 0;
+   char *staged = mcp_git_run("git diff --cached --name-only 2>/dev/null", &rc);
+   if (!staged)
+      return 0;
+
+   int n = 0, rpos = 0;
+   char *line = staged;
+   while (line && *line)
+   {
+      char *nl = strchr(line, '\n');
+      if (nl)
+         *nl = '\0';
+      if (*line && is_sensitive_file(line))
+      {
+         char *esc = shell_quote(line);
+         char cmd[MAX_PATH_LEN + 64];
+         snprintf(cmd, sizeof(cmd), "git restore --staged -- %s 2>&1", esc);
+         free(esc);
+         int unstage_rc = 0;
+         free(mcp_git_run(cmd, &unstage_rc));
+         if (unstage_rc == 0)
+         {
+            n++;
+            if (report && report_len)
+               rpos = str_appendf(report, rpos, (int)report_len, "%s%s", n > 1 ? ", " : "", line);
+         }
+      }
+      line = nl ? nl + 1 : NULL;
+   }
+   free(staged);
+   return n;
+}
+
+/* --- git_switch / git_checkout ---
+ *
+ * Pure routing to the handler that already owns each behaviour, so the model does
+ * not have to know that "switch branches" lives under git_branch and "throw away
+ * my edits to this file" lives under git_restore. No second implementation: the
+ * worktree lock, the ownership registration and the restore semantics stay in
+ * one place each. */
+cJSON *handle_git_switch(cJSON *args)
+{
+   cJSON *jname = cJSON_GetObjectItemCaseSensitive(args, "name");
+   cJSON *jref = cJSON_GetObjectItemCaseSensitive(args, "ref");
+   if ((!cJSON_IsString(jname) || !jname->valuestring[0]) && cJSON_IsString(jref) &&
+       jref->valuestring[0])
+      cJSON_AddStringToObject(args, "name", jref->valuestring);
+   if (!cJSON_IsString(cJSON_GetObjectItemCaseSensitive(args, "name")))
+      return mcp_text("error: 'ref' (the branch to switch to) is required");
+
+   cJSON *jaction = cJSON_GetObjectItemCaseSensitive(args, "action");
+   if (jaction)
+      cJSON_ReplaceItemInObject(args, "action", cJSON_CreateString("switch"));
+   else
+      cJSON_AddStringToObject(args, "action", "switch");
+   return handle_git_branch(args);
+}
+
+cJSON *handle_git_checkout(cJSON *args)
+{
+   cJSON *jfiles = cJSON_GetObjectItemCaseSensitive(args, "files");
+   if (cJSON_IsArray(jfiles) && cJSON_GetArraySize(jfiles) > 0)
+   {
+      /* Path-scoped checkout is a restore: `source` is what git spells as the ref
+       * to take the content from. */
+      cJSON *jref = cJSON_GetObjectItemCaseSensitive(args, "ref");
+      if (cJSON_IsString(jref) && jref->valuestring[0] &&
+          !cJSON_GetObjectItemCaseSensitive(args, "source"))
+         cJSON_AddStringToObject(args, "source", jref->valuestring);
+      return handle_git_restore(args);
+   }
+   return handle_git_switch(args);
+}
+
 /* --- git_restore --- */
 
 cJSON *handle_git_restore(cJSON *args)
 {
+   /* Also covers checkout with a file list, which routes here. */
+   {
+      cJSON *blocked = mcp_git_durability_guard("restore");
+      if (blocked)
+         return blocked;
+   }
    cJSON *jfiles = cJSON_GetObjectItemCaseSensitive(args, "files");
    cJSON *jstaged = cJSON_GetObjectItemCaseSensitive(args, "staged");
    cJSON *jsource = cJSON_GetObjectItemCaseSensitive(args, "source");
@@ -641,8 +892,8 @@ cJSON *handle_git_restore(cJSON *args)
       cJSON *f = cJSON_GetArrayItem(jfiles, i);
       if (!cJSON_IsString(f))
          continue;
-      char *esc = shell_escape(f->valuestring);
-      fpos = str_appendf(file_args, fpos, (int)sizeof(file_args), " '%s'", esc);
+      char *esc = shell_quote(f->valuestring);
+      fpos = str_appendf(file_args, fpos, (int)sizeof(file_args), " %s", esc);
       free(esc);
    }
 
@@ -654,8 +905,8 @@ cJSON *handle_git_restore(cJSON *args)
 
    if (cJSON_IsString(jsource) && jsource->valuestring[0])
    {
-      char *esc = shell_escape(jsource->valuestring);
-      cpos = str_appendf(cmd, cpos, (int)sizeof(cmd), " --source='%s'", esc);
+      char *esc = shell_quote(jsource->valuestring);
+      cpos = str_appendf(cmd, cpos, (int)sizeof(cmd), " --source=%s", esc);
       free(esc);
    }
 

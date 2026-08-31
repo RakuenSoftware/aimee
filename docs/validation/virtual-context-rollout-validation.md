@@ -1,9 +1,9 @@
 # Virtual-Context Assembly: Rollout Validation Report
 
 Closes the operational acceptance criteria of
-[virtual-context-assembly-rollout-validation.md](../proposals/done/virtual-context-assembly-rollout-validation.md).
+virtual-context-assembly-rollout-validation.md (proposal not filed under `docs/proposals/`).
 The parent feature
-([virtual-context-assembly-and-tool-chain-paging.md](../proposals/done/virtual-context-assembly-and-tool-chain-paging.md))
+(virtual-context-assembly-and-tool-chain-paging.md (proposal not filed under `docs/proposals/`))
 shipped the assembler, deterministic stubbing, the `session_context_*` tools,
 and the benchmark gate; this validates them for real and flips the default on.
 
@@ -11,11 +11,11 @@ and the benchmark gate; this validates them for real and flips the default on.
 
 | Acceptance criterion | Status | Evidence |
 |---|---|---|
-| Gate passes on a real (non-synthetic) tool-heavy transcript | ✅ | §1, `fixture_real_session.json` |
-| Manual inspection: compacted signal, not raw duplicate traffic; expand recovers raw | ✅ | §2, `make virtual-context-inspect` |
-| Operational metrics collected, no late-turn regression beyond 0.01 | ✅ | §1 (accuracy) + §3 (metrics surface) |
-| Default flipped to on with documented rollback | ✅ | §4 |
-| Dashboard + rebuild-backlog / expansion-failure alert thresholds | ✅ | §5 |
+| Gate passes on a real (non-synthetic) tool-heavy transcript | yes | §1, `fixture_real_session.json` |
+| Manual inspection: compacted signal, not raw duplicate traffic; expand recovers raw | yes | §2, `make virtual-context-inspect` |
+| Operational metrics collected, no late-turn regression beyond 0.01 | yes | §1 (accuracy) + §3 (metrics surface) |
+| Default flipped to on with documented rollback | yes | §4 |
+| Dashboard + rebuild-backlog / expansion-failure alert thresholds | yes | §5 |
 
 ## §1: Real-session benchmark validation (AC#1)
 
@@ -72,7 +72,7 @@ Observed (verbatim):
 
 --- Assembled working set (conv_ctx_assemble): compacted stubs, NOT replayed raw traffic ---
 # Session Activity
-- [chain 1] Tools: read_file,bash. Files: src/config.c,src/conversation_context.c,src/db1/conv_context.h. Excerpt: config_load parses aimee.yaml; the session.virtual_context block sets virtual_context_enabled...
+- [chain 1] Tools: read_file,bash. Files: src/config.c,src/conversation_context.c,src/db1/conv_context.h. Excerpt: legacy_config_read parses aimee.yaml; the session.virtual_context block sets virtual_context_enabled...
 
 --- session_context_search('virtual_context') hit ---
   1 chain(s) matched; first stub: Tools: read_file,bash. Files: src/config.c,...

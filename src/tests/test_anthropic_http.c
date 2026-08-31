@@ -41,6 +41,7 @@ static const char *g_stream_payload;
 static const char *g_response_body = NULL;
 static int g_response_status = 200;
 static int g_proof_gated = 0;
+static char g_requested_agent[128];
 
 static void reset_capture(void)
 {
@@ -53,6 +54,7 @@ static void reset_capture(void)
    g_response_body = NULL;
    g_response_status = 200;
    g_proof_gated = 0;
+   g_requested_agent[0] = '\0';
 }
 
 int agent_load_config(agent_config_t *cfg)
@@ -76,6 +78,43 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
 agent_t *agent_default_primary(agent_config_t *cfg)
 {
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
+/* Registry accessors (see agent_config.h): the production ones read a cached
+ * registry in place; here they answer from this file's stubbed loader so the
+ * test's fixture still decides the outcome. */
+int agent_registry_find(const char *name, agent_t *out)
+{
+   agent_config_t cfg;
+   if (!name || !out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_find(&cfg, name);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_default_primary(agent_t *out)
+{
+   agent_config_t cfg;
+   if (!out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_default_primary(&cfg);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   snprintf(g_requested_agent, sizeof(g_requested_agent), "%s", model ? model : "");
+   if (model && strcmp(model, "missing") == 0)
+      return -1;
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -303,7 +342,7 @@ int agent_ingress_accounting_enabled(void)
 }
 
 /* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
- * is present so messages_apply_preinject proceeds; build returns the per-test
+ * is present so pre-injection proceeds; build returns the per-test
  * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
  * The injection-coverage test sets g_stub_preinject_env. */
 static char *g_stub_preinject_env = NULL;
@@ -324,28 +363,10 @@ char *ingress_preinject_apply(const char *instructions, const char *envelope)
    (void)instructions;
    return envelope ? strdup(envelope) : NULL;
 }
-/* The economizer seam moved from config_load to econ_mode_current(). Mirror
- * exactly what the config_load stub below produces (module_economizer = 1, so
- * mode is authoritative) so these assertions are unchanged. */
+/* Mirror the configured economizer mode for these assertions. */
 int econ_mode_current(void)
 {
    return g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-}
-
-/* messages_run_request_pipeline reads config for the P5 anthropic-inject opt-in;
- * these whitebox tests run with it off (zeroed). */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      /* -1 = unspecified: memset-0 would read as user-disabled and gate the modules. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-      cfg->module_economizer = 1;
-      cfg->economizer_mode = g_proof_gated ? ECON_MODE_SAFE : ECON_MODE_OFF;
-   }
-   return 0;
 }
 
 /* HTTP-layer stub: agent_http_last_retry_after has no upstream socket here, so 0
@@ -386,10 +407,14 @@ int gateway_policy_police_parsed_response(parsed_response_t *p)
 
 #include "../server/anthropic_http.c"
 
+/* Sized for the longest relayed sequence a test drives (a full thinking turn is
+ * message_start + two content blocks + message_delta/stop = 10 events). */
+#define EMIT_CAP_MAX 16
+
 typedef struct
 {
-   char events[8][64];
-   char data[8][8192];
+   char events[EMIT_CAP_MAX][64];
+   char data[EMIT_CAP_MAX][8192];
    int count;
 } emit_capture_t;
 
@@ -463,10 +488,33 @@ static void parsed_text(cJSON *root, const char *body, parsed_response_t *out)
 static void cap_emit(void *ctx, const char *event, const char *data_json)
 {
    emit_capture_t *cap = (emit_capture_t *)ctx;
-   assert(cap->count < 8);
+   assert(cap->count < EMIT_CAP_MAX);
    snprintf(cap->events[cap->count], sizeof(cap->events[cap->count]), "%s", event);
    snprintf(cap->data[cap->count], sizeof(cap->data[cap->count]), "%s", data_json);
    cap->count++;
+}
+
+static void test_explicit_unknown_model_is_rejected(void)
+{
+   const char *request =
+       "{\"model\":\"missing\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\","
+       "\"content\":\"hello\"}]}";
+   char resp[1024];
+   emit_capture_t cap;
+
+   reset_capture();
+   assert(messages_buffered(request, resp, sizeof(resp)) == 404);
+   assert(strstr(resp, "not_found_error") != NULL);
+   assert(strcmp(g_requested_agent, "missing") == 0);
+
+   memset(&cap, 0, sizeof(cap));
+   assert(messages_stream(request, cap_emit, &cap) == 0);
+   assert(cap.count == 1);
+   assert(strcmp(cap.events[0], "error") == 0);
+   assert(strstr(cap.data[0], "not_found_error") != NULL);
+   assert(strcmp(g_requested_agent, "missing") == 0);
+   reset_capture();
+   PASS("explicit_unknown_model_is_rejected");
 }
 
 static void test_translate_request_anthropic_passthrough(void)
@@ -577,6 +625,126 @@ static void test_anthropic_relay_usage_capture(void)
    PASS("anthropic_relay_usage_capture");
 }
 
+/* The reasoning tap must read the model's thought WITHOUT perturbing a single byte
+ * of the relayed stream -- that byte-neutrality is the whole reason the native
+ * passthrough exists, and is what makes observing it safe. */
+static void test_anthropic_relay_reasoning_tap(void)
+{
+   anthropic_relay_ctx_t relay, control;
+   emit_capture_t cap, cap_control;
+   const char *chunk = "event: message_start\n"
+                       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\","
+                       "\"usage\":{\"input_tokens\":5}}}\n\n"
+                       "event: content_block_start\n"
+                       "data: {\"type\":\"content_block_start\",\"index\":0,"
+                       "\"content_block\":{\"type\":\"thinking\",\"thinking\":\"\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"I need a test\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" environment\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                       "\"delta\":{\"type\":\"signature_delta\",\"signature\":\"sig\"}}\n\n"
+                       "event: content_block_stop\n"
+                       "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                       "event: content_block_start\n"
+                       "data: {\"type\":\"content_block_start\",\"index\":1,"
+                       "\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n"
+                       "event: content_block_delta\n"
+                       "data: {\"type\":\"content_block_delta\",\"index\":1,"
+                       "\"delta\":{\"type\":\"text_delta\",\"text\":\"Answer\"}}\n\n"
+                       "event: message_delta\n"
+                       "data: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},"
+                       "\"usage\":{\"output_tokens\":9}}\n\n"
+                       "event: message_stop\n"
+                       "data: {\"type\":\"message_stop\"}\n\n";
+
+   memset(&relay, 0, sizeof(relay));
+   memset(&cap, 0, sizeof(cap));
+   sse_parser_init(&relay.parser);
+   anthropic_backend_stream_state_init(&relay.ir_bst);
+   relay.emit = cap_emit;
+   relay.emit_ctx = &cap;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
+   relay_flush(&relay);
+
+   /* the reasoning is recovered, and ONLY the reasoning -- not the answer text */
+   assert(relay.reasoning);
+   assert(strcmp(relay.reasoning, "I need a test environment") == 0);
+   assert(!relay.reasoning_truncated && !relay.reasoning_giveup);
+   /* usage tapping still works alongside it */
+   assert(relay.input_tokens == 5 && relay.output_tokens == 9);
+
+   /* Byte-neutrality: a relay with the tap disabled (giveup preset) must emit the
+    * exact same events and payloads, event for event. */
+   memset(&control, 0, sizeof(control));
+   memset(&cap_control, 0, sizeof(cap_control));
+   sse_parser_init(&control.parser);
+   control.reasoning_giveup = 1; /* tap off */
+   control.emit = cap_emit;
+   control.emit_ctx = &cap_control;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &control) == 0);
+   relay_flush(&control);
+
+   assert(cap.count == cap_control.count);
+   for (int i = 0; i < cap.count; i++)
+   {
+      assert(strcmp(cap.events[i], cap_control.events[i]) == 0);
+      assert(strcmp(cap.data[i], cap_control.data[i]) == 0);
+   }
+   assert(!control.reasoning);
+
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   free(relay.reasoning);
+   sse_parser_free(&control.parser);
+   free(control.data);
+   PASS("anthropic_relay_reasoning_tap");
+}
+
+/* A stream the parser rejects must yield NOTHING rather than a partial thought:
+ * acting on a fragment is the failure mode this tap has to avoid. */
+static void test_anthropic_relay_reasoning_abstains_on_bad_stream(void)
+{
+   anthropic_relay_ctx_t relay;
+   emit_capture_t cap;
+   /* real reasoning first, then a malformed KNOWN event (index out of range) */
+   const char *chunk =
+       "event: message_start\n"
+       "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":0,"
+       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"half a thought\"}}\n\n"
+       "event: content_block_start\n"
+       "data: {\"type\":\"content_block_start\",\"index\":999999,"
+       "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+       "event: content_block_delta\n"
+       "data: {\"type\":\"content_block_delta\",\"index\":0,"
+       "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\" and more\"}}\n\n";
+
+   memset(&relay, 0, sizeof(relay));
+   memset(&cap, 0, sizeof(cap));
+   sse_parser_init(&relay.parser);
+   anthropic_backend_stream_state_init(&relay.ir_bst);
+   relay.emit = cap_emit;
+   relay.emit_ctx = &cap;
+   assert(anthropic_relay_chunk_cb(chunk, strlen(chunk), &relay) == 0);
+   relay_flush(&relay);
+
+   assert(relay.reasoning_giveup);
+   assert(!relay.reasoning && relay.reasoning_len == 0); /* the fragment is discarded */
+   assert(cap.count == 5); /* every event still relayed to the client */
+
+   sse_parser_free(&relay.parser);
+   free(relay.data);
+   PASS("anthropic_relay_reasoning_abstains_on_bad_stream");
+}
+
 static void test_relay_append_data_growth(void)
 {
    anthropic_relay_ctx_t relay;
@@ -635,6 +803,7 @@ static void test_messages_buffered_anthropic_preserves_request_shape(void)
                          "\"stop_sequences\":[\"STOP\"],\"top_k\":7}",
                          resp, sizeof(resp)) == 200);
    assert(g_last_body != NULL);
+   assert(strcmp(g_requested_agent, "ignored") == 0);
    sent = parse(g_last_body);
    /* Anthropic primary speaks the Anthropic API -> inbound model honored verbatim. */
    assert(strcmp(obj(sent, "model")->valuestring, "ignored") == 0);
@@ -733,6 +902,86 @@ static void test_messages_stream_anthropic_preserves_request_shape(void)
    cJSON_Delete(sent);
    reset_capture();
    PASS("messages_stream_anthropic_preserves_request_shape");
+}
+
+/* End-to-end through the REAL native-relay entry point: the counters are the whole
+ * deliverable of the reasoning tap, so "the tap fills a buffer" is not enough -- the
+ * metric must actually move on a live stream, and stay still when there is nothing
+ * to observe. (This target links the real aimee_ir_metrics.o; the weak stub in
+ * ir_ingress_stubs.c would otherwise make every counter inert.) */
+static void test_messages_stream_anthropic_reasoning_metrics(void)
+{
+   const delegate_driver_t anthropic = {.name = "anthropic", .parse_response = parsed_text};
+   emit_capture_t cap;
+   const char *REQ = "{\"model\":\"m\",\"max_tokens\":64,"
+                     "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}";
+
+   /* (1) a turn with no reasoning must leave BOTH counters alone -- a tap that
+    * fires on ordinary turns would make the base rate meaningless. */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_driver = &anthropic;
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"text\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"text_delta\",\"text\":\"plain answer\"}}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+
+   /* (2) a turn that carries reasoning counts as observed, and NOT as incomplete */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"weighing it up\"}}\n\n"
+                      "event: content_block_stop\n"
+                      "data: {\"type\":\"content_block_stop\",\"index\":0}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 1);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 0);
+
+   /* (3) reasoning the parser had to abandon counts ONLY as incomplete: it was
+    * discarded, so counting it as observed would inflate the base rate with
+    * thoughts nothing can actually act on. */
+   aimee_ir_metrics_reset();
+   reset_capture();
+   memset(&cap, 0, sizeof(cap));
+   g_stream_payload = "event: message_start\n"
+                      "data: {\"type\":\"message_start\",\"message\":{\"role\":\"assistant\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":0,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: content_block_delta\n"
+                      "data: {\"type\":\"content_block_delta\",\"index\":0,"
+                      "\"delta\":{\"type\":\"thinking_delta\",\"thinking\":\"half a thought\"}}\n\n"
+                      "event: content_block_start\n"
+                      "data: {\"type\":\"content_block_start\",\"index\":424242,"
+                      "\"content_block\":{\"type\":\"thinking\"}}\n\n"
+                      "event: message_stop\n"
+                      "data: {\"type\":\"message_stop\"}\n\n";
+   assert(messages_stream(REQ, cap_emit, &cap) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_OBSERVED) == 0);
+   assert(aimee_ir_metric_total(AIMEE_IR_M_REASONING_INCOMPLETE) == 1);
+
+   aimee_ir_metrics_reset();
+   reset_capture();
+   PASS("messages_stream_anthropic_reasoning_metrics");
 }
 
 static void test_messages_buffered_openai_family_translates(void)
@@ -887,27 +1136,6 @@ static void test_messages_stream_chatgpt_buffered_replays_responses(void)
    PASS("messages_stream_chatgpt_buffered_replays_responses");
 }
 
-/* The pre-injection envelope is folded into the request `system` as a trailing
- * text block (array form), so a cached system prefix stays stable and both the
- * passthrough and translated paths inherit it. */
-static void test_messages_preinject_appends_system_block(void)
-{
-   g_stub_preinject_env = "<aimee-context>ENV</aimee-context>";
-   cJSON *req = parse("{\"system\":[{\"type\":\"text\",\"text\":\"SYS\"}],"
-                      "\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}");
-   messages_apply_preinject(req);
-   char *flat = anthropic_system_to_text(req);
-   assert(flat);
-   const char *sys = strstr(flat, "SYS");
-   const char *env = strstr(flat, "<aimee-context>ENV</aimee-context>");
-   assert(sys && env);
-   assert(sys < env); /* envelope appended AFTER the (cacheable) prefix */
-   free(flat);
-   cJSON_Delete(req);
-   g_stub_preinject_env = NULL;
-   PASS("messages_preinject_appends_system_block");
-}
-
 static void test_proof_gated_ingress_wire_parity(void)
 {
    const char *request = "{\"model\":\"ignored\",\"max_tokens\":64,"
@@ -955,12 +1183,53 @@ static void test_proof_gated_ingress_wire_parity(void)
    PASS("proof_gated_ingress_wire_parity");
 }
 
+static void test_count_tokens_validates_request_shape(void)
+{
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   static const char *const invalid[] = {
+       "{", "[]", "null", "{}", "{\"messages\":\"not-an-array\"}", NULL,
+   };
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &openai;
+   for (int i = 0; invalid[i]; i++)
+   {
+      assert(count_tokens(invalid[i], resp, sizeof(resp)) == 400);
+      assert(strstr(resp, "invalid_request_error") != NULL);
+   }
+   assert(count_tokens("{\"messages\":[]}", resp, sizeof(resp)) == 200);
+   assert(strcmp(resp, "{\"input_tokens\":0}") == 0);
+   assert(count_tokens("{\"messages\":[{\"role\":\"user\",\"content\":\"hello\"}]}", resp,
+                       sizeof(resp)) == 200);
+   assert(strcmp(resp, "{\"input_tokens\":1}") == 0);
+   reset_capture();
+   PASS("count_tokens_validates_request_shape");
+}
+
+static void test_messages_buffered_rejects_missing_messages(void)
+{
+   const delegate_driver_t openai = {.name = "openai", .build_request = openai_driver_build};
+   char resp[4096];
+
+   reset_capture();
+   g_driver = &openai;
+   assert(messages_buffered("{\"max_tokens\":16}", resp, sizeof(resp)) == 400);
+   assert(strstr(resp, "messages must be a non-empty array") != NULL);
+   assert(g_last_body == NULL);
+   reset_capture();
+   PASS("messages_buffered_rejects_missing_messages");
+}
+
 int main(void)
 {
+   test_explicit_unknown_model_is_rejected();
    test_translate_request_anthropic_passthrough();
-   test_messages_preinject_appends_system_block();
    test_anthropic_relay_round_trip();
    test_anthropic_relay_usage_capture();
+   test_anthropic_relay_reasoning_tap();
+   test_anthropic_relay_reasoning_abstains_on_bad_stream();
+   test_messages_stream_anthropic_reasoning_metrics();
    test_relay_append_data_growth();
    test_relay_transport_error();
    test_messages_buffered_anthropic_preserves_request_shape();
@@ -973,14 +1242,14 @@ int main(void)
    test_messages_stream_openai_family_translates();
    test_messages_stream_chatgpt_buffered_replays_responses();
    test_proof_gated_ingress_wire_parity();
+   test_count_tokens_validates_request_shape();
+   test_messages_buffered_rejects_missing_messages();
    printf("anthropic_http: OK\n");
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+/* Configuration is readable, modules are unspecified (-1) so the environment
+ * default decides, economizer is on, and the P5 injection opt-in is off. */
 int config_present(void)
 {
    return 1;

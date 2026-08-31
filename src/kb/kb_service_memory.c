@@ -8,25 +8,350 @@
 #include "cJSON.h"
 #include "json_fluent.h" /* jo_ok */
 #include "config.h"
-#include "db2/kb_service_backend.h"
-#include "db2/bandit.h"
-#include "db2/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
-#include "db2/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
-#include "db2/memory_scope_query.h"
-#include "db2/fidelity.h"       /* db2_fidelity_report_by_turn (auditable-correctness P3) */
-#include "db2/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/bandit.h"
+#include "modules/db2/c/demotion.h" /* db2_demotion_retrieval_event_write_turn (auditable-correctness P1) */
+#include "modules/db2/c/memory_payload.h" /* db2_memory_provenance_by_id (auditable-correctness P2) */
+#include "modules/db2/c/evidence_lifecycle.h" /* P5 outcome history on provenance export */
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_scope_query.h"
+#include "modules/db2/c/fidelity.h" /* db2_fidelity_report_by_turn (auditable-correctness P3) */
+#include "modules/db2/c/fact_mutation.h"
+#include "modules/db2/c/code_index_ops.h" /* db2_code_file_hash (auditable-correctness P1.5 code provenance) */
 #include "kb_bandit.h"
 #include "kb_bandit_registry.h"
+#include "kb/kb_login_throttle.h" /* kb_login_throttle_peer_is_loopback — the canonical local test */
+#include "kb_reqctx.h"            /* kb_reqctx_actor — authenticated caller for write authority */
 #include "kb_service_memory.h"
 #include "log.h"
+#include "modules/memory/memory_activation.h"
 #include "modules/memory/memory_graph_fusion.h"
 
 #include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 /* Defined in kb_service.c; non-static so this file can call them. */
 int kb_send_response(int fd, cJSON *resp);
 int kb_send_error(int fd, const char *message);
 int kb_reply_or_error(int fd, cJSON *resp, const char *err_msg);
+
+/* Activation belongs to the user's conversation in DB1, which aimee-kb must
+ * never open. The 1:1 server reads it once and carries this bounded snapshot
+ * across the existing recall request. Missing or malformed state fails open. */
+static int kb_memory_activation_from_request(const cJSON *req, memory_activation_t *out)
+{
+   memset(out, 0, sizeof(*out));
+   const cJSON *obj = cJSON_GetObjectItemCaseSensitive(req, "activation");
+   if (!cJSON_IsObject(obj))
+      return 0;
+   const cJSON *turn = cJSON_GetObjectItemCaseSensitive(obj, "current_turn");
+   if (!cJSON_IsNumber(turn) || turn->valuedouble <= 0.0)
+      return 0;
+   out->current_turn = (int64_t)turn->valuedouble;
+   const cJSON *rows = cJSON_GetObjectItemCaseSensitive(obj, "rows");
+   const cJSON *row = NULL;
+   cJSON_ArrayForEach(row, rows)
+   {
+      if (out->count >= MEMORY_ACTIVATION_MAX_ROWS)
+         break;
+      const cJSON *mid = cJSON_GetObjectItemCaseSensitive(row, "memory_id");
+      const cJSON *last = cJSON_GetObjectItemCaseSensitive(row, "last_turn");
+      if (!cJSON_IsNumber(mid) || !cJSON_IsNumber(last) || mid->valuedouble <= 0.0 ||
+          last->valuedouble <= 0.0 || last->valuedouble > turn->valuedouble)
+         continue;
+      out->rows[out->count].memory_id = (int64_t)mid->valuedouble;
+      out->rows[out->count].last_turn = (int64_t)last->valuedouble;
+      out->count++;
+   }
+   out->loaded = 1;
+   return 1;
+}
+
+static unsigned long long kb_trace_fingerprint(const char *s)
+{
+   unsigned long long h = 1469598103934665603ULL;
+   for (const unsigned char *p = (const unsigned char *)(s ? s : ""); *p; p++)
+   {
+      h ^= *p;
+      h *= 1099511628211ULL;
+   }
+   return h;
+}
+
+/* Attach a P9 trace to the already-ranked response. The trace is derived from
+ * the returned rows, never used as a second ranking path, so enabling it cannot
+ * alter content or order. The keyword bucket is the exact residual after the
+ * individually surfaced semantic, graph, temporal, and utility contributions;
+ * this keeps older/richer ranker passes reconstructible without losing their
+ * detailed diagnostic fields in the ordinary response. */
+static void kb_memory_attach_recall_trace(cJSON *req, cJSON *resp, const char *query,
+                                          const char *explicit_scope_kind,
+                                          const char *explicit_scope_id)
+{
+   cJSON *trace_j = cJSON_GetObjectItemCaseSensitive(req, "trace");
+   if (!(cJSON_IsBool(trace_j) && cJSON_IsTrue(trace_j)) || !resp)
+      return;
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(0, &actor) != 0)
+   {
+      cJSON_AddStringToObject(resp, "trace_status", "authenticated actor required");
+      return;
+   }
+   const char *scope_kind = explicit_scope_kind;
+   const char *scope_id = explicit_scope_id;
+   if (!scope_kind || !scope_kind[0] || !scope_id || !scope_id[0])
+   {
+      if (!kb_reqctx_verified_scope(&scope_kind, &scope_id))
+      {
+         scope_kind = "global";
+         scope_id = "";
+      }
+   }
+   cJSON *rows = cJSON_GetObjectItemCaseSensitive(resp, "rows");
+   cJSON *results = cJSON_CreateArray();
+   if (!cJSON_IsArray(rows) || !results)
+   {
+      cJSON_Delete(results);
+      cJSON_AddStringToObject(resp, "trace_status", "results unavailable");
+      return;
+   }
+   int rank = 0;
+   cJSON *row = NULL;
+   cJSON_ArrayForEach(row, rows)
+   {
+      cJSON *memory = cJSON_GetObjectItemCaseSensitive(row, "memory");
+      cJSON *parts = cJSON_GetObjectItemCaseSensitive(row, "parts");
+      cJSON *id = cJSON_GetObjectItemCaseSensitive(memory, "id");
+      cJSON *final_j = cJSON_GetObjectItemCaseSensitive(memory, "retrieval_score");
+      cJSON *hybrid_rank_j = cJSON_GetObjectItemCaseSensitive(memory, "hybrid_rank");
+#define TRACE_PART(name)                                                                           \
+   (cJSON_IsNumber(cJSON_GetObjectItemCaseSensitive(parts, (name)))                                \
+        ? cJSON_GetObjectItemCaseSensitive(parts, (name))->valuedouble                             \
+        : 0.0)
+      double final_score =
+          cJSON_IsNumber(final_j) && cJSON_IsNumber(hybrid_rank_j) && hybrid_rank_j->valuedouble > 0
+              ? final_j->valuedouble
+              : TRACE_PART("total");
+      double semantic = TRACE_PART("semantic");
+      double graph_weight = TRACE_PART("graph_weight");
+      double graph = TRACE_PART("graph_score");
+      double temporal = TRACE_PART("temporal");
+      double outcome = TRACE_PART("outcome");
+      double keyword = TRACE_PART("lexical") + TRACE_PART("coverage");
+      double explained = keyword + TRACE_PART("entity") + temporal + TRACE_PART("evidence") +
+                         semantic + TRACE_PART("state") + TRACE_PART("intent") +
+                         TRACE_PART("salience") + TRACE_PART("surprise") + TRACE_PART("pagerank") +
+                         graph * graph_weight + outcome;
+      double residual = final_score - explained;
+      cJSON *r = cJSON_CreateObject();
+      char subject[32];
+      snprintf(subject, sizeof(subject), "%lld",
+               (long long)(cJSON_IsNumber(id) ? id->valuedouble : 0));
+      cJSON_AddStringToObject(r, "subject_kind", "memory");
+      cJSON_AddStringToObject(r, "subject_id", subject);
+      cJSON_AddStringToObject(r, "lane", "hybrid");
+      cJSON_AddNumberToObject(r, "lane_rank", ++rank);
+      cJSON_AddNumberToObject(r, "final_rank", rank);
+      cJSON_AddStringToObject(r, "scope_decision", "allowed");
+      cJSON_AddNumberToObject(r, "semantic_value", semantic);
+      cJSON_AddNumberToObject(r, "semantic_weight", 1.0);
+      cJSON_AddNumberToObject(r, "keyword_value", keyword);
+      cJSON_AddNumberToObject(r, "keyword_weight", 1.0);
+      cJSON_AddNumberToObject(r, "graph_value", graph);
+      cJSON_AddNumberToObject(r, "graph_weight", graph_weight);
+      cJSON_AddNumberToObject(r, "temporal_value", temporal);
+      cJSON_AddNumberToObject(r, "temporal_weight", 1.0);
+      cJSON_AddNumberToObject(r, "outcome_value", outcome);
+      cJSON_AddNumberToObject(r, "outcome_weight", 1.0);
+      cJSON_AddNumberToObject(r, "final_score", final_score);
+      cJSON *feature_values = cJSON_AddObjectToObject(r, "feature_values");
+      cJSON *feature_weights = cJSON_AddObjectToObject(r, "feature_weights");
+      cJSON *feature_contributions = cJSON_AddObjectToObject(r, "feature_contributions");
+#define TRACE_FEATURE(name, value, weight)                                                         \
+   do                                                                                              \
+   {                                                                                               \
+      cJSON_AddNumberToObject(feature_values, (name), (value));                                    \
+      cJSON_AddNumberToObject(feature_weights, (name), (weight));                                  \
+      cJSON_AddNumberToObject(feature_contributions, (name), (value) * (weight));                  \
+   } while (0)
+      TRACE_FEATURE("lexical", TRACE_PART("lexical"), 1.0);
+      TRACE_FEATURE("coverage", TRACE_PART("coverage"), 1.0);
+      TRACE_FEATURE("entity", TRACE_PART("entity"), 1.0);
+      TRACE_FEATURE("temporal", temporal, 1.0);
+      TRACE_FEATURE("evidence", TRACE_PART("evidence"), 1.0);
+      TRACE_FEATURE("semantic", semantic, 1.0);
+      TRACE_FEATURE("state", TRACE_PART("state"), 1.0);
+      TRACE_FEATURE("intent", TRACE_PART("intent"), 1.0);
+      TRACE_FEATURE("salience", TRACE_PART("salience"), 1.0);
+      TRACE_FEATURE("surprise", TRACE_PART("surprise"), 1.0);
+      TRACE_FEATURE("pagerank", TRACE_PART("pagerank"), 1.0);
+      TRACE_FEATURE("graph", graph, graph_weight);
+      TRACE_FEATURE("outcome", outcome, 1.0);
+      TRACE_FEATURE("post_rank_residual", residual, 1.0);
+#undef TRACE_FEATURE
+      cJSON_AddStringToObject(
+          r, "authority_class",
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(memory, "provenance_category"))
+              ?: "not-computed");
+      cJSON_AddStringToObject(r, "confidence_class", "not-computed");
+      char epistemic_kind[32] = "world_fact";
+      if (cJSON_IsNumber(id))
+         (void)db2_memory_epistemic_kind((int64_t)id->valuedouble, epistemic_kind,
+                                         sizeof(epistemic_kind));
+      cJSON_AddStringToObject(r, "epistemic_kind", epistemic_kind);
+      cJSON_AddStringToObject(r, "valid_time_match", "not-computed");
+      cJSON_AddStringToObject(
+          r, "source_evidence",
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(memory, "source_session"))
+              ?: "not-computed");
+      cJSON_AddStringToObject(r, "document_state", "not-computed");
+      cJSON_AddStringToObject(r, "staleness_status", "not-computed");
+      cJSON_AddItemToArray(results, r);
+#undef TRACE_PART
+   }
+   memory_recall_rejection_t rejected[MEMORY_RECALL_TRACE_MAX_REJECTIONS];
+   int rejected_n = memory_recall_trace_rejections(rejected, MEMORY_RECALL_TRACE_MAX_REJECTIONS);
+   for (int i = 0; i < rejected_n; i++)
+   {
+      cJSON *r = cJSON_CreateObject();
+      char subject[32];
+      snprintf(subject, sizeof(subject), "%lld", (long long)rejected[i].memory_id);
+      cJSON_AddStringToObject(r, "subject_kind", "memory");
+      cJSON_AddStringToObject(r, "subject_id", subject);
+      cJSON_AddStringToObject(r, "lane", rejected[i].lane);
+      cJSON_AddNumberToObject(r, "lane_rank", 0);
+      cJSON_AddNumberToObject(r, "final_rank", 0);
+      cJSON_AddStringToObject(r, "scope_decision",
+                              strcmp(rejected[i].gate, "scope_boundary") == 0 ? "rejected"
+                                                                              : "allowed");
+      cJSON_AddNumberToObject(r, "final_score", 0.0);
+      cJSON_AddBoolToObject(r, "rejected", 1);
+      cJSON_AddStringToObject(r, "rejection_gate", rejected[i].gate);
+      char epistemic_kind[32] = "world_fact";
+      (void)db2_memory_epistemic_kind(rejected[i].memory_id, epistemic_kind,
+                                      sizeof(epistemic_kind));
+      cJSON_AddStringToObject(r, "epistemic_kind", epistemic_kind);
+      cJSON_AddItemToArray(results, r);
+   }
+   char *results_json = cJSON_PrintUnformatted(results);
+   cJSON_Delete(results);
+   if (!results_json)
+      return;
+   cJSON *turn_j = cJSON_GetObjectItemCaseSensitive(req, "turn_id");
+   cJSON *event_j = cJSON_GetObjectItemCaseSensitive(req, "retrieval_event_id");
+   cJSON *persist_j = cJSON_GetObjectItemCaseSensitive(req, "persist_trace");
+   cJSON *sensitivity_j = cJSON_GetObjectItemCaseSensitive(req, "sensitivity");
+   char fingerprint[32], generated_event[96];
+   unsigned long long fp = kb_trace_fingerprint(query);
+   snprintf(fingerprint, sizeof(fingerprint), "%016llx", fp);
+   struct timespec now;
+   clock_gettime(CLOCK_REALTIME, &now);
+   snprintf(generated_event, sizeof(generated_event), "diagnose:%016llx:%lld:%ld", fp,
+            (long long)now.tv_sec, now.tv_nsec);
+   const char *turn = cJSON_IsString(turn_j) ? turn_j->valuestring : generated_event;
+   const char *event = cJSON_IsString(event_j) ? event_j->valuestring : generated_event;
+   const char *sensitivity = cJSON_IsString(sensitivity_j) ? sensitivity_j->valuestring : "normal";
+   const char *args[] = {
+       event,    turn,        fingerprint,  scope_kind,
+       scope_id, sensitivity, results_json, cJSON_IsTrue(persist_j) ? "true" : "false"};
+   char *trace_out = malloc(262144);
+   if (trace_out &&
+       db2_evidence_lifecycle_json(&actor, EL_RECALL_TRACE_RECORD, args, 8, trace_out, 262144) == 0)
+   {
+      cJSON *trace = cJSON_Parse(trace_out);
+      if (trace)
+         cJSON_AddItemToObject(resp, "trace", trace);
+   }
+   else
+      cJSON_AddStringToObject(resp, "trace_status", "trace recording failed");
+   free(trace_out);
+   free(results_json);
+}
+
+/* The typed-fact write authority of the request being served (typed-fact §5).
+ *
+ * Derived from the request's AUTHENTICATED actor and nothing else — never from a
+ * field in the request (verify-then-trust, kb_verifier.h). Class A is reserved
+ * for a direct assertion by the user, so only a named human identity qualifies:
+ * an OIDC subject, or a host account the calling service asserted over the mTLS
+ * listener after its certificate, bearer and service identity all verified
+ * (kb_tls_serve.c -> kb_reqctx_apply_asserted). Everything else is an agent-side
+ * or service origin and gets MODEL authority — a bearer/owner credential, an
+ * mTLS machine identity, and an unauthenticated caller alike.
+ *
+ * The actor answers WHO is calling. It does not answer whether the payload is
+ * that person's own words: an agent's tool call, made mid-turn, inherits the
+ * human's request context. So a caller that relays model-composed text must not
+ * use this — see kb_handle_memory_context_block.
+ *
+ * The owner bearer from a LOOPBACK PEER is the third case, and it is a
+ * deployment fact rather than a weaker rule. Only the plain HTTP listener
+ * records a peer address (kb_http_listener.c), so this condition means
+ * specifically "arrived over plain loopback HTTP" — never mTLS, never a remote
+ * peer, and never a direct in-process call, all of which leave the peer empty
+ * and are not local. That listener serves exactly one client, aimee-server on
+ * this host, because kb_client refuses to put the bearer on a cleartext link to
+ * anywhere else; and it has no peer certificate to bind a caller assertion to,
+ * so kb_http_conn.c rejects the caller header outright (B5). aimee-server has
+ * already derived the authority from the kernel-attested peer of ITS OWN socket
+ * and only asks for "user" when it attested a person. Nothing the model can
+ * reach bypasses that: its tool calls go through the server, which resolves
+ * authority from attestation and never from the payload. Over mTLS the human
+ * arrives as an asserted host actor instead, handled above. */
+/* Who is this request, in the only terms that decide whether it may speak as the
+ * user: is there an authenticated account?
+ *
+ * Authentication happens once, at message receipt -- the channel, the session
+ * and the account are each verified there, and a request that fails any of them
+ * never reaches an action. `actor` IS that result, so this reads it rather than
+ * re-deriving anything: only the constructors in kb_identity.h set
+ * authenticated = 1, and a zero-initialized principal is unauthenticated.
+ *
+ * An account NAMES SOMEONE, and that is what separates the four kinds:
+ *
+ *   OIDC   an issuer-scoped subject -- the same account whatever carried it
+ *   HOST   a local host account PAM accepted
+ *   CERT   a verified mTLS peer, which names one enrolled machine
+ *   OWNER  a SHARED install credential, which names nobody in particular
+ *
+ * The first three identify a principal, so no transport qualifier applies to
+ * them: an OIDC subject is the same person over any socket, and a client cert
+ * names one enrolled machine.
+ *
+ * OWNER is different in kind, not merely weaker. It is one bearer for the whole
+ * install, so it cannot say WHICH person is acting; loopback is what makes it
+ * stand for "the operator at this machine" rather than "whoever holds the
+ * token". Dropping that qualifier was measured, from a genuinely non-loopback
+ * peer, and it let a remote holder of the bearer destroy a user-stated Class-A
+ * fact:
+ *
+ *     alice before: A current
+ *     remote peer, authority=user -> {"status":"ok","retracted":1}
+ *     alice after:  A gone
+ *
+ * That is a real widening of what a leaked bearer can do, and it is not what
+ * the account model argues for -- the model says the ACCOUNT decides, and a
+ * shared credential is precisely the case where there is no account to decide
+ * with. The qualifier is kept for OWNER alone.
+ *
+ * CERT was previously excluded, mirroring a matching exclusion of
+ * ATTEST_MTLS_CLIENT on the server, and the two together were the bug: a client
+ * presenting a verified certificate was an authenticated principal everywhere
+ * else in the tree (vault_capability.c puts it with UDS/webchat precisely
+ * because it "makes the grant expressible per client") yet an anonymous agent
+ * here. A caller could be a person to one daemon and not to the other. */
+static fact_authority_t kb_memory_request_authority(void)
+{
+   const kb_principal_t *actor = kb_reqctx_actor(); /* NULL unless authenticated */
+   if (!actor || !actor->authenticated || actor->kind == KB_PRIN_NONE)
+      return FACT_AUTHORITY_MODEL;
+   /* A shared install bearer only stands for a person at the machine it is
+    * installed on. Every other kind names one. */
+   if (actor->kind == KB_PRIN_OWNER)
+      return kb_login_throttle_peer_is_loopback() ? FACT_AUTHORITY_USER : FACT_AUTHORITY_MODEL;
+   return FACT_AUTHORITY_USER;
+}
 
 static int kb_memory_scope_begin(cJSON *req, int force, int *missing_out)
 {
@@ -352,8 +677,11 @@ int kb_handle_memory_tag_workspace(int fd, cJSON *req)
    cJSON *ws_j = cJSON_GetObjectItemCaseSensitive(req, "workspace");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(ws_j))
       return kb_send_error(fd, "missing memory_id or workspace");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_tag_workspace_json((int64_t)id_j->valuedouble, ws_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to tag workspace");
 }
 
@@ -364,8 +692,11 @@ int kb_handle_memory_tag_scope(int fd, cJSON *req)
    cJSON *sv_j = cJSON_GetObjectItemCaseSensitive(req, "scope_value");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(st_j) || !cJSON_IsString(sv_j))
       return kb_send_error(fd, "missing memory_id, scope_type or scope_value");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_tag_scope_json((int64_t)id_j->valuedouble, st_j->valuestring,
                                                       sv_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to tag scope");
 }
 
@@ -431,7 +762,14 @@ int kb_handle_memory_diagnose_scoped(int fd, cJSON *req)
    int limit = cJSON_IsNumber(l) ? (int)l->valuedouble : 10;
    int missing = 0;
    int scope_active = (!st_s && !sv_s) ? kb_memory_scope_begin(req, 0, &missing) : 0;
+   cJSON *trace_j = cJSON_GetObjectItemCaseSensitive(req, "trace");
+   int trace_enabled = cJSON_IsBool(trace_j) && cJSON_IsTrue(trace_j);
+   if (trace_enabled)
+      memory_recall_trace_capture_begin();
    cJSON *resp = db2_kb_service_memory_diagnose_scoped_json(q->valuestring, st_s, sv_s, limit);
+   kb_memory_attach_recall_trace(req, resp, q->valuestring, st_s, sv_s);
+   if (trace_enabled)
+      memory_recall_trace_capture_end();
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to diagnose memory");
 }
@@ -537,6 +875,18 @@ int kb_handle_memory_assemble_context(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to assemble context");
 }
 
+int kb_handle_memory_assemble_typed_context(int fd, cJSON *req)
+{
+   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
+   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
+      return kb_send_error(fd, "memory.assemble_typed_context requires a non-empty query");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 1, &missing);
+   cJSON *resp = db2_kb_service_memory_assemble_typed_context_json(req);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to assemble typed context");
+}
+
 int kb_handle_memory_compact_windows(int fd, cJSON *req)
 {
    (void)req;
@@ -562,12 +912,37 @@ int kb_handle_memory_effectiveness_stats(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to compute effectiveness stats");
 }
 
+/* Read the request's destructive-edit authority. Only the exact string "user"
+ * grants it: an absent, misspelled, or non-string field means MODEL, so a caller
+ * that does not know about this field cannot destroy anything by accident.
+ *
+ * And asking is not the same as being granted. `authority` is a REQUEST — these
+ * actions are reachable from outside as POST /v1/actions/memory.delete and
+ * .update, where "user" means destroy rather than retire — so it is capped by
+ * what the request actually authenticated as (kb_memory_request_authority,
+ * below). A caller that cannot prove a human never destroys a memory outright. */
+static memory_authority_t kb_memory_authority(cJSON *req)
+{
+   cJSON *a = cJSON_GetObjectItemCaseSensitive(req, "authority");
+   int wants_user = cJSON_IsString(a) && a->valuestring && strcmp(a->valuestring, "user") == 0;
+   if (wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER)
+      return MEMORY_AUTHORITY_USER;
+   if (wants_user)
+      LOG_WARN("kb.memory", "user-authority memory edit served at model authority: the request "
+                            "carries no authenticated human actor");
+   return MEMORY_AUTHORITY_MODEL;
+}
+
 int kb_handle_memory_delete(int fd, cJSON *req)
 {
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "missing id");
-   cJSON *resp = db2_kb_service_memory_delete_json((int64_t)id_j->valuedouble);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp =
+       db2_kb_service_memory_delete_json((int64_t)id_j->valuedouble, kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to delete memory");
 }
 
@@ -576,7 +951,10 @@ int kb_handle_memory_touch(int fd, cJSON *req)
    cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "missing id");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_touch_json((int64_t)id_j->valuedouble);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to touch memory");
 }
 
@@ -586,8 +964,11 @@ int kb_handle_memory_update(int fd, cJSON *req)
    cJSON *content_j = cJSON_GetObjectItemCaseSensitive(req, "content");
    if (!cJSON_IsNumber(id_j) || !cJSON_IsString(content_j))
       return kb_send_error(fd, "missing id or content");
-   cJSON *resp =
-       db2_kb_service_memory_update_json((int64_t)id_j->valuedouble, content_j->valuestring);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_update_json(
+       (int64_t)id_j->valuedouble, content_j->valuestring, kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to update memory");
 }
 
@@ -598,8 +979,37 @@ int kb_handle_memory_reject(int fd, cJSON *req)
       return kb_send_error(fd, "missing id");
    cJSON *reason_j = cJSON_GetObjectItemCaseSensitive(req, "reason");
    const char *reason = cJSON_IsString(reason_j) ? reason_j->valuestring : NULL;
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_reject_json((int64_t)id_j->valuedouble, reason);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to reject memory");
+}
+
+int kb_handle_memory_restore(int fd, cJSON *req)
+{
+   cJSON *id_j = cJSON_GetObjectItemCaseSensitive(req, "id");
+   if (!cJSON_IsNumber(id_j))
+      return kb_send_error(fd, "missing id");
+   fact_actor_t actor;
+   if (db2_fact_actor_from_request(0, &actor) != 0 || !actor.authenticated)
+      return kb_send_error(fd, "authenticated user required");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_restore_json((int64_t)id_j->valuedouble, actor.principal);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to restore memory");
+}
+
+int kb_handle_memory_review_list(int fd, cJSON *req)
+{
+   const char *state = jo_str(req, "state", "");
+   int limit = jo_int(req, "limit", 64);
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_review_list_json(state, limit);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to list memory review rows");
 }
 
 int kb_handle_memory_stats(int fd, cJSON *req)
@@ -682,13 +1092,17 @@ int kb_handle_memory_recall(int fd, cJSON *req)
        (cJSON_IsString(task_j) && task_j->valuestring[0]) ? task_j->valuestring : NULL;
    int limit_tokens = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 0;
    int session_start = cJSON_IsBool(start_j) ? (cJSON_IsTrue(start_j) ? 1 : 0) : 0;
+   memory_activation_t activation;
+   const memory_activation_t *activation_ptr =
+       kb_memory_activation_from_request(req, &activation) ? &activation : NULL;
    /* Honour graph_code_fusion_state across the recall assembly (its fact
     * sections retrieve through the fusion-aware ranking path). Thread-local. */
    cJSON *fusion_j = cJSON_GetObjectItemCaseSensitive(req, "graph_code_fusion_state");
    memory_fusion_state_set(cJSON_IsString(fusion_j) ? fusion_j->valuestring : NULL);
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start);
+   cJSON *resp =
+       db2_kb_service_memory_recall_json(task_hint, limit_tokens, session_start, activation_ptr);
    kb_memory_scope_end(resp, scope_active, missing);
    memory_fusion_state_clear();
    return kb_reply_or_error(fd, resp, "failed to render memory recall");
@@ -768,7 +1182,12 @@ int kb_handle_memory_get(int fd, cJSON *req)
    if (!cJSON_IsNumber(id_j))
       return kb_send_error(fd, "memory.get requires id");
 
-   cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble);
+   /* Optional: was this memory in force at `as_of`, in EVENT time? */
+   const char *as_of = jo_str(req, "as_of", "");
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_get_json((int64_t)id_j->valuedouble, as_of);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to get memory");
 }
 
@@ -796,7 +1215,16 @@ int kb_handle_memory_context_block(int fd, cJSON *req)
 
    int missing = 0;
    int scope_active = kb_memory_scope_begin(req, 0, &missing);
-   cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit);
+   /* MODEL authority, structurally — not kb_memory_request_authority(). This
+    * action's only caller is the get_context_block MCP tool, so `query` is a
+    * string the MODEL composed, even though the request carries the human's
+    * authenticated identity (a tool call runs inside the user's turn and inherits
+    * its context). Authenticating the caller therefore proves nothing about who
+    * wrote the text, and the §4 retraction this query can trigger deletes facts.
+    * A future caller that really does relay the user's own turn should pass
+    * FACT_AUTHORITY_USER here — and nothing else should. */
+   cJSON *resp = db2_kb_service_memory_context_block_json(query_j->valuestring, block_type, limit,
+                                                          FACT_AUTHORITY_MODEL);
    kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to build context block");
 }
@@ -1007,6 +1435,24 @@ int kb_handle_evidence_provenance(int fd, cJSON *req)
    {
       cJSON_AddStringToObject(resp, "provenance_status", "ok");
       cJSON_AddStringToObject(resp, "retrieval_event_id", ev_id);
+      /* P5 extends the established audit/CLI export rather than creating a
+       * parallel reporting path.  An empty array means computed-and-empty;
+       * lookup failure is explicit and never masquerades as no outcomes. */
+      char outcomes_json[16384] = "";
+      if (db2_work_outcomes_for_retrieval_json(ev_id, outcomes_json, (int)sizeof(outcomes_json)) ==
+          0)
+      {
+         cJSON *outcomes = cJSON_Parse(outcomes_json);
+         if (cJSON_IsArray(outcomes))
+            cJSON_AddItemToObject(resp, "outcomes", outcomes);
+         else
+         {
+            cJSON_Delete(outcomes);
+            cJSON_AddStringToObject(resp, "outcomes", "not-computed");
+         }
+      }
+      else
+         cJSON_AddStringToObject(resp, "outcomes", "not-computed");
       cJSON *sources = cJSON_AddArrayToObject(resp, "sources");
       cJSON *ev = payload[0] ? cJSON_Parse(payload) : NULL;
       cJSON *ids = ev ? cJSON_GetObjectItemCaseSensitive(ev, "surfaced_ids") : NULL;
@@ -1246,6 +1692,38 @@ int kb_handle_memory_search_graph_as_of(int fd, cJSON *req)
    return kb_reply_or_error(fd, resp, "failed to search memory graph as-of");
 }
 
+int kb_handle_memory_search_assertions(int fd, cJSON *req)
+{
+   cJSON *query_j = cJSON_GetObjectItemCaseSensitive(req, "query");
+   cJSON *valid_j = cJSON_GetObjectItemCaseSensitive(req, "valid_at");
+   cJSON *believed_j = cJSON_GetObjectItemCaseSensitive(req, "believed_at");
+   cJSON *historical_j = cJSON_GetObjectItemCaseSensitive(req, "include_historical");
+   cJSON *hops_j = cJSON_GetObjectItemCaseSensitive(req, "max_hops");
+   cJSON *limit_j = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   if (!cJSON_IsString(query_j) || !query_j->valuestring[0])
+      return kb_send_error(fd, "memory.search_assertions requires a non-empty query");
+   if (valid_j && !cJSON_IsString(valid_j))
+      return kb_send_error(fd, "memory.search_assertions valid_at must be a timestamp string");
+   if (believed_j && !cJSON_IsString(believed_j))
+      return kb_send_error(fd, "memory.search_assertions believed_at must be a timestamp string");
+   if (historical_j && !cJSON_IsBool(historical_j))
+      return kb_send_error(fd, "memory.search_assertions include_historical must be boolean");
+   int limit = cJSON_IsNumber(limit_j) ? (int)limit_j->valuedouble : 10;
+   int include_historical = cJSON_IsBool(historical_j) && cJSON_IsTrue(historical_j);
+   int max_hops = cJSON_IsNumber(hops_j) ? (int)hops_j->valuedouble : 0;
+   if (max_hops < 0 || max_hops > 2)
+      return kb_send_error(fd, "memory.search_assertions max_hops must be between 0 and 2");
+
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 1, &missing);
+   cJSON *resp = db2_kb_service_memory_search_assertions_json(
+       query_j->valuestring, cJSON_IsString(valid_j) ? valid_j->valuestring : "",
+       cJSON_IsString(believed_j) ? believed_j->valuestring : "", include_historical, max_hops,
+       limit);
+   kb_memory_scope_end(resp, scope_active, missing);
+   return kb_reply_or_error(fd, resp, "failed to search semantic assertions");
+}
+
 int kb_handle_memory_get_episode(int fd, cJSON *req)
 {
    cJSON *key_j = cJSON_GetObjectItemCaseSensitive(req, "episode_key");
@@ -1282,8 +1760,11 @@ int kb_handle_memory_find_id_by_key_kind(int fd, cJSON *req)
    if (!cJSON_IsString(key_j) || !cJSON_IsString(kind_j))
       return kb_send_error(fd, "memory.find_id_by_key_kind requires key and kind");
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp =
        db2_kb_service_memory_find_id_by_key_kind_json(key_j->valuestring, kind_j->valuestring);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to look up memory id");
 }
 
@@ -1314,9 +1795,85 @@ int kb_handle_memory_supersede(int fd, cJSON *req)
    double conf = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
    const char *sid = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
 
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
    cJSON *resp = db2_kb_service_memory_supersede_json((int64_t)id_j->valuedouble,
                                                       content_j->valuestring, conf, sid);
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to supersede memory");
+}
+
+/* §4 retraction: withdraw a typed fact the layer got wrong. `target` is optional
+ * and scopes the retraction to one value; omitting it retracts every current
+ * value of (source, relation). */
+int kb_handle_facts_retract(int fd, cJSON *req)
+{
+   cJSON *src_j = cJSON_GetObjectItemCaseSensitive(req, "source");
+   cJSON *rel_j = cJSON_GetObjectItemCaseSensitive(req, "relation");
+   cJSON *tgt_j = cJSON_GetObjectItemCaseSensitive(req, "target");
+   cJSON *auth_j = cJSON_GetObjectItemCaseSensitive(req, "authority");
+   if (!cJSON_IsString(src_j) || !src_j->valuestring[0] || !cJSON_IsString(rel_j) ||
+       !rel_j->valuestring[0])
+      return kb_send_error(fd, "facts.retract requires a non-empty source and relation");
+   if (tgt_j && !cJSON_IsString(tgt_j))
+      return kb_send_error(fd, "facts.retract target must be a string");
+   if (auth_j && !cJSON_IsString(auth_j))
+      return kb_send_error(fd, "facts.retract authority must be a string");
+
+   /* This action is reachable from outside (POST /v1/actions/facts.retract), so
+    * the body's `authority` is a request, not a grant: it may only lower what the
+    * caller authenticated as. Without an authenticated human actor a "user"
+    * retraction is served at model authority, and db2_fact_retract then leaves
+    * Class-A facts and immutable relations alone.
+    *
+    * aimee-server carries the human across this hop as X-Aimee-Caller-Subject,
+    * which the mTLS listener turns into a KB_PRIN_HOST actor after the peer
+    * certificate, bearer and service identity have verified. The PLAIN listener
+    * has no peer to attest and rejects that header by design (B5), so on a
+    * plain-loopback kb a user retraction lands at model authority and reports
+    * retracted: 0. That is a deployment property, not a silent failure — say so,
+    * because "nothing happened and nothing was logged" is the hard version. */
+   const char *requested = cJSON_IsString(auth_j) ? auth_j->valuestring : NULL;
+   int wants_user = requested && strcmp(requested, "user") == 0;
+   int granted_user = wants_user && kb_memory_request_authority() == FACT_AUTHORITY_USER;
+   const char *authority = granted_user ? "user" : "model";
+   if (wants_user && !granted_user)
+      LOG_WARN("kb.facts",
+               "user retraction of %s/%s served at model authority: the request "
+               "carries no authenticated human actor",
+               src_j->valuestring, rel_j->valuestring);
+
+   cJSON *resp = db2_kb_service_facts_retract_json(
+       src_j->valuestring, rel_j->valuestring, cJSON_IsString(tgt_j) ? tgt_j->valuestring : NULL,
+       authority);
+   return kb_reply_or_error(fd, resp, "failed to retract fact");
+}
+
+/* §3 entity merge: collapse two records of the same real entity into one. */
+int kb_handle_entities_merge(int fd, cJSON *req)
+{
+   cJSON *from_j = cJSON_GetObjectItemCaseSensitive(req, "from_id");
+   cJSON *into_j = cJSON_GetObjectItemCaseSensitive(req, "into_id");
+   if (!cJSON_IsNumber(from_j) || !cJSON_IsNumber(into_j))
+      return kb_send_error(fd, "entities.merge requires numeric from_id and into_id");
+   if (from_j->valuedouble <= 0 || into_j->valuedouble <= 0)
+      return kb_send_error(fd, "entities.merge ids must be positive");
+
+   cJSON *resp = db2_kb_service_entities_merge_json((int64_t)from_j->valuedouble,
+                                                    (int64_t)into_j->valuedouble);
+   return kb_reply_or_error(fd, resp, "failed to merge entities");
+}
+
+/* §3 unmerge: reverse a recorded merge. Without this the merge audit row was
+ * reversible only in principle — nothing outside a test could undo one. */
+int kb_handle_entities_unmerge(int fd, cJSON *req)
+{
+   cJSON *mid_j = cJSON_GetObjectItemCaseSensitive(req, "merge_id");
+   if (!cJSON_IsNumber(mid_j) || mid_j->valuedouble <= 0)
+      return kb_send_error(fd, "entities.unmerge requires a positive merge_id");
+
+   cJSON *resp = db2_kb_service_entities_unmerge_json((int64_t)mid_j->valuedouble);
+   return kb_reply_or_error(fd, resp, "failed to unmerge entities");
 }
 
 int kb_handle_memory_fact_history(int fd, cJSON *req)
@@ -1510,13 +2067,25 @@ int kb_handle_memory_store(int fd, cJSON *req)
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(req, "confidence");
    cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(req, "use_cases");
+   cJSON *epistemic_j = cJSON_GetObjectItemCaseSensitive(req, "epistemic_kind");
    const char *tier = cJSON_IsString(tier_j) ? tier_j->valuestring : TIER_L0;
    const char *kind = cJSON_IsString(kind_j) ? kind_j->valuestring : KIND_FACT;
    double confidence = cJSON_IsNumber(conf_j) ? conf_j->valuedouble : 1.0;
    const char *session_id = cJSON_IsString(sid_j) ? sid_j->valuestring : "";
    const char *use_cases = cJSON_IsString(use_cases_j) ? use_cases_j->valuestring : "";
+   const char *epistemic_kind =
+       cJSON_IsString(epistemic_j) ? epistemic_j->valuestring : "world_fact";
 
-   cJSON *resp = db2_kb_service_memory_insert_ex_json(
-       tier, kind, key_j->valuestring, content_j->valuestring, use_cases, confidence, session_id);
+   /* The write's authority is persisted as the row's provenance, so the drain can
+    * tell later whether facts mined from this note may be Class A. Same rule as
+    * every other authority on this surface: the body asks, the request's
+    * authentication grants (kb_memory_authority). A caller that says nothing —
+    * every internal writer — records the fail-closed agent provenance. */
+   int missing = 0;
+   int scope_active = kb_memory_scope_begin(req, 0, &missing);
+   cJSON *resp = db2_kb_service_memory_insert_epistemic_ex_json(
+       tier, kind, epistemic_kind, key_j->valuestring, content_j->valuestring, use_cases,
+       confidence, session_id, (int)kb_memory_authority(req));
+   kb_memory_scope_end(resp, scope_active, missing);
    return kb_reply_or_error(fd, resp, "failed to store memory");
 }

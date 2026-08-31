@@ -17,6 +17,14 @@ delegates, tests, and the Windows client through `-Imodules/tools`) and `agent_t
 private seam shared across the three sources). These were relocated from `src/posix/` (the
 implementations) and `src/headers/` (the contract).
 
+The tool-dispatch classification stage now runs in the supervised Go
+`aimee-module-tools` process from `server-go/modules/tools`. The C
+`module_adapter.c` remains a byte-parity fixture. The dispatcher uses only the
+registered event-bus classifier; if it is absent or fails, the tool remains
+unclassified rather than falling back to a local name table. Tool execution,
+policy and workspace binding, schemas, and result handling are deliberately not
+claimed as ported by this first classification-stage conversion.
+
 `agent_tools.h` also declares a turn/snapshot/toolset session-state slice (`agent_tools_begin_turn`,
 `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`) implemented in `src/server/agent_tools.c`:
 server-side tool-execution session orchestration that is not module-local, the same arrangement by
@@ -30,6 +38,7 @@ argument/schema helpers, and MCP native dispatch remain owned elsewhere and cons
 - `execution-policy`: authorizes each proposed capability and effect before dispatch.
 - `ir`: supplies canonical tool definitions, calls, results, and streaming events.
 - `module-runtime`: supplies required lifecycle plus optional tool-provider registration contracts.
+- `sandbox`: records learned packages and enforces package-egress policy for delegated tools.
 - `vault`: supplies scoped secret references or bounded values required by a tool implementation.
 - `workspace`: supplies the selected resource provider and filesystem/process context.
 
@@ -50,8 +59,8 @@ advertised-but-unbound tools are an error, not a capability.
 
 ### Config touchpoint
 
-The module consumes toolsets, role visibility, output caps (`src/modules/config/config_fields.c:107`),
-compaction thresholds (`src/modules/config/config_sections.c:655`), sandbox/tool policy,
+The module consumes toolsets, role visibility, output caps, compaction thresholds, sandbox/tool policy,
+all obtained through the external config-module contract,
 and provider registration settings. `config` parses and projects values; tools interprets catalog and
 dispatch behavior. A GUI field is valid only when its named tool/provider has a live consumer path.
 

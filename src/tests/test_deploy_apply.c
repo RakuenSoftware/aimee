@@ -28,6 +28,7 @@
 #include "config_database.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* --- stubs for the config surface deploy_apply.c pulls in --- */
 
@@ -47,10 +48,15 @@ int platform_random_hex(char *out, size_t hex_len)
 }
 
 /* deploy_apply asks config_present() then config_emit_deploy_env_current(); the
- * config_load + config_emit_deploy_env pair these replace behaved the same way. */
+ * legacy_config_read + config_emit_deploy_env pair these replace behaved the same way. */
 int config_present(void)
 {
    return 1;
+}
+
+void appliance_admin_webuser(char *out, size_t out_n)
+{
+   snprintf(out, out_n, "release-operator");
 }
 
 /* Emitted alongside the profiles because a managed kb without an embedder is refused.
@@ -79,6 +85,19 @@ int vault_runtime_secret_delete(const char *name)
    return 0;
 }
 
+static int g_stub_mtls_resets;
+static int g_stub_dependency_resets;
+
+void kb_client_mtls_pool_reset(void)
+{
+   g_stub_mtls_resets++;
+}
+
+void kb_client_dependency_reset(void)
+{
+   g_stub_dependency_resets++;
+}
+
 #include "../server/deploy_apply.c"
 
 static const char *envp_value(char **envp, const char *key)
@@ -100,9 +119,84 @@ static int envp_key_count(char **envp, const char *key)
    return count;
 }
 
+static void test_capture_keeps_terminal_output(void)
+{
+   char out[12] = "";
+   size_t len = 0;
+   capture_tail_append(out, sizeof(out), &len, "first", 5);
+   capture_tail_append(out, sizeof(out), &len, "-middle-", 8);
+   capture_tail_append(out, sizeof(out), &len, "LAST", 4);
+   assert(strcmp(out, "middle-LAST") == 0);
+   assert(len == strlen(out));
+
+   /* A later deploy-stage result must displace old progress even after the
+    * shared UI buffer is already full. */
+   capture_tail_printf(out, sizeof(out), "-END");
+   assert(strcmp(out, "le-LAST-END") == 0);
+
+   char one_chunk[8] = "";
+   len = 0;
+   capture_tail_append(one_chunk, sizeof(one_chunk), &len, "0123456789", 10);
+   assert(strcmp(one_chunk, "3456789") == 0);
+   printf("  deploy diagnostics retain the terminal output across stages ok\n");
+}
+
+static void test_managed_kb_bearer_is_vault_persistent(void)
+{
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   char first[DEPLOY_KB_TOKEN_MAX + 1], second[DEPLOY_KB_TOKEN_MAX + 1];
+   g_stub_random_hex = 'b';
+   assert(deploy_kb_token(first, sizeof(first)) == 0);
+   assert(strncmp(first, DEPLOY_KB_SERVICE_SCOPE, sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1) == 0);
+   assert(strlen(first) == DEPLOY_KB_TOKEN_MAX);
+   g_stub_random_hex = 'c';
+   assert(deploy_kb_token(second, sizeof(second)) == 0);
+   assert(strcmp(first, second) == 0);
+
+   /* Upgrade an owner-strength legacy value in place instead of retaining its
+    * administrative authority or needlessly rotating its secret. */
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   assert(runtime_secret_store(
+              "AIMEE_KB_API_BEARER_TOKEN",
+              "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") == 0);
+   assert(deploy_kb_token(first, sizeof(first)) == 0);
+   assert(strcmp(first, "scope:service:aimee-server:"
+                        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd") == 0);
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   printf("  managed KB bearer is scoped, upgraded, and retained in Vault ok\n");
+}
+
+static void test_managed_kb_application_identity_is_independent(void)
+{
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
+   char bearer[DEPLOY_KB_TOKEN_MAX + 1], identity[DEPLOY_KB_TOKEN_MAX + 1];
+   g_stub_random_hex = 'e';
+   assert(deploy_kb_token(bearer, sizeof(bearer)) == 0);
+   g_stub_random_hex = 'f';
+   assert(deploy_kb_service_identity_token(identity, sizeof(identity)) == 0);
+   assert(deploy_kb_scoped_token_valid(bearer));
+   assert(deploy_kb_scoped_token_valid(identity));
+   assert(strcmp(bearer, identity) != 0);
+   runtime_secret_remove("AIMEE_KB_API_BEARER_TOKEN");
+   runtime_secret_remove("AIMEE_KB_SERVICE_IDENTITY_TOKEN");
+   printf("  managed KB application identity is independently rotated and scoped ok\n");
+}
+
+static void test_managed_identity_activation_resets_live_client(void)
+{
+   g_stub_mtls_resets = 0;
+   g_stub_dependency_resets = 0;
+   deploy_managed_identity_activated();
+   assert(g_stub_mtls_resets == 1);
+   assert(g_stub_dependency_resets == 1);
+   printf("  managed identity activates immediately in the live KB client ok\n");
+}
+
 static void test_managed_llm_service_credential(void)
 {
-   char tmp[] = "/tmp/aimee-deploy-llm-token-XXXXXX";
+   char tmp[256];
+   snprintf(tmp, sizeof tmp, "%s/aimee-deploy-llm-token-XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmp) != NULL);
    assert(setenv("AIMEE_HOME", tmp, 1) == 0);
    runtime_secret_remove("SYNTHESIS_API_KEY");
@@ -120,6 +214,8 @@ static void test_managed_llm_service_credential(void)
    assert(managed_llm == 1);
    assert(managed_kb == 1);
    assert(managed_identity == 1);
+   assert(strcmp(envp_value(envp, "AIMEE_MANAGED_KB_MEMBER"), "release-operator") == 0);
+   assert(envp_key_count(envp, "AIMEE_MANAGED_KB_MEMBER") == 1);
    const char *token = envp_value(envp, "SYNTHESIS_API_KEY");
    assert(token != NULL && strlen(token) == 64);
    for (size_t i = 0; i < 64; i++)
@@ -289,8 +385,8 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    deploy_apply_compose_file(file, sizeof(file));
 
    const char *argv[10];
-   int n = deploy_up_service_argv(file, "aimee-kb", argv, sizeof(argv) / sizeof(argv[0]));
-   assert(n == 8);
+   int n = deploy_up_service_argv(file, "aimee-kb", 1, argv, sizeof(argv) / sizeof(argv[0]));
+   assert(n == 9);
    assert(argv[n] == NULL);
 
    /* The regression: --remove-orphans made compose stop and remove aimee-server,
@@ -305,16 +401,19 @@ static void test_deploy_argv_is_orderable_and_has_no_remove_orphans(void)
    assert(strcmp(argv[4], "up") == 0);
    assert(strcmp(argv[5], "-d") == 0);
    assert(strcmp(argv[6], "--no-deps") == 0);
-   assert(strcmp(argv[7], "aimee-kb") == 0);
+   assert(strcmp(argv[7], "--force-recreate") == 0);
+   assert(strcmp(argv[8], "aimee-kb") == 0);
 
-   n = deploy_up_service_argv(file, "aimee-llm", argv, sizeof(argv) / sizeof(argv[0]));
+   n = deploy_up_service_argv(file, "aimee-llm", 0, argv, sizeof(argv) / sizeof(argv[0]));
    assert(n == 8 && strcmp(argv[7], "aimee-llm") == 0);
+   for (int i = 0; i < n; i++)
+      assert(strcmp(argv[i], "--force-recreate") != 0);
 
    /* a buffer with no room for the NULL terminator is refused, not overrun */
    const char *tight[8];
-   assert(deploy_up_service_argv(file, "aimee-kb", tight, 8) == -1);
-   assert(deploy_up_service_argv(file, "aimee-kb", NULL, 10) == -1);
-   assert(deploy_up_service_argv(file, "", argv, 10) == -1);
+   assert(deploy_up_service_argv(file, "aimee-kb", 1, tight, 8) == -1);
+   assert(deploy_up_service_argv(file, "aimee-kb", 1, NULL, 10) == -1);
+   assert(deploy_up_service_argv(file, "", 1, argv, 10) == -1);
    printf("  deploy argv supports explicit KB-then-LLM ordering without orphan removal ok\n");
 }
 
@@ -325,7 +424,7 @@ static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
    assert(n > 0 && argv[n] == NULL);
    assert(strcmp(argv[0], "docker") == 0 && strcmp(argv[1], "compose") == 0);
    assert(strcmp(argv[3], "/managed.yaml") == 0 && strcmp(argv[4], "run") == 0);
-   int saw_rm = 0, saw_stdin_bootstrap = 0, saw_kb = 0;
+   int saw_rm = 0, saw_stdin_bootstrap = 0, saw_kb = 0, saw_overwrite = 0;
    for (int i = 0; i < n; i++)
    {
       assert(strstr(argv[i], "SYNTHESIS_API_KEY=") == NULL);
@@ -336,8 +435,10 @@ static void test_managed_kb_credential_bootstrap_is_stdin_only(void)
          saw_stdin_bootstrap = 1;
       if (strcmp(argv[i], "aimee-kb") == 0)
          saw_kb = 1;
+      if (strcmp(argv[i], "AIMEE_VAULT_ENV_OVERWRITE=1") == 0)
+         saw_overwrite = 1;
    }
-   assert(saw_rm && saw_stdin_bootstrap && saw_kb);
+   assert(saw_rm && saw_stdin_bootstrap && saw_kb && saw_overwrite);
    assert(deploy_kb_vault_bootstrap_argv("/managed.yaml", argv, (size_t)n) == -1);
    printf("  managed KB service credential crosses only a disposable stdin bootstrap ok\n");
 }
@@ -500,6 +601,10 @@ static void test_ps_passes_through_unparseable_output(void)
 int main(void)
 {
    printf("test_deploy_apply\n");
+   test_capture_keeps_terminal_output();
+   test_managed_kb_bearer_is_vault_persistent();
+   test_managed_kb_application_identity_is_independent();
+   test_managed_identity_activation_resets_live_client();
    test_managed_llm_service_credential();
    test_managed_kb_without_an_embedder_is_refused();
    test_deploy_argv_is_orderable_and_has_no_remove_orphans();

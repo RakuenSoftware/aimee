@@ -20,13 +20,13 @@
 
 #include "aimee_home.h"
 #include "cJSON.h"
-#include "config.h" /* trigger_rule_t / config_load — surface configured trigger rules */
+#include "config.h" /* trigger_rule_t / legacy_config_read — surface configured trigger rules */
 #include "server_http_identity.h" /* server_http_identity_principal — ownership scoping */
 #include "wfe_def.h"
 #include "wfe_engine.h" /* wfe_load_workflow — roundtable-park resume check */
 #include "yaml.h"       /* yaml_emit — write blocks.yaml */
 #include "wfe_iface.h"
-#include "wfe_store.h"
+#include "db1_client/wfe_store.h"
 
 /* ── helpers ─────────────────────────────────────────────────────────────── */
 
@@ -649,13 +649,30 @@ static const char *path_basename(const char *p)
    return slash ? slash + 1 : (p ? p : "");
 }
 
-/* Work items belong to the one server environment, never to a PAM login. The
- * submitter remains actor attribution and human-gate decisions remain separately
- * CAP_WORKFLOW_ADMIN-gated; visibility does not grant mutation authority. */
+/* Ownership / operator-visibility for the Workflow Actions surface. True iff:
+ *   - the run is AUTONOMOUS (system/triggered: the proposals trigger, cron, or a
+ *     dev-submit pipeline). These are not private human proposals, so they are
+ *     visible to — and operable (pause/resume/stop) by — any authenticated
+ *     dashboard operator; OR
+ *   - the item's submitter equals the calling principal — an INTERACTIVE human
+ *     proposal stays owner-scoped (closes the list IDOR; one user never sees
+ *     another's drafts).
+ * A NULL/empty submitter on a non-autonomous row is owned by nobody -> fail
+ * closed. The human-gate decision (approve/reject) is separately CAP_WORKFLOW_
+ * ADMIN-gated, so visibility here does not widen gate authority.
+ *
+ * This predicate is the ONLY thing separating one actor's drafts from another's
+ * on these routes. The route table admits every lifecycle mutation on
+ * CAP_DASHBOARD_READ precisely because the handler re-checks ownership; making
+ * this return 1 unconditionally would let any dashboard reader stop or delete
+ * another actor's work item, and would leave the CAP_WORKFLOW_ADMIN-gated
+ * /v1/workflow/items/all with nothing to distinguish it from the plain list. */
 static int wf_owns(const db1_work_item_t *wi)
 {
-   (void)wi;
-   return 1;
+   if (strcmp(wi->mode, "autonomous") == 0)
+      return 1;
+   const char *principal = server_http_identity_principal();
+   return wi->submitter[0] && principal && principal[0] && strcmp(principal, wi->submitter) == 0;
 }
 
 /* shared: serialize one work-item row. The base keys (id..repo) are unchanged so
@@ -857,7 +874,8 @@ static int wf_load_for_mutation(const char *id, int is_operator, db1_work_item_t
       return err(resp, cap, 400, "missing work item id");
    if (db1_work_item_get(id, wi) != 1)
       return err(resp, cap, 404, "work item not found");
-   (void)is_operator;
+   if (!is_operator && !wf_owns(wi))
+      return err(resp, cap, 403, "not your work item");
    return 0;
 }
 

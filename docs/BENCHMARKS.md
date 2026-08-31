@@ -20,8 +20,11 @@ claims.
 
 ## Event-bus gate
 
-The bus has a committed dispatch baseline and ceiling. The reference measurement is roughly 134 ns
-per event against a 2,000 ns ceiling for host enqueue through client dequeue, excluding module work.
+The bus has committed dispatch and audit-enqueue baselines and ceilings. Dispatch measures roughly
+134 ns per event against a 1,000 ns ceiling for host enqueue through client dequeue, excluding
+module work. Governed-action audit enqueue has the same 1,000 ns ceiling.
+Its controlled reference measurement is 117 ns: the median of eight per-run
+medians, with each run timing 5,000 emits and the test pinned to one CPU.
 Run the gate on comparable hardware and keep the raw artifact. A slower machine can still be
 correct; changing the committed ceiling needs an explicit decision, not a convenient rebaseline.
 
@@ -56,6 +59,25 @@ Record:
 - failures, skips, and degraded paths.
 
 Keep raw machine output beside the summary when practical.
+
+### Coverage is recorded, not remembered
+
+Every result file the memory and retrieval producers write carries a `coverage`
+block stating the caps that were in force (`--max-samples` / `--max-cases` /
+`--max-questions`) and how much actually ran. A run with no cap is `complete`.
+
+A subsampled run and a full run are otherwise the same shape, so a score from a
+short run can be read back as a reproduction of a long one. That has already
+cost us once: reranking measured **+0.020** on a 600-question subsample and
+**-0.0048** on the full 10,000, a sign flip, and the recommendation was nearly
+shipped on the subsample. See
+[the retrieval writeup](blog/we-measured-our-reranker-and-deleted-it.md).
+
+`benchmarks/verify_scores.py` prints coverage for every file, and
+`--require-complete` fails the run unless every file proves it was uncapped. Use
+it wherever a score is promoted rather than merely read: baseline eligibility,
+cross-run comparison, and published claims. A file with no coverage block is
+refused there too: an unknown question count is not evidence of a full run.
 
 ## Compare
 

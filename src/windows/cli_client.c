@@ -47,7 +47,7 @@ static const char *cli_config_dir(void)
 
 const char *cli_default_socket_path(void)
 {
-   static char path[MAX_PATH];
+   static char path[MAX_PATH + sizeof("\\aimee.sock")];
    if (path[0])
       return path;
 
@@ -56,7 +56,7 @@ const char *cli_default_socket_path(void)
 }
 
 static int last_connect_errno = 0;
-static char last_connect_path[MAX_PATH] = "";
+static char last_connect_path[MAX_PATH + sizeof("\\aimee.sock")] = "";
 
 static int cli_win32_connect_errno(void)
 {
@@ -358,73 +358,10 @@ static int try_server(const char *socket_path, int timeout_ms, const char *requi
    return ok;
 }
 
-static int wait_for_ready(const char *sock_path, int timeout_ms, const char *required_method)
-{
-   int elapsed = 0;
-   int backoff = 10;
-
-   while (elapsed < timeout_ms)
-   {
-      if (try_server(sock_path, 500, required_method))
-         return 1;
-      Sleep((DWORD)backoff);
-      elapsed += backoff;
-      if (backoff < 200)
-         backoff *= 2;
-   }
-   return 0;
-}
-
-static void server_path_next_to_client(char *buf, size_t buflen)
-{
-   if (platform_get_exe_path(buf, buflen) != 0)
-   {
-      snprintf(buf, buflen, "aimee-server.exe");
-      return;
-   }
-   char *slash = strrchr(buf, '\\');
-   char *slash2 = strrchr(buf, '/');
-   if (!slash || (slash2 && slash2 > slash))
-      slash = slash2;
-   if (!slash)
-   {
-      snprintf(buf, buflen, "aimee-server.exe");
-      return;
-   }
-   snprintf(slash + 1, buflen - (size_t)(slash - buf) - 1, "aimee-server.exe");
-}
-
-static const char *spawn_server(const char *required_method)
-{
-   static char sock_path[MAX_PATH];
-   snprintf(sock_path, sizeof(sock_path), "%s", cli_default_socket_path());
-   platform_mkdir_p(cli_config_dir(), 0700);
-
-   if (try_server(sock_path, 500, required_method))
-      return sock_path;
-
-   char sock_arg[MAX_PATH + 16];
-   snprintf(sock_arg, sizeof(sock_arg), "--socket=%s", sock_path);
-
-   char server_path[MAX_PATH];
-   server_path_next_to_client(server_path, sizeof(server_path));
-   const char *argv_same_dir[] = {server_path, sock_arg, NULL};
-   pid_t pid = platform_spawn_daemon(argv_same_dir);
-
-   if (pid < 0)
-   {
-      const char *argv_path[] = {"aimee-server.exe", sock_arg, NULL};
-      pid = platform_spawn_daemon(argv_path);
-   }
-   if (pid < 0)
-      return NULL;
-
-   if (wait_for_ready(sock_path, SERVER_READY_TIMEOUT_MS, required_method))
-      return sock_path;
-
-   fprintf(stderr, "aimee: server did not become ready (30s timeout)\n");
-   return NULL;
-}
+/* wait_for_ready / server_path_next_to_client / spawn_server removed: the
+ * Windows client no longer starts a local aimee-server. cli_start_server()
+ * and cli_restart_server() below already refused to, and said so; the
+ * implicit spawn behind cli_ensure_server_for_method contradicted them. */
 
 const char *cli_ensure_server(void)
 {
@@ -449,15 +386,13 @@ int cli_restart_server(void)
 
 const char *cli_ensure_server_for_method(const char *method)
 {
-   const char *sock = cli_existing_server_for_method(method);
-   if (sock)
-      return sock;
-
-   const char *no_auto = getenv("AIMEE_NO_AUTOSTART");
-   if (no_auto && no_auto[0])
-      return NULL;
-
-   return spawn_server(method);
+   /* Pure lookup. The POSIX client stopped spawning aimee-server on demand in
+    * #1660 -- every CLI invocation being a potential server-spawner was the root
+    * of five orphan-listener fixes -- and stopped DISCOVERING one in the
+    * remote-only cutover. Windows kept both, so a Windows client still started a
+    * local server and bound itself to whatever it found: the topology aimee does
+    * not have, since the server runs in its own container, remotely. */
+   return cli_existing_server_for_method(method);
 }
 
 const char *cli_existing_server(void)
@@ -467,14 +402,14 @@ const char *cli_existing_server(void)
 
 const char *cli_existing_server_for_method(const char *method)
 {
+   /* AIMEE_SOCK only: an EXPLICIT operator/entrypoint choice, which is how the
+    * CLI inside the server's own container reaches it. Probing the well-known
+    * socket was discovery -- a client that finds a server by looking around the
+    * filesystem cannot tell its own server from a stray one, and answers
+    * confidently either way. Same rule the POSIX client enforces. */
    const char *env_sock = getenv("AIMEE_SOCK");
    if (env_sock && env_sock[0] && try_server(env_sock, 100, method))
       return env_sock;
-
-   const char *well_known = cli_default_socket_path();
-   if (try_server(well_known, 200, method))
-      return well_known;
-
    return NULL;
 }
 

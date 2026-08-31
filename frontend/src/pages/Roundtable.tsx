@@ -60,13 +60,13 @@ type Preset = {
 type PresetSummary = { name: string; description?: string; active?: boolean; synthesized?: boolean };
 type Status = { kind: "ok" | "err"; msg: string } | null;
 
-const lbl: React.CSSProperties = { fontSize: 12, color: "#666", display: "block", marginBottom: 2 };
+const lbl: React.CSSProperties = { fontSize: 12, color: "var(--sg-text-secondary)", display: "block", marginBottom: 2 };
 const input: React.CSSProperties = {
   width: "100%",
   fontSize: 13,
   padding: 6,
   borderRadius: 6,
-  border: "1px solid #ccc",
+  border: "1px solid var(--sg-border-medium)",
   boxSizing: "border-box",
 };
 const num: React.CSSProperties = { ...input, width: 120 };
@@ -181,8 +181,8 @@ export default function Roundtable() {
 
   useEffect(() => {
     refresh();
-    getJSON<{ agents?: { name: string }[] }>("/api/agents")
-      .then((d) => setModels((d.agents || []).map((a) => a.name).filter(Boolean).sort()))
+    getJSON<{ models?: { name: string }[]; agents?: { name: string }[] }>("/api/models")
+      .then((d) => setModels((d.models || d.agents || []).map((a) => a.name).filter(Boolean).sort()))
       .catch(() => setModels([]));
     getJSON<{ personas?: { name: string }[] }>("/api/chat/personas")
       .then((d) => setPersonas((d.personas || []).map((p) => p.name).filter(Boolean).sort()))
@@ -301,13 +301,13 @@ export default function Roundtable() {
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Roundtable</strong>
-        {active && <span style={{ fontSize: 12, color: "#666" }}>active: <code>{active}</code></span>}
+        {active && <span style={{ fontSize: 12, color: "var(--sg-text-secondary)" }}>active: <code>{active}</code></span>}
         <InlineStatus status={status} />
       </div>
 
       <div style={{ maxWidth: 760 }}>
         <Panel title="Roundtable behaviour">
-          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
             These apply to every panel, whichever preset is active. (Seats, limits, and the pipeline
             caps are per preset — set those below.)
           </p>
@@ -322,8 +322,8 @@ export default function Roundtable() {
                   style={{ marginTop: 2 }}
                 />
                 <span>
-                  {f.label} <code style={{ color: "#aaa", fontSize: 11 }}>{f.key}</code>
-                  <div style={{ fontSize: 12, color: "#777", lineHeight: 1.4 }}>{f.help}</div>
+                  {f.label} <code style={{ color: "var(--sg-text-pale)", fontSize: 11 }}>{f.key}</code>
+                  <div style={{ fontSize: 12, color: "var(--sg-text-faint)", lineHeight: 1.4 }}>{f.help}</div>
                 </span>
               </label>
             ))}
@@ -331,12 +331,12 @@ export default function Roundtable() {
         </Panel>
 
         <Panel title="Presets" count={presets.length}>
-          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
             A roundtable is a panel of models, each playing a persona, that review or draft together. Configure
             several named presets and pick one as the active default — the active preset drives what{" "}
             <code>aimee delegate roundtable</code> convenes.
           </p>
-          <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+          <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
             Roundtable policy is read-only to agents and automation. Creating, editing, deleting, or selecting the
             default requires an authenticated appliance-administrator action from this UI.
           </p>
@@ -348,13 +348,13 @@ export default function Roundtable() {
                 onClick={() => openPreset(p.name)}
                 title={p.description || ""}
                 style={{
-                  background: sel === p.name ? "#e8eef9" : "#fff",
+                  background: sel === p.name ? "var(--sg-info-bg)" : "var(--sg-surface)",
                   fontWeight: p.active ? 700 : 400,
                 }}
               >
                 <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
                   {p.active && (
-                    <span aria-label="Default roundtable" title="Default roundtable" style={{ color: "#b26a00" }}>
+                    <span aria-label="Default roundtable" title="Default roundtable" style={{ color: "var(--sg-warning-dark)" }}>
                       ★
                     </span>
                   )}
@@ -381,7 +381,7 @@ export default function Roundtable() {
               <div style={{ marginTop: 14, marginBottom: 4, fontSize: 13, fontWeight: 600 }}>
                 Required seats / positive pins ({form.seats.filter((s) => s.model.trim()).length})
               </div>
-              <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+              <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
                 Every configured seat is filled. Assignment spreads seats across providers and
                 distinct models first, then reuses eligible models up to their parallel capacity
                 until the table is full. A specific seat is a positive must-use pin; it never
@@ -390,7 +390,7 @@ export default function Roundtable() {
                 workflow run fails (never silently swapped). <strong>Random</strong> lets any
                 review-capable agent fill the seat, retrying a different one until one is accepted.
               </p>
-              <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+              <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
                 Reviews always include an <strong>original-request alignment</strong> assessment.
                 Direction drift or an unclear/missing assessment fails workflow gates closed;
                 refinements that still advance the request remain aligned.
@@ -401,7 +401,7 @@ export default function Roundtable() {
                 <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 6 }}>
                   <input
                     list={modelList}
-                    style={{ ...input, flex: 1, ...(isRandom ? { color: "#0a58ca", fontStyle: "italic" } : {}) }}
+                    style={{ ...input, flex: 1, ...(isRandom ? { color: "var(--sg-info-dark)", fontStyle: "italic" } : {}) }}
                     placeholder="model / agent (e.g. codex)"
                     title="Model or agent for this seat; type a value or pick a configured agent."
                     value={isRandom ? "Random — any review-capable" : seat.model}
@@ -411,7 +411,7 @@ export default function Roundtable() {
                   <Button
                     size="md"
                     onClick={() => setSeat(i, { model: isRandom ? "" : RANDOM_MODEL })}
-                    style={{ padding: "4px 8px", background: isRandom ? "#e8eef9" : "#fff", fontWeight: isRandom ? 700 : 400 }}
+                    style={{ padding: "4px 8px", background: isRandom ? "var(--sg-info-bg)" : "var(--sg-surface)", fontWeight: isRandom ? 700 : 400 }}
                     title={isRandom ? "switch to a specific pinned model" : "let any review-capable agent fill this seat (retried until one is accepted)"}
                   >
                     🎲 Random
@@ -451,7 +451,7 @@ export default function Roundtable() {
                     placeholder="agent used when enabled"
                   />
                   {form.chairman_enabled && form.chairman !== RANDOM_MODEL && models.length > 0 && !models.includes(form.chairman) && (
-                    <span style={{ fontSize: 11, color: "#9a6700" }}>
+                    <span style={{ fontSize: 11, color: "var(--sg-warning-dark)" }}>
                       This name is not in the current configured-agent list; acquisition will park until it is eligible.
                     </span>
                   )}
@@ -494,14 +494,14 @@ export default function Roundtable() {
               <Button
                 size="md"
                 onClick={() => setShowAdvanced((v) => !v)}
-                style={{ marginTop: 12, background: "#f5f5f5" }}
+                style={{ marginTop: 12, background: "var(--sg-bg)" }}
                 title="Show or hide the authoring-pipeline settings."
               >
                 {showAdvanced ? "▾" : "▸"} Advanced — authoring pipeline
               </Button>
               {showAdvanced && (
-                <div style={{ marginTop: 8, padding: 10, border: "1px solid #eee", borderRadius: 8 }}>
-                  <p style={{ fontSize: 12, color: "#666", margin: "0 0 8px" }}>
+                <div style={{ marginTop: 8, padding: 10, border: "1px solid var(--sg-border-light)", borderRadius: 8 }}>
+                  <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 8px" }}>
                     The outer REVIEW↔revise loop for roundtable authoring runs (done-bar and cost/pass
                     backstops). Leave at defaults unless you run authoring pipelines.
                   </p>

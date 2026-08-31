@@ -4,8 +4,8 @@
  * optional chairman, guard/loop knobs, and authoring
  * pipeline knobs — so the web GUI can maintain several named configurations and
  * pick which one is "active". Selecting a preset active copies its values into
- * the live config_t ensemble_* and roundtable_* fields (the runtime source of truth,
- * read by delegate_ensemble.c) and records the name in config_t.roundtable_default;
+ * the live legacy_config_record ensemble_* and roundtable_* fields (the runtime source of truth,
+ * read by delegate_ensemble.c) and records the name in legacy_config_record.roundtable_default;
  * the roundtable runtime uses those seats as the complete, authoritative panel.
  *
  * Presets are stored one-per-file as JSON at <config_default_dir()>/roundtables/
@@ -19,8 +19,8 @@
 #include "roundtable_types.h" /* ensemble_panel_t */
 #include <stddef.h>
 
-/* Bounds mirror the config_t arrays (config.h). ENSEMBLE_MAX_REFS == 32 seats;
- * model/persona/agent widths match the config_t field sizes exactly so an
+/* Bounds mirror the legacy_config_record arrays (config.h). ENSEMBLE_MAX_REFS == 32 seats;
+ * model/persona/agent widths match the legacy_config_record field sizes exactly so an
  * apply-to-config copy never truncates differently than the config parser. */
 #define RT_PRESET_MAX_SEATS   32
 #define RT_PRESET_NAME_MAX    64
@@ -109,10 +109,9 @@ int roundtable_preset_apply_to_config(const char *name, char *err, size_t errn);
  * "default" exists, and -1 when an explicitly named/configured preset is
  * missing. `resolved` receives the acquired name when provided. */
 int roundtable_preset_resolve_runtime(const char *requested, ensemble_panel_t *panel,
-                                      char *resolved,
-                                      size_t resolved_n, char *err, size_t err_n);
+                                      char *resolved, size_t resolved_n, char *err, size_t err_n);
 
-/* Synthesize a preset named `name` from the live config_t (ensemble_* and roundtable_*)
+/* Synthesize a preset named `name` from the live legacy_config_record (ensemble_* and roundtable_*)
  * into *out. Used to materialize an implicit "current" preset when the store is
  * empty, so the GUI opens showing today's effective roundtable. Never touches disk. */
 void roundtable_preset_from_current_config(const char *name, roundtable_preset_t *out);

@@ -5,9 +5,11 @@
  * as fresh. Saturation, a storage fault and a malformed record all mean the jti
  * was not recorded, so treating any of them as "not replayed" would let the
  * same token be presented again for as long as the condition lasts. */
-#include "db1.h"
-#include "db1_internal.h"
+#include "db1_client/db1.h"
+#include "server.h"
 #include "server_write_tier_db1.h"
+#include "server_write_tier.h"
+#include "server/server_mgmt_jwks_cache.h"
 
 #include "platform_test_util.h" /* platform_tmpdir */
 
@@ -16,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "support/store_module_fixture.h"
 
 static int g_managed_identity;
 
@@ -44,8 +47,122 @@ static server_identity_token_claims_t claims(const char *jti, kb_identity_tier_t
    return c;
 }
 
+/* --- the verifier must be handed THIS server's id as the audience ---------
+ *
+ * config->expected_audience is what binds a token to this server. It used to
+ * point at a `char server_id[128]` local to the (static) assembler, so by the
+ * time the verifier read it that frame was dead -- undefined behaviour that
+ * silently rejected every valid identity token as INVALID once an unrelated
+ * change disturbed the stack. Finding it took a full bisect against a
+ * CI-equivalent rig.
+ *
+ * WHAT THIS TEST DOES AND DOES NOT CATCH. It pins the contract: the verifier is
+ * handed the real server id, exactly. It will catch a logic change that passes
+ * the wrong audience, and it documents why the buffer is caller-owned.
+ *
+ * It does NOT reliably catch a reintroduction of the lifetime bug itself, and
+ * that was measured, not assumed: with the defect restored this test still
+ * passes, because build_config is static and -Os (and -flto at link time)
+ * inlines it, so `server_id` ends up in a frame that is still alive. Forcing
+ * -fno-inline on the object does not help either, since LTO re-inlines at link.
+ *
+ * The real guards are the signature -- a caller-owned buffer makes the mistake
+ * structurally impossible -- and scripts/run-write-tier-enforce-live.sh, which
+ * is what actually caught this. */
+static char g_seen_audience[256];
+static int g_verify_calls;
+
+int server_mgmt_jwks_trust_bundle_load(const char *absolute_path, char *out, size_t cap,
+                                       size_t *out_len)
+{
+   (void)absolute_path;
+   if (!out || cap == 0 || !out_len)
+      return -1;
+   snprintf(out, cap, "trust-bundle");
+   *out_len = strlen(out);
+   return 0;
+}
+
+server_mgmt_jwks_cache_result_t server_mgmt_jwks_cache_load(const char *trust_bundle,
+                                                            size_t trust_bundle_len, int64_t now,
+                                                            char *jwks_out, size_t jwks_cap,
+                                                            size_t *jwks_len)
+{
+   (void)trust_bundle;
+   (void)trust_bundle_len;
+   (void)now;
+   if (!jwks_out || jwks_cap == 0 || !jwks_len)
+      return SERVER_MGMT_JWKS_CACHE_INVALID;
+   snprintf(jwks_out, jwks_cap, "{\"keys\":[]}");
+   *jwks_len = strlen(jwks_out);
+   return SERVER_MGMT_JWKS_CACHE_OK;
+}
+
+/* Overwrite the region a returned-from frame would occupy. Without this the test
+ * is worthless: a dangling pointer into a dead frame still reads the right bytes
+ * until something reuses them, so the defect passes. The real caller reused that
+ * memory by accident; this does it on purpose, which is what makes the assertion
+ * deterministic rather than luck. */
+static void clobber_dead_frame(int depth)
+{
+   volatile unsigned char pad[2048];
+   for (size_t i = 0; i < sizeof(pad); i++)
+      pad[i] = 0xAB;
+   if (depth > 0)
+      clobber_dead_frame(depth - 1);
+}
+
+int server_write_tier_verify(const char *token, size_t token_len,
+                             const server_write_tier_config_t *config, int64_t now,
+                             server_write_tier_outcome_t *outcome,
+                             server_identity_token_claims_t *claims_out)
+{
+   (void)token;
+   (void)token_len;
+   (void)now;
+   (void)claims_out;
+   /* build_config has already returned by the time the verifier runs, so this is
+    * the exact window in which its frame is dead and reusable. */
+   clobber_dead_frame(3);
+   g_verify_calls++;
+   g_seen_audience[0] = '\0';
+   if (config && config->expected_audience)
+      snprintf(g_seen_audience, sizeof(g_seen_audience), "%s", config->expected_audience);
+   if (outcome)
+      *outcome = SERVER_WRITE_TIER_OK;
+   return SERVER_REMOTE_WRITES_DATA;
+}
+
+static void test_audience_storage_outlives_the_assembler(void)
+{
+   g_managed_identity = 1;
+   setenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE", "/nonexistent-but-nonempty", 1);
+
+   server_write_tier_outcome_t outcome = SERVER_WRITE_TIER_INVALID;
+   server_identity_token_claims_t out;
+   int tier = server_write_tier_verify_for_request("a.b.c", 5, 1000, &outcome, &out);
+
+   assert(g_verify_calls == 1);
+   /* The stub above provides this id; anything else means the audience pointer
+    * did not survive the assembler returning. */
+   assert(strcmp(g_seen_audience, "wizard-managed-server") == 0);
+   assert(outcome == SERVER_WRITE_TIER_OK);
+   assert(tier == SERVER_REMOTE_WRITES_DATA);
+
+   unsetenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
+   g_managed_identity = 0;
+   printf("ok: the audience the verifier sees is the server id, not a dead frame\n");
+}
+
 int main(void)
 {
+   /* The store is a module now. Without one attached every db1_* call below
+      fails, so bring the real one up -- or skip, saying why, on a machine with
+      no database to point it at. */
+   if (!store_module_fixture_available())
+      return 0;
+   store_module_fixture_start();
+
    unsetenv("AIMEE_SERVER_TEAM_ID");
    unsetenv("AIMEE_SERVER_ID");
    unsetenv("AIMEE_SERVER_MGMT_JWKS_TRUST_BUNDLE");
@@ -85,12 +202,11 @@ int main(void)
    g_managed_identity = 0;
    printf("ok: managed identity is a fallback and never fills a partial explicit packet\n");
 
-   char path[] = "/tmp/aimee-write-tier-db1-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-write-tier-db1-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(path) == 0);
-
    /* Fresh, then replayed. */
    server_identity_token_claims_t c = claims("id-jti-00000001", KB_IDENTITY_TIER_DATA);
    assert(server_write_tier_replay_db1(NULL, &c, 150) == 0);
@@ -127,7 +243,8 @@ int main(void)
    assert(server_write_tier_replay_db1(NULL, NULL, 150) < 0);
    printf("ok: NULL claims deny\n");
 
-   db1_shutdown();
+   test_audience_storage_outlives_the_assembler();
+
    unlink(path);
    printf("  PASS: only an explicit store OK counts as fresh\n");
    return 0;

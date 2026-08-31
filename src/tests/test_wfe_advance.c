@@ -1,6 +1,5 @@
-/* test_wfe_advance.c -- S2 sub-slice 3 pure core: the advance_request argument
- * parser + the interactive-driver CAS/replay decision. No engine/DB deps (the
- * executor integration is covered by test_wfe_advance_exec). */
+/* test_wfe_advance.c -- advance_request argument parsing and the event-bus-only
+ * workflow decision seam. */
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -22,6 +21,27 @@ static wfe_advance_args_t mk(const char *wi, const char *stage, const char *nonc
       a.have_nonce = 1;
    }
    return a;
+}
+
+static int provider_calls;
+static int provider_fails;
+static wfe_advance_outcome_t provider_outcome;
+static char provider_bound[WFE_ADVANCE_WI_LEN];
+
+static int fake_event_bus_provider(const char *bound_wi, const wfe_advance_args_t *args,
+                                   const char *actual_stage, const char *actual_state,
+                                   const char *last_nonce, wfe_advance_outcome_t *outcome)
+{
+   provider_calls++;
+   snprintf(provider_bound, sizeof(provider_bound), "%s", bound_wi ? bound_wi : "");
+   assert(args != NULL);
+   assert(strcmp(actual_stage ? actual_stage : "", "split") == 0);
+   assert(strcmp(actual_state ? actual_state : "", "active") == 0);
+   assert(strcmp(last_nonce ? last_nonce : "", "n-1") == 0);
+   if (provider_fails)
+      return -1;
+   *outcome = provider_outcome;
+   return 0;
 }
 
 static void test_parse(void)
@@ -64,55 +84,29 @@ static void test_parse(void)
    assert(wfe_advance_parse_args("{\"work_item_id\":5,\"observed_stage\":\"s\"}", &a) != 0);
 }
 
-static void test_decide(void)
+static void test_decision_seam(void)
 {
    wfe_advance_args_t a = mk("wi_1", "understand", NULL);
+   wfe_advance_outcome_t outcome = WFE_ADV_BADARGS;
 
-   /* clean advance: bound, active, stage matches */
-   assert(wfe_advance_decide("wi_1", &a, "understand", "active", "") == WFE_ADV_OK);
-   assert(wfe_advance_decide("wi_1", &a, "understand", "active", NULL) == WFE_ADV_OK);
+   wfe_advance_register_decision_provider(fake_event_bus_provider);
+   provider_calls = provider_fails = 0;
+   provider_outcome = WFE_ADV_REPLAY;
+   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-1", &outcome) == 0);
+   assert(provider_calls == 1 && outcome == WFE_ADV_REPLAY);
+   assert(strcmp(provider_bound, "wi_1") == 0);
 
-   /* unbound, or bound to a different work-item (confused deputy) */
-   assert(wfe_advance_decide("", &a, "understand", "active", "") == WFE_ADV_UNBOUND);
-   assert(wfe_advance_decide(NULL, &a, "understand", "active", "") == WFE_ADV_UNBOUND);
-   assert(wfe_advance_decide("wi_OTHER", &a, "understand", "active", "") == WFE_ADV_UNBOUND);
+   /* Provider failure and malformed outcomes fail closed without local policy. */
+   provider_fails = 1;
+   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-1", &outcome) == -1);
+   provider_fails = 0;
+   provider_outcome = (wfe_advance_outcome_t)(WFE_ADV_BADARGS + 1);
+   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-1", &outcome) == -1);
 
-   /* stale CAS: observed stage no longer current */
-   assert(wfe_advance_decide("wi_1", &a, "split", "active", "") == WFE_ADV_STALE);
-   assert(wfe_advance_decide("wi_1", &a, "", "active", "") == WFE_ADV_STALE);
-
-   /* terminal work-item cannot advance (no matching nonce) */
-   assert(wfe_advance_decide("wi_1", &a, "understand", "accepted", "") == WFE_ADV_TERMINAL);
-   assert(wfe_advance_decide("wi_1", &a, "understand", "rejected", "") == WFE_ADV_TERMINAL);
-   assert(wfe_advance_decide("wi_1", &a, "understand", "abandoned", "") == WFE_ADV_TERMINAL);
-
-   /* bad args */
-   wfe_advance_args_t empty;
-   memset(&empty, 0, sizeof empty);
-   assert(wfe_advance_decide("wi_1", &empty, "understand", "active", "") == WFE_ADV_BADARGS);
-   assert(wfe_advance_decide("wi_1", NULL, "understand", "active", "") == WFE_ADV_BADARGS);
-}
-
-static void test_replay_precedence(void)
-{
-   /* A retried turn: same nonce as the last applied advance. The stage has since
-    * moved on (observed=understand, actual=split) AND the item may have gone
-    * terminal -- REPLAY must win over both STALE and TERMINAL so the retry is an
-    * idempotent no-op, never an error or a double-advance. */
-   wfe_advance_args_t a = mk("wi_1", "understand", "n-7");
-
-   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-7") == WFE_ADV_REPLAY);
-   assert(wfe_advance_decide("wi_1", &a, "split", "accepted", "n-7") == WFE_ADV_REPLAY);
-
-   /* a DIFFERENT nonce is a fresh advance, not a replay */
-   assert(wfe_advance_decide("wi_1", &a, "understand", "active", "n-6") == WFE_ADV_OK);
-
-   /* no last nonce recorded -> not a replay */
-   assert(wfe_advance_decide("wi_1", &a, "understand", "active", "") == WFE_ADV_OK);
-
-   /* args without a nonce never replay, even if a last nonce exists */
-   wfe_advance_args_t no_nonce = mk("wi_1", "understand", NULL);
-   assert(wfe_advance_decide("wi_1", &no_nonce, "understand", "active", "n-7") == WFE_ADV_OK);
+   wfe_advance_register_decision_provider(NULL);
+   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-1", &outcome) == -1);
+   assert(wfe_advance_decide("wi_1", NULL, "split", "active", "n-1", &outcome) == -1);
+   assert(wfe_advance_decide("wi_1", &a, "split", "active", "n-1", NULL) == -1);
 }
 
 static void test_tool_schema(void)
@@ -138,8 +132,7 @@ int main(void)
 {
    printf("wfe-advance: ");
    test_parse();
-   test_decide();
-   test_replay_precedence();
+   test_decision_seam();
    test_tool_schema();
    printf("ok\n");
    return 0;

@@ -1,6 +1,3 @@
-#if defined(AIMEE_DB2_DISABLED)
-#error "memory_core KB-real TU must not be compiled into the AIMEE_DB2_DISABLED (server) build"
-#endif
 #ifndef _GNU_SOURCE /* strcasestr/memmem are GNU extensions (container gcc) */
 #define _GNU_SOURCE
 #endif
@@ -11,30 +8,32 @@
 #include "aimee.h"
 #include "memory_context_internal.h"
 #include "memory_rewrite_llm.h" /* weak in-process rewrite seam (KB build only) */
+#include "memory_candidate_fusion.h"
 #include <math.h>
 #include "db1_optional.h"
-#include "db2/entity_edges.h"
-#include "db2/kb_runtime_state.h"
-#include "db2/memory_health.h"
-#include "db2/memory_payload.h"
-#include "db2/feature_rows.h"
-#include "db2/memory_promotion.h"
-#include "db2/memory_query.h"
-#include "db2/memory_scope_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/kb_runtime_state.h"
+#include "modules/db2/c/memory_health.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/feature_rows.h"
+#include "modules/db2/c/memory_promotion.h"
+#include "modules/db2/c/memory_query.h"
+#include "modules/db2/c/memory_scope_query.h"
 #include "memory_graph_fusion.h"
 #include "kb_mdl.h"
-#include "db2/memory_relations.h"
-#include "db2/memory_scenes.h"
-#include "db2/stopwords.h"
-#include "db2/vector_index_ops.h"
-#include "db2/vector_verify.h"
+#include "modules/db2/c/memory_relations.h"
+#include "modules/db2/c/memory_scenes.h"
+#include "modules/db2/c/stopwords.h"
+#include "modules/db2/c/vector_index_ops.h"
+#include "modules/db2/c/vector_verify.h"
 #include "memory_vectors.h"
 #include "lifecycle.h"
 #include "platform_process.h"
 #include "memory_platform.h"
 #include "log.h"
-#include "util.h"       /* util_now_ms — memory.search stage timing */
-#include "agent_exec.h" /* agent_http_post: in-process HTTP embedding (no fork) */
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
+#include "util.h"                       /* util_now_ms — memory.search stage timing */
+#include "agent_exec.h"                 /* agent_http_post: in-process HTTP embedding (no fork) */
 #include "cJSON.h"
 #include "dogfood.h"
 #include <ctype.h>
@@ -42,6 +41,32 @@
 #include <time.h>
 #include <unistd.h>
 #include <pthread.h>
+
+/* Stack bound for id arrays handed to the batched rank reader. Sized to the
+ * rerank buffer; a wider set falls back to the single-id reader for the tail
+ * rather than growing the frame. */
+#define MEMORY_SCOPE_RANK_PROBE_MAX 96
+
+/* Heuristic sub-query expansion: how many fragments to build, and the
+ * per-fragment candidate cap. Each fragment is collected into its own list so
+ * the merge can interleave them by rank. */
+#define MEMORY_HEURISTIC_SUBQ_MAX 3
+#define MEMORY_HEURISTIC_SUBQ_CAP 32
+
+/* Whether the heuristic sub-query stage runs.
+ *
+ * AIMEE_MEMORY_DECOMPOSE_HEURISTIC overrides the config key, following the same
+ * precedent as AIMEE_MEMORY_RERANK_MODE: the benchmark harness needs to flip a
+ * retrieval stage per run without writing to the operator's config, and this
+ * stage has never been ablated on its own. The config key is seeded to 1, so an
+ * unset config and an unset environment both leave the stage running. */
+static int memory_decompose_heuristic_effective(void)
+{
+   const char *env = getenv("AIMEE_MEMORY_DECOMPOSE_HEURISTIC");
+   if (env && env[0])
+      return !(env[0] == '0' && env[1] == '\0');
+   return config_memory_decompose_heuristic_enabled();
+}
 
 static int memory_collect_graph_candidates(const char *raw_query, const char *norm_query,
                                            int fetch_limit, memory_t *out, int count, int max,
@@ -105,12 +130,32 @@ static int memory_collect_graph_candidates(const char *raw_query, const char *no
    return count;
 }
 
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void cand_warn_store_unreachable(void)
+{
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.search.candidates",
+            "candidate generation is unavailable: the relational store is "
+            "unreachable, so retrieval produces no candidates at all, not "
+            "merely poor ones");
+}
+
 int memory_generate_candidates(const char *query, const char *norm_query,
                                memory_query_intent_t intent, const memory_query_plan_t *plan,
                                int fetch_limit, memory_t *out, int max, int64_t *semantic_ids,
                                double *semantic_scores, int *semantic_hit_count,
                                memory_candidate_source_t *source_stats, int *source_stats_count)
 {
+   if (!db2_conn())
+   {
+      cand_warn_store_unreachable();
+      return 0;
+   }
    if (!query || !query[0] || !norm_query || !norm_query[0] || !out || max <= 0)
       return 0;
    int count = 0;
@@ -150,21 +195,6 @@ int memory_generate_candidates(const char *query, const char *norm_query,
       return -1;
    memory_record_query_stage_metric(plan, "variant");
 
-   /* Query decomposition: heuristic sub-query expansion */
-   {
-      char subqueries[3][128];
-      int subquery_count = memory_build_query_decomposition(norm_query, subqueries, 3);
-      for (int i = 0; i < subquery_count && count < max; i++)
-      {
-         count = memory_collect_variant_candidates(
-             query, subqueries[i], intent,
-             variant_fetch_limit / 2 > 0 ? variant_fetch_limit / 2 : 1, out, count, max,
-             source_stats, source_stats_count);
-         if (count < 0)
-            return -1;
-      }
-   }
-
    if (!plan || plan->semantic_enabled)
    {
       if (plan && plan->route == MEM_ROUTE_SEMANTIC)
@@ -199,6 +229,115 @@ int memory_generate_candidates(const char *query, const char *norm_query,
       }
 
       memory_record_query_stage_metric(plan, "semantic");
+   }
+
+   /* Heuristic sub-query expansion.
+    *
+    * Ordered after the dense leg and merged interleaved, both deliberately.
+    * Run before it, these fragments wrote straight into the shared candidate
+    * array: one variant pass can fill the 96-slot pool on its own, so the
+    * primary semantic leg above could be left with no slots at all, and
+    * appending each fragment's hits in turn let the first one spend whatever
+    * capacity was left. Neither is a ranking judgement — both are arrival order
+    * deciding what the reader is allowed to see. Paired measurements on
+    * multi-hop retrieval put naive parallel-and-pool sub-query expansion below
+    * doing no expansion at all, and interleaved fusion well above it.
+    *
+    * memory_collect_variant_candidates writes the two-lane membership globals,
+    * so the primary query's lanes are snapshotted and restored around these
+    * calls. Without that, memory_apply_lane_floor enforces a floor built from
+    * the last fragment rather than from the query the caller asked about. */
+   if (memory_decompose_heuristic_effective() && count < max)
+   {
+      char subqueries[MEMORY_HEURISTIC_SUBQ_MAX][128];
+      int subquery_count =
+          memory_build_query_decomposition(norm_query, subqueries, MEMORY_HEURISTIC_SUBQ_MAX);
+      if (subquery_count > 0)
+      {
+         MEMORY_AUTOFREE memory_t *subpool =
+             calloc((size_t)subquery_count * MEMORY_HEURISTIC_SUBQ_CAP, sizeof(*subpool));
+         if (!subpool)
+            return count;
+
+         int64_t saved_summary_ids[96];
+         int64_t saved_fact_ids[96];
+         int saved_summary_count = s_lane_summary_count;
+         int saved_fact_count = s_lane_fact_count;
+         memcpy(saved_summary_ids, s_lane_summary_ids, sizeof(saved_summary_ids));
+         memcpy(saved_fact_ids, s_lane_fact_ids, sizeof(saved_fact_ids));
+
+         memory_candidate_source_t frag_stats[128];
+         int frag_stats_count = 0;
+         memory_t *lists[MEMORY_HEURISTIC_SUBQ_MAX];
+         int list_counts[MEMORY_HEURISTIC_SUBQ_MAX];
+         int n_lists = 0;
+         int sub_fetch = variant_fetch_limit / 2 > 0 ? variant_fetch_limit / 2 : 1;
+         int failed = 0;
+
+         for (int i = 0; i < subquery_count; i++)
+         {
+            memory_t *slot = subpool + (size_t)i * MEMORY_HEURISTIC_SUBQ_CAP;
+            /* Fragment-local stats, promoted after the merge.
+             *
+             * Real per-leg masks matter: they feed the multi-source agreement
+             * bonus in ranking and the lane candidate/win counters in
+             * memory_record_lane_outcome_metrics. Tagging the merged rows with
+             * one blanket source would invent agreement no retrieval leg
+             * reported and skew that telemetry.
+             *
+             * They are collected here rather than straight into source_stats
+             * because a fragment fetches more rows than the merge keeps. The
+             * pooled code this replaced could not overcount, since it only ever
+             * noted rows it had already appended, so writing every fetched row
+             * into source_stats would inflate the lane candidate counts with
+             * rows that never became candidates. Only survivors are promoted,
+             * below. */
+            int got = memory_collect_variant_candidates(query, subqueries[i], intent, sub_fetch,
+                                                        slot, 0, MEMORY_HEURISTIC_SUBQ_CAP,
+                                                        frag_stats, &frag_stats_count);
+            if (got < 0)
+            {
+               failed = 1;
+               break;
+            }
+            if (got > 0)
+            {
+               lists[n_lists] = slot;
+               list_counts[n_lists] = got;
+               n_lists++;
+            }
+         }
+
+         s_lane_summary_count = saved_summary_count;
+         s_lane_fact_count = saved_fact_count;
+         memcpy(s_lane_summary_ids, saved_summary_ids, sizeof(s_lane_summary_ids));
+         memcpy(s_lane_fact_ids, saved_fact_ids, sizeof(s_lane_fact_ids));
+
+         if (failed)
+            return -1;
+
+         if (n_lists > 0)
+         {
+            int before = count;
+            count =
+                memory_candidates_merge_interleaved(out, count, lists, list_counts, n_lists, max);
+            /* Promote only the survivors, each under the mask its own leg
+             * reported, so the lane counters describe the candidate set that
+             * actually exists. */
+            for (int i = before; i < count; i++)
+            {
+               for (int f = 0; f < frag_stats_count; f++)
+               {
+                  if (frag_stats[f].memory_id != out[i].id)
+                     continue;
+                  memory_note_candidate_sources(source_stats, source_stats_count, 128, out, i,
+                                                i + 1, frag_stats[f].source_mask);
+                  break;
+               }
+            }
+            memory_record_query_stage_metric(plan, "decompose");
+         }
+      }
    }
 
    /* Negation lexical recall: when query has negative polarity, search for
@@ -247,11 +386,17 @@ int memory_generate_candidates(const char *query, const char *norm_query,
       }
    }
 
-   /* Fallback: LIKE search */
+   /* Indexed lexical lane. The former unconditional LOWER(... LIKE ...) scan
+    * walked the full memories table on every hybrid recall, even when the
+    * vector and structured lanes had already produced candidates. Preserve
+    * substring recall only as a compatibility fallback when word-based FTS
+    * finds nothing. */
    MEMORY_AUTOFREE memory_t *like_matches = calloc(128, sizeof(*like_matches));
    if (!like_matches)
       return count;
-   int like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches, 128);
+   int like_count = db2_memory_find_facts_fts(norm_query, fetch_limit, like_matches, 128);
+   if (like_count == 0)
+      like_count = memory_find_facts_like(norm_query, fetch_limit, like_matches, 128);
    if (like_count > 0)
       memory_record_query_stage_metric(plan, "like");
    for (int i = 0; i < like_count && count < max; i++)
@@ -524,9 +669,10 @@ int memory_expand_to_session_window(memory_t *out, int count, int max, int windo
    return count;
 }
 
-int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
-                             int limit, memory_t *out, int max)
+static int memory_find_facts_scoped_impl(const char *query, const char *scope_type,
+                                         const char *scope_value, int limit, memory_t *out, int max)
 {
+   memory_recall_trace_capture_reset();
    if (!query || !query[0])
       return 0;
 
@@ -763,49 +909,104 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
       count = memory_candidates_merge(candidates, count, extra, extra_count, MEMORY_RERANK_BUFFER);
    }
 
-   /* Decomposition: additional passes for each sub-question */
-   for (int q = 0; q < rewrite.sub_question_count; q++)
+   /* Decomposition: one pass per LLM sub-question, merged interleaved.
+    *
+    * Each sub-question keeps its own ranked list and the merge takes rank 0 from
+    * every list before any list's rank 1. Merging them one whole list at a time
+    * let sub-question 1 spend the remaining pool capacity and evict what the
+    * later sub-questions found — the failure mode that puts naive decomposition
+    * below no decomposition at all on multi-hop retrieval.
+    *
+    * The lane-membership globals are snapshotted and restored around the passes
+    * for the same reason as the heuristic stage in memory_generate_candidates: a
+    * sub-question is a fragment of the caller's query, and a floor built from a
+    * fragment is not the floor the caller asked for. The HyDE pass above is
+    * deliberately not covered — it is a full-fidelity pass over the real query,
+    * not a fragment, so its lane membership is a legitimate description of the
+    * request. */
+   if (rewrite.sub_question_count > 0)
    {
-      char sub_norm[512];
-      normalize_key(rewrite.sub_questions[q], sub_norm, sizeof(sub_norm));
-      if (!sub_norm[0])
-         snprintf(sub_norm, sizeof(sub_norm), "%s", rewrite.sub_questions[q]);
-
-      memory_query_plan_t sub_plan;
-      if (memory_query_plan(rewrite.sub_questions[q], limit, MEMORY_RERANK_BUFFER, &sub_plan) != 0)
-         sub_plan = plan;
-
-      int64_t sub_sem_ids[128];
-      double sub_sem_scores[128];
-      int sub_sem_count = 0;
-      memory_candidate_source_t sub_src[128];
-      int sub_src_count = 0;
-      MEMORY_AUTOFREE memory_t *sub_cands = calloc(MEMORY_RERANK_BUFFER / 2, sizeof(*sub_cands));
-      if (!sub_cands)
-         break;
-      int sub_count = memory_generate_candidates(
-          rewrite.sub_questions[q], sub_norm,
-          memory_query_intent(rewrite.sub_questions[q], sub_norm), &sub_plan,
-          fetch_limit / (rewrite.sub_question_count + 1), sub_cands, MEMORY_RERANK_BUFFER / 2,
-          sub_sem_ids, sub_sem_scores, &sub_sem_count, sub_src, &sub_src_count);
-      if (sub_count < 0)
+      const int sub_cap = MEMORY_RERANK_BUFFER / 2;
+      MEMORY_AUTOFREE memory_t *sub_pool =
+          calloc((size_t)rewrite.sub_question_count * sub_cap, sizeof(*sub_pool));
+      if (!sub_pool)
       {
          pgvec_memory_vector_scope_hint_clear();
          free(candidates);
          return -1;
       }
-      count =
-          memory_candidates_merge(candidates, count, sub_cands, sub_count, MEMORY_RERANK_BUFFER);
+
+      int64_t saved_summary_ids[96];
+      int64_t saved_fact_ids[96];
+      int saved_summary_count = s_lane_summary_count;
+      int saved_fact_count = s_lane_fact_count;
+      memcpy(saved_summary_ids, s_lane_summary_ids, sizeof(saved_summary_ids));
+      memcpy(saved_fact_ids, s_lane_fact_ids, sizeof(saved_fact_ids));
+
+      memory_t *sub_lists[MEMORY_REWRITE_MAX_SUBQUERIES];
+      int sub_list_counts[MEMORY_REWRITE_MAX_SUBQUERIES];
+      int n_sub_lists = 0;
+      int sub_failed = 0;
+
+      for (int q = 0; q < rewrite.sub_question_count; q++)
+      {
+         char sub_norm[512];
+         normalize_key(rewrite.sub_questions[q], sub_norm, sizeof(sub_norm));
+         if (!sub_norm[0])
+            snprintf(sub_norm, sizeof(sub_norm), "%s", rewrite.sub_questions[q]);
+
+         memory_query_plan_t sub_plan;
+         if (memory_query_plan(rewrite.sub_questions[q], limit, MEMORY_RERANK_BUFFER, &sub_plan) !=
+             0)
+            sub_plan = plan;
+
+         int64_t sub_sem_ids[128];
+         double sub_sem_scores[128];
+         int sub_sem_count = 0;
+         memory_candidate_source_t sub_src[128];
+         int sub_src_count = 0;
+         memory_t *slot = sub_pool + (size_t)q * sub_cap;
+         int sub_count = memory_generate_candidates(
+             rewrite.sub_questions[q], sub_norm,
+             memory_query_intent(rewrite.sub_questions[q], sub_norm), &sub_plan,
+             fetch_limit / (rewrite.sub_question_count + 1), slot, sub_cap, sub_sem_ids,
+             sub_sem_scores, &sub_sem_count, sub_src, &sub_src_count);
+         if (sub_count < 0)
+         {
+            sub_failed = 1;
+            break;
+         }
+         if (sub_count > 0)
+         {
+            sub_lists[n_sub_lists] = slot;
+            sub_list_counts[n_sub_lists] = sub_count;
+            n_sub_lists++;
+         }
+      }
+
+      s_lane_summary_count = saved_summary_count;
+      s_lane_fact_count = saved_fact_count;
+      memcpy(s_lane_summary_ids, saved_summary_ids, sizeof(s_lane_summary_ids));
+      memcpy(s_lane_fact_ids, saved_fact_ids, sizeof(s_lane_fact_ids));
+
+      if (sub_failed)
+      {
+         pgvec_memory_vector_scope_hint_clear();
+         free(candidates);
+         return -1;
+      }
+
+      count = memory_candidates_merge_interleaved(candidates, count, sub_lists, sub_list_counts,
+                                                  n_sub_lists, MEMORY_RERANK_BUFFER);
    }
 
    count = memory_filter_scope(candidates, count, scope_type, scope_value);
 
-   /* Lifecycle archival filter: when the feature is enabled and
-    * hide_archived is set, drop any candidate whose lifecycle_state is
-    * `archived` before reranking.  memory_get() keeps returning them;
-    * this only affects the recall surface. */
+   /* Negative retrieval is unconditional: corrected, archived and explicitly
+    * suppressed memories must not re-enter through lexical, dense or graph-
+    * fused candidates. memory_get() remains an audit/read-by-id surface. */
    {
-      if (config_memory_lifecycle_enabled() && config_memory_lifecycle_hide_archived() && count > 0)
+      if (count > 0)
       {
          /* Batch-probe archive state via db2 and drop any archived ids from
           * the candidate array. */
@@ -813,23 +1014,25 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
          int probe_n = count < MEMORY_RERANK_BUFFER ? count : MEMORY_RERANK_BUFFER;
          for (int i = 0; i < probe_n; i++)
             cand_ids[i] = candidates[i].id;
-         int64_t archived_ids[MEMORY_RERANK_BUFFER];
-         int n_arch =
-             db2_memory_filter_archived_ids(cand_ids, probe_n, archived_ids, MEMORY_RERANK_BUFFER);
+         int64_t withheld_ids[MEMORY_RERANK_BUFFER];
+         int n_withheld =
+             db2_memory_filter_archived_ids(cand_ids, probe_n, withheld_ids, MEMORY_RERANK_BUFFER);
          {
 
             int write = 0;
             for (int i = 0; i < count; i++)
             {
-               int is_archived = 0;
-               for (int a = 0; a < n_arch; a++)
-                  if (archived_ids[a] == candidates[i].id)
+               int is_withheld = 0;
+               for (int a = 0; a < n_withheld; a++)
+                  if (withheld_ids[a] == candidates[i].id)
                   {
-                     is_archived = 1;
+                     is_withheld = 1;
                      break;
                   }
-               if (!is_archived)
+               if (!is_withheld)
                   candidates[write++] = candidates[i];
+               else
+                  memory_recall_trace_reject(candidates[i].id, "candidate", "withheld_state");
             }
             count = write;
          }
@@ -929,6 +1132,8 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
                                  config_memory_recall_lanes_floor_fact(), eff);
       }
    }
+   memory_record_lane_outcome_metrics(&plan, candidates, reranked, source_stats,
+                                      source_stats_count);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
 
@@ -946,10 +1151,32 @@ int memory_find_facts_scoped(const char *query, const char *scope_type, const ch
    return reranked;
 }
 
+int memory_find_facts_scoped(const char *query, const char *scope_type, const char *scope_value,
+                             int limit, memory_t *out, int max)
+{
+   db2_memory_scope_context_t previous;
+   db2_memory_scope_context_get(&previous);
+   db2_memory_scope_context_set_exact(previous.workspace, previous.project, scope_type, scope_value,
+                                      previous.include_all);
+   int count = memory_find_facts_scoped_impl(query, scope_type, scope_value, limit, out, max);
+   db2_memory_scope_context_restore(&previous);
+   return count;
+}
+
 static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_rank)
 {
-   for (int i = 0; i < count; i++)
-      scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   /* One statement for the whole set: this ranks every candidate about to be
+    * sorted, so a per-candidate reader made the round trips scale with recall
+    * width. */
+   {
+      int64_t rank_ids[MEMORY_SCOPE_RANK_PROBE_MAX];
+      int probe = count < MEMORY_SCOPE_RANK_PROBE_MAX ? count : MEMORY_SCOPE_RANK_PROBE_MAX;
+      for (int i = 0; i < probe; i++)
+         rank_ids[i] = matches[i].id;
+      db2_memory_scope_context_rank_batch(rank_ids, probe, scope_rank);
+      for (int i = probe; i < count; i++)
+         scope_rank[i] = db2_memory_scope_context_rank(matches[i].id);
+   }
    /* Stable insertion sort: relevance ordering from the reranker is retained
     * inside each hard visibility bucket. */
    for (int i = 1; i < count; i++)
@@ -971,6 +1198,7 @@ static void memory_sort_scope_buckets(memory_t *matches, int count, int *scope_r
 int memory_find_facts_visible_ex(const char *query, const char *workspace, const char *project,
                                  int include_all, int limit, memory_t *out, int max)
 {
+   memory_recall_trace_capture_reset();
    if (!query || !query[0])
       return 0;
    db2_memory_scope_context_t previous_scope;
@@ -1060,12 +1288,27 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
          db2_memory_scope_context_clear();
       return -1;
    }
+   /* Rank the pool in one statement before the filter loop: this runs on every
+    * scoped recall, over the full candidate pool, and a per-candidate reader
+    * made its round trips scale with pool width. */
+   int pool_ranks[MEMORY_RERANK_BUFFER];
+   {
+      int64_t rank_ids[MEMORY_RERANK_BUFFER];
+      int probe = count < MEMORY_RERANK_BUFFER ? count : MEMORY_RERANK_BUFFER;
+      for (int i = 0; i < probe; i++)
+         rank_ids[i] = candidates[i].id;
+      db2_memory_scope_context_rank_batch(rank_ids, probe, pool_ranks);
+   }
    int kept = 0;
    for (int i = 0; i < count; i++)
    {
-      int rank = db2_memory_scope_context_rank(candidates[i].id);
+      int rank = i < MEMORY_RERANK_BUFFER ? pool_ranks[i]
+                                          : db2_memory_scope_context_rank(candidates[i].id);
       if (rank <= 0 && !include_all)
+      {
+         memory_recall_trace_reject(candidates[i].id, "candidate", "scope_boundary");
          continue;
+      }
       if (kept != i)
          candidates[kept] = candidates[i];
       scope_rank[kept] = rank;
@@ -1096,6 +1339,8 @@ int memory_find_facts_visible_ex(const char *query, const char *workspace, const
     * Re-apply the hard scope order last so relevance features can only move
     * candidates within their scope bucket. */
    memory_sort_scope_buckets(candidates, ranked_count, scope_rank);
+   memory_record_lane_outcome_metrics(&plan, candidates, reranked, source_stats,
+                                      source_stats_count);
    for (int i = 0; i < reranked; i++)
       out[i] = candidates[i];
    clock_gettime(CLOCK_MONOTONIC, &ts1);

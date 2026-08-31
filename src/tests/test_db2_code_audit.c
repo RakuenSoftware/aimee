@@ -5,8 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "db2/kb_service_backend.h"
-#include "db2/db_postgres.h"
+#include "modules/db2/c/kb_service_backend.h"
+#include "modules/db2/c/db_postgres.h"
 
 typedef enum
 {

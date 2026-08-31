@@ -2,7 +2,6 @@
 #include "util.h"
 #include <aimee/tools/agent_tools.h>
 #include "aimee_home.h"
-#include <aimee/delegates/delegate_ephemeral_ws.h>
 #include "economizer.h"
 #include "log.h"
 #include "agent_tools_internal.h"
@@ -10,7 +9,7 @@
 #include "process_mgr.h"
 #include "agent_exec.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "sandbox.h"
 #include "slop_detect.h"
 #include "web_search.h"
@@ -694,7 +693,7 @@ int64_t auto_snapshot_record(const char *path)
    if (!sid || !sid[0])
       return 0;
 
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
       return 0;
 
    int64_t snap_id = agent_tools_get_snap_id();
@@ -777,7 +776,10 @@ char *tool_bash(const char *command, int timeout_ms)
          dstr_free(&w);
       }
       int exit_code = -1;
-      char *out = ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
+      char *out =
+          ws->exec_shell_timeout
+              ? ws->exec_shell_timeout(ws, wrapped ? wrapped : command, timeout_ms, &exit_code)
+              : ws->exec_shell(ws, wrapped ? wrapped : command, &exit_code);
       free(wrapped);
       /* Learned toolchain: capture apt-install intent ONLY after a successful run, so a
        * failed/typo'd/nonexistent install is never recorded (and can't poison later
@@ -822,7 +824,7 @@ char *tool_bash(const char *command, int timeout_ms)
     * delegate — the trusted primary (operator) session, which has no active
     * delegation, is unaffected and still runs on the host. */
 #ifdef __linux__
-   const int host_unsandboxed = (sbox_cfg.mode == SANDBOX_MODE_OFF);
+   const int host_unsandboxed = (sandbox_effective_mode(&sbox_cfg) == SANDBOX_MODE_OFF);
 #else
    const int host_unsandboxed = !guarded_parent; /* guarded_parent already refused below */
 #endif
@@ -832,10 +834,15 @@ char *tool_bash(const char *command, int timeout_ms)
       close(stdout_pipe[1]);
       close(stderr_pipe[0]);
       close(stderr_pipe[1]);
+      /* Say DISABLED, not "unavailable": on Linux this branch tests the configured
+       * mode only — sandbox_available() is never consulted here (it is probed inside
+       * sandbox_exec_internal, which this refusal precedes). The old "off/unavailable"
+       * wording sent readers hunting for a broken kernel/namespace setup when the
+       * actual state is a config value. Name the setting so the fix is obvious. */
       return safe_strdup(
           "{\"stdout\":\"\",\"stderr\":\"refused: a delegated shell requires sandbox isolation, "
-          "but the sandbox is off/unavailable; running unsandboxed on the aimee-server host is "
-          "not permitted\",\"exit_code\":-1}");
+          "but the sandbox is disabled (sandbox.mode=off); running unsandboxed on the "
+          "aimee-server host is not permitted\",\"exit_code\":-1}");
    }
 #ifndef __linux__
    if (guarded_parent)
@@ -1133,7 +1140,7 @@ char *tool_bash(const char *command, int timeout_ms)
 /* Validate a file path: delegates to the shared guardrail-level check. */
 static const char *validate_file_path(const char *path, char *resolved, size_t resolved_len)
 {
-   return guardrails_validate_file_path(path, resolved, resolved_len);
+   return guardrails_check_sensitive_path(path, resolved, resolved_len);
 }
 
 const char *path_in_thread_cwd(const char *path, char *buf, size_t buf_len)
@@ -1324,6 +1331,8 @@ char *tool_write_file(const char *path, const char *content)
       return safe_strdup("error: write blocked: read-only delegate (not write-capable)");
    if (agent_tools_parent_write_guard_blocks(actual_path, NULL))
       return safe_strdup("error: write blocked: parent worktree is read-only for delegates");
+   if (!text_is_valid_utf8(content))
+      return safe_strdup("error: content is not valid UTF-8; refusing text-file write");
 
    /* Route raw I/O through the workspace provider (shared = direct fs, the
     * same calls as before). Policy above this point — cwd resolution, path
@@ -1435,7 +1444,7 @@ char *tool_list_files(const char *path, const char *pattern)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *err = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *err = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (err)
       return safe_strdup(err);
 
@@ -1655,7 +1664,7 @@ char *tool_verify(const char *check_type, const char *target, const char *expect
    else if (strcmp(check_type, "file_contains") == 0)
    {
       char resolved[MAX_PATH_LEN];
-      const char *verr = guardrails_validate_file_path(target, resolved, sizeof(resolved));
+      const char *verr = guardrails_check_sensitive_path(target, resolved, sizeof(resolved));
       if (verr)
       {
          cJSON_AddBoolToObject(result, "pass", 0);
@@ -1748,7 +1757,7 @@ char *tool_grep(const char *path, const char *pattern, int max_results)
    char cwd_path[MAX_PATH_LEN];
    const char *actual_path = path_in_thread_cwd(path, cwd_path, sizeof(cwd_path));
    char resolved[MAX_PATH_LEN];
-   const char *verr = guardrails_validate_file_path(actual_path, resolved, sizeof(resolved));
+   const char *verr = guardrails_check_sensitive_path(actual_path, resolved, sizeof(resolved));
    if (verr)
       return safe_strdup(verr);
 
@@ -2003,8 +2012,7 @@ char *tool_code_search(const char *query, const char *project, int max_results)
  * Shared knowledge lives behind the knowledge service; server-side delegates
  * reach it via the kb_client RPC bridge. */
 
-static char *render_notes_json_to_text(const char *json, const char *empty_msg, int include_content,
-                                       const char *prefix)
+static char *render_notes_json_to_text(const char *json, const char *empty_msg, int include_content)
 {
    if (!json)
       return safe_strdup("error: knowledge service unavailable for notes");
@@ -2030,7 +2038,8 @@ static char *render_notes_json_to_text(const char *json, const char *empty_msg, 
       return out;
    }
    char buf[8192];
-   int pos = snprintf(buf, sizeof(buf), prefix, count);
+   int pos = include_content ? snprintf(buf, sizeof(buf), "Found %d note(s):\n\n", count)
+                             : snprintf(buf, sizeof(buf), "Investigation notes (%d):\n\n", count);
    cJSON *n = NULL;
    cJSON_ArrayForEach(n, notes)
    {
@@ -2100,8 +2109,7 @@ char *tool_list_notes(const char *tag, int limit)
    if (limit <= 0 || limit > 20)
       limit = 20;
    char *json = kb_client_note_list_json((tag && tag[0]) ? tag : NULL, limit);
-   char *out = render_notes_json_to_text(json, "No investigation notes found.", 0,
-                                         "Investigation notes (%d):\n\n");
+   char *out = render_notes_json_to_text(json, "No investigation notes found.", 0);
    free(json);
    return out;
 }
@@ -2113,7 +2121,7 @@ char *tool_search_notes(const char *query)
    char *json = kb_client_note_search_json(query, 10);
    char none[256];
    snprintf(none, sizeof(none), "No notes matching '%s'.", query);
-   char *out = render_notes_json_to_text(json, none, 1, "Found %d note(s):\n\n");
+   char *out = render_notes_json_to_text(json, none, 1);
    free(json);
    return out;
 }

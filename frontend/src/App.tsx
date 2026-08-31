@@ -1,13 +1,14 @@
 import { Component, useEffect, useRef, useState } from 'react';
 import type { ErrorInfo, ReactNode } from 'react';
 import { Routes, Route, Navigate, NavLink, useLocation } from 'react-router-dom';
-import { Toast } from '@rakuensoftware/smoothgui';
+import { Toast, ThemeToggle } from '@rakuensoftware/smoothgui';
 import Chat from './pages/Chat';
 import Dashboard from './pages/Dashboard';
 import Logs from './pages/Logs';
 import EditWorkflows from './pages/EditWorkflows';
 import WorkflowActions from './pages/WorkflowActions';
-import Agents from './pages/Agents';
+import Providers from './pages/Providers';
+import Models from './pages/Models';
 import Personas from './pages/Personas';
 import Roles from './pages/Roles';
 import Roundtable from './pages/Roundtable';
@@ -15,6 +16,7 @@ import Settings from './pages/Settings';
 import Projects from './pages/Projects';
 import Graph from './pages/Graph';
 import Editor from './pages/Editor';
+import Memory from './pages/Memory';
 import { SessionProvider, useSessions } from './SessionContext';
 import TabTutorial from './components/TabTutorial';
 import SetupChip from './components/SetupChip';
@@ -46,15 +48,15 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
   render() {
     if (this.state.error) {
       return (
-        <div style={{ padding: '24px', fontFamily: 'system-ui', color: '#555' }}>
-          <div style={{ fontSize: '15px', fontWeight: 600, color: '#c62828', marginBottom: '8px' }}>
+        <div style={{ padding: '24px', fontFamily: 'system-ui', color: 'var(--sg-text-muted)' }}>
+          <div style={{ fontSize: '15px', fontWeight: 600, color: 'var(--sg-danger-dark)', marginBottom: '8px' }}>
             This page hit an error and couldn’t render.
           </div>
-          <div style={{ fontSize: '13px', color: '#888', marginBottom: '12px' }}>
+          <div style={{ fontSize: '13px', color: 'var(--sg-text-faint)', marginBottom: '12px' }}>
             Other pages still work — use the navigation to switch. Details below.
           </div>
           <pre style={{
-            fontSize: '12px', color: '#a33', background: '#fff3f3', border: '1px solid #ffd2d2',
+            fontSize: '12px', color: 'var(--sg-danger)', background: 'var(--sg-danger-bg)', border: '1px solid var(--sg-danger-bg)',
             borderRadius: '6px', padding: '10px', overflow: 'auto', whiteSpace: 'pre-wrap',
           }}>
             {this.state.error.message}
@@ -62,8 +64,8 @@ class ErrorBoundary extends Component<{ children: ReactNode }, { error: Error | 
           <button
             onClick={() => this.setState({ error: null })}
             style={{
-              marginTop: '12px', padding: '6px 14px', background: '#fff', color: '#666',
-              border: '1px solid #ddd', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
+              marginTop: '12px', padding: '6px 14px', background: 'var(--sg-surface)', color: 'var(--sg-text-secondary)',
+              border: '1px solid var(--sg-border-medium)', borderRadius: '4px', cursor: 'pointer', fontSize: '13px',
             }}
           >
             Retry
@@ -97,8 +99,8 @@ function SessionTabBar() {
             style={{
               display: 'flex', alignItems: 'center', gap: 6, padding: '4px 8px', borderRadius: 6,
               cursor: 'pointer', fontSize: 13, whiteSpace: 'nowrap', maxWidth: 220,
-              background: isActive ? '#23233a' : 'transparent',
-              color: isActive ? '#cde' : '#889', border: '1px solid', borderColor: isActive ? '#3a3a55' : 'transparent',
+              background: isActive ? 'var(--sg-dark-surface-alt)' : 'transparent',
+              color: isActive ? 'var(--sg-sidebar-text)' : 'var(--sg-text-faint)', border: '1px solid', borderColor: isActive ? 'var(--sg-dark-surface-alt)' : 'transparent',
             }}
           >
             {editing === s.id ? (
@@ -111,19 +113,19 @@ function SessionTabBar() {
                   if (e.key === 'Enter') { renameSession(s.id, (e.target as HTMLInputElement).value); setEditing(''); }
                   if (e.key === 'Escape') setEditing('');
                 }}
-                style={{ width: 110, background: '#13131f', color: '#cde', border: '1px solid #3a3a55', borderRadius: 4, fontSize: 13, padding: '1px 4px' }}
+                style={{ width: 110, background: 'var(--sg-dark-surface)', color: 'var(--sg-sidebar-text)', border: '1px solid var(--sg-dark-surface-alt)', borderRadius: 4, fontSize: 13, padding: '1px 4px' }}
               />
             ) : (
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {s.name}{s.projectName ? <span style={{ color: '#667', marginLeft: 5 }}>· {s.projectName}</span> : null}
+                {s.name}{s.projectName ? <span style={{ color: 'var(--sg-text-secondary)', marginLeft: 5 }}>· {s.projectName}</span> : null}
               </span>
             )}
             <span
               onClick={e => { e.stopPropagation(); closeSession(s.id); }}
               title="Close session"
-              style={{ color: '#667', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
-              onMouseOver={e => (e.currentTarget.style.color = '#e88')}
-              onMouseOut={e => (e.currentTarget.style.color = '#667')}
+              style={{ color: 'var(--sg-text-secondary)', fontSize: 14, lineHeight: 1, padding: '0 2px' }}
+              onMouseOver={e => (e.currentTarget.style.color = 'var(--sg-danger)')}
+              onMouseOut={e => (e.currentTarget.style.color = 'var(--sg-text-secondary)')}
             >×</span>
           </div>
         );
@@ -131,7 +133,7 @@ function SessionTabBar() {
       <button
         onClick={() => addSession()}
         title="New session"
-        style={{ background: 'transparent', color: '#8cf', border: '1px dashed #3a3a55', borderRadius: 6, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 9px' }}
+        style={{ background: 'transparent', color: 'var(--sg-primary)', border: '1px dashed var(--sg-dark-surface-alt)', borderRadius: 6, cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '3px 9px' }}
       >+</button>
     </div>
   );
@@ -160,9 +162,9 @@ function LogoutButton() {
     <a
       href="/logout"
       onClick={handleLogout}
-      style={{ color: '#666', fontSize: '13px', textDecoration: 'none' }}
-      onMouseOver={e => (e.currentTarget.style.color = '#333')}
-      onMouseOut={e => (e.currentTarget.style.color = '#666')}
+      style={{ color: 'var(--sg-text-secondary)', fontSize: '13px', textDecoration: 'none' }}
+      onMouseOver={e => (e.currentTarget.style.color = 'var(--sg-text)')}
+      onMouseOut={e => (e.currentTarget.style.color = 'var(--sg-text-secondary)')}
     >
       Logout
     </a>
@@ -201,7 +203,7 @@ export default function App() {
 
   if (!ready) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#888', fontFamily: 'system-ui' }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: 'var(--sg-text-faint)', fontFamily: 'system-ui' }}>
         Loading…
       </div>
     );
@@ -215,12 +217,16 @@ export default function App() {
         <header
           style={{
             display: 'flex', alignItems: 'center', height: '46px', flexShrink: 0, gap: 14,
-            background: '#13131f', borderBottom: '1px solid #2a2a3a', padding: '0 14px',
+            background: 'var(--sg-dark-surface)', borderBottom: '1px solid var(--sg-dark-border)', padding: '0 14px',
           }}
         >
-          <span style={{ color: '#8cf', fontWeight: 700, fontSize: 18 }}>aimee</span>
+          <span style={{ color: 'var(--sg-primary)', fontWeight: 700, fontSize: 18 }}>aimee</span>
           <SessionTabBar />
           <SilentBoundary><SetupChip /></SilentBoundary>
+          {/* Follows the OS until clicked; the first click pins an explicit
+              choice and persists it (smoothgui owns that logic and the storage
+              key the pre-paint script in index.html reads). */}
+          <SilentBoundary><ThemeToggle /></SilentBoundary>
           <LogoutButton />
         </header>
         <SilentBoundary><HealthBanner /></SilentBoundary>
@@ -229,7 +235,7 @@ export default function App() {
           <nav
             style={{
               display: 'flex', flexDirection: 'column', gap: 2, width: 132, flexShrink: 0,
-              background: '#1a1a28', borderRight: '1px solid #2a2a3a', padding: '8px 6px',
+              background: 'var(--sg-dark-surface)', borderRight: '1px solid var(--sg-dark-border)', padding: '8px 6px',
             }}
           >
             {NAV_ITEMS.map(it => (
@@ -240,8 +246,8 @@ export default function App() {
                 style={({ isActive }) => ({
                   display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px', borderRadius: 6,
                   fontSize: 14, textDecoration: 'none',
-                  color: isActive ? '#cde' : '#889',
-                  background: isActive ? '#23233a' : 'transparent',
+                  color: isActive ? 'var(--sg-sidebar-text)' : 'var(--sg-text-faint)',
+                  background: isActive ? 'var(--sg-dark-surface-alt)' : 'transparent',
                   fontWeight: isActive ? 600 : 400,
                 })}
               >
@@ -251,7 +257,7 @@ export default function App() {
           </nav>
           {/* Content: flex:1 + minHeight:0 so pages using height:100% resolve.
            * position:relative anchors the per-tab tutorial overlay/"?" button. */}
-          <main style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: '#fff' }}>
+          <main style={{ position: 'relative', flex: 1, minWidth: 0, minHeight: 0, overflow: 'auto', background: 'var(--sg-surface)' }}>
             <SilentBoundary><TabTutorial route={location.pathname} /></SilentBoundary>
             <ErrorBoundary key={location.pathname}>
               <Routes>
@@ -260,14 +266,19 @@ export default function App() {
                 <Route path="/logs" element={<Logs />} />
                 <Route path="/edit-workflows" element={<EditWorkflows />} />
                 <Route path="/workflow-actions" element={<WorkflowActions />} />
-                <Route path="/agents" element={<Agents />} />
-                <Route path="/delegates" element={<Navigate to="/agents" replace />} />
+                <Route path="/providers" element={<Providers />} />
+                <Route path="/models" element={<Models />} />
+                {/* Pre-rename routes: the roster tab was "Agents" (and "delegates"
+                    before that). Keep both redirecting so bookmarks survive. */}
+                <Route path="/agents" element={<Navigate to="/models" replace />} />
+                <Route path="/delegates" element={<Navigate to="/models" replace />} />
                 <Route path="/personas" element={<Personas />} />
                 <Route path="/roles" element={<Roles />} />
                 <Route path="/roundtable" element={<Roundtable />} />
                 <Route path="/projects" element={<Projects />} />
                 <Route path="/graph" element={<Graph />} />
                 <Route path="/editor" element={<Editor />} />
+                <Route path="/memory" element={<Memory />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="*" element={<Navigate to="/chat" replace />} />
               </Routes>

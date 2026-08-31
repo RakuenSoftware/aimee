@@ -11,17 +11,8 @@
 
 #include <aimee/ir/aimee_ir_metrics.h>
 #include <aimee/delegates/aimee_ir_rescue.h>
+#include "support/rescue_fixture_provider.h"
 #include "cJSON.h"
-
-/* The dialect parser consults the tool registry only on its bare-JSON/bracket rescue
- * paths, to gate unknown tool names. These cases use the explicit <tool_call> form,
- * which accepts any name, so a NULL stub keeps the test self-contained -- same shape
- * as test_delegate_xml_fallback.c. */
-struct cJSON *agent_tool_get_schema_cached(const char *tool_name)
-{
-   (void)tool_name;
-   return NULL;
-}
 
 static aimee_response_t *resp_of(aimee_block_type_t t, const char *text)
 {
@@ -34,12 +25,19 @@ static aimee_response_t *resp_of(aimee_block_type_t t, const char *text)
    return r;
 }
 
+static void resp_destroy(aimee_response_t *r)
+{
+   aimee_response_free(r);
+   free(r);
+}
+
 #define XMLCALL                                                                                    \
    "<tool_call><name>bash</name><arguments>{\"command\":\"ls\"}</arguments></tool_call>"
 
 int main(void)
 {
    printf("aimee-ir-rescue:\n");
+   delegate_register_rescue_provider(rescue_fixture_provider);
 
    /* 1. A prose XML tool call in a TEXT block becomes a real TOOL_USE block. */
    {
@@ -60,7 +58,7 @@ int main(void)
        * caller answers the user instead of dispatching the tool */
       assert(r->stop_reason == AIMEE_STOP_TOOL_USE);
       assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: prose XML call in TEXT -> TOOL_USE, stop_reason corrected\n");
    }
 
@@ -76,7 +74,7 @@ int main(void)
       assert(r->n_content == 1 && r->content[0].type == AIMEE_BLK_THINKING);
       assert(r->stop_reason == AIMEE_STOP_END_TURN);
       assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 0);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: identical call text in THINKING is never rescued\n");
    }
 
@@ -94,7 +92,7 @@ int main(void)
       int n = aimee_ir_rescue_tool_calls(r, 0);
       assert(n == 0);
       assert(r->n_content == 2);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: no rescue when a native TOOL_USE is already present\n");
    }
 
@@ -105,7 +103,7 @@ int main(void)
       assert(n == 0);
       assert(r->n_content == 1 && strcmp(r->content[0].text, "just an ordinary answer") == 0);
       assert(r->stop_reason == AIMEE_STOP_END_TURN);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: prose without a call is untouched\n");
    }
 
@@ -137,7 +135,7 @@ int main(void)
       assert(r->content[3].type == AIMEE_BLK_TEXT && r->content[3].text == trailing);
       assert(r->stop_reason == AIMEE_STOP_TOOL_USE);
       assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: mixed block order and pass-through ownership preserved\n");
    }
 
@@ -153,7 +151,7 @@ int main(void)
       assert(r->content[1].type == AIMEE_BLK_TOOL_USE);
       assert(r->stop_reason == AIMEE_STOP_TOOL_USE);
       assert(aimee_ir_metric_total(AIMEE_IR_M_RESCUE_RECOVERIES) == 1);
-      aimee_response_free(r);
+      resp_destroy(r);
       printf("  PASS: multiple calls count as one rescue recovery\n");
    }
 

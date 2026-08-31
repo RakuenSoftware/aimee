@@ -3,11 +3,11 @@
 #include <stdio.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
-#include "../db2/code_index.h"
-#include "../db2/code_index_ops.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/code_index_ops.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 /* Count files rows for (project, path) over the shim. -1 on DB/step failure. */
 static int file_count_path(const char *project, const char *path)
@@ -192,13 +192,18 @@ int main(void)
    {
       void *conn = db2_conn();
       char e[256] = "";
-      const char *spared[] = {".gitmodules", "sub/.gitmodules", "a/b/.gitmodules"};
-      const char *purged[] = {".bashrc", ".git/config", "sub/.hidden.c", ".git/.gitmodules",
-                              "sub/.hidden/.gitmodules"};
+      const char *spared[] = {".gitmodules",      "sub/.gitmodules", "a/b/.gitmodules",
+                              ".travis.yml",      ".eslintrc.json",  "sub/.hidden.c",
+                              "sub/.babelrc.json"};
+      const char *purged[] = {".bashrc",
+                              ".env",
+                              ".npmrc",
+                              ".git/config",
+                              ".git/.gitmodules",
+                              "sub/.hidden/.gitmodules",
+                              ".github/workflows/ci.yml"};
       const char *keep[] = {"src/a.c"};
       const char *projs[] = {"hp", "hp2"};
-      const char *seed = "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
-                         " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')";
       for (size_t pj = 0; pj < 2; pj++)
       {
          char ins[512];
@@ -208,17 +213,26 @@ int main(void)
          assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          for (size_t i = 0; i < sizeof(spared) / sizeof(spared[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], spared[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], spared[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
          for (size_t i = 0; i < sizeof(purged) / sizeof(purged[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], purged[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], purged[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
          for (size_t i = 0; i < sizeof(keep) / sizeof(keep[0]); i++)
          {
-            snprintf(ins, sizeof ins, seed, projs[pj], keep[i]);
+            snprintf(ins, sizeof ins,
+                     "INSERT INTO files (project_id, path, hash, scanned_at) VALUES"
+                     " ((SELECT id FROM projects WHERE name='%s'),'%s','h','t')",
+                     projs[pj], keep[i]);
             assert(aimee_pg_exec(conn, ins, e, sizeof e) == 0);
          }
       }
@@ -265,14 +279,14 @@ int main(void)
       assert(aimee_pg_exec(conn,
                            "INSERT INTO files(project_id,generation,path,hash,scanned_at) VALUES"
                            " ((SELECT id FROM projects WHERE name='historical-hidden'),1,"
-                           " '.hidden.c','old','t'),"
+                           " '.bashrc','old','t'),"
                            " ((SELECT id FROM projects WHERE name='historical-hidden'),2,"
-                           " '.hidden.c','new','t')",
+                           " '.bashrc','new','t')",
                            e, sizeof e) == 0);
       (void)db2_code_index_purge_hidden_pollution();
-      assert(file_count_path_generation("historical-hidden", ".hidden.c", 1) == 1);
-      assert(file_count_path_generation("historical-hidden", ".hidden.c", 2) == 0);
-      assert(file_count_path("historical-hidden", ".hidden.c") == 1);
+      assert(file_count_path_generation("historical-hidden", ".bashrc", 1) == 1);
+      assert(file_count_path_generation("historical-hidden", ".bashrc", 2) == 0);
+      assert(file_count_path("historical-hidden", ".bashrc") == 1);
       printf("  startup hidden cleanup preserves retained generations OK\n");
    }
 

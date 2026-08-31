@@ -11,7 +11,7 @@
 #include <sqlite3.h>
 
 #include "aimee.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "kb_curator_resolve_entities.h"
 #include "kb_curator_index_code_unit.h"
 #include "kb_curator_link_artifacts.h"
@@ -78,6 +78,9 @@ static void seed(sqlite3 *db, const char *sql)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_pipeline"))
+      return 0;
+
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);

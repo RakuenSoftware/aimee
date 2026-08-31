@@ -5,22 +5,45 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include "aimee.h"
-#include "../db1/db.h"
-#include "../db1/eval.h"
-#include "../db1/server_sessions.h"
+#include "db1_client/db1_module_api.h"
+#include "support/module_bus_stub.h"
+#include "db1_client/db1.h"
+#include "db1_client/eval.h"
+#include "db1_client/server_sessions.h"
+#include "eval_synthesis_store.h" /* the regression-candidate surface stubbed below */
+#include "approach_store.h"
+#include <aimee/learning/attribution.h>
+#include "curiosity_resolve.h"
 #include "kb_client.h" /* kb_health_t for the stub below */
+#include <aimee/audit/obs_bus.h>
+#include "server_internal.h" /* server_health_add_kb, for the kb verdict tests */
 #include "agent_config.h"
-#include "config_fields.h" /* config_field_lookup / _set_value for the config_set stub */
+#include "config_client.h"
 #include "agent_eval.h"
 #include "hud.h"
 #include "log.h"
 #include "server.h"
 #include "server_http.h"
+#include "server_mcp_internal.h"
 #include "toolset.h"
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
 #include "platform_ipc.h"
 #include "platform_process.h"
+#include "hook_session_token.h"
+
+/* server.c exposes capture completeness in server.health.  This dispatch test
+ * does not start the observability bus, so give it a deterministic health
+ * snapshot just as the KB health seam below does for its external service. */
+void obs_bus_capture_health(obs_bus_capture_health_t *out)
+{
+   assert(out);
+   memset(out, 0, sizeof(*out));
+   out->capture_ok = 1;
+   out->reason = "ok";
+   snprintf(out->session_id, sizeof(out->session_id), "%s", "test-session");
+   out->last_seq = 7;
+}
 
 int hud_gather(hud_status_t *out)
 {
@@ -88,12 +111,8 @@ static session_state_t g_saved_state;
 static int g_session_state_save_calls = 0;
 static session_state_t g_pre_tool_state;
 static int g_pre_tool_seen_state = 0;
-static int g_config_stateful = 0;
-static int g_config_reload_calls = 0;
 static int g_config_secret_store_calls = 0;
 static int g_config_secret_store_configured = 0;
-static config_t g_config_disk;
-static config_t g_config_snapshot;
 
 static char *read_all(int fd)
 {
@@ -242,12 +261,6 @@ int platform_exec_capture(const char *cmd, char **out, size_t *out_len, int time
    return 0;
 }
 
-void db1_apply_pragmas(sqlite3 *db, db_mode_t mode)
-{
-   (void)db;
-   (void)mode;
-}
-
 int compute_pool_init(compute_pool_t *pool, int num_threads)
 {
    (void)pool;
@@ -258,6 +271,26 @@ int compute_pool_init(compute_pool_t *pool, int num_threads)
 void compute_pool_shutdown(compute_pool_t *pool)
 {
    (void)pool;
+}
+
+/* db1_store_ready() asks the module bus whether the DB1 store is attached, and
+ * this test deliberately links neither -- the point of it is dispatch, not
+ * storage. Answering "not ready" is the honest stub: the handlers that consult
+ * it then take their storage-unavailable path, which is a branch worth
+ * exercising here anyway. */
+int db1_store_ready(void)
+{
+   return 0;
+}
+
+/* db1_store_probe() is the same question asked by calling the store rather than
+ * by reading the bus registry -- server.health uses it so that a module which
+ * died is noticed in a second instead of in the ~37s the heartbeat reaper takes.
+ * It needs the sessions client and the bus, and this test links neither, for the
+ * reason above. Same honest answer: not reachable. */
+int db1_store_probe(void)
+{
+   return 0;
 }
 
 /* On-demand delegate execution (server_delegate_ondemand.c) is not linked here;
@@ -346,22 +379,108 @@ int agent_eval_run_with_options(agent_config_t *cfg, const char *suite_dir,
    return 1;
 }
 
-int db1_eval_results_list(const char *suite_or_null, db1_eval_display_row_t *out, int max)
+/* The eval.candidates surface reaches the endogeneity gate, which is not what
+ * this test exercises -- it proves the dispatch table routes -- so the gate is
+ * stubbed open. The store side of that surface is no longer stubbed here: it
+ * runs through the real db1_client over module_bus_stub, whose default is "no
+ * module attached". */
+
+learning_gate_state_t learning_gate_check(learning_endogeneity_t *out)
+{
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return LEARNING_GATE_OPEN;
+}
+
+int eval_synthesis_scan_failures(int window_days, const char *suite,
+                                 eval_synthesis_scan_stats_t *out)
+{
+   (void)window_days;
+   (void)suite;
+   if (out)
+      memset(out, 0, sizeof(*out));
+   return 0;
+}
+
+int eval_synthesis_admit_pending(const char *suite_dir, const char *admitted_by,
+                                 int min_occurrences)
+{
+   (void)admitted_by;
+   (void)min_occurrences;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+int eval_synthesis_retire(const char *suite_dir, int retire_windows)
+{
+   (void)retire_windows;
+   return (suite_dir && suite_dir[0]) ? 0 : -1;
+}
+
+/* Approach recall reaches DB2, which this test deliberately does not link —
+ * it proves the dispatch table routes, not what the stores hold. */
+int approach_store_recall(const char *goal, learning_approach_hit_t *out, int max)
+{
+   (void)goal;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+int approach_store_render(const char *goal, char *out, size_t out_len, char *arm_out,
+                          size_t arm_out_len)
+{
+   (void)goal;
+   if (out && out_len)
+      out[0] = '\0';
+   if (arm_out && arm_out_len)
+      arm_out[0] = '\0';
+   return 0;
+}
+
+int eval_attribution_for_suite(const char *suite_or_null, learning_attribution_t *out, int max)
 {
    (void)suite_or_null;
-   if (!out || max <= 0)
-      return 0;
-   snprintf(out[0].suite, sizeof(out[0].suite), "delegate");
-   snprintf(out[0].task_name, sizeof(out[0].task_name), "dispatch");
-   snprintf(out[0].agent_name, sizeof(out[0].agent_name), "test-agent");
-   snprintf(out[0].ablation, sizeof(out[0].ablation), "full");
-   out[0].success = 1;
-   out[0].tool_calls = 3;
-   out[0].tool_call_failures = 1;
-   out[0].rescue_recoveries = 2;
-   out[0].latency_ms = 11;
-   snprintf(out[0].created_at, sizeof(out[0].created_at), "2026-05-25T00:00:00Z");
-   return 1;
+   (void)out;
+   return max > 0 ? 0 : -1;
+}
+
+/* The backlog drain reaches DB2; this test proves routing, not resolution. */
+int curiosity_resolve_pass(int budget, curiosity_resolve_stats_t *out)
+{
+   if (out)
+   {
+      memset(out, 0, sizeof(*out));
+      out->budget = budget > 0 ? budget : CURIOSITY_RESOLVE_DEFAULT_BUDGET;
+      out->no_probe = 1;
+   }
+   return 0;
+}
+
+/* The gate is answered by the knowledge service, which this test does not
+ * link; NULL is what an unreachable one looks like. */
+char *kb_client_learning_endogeneity_json(int window_days)
+{
+   (void)window_days;
+   return NULL;
+}
+
+char *kb_client_learning_resolve_json(int budget)
+{
+   (void)budget;
+   return NULL;
+}
+
+char *kb_client_learning_fate_json(int id, const char *fate, const char *reason)
+{
+   (void)id;
+   (void)fate;
+   (void)reason;
+   return NULL;
+}
+
+char *kb_client_learning_policy_select_json(const char *decision_point)
+{
+   (void)decision_point;
+   return NULL;
 }
 
 int server_load_token(server_ctx_t *ctx)
@@ -483,13 +602,6 @@ int db1_user_memory_upsert(const char *kind, const char *tier, const char *key, 
    (void)source_session;
    return 0;
 }
-void session_id_set_override(const char *sid)
-{
-   (void)sid;
-}
-void session_id_clear_override(void)
-{
-}
 int handle_session_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "session.create");
@@ -585,6 +697,18 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.list");
 }
+int handle_memory_review_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.review_list");
+}
+int handle_memory_reject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.reject");
+}
+int handle_memory_restore(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "memory.restore");
+}
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.stats");
@@ -603,6 +727,18 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.supersede");
 }
+int handle_facts_retract(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "facts.retract");
+}
+int handle_entities_merge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "entities.merge");
+}
+int handle_entities_unmerge(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "entities.unmerge");
+}
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.read");
@@ -614,6 +750,13 @@ int handle_memory_benchmark(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_index_scan(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.scan");
+}
+
+int handle_index_verify(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   (void)req;
+   return server_send_error(conn, "index.verify stub", NULL);
 }
 int handle_index_ingest(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -634,6 +777,18 @@ int handle_index_blast_radius(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 int handle_index_structure(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "index.structure");
+}
+int handle_index_span(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.span");
+}
+int handle_index_hybrid(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.hybrid");
+}
+int handle_index_investigate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "index.investigate");
 }
 int handle_index_find_callers(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -697,23 +852,38 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
 }
 /* server_api_status.c (linked here for handle_api_*) probes the kb from
  * server.health. This test exercises the dispatch table, not the kb, so answer
- * "unreachable" without linking the whole kb client. */
+ * "unreachable" by default without linking the whole kb client.
+ *
+ * The health-verdict tests below drive it instead: set g_kb_health_rc and the
+ * fields they care about, so server_health_add_kb's aggregation can be exercised
+ * without a kb. */
+static int g_kb_health_rc = -1;
+static kb_health_t g_kb_health;
+
 int kb_client_health(kb_health_t *out)
 {
    if (out)
-      memset(out, 0, sizeof(*out));
-   return -1;
+      *out = g_kb_health;
+   return g_kb_health_rc;
+}
+
+static void kb_health_stub_reset(void)
+{
+   memset(&g_kb_health, 0, sizeof(g_kb_health));
+   g_kb_health_rc = -1;
 }
 
 /* server.health also reports the kb transport breaker, so an operator can see
  * that calls are being refused locally while the kb itself looks fine. Same
  * reasoning as above: report a closed breaker without linking the kb client. */
+static const char *g_kb_breaker_state = "closed";
+
 void kb_client_dependency_health(kb_client_dependency_health_t *out)
 {
    if (!out)
       return;
    memset(out, 0, sizeof(*out));
-   snprintf(out->state, sizeof(out->state), "closed");
+   snprintf(out->state, sizeof(out->state), "%s", g_kb_breaker_state);
 }
 
 int handle_kb_build(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -743,6 +913,10 @@ int handle_kb_reembed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_memory_embed(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "memory.embed");
+}
+int handle_kb_erase_subject(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "kb.erase-subject");
 }
 int handle_kb_status(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -807,6 +981,10 @@ int handle_skill_lint(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 int handle_skill_eval(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "skill.eval");
+}
+int handle_skill_eval_exec(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "skill.eval_exec");
 }
 int handle_skill_create(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1017,7 +1195,15 @@ int handle_delegate_aggregate(server_ctx_t *ctx, server_conn_t *conn, cJSON *req
 {
    return stub_handler(conn, "delegate.aggregate");
 }
-int handle_roundtable_review_proxy(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_delegate_reservation_forget(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "delegate.reservation.forget");
+}
+int handle_delegate_cancel_unassigned(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "delegate.cancel_unassigned");
+}
+int handle_roundtable_review(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "roundtable.review");
 }
@@ -1087,7 +1273,7 @@ int handle_episode_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 }
 int handle_agent_episodes(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.episodes");
+   return stub_handler(conn, "model.episodes");
 }
 int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1096,71 +1282,71 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.list");
+   return stub_handler(conn, "model.list");
 }
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.add");
+   return stub_handler(conn, "model.add");
 }
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.local");
+   return stub_handler(conn, "model.local");
 }
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.remove");
+   return stub_handler(conn, "model.remove");
 }
 int handle_agent_enable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.enable");
+   return stub_handler(conn, "model.enable");
 }
 int handle_agent_roles(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.roles");
+   return stub_handler(conn, "model.roles");
 }
 int handle_agent_personas(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.personas");
+   return stub_handler(conn, "model.personas");
 }
 int handle_agent_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.set");
+   return stub_handler(conn, "model.set");
 }
 int handle_agent_disable(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.disable");
+   return stub_handler(conn, "model.disable");
 }
 int handle_agent_probe(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.probe");
+   return stub_handler(conn, "model.probe");
 }
 int handle_agent_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.stats");
+   return stub_handler(conn, "model.stats");
 }
 int handle_agent_draft(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.draft");
+   return stub_handler(conn, "model.draft");
 }
 int handle_agent_setup(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.setup");
+   return stub_handler(conn, "model.setup");
 }
 int handle_agent_setup_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.setup_poll");
+   return stub_handler(conn, "model.setup_poll");
 }
 int handle_agent_cli_oauth_start(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_start");
+   return stub_handler(conn, "model.cli_oauth_start");
 }
 int handle_agent_cli_oauth_code(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_code");
+   return stub_handler(conn, "model.cli_oauth_code");
 }
 int handle_agent_cli_oauth_poll(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
-   return stub_handler(conn, "agent.cli_oauth_poll");
+   return stub_handler(conn, "model.cli_oauth_poll");
 }
 
 int handle_mcp_tools_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -1242,176 +1428,18 @@ int is_safe_id(const char *s)
    return 1;
 }
 
-char *shell_escape(const char *raw)
+char *shell_quote(const char *raw)
 {
    return strdup(raw ? raw : "");
 }
 
-int config_load(config_t *cfg)
-{
-   if (g_config_stateful)
-   {
-      *cfg = g_config_snapshot;
-      return 0;
-   }
-   memset(cfg, 0, sizeof(*cfg));
-   return 0;
-}
-
-/* The config_load stub above always succeeds, so the probe the handlers now use
- * in its place has to say so too -- otherwise config.show / config.get would
- * report "failed to load config" against a config this suite considers loaded. */
-int config_present(void)
-{
-   return 1;
-}
-
-/* api.disable persists through this now instead of load_file/save here. The
- * stateful mode's disk copy is what it would write, so mirror the port change
- * onto it; non-stateful is a no-op success, matching the config_save stub. */
-int config_disable_api_http_listener(void)
-{
-   if (g_config_stateful)
-      g_config_disk.server_api_http_port = 0;
-   return 0;
-}
-
-/* The generated accessors read every field through this. Serve them out of the
- * SAME in-memory config the config_load stub returns, so an accessor and a
- * config_load observed in one test can never disagree. Non-stateful mode zeroes,
- * matching the config_load stub above. */
-int config_field_read(size_t offset, size_t size, void *dst)
-{
-   if (!dst || size == 0)
-      return -1;
-   if (g_config_stateful)
-      memcpy(dst, (const char *)&g_config_snapshot + offset, size);
-   else
-      memset(dst, 0, size);
-   return 0;
-}
-
-int config_load_file(config_t *cfg)
-{
-   if (g_config_stateful)
-   {
-      *cfg = g_config_disk;
-      return 0;
-   }
-   memset(cfg, 0, sizeof(*cfg));
-   return 0;
-}
-
-/* live-config-reload P1b: server_config.c / server.c call config_reload after a config.set
- * and on SIGHUP; stub it here (this test doesn't link the real config.o). */
-int config_reload(void)
-{
-   if (g_config_stateful)
-   {
-      g_config_snapshot = g_config_disk;
-      g_config_reload_calls++;
-   }
-   return 0;
-}
-
-/* The provider endpoint writes through config_set now instead of mutating a
- * config_t and calling config_save. Mirror what the real one does against this
- * file's simulated state: patch the field on "disk" AND republish it to the
- * snapshot, so a following config_load observes the write. */
-int config_set(const char *key, const char *value)
-{
-   const config_field_t *f = config_field_lookup(key);
-   if (!f || !value)
-      return -1;
-   if (g_config_stateful)
-   {
-      if (config_field_set_value(&g_config_disk, f, value) != 0)
-         return -1;
-      (void)config_field_set_value(&g_config_snapshot, f, value);
-   }
-   return 0;
-}
-
-/* Enrolled-bearer writes go through the config module now instead of mutating
- * server_api_bearer_extra on a config_t. Mirror the config_save stub's model:
- * apply to the simulated disk AND the snapshot, so a read-back sees the write.
- * Note the config_save stub deliberately SCRUBS bearer state on the way to
- * disk (credentials live in Vault, not the config file), so these do the same. */
-int config_server_api_bearer_extra_append(const char *token)
-{
-   if (!token || !token[0])
-      return -1;
-   if (!g_config_stateful)
-      return 0;
-   int slot = g_config_snapshot.server_api_bearer_extra_count;
-   if (slot < 0 || slot >= AIMEE_API_BEARER_EXTRA_MAX)
-      return -2;
-   snprintf(g_config_snapshot.server_api_bearer_extra[slot],
-            sizeof(g_config_snapshot.server_api_bearer_extra[0]), "%s", token);
-   g_config_snapshot.server_api_bearer_extra_count = slot + 1;
-   return slot;
-}
-
-int config_server_api_bearer_extra_clear(void)
-{
-   if (g_config_stateful)
-   {
-      memset(g_config_snapshot.server_api_bearer_extra, 0,
-             sizeof(g_config_snapshot.server_api_bearer_extra));
-      g_config_snapshot.server_api_bearer_extra_count = 0;
-   }
-   return 0;
-}
-
-int config_save(const config_t *cfg)
-{
-   if (g_config_stateful)
-   {
-      g_config_disk = *cfg;
-      memset(g_config_disk.server_api_bearer_token, 0,
-             sizeof(g_config_disk.server_api_bearer_token));
-      memset(g_config_disk.server_api_bearer_extra, 0,
-             sizeof(g_config_disk.server_api_bearer_extra));
-      g_config_disk.server_api_bearer_extra_count = 0;
-   }
-   (void)cfg;
-   return 0;
-}
-
-int config_secret_store(const char *name, const char *value)
+static int test_config_secret_store(const char *name, const char *value)
 {
    assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
    g_config_secret_store_calls++;
    g_config_secret_store_configured = value && value[0] ? 1 : 0;
-   return 0;
-}
-
-/* config_fields.o resolves the economizer mode through these pure helpers; this
- * test does not link the real config.o. */
-const char *econ_mode_name(int mode)
-{
-   return mode == ECON_MODE_AGGRESSIVE ? "aggressive" : mode == ECON_MODE_SAFE ? "safe" : "off";
-}
-
-int econ_mode_parse(const char *s)
-{
-   if (s && strcmp(s, "off") == 0)
-      return ECON_MODE_OFF;
-   if (s && strcmp(s, "safe") == 0)
-      return ECON_MODE_SAFE;
-   if (s && strcmp(s, "aggressive") == 0)
-      return ECON_MODE_AGGRESSIVE;
-   return -1;
-}
-
-const char *config_output_dir(void)
-{
-   return "/tmp";
-}
-
-const char *config_guardrail_mode(void)
-{
-   return "off";
+   return value && value[0] ? vault_runtime_secret_set(name, value)
+                            : vault_runtime_secret_delete(name);
 }
 
 void session_state_load(session_state_t *state, const char *sid)
@@ -1497,6 +1525,21 @@ static void test_invalid_json(void)
    free(ctx);
 }
 
+static void test_invalid_json_utf8(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+   static const char invalid[] = "{\"method\":\"status\",\"extra\":\"\xff\"}";
+   cJSON *json = dispatch_json(ctx, conn, invalid, sizeof(invalid) - 1);
+   assert(strcmp(cJSON_GetObjectItem(json, "message")->valuestring,
+                 "invalid JSON: input is not valid UTF-8") == 0);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
+   cJSON_Delete(json);
+   free(conn);
+   free(ctx);
+}
+
 static void test_missing_method(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1526,6 +1569,40 @@ static void test_oversized_payload(void)
    msg[size] = '\0';
    cJSON *json = dispatch_json(ctx, conn, msg, size);
    assert(strstr(cJSON_GetObjectItem(json, "message")->valuestring, "PAYLOAD_TOO_LARGE") != NULL);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_PAYLOAD_TOO_LARGE) ==
+          0);
+   cJSON_Delete(json);
+   free(msg);
+   free(conn);
+   free(ctx);
+}
+
+static void test_excessive_json_depth_is_invalid_argument(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx != NULL && conn != NULL);
+
+   const char *prefix = "{\"method\":\"status\",\"extra\":";
+   size_t depth = JSON_MAX_DEPTH + 2;
+   size_t size = strlen(prefix) + depth + 1 + depth + 1;
+   char *msg = malloc(size + 1);
+   assert(msg != NULL);
+   size_t off = 0;
+   memcpy(msg + off, prefix, strlen(prefix));
+   off += strlen(prefix);
+   memset(msg + off, '[', depth);
+   off += depth;
+   msg[off++] = '0';
+   memset(msg + off, ']', depth);
+   off += depth;
+   msg[off++] = '}';
+   msg[off] = '\0';
+   assert(off == size);
+
+   cJSON *json = dispatch_json(ctx, conn, msg, size);
+   assert(strstr(cJSON_GetObjectItem(json, "message")->valuestring, "PAYLOAD_MALFORMED") != NULL);
+   assert(strcmp(cJSON_GetObjectItem(json, "kind")->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
    cJSON_Delete(json);
    free(msg);
    free(conn);
@@ -1672,6 +1749,50 @@ static void test_authz_denied_shape(void)
    free(ctx);
 }
 
+/* One eval row as the telemetry stage would answer it: a status, a field count,
+ * then each value length-prefixed. The eleven values are the order
+ * db1_eval_results_list lays out its slots in.
+ *
+ * Built here rather than stubbing db1_eval_results_list, because that function
+ * shares an object file with the token-audit and insights readers this test
+ * needs -- see .wire_eval.py. The upside is that the client's own encoding and
+ * decoding run for real.
+ */
+static uint8_t g_eval_reply[512];
+static uint32_t g_eval_reply_len;
+
+static void eval_reply_build(void)
+{
+   static const char *const values[11] = {
+       "delegate",             /* suite */
+       "dispatch",             /* task_name */
+       "test-agent",           /* agent_name */
+       "full",                 /* ablation */
+       "1",                    /* success */
+       "0",                    /* turns */
+       "3",                    /* tool_calls */
+       "1",                    /* tool_call_failures */
+       "2",                    /* rescue_recoveries */
+       "11",                   /* latency_ms */
+       "2026-05-25T00:00:00Z", /* created_at */
+   };
+   uint32_t at = 0;
+   aimee_db1_put_u32(g_eval_reply + at, (uint32_t)AIMEE_DB1_STATUS_OK);
+   at += 4u;
+   aimee_db1_put_u32(g_eval_reply + at, 11u);
+   at += 4u;
+   for (unsigned i = 0; i < 11u; ++i)
+   {
+      uint32_t n = (uint32_t)strlen(values[i]);
+      assert(at + 4u + n <= sizeof g_eval_reply);
+      aimee_db1_put_u32(g_eval_reply + at, n);
+      at += 4u;
+      memcpy(g_eval_reply + at, values[i], n);
+      at += n;
+   }
+   g_eval_reply_len = at;
+}
+
 static void test_routing(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -1695,6 +1816,7 @@ static void test_routing(void)
    int has_cron_add = 0;
    int has_trajectory_export = 0;
    int has_trajectory_batch = 0;
+   int has_skill_eval_exec = 0;
    cJSON *m;
    cJSON_ArrayForEach(m, methods)
    {
@@ -1720,6 +1842,8 @@ static void test_routing(void)
          has_trajectory_export = 1;
       if (cJSON_IsString(m) && strcmp(m->valuestring, "trajectory.batch") == 0)
          has_trajectory_batch = 1;
+      if (cJSON_IsString(m) && strcmp(m->valuestring, "skill.eval_exec") == 0)
+         has_skill_eval_exec = 1;
    }
    assert(has_delegate_status);
    assert(has_delegate_launch);
@@ -1732,6 +1856,7 @@ static void test_routing(void)
    assert(has_cron_add);
    assert(has_trajectory_export);
    assert(has_trajectory_batch);
+   assert(has_skill_eval_exec);
    cJSON_Delete(json);
 
    json =
@@ -1813,6 +1938,12 @@ static void test_routing(void)
    assert(strcmp(g_last_handler, "skill.show") == 0);
    cJSON_Delete(json);
 
+   json = dispatch_json(ctx, conn, "{\"method\":\"skill.eval_exec\",\"name\":\"review\"}",
+                        strlen("{\"method\":\"skill.eval_exec\",\"name\":\"review\"}"));
+   assert(strcmp(cJSON_GetObjectItem(json, "route")->valuestring, "skill.eval_exec") == 0);
+   assert(strcmp(g_last_handler, "skill.eval_exec") == 0);
+   cJSON_Delete(json);
+
    json = dispatch_json(ctx, conn,
                         "{\"method\":\"skill.patch\",\"name\":\"review\","
                         "\"old_string\":\"a\",\"new_string\":\"b\"}",
@@ -1879,6 +2010,8 @@ static void test_routing(void)
    assert(cJSON_GetObjectItem(run_row, "rescue_recoveries")->valueint == 2);
    cJSON_Delete(json);
 
+   eval_reply_build();
+   module_bus_stub_reply_bytes(g_eval_reply, g_eval_reply_len);
    json = dispatch_json(ctx, conn, "{\"method\":\"eval.results\"}",
                         strlen("{\"method\":\"eval.results\"}"));
    assert(strcmp(cJSON_GetObjectItem(json, "status")->valuestring, "ok") == 0);
@@ -1935,7 +2068,7 @@ static void test_launch_run_returns_provider_metadata(void)
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAPS_AUTHENTICATED;
 
-   /* No-arg `aimee` launch issues launch.run. With config_load stubbed to
+   /* No-arg `aimee` launch issues launch.run. With configuration stubbed to
     * zero-init, the response should still carry a session_id and the
     * default "claude" provider rather than the unported-command error. */
    snprintf(g_git_repo_root_prefix, sizeof(g_git_repo_root_prefix), "%s", "/tmp/proj");
@@ -1999,6 +2132,51 @@ static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
 
    g_git_repo_root_prefix[0] = '\0';
    g_git_repo_root_value[0] = '\0';
+   free(conn);
+   free(ctx);
+}
+
+static void test_hook_identity_session_binding(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx && conn);
+   conn->peer_uid = 1000;
+   hook_session_token_registry_reset();
+
+   const char *start = "{\"method\":\"hooks.session_start\",\"session_id\":\"bound-session\","
+                       "\"harness_client\":\"claude\",\"hook_input\":\"{}\"}";
+   cJSON *json = dispatch_json(ctx, conn, start, strlen(start));
+   const char *token = cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_token"));
+   assert(token && strlen(token) == HOOK_SESSION_TOKEN_HEX_LEN);
+   char saved[HOOK_SESSION_TOKEN_CAP];
+   snprintf(saved, sizeof(saved), "%s", token);
+   cJSON_Delete(json);
+
+   char pre[1024];
+   snprintf(pre, sizeof(pre),
+            "{\"method\":\"hooks.pre\",\"session_id\":\"bound-session\","
+            "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
+            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            saved);
+   json = dispatch_json(ctx, conn, pre, strlen(pre));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
+                 "trusted") == 0);
+   cJSON_Delete(json);
+
+   /* The same secret cannot claim a different harness or session. */
+   char mismatch[1024];
+   snprintf(mismatch, sizeof(mismatch),
+            "{\"method\":\"hooks.pre\",\"session_id\":\"other-session\","
+            "\"harness_client\":\"claude\",\"hook_token\":\"%s\","
+            "\"tool_name\":\"Read\",\"tool_input\":{},\"cwd\":\"/tmp\"}",
+            saved);
+   json = dispatch_json(ctx, conn, mismatch, strlen(mismatch));
+   assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(json, "hook_identity")),
+                 "untrusted") == 0);
+   cJSON_Delete(json);
+
+   hook_session_token_registry_reset();
    free(conn);
    free(ctx);
 }
@@ -2073,12 +2251,8 @@ static void test_config_secret_redaction_and_vault_write(void)
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAP_SESSION_ADMIN;
 
-   memset(&g_config_snapshot, 0, sizeof(g_config_snapshot));
-   memset(&g_config_disk, 0, sizeof(g_config_disk));
-   snprintf(g_config_snapshot.kb_api_bearer_token, sizeof(g_config_snapshot.kb_api_bearer_token),
-            "%s", "never-echo-config-secret");
-   g_config_stateful = 1;
-   g_config_reload_calls = 0;
+   assert(vault_runtime_secret_set("AIMEE_KB_API_BEARER_TOKEN", "never-echo-config-secret") == 0);
+   config_secret_writer_set(test_config_secret_store);
    g_config_secret_store_calls = 0;
    g_config_secret_store_configured = 0;
 
@@ -2105,19 +2279,15 @@ static void test_config_secret_redaction_and_vault_write(void)
    assert(serialized && strstr(serialized, "never-echo-new-secret") == NULL);
    free(serialized);
    cJSON_Delete(set);
-   assert(g_config_reload_calls == 0);
-   assert(g_config_disk.kb_api_bearer_token[0] == '\0');
-
-   g_config_stateful = 0;
+   assert(vault_runtime_secret_delete("AIMEE_KB_API_BEARER_TOKEN") == 0);
+   config_secret_writer_set(NULL);
    free(conn);
    free(ctx);
    printf("test_config_secret_redaction_and_vault_write: PASS\n");
 }
 
-/* Regression: the server's config_load() is an immutable live snapshot. API
- * credential mutations must instead start from the latest disk image and
- * republish it, or a second sequential enrollment starts from zero extras and
- * silently replaces the first one. */
+/* Regression: API bearer enrollment is Vault-owned and sequential enrollment
+ * must not overwrite the first token or write credentials to configuration. */
 static void test_api_enroll_preserves_sequential_bearers(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -2125,11 +2295,7 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    assert(ctx != NULL && conn != NULL);
    conn->capabilities = CAP_SESSION_ADMIN;
 
-   memset(&g_config_disk, 0, sizeof(g_config_disk));
    assert(vault_runtime_secret_set("AIMEE_API_BEARER_TOKEN", "primary-test-bearer") == 0);
-   g_config_snapshot = g_config_disk;
-   g_config_reload_calls = 0;
-   g_config_stateful = 1;
    server_http_set_bearer_extra(NULL, 0);
 
    const char *request = "{\"method\":\"api.enroll_bearer\"}";
@@ -2150,13 +2316,8 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    cJSON_Delete(second);
 
    assert(strcmp(first_bearer, second_bearer) != 0);
-   /* Enrolling touches VAULT only. config_save never persisted the enrolled set
-    * (config_load migrates any legacy value out and scrubs the fields), so the
-    * save+reload this used to do republished an unchanged config. No reload now. */
-   assert(g_config_reload_calls == 0);
-   assert(g_config_disk.server_api_bearer_token[0] == '\0');
-   assert(g_config_disk.server_api_bearer_extra_count == 0);
-   assert(g_config_snapshot.server_api_bearer_extra_count == 0);
+   /* Enrolling touches Vault only; the configuration contract carries no
+    * credential values. */
    char stored[256];
    assert(runtime_secret_get("AIMEE_API_BEARER_TOKEN_EXTRA_0", stored, sizeof(stored)) == 1);
    assert(strcmp(stored, first_bearer) == 0);
@@ -2168,7 +2329,6 @@ static void test_api_enroll_preserves_sequential_bearers(void)
    assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN") == 0);
    assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_0") == 0);
    assert(vault_runtime_secret_delete("AIMEE_API_BEARER_TOKEN_EXTRA_1") == 0);
-   g_config_stateful = 0;
    free(conn);
    free(ctx);
    printf("test_api_enroll_preserves_sequential_bearers: PASS\n");
@@ -2199,15 +2359,153 @@ static void test_session_brief_assemble(void)
    printf("test_session_brief_assemble: PASS\n");
 }
 
+static void test_mcp_span_shorthand_batch_parse(void)
+{
+   const char *items[] = {"app/items.py:1-260", "tests/test_items.py:7-42", "malformed"};
+   int valid = 0;
+   for (size_t i = 0; i < sizeof(items) / sizeof(items[0]); i++)
+   {
+      char path[128] = "";
+      int start = 0, end = 0;
+      int parsed = server_mcp_span_shorthand_parse(items[i], path, sizeof(path), &start, &end);
+      if (i == 0)
+         assert(parsed && strcmp(path, "app/items.py") == 0 && start == 1 && end == 260);
+      else if (i == 1)
+         assert(parsed && strcmp(path, "tests/test_items.py") == 0 && start == 7 && end == 42);
+      else
+         assert(!parsed);
+      valid += parsed;
+   }
+   assert(valid == 2);
+   char path[8];
+   int start = 0, end = 0;
+   assert(!server_mcp_span_shorthand_parse("x.py:0-4", path, sizeof(path), &start, &end));
+   assert(!server_mcp_span_shorthand_parse("x.py:9-4", path, sizeof(path), &start, &end));
+   assert(!server_mcp_span_shorthand_parse("x.py:1-4-extra", path, sizeof(path), &start, &end));
+   printf("test_mcp_span_shorthand_batch_parse: PASS\n");
+}
+
+/* The kb block in server.health is where "accepted, reports healthy, cannot work"
+ * became visible to users: `status` was `reachable ? "ok" : "unreachable"`, and
+ * every capability the kb reported sat beside it as a sibling that nothing read.
+ * `aimee status` printed "aimee-kb: ok" one line above "embedder: not
+ * configured" and both were true.
+ *
+ * These pin the three states apart, because the failure mode is not that any one
+ * of them is wrong — it is that two of them used to collapse into one. */
+static const char *kb_status_of(cJSON *resp)
+{
+   cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *s = kb ? cJSON_GetObjectItemCaseSensitive(kb, "status") : NULL;
+   return cJSON_IsString(s) ? s->valuestring : NULL;
+}
+
+static void test_health_kb_verdict_states(void)
+{
+   /* 1. Nothing answered — the only case that may say unreachable. */
+   kb_health_stub_reset();
+   cJSON *resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "unreachable") == 0);
+   cJSON_Delete(resp);
+
+   /* 2. Answered and capable. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0);
+   cJSON_Delete(resp);
+
+   /* 3. Answered and told us it cannot work. This is the case that used to
+    * report "ok"; it must be degraded, NOT unreachable — the kb is up, and
+    * sending an operator to debug the network would be a fresh wrong answer. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "degraded");
+   snprintf(g_kb_health.blockers, sizeof(g_kb_health.blockers),
+            "no embedder configured: set embedder_model\nvector table missing");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "degraded") == 0);
+   /* The reasons reach the client, split back into one string per blocker. */
+   cJSON *kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *blockers = cJSON_GetObjectItemCaseSensitive(kb, "blockers");
+   assert(cJSON_IsArray(blockers) && cJSON_GetArraySize(blockers) == 2);
+   assert(strcmp(cJSON_GetArrayItem(blockers, 0)->valuestring,
+                 "no embedder configured: set embedder_model") == 0);
+   assert(strcmp(cJSON_GetArrayItem(blockers, 1)->valuestring, "vector table missing") == 0);
+   cJSON_Delete(resp);
+
+   /* Warnings travel even though they do not move the verdict. This block used to
+    * drop the kb's warnings array entirely, so an advisory finding reached no
+    * operator: a typed-fact backlog nothing could drain sat unreported for hours
+    * behind a status of "ok". Publishing a finding into a field no surface renders
+    * is the same defect as never computing it. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   snprintf(g_kb_health.warnings, sizeof(g_kb_health.warnings),
+            "typed-fact extraction: 4 job(s) queued with nothing to drain them\nKB not ingested "
+            "in over 7 days");
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0); /* advisory: verdict unchanged */
+   kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   cJSON *warns = cJSON_GetObjectItemCaseSensitive(kb, "warnings");
+   assert(cJSON_IsArray(warns) && cJSON_GetArraySize(warns) == 2);
+   assert(strstr(cJSON_GetArrayItem(warns, 0)->valuestring, "typed-fact extraction") != NULL);
+   /* No blockers key at all when there are none, rather than an empty array. */
+   assert(cJSON_GetObjectItemCaseSensitive(kb, "blockers") == NULL);
+   cJSON_Delete(resp);
+
+   /* 4. An open transport breaker refuses every call locally, so a kb that
+    * considers itself perfectly healthy still cannot be queried. The breaker is
+    * part of the verdict rather than a flag beside it. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   snprintf(g_kb_health.status, sizeof(g_kb_health.status), "ok");
+   g_kb_breaker_state = "open";
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "degraded") == 0);
+   kb = cJSON_GetObjectItemCaseSensitive(resp, "kb");
+   assert(cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(kb, "queries_suppressed")));
+   cJSON_Delete(resp);
+   g_kb_breaker_state = "closed";
+
+   /* 5. An older kb sends no verdict. Absence is not a blocker, and must not be
+    * read as one — inventing "degraded" out of silence would make every
+    * pre-upgrade install look broken. */
+   kb_health_stub_reset();
+   g_kb_health_rc = 0;
+   g_kb_health.process_ok = 1;
+   resp = cJSON_CreateObject();
+   server_health_add_kb(resp);
+   assert(strcmp(kb_status_of(resp), "ok") == 0);
+   cJSON_Delete(resp);
+
+   kb_health_stub_reset();
+}
+
 int main(void)
 {
+   test_health_kb_verdict_states();
    test_invalid_json();
+   test_invalid_json_utf8();
    test_session_brief_assemble();
+   test_mcp_span_shorthand_batch_parse();
    test_conn_update_events_null_evloop();
    test_config_secret_redaction_and_vault_write();
    test_api_enroll_preserves_sequential_bearers();
    test_missing_method();
    test_oversized_payload();
+   test_excessive_json_depth_is_invalid_argument();
    test_large_delegate_payload_within_limit();
    test_large_roundtable_payload_within_limit();
    test_large_mcp_call_payload_within_limit();
@@ -2218,15 +2516,7 @@ int main(void)
    test_init_route_through_server_to_kb();
    test_launch_run_returns_provider_metadata();
    test_hooks_pre_recovers_worktree_mapping_from_cwd();
+   test_hook_identity_session_binding();
    printf("server_dispatch: all tests passed\n");
    return 0;
-}
-
-const char *config_embedder_command(const config_t *cfg, const char *requested)
-{
-   if (requested && requested[0])
-      return requested;
-   if (cfg && cfg->embedder_command[0])
-      return cfg->embedder_command;
-   return MEMORY_EMBED_TEST_FIXTURE;
 }

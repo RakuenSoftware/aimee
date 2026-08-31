@@ -1,12 +1,16 @@
 # Server-owned turn lifecycle: a turn outlives the connection that started it
 
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
 Status: done
 
 ## Problem
 
 A chat turn's execution is today bound to the client connection that started
-it. When that connection drops — the user closes the webchat browser tab, the
-laptop sleeps, a phone loses signal — the in-flight turn is **aborted**, not
+it. When that connection drops, the user closes the webchat browser tab, the
+laptop sleeps, a phone loses signal. The in-flight turn is **aborted**, not
 merely detached:
 
 - The CLI-backed chat worker gates its provider read loop on
@@ -19,8 +23,7 @@ merely detached:
   `conn_alive` in the first place.
 
 This contradicts aimee's goal of being an **autonomous agent**. An autonomous
-agent must keep working — and be able to reach out to a human mid-run —
-regardless of whether any client is watching. A connection should be a *window*
+agent must keep working (and be able to reach out to a human mid-run) regardless of whether any client is watching. A connection should be a *window*
 onto a running session, not the *thread of life* for it.
 
 The durable substrate to fix this already exists (unified-presence; see
@@ -59,11 +62,11 @@ is durably observable, **independent of any client connection**:
 
 ### Non-goals (this phase)
 
-- Agent-initiated outreach (`send_message`/`ask_user` made real) — Phase 2.
-- Cross-process delivery to Telegram/Discord via the gateway — Phase 3.
-- A Discord adapter; webchat fully symmetric with gateway surfaces — Phase 4.
+- Agent-initiated outreach (`send_message`/`ask_user` made real). Phase 2.
+- Cross-process delivery to Telegram/Discord via the gateway. Phase 3.
+- A Discord adapter; webchat fully symmetric with gateway surfaces. Phase 4.
 - A durable per-turn event log surviving server crash (see above).
-- Changing turn *arbitration* (single-turn lock + FIFO queue) — reused unchanged.
+- Changing turn *arbitration* (single-turn lock + FIFO queue), reused unchanged.
 
 ## Background: what already exists (reuse, don't rebuild)
 
@@ -80,8 +83,8 @@ already brackets every turn with a presence turn-lock and
 ### Code audit (verifying R1 correctness claims before design)
 
 - **Event funnel:** every turn event is emitted via `stream_event`
-  (`src/posix/server_compute.c:78`) — `turn_start`, `text`, `thinking`,
-  `session`, tool-call phases (`:541`), `turn_end`, `done` — across all worker
+  (`src/posix/server_compute.c:78`), `turn_start`, `text`, `thinking`,
+  `session`, tool-call phases (`:541`), `turn_end`, `done`, across all worker
   variants (agent `:544`, primary-session `:638`, CLI/claude `:1233+`, compact
   paths). **Exception:** token usage is emitted by a *separate* function
   `stream_event_usage` (`:123`), which does **not** currently mirror to the ring.
@@ -90,7 +93,7 @@ already brackets every turn with a presence turn-lock and
   `presence_turn_release` / `presence_emit_turn_done`
   (`server_compute_async.c:480-482`) **unconditionally after the worker
   returns**, using `lock_session`/`lock_turn`/`sid`/`turn_id` copied into locals
-  *before* the worker ran (`:422-431`) — valid even though sub-workers free
+  *before* the worker ran (`:422-431`), valid even though sub-workers free
   `cctx`. So `turn_done` already reaches the ring independent of `conn_alive`,
   provided the worker *returns* (which WP-2 guarantees).
 - **Persistence independence:** the only `conn_alive` reads on the worker path
@@ -99,10 +102,10 @@ already brackets every turn with a presence turn-lock and
   consults `conn_alive`; history is written by the provider/CLI session keyed by
   session id. Persistence is therefore already connection-independent.
 - **Cancellation today:** there is **no** `chat.graceful_cancel` handler in the
-  method table (`server.c`) — the gateway `/stop` is currently a no-op. The CLI
+  method table (`server.c`). The gateway `/stop` is currently a no-op. The CLI
   worker's subprocess pid is a local (`:1113`). The *only* existing interrupt is
   the `conn_alive` disconnect-kill. Removing it (WP-2) therefore requires a real
-  cancellation primitive (WP-4) — they must ship together.
+  cancellation primitive (WP-4). They must ship together.
 - **Shutdown drain:** `server_shutdown` (`server.c:1706`) calls
   `server_compute_async_drain()` → `chat_thread_drain()` which **blocks until
   all chat threads exit** (`:1719`). A long detached turn would hang shutdown
@@ -114,7 +117,7 @@ already brackets every turn with a presence turn-lock and
 
 ## Design
 
-### WP-1 — The presence ring is always the full, faithful turn stream
+### WP-1: The presence ring is always the full, faithful turn stream
 
 Today the worker mirrors deltas to the ring **only when a second surface is
 attached** (`server_compute_async.c:440`, `presence_attachment_count(...) > 1`).
@@ -126,14 +129,14 @@ Changes:
 - **Cover all event classes,** including usage: both `stream_event` (`:78`) and
   `stream_event_usage` (`:123`) publish to the ring.
 - **Restructure the `conn_alive` guard so it never gates the ring (critical).**
-  Today `stream_event` early-returns at the top when `!conn_alive` (`:80`) —
-  *before* the ring publish at `:107-116`. Left as-is, a dead connection would
+  Today `stream_event` early-returns at the top when `!conn_alive` (`:80`),
+*before* the ring publish at `:107-116`. Left as-is, a dead connection would
   skip the ring publish and defeat this entire proposal. The functions are
   reordered so the **ring publish runs unconditionally**, and the `conn_alive`
   check is narrowed to wrap **only the direct-to-socket `write_all` calls**
   (`:94-96`, and the equivalent in `stream_event_usage` `:140-142`). Concretely:
   build the event JSON, publish to the ring (coalesced per the rule below),
-  then — only if `conn_alive` — attempt the socket write, flipping `conn_alive`
+  then (only if `conn_alive`) attempt the socket write, flipping `conn_alive`
   to 0 on write failure as today. The ring becomes the unconditional sink; the
   socket is the best-effort, connection-scoped sink.
 - **Ring event schema** (additive; unknown kinds ignored by older consumers).
@@ -148,7 +151,7 @@ Changes:
 - **Text-delta coalescing (ordering-safe):** coalesce *text* deltas into the
   ring on a ~50ms / N-char window. **Only text is batched.** Any non-text event
   (`thinking`, `tool_call.*`, `usage`, `turn_done`) **first flushes the pending
-  text batch, then publishes immediately** — so the ring's cursor order never
+  text batch, then publishes immediately**, so the ring's cursor order never
   reorders a tool call or usage relative to the text around it. The live
   direct-to-connection write path is unchanged (still per-delta); only the ring
   publish is coalesced. This caps how fast `PRESENCE_EVENT_RING` fills,
@@ -157,13 +160,13 @@ Changes:
 After WP-1, `GET /v1/sessions/{id}/events` is a faithful, cursor-ordered,
 replayable mirror of every turn on every session.
 
-### WP-2 — `conn_alive` gates one connection's writes, never turn execution (ships with WP-4)
+### WP-2: `conn_alive` gates one connection's writes, never turn execution (ships with WP-4)
 
 `conn_alive` must mean "this one connection can still receive best-effort
 writes," not "keep running the turn." Two edits in `src/posix/server_compute.c`:
 
 1. **CLI worker read loop** (`:1233`): drop the `conn_alive` guard. To keep the
-   loop interruptible (a hung provider must not block forever — see WP-4), set
+   loop interruptible (a hung provider must not block forever; see WP-4), set
    `O_NONBLOCK` on the provider pipe fd and replace blocking `fgets` with a
    `poll()` on the fd with a short timeout (~200ms); each wakeup checks the
    per-turn cancel flag (WP-4), then drains available bytes into a line buffer,
@@ -176,7 +179,7 @@ writes," not "keep running the turn." Two edits in `src/posix/server_compute.c`:
    on cancel the loop breaks within one poll tick; the provider subprocess is
    then expected to respond to `SIGTERM` within the bounded wait before
    `SIGKILL` (WP-4). A WP-6 test cancels a provider that emits no output at all
-   (pure block), proving the poll loop — not provider output — is what makes the
+   (pure block), proving the poll loop (not provider output) is what makes the
    loop interruptible.
 2. **Disconnect-triggered kill** (`:1353-1367`): removed. The subprocess is
    reaped on natural completion (happy path) or by the cancel primitive (WP-4).
@@ -191,7 +194,7 @@ emits `turn_done`, and (b) session-close cancels a long turn within the drain
 bound. Both must pass in the same change; WP-2's loop edit cannot land green
 without WP-4's cancel path.
 
-### WP-3 — Completion and persistence are connection-independent (verified)
+### WP-3: Completion and persistence are connection-independent (verified)
 
 Consequence of WP-1 + WP-2, confirmed by the audit above:
 - `presence_turn_release` / `turn_done` run unconditionally after the worker
@@ -201,7 +204,7 @@ Consequence of WP-1 + WP-2, confirmed by the audit above:
 
 Captured as acceptance criteria + tests (WP-6), not new code.
 
-### WP-4 — Cancellation primitive + bounded lifetime (ships with WP-2)
+### WP-4: Cancellation primitive + bounded lifetime (ships with WP-2)
 
 Replace the connection-as-leash with an explicit, connection-independent cancel
 primitive.
@@ -212,7 +215,7 @@ primitive.
   table sizing). **Lifecycle:** the entry is published *before* the worker is
   dispatched (so a cancel arriving immediately is not lost), and cleared only
   *after* the child is reaped and `turn_done` is emitted. **Lock hierarchy:**
-  the registry mutex is a leaf — it is never held while acquiring a presence
+  the registry mutex is a leaf. It is never held while acquiring a presence
   turn-lock or the compute locks (acquire order is always presence/compute →
   registry, released in reverse), so cancel-all during shutdown cannot deadlock
   against a worker. A cancel only *sets the flag and reads the pid* under the
@@ -224,7 +227,7 @@ primitive.
   `waitpid` runs exactly once, after which `reaped=1`. The read loop checks the
   cancel flag *before* signalling; if the child already exited naturally
   (`poll` returns `POLLHUP`/EOF), the natural completion path reaps it and sets
-  `reaped` — so a cancel racing a natural exit is a no-op, not a double-reap.
+  `reaped`, so a cancel racing a natural exit is a no-op, not a double-reap.
 - **Propagation:**
   - CLI path: the `poll()`-based read loop (WP-2) checks `cancel` each wakeup;
     on set it breaks into the single-owner reap sequence above.
@@ -245,7 +248,7 @@ primitive.
     inside the handler.
   - `chat.graceful_cancel` is **registered** (new handler) to set `cancel` by
     session id. **Authz:** the handler verifies the caller's principal/owner
-    matches the target session's presence owner and rejects a mismatch — a
+    matches the target session's presence owner and rejects a mismatch. A
     client cannot cancel another client's turn via a forged session id. Presence
     already records `owner` per session (`presence.c:53`); this adds a small
     `presence_session_owner(sid, out)` accessor. The webchat and gateway surfaces
@@ -261,14 +264,14 @@ primitive.
   and provider deadlines, so a detached turn with no audience terminates on its
   own even absent an explicit cancel.
 
-### WP-5 — Webchat: disconnect detaches, reconnect replays (full protocol)
+### WP-5: Webchat: disconnect detaches, reconnect replays (full protocol)
 
 Webchat stops treating the turn POST as the turn's lifeline; the browser renders
 **only** from the durable events stream.
 
 - **Two-step protocol.** `POST /api/chat/send` accepts the turn, starts (or
   rejoins) it server-side, and returns **`202 Accepted` with
-  `{session_id, turn_id}`** immediately — it no longer holds the request open
+  `{session_id, turn_id}`** immediately. It no longer holds the request open
   for the turn's duration, and no longer passes `r.Context()` as the turn's
   lifeline. The SPA then renders from `GET /v1/sessions/{id}/events?cursor=<n>`
   (proxied by webchat) as the **single** render source. The old direct
@@ -277,8 +280,8 @@ Webchat stops treating the turn POST as the turn's lifeline; the browser renders
 - **Synchronous ring creation (no lazy-init race).** The presence session and
   its event ring are created **synchronously inside `POST /api/chat/send`,
   before the worker is dispatched**, and `turn_started` is published as the
-  ring's first event. The ring is therefore never lazily created on first GET —
-  a `turn_started` and all early deltas are guaranteed retained from cursor 0,
+  ring's first event. The ring is therefore never lazily created on first GET.
+A `turn_started` and all early deltas are guaranteed retained from cursor 0,
   even if the client's GET subscription arrives late or never. (`launch.run` /
   session bootstrap already mint the session id; this only guarantees the
   in-process presence+ring exist before any worker event can fire.)
@@ -308,7 +311,7 @@ Webchat stops treating the turn POST as the turn's lifeline; the browser renders
 The CLI already demonstrates the attach + event-consume shape
 (`cli_chat_presence_attach`, `src/cli_tui.c:474`).
 
-### WP-6 — Tests
+### WP-6: Tests
 
 - **C unit:** turn with `conn_alive=0` mid-stream (a) runs to completion,
   (b) publishes the full event sequence incl. `usage` and `turn_done` to the
@@ -316,7 +319,7 @@ The CLI already demonstrates the attach + event-consume shape
   seam + a stub provider; asserts via `presence_wait`. Extends
   `src/tests/test_presence.c`.
 - **C unit:** single-attachment turn publishes deltas to the ring (WP-1
-  regression guard — previously gated off).
+  regression guard, previously gated off).
 - **C unit:** `session.close` cancels an in-flight turn; the subprocess is
   reaped within the drain bound (WP-4).
 - **C unit:** server-shutdown path cancels all active turns then drains within a
@@ -396,11 +399,10 @@ The CLI already demonstrates the attach + event-consume shape
 
 ## Acceptance criteria
 
-1. With a single webchat attachment, the full turn stream — incl. `usage` —
-   appears on `GET /v1/sessions/{id}/events` (WP-1).
+1. With a single webchat attachment, the full turn stream (incl; `usage`) appears on `GET /v1/sessions/{id}/events` (WP-1).
 2. Marking the serving connection dead mid-turn does not abort the turn: it runs
    to completion, publishes `turn_done` to the ring, and persists its result
-   (WP-2/WP-3) — verified by a C unit test with no live attachment at
+   (WP-2/WP-3), verified by a C unit test with no live attachment at
    completion.
 3. The provider subprocess is no longer killed on client disconnect; it is
    reaped on natural completion or by the cancel primitive
@@ -410,7 +412,7 @@ The CLI already demonstrates the attach + event-consume shape
 5. Server shutdown cancels all active turns then drains within a bounded time
    even with a long detached turn running (WP-4).
 6. Webchat: closing the tab mid-turn then reopening shows the completed turn with
-   full output — from the ring tail within retention, otherwise from persisted
+   full output, from the ring tail within retention, otherwise from persisted
    history via the gap fallback (WP-5).
 7. No regression to turn arbitration (single-turn lock + FIFO) or to
    session-history persistence.

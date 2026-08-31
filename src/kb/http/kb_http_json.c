@@ -2,12 +2,29 @@
  * See kb_http_json.h for what these are and are not. */
 
 #include "kb_http_json.h"
+#include "aimee.h"
+#include "cJSON.h"
 
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+void kb_http_capabilities_json(char *out, size_t out_cap, cJSON *surfaces)
+{
+   cJSON *root = cJSON_CreateObject();
+   cJSON *capabilities = cJSON_AddArrayToObject(root, "capabilities");
+   cJSON_AddItemToArray(capabilities, cJSON_CreateString("memory"));
+   cJSON_AddItemToArray(capabilities, cJSON_CreateString("search"));
+   cJSON_AddItemToArray(capabilities, cJSON_CreateString("index"));
+   cJSON_AddItemToObject(root, "agent_surfaces", surfaces ? surfaces : cJSON_CreateObject());
+   cJSON_AddStringToObject(root, "version", AIMEE_VERSION);
+   char *json = cJSON_PrintUnformatted(root);
+   snprintf(out, out_cap, "%s", json ? json : "{\"error\":\"out of memory\"}");
+   free(json);
+   cJSON_Delete(root);
+}
 
 /* Position p just past `"key" :` and return it, or NULL when the key is absent
  * or is not followed by a colon. Shared by all three scanners so they agree on

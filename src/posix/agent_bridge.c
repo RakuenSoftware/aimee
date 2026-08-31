@@ -692,7 +692,39 @@ static int parse_response_headers(char *buf, size_t len, size_t *header_end, int
 
 /* Read a full HTTP response (headers + body) into *out_body, returning status code.
  * For buffered (non-streaming) reads. */
-static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_len)
+/* Copy one response header's value out of the raw header block. Case-insensitive
+ * on the name, as HTTP requires; the block is `buf[0..header_end)` and is still
+ * intact at the point this is called. */
+static void http_header_value(const char *buf, size_t header_end, const char *name, char *out,
+                              size_t out_cap)
+{
+   out[0] = '\0';
+   size_t name_len = strlen(name);
+   for (size_t i = 0; i + name_len + 1 < header_end; i++)
+   {
+      if (i && buf[i - 1] != '\n')
+         continue; /* only at the start of a header line */
+      if (strncasecmp(buf + i, name, name_len) != 0 || buf[i + name_len] != ':')
+         continue;
+      const char *v = buf + i + name_len + 1;
+      while (*v == ' ' || *v == '\t')
+         v++;
+      size_t n = 0;
+      while (v[n] && v[n] != '\r' && v[n] != '\n' && (size_t)(v - buf) + n < header_end &&
+             n + 1 < out_cap)
+         n++;
+      memcpy(out, v, n);
+      out[n] = '\0';
+      return;
+   }
+}
+
+/* As http_read_response, plus one header captured for the caller. Exists so a
+ * caller can act on a redirect (Location) itself rather than have this layer
+ * follow it: a 302 to pre-signed storage must NOT carry the Authorization header
+ * onward, and only the caller knows which of its headers are host-bound. */
+static int http_read_response_hdr(http_conn_t *conn, char **out_body, size_t *out_len,
+                                  const char *want_header, char *hdr_out, size_t hdr_cap)
 {
    *out_body = NULL;
    *out_len = 0;
@@ -745,6 +777,8 @@ static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_le
       free(buf);
       return -1;
    }
+   if (want_header && hdr_out && hdr_cap)
+      http_header_value(buf, header_end, want_header, hdr_out, hdr_cap);
 
    /* Phase 2: read body */
    if (chunked)
@@ -1143,7 +1177,50 @@ stream_done:
    return status;
 }
 
+static int http_read_response(http_conn_t *conn, char **out_body, size_t *out_len)
+{
+   return http_read_response_hdr(conn, out_body, out_len, NULL, NULL, 0);
+}
+
 /* ---- Public API ---- */
+
+/* GET that REPORTS a redirect instead of following it: on a 3xx the target lands
+ * in `location` and the caller decides what to re-send. Deliberately not a
+ * following GET — a forge's log endpoint redirects to pre-signed third-party
+ * storage, and blindly replaying the request there would hand that host the
+ * Authorization header (the forge token). Only the caller knows which of its
+ * headers are host-bound, so only the caller can safely follow. */
+int agent_http_get_location(const char *url, const char *extra_headers, char *location,
+                            size_t location_cap, char **response_buf, int timeout_ms)
+{
+   *response_buf = NULL;
+   if (location && location_cap)
+      location[0] = '\0';
+
+   parsed_url_t pu;
+   if (parse_url(url, &pu) < 0)
+      return -1;
+
+   http_conn_t conn;
+   if (conn_open(&conn, &pu, timeout_ms) < 0)
+      return -1;
+   if (send_request(&conn, "GET", &pu, NULL, NULL, extra_headers, "aimee/1.0", NULL, 0) < 0)
+   {
+      conn_close(&conn);
+      return -1;
+   }
+
+   size_t resp_len = 0;
+   int status =
+       http_read_response_hdr(&conn, response_buf, &resp_len, "Location", location, location_cap);
+   conn_close(&conn);
+   if (status < 0)
+   {
+      free(*response_buf);
+      *response_buf = NULL;
+   }
+   return status;
+}
 
 /* SSRF-safe GET: connect to `pinned_ip` (a numeric IP the caller already
  * validated against the egress deny-list) while keeping Host/SNI = the URL host.

@@ -6,18 +6,9 @@
 #include <stddef.h>
 #include <string.h>
 
-#include "config.h"              /* config_t + econ_preset_t (for the econ_preset stub) */
+#include "config.h"
 #include "gateway_mutate_wire.h" /* gw_mutate_ctx_t + gw_post_action_t (header-only deps) */
 #include "agent_exec.h"
-
-/* The minimal ingress links do not carry config.o. Mirror the production hard-kill
- * resolver so the real immutable wire-snapshot fence can be exercised. */
-__attribute__((weak)) int econ_mode(const config_t *cfg)
-{
-   if (!cfg || cfg->module_economizer == 0)
-      return ECON_MODE_OFF;
-   return cfg->economizer_mode;
-}
 
 /* Exact-length transport adapters for ingress tests whose capture doubles expose
  * the historical string API. Production links the real byte-counted transport. */
@@ -223,13 +214,16 @@ __attribute__((weak)) int aimee_ir_responses_to_chat(const char *body, char *mod
 
 __attribute__((weak)) void *aimee_ir_build_from_chat(const char *agent_model, const void *messages,
                                                      const void *tools, const char *system,
-                                                     const char *driver_name)
+                                                     const char *driver_name, int max_tokens,
+                                                     double temperature)
 {
    (void)agent_model;
    (void)messages;
    (void)tools;
    (void)system;
    (void)driver_name;
+   (void)max_tokens;
+   (void)temperature;
    return NULL;
 }
 
@@ -264,10 +258,11 @@ __attribute__((weak)) void aimee_response_free(void *r)
  * (which now calls gw_response_run_governance) but links no policing graph. Inert weak
  * stub -> no policing, which the shape test does not exercise. The p2c tests link the real
  * gw_stage_governance.o + gateway_policy.o, so the strong symbol wins there. */
-__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled)
+__attribute__((weak)) int gw_response_run_governance(void *parsed, int enabled, int policy_active)
 {
    (void)parsed;
    (void)enabled;
+   (void)policy_active;
    return 0;
 }
 
@@ -278,72 +273,9 @@ __attribute__((weak)) int gw_response_governance_enabled(void)
    return 1;
 }
 
-/* Context-economizer gateway-seam symbols. messages_run_request_pipeline calls these inside a
- * block gated by the economizer gateway seam (off under the tests' stubbed safe-tier config, so
- * NEVER entered at runtime). LTO used to dead-code-eliminate the block, but that decision is
- * fragile (any new read of the loaded cfg in that function can retain it, and it differs across gcc
- * versions), so resolve the symbols with inert weak stubs. Real context_reduce.o / agent_exec.o win
- * when a test links them. Loose signatures: never called here, matched only by name + ABI (arg
- * count, pointer/enum-as-int). */
-__attribute__((weak)) int context_reduce(cJSON *messages, const char *system_prompt,
-                                         const char *model, const char *session_id,
-                                         reduce_seam_t seam, const reduce_config_t *cfg,
-                                         reduce_state_t *st, reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)session_id;
-   (void)seam;
-   (void)cfg;
-   (void)st;
-   (void)out;
-   return 1; /* non-zero: "did nothing" (the caller bypasses on != 0) */
-}
-__attribute__((weak)) void context_reduce_result_free(reduce_result_t *out)
-{
-   (void)out;
-}
-/* anthropic_http.c / openai_chat.c resolve the economizer gateway-seam gate through
- * econ_preset(); this inert weak stub returns an all-zero preset (gateway_seam off), so
- * the shadow-measure block is never entered. The real config.o wins when linked. */
-__attribute__((weak)) void econ_preset(const config_t *cfg, econ_preset_t *out)
-{
-   (void)cfg;
-   if (out)
-      memset(out, 0, sizeof(*out));
-}
-/* Shadow gateway-measure wrapper: anthropic_http.c / openai_chat.c call this inside the
- * economizer gateway-seam block (off under the tests' stubbed safe-tier config, so NEVER entered at
- * runtime); the inert weak stub only resolves the link. Mirrors the real no-op contract:
- * zero `out` so the caller's context_reduce_result_free is safe, return 1 ("did nothing").
- * Real gateway_mutate_wire.o wins when a test links it. */
-__attribute__((weak)) int gw_economizer_measure(cJSON *messages, const char *system_prompt,
-                                                const char *model, int retained_msgs,
-                                                reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)retained_msgs;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return 1;
-}
-__attribute__((weak)) void agent_record_reduce_ledger(const struct reduce_result_s *r,
-                                                      const char *model, const char *agent_name,
-                                                      const char *role)
-{
-   (void)r;
-   (void)model;
-   (void)agent_name;
-   (void)role;
-}
-
 /* Config-surface slice: the ingress now resolves module toggles via config_module_enabled
- * (memory slot + governance egress). It is a pure resolver; the minimal-link ingress tests
- * stub config_load (not the whole config.o), so provide the real logic as a weak symbol here
- * (config.o's strong definition wins when a test links it). */
+ * (memory slot + governance egress). It is a pure resolver, so provide the real
+ * logic as a weak symbol for minimal-link tests. */
 __attribute__((weak)) int config_module_enabled(int config_tristate, int env_default)
 {
    if (config_tristate == 0 || config_tristate == 1)

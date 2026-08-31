@@ -3,6 +3,7 @@
 #ifndef DEC_CMD_AGENT_DELEGATE_IMPL_H
 #define DEC_CMD_AGENT_DELEGATE_IMPL_H 1
 
+#include <stdint.h>
 #include "aimee.h"
 #include "agent.h"
 #include "agent_config.h"
@@ -42,6 +43,14 @@ void delegate_worktree_restore(const char *orig_cwd, const char *git_root, const
  *   - Returns -1 without modifying the environment.
  *   - If errbuf is non-NULL, writes a human-readable message into it.
  */
+/* Answers the delegates module's chain questions. Returns 0 and fills *flag
+ * (should-clear, or depth-allowed) and, for the depth op, *current_depth.
+ * Non-zero means the module could not answer. */
+typedef int (*delegate_chain_provider_fn)(unsigned op, int has_depth, int has_parent,
+                                          int parent_known, int parent_active, int parent_depth,
+                                          int max_depth, int *flag, int32_t *current_depth);
+void delegate_register_chain_provider(delegate_chain_provider_fn provider);
+
 int delegate_check_chain_depth(int max_depth, char *errbuf, size_t errbuf_sz);
 int delegate_chain_env_should_clear(const char *depth_env, const char *parent_env,
                                     int parent_active_known, int parent_active);
@@ -93,6 +102,13 @@ char *delegate_handoff_repair_prompt(const char *previous_response, const char *
  * JSON array, changed files outside that list are reported as supervisor-review
  * items.  If |require_verification| is true, status=done without a passed test is
  * downgraded to partial in |out->status|. */
+/* Fills *out and returns 0 when the module answered, non-zero when it could
+ * not or the handoff was malformed. */
+typedef int (*delegate_handoff_provider_fn)(const char *text, const char *owned_files_json,
+                                            int require_verification,
+                                            delegate_handoff_validation_t *out);
+void delegate_register_handoff_provider(delegate_handoff_provider_fn provider);
+
 int delegate_handoff_validate_text(const char *text, const char *owned_files_json,
                                    int require_verification, delegate_handoff_validation_t *out);
 
@@ -130,13 +146,19 @@ int platform_trace_run_task(agent_config_t *cfg, const char *role, const char *s
  * extension) from a delegate prompt string.  Populates paths[0..max_paths-1]
  * and returns the number of distinct paths found.  Each entry in paths must be
  * at least DELEGATE_DRIFT_PATH_MAX bytes. */
+/* Fills a contiguous paths buffer of `max_paths` rows, each `path_stride` bytes
+ * including the terminator. Returns the count written, or negative when the
+ * module could not answer. */
+typedef int (*delegate_paths_provider_fn)(const char *prompt, unsigned max_paths, char *paths,
+                                          size_t path_stride);
+void delegate_register_paths_provider(delegate_paths_provider_fn provider);
+
 int delegate_extract_named_paths(const char *prompt, char paths[][DELEGATE_DRIFT_PATH_MAX],
                                  int max_paths);
 
 /* Returns 1 when a delegate prompt asks for writes/edits, 0 when it is
  * explicitly read-only ("read-only", "do not edit", etc.). Empty prompts are
  * treated as write-capable to preserve legacy behavior. */
-int delegate_prompt_allows_writes(const char *prompt);
 
 /* Named-file drift guard.
  *
@@ -156,19 +178,18 @@ int delegate_prompt_allows_writes(const char *prompt);
  *     full-path match → ok; basename-only → soft drift (rc=1);
  *     absent from response → hard drift (rc=-1).
  *   Returns -1 on hard drift, 1 on soft drift, 0 when all paths are ok.
- *   role_is_write is the authoritative write-intent gate: a read/analysis role
- *   (0) can never hard-drift on a missing named file (it produces no files), so a
- *   path scraped from reference content in its prompt never fails it. */
+ *   writes_allowed is the delegate's repo_write permission, resolved once when it
+ *   was created and passed in here. A delegate that cannot write can never
+ *   hard-drift on a missing named file (it produces no files), so a path scraped
+ *   from reference content in its prompt never fails it. */
 int delegate_check_named_file_drift(const char *const *paths, int path_count, const char *prompt,
-                                    const char *response, const char *wt_path, int role_is_write,
+                                    const char *response, const char *wt_path, int writes_allowed,
                                     char *errbuf, size_t errbuf_size);
 
 /* Build a compact validation evidence bundle for validate/review delegates.
  * The bundle includes HEAD ref, diff --stat, and changed files.
  * Returns a heap-allocated string; caller must free.  Returns NULL on failure. */
 char *delegate_build_validation_bundle(const char *cwd);
-char *delegate_maybe_append_validation_bundle(const char *role, const char *cwd, char *owned_prompt,
-                                              const char *fallback_prompt, int target_provided);
 /* Validate Location-backed review snippets against the current checkout.
  * Returns 1 and fills errbuf when a fenced code block following a
  * `Location: `path:line`` marker does not match that file near the cited line,
@@ -194,7 +215,6 @@ int delegate_worktree_has_changes(const char *wt_path);
  *   via_name      — pin by agent name (mutually exclusive with tier_override)
  *   tier_override — pin by tier number (-1 = use default routing)
  *   role          — the delegation role (used to resolve the agent) */
-char *delegate_build_tier_context(const char *via_name, int tier_override, const char *role);
 
 /* Route override helpers shared by the direct CLI and server-routed delegate
  * paths. Provider routing picks the cheapest enabled agent for the requested
@@ -215,6 +235,12 @@ int delegate_apply_route_overrides(agent_config_t *cfg, const char *role, const 
                                    int tier_override, const char *provider_override,
                                    const char *model_override, char *errbuf, size_t errbuf_sz);
 int delegate_route_preflight(agent_config_t *cfg, const char *role, char *errbuf, size_t errbuf_sz);
+/* Answers the delegates module's capability question. Returns 0 and fills both
+ * outputs, or non-zero when the module cannot be reached. */
+typedef int (*delegate_capability_provider_fn)(const char *prompt, int tools_enabled,
+                                               unsigned *required_caps, int *min_context);
+void delegate_routing_register_capability_provider(delegate_capability_provider_fn provider);
+
 void delegate_infer_capability_requirements(const char *prompt, int tools_enabled,
                                             unsigned *required_caps_out, int *min_context_out);
 /* Disable every agent whose declared max_scope ceiling cannot serve a packet of
@@ -238,6 +264,26 @@ char *delegate_inject_code_context(const char *prompt);
  * with cwd). Opt-in via delegate_graph_context_enabled; structural-only,
  * fail-open. Heap string (caller frees) or NULL. */
 char *delegate_inject_graph_context(const char *prompt, const char *cwd);
+
+/* What kind of place a delegate turn's root is. A delegate cannot judge its own
+ * evidence without this: `git log` showing nothing unusual means one thing in the
+ * repository and quite another in a reconstruction of it taken at some earlier
+ * point, and "the file is not here" means something different again in a
+ * directory that never held a repository at all. */
+typedef enum
+{
+   DELEGATE_ROOT_NAMED = 0,     /* the workspace the caller named */
+   DELEGATE_ROOT_RECONSTRUCTED, /* server-side mirror of a detached workspace */
+} delegate_root_kind_t;
+
+/* Build a "## Working root" block naming the root this turn is bound to and what
+ * kind of place it is, so the delegate is not left inferring it from whether
+ * commands happen to work. Both roots are passed because they are what the
+ * delegate actually experiences -- the directory its shell runs in and the one
+ * its file tools write to -- and when they differ, saying so plainly is the whole
+ * point. Heap string (caller frees); NULL when there is no root to describe. */
+char *delegate_bound_root_notice(const char *shell_root, const char *file_root,
+                                 delegate_root_kind_t kind);
 
 /* Rewrite every occurrence of `cwd` in `prompt` to `worktree_path` so a delegate
  * running in an isolated sibling worktree sees paths under its own checkout.

@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "claim_status": "exploratory_matched_cross_model_pilot",
+  "created_at": "2026-08-27T09:55:00Z",
+  "task_id": "trust_bundle_readiness",
+  "buggy_parent": "358bab1f7fa4da58b349e1847c0b685a4c5686f0",
+  "hidden_test_source_commit": "270b3483d5da39a68206c47378c6bb9614728550",
+  "learned_failure_source": {
+    "artifact": "large-repo-qwen38-trust-progress.json",
+    "artifact_sha256": "9f33c6e1949a1e53fab48ec7ea2baf50f92c1d8c60500b391d6f8b9ee4e1cbb4",
+    "origin_model": "Qwen3.8-27B UD-Q4_K_XL",
+    "origin_terminal_reason": "progress_abort",
+    "calls_without_mutation": 28,
+    "repeated_or_overlapping_retrievals": 9,
+    "lesson": "Broad repository exploration with repeated or overlapping retrievals and no edit failed. On a similar goal, choose a materially different plan, form a concrete defect hypothesis, and attempt the smallest justified edit or decisive test before broadening exploration."
+  },
+  "design": {
+    "pairing": "For each Codex model, base and learned arms used separate worktrees at the same buggy revision, the same task, medium reasoning effort, and the same independent visible and hidden grader. The learned arm alone received the lesson derived from the sealed Qwen failure.",
+    "visible_grader": [
+      "make -C src -j8 build/obj/tests/unit-test-server-write-tier-db1",
+      "src/build/obj/tests/unit-test-server-write-tier-db1"
+    ],
+    "hidden_grader": "Replace src/tests/test_server_write_tier_db1.c with the child-era file from the fix commit, touch it, then run the visible grader.",
+    "test_sensitivity": "Apply only the learned arm's authored test changes to the buggy parent and run the visible grader."
+  },
+  "models": {
+    "gpt-5.6-luna": {
+      "base": {
+        "authored_production_patch": true,
+        "authored_test_patch": true,
+        "full_server_build_passed": false,
+        "focused_test_binary_executed": false,
+        "visible_grader_passed": false,
+        "hidden_grader_passed": false,
+        "terminal_evidence": "The agent stopped after assuming unavailable CMake blocked verification; the independent Make grader found an undeclared server_mgmt_jwks_trust_bundle_load link dependency."
+      },
+      "learned": {
+        "authored_production_patch": true,
+        "authored_test_patch": true,
+        "full_server_build_passed": true,
+        "focused_test_binary_executed": true,
+        "visible_grader_passed": false,
+        "hidden_grader_passed": false,
+        "terminal_evidence": "The full server build passed and the focused test executed, but an assertion exposed stale fixture state; the sealed hidden test also failed."
+      },
+      "observed_crossover": "The learned arm reached full-server build and focused-test execution capabilities the base arm did not, but did not complete the repair."
+    },
+    "gpt-5.6-terra": {
+      "base": {
+        "authored_production_patch": true,
+        "authored_test_patch": true,
+        "self_selected_tests_passed": true,
+        "visible_grader_passed": true,
+        "hidden_grader_passed": false,
+        "terminal_evidence": "The patch changed general readiness and passed its own server-ready test, but did not repair the write-tier contract exercised by the sealed hidden test."
+      },
+      "learned": {
+        "authored_production_patch": true,
+        "authored_test_patch": true,
+        "visible_grader_passed": true,
+        "hidden_grader_passed": true,
+        "authored_test_failed_on_buggy_parent": true,
+        "regression_sensitive_test": true,
+        "terminal_evidence": "The arm made the focused three-file repair, passed its authored visible regression, passed the sealed hidden child-era test, and its test-only patch failed on the buggy parent."
+      },
+      "observed_crossover": "The learned arm completed a regression-sensitive repair that the same model's base arm missed."
+    }
+  },
+  "supported_interpretation": [
+    "A lesson produced by a local Qwen failure changed later behavior in two different Codex model tiers.",
+    "For Luna the transferred lesson expanded implementation and verification depth without producing a correct final patch.",
+    "For Terra the transferred lesson converted a hidden-grade failure into a complete, regression-sensitive repair.",
+    "Because approach memory is stored in the shared Aimee KB and recalled by goal rather than originating session or model, the same mechanism is reusable by later authorized users and models on that KB."
+  ],
+  "limitations": [
+    "One task and one run per arm are exploratory, not a population estimate.",
+    "The collaboration-agent runtime did not expose provider token-usage objects, so this artifact supports capability and completion claims but not token-savings claims.",
+    "The shared-KB authorization boundary is a deployment property; this pilot directly demonstrates cross-model transfer, while storage-backed product tests cover source-independent recall within one KB."
+  ]
+}

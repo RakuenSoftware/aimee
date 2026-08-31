@@ -11,10 +11,10 @@
 #
 #   1. GET  /v1/health        — server is up (server-native)
 #   2. GET  /v1/version       — server identifies its build
-#   3. GET  /v1/kb/status     — server -> kb /v1/health?status=1 (DB2 + pgvector)
-#   4. POST /v1/kb/search      — server -> kb /v1/search (query -> embed -> pgvector)
-#   5. auth enforcement        — /v1/health with no bearer must be rejected (401)
-#   6. kb direct on :8741      — sanity that the kb container itself is healthy
+#   3. GET  /v1/rules         — server -> kb active collaboration rules
+#   4. POST /v1/memory/get    — server -> kb, including the temporal-read fields
+#   5. auth enforcement       — /v1/health with no bearer must be rejected (401)
+#   6. kb direct on :8741     — sanity that the kb container itself is healthy
 #
 # Checks 3 and 4 only pass if the server reached the kb container, so a green
 # run proves the AIMEE_KB_API_URL wiring end to end.
@@ -29,10 +29,14 @@
 #   KB_URL        base URL of the kb /v1 API      (default http://localhost:8741)
 #   BEARER        server bearer token (required for an existing stack; generated
 #                 and supplied as a first-boot secret when --up is used)
+#   KB_BEARER     KB bearer token (defaults to BEARER for an existing stack;
+#                 generated as a service-scoped credential with --up)
 #   COMPOSE_FILE  compose file(s), space-separated (default compose.server.yaml);
 #                 list several to layer an override, e.g. to remap host ports
 #                 on a host where 8740/8741 are already taken
 #   WAIT_SECONDS  health wait budget on --up      (default 300)
+#   AIMEE_STORE_{ADMIN,MIGRATOR,RUNTIME}_PASSWORD may be supplied; --up
+#                 generates independent values when they are absent
 #
 # Exit code: 0 = all checks passed, non-zero otherwise.
 
@@ -41,6 +45,7 @@ set -euo pipefail
 SERVER_URL="${SERVER_URL:-https://localhost:8743}"
 KB_URL="${KB_URL:-http://localhost:8741}"
 BEARER="${BEARER:-}"
+KB_BEARER="${KB_BEARER:-}"
 COMPOSE_FILE="${COMPOSE_FILE:-compose.server.yaml}"
 WAIT_SECONDS="${WAIT_SECONDS:-300}"
 
@@ -62,6 +67,12 @@ for arg in "$@"; do
   esac
 done
 
+# Scope every fresh smoke stack explicitly. This keeps Vault bootstrap, startup,
+# logs, and teardown on the same project even when other projects use this file.
+if [[ "$DO_UP" == 1 && -z "${COMPOSE_PROJECT_NAME:-}" ]]; then
+  export COMPOSE_PROJECT_NAME="aimee-e2e-server-$$"
+fi
+
 if [[ -z "$BEARER" ]]; then
   if [[ "$DO_UP" == 1 ]]; then
     BEARER="$(openssl rand -hex 32)"
@@ -71,8 +82,20 @@ if [[ -z "$BEARER" ]]; then
   fi
 fi
 if [[ "$DO_UP" == 1 ]]; then
+  # Both listeners are remotely reachable in this topology and therefore both
+  # fail closed without a Vault-backed bearer.  The mTLS hop additionally
+  # requires a distinct service identity bound to the enrolled
+  # service:aimee-server certificate; seal both values into both Vaults.
+  KB_BEARER="scope:service:aimee-server:$(openssl rand -hex 32)"
   export AIMEE_API_BEARER_TOKEN="$BEARER"
+  export AIMEE_KB_API_BEARER_TOKEN="$KB_BEARER"
+  export AIMEE_KB_SERVICE_IDENTITY_TOKEN="scope:service:aimee-server:$(openssl rand -hex 32)"
+  : "${AIMEE_STORE_ADMIN_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_MIGRATOR_PASSWORD:=$(openssl rand -hex 32)}"
+  : "${AIMEE_STORE_RUNTIME_PASSWORD:=$(openssl rand -hex 32)}"
+  export AIMEE_STORE_ADMIN_PASSWORD AIMEE_STORE_MIGRATOR_PASSWORD AIMEE_STORE_RUNTIME_PASSWORD
 fi
+: "${KB_BEARER:=$BEARER}"
 
 cd "$(dirname "$0")/.."
 
@@ -85,6 +108,7 @@ bold()  { printf '\033[1m%s\033[0m\n' "$*"; }
 DC=(docker compose)
 for f in $COMPOSE_FILE; do DC+=(-f "$f"); done
 AUTH=(-H "Authorization: Bearer ${BEARER}")
+KB_AUTH=(-H "Authorization: Bearer ${KB_BEARER}")
 PASS=0
 FAIL=0
 
@@ -101,6 +125,43 @@ check() {
     printf '        expected substring: %s\n' "$expect"
     printf '        got: %s\n' "${body:-<no response / curl error>}"
     FAIL=$((FAIL + 1))
+  fi
+}
+
+check_kb() {
+  # check_kb <name> <expected-substring> <curl-args...>
+  local name="$1" expect="$2"; shift 2
+  local body
+  if body="$(curl -fsS -k --max-time 20 "${KB_AUTH[@]}" "$@" 2>/dev/null)" &&
+     [[ "$body" == *"$expect"* ]]; then
+    green "  PASS  $name"
+    PASS=$((PASS + 1))
+  else
+    red   "  FAIL  $name"
+    printf '        expected substring: %s\n' "$expect"
+    printf '        got: %s\n' "${body:-<no response / curl error>}"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+check_absent() {
+  # check_absent <name> <substring-that-must-NOT-appear> <curl-args...>
+  # A field that must stay OFF the wire needs its own assertion: check() only
+  # proves presence, and "no verdict was emitted" is exactly what distinguishes
+  # "you did not ask" from "the answer is no".
+  local name="$1" forbidden="$2"; shift 2
+  local body
+  if ! body="$(curl -fsS -k --max-time 20 "${AUTH[@]}" "$@" 2>/dev/null)"; then
+    red "  FAIL  $name (no response / curl error)"
+    FAIL=$((FAIL + 1))
+  elif [[ "$body" == *"$forbidden"* ]]; then
+    red   "  FAIL  $name"
+    printf '        must NOT contain: %s\n' "$forbidden"
+    printf '        got: %s\n' "$body"
+    FAIL=$((FAIL + 1))
+  else
+    green "  PASS  $name"
+    PASS=$((PASS + 1))
   fi
 }
 
@@ -137,7 +198,37 @@ if [[ "$DO_UP" == 1 ]]; then
   # both owners against the base file before creating either long-lived service.
   bootstrap_compose="${COMPOSE_FILE%% *}"
   scripts/aimee-compose-vault-bootstrap.sh -f "$bootstrap_compose" all
-  "${DC[@]}" up -d --no-build
+  # A bearer may not cross the plaintext Compose network to the KB.  Start the
+  # KB first, wait for its CA/tenant state to be ready, then install the
+  # KB-issued mTLS identity into the server's persistent home before the server
+  # process ever starts.
+  "${DC[@]}" up -d --no-build aimee-kb aimee-store-db
+  bold "==> Waiting for aimee-kb before installing the server mTLS identity"
+  identity_deadline=$((SECONDS + WAIT_SECONDS))
+  while true; do
+    identity_state="$("${DC[@]}" ps --format '{{.Service}} {{.Health}}' 2>/dev/null | awk '$1=="aimee-kb"{print $2}')"
+    [[ "$identity_state" == "healthy" ]] && break
+    if (( SECONDS >= identity_deadline )); then
+      red "    aimee-kb did not become healthy before identity bootstrap"
+      "${DC[@]}" ps
+      "${DC[@]}" logs --tail=60 aimee-kb || true
+      exit 1
+    fi
+    sleep 3
+  done
+  "${DC[@]}" --profile identity-bootstrap run --rm --no-deps aimee-server-identity
+  # `up` failing is where the stack's own words are the only diagnosis, and
+  # the EXIT trap tears everything down a moment later -- so dump them HERE,
+  # while the containers still exist. A store database that aborts during
+  # initdb exits before its first healthcheck, and compose reports only
+  # "dependency failed to start: container ... is unhealthy", which names the
+  # service and says nothing about the cause.
+  if ! "${DC[@]}" up -d --no-build; then
+    red "==> the stack did not come up; container logs follow"
+    "${DC[@]}" ps -a || true
+    "${DC[@]}" logs --no-color --tail=80 || true
+    exit 1
+  fi
 
   bold "==> Waiting up to ${WAIT_SECONDS}s for aimee-server to report healthy"
   deadline=$((SECONDS + WAIT_SECONDS))
@@ -159,19 +250,57 @@ check "GET /v1/health"   '"service":"aimee-server"' "${SERVER_URL}/v1/health"
 check "GET /v1/version"  'version'                  "${SERVER_URL}/v1/version"
 
 bold "==> Cross-container: server -> kb (proves AIMEE_KB_API_URL wiring)"
-# /v1/kb/status relays the kb's /v1/health?status=1 verbatim; "vector" only
-# appears when the server reached the kb and the kb queried its pgvector store.
-check "GET /v1/kb/status -> kb"  '"vector"'  "${SERVER_URL}/v1/kb/status"
-# /v1/kb/search proxies to the kb's ranked search (query -> embed -> pgvector).
-check "POST /v1/kb/search -> kb" '"hits"'   -X POST -H 'content-type: application/json' \
-                                            -d '{"query":"docker smoke test","scope":"all","max_results":3}' \
-                                            "${SERVER_URL}/v1/kb/search"
+# /v1/kb/status is owner/dashboard-gated. The ordinary read-scoped rules proxy
+# still proves that the server reached the KB without weakening that boundary.
+check "GET /v1/rules -> kb" '"rules"' "${SERVER_URL}/v1/rules"
+# `memory get --as-of` is a FIELD that has to survive this same hop, and it did
+# not: the server read only the id, so the timestamp was marshalled, sent, and
+# dropped here, and the client printed the row with no verdict -- indistinguishable
+# from "not in force". Unit tests at both ends passed throughout, because each was
+# checked against a payload hand-written to contain the field. Only a real
+# cross-container call catches it, so the assertion belongs in this job.
+#
+# The row is seeded through the KB'S OWN API rather than the server's, because
+# data-plane writes are refused on the server's TCP listener at the default
+# aimee.api.remote_writes=off (server_http_authz.c). Seeding direct keeps this
+# stack exactly as shipped -- turning remote writes on would test a topology
+# nobody deploys. The READ still crosses server -> kb, which is the hop at issue.
+#
+# No `-f`: an HTTP error must leave the body readable so a failure here is
+# diagnosable, and the assignment is guarded so a non-zero curl cannot trip
+# `set -e` and kill the run between checks with no message.
+# The first write can overlap the fresh KB's initial reflection/index pass. Its
+# production request budget is longer than the generic 20-second read probe, so
+# give this write enough time to return its committed id instead of reporting a
+# false failure after the KB has accepted it.
+as_of_seed="$(curl -sS -k --max-time 60 "${KB_AUTH[@]}" -X POST -H 'content-type: application/json' \
+  -d '{"key":"e2e-as-of","content":"as-of smoke value","tier":"L0","kind":"fact"}' \
+  "${KB_URL}/v1/actions/memory.store" 2>&1 || true)"
+mem_id="$(printf '%s' "$as_of_seed" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' | head -1)"
+if [[ -n "$mem_id" ]]; then
+  check "POST /v1/memory/get --as-of -> kb echoes the timestamp" '"as_of"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+  check "POST /v1/memory/get --as-of -> kb returns a verdict" '"valid_at"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+  check_absent "POST /v1/memory/get without --as-of emits no verdict" '"valid_at"' \
+        -X POST -H 'content-type: application/json' \
+        -d "{\"id\":${mem_id}}" "${SERVER_URL}/v1/memory/get"
+else
+  red "  FAIL  kb memory.store did not return an id (cannot check --as-of)"
+  printf '        got: %s\n' "${as_of_seed:-<no response>}"
+  FAIL=$((FAIL + 1))
+fi
 
 bold "==> Auth is enforced"
 check_status "GET /v1/health (no bearer) rejected" 401 "${SERVER_URL}/v1/health"
 
 bold "==> Sanity: kb container is directly healthy at ${KB_URL}"
-check "GET /v1/health (kb direct)" '"status"' "${KB_URL}/v1/health"
+check_kb "GET /v1/health (kb direct)" '"status"' "${KB_URL}/v1/health"
+check_kb "GET /v1/health reports DB2 schema ready" '"db2_ok":true' "${KB_URL}/v1/health"
+check_kb "GET /v1/health reports KB tables ready" '"db2_kb_tables_ok":true' \
+         "${KB_URL}/v1/health"
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

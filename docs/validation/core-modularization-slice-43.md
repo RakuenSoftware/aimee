@@ -36,8 +36,8 @@ and `learning_version` tests are KB tests, not module tests; and the CMake omiss
 adds only the completeness assertion on the already-reviewed declarations.
 
 Completeness is a file-ownership statement about the module root as it stands. It does not assert that
-the DB2 persistence (`src/db2/db2_learning.h`, `src/db2/learning_synth_ops.c`) or the KB synthesis lane
-have been moved into the module — they remain physical-ownership debt the document records — and it does
+the DB2 persistence (`src/modules/db2/c/db2_learning.h`, `src/modules/db2/c/learning_synth_ops.c`) or the KB synthesis lane
+have been moved into the module (they remain physical-ownership debt the document records) and it does
 not resolve the `learning.h` layout question, which a separate header-layout slice owns.
 
 ## Multi-element set-equality, exercised for the first time
@@ -47,7 +47,7 @@ one source and one header, so the `sources` and `private_headers` set-equality c
 compared sets of size zero or one. `learning` gives each check four declared entries against four actual
 files. The regression suite removes `learning_router.c` from `sources` and requires
 `rule=ownership-complete` on `/sources` with the source named missing, and removes `learning.h` from
-`private_headers` and requires the same rule on `/private_headers` with the header named missing —
+`private_headers` and requires the same rule on `/private_headers` with the header named missing,
 confirming the checks bite when one element of a multi-element declared set is dropped, not only when a
 whole set is emptied.
 
@@ -59,7 +59,7 @@ The descriptor mutation suite removes `learning_router.c` and requires `rule=own
 `/private_headers`. It removes `docs/modules/learning.md` from the descriptor's `docs` field and
 requires the rule on `/docs`. The latched-descriptor assertion introduced in slice 35 is
 converted here from a hardcoded module list to a graph-derived scan, so it now covers every latched
-descriptor — clearing the latch on any of them fails directly. That list had silently stopped at
+descriptor, clearing the latch on any of them fails directly. That list had silently stopped at
 `gateway`: governance (slice 41) and learning were not added to it, so the assertion had quietly
 stopped covering the two newest latched modules. Deriving the set from the descriptor graph fixes
 governance retroactively and removes the drift for good; the scan guards only against a vacuous pass

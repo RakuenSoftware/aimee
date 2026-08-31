@@ -1,0 +1,431 @@
+{
+  "budget": {
+    "actual_contract": "Codex CLI authenticated using ChatGPT; fixed-plan quota, no per-call cash charge",
+    "actual_marginal_budget_usd": 0.0,
+    "api_equivalent_budget_usd": 86.04,
+    "calls": 6,
+    "expected_actual_marginal_cash_usd": 0.0,
+    "expected_api_price_equivalent_usd": 0.26784,
+    "hard_actual_marginal_cash_usd": 0.0,
+    "hard_api_price_equivalent_usd": 86.03999999999999,
+    "pricing_generation": "official-gpt-5.6-sol-2026-08-26",
+    "retries": 0
+  },
+  "calls": [
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0329696,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-0",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:0:0:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 0,
+      "request_sha256": "4a124480bf44619efaf2df846cf7cfb85f8ee410fbc8a060480e732fbc37a596",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff6-e2a3-7692-bf1a-e890cbc4eb8c",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.130736368941143
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0272536,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-0",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:0:1:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 4665,
+        "epochs": 1,
+        "foldable_tokens": 2773,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 1 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 2 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 3 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 4 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 5 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-00-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2474,
+        "removed_tokens": 2191,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 0,
+      "request_sha256": "e3a46d2c5d812c53d6ea55fa7234fc29a3feebce3244bf9b3cd5384d81ac19fb",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff6-f2ba-74e1-9827-0b71712e090a",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.7245497880503535
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0272536,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-1",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:1:2:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 4665,
+        "epochs": 1,
+        "foldable_tokens": 2773,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 1 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 2 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 3 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 4 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 5 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-00-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2474,
+        "removed_tokens": 2191,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 1,
+      "request_sha256": "d233e90244c0bdaaa473541aeef0b6a042f5d7397217b508a52beffdd72d8b72",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff7-0540-7f03-bfe0-15e5ca05b518",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.299478973960504
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0329696,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-1",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:1:3:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 1,
+      "request_sha256": "1e8a4f8920f8e2f172798d84d40bde30f2ca3bce0a760f1ec96898131a9c20ad",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff7-1605-7ed1-a1cb-5d58d00f10fa",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 9984,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 4.65160126099363
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0255968,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-2",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:2:4:off",
+      "condition": "off",
+      "economizer": {
+        "byte_identical": true,
+        "mutated": false,
+        "reason": "off"
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 12032,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 2,
+      "request_sha256": "af3f8a8efbdbd5f64ec95920a0c6c9eae59234aaecb6271e05e4c3173d9b3dac",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff7-2835-7710-9f06-43963a67901a",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 12032,
+        "input_tokens": 17158,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 6.158828277140856
+    },
+    {
+      "actual_marginal_cash_usd": 0.0,
+      "answer": "RBK-00-7F39A2",
+      "api_price_equivalent_usd": 0.0198808,
+      "cache_isolation_nonce": "roi-codex-pilot-299e09879a4b4eb8:repeat-2",
+      "call_id": "roi-codex-pilot-299e09879a4b4eb8:2:5:full",
+      "condition": "full",
+      "economizer": {
+        "baseline_tokens": 4665,
+        "epochs": 1,
+        "foldable_tokens": 2773,
+        "folded_msgs": 12,
+        "messages": [
+          {
+            "content": "[folded 12 earlier message(s); skeleton below \u2014 exact identifiers are conserved in the Coordinate Closet, full bodies remain in history]\n\nuser: Review deployment checkpoint 0 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 1 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 2 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 3 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 4 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\nuser: Review deployment checkpoint 5 for service svc-00.\nassistant/wip: Checkpoint reviewed. The exact audit follows. The queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes. The queue remained healthy throughout this checkpoint. The platform team observed no retrie\u2026\n",
+            "role": "user"
+          },
+          {
+            "content": "Understood \u2014 continuing from the folded summary above.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 6 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 7 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 8 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.",
+            "role": "assistant"
+          },
+          {
+            "content": "Review deployment checkpoint 9 for service svc-00.",
+            "role": "user"
+          },
+          {
+            "content": "Checkpoint reviewed. The exact audit follows.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nThe queue remained healthy throughout this checkpoint. The platform team observed no retries and no ownership changes.\nAUTHORITATIVE_ROLLBACK_TOKEN=RBK-00-7F39A2\n",
+            "role": "assistant"
+          },
+          {
+            "content": "Return only the exact value of AUTHORITATIVE_ROLLBACK_TOKEN from the handoff.",
+            "role": "user"
+          }
+        ],
+        "mutated": true,
+        "reason": "reduced",
+        "reduced_tokens": 2474,
+        "removed_tokens": 2191,
+        "retained_msgs": 9
+      },
+      "expected": "RBK-00-7F39A2",
+      "model": "gpt-5.6-sol",
+      "raw_usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 12032,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "repeat": 2,
+      "request_sha256": "d87a2b4cbe40837f21a087b63107dbc90608d30cc9faef37373a61be0dd8e73a",
+      "resolved": true,
+      "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+      "task_id": "ops-handoff-00",
+      "thread_id": "01a03ff7-4043-78e0-9ab1-52b878f2a4a1",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 12032,
+        "input_tokens": 15729,
+        "output_tokens": 14,
+        "reasoning_output_tokens": 0
+      },
+      "wall_seconds": 3.740223102038726
+    }
+  ],
+  "claim_status": "calibration_only",
+  "commit": "09fa898d95fe8aa9d6da5efee38d61223c8de177",
+  "coordinate_density": "low",
+  "created_at": "2026-08-26T21:26:07.275213+00:00",
+  "execution_path": "production Go economizer handler in-process; ephemeral Codex CLI",
+  "model": "gpt-5.6-sol",
+  "repeats": 3,
+  "run_id": "roi-codex-pilot-299e09879a4b4eb8",
+  "schema_version": 1,
+  "seed": 20260826,
+  "summary": {
+    "api_price_equivalent_delta_usd": -0.01714800000000001,
+    "by_condition": {
+      "full": {
+        "actual_marginal_cash_usd": 0.0,
+        "api_price_equivalent_usd": 0.074388,
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 32000,
+        "calls": 3,
+        "input_tokens": 47187,
+        "output_tokens": 42,
+        "reasoning_output_tokens": 0,
+        "resolved": 3
+      },
+      "off": {
+        "actual_marginal_cash_usd": 0.0,
+        "api_price_equivalent_usd": 0.091536,
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 32000,
+        "calls": 3,
+        "input_tokens": 51474,
+        "output_tokens": 42,
+        "reasoning_output_tokens": 0,
+        "resolved": 3
+      }
+    },
+    "input_token_delta": -4287,
+    "output_token_delta": 0,
+    "quality_gate_equal_resolved": true,
+    "unique_threads": true
+  },
+  "task_corpus_sha256": "6e2c49a3bde3b08fc74c60d1aa342d97184d5e955948a6e9bac6debe5d097f3b",
+  "wall_seconds": 27.706336450995877
+}

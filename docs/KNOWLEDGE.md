@@ -28,14 +28,40 @@ confidence, class, time, and review state.
 
 ## Ingest and curation
 
-```text
-content -> validate -> store source -> chunk/index -> extract candidates
-        -> resolve/link -> contradict/dedupe -> review/promote -> maintain/decay
+```mermaid
+flowchart LR
+    U[uploaded bytes] --> V[request, scope, size,<br/>and content-hash validation]
+    V --> P{PDF?}
+    P -->|yes| PDF[structured PDF ingest]
+    P -->|no| E{AIMEE_KB_DOCUMENT_INSPECTION enabled?}
+    E -->|no| N[normalize / convert]
+    E -->|yes| I[bounded in-process inspection<br/>HTML, DOCX, PPTX, XLSX, or plain]
+    I --> D{disposition}
+    D -->|clean| N
+    D -->|review, reject, invalid,<br/>unsupported, or resource limit| STOP[stop before conversion<br/>and before any DB2 row]
+    PDF --> S[(store source and<br/>lexical evidence in DB2)]
+    N --> S
+    S --> C[chunk and index]
+    C --> X[extract candidates]
+    X --> R[resolve and link]
+    R --> Q[contradict and dedupe]
+    Q --> G[review and promote]
+    G --> M[maintain and decay]
 ```
 
 The fast path commits usable source and lexical evidence. Background workers add embeddings, typed
 artifacts, links, contradiction checks, and synthesis. Workers claim durable DB2 queue rows, so a
 restart or second KB process does not duplicate the same unit.
+
+When structural inspection is enabled, it runs on raw non-PDF bytes before a
+converter can erase hidden channels. The inspector bounds package members,
+expanded bytes, compression ratio, markup nodes, and extracted text; compares
+ZIP central and local metadata; and detects hidden text, comments, notes,
+metadata, active content, external relationships, nested archives, and traversal.
+Hidden lexical content also crosses the existing integrity gate. A non-clean
+disposition returns an explicit HTTP error and digest-bearing diagnostic without
+creating a staged document row. The flag is off by default while rollout evidence
+is collected.
 
 Curator stages are independently enabled and split between model-bound and index-bound lanes. A
 missing optional model degrades that stage; it does not relabel unprocessed content as curated.
@@ -76,14 +102,74 @@ context policy.
 
 Typed facts are gated by configuration. See the generated reference for the current key.
 
+## Temporal recall
+
+Assertions carry two independent times. World time is when the thing was true. Belief time is when
+the KB came to believe it. Asking what a value was last March and asking what the KB thought last
+March are different queries, and they return different rows.
+
+Recall returns current assertions by default. Historical recall is a request-level opt-in, so a
+superseded value never arrives beside a live one without being asked for.
+
+A model-extracted claim carries the exact byte span it came from and a hash of that region. A
+candidate that cannot name its evidence is refused rather than stored unsourced.
+
+Lexical and vector legs fuse late under a similarity floor. Graph expansion is bounded, temporally
+filtered, and scope-checked at every hop. Each result carries the trace that explains its rank.
+
+## Observations and reviewed procedures
+
+An episode that fails, or recovers, once is a single event. The same shape across two independent
+sessions becomes an observation: a deterministic, evidence-linked record of a recurring failure,
+recovery, commitment, or state transition. The threshold is two sessions because one session cannot
+distinguish a pattern from a coincidence.
+
+An observation can raise a procedural proposal. It enters the same review and promotion gate the
+learning module already uses, carrying applicability, expiry, evidence, and rollback metadata. A
+proposal never promotes itself, and a rejected one rolls back without leaving an attribution row.
+
+Application and outcome are attributed back to the record that was used, with cost, latency, turn,
+and tool metrics. Retrieval sufficiency is scored separately from answer correctness, so a wrong
+answer over good evidence and a wrong answer over missing evidence are told apart.
+
+Context assembly is typed. Current assertions, historical assertions, episodes, summaries,
+observations, reviewed procedures, and recent working context each occupy their own channel with a
+budget, a packing trace, a watermark, and a stated trust boundary.
+
+Semantic recall, active observations, reviewed procedures, and the typed assembler are on by
+default. The master assembler and every channel keep a request-level opt-out; historical recall
+stays opt-in. See the
+[validation report](validation/temporal-assertion-learning-loop.md) for the deployment evidence.
+
 ## Memory lifecycle
 
 Session context begins as local DB1 evidence. Durable, shareable knowledge belongs in DB2 after the
 owning write or promotion contract accepts it. Useful records strengthen through recall and feedback;
 stale or contradicted records can decay without deleting their history.
 
-Working memory is not a lower-quality KB. It is session scratch and should not be promoted by
+Working memory is session scratch. It is not a lower-quality KB, and it should not be promoted by
 accident.
+
+### Archival is a recall filter, not an access control
+
+Archived rows are hidden from the default recall surface only when **both** flags are set:
+
+| Key (`memory.lifecycle.*` in the config file) | Default | Effect |
+| --- | --- | --- |
+| `enabled` | `0` | `0` leaves every row looking `active` and the TTL sweep never runs, which is byte-identical behaviour for operators who have not opted in. `1` runs the sweep each maintenance cycle and tags commitment-shaped statements `pending`. |
+| `hide_archived` | `0` | `1` filters `archived` rows out of default recall (`memory_list`, scored recall). `0` keeps them in recall. |
+
+Both default to `0`, so **archival hides nothing out of the box**. `hide_archived` is also inert on
+its own: it is read only after `enabled` passes, so setting it alone changes nothing.
+
+Even with both set, this is a **relevance filter, not a confidentiality boundary**. `memory_get()`
+returns archived rows by id regardless, by design: the filter keeps stale records out of ranked
+recall, it does not restrict who may read them. Anything that must actually be unreadable needs a
+deletion or retention contract, not archival.
+
+These two keys are parsed from the config file only (`memory.lifecycle` object). They are not
+registered in the flat config table, so they are not reachable through `aimee config get/set` and do
+not appear in the generated [configuration reference](gen/configuration.md).
 
 ## Commands
 
@@ -109,13 +195,14 @@ fingerprinted before audit so a key cannot inject personal data or forged log li
 record itself remains subject to its KB scope and retention policy.
 
 Model roles receive only the evidence allowed by the selected KB's provider and egress policy.
-Embedding and synthesis can run inside that KB container or at its configured remote endpoint. Use
-internal placement when the corpus must not cross the container boundary. There is no standalone
-inference service beside the KB.
+Embedding runs in the KB image or its selected embedder sidecar. Local synthesis runs in the KB's
+model-specific `aimee-llm` sidecar over mTLS; remote synthesis uses the configured endpoint. Use a
+local placement when the corpus must stay within the deployment boundary.
 
 ## What exists now
 
-Scoped memory, typed facts, hybrid retrieval, curation, graph links, contradiction handling,
+Scoped memory, typed facts, temporal recall, evidence-backed observations, reviewed procedural
+learning, hybrid retrieval, curation, graph links, contradiction handling,
 evidence, and the current single-KB model path are implemented. Multi-KB routing, connectors for
 every company data source, and free-form cross-domain synthesis are not automatic; they need an
 integrated routing or ingest path, scope policy, and evidence contract.

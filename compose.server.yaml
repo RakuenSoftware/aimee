@@ -20,7 +20,7 @@ services:
     restart: unless-stopped
     # Published image (pushed to ghcr on every merge to main); override
     # AIMEE_KB_IMAGE to pin a version or use a fork/registry.
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
     build:
       context: .
       dockerfile: Dockerfile
@@ -45,7 +45,10 @@ services:
       # MUST receive both: `aimee config deploy-env` emits them, and without them
       # reaching the container the entrypoint sees no selection, starts nothing, and
       # the builtin serves forever — the wizard's embedder silently never runs.
-      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-}
+      # Keep the selection paired with the default bundled-image variant. The
+      # entrypoint intentionally refuses to guess a vector space, so an empty
+      # value makes the default image restart forever despite carrying A25M.
+      EMBEDDER_MODEL: ${EMBEDDER_MODEL:-bekko-a25m}
       EMBEDDER_URL: ${EMBEDDER_URL:-}
       # Embedding dim — empty = config default 1024 (CPU tier); set 2560 for GPU.
       EMBEDDER_DIMS: ${EMBEDDER_DIMS:-}
@@ -59,7 +62,7 @@ services:
     ports:
       - "127.0.0.1:8741:8741"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8741/v1/health"]
+      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -73,6 +76,100 @@ services:
       # kb.build/update receive server workspace paths; mount the same durable
       # workspace volume at the same path so those paths are actually readable.
       - aimee-server-workspaces:/var/lib/aimee-workspaces:ro
+
+  # One-shot trust bootstrap for the split topology.  The KB's ordinary HTTP
+  # listener is intentionally plaintext-only, so a bearer may not cross the
+  # Compose network to it.  This job writes the KB-issued mTLS identity into the
+  # server volume while keeping the KB CA and database socket in the KB volume.
+  # It is profile-gated and invoked explicitly by the deploy smoke/bootstrap
+  # flow; ordinary `compose up` never treats it as a long-running service.
+  aimee-server-identity:
+    profiles: ["identity-bootstrap"]
+    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb-a25m:${AIMEE_IMAGE_TAG:-latest}}
+    user: "0:0"
+    environment:
+      AIMEE_HOME: /var/lib/aimee
+      AIMEE_DB2_URL: postgresql:///aimee_shared?host=/var/lib/aimee/run&user=aimee
+    command:
+      - managed-server-identity
+      - install
+      - --server-home=/var/lib/aimee-server
+      - --host=aimee-kb
+      - --port=8745
+      - --endpoint=https://aimee-server:8743
+      - --uid=1000
+      # `docker compose exec aimee-server aimee ...` enters as root (the image
+      # has no Config.User). The server resolves that kernel-attested UDS peer
+      # to KB subject "root", so enroll the standard appliance operator beside
+      # the service identity or every content read is denied on a clean install.
+      - --member=root
+    depends_on:
+      aimee-kb: { condition: service_healthy }
+    volumes:
+      - aimee-kb-home:/var/lib/aimee
+      - aimee-server-home:/var/lib/aimee-server
+
+  # The server's store: PostgreSQL, holding every table the daemon keeps.
+  #
+  # A STOCK upstream image, deliberately. The kb builds its own PostgreSQL
+  # because DB2 needs pgvector and pgvectorscale, and no published image carries
+  # vectorscale -- which is why pointing DB2 at an external container went badly
+  # before. The store has no such requirement: all 22 of its schema files
+  # declare no extension at all, so it runs on what upstream ships and anyone
+  # can support it without knowing anything about this project.
+  #
+  # A SEPARATE database from DB2, not a second one in the kb's cluster: the kb's
+  # PostgreSQL listens on no TCP port and lives inside that container.
+  #
+  # UTF8 is pinned rather than inherited. The store bounds text with
+  # octet_length, and in a SQL_ASCII database octet_length and char_length are
+  # the same function -- so every byte-limit CHECK would pass whether or not it
+  # held, and the schema would look enforced while enforcing nothing.
+  aimee-store-db:
+    restart: unless-stopped
+    image: ${AIMEE_STORE_DB_IMAGE:-postgres:18}
+    entrypoint: ["/opt/aimee/postgres-secure-entrypoint.sh"]
+    environment:
+      # Literal, not per-field knobs. AIMEE_STORE_URL below is the ONE override
+      # that matters: an operator with their own PostgreSQL points it there and
+      # this service goes unused. Per-field variables would have to be kept in
+      # agreement with that DSN by hand, and a password that disagrees with the
+      # URL fails as "the store is unreachable".
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${AIMEE_STORE_ADMIN_PASSWORD:?AIMEE_STORE_ADMIN_PASSWORD is required}
+      AIMEE_STORE_MIGRATOR_PASSWORD: ${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}
+      AIMEE_STORE_RUNTIME_PASSWORD: ${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}
+      POSTGRES_DB: aimee_store
+      # The LOCALE travels with the encoding. initdb refuses a UTF8 encoding
+      # against a locale whose own encoding differs, and aborts before the
+      # server ever starts -- which presents as the container exiting half a
+      # second after `Started`, with no healthcheck having run and nothing in
+      # the compose output to say why. C.UTF-8 is present in the image and
+      # pins both halves of the pair.
+      POSTGRES_INITDB_ARGS: --encoding=UTF8 --locale=C.UTF-8
+      # PGDATA is stated rather than inherited, and points INSIDE the mount.
+      # postgres:18 moved its default data directory out of
+      # /var/lib/postgresql/data, so a compose file that mounts that path and
+      # says nothing else is version-dependent in a way nothing announces.
+      PGDATA: /var/lib/postgresql/data/pgdata
+    # No published port: the store is reached only across this compose network,
+    # by aimee-server. Publishing it would put the daemon's whole state on the
+    # host interface for no deployment that needs it there.
+    networks: [store]
+    volumes:
+      - aimee-store-db:/var/lib/postgresql/data
+      - ./scripts/postgres-secure-entrypoint.sh:/opt/aimee/postgres-secure-entrypoint.sh:ro
+      - ./scripts/postgres-store-init.sh:/docker-entrypoint-initdb.d/10-aimee-store-roles.sh:ro
+      - aimee-store-tls:/var/lib/postgresql/secure
+    healthcheck:
+      test: ["CMD-SHELL",
+             "PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_MIGRATOR_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_migrator -d aimee_store -Atqc 'SELECT 1' | grep -qx 1 && PGSSLMODE=require PGPASSWORD=\"$${AIMEE_STORE_RUNTIME_PASSWORD}\" psql -h 127.0.0.1 -U aimee_store_runtime -d aimee_store -Atqc 'SELECT 1' | grep -qx 1"]
+      interval: 2s
+      timeout: 2s
+      retries: 30
+      # First boot runs initdb before the server answers. Without this, that
+      # time is spent out of `retries` rather than before the count starts.
+      start_period: 30s
 
   aimee-server:
     restart: unless-stopped
@@ -92,8 +189,12 @@ services:
       stack: 67108864
     environment:
       AIMEE_HOME: /var/lib/aimee
-      # DB1: user-scoped store owned by the server (self-contained SQLite file).
-      AIMEE_DB1_URL: sqlite:///var/lib/aimee/aimee.db
+      # The store: a PostgreSQL DSN, read by the postgres module. This replaced
+      # AIMEE_DB1_URL, which named a SQLite file for a C module that no longer
+      # exists -- nothing had read it since the store became a Go module, so it
+      # was telling operators the server kept a database it does not keep.
+      AIMEE_STORE_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_runtime password=${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
+      AIMEE_STORE_MIGRATION_URL: "host=aimee-store-db port=5432 dbname=aimee_store user=aimee_store_migrator password=${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required} sslmode=verify-full sslrootcert=/run/aimee-store-tls/server.crt"
       # Reach the kb over its /v1 HTTP API. The base URL must NOT include /v1 —
       # kb_client paths already carry the /v1 prefix (kb_client_v1_url).
       AIMEE_KB_API_URL: http://aimee-kb:8741
@@ -133,29 +234,40 @@ services:
     ports:
       # Remote /v1 is served over native TLS on 8743 (the server refuses to expose
       # plaintext /v1 off-loopback). Plaintext 8740 stays bound to 127.0.0.1 inside
-      # the container (the healthcheck below still uses it) and is NOT published.
+      # the container and is NOT published.
       - "8743:8743"
       # webchat UI — on by default; gated off only by AIMEE_RUNTIME_WEB_ENABLED=0 above.
       - "8443:8443"
     depends_on:
+      aimee-store-db:
+        condition: service_healthy
       aimee-kb:
         condition: service_healthy
-    # An unauthenticated probe gets 401, which still proves the listener is up;
-    # treat 200/401 as healthy so this stays correct if the bearer is overridden.
+    # Probe the privileged local socket so credentials are unnecessary, but
+    # require the core store and module graph to be ready before admitting work.
     healthcheck:
       test: ["CMD-SHELL",
-             "curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8740/v1/health | grep -qE '^(200|401)$$'"]
+             "body=$$(curl -sS --max-time 4 --unix-socket /var/lib/aimee/aimee-http.sock http://localhost/v1/ready) && printf '%s' \"$$body\" | grep -q '\"db1\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"modules\":\"ok\"'"]
       interval: 10s
       timeout: 5s
       retries: 5
+    networks: [default, store]
     volumes:
       - aimee-server-home:/var/lib/aimee
+      - aimee-store-tls:/run/aimee-store-tls:ro
       # Durable mirror-tier state (AIMEE_WORKSPACES_DIR): bare mirrors +
       # reconstructed worktrees, persisted across recreations on their own volume.
       - aimee-server-workspaces:/var/lib/aimee-workspaces
       - ${AIMEE_SERVER_MANAGEMENT_DIR:-./server-management}:/run/aimee/management:ro
 
 volumes:
+  aimee-store-db:
+  aimee-store-tls:
   aimee-kb-home:
   aimee-server-home:
   aimee-server-workspaces:
+
+networks:
+  default:
+  store:
+    internal: true

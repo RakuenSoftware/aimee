@@ -102,6 +102,24 @@ def validate_forbidden_metadata_ignored(payload: dict[str, Any]) -> list[str]:
     return errors
 
 
+def fixture_label(fixture_path: Path) -> str:
+    """Repo-relative path for the report, falling back to absolute.
+
+    The report is committed, so an absolute path made it churn on every run from
+    a different checkout -- two runs of an identical, fully deterministic gate
+    produced a diff whose only content was somebody's worktree name. That is a
+    spurious diff in review and it hides real ones.
+    """
+    resolved = fixture_path.resolve()
+    repo_root = Path(__file__).resolve().parents[2]
+    try:
+        return resolved.relative_to(repo_root).as_posix()
+    except ValueError:
+        # Fixture supplied from outside the repo via --fixtures; absolute is the
+        # only meaningful label, and such a run is not the committed baseline.
+        return str(resolved)
+
+
 def run(fixture_path: Path) -> tuple[int, dict[str, Any]]:
     payload = json.loads(fixture_path.read_text())
     n_min = int(payload["n_min"])
@@ -116,7 +134,7 @@ def run(fixture_path: Path) -> tuple[int, dict[str, Any]]:
     report = {
         "version": 1,
         "benchmark": "memory_poison_resilience",
-        "fixture": str(fixture_path),
+        "fixture": fixture_label(fixture_path),
         "delta_max": delta_max,
         "accuracy_clean": clean["accuracy"],
         "accuracy_poison": poison["accuracy"],

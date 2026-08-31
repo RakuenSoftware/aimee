@@ -16,9 +16,23 @@ explicit endpoints, client identity, vault-backed secret reference, redirects, s
 accepted algorithms, and namespaced claim mappings. GitHub may be configured if it conforms, but
 `GitHub` is never the governance contract or default provider.
 
+### Go process stage
+
+The supervised governance process uses the shared pure-Go module runtime for the
+bounded response tool-policy decision. Its GOVQ/GOVR wire contract accepts at
+most 16 fixed-width tool names, the already-resolved policy-active flag, and the
+provider stop reason. It returns the survivor mask, intervention count, and the
+same stop-reason finalization used by the legacy response policing path. Exact
+`Agent`, `spawn_agent`, `RemoteTrigger`, and `Task` names are denied; matching is
+case-sensitive and intentionally mirrors the existing canonical-name boundary.
+The C adapter is a wire-parity fixture. Parsed-response compaction and memory
+ownership, policy/config resolution, request-side policing, OIDC, identity, and
+control-plane orchestration remain in their current C owners.
+
 The descriptor's ownership fields describe what lives under `src/modules/governance/` today, which is
-the response-governance stage alone: `gw_stage_governance.c` and its private header
-`gw_stage_governance.h`, tested by `src/tests/test_response_governance_stage.c`. That is narrower than
+the response-governance stage alone: `gw_stage_governance.c`, its private header
+`gw_stage_governance.h`, and the process wire-parity adapter, tested by
+`src/tests/test_response_governance_stage.c` plus cross-language conformance. That is narrower than
 the governance plane this document describes. The OIDC, identity, policy-distribution, and console
 surfaces remain distributed across the KB, DB2, management, and console layers and are not yet
 module-local. The descriptor declares its sources, private header, test, and this document and sets
@@ -61,12 +75,12 @@ OIDC.
 
 - `runtime_toggle.supported`: `false`; the descriptor is `enabled_by_default: false`, so governance is selected before startup and omitted/disabled surfaces are not advertised.
 
-The current `modules.governance` response-stage gate conflicts with the descriptor: legacy
-`AIMEE_STAGE_GOVERNANCE` falls back default-on and controls only response tool-policing, while OIDC has
-separate environment/file/DB2 routes. The target module selection must gate all organizational
-governance surfaces and leave core fail-closed enforcement intact. Issuer profiles are configurable from
-Control Plane UI and equivalent CLI, environment/config-file, and non-web API surfaces; secrets are vault
-references. With governance absent, OIDC and organizational settings are absent from advertised catalogs.
+The `modules.governance` response-stage gate follows the descriptor's default-off selection. The legacy
+`AIMEE_STAGE_GOVERNANCE` fallback is also opt-in and controls only response tool-policing, while OIDC has
+separate environment/file/DB2 routes. The target module selection must gate all organizational governance
+surfaces and leave core fail-closed enforcement intact. Issuer profiles are configurable from Control Plane
+UI and equivalent CLI, environment/config-file, and non-web API surfaces; secrets are vault references.
+With governance absent, OIDC and organizational settings are absent from advertised catalogs.
 
 ## Surfaces
 

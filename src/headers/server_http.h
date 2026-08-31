@@ -235,6 +235,16 @@ extern "C"
    void server_http_populate_request_context(int fd, int is_tcp, const char *buf,
                                              const char *request_id, const char *method,
                                              const char *path, uint32_t caps);
+
+   /* Install the authenticated surface caller after base context capture.
+    * Returns -1 only when a UDS peer does not resolve to a local host account. */
+   int server_http_apply_caller_context(int is_tcp, const char *request,
+                                        const char *first_user_principal, int identity_present,
+                                        const char *identity_subject);
+
+   /* Resolve a kernel peer uid to the PAM/host subject forwarded to the KB.
+    * Returns 0 only for a non-empty local account name. */
+   int server_http_host_subject_for_uid(long uid, char *out, size_t cap);
    int server_http_route_allowed(int is_tcp, const char *bearer, const char *method,
                                  const char *path, int remote_writes);
    /* Whether a route is reachable ONLY over the local UDS listener — never over TCP,
@@ -406,7 +416,13 @@ extern "C"
     * registered the route answers 503. Providers are wired by
     * server_native_register() at startup (defined in server/server_api.c). */
    typedef char *(*server_http_json_provider)(void);
+   /* Optional KB projection merged into GET /v1/capabilities. The provider
+    * returns a heap {cli_only:[...],mcp_only:[...]} object; the route frees it. */
+   void server_http_set_kb_agent_surfaces_provider(server_http_json_provider fn);
    void server_http_set_rules_provider(server_http_json_provider fn);
+   /* Optional kb projection merged into GET /v1/capabilities. The provider
+    * returns a heap {cli_only:[...],mcp_only:[...]} object; the route frees it. */
+   void server_http_set_kb_agent_surfaces_provider(server_http_json_provider fn);
 
    /* GET /v1/dashboard/memory provider (arg-less JSON body, like rules). */
    void server_http_set_dashboard_memory_provider(server_http_json_provider fn);
@@ -505,6 +521,13 @@ extern "C"
    /* Look up the persona for session_id. Writes it to out (n bytes) and returns
     * 1 if set, 0 otherwise (out gets "" ). */
    int session_persona_get(const char *session_id, char *out, size_t n);
+
+   /* Durable first-ingress delivery reservation, tied to the server session row
+    * and therefore removed by normal session expiration. claim returns 1 for a
+    * new reservation, 0 when already delivered/in flight, and -1 on storage
+    * failure. finish commits or releases it. */
+   int session_persona_delivery_claim(const char *session_id);
+   void session_persona_delivery_finish(const char *session_id, int delivered);
 
    /* --- Per-session active primary agent (set via POST
     *     /v1/sessions/<id>/primary, used as the chat fallback agent when a

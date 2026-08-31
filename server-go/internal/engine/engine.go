@@ -5,15 +5,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/internal/db1"
-	roundtablecfg "github.com/JBailes/aimee/server-go/internal/roundtable"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
 type StepStatus string
@@ -39,7 +38,11 @@ type StepRequest struct {
 	Proposal string                  `json:"proposal"`
 	Inputs   map[string]wfe.Artifact `json:"inputs,omitempty"`
 	Feedback *wfe.ReviewFeedback     `json:"feedback,omitempty"`
-	Block    wfe.BlockDefinition     `json:"block_definition"`
+	// RetryDetail is the durable diagnostic from the immediately preceding
+	// failure of this stage. It lets a repair delegate address a known verifier
+	// failure instead of rediscovering it from scratch.
+	RetryDetail string              `json:"retry_detail,omitempty"`
+	Block       wfe.BlockDefinition `json:"block_definition"`
 	// CostLimitUSD is the durable reservation granted to this invocation. A
 	// capped runner must pass it to every billable resource-plane call and must
 	// not return a cost above it.
@@ -79,19 +82,6 @@ const maxRunnerFailuresWithoutProgress = 8
 // far higher than the runner-failure bound: it exists only so a permanently
 // throttled credential cannot hold an item forever.
 const maxCapacityWaitsWithoutProgress = 240
-
-// isCapacityBackpressure reports whether err is the provider refusing more work
-// right now rather than the delegate failing. Both forms carry their own
-// retry-after, so re-dispatching after a wait is the correct recovery and the
-// attempt must not count against the no-progress bound.
-func isCapacityBackpressure(err error) bool {
-	if err == nil {
-		return false
-	}
-	detail := err.Error()
-	return strings.Contains(detail, "aimee_err=concurrency_limit") ||
-		strings.Contains(detail, "is rate-limited; retry in")
-}
 
 type Engine struct {
 	db            *db1.Store
@@ -190,6 +180,11 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 	}
 	req := StepRequest{WorkItem: item, Node: node, Proposal: string(proposal), CostLimitUSD: budget.Amount, ReplayOnly: budget.ReplayOnly}
 	req.Block = block
+	retryDetail, detailErr := e.db.LatestStageRetryDetail(ctx, item.ID, item.Stage)
+	if detailErr != nil {
+		return out, detailErr
+	}
+	req.RetryDetail = retryDetail
 	if len(node.In) > 0 {
 		req.Inputs = make(map[string]wfe.Artifact, len(node.In))
 		for inputName, binding := range node.In {
@@ -208,23 +203,19 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 
 	stopHeartbeat := make(chan struct{})
 	heartbeatDone := make(chan struct{})
-	if !budget.ReplayOnly {
-		go func() {
-			defer close(heartbeatDone)
-			ticker := time.NewTicker(30 * time.Second)
-			defer ticker.Stop()
-			for {
-				select {
-				case <-stopHeartbeat:
-					return
-				case <-ticker.C:
-					_ = e.db.HeartbeatWorkflowBudget(context.WithoutCancel(ctx), item.ID, owner)
-				}
+	go func() {
+		defer close(heartbeatDone)
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopHeartbeat:
+				return
+			case <-ticker.C:
+				_ = e.db.HeartbeatWorkflowBudget(context.WithoutCancel(ctx), item.ID, owner)
 			}
-		}()
-	} else {
-		close(heartbeatDone)
-	}
+		}
+	}()
 	step, err := e.runner.Run(ctx, req)
 	// Stop the heartbeat and wait for it to exit before touching the reservation.
 	// Awaiting the goroutine guarantees no lease-extending write can land after
@@ -266,7 +257,12 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 		}
 		reason := "runner_unavailable"
 		capacity := isCapacityBackpressure(err)
-		if capacity {
+		if errors.Is(err, ErrGitIdentityMissing) {
+			// This cannot heal on the scheduler's five-second runner backoff. Park
+			// until an operator seals the documented install-time identity and
+			// explicitly resumes the run.
+			reason = "git_identity_missing"
+		} else if capacity {
 			// The provider refused the dispatch outright; no delegate ran. Park
 			// on a distinct transient reason so this waits out the throttle on a
 			// longer backoff instead of burning the runner-failure bound.
@@ -436,7 +432,9 @@ func (e *Engine) Advance(ctx context.Context, workItemID string) (AdvanceResult,
 			return out, e.parkAfterSpend(ctx, item, "feedback_encode_failed", err, step.CostUSD)
 		}
 		transition, err := e.db.RecordRequestedChanges(ctx, item.ID, node.ID, node.OnFail,
-			reviewed.Hash, wfe.Hash(encoded), unresolvedBlockers(step.Feedback),
+			reviewed.Hash, wfe.Hash(encoded),
+			convergencePayload(node.ID, unresolvedBlockers(step.Feedback), step.Feedback,
+				paramString(node, "blocker_convergence", "observe")),
 			maxIterations(node), e.maxNoProgress, step.CostUSD)
 		if err != nil {
 			return out, err
@@ -492,33 +490,6 @@ func (e *Engine) parkAfterSpend(ctx context.Context, item db1.WorkItem, reason s
 		return fmt.Errorf("%s: %v; park failed: %w", reason, cause, err)
 	}
 	return nil
-}
-
-var diagnosticRedactions = []struct {
-	pattern     *regexp.Regexp
-	replacement string
-}{
-	{regexp.MustCompile(`(?i)(authorization\s*:\s*(?:bearer|basic)\s+)[^\s,;]+`), `${1}[REDACTED]`},
-	{regexp.MustCompile(`(?i)(cookie\s*:\s*)[^\r\n]+`), `${1}[REDACTED]`},
-	{regexp.MustCompile(`(?i)([a-z][a-z0-9+.-]*://)[^/@\s]+@`), `${1}[REDACTED]@`},
-	{regexp.MustCompile(`(?i)("?(?:api[_-]?key|access[_-]?token|token|password|secret)"?\s*[:=]\s*)"(?:\\.|[^"\\])*"`), `${1}"[REDACTED]"`},
-	{regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|token|password|secret)\s*[:=]\s*)'(?:\\.|[^'\\])*'`), `${1}'[REDACTED]'`},
-	{regexp.MustCompile(`(?im)("?(?:api[_-]?key|access[_-]?token|token|password|secret)"?\s*[:=]\s*)"(?:\\.|[^"\\\r\n])*(?:\\)?$`), `${1}"[REDACTED]`},
-	{regexp.MustCompile(`(?im)((?:api[_-]?key|access[_-]?token|token|password|secret)\s*[:=]\s*)'(?:\\.|[^'\\\r\n])*(?:\\)?$`), `${1}'[REDACTED]`},
-	{regexp.MustCompile(`(?i)((?:api[_-]?key|access[_-]?token|token|password|secret)["']?\s*[:=]\s*["']?)[^\s,"';}]+`), `${1}[REDACTED]`},
-	{regexp.MustCompile(`\bAKIA[0-9A-Z]{16}\b`), `[REDACTED_AWS_ACCESS_KEY]`},
-	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]*\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b`), `[REDACTED_JWT]`},
-	{regexp.MustCompile(`(?s)-----BEGIN [^-\r\n]*PRIVATE KEY-----.*?-----END [^-\r\n]*PRIVATE KEY-----`), `[REDACTED_PRIVATE_KEY]`},
-}
-
-// safeDiagnostic preserves the complete diagnostic—including arbitrarily long
-// tool output—while removing common credential forms before durable storage.
-// Artifact and review payloads are never routed through this function.
-func safeDiagnostic(detail string) string {
-	for _, redaction := range diagnosticRedactions {
-		detail = redaction.pattern.ReplaceAllString(detail, redaction.replacement)
-	}
-	return detail
 }
 
 // maxIterations is how many times one step may repeat before it parks.

@@ -8,7 +8,7 @@
  * (server_identity_token_verify) — the code that will gate /v1 writes — must
  * accept it against a JWKS carrying that key. A mint the server would reject is
  * a silent lockout, so asserting only "a JWT came out" would not be a test. */
-#include "kb/kb_mgmt_token_authority.h"
+#include "management_token_authority.h"
 
 #include <assert.h>
 #include <openssl/bn.h>
@@ -26,6 +26,39 @@
 #define AUDIENCE "server-1"
 #define SUBJECT  "oidc:https%3A//idp.example.test:user-42"
 #define JTI      "id-jti-00000001"
+
+static int contract_result;
+
+static int management_record_valid_unused(const kb_mgmt_token_authority_record_t *record)
+{
+   (void)record;
+   return 1;
+}
+
+static int identity_record_valid_contract(const kb_identity_token_authority_record_t *record)
+{
+   assert(record);
+   return contract_result;
+}
+
+static void test_injected_record_validator(void)
+{
+   kb_identity_token_authority_record_t record = {0};
+
+   aimee_db2_register_token_record_validators(management_record_valid_unused, NULL);
+   assert(!db2_management_identity_authority_record_validate(&record));
+
+   aimee_db2_register_token_record_validators(management_record_valid_unused,
+                                              identity_record_valid_contract);
+   contract_result = 1;
+   assert(db2_management_identity_authority_record_validate(&record));
+   contract_result = 0;
+   assert(!db2_management_identity_authority_record_validate(&record));
+   contract_result = 2;
+   assert(!db2_management_identity_authority_record_validate(&record));
+   contract_result = -1;
+   assert(!db2_management_identity_authority_record_validate(&record));
+}
 
 static void sha256(const void *data, size_t len, unsigned char out[32])
 {
@@ -167,6 +200,8 @@ static int set_subject(kb_identity_token_authority_record_t *r, const char *pref
 
 int main(void)
 {
+   test_injected_record_validator();
+
    EVP_PKEY *key = rsa3072();
    unsigned char der[KB_MGMT_ROOT_SECRET_MAX + 1];
    size_t der_len = pkcs8_der(key, der, sizeof(der));

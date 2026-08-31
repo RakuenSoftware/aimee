@@ -28,7 +28,7 @@
 #include "wfe_engine.h"
 #include "wfe_iface.h"
 #include "wfe_manager_artifacts.h" /* typed intent/packet/verdict schema validators */
-#include "wfe_store.h"             /* db1_work_item_set_worktree — persist the per-item worktree */
+#include "db1_client/wfe_store.h"  /* db1_work_item_set_worktree — persist the per-item worktree */
 
 /* Resolve the local working repo for a work item: $AIMEE_WORKFLOW_REPO or cwd. */
 static const char *repo_dir(void)
@@ -136,10 +136,17 @@ static int is_dir(const char *p)
    return p && p[0] && stat(p, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-/* snprintf that returns -1 on truncation (a corrupt path must never reach git). */
-static int sn(char *buf, size_t cap, const char *fmt, const char *a)
+/* Bounded join helpers keep the format literal while returning -1 on
+ * truncation (a corrupt path must never reach git). */
+static int sn_suffix(char *buf, size_t cap, const char *a, const char *suffix)
 {
-   int r = snprintf(buf, cap, fmt, a);
+   int r = snprintf(buf, cap, "%s%s", a, suffix);
+   return (r >= 0 && (size_t)r < cap) ? 0 : -1;
+}
+
+static int sn_prefix(char *buf, size_t cap, const char *prefix, const char *a)
+{
+   int r = snprintf(buf, cap, "%s%s", prefix, a);
    return (r >= 0 && (size_t)r < cap) ? 0 : -1;
 }
 
@@ -225,9 +232,9 @@ int wfe_worktree_ensure(const char *work_item_id, const char *existing, const ch
    if (!home || !home[0])
       return -1;
    char parent[768], path[1000], branch[200], lockf[1024];
-   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0 ||
+   if (sn_suffix(parent, sizeof parent, home, "/wfe-worktrees") != 0 ||
        snprintf(path, sizeof path, "%s/%s", parent, work_item_id) >= (int)sizeof path ||
-       sn(branch, sizeof branch, "aimee/wi/%s", work_item_id) != 0 ||
+       sn_prefix(branch, sizeof branch, "aimee/wi/", work_item_id) != 0 ||
        snprintf(lockf, sizeof lockf, "%s/%s.lock", parent, work_item_id) >= (int)sizeof lockf)
       return -1;
    const char *b = (base && base[0]) ? base : "HEAD";
@@ -327,7 +334,7 @@ int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs)
    if (!home || !home[0])
       return 0;
    char parent[768];
-   if (sn(parent, sizeof parent, "%s/wfe-worktrees", home) != 0)
+   if (sn_suffix(parent, sizeof parent, home, "/wfe-worktrees") != 0)
       return 0;
    DIR *dp = opendir(parent);
    if (!dp)
@@ -365,7 +372,7 @@ int wfe_worktree_orphan_gc(const char *repo_local, long grace_secs)
          continue;
 
       char branch[220];
-      if (sn(branch, sizeof branch, "aimee/wi/%s", e->d_name) != 0)
+      if (sn_prefix(branch, sizeof branch, "aimee/wi/", e->d_name) != 0)
          continue;
       wt_scrub(rl, path, branch); /* force-remove worktree + rm -rf + delete branch */
       char lockf[1100];
@@ -1464,7 +1471,16 @@ static int wfe_repo_default_branch(const char *repo_dir, char *buf, size_t n)
  *                feature PR targets the trunk; sets *allow_protected so exec_pr_open
  *                may OPEN a PR against main/master (it never merges -- merge keeps its
  *                own wfe_autonomous_target_ok() rail).
- *   "default"/absent -> the autonomous base (the aimee integration branch).
+ *   "default"/absent -> the PARENT's feature branch when this run has one (a slice
+ *                merges into the feature it belongs to), else the autonomous base.
+ *                Slices aiming at the integration branch by default is what made every
+ *                run open its own PR against a shared branch; the feature branch is
+ *                where a feature's slices belong, and the feature reaches the trunk
+ *                through one base:trunk PR. pr_base_mode=default_branch (reaching the
+ *                engine as AIMEE_PR_BASE_MODE) restores the old default. The head/base pairing this
+ * produces (aimee/wi/<parent>.sN
+ *                -> aimee/feat/<parent>) is the one base:"feature" already produced, so
+ *                it passes the same forge rails -- no rail is relaxed here.
  * *allow_protected defaults to 0; only "trunk" sets it. Returns 0 on success, -1 if a
  * feature base was requested but the run has no parent (a misconfiguration -> the
  * caller fails closed). */
@@ -1491,6 +1507,20 @@ static int resolve_pr_base(wfe_ctx *ctx, const wfe_node_t *node, char *buf, size
       if (allow_protected)
          *allow_protected = 1; /* open-only against the repo trunk (never merged here) */
       return wfe_repo_default_branch(wd, buf, n);
+   }
+   /* base:"default"/absent. Prefer this run's parent feature branch -- a slice belongs
+    * to its feature, not to the shared integration branch. Only a run with a parent has
+    * one; a top-level run keeps the autonomous base (its own final PR is base:"trunk").
+    * config_pr_base_mode()=="default_branch" opts back out to the old behaviour. */
+   if (wfe_pr_base_prefers_feature())
+   {
+      const char *wi = wfe_ctx_work_item(ctx);
+      db1_work_item_t row;
+      if (wi && wi[0] && db1_work_item_get(wi, &row) == 1 && row.parent_id[0])
+      {
+         feature_branch_name(row.parent_id, buf, n);
+         return 0;
+      }
    }
    const char *ab = wfe_autonomous_base();
    snprintf(buf, n, "%s", (ab && ab[0]) ? ab : "");
@@ -1955,14 +1985,29 @@ static wfe_step_result_t exec_split(wfe_ctx *ctx, const wfe_node_t *node)
          fclose(f);
       }
    }
-   char prompt[14 * 1024];
+   /* An acceptance gate loops back to split when the assembled generation is
+    * wrong.  Its blockers are not optional commentary: they are the reason a
+    * replacement generation exists and therefore supersede conflicting details
+    * in the previously approved plan.  Thread them into packetization instead
+    * of blindly producing the same packets from the stale plan again. */
+   char feedback[4096];
+   wfe_feedback_read(wfe_ctx_work_item(ctx), feedback, sizeof feedback);
+   char prompt[18 * 1024];
    snprintf(prompt, sizeof prompt,
             "Decompose the APPROVED PLAN below into a structured PACKET PLAN: "
             "{\"schema_version\":1,\"packets\":[{\"packet_id\":\"p1\",\"summary\":\"...\","
             "\"target_blocks\":[\"implement\"],\"dependencies\":[],"
             "\"acceptance_criteria\":[\"...\"]}]}. Write the JSON to the given path and commit it "
             "if you can; if file tools are unavailable to you, your ENTIRE reply must be exactly "
-            "that JSON document — no prose, no code fences, nothing else.\n\nAPPROVED PLAN:\n%s",
+            "that JSON document — no prose, no code fences, nothing else.%s%s"
+            "\n\nAPPROVED PLAN:\n%s",
+            feedback[0]
+                ? "\n\nSUPERSEDING ACCEPTANCE FEEDBACK:\nThe prior assembled generation failed "
+                  "acceptance. Every blocking correction below is authoritative and supersedes "
+                  "any conflicting detail in the approved plan. Encode the corrections in the "
+                  "new packets and their acceptance criteria:\n"
+                : "",
+            feedback[0] ? feedback : "",
             plan[0] ? plan : "(no plan artifact found — decompose the work item's ask)");
    return manager_produce(ctx, node, "architect", prompt, wfe_packets_validate);
 }

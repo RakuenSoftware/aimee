@@ -18,30 +18,30 @@
  * pair it with workspace_turn_unbind_active after the turn), 0 otherwise. */
 int workspace_turn_bind_active(const char *cwd);
 
+/* Select the client-side repository location that a git MCP call names.
+ * `path` is authoritative for every operation except clone, where it is the
+ * destination rather than an existing repository. `cwd` remains the fallback.
+ * Pure policy seam so dispatch and tests cannot drift on path-vs-cwd priority. */
+const char *workspace_turn_git_target(const char *tool, const char *path, const char *cwd);
+
 /* Bind this thread's file/exec tools to a DELEGATE'S OWN CONTAINER for the turn:
  * acquire a container from the `docker` backend keyed by `task_id`, and route
  * td_bash / read / write / list through it. `image` may be NULL for the backend's
  * default; `workspace` is the host directory to expose AS the container's
  * workspace — normally the tree the delegate already has server-side, so it gets
- * the entire current source tree by bind-mount rather than the backend's empty
- * scratch dir. NULL keeps that historical empty dir. `workspace_read_only` mounts
- * it :ro — required whenever the tree is not the delegate's own, because a
- * delegate's changes must not leave its container: a shared tree must be
- * unwritable at the MOUNT, not merely guarded above it. Returns 1 if bound (pair it
- * with workspace_turn_unbind_active, which also RELEASES the container), 0 for the
- * benign in-process fallback, or -1 for a HARD refusal (do not run the delegate at
- * all — see below).
+ * the entire current source tree by bind-mount. NULL or empty is refused.
+ * `workspace_read_only` mounts it :ro — required whenever the tree is not the
+ * delegate's own, because a delegate's changes must not leave its container: a
+ * shared tree must be unwritable at the MOUNT, not merely guarded above it.
  *
- * Returns 0 — leaving the turn in-process, exactly as today — when the
- * `delegate_sandbox` config dial is off (the default), or when the docker backend
- * is unavailable, or the container cannot be acquired. Those last two are LOGGED at
- * ERROR: falling back silently would run the delegate on the host while the
+ * Returns 1 if bound (pair it with workspace_turn_unbind_active, which also
+ * RELEASES the container), 0 only when `task_id` is empty and there is therefore
+ * no delegate to bind, or -1 for a refusal: the caller MUST abort the delegation.
  *
- * Returns -1 — the caller MUST abort the delegation, not fall back to in-process —
- * when `delegate_sandbox_require_isolation` is set and the runtime did not provide a
- * network-isolated sandbox (e.g. it ignored --network none). Running in-process on
- * the host would be even less isolated, so a hard refusal must never degrade.
- * operator believes it is sandboxed.
+ * There is no in-process fallback and no dial that selects one. A delegate runs in
+ * its own container or not at all, so an unavailable backend, an unacquirable
+ * container, an unauthorized workspace, and a runtime that would not honour
+ * --network none all return -1. Every one is logged at ERROR where it is detected.
  *
  * Unlike workspace_turn_bind_active this is not cwd-driven: a container provider
  * needs a live container handle, so the caller that owns the delegate decides. */
@@ -69,6 +69,10 @@ int workspace_turn_container_bound(void);
  * thread-bound state; 0/1 pin it. For tests exercising the container-delegate exemption. */
 void workspace_turn_set_container_bound_for_test(int bound);
 
+/* Test-only fallback for legacy unit requests that omit cwd. Production never
+ * calls this; an explicit workspace always wins. */
+void workspace_turn_set_default_workspace_for_test(const char *workspace);
+
 /* Clear any provider bound for this thread by workspace_turn_bind_active.
  * Safe to call unconditionally (no-op if nothing was bound). */
 void workspace_turn_unbind_active(void);
@@ -94,6 +98,21 @@ const char *workspace_turn_drift_notice(void);
  * `/pr` works on a mirror workspace). Returns 1 and fills out[out_cap] when `cwd`
  * is in a mirror workspace; 0 otherwise (out emptied). */
 int workspace_turn_resolve_mirror_cwd(const char *cwd, char *out, size_t out_cap);
+
+/* Same resolution, for a `detached` workspace that also carries mirror inputs.
+ *
+ * A detached workspace is served by its client, so a job running with no client
+ * attached (a background delegate) cannot reach it at all. When such a workspace
+ * has recorded a `remote` and a `head` — a client ran `workspace mirror-sync` —
+ * the server can still reconstruct an equivalent tree from its own bare mirror
+ * and run there instead of having nowhere to go.
+ *
+ * That tree is the LAST SYNCED state, not the client's current one, so this is
+ * deliberately a separate entry point rather than a widening of the mirror
+ * resolver: a caller must choose the stale-but-real tree knowingly, and say so.
+ * Returns 1 and fills out[out_cap] when `cwd` is in a detached workspace with
+ * both inputs recorded; 0 otherwise (out emptied). */
+int workspace_turn_resolve_detached_mirror_cwd(const char *cwd, char *out, size_t out_cap);
 
 /* AC #6 — the worktree_cwd-trust hole. A turn carries a client-supplied `cwd`.
  * For a co-located peer (trusted_local) it is a real server-side path; for a

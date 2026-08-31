@@ -4,19 +4,19 @@
 #include "aimee.h"
 #include "cJSON.h"
 #include "dashboard.h"
-#include "db.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include <aimee/workspace/workspace.h>
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/lifecycle.h"
-#include "../db2/memory_briefing.h"
-#include "../db2/memory_lifecycle.h"
-#include "../db2/memory_query.h"
-#include "../db2/memory_relations.h"
-#include "../db2/memory_scope_query.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/memory_briefing.h"
+#include "../modules/db2/c/memory_lifecycle.h"
+#include "../modules/db2/c/memory_query.h"
+#include "../modules/db2/c/memory_relations.h"
+#include "../modules/db2/c/memory_scope_query.h"
+#include "../modules/memory/memory_core_internal.h"
 
 static char tmpdir[64];
 
@@ -230,8 +230,9 @@ static void test_ws_cross_workspace_high_confidence(void)
    memory_t m;
 
    /* Insert a high-confidence memory in another workspace */
-   memory_insert(TIER_L2, KIND_FACT, "other-ws-fact", "critical pattern from other project", 0.95,
-                 "s1", &m);
+   assert(memory_insert_ex(TIER_L2, KIND_FACT, "other-ws-fact",
+                           "critical pattern from other project", "", 0.95, "s1",
+                           MEMORY_AUTHORITY_USER, &m) == 0);
    memory_tag_workspace(m.id, "other-project");
 
    /* Bump use_count to >= 5 */
@@ -334,18 +335,18 @@ static void test_upsert_workflow_dedupes_and_bumps(void)
    assert(second == first);
    assert(count_key("workflow:smoothnas:pr-target") == 1);
 
-   /* Confidence bumped by +0.2 per repeat observation (capped at 1.0). */
+   /* Confidence bumps toward the durable model-authored provenance ceiling. */
    double c2 = conf_for_key("workflow:smoothnas:pr-target");
    assert(c2 >= 0.79 && c2 <= 0.81);
 
    memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s3");
    double c3 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c3 >= 0.99 && c3 <= 1.01);
+   assert(c3 >= 0.79 && c3 <= 0.81);
 
-   /* Further observations must not overflow past 1.0. */
+   /* Re-exposure cannot lift belief above the provenance ceiling. */
    memory_upsert_workflow("SmoothNAS", "pr-target", "PRs target the `testing` branch.", 0.6, "s4");
    double c4 = conf_for_key("workflow:smoothnas:pr-target");
-   assert(c4 <= 1.0001);
+   assert(c4 >= 0.79 && c4 <= 0.81);
 
    teardown();
 }
@@ -362,7 +363,7 @@ static void test_upsert_workflow_rejects_empty_args(void)
 static void test_auto_tag_shared_keywords(void)
 {
    setup();
-   memory_t m;
+   memory_t m, long_memory;
 
    /* This memory mentions "auth" — should be auto-tagged _shared */
    memory_insert(TIER_L2, KIND_FACT, "auth-config", "PostgreSQL cert auth flow", 0.9, "s1", &m);
@@ -380,6 +381,27 @@ static void test_auto_tag_shared_keywords(void)
    aimee_pg_finalize(ws_st);
 
    /* Should have _shared tag because "auth" is a shared keyword */
+   assert(count == 1);
+
+   /* The scanner must cover the whole stored value. Its old 1 KiB scratch
+    * buffer both missed later keywords and overflowed its terminator at the
+    * boundary. */
+   char late_keyword[4097];
+   memset(late_keyword, 'x', sizeof(late_keyword) - 1);
+   late_keyword[sizeof(late_keyword) - 1] = '\0';
+   memcpy(late_keyword + 3000, " database ", 10);
+   assert(memory_insert(TIER_L2, KIND_FACT, "late-shared-keyword", late_keyword, 0.9, "s1",
+                        &long_memory) == 0);
+
+   ws_st = aimee_pg_prepare(
+       db2_conn(), "SELECT COUNT(*) FROM memory_workspaces WHERE memory_id = ?1 AND workspace = ?2",
+       ws_err, sizeof(ws_err));
+   assert(ws_st != NULL);
+   aimee_pg_bind_int64(ws_st, "?1", long_memory.id);
+   aimee_pg_bind_text(ws_st, "?2", SHARED_WORKSPACE);
+   assert(aimee_pg_step(ws_st, ws_err, sizeof(ws_err)) == AIMEE_PG_ROW);
+   count = aimee_pg_column_int(ws_st, 0);
+   aimee_pg_finalize(ws_st);
    assert(count == 1);
 
    teardown();
@@ -452,9 +474,9 @@ static void test_local_first_applies_before_limits_across_memory_surfaces(void)
    memory_insert(TIER_L2, KIND_FACT, "identity:workspace-crowdout",
                  "crowdout routing needle belongs to the active workspace", 0.20,
                  "workspace-session", &workspace_mem);
-   /* Preserve compatibility with rows written before memory_scopes became the
-    * canonical tag table: the legacy workspace table alone must rank second. */
-   db2_memory_workspace_tag_insert(workspace_mem.id, "active-workspace");
+   /* An explicit ownership change stamps both the compatibility projection
+    * and the memory row used by authorization. */
+   assert(memory_tag_workspace(workspace_mem.id, "active-workspace") == 0);
 
    /* Both buckets exceed every one-row request below. Their much higher
     * relevance/confidence and later insertion order reproduce the old failure:
@@ -788,8 +810,143 @@ static void test_api_memory_stats_includes_functional_tiers(void)
    teardown();
 }
 
+/* ---------------------------------------------------------------------------
+ * Ranking a candidate set must cost ONE statement, not one per candidate.
+ *
+ * Two assertions, and the first matters more: the batch reader must agree with
+ * the single-id reader on every id. This is a visibility ladder -- a batch form
+ * that ranks even one row differently silently changes who can see what, and
+ * that would be a far worse bug than the latency it set out to fix.
+ *
+ * The second asserts round-trip COUNT rather than elapsed time: deterministic,
+ * no clock, no load sensitivity, and it fails identically on every machine.
+ */
+void aimee_pg_test_stmt_count_reset(void);
+long aimee_pg_test_stmt_count(void);
+
+static void test_scope_rank_batch_matches_single_and_costs_one_statement(void)
+{
+   setup();
+   db2_memory_scope_context_set("active-workspace", "active-project", 0);
+
+   /* One memory per rank tier, plus an unscoped row and an id that does not
+    * exist -- the two cases a naive IN(...) batch gets wrong. */
+   memory_t proj, ws, shared, plain;
+   memory_insert(TIER_L2, KIND_FACT, "rb-proj", "batch rank project row", 0.9, "s", &proj);
+   memory_insert(TIER_L2, KIND_FACT, "rb-ws", "batch rank workspace row", 0.9, "s", &ws);
+   memory_insert(TIER_L2, KIND_FACT, "rb-shared", "batch rank shared row", 0.9, "s", &shared);
+   memory_insert(TIER_L2, KIND_FACT, "rb-plain", "batch rank unscoped row", 0.9, "s", &plain);
+   assert(memory_tag_project(proj.id, "active-project") == 0);
+   assert(memory_tag_workspace(ws.id, "active-workspace") == 0);
+   assert(memory_tag_workspace(shared.id, SHARED_WORKSPACE) == 0);
+
+   int64_t ids[6];
+   ids[0] = proj.id;
+   ids[1] = ws.id;
+   ids[2] = shared.id;
+   ids[3] = plain.id;
+   ids[4] = proj.id;         /* a repeated id must rank at BOTH positions */
+   ids[5] = plain.id + 9999; /* absent from `memories` -> rank 0 */
+
+   int single[6];
+   for (int i = 0; i < 6; i++)
+      single[i] = db2_memory_scope_context_rank(ids[i]);
+
+   int batch[6];
+   aimee_pg_test_stmt_count_reset();
+   db2_memory_scope_context_rank_batch(ids, 6, batch);
+   long batch_stmts = aimee_pg_test_stmt_count();
+
+   /* Equivalence: identical verdict for every position, repeats and misses too. */
+   for (int i = 0; i < 6; i++)
+      assert(batch[i] == single[i]);
+   assert(batch[5] == 0);        /* absent id */
+   assert(batch[0] == batch[4]); /* repeated id ranked twice */
+
+   /* Cost: one statement for six ids, not six. */
+   assert(batch_stmts == 1);
+
+   /* And the single-id reader really is the per-id shape being replaced, so the
+    * saving is proportional to the candidate set rather than a constant. */
+   aimee_pg_test_stmt_count_reset();
+   for (int i = 0; i < 6; i++)
+      (void)db2_memory_scope_context_rank(ids[i]);
+   assert(aimee_pg_test_stmt_count() == 6);
+
+   db2_memory_scope_context_clear();
+   teardown();
+   printf("  PASS: test_scope_rank_batch_matches_single_and_costs_one_statement\n");
+}
+
+static void test_indexed_lexical_recall_and_substring_compatibility(void)
+{
+   setup();
+   memory_t indexed, substring;
+   assert(memory_insert(TIER_L2, KIND_FACT, "perf-indexed",
+                        "indexed performance regression detection", 0.9, "fts", &indexed) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "releasecandidate",
+                        "the releasecandidate marker is deliberately unseparated", 0.9, "fts",
+                        &substring) == 0);
+
+   memory_t rows[8];
+   aimee_pg_test_stmt_count_reset();
+   int n = db2_memory_find_facts_fts("performance", 8, rows, 8);
+   assert(n >= 1);
+   assert(rows[0].id == indexed.id);
+   assert(aimee_pg_test_stmt_count() == 1);
+
+   /* FTS is word based, so an infix-only legacy match deliberately misses the
+    * index and must still be recovered by the lexical compatibility fallback. */
+   assert(db2_memory_find_facts_fts("candidate", 8, rows, 8) == 0);
+   n = memory_find_facts_lexical_fallback("candidate", NULL, NULL, 8, rows, 8);
+   assert(n >= 1);
+   int found = 0;
+   for (int i = 0; i < n; i++)
+      if (rows[i].id == substring.id)
+         found = 1;
+   assert(found);
+
+   teardown();
+   printf("  PASS: test_indexed_lexical_recall_and_substring_compatibility\n");
+}
+
+static void test_memory_link_batch_matches_single_query_surface(void)
+{
+   setup();
+   memory_t a, b, c;
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-a", "batch link a", 0.9, "links", &a) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-b", "batch link b", 0.9, "links", &b) == 0);
+   assert(memory_insert(TIER_L2, KIND_FACT, "link-c", "batch link c", 0.9, "links", &c) == 0);
+   assert(memory_link_create(a.id, b.id, "depends_on") == 0);
+   assert(memory_link_create(c.id, b.id, "related") == 0);
+
+   int64_t ids[] = {a.id, c.id};
+   memory_link_t rows[8];
+   aimee_pg_test_stmt_count_reset();
+   int n = db2_memory_link_query_many(ids, 2, rows, 8);
+   assert(aimee_pg_test_stmt_count() == 1);
+   assert(n == 2);
+   int saw_depends = 0, saw_related = 0;
+   for (int i = 0; i < n; i++)
+   {
+      if (rows[i].source_id == a.id && rows[i].target_id == b.id &&
+          strcmp(rows[i].relation, "depends_on") == 0)
+         saw_depends = 1;
+      if (rows[i].source_id == c.id && rows[i].target_id == b.id &&
+          strcmp(rows[i].relation, "related") == 0)
+         saw_related = 1;
+   }
+   assert(saw_depends && saw_related);
+
+   teardown();
+   printf("  PASS: test_memory_link_batch_matches_single_query_surface\n");
+}
+
 int main(void)
 {
+   test_indexed_lexical_recall_and_substring_compatibility();
+   test_memory_link_batch_matches_single_query_surface();
+   test_scope_rank_batch_matches_single_and_costs_one_statement();
    test_tag_workspace();
    test_tag_generic_scope();
    test_tag_multiple_workspaces();

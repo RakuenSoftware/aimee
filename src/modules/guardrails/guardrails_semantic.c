@@ -11,10 +11,8 @@
  * guardrail result is unaffected. One warning is logged on failure. */
 #include "guardrails_semantic.h"
 #include <aimee/audit/obs_bus.h> /* guardrail events cross the event bus, not a direct db1 insert */
-#include "db1/guardrail_events.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/bandit.h"
-#endif
+#include "db1_client/guardrail_events.h"
+#include "modules/db2/c/bandit.h"
 #include "headers/log.h"
 #include "platform_process.h"
 #include <cJSON.h>
@@ -248,7 +246,7 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
 /* Effective semantic thresholds: the configured value, clamped when the
  * "guardrail_strictness" bandit arm is promoted to strict.
  *
- * This replaced gsem_apply_strictness_arm(config_t *), which mutated a caller's
+ * This replaced gsem_apply_strictness_arm(legacy_config_record *), which mutated a caller's
  * config in place and so required every caller to hold the struct. The clamp is
  * transient — it was never saved — so it belongs behind a function that answers
  * "what threshold applies right now", not behind a struct edit.
@@ -257,14 +255,10 @@ const char *gsem_policy(const gsem_output_t *out, double warn_t, double prompt_t
  * own, which it was not before. */
 static int gsem_strict_arm_active(void)
 {
-#if defined(AIMEE_DB2_DISABLED)
-   return 0;
-#else
    char arm[64] = "";
    if (db2_bandit_promotion_get("guardrail_strictness", arm, sizeof(arm)) != 0)
       return 0;
    return strcmp(arm, "strict") == 0;
-#endif
 }
 
 double gsem_effective_warn_threshold(void)

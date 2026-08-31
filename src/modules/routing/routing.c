@@ -21,6 +21,8 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include "log.h"
+
+#include <stdatomic.h>
 #include <unistd.h>
 
 /* --- Routing --- */
@@ -337,11 +339,74 @@ static int agent_is_local(const agent_t *ag)
    return strcmp(ag->auth_type, "none") == 0 && agent_endpoint_is_localish(ag->endpoint);
 }
 
+/* Non-zero while the selection authority is failing. Process-wide and atomic
+ * rather than thread-local on purpose: a delegate job routes on one thread and
+ * composes its error on another, so a per-thread flag was silently lost exactly
+ * where the diagnostic mattered most. Cleared by the first successful selection.
+ *
+ * Without it the refusal reaches the caller as a bare NULL, which every caller
+ * renders as "no agent available for role" -- sending an operator to audit the
+ * roster while the routing module is what is broken. */
+static atomic_int g_route_module_faults;
+
+int agent_route_last_was_module_fault(void)
+{
+   return atomic_load_explicit(&g_route_module_faults, memory_order_relaxed) != 0;
+}
+
+/* Every path that actually produces a seat clears the latch -- including the
+ * ones that never consult the provider, like the single-candidate shortcut.
+ * Clearing only on provider success left the latch set after the module came
+ * back, so the next genuinely empty roster was reported as an outage. */
+static void route_selection_succeeded(void)
+{
+   atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
+}
+
+static void route_selection_faulted(void)
+{
+   atomic_fetch_add_explicit(&g_route_module_faults, 1, memory_order_relaxed);
+}
+
+void agent_route_failure_message(const char *role, char *buf, size_t len)
+{
+   if (!buf || len == 0)
+      return;
+   if (!role)
+      role = "";
+   if (agent_route_last_was_module_fault())
+      snprintf(buf, len,
+               "routing module unavailable: refused to select an agent for role '%s' (the roster "
+               "was not consulted)",
+               role);
+   else
+      snprintf(buf, len, "no agent available for role '%s'", role);
+}
+
 static agent_route_selection_fn g_route_selection_provider;
+/* Latched once a caller declares a selection authority. It is deliberately NOT
+ * cleared when the provider is: a daemon that has handed selection to the
+ * routing module must never silently resume the in-process balancer if that
+ * module goes away. Losing the module has to look like a refusal, not like a
+ * slightly different routing policy nobody notices. */
+static int g_route_selection_authority;
 
 void agent_set_route_selection_provider(agent_route_selection_fn provider)
 {
    g_route_selection_provider = provider;
+   if (provider)
+      g_route_selection_authority = 1;
+}
+
+/* Test/bench seam: drop the latch so a suite can exercise the built-in balancer
+ * after having installed a provider. Never called by a daemon. */
+void agent_reset_route_selection_authority(void)
+{
+   g_route_selection_provider = NULL;
+   g_route_selection_authority = 0;
+   /* No authority means no pending authority fault; leaving it latched would
+    * mislabel a genuinely empty roster as a module outage. */
+   atomic_store_explicit(&g_route_module_faults, 0, memory_order_relaxed);
 }
 
 static agent_t *agent_pick_balanced(agent_t **candidates, int count)
@@ -350,16 +415,36 @@ static agent_t *agent_pick_balanced(agent_t **candidates, int count)
    if (count <= 0)
       return NULL;
    if (count == 1)
+   {
+      route_selection_succeeded();
       return candidates[0];
+   }
    if (g_route_selection_provider)
    {
       uint32_t selected = 0;
       if (g_route_selection_provider(0, (uint32_t)count, &selected) != 0 ||
           selected >= (uint32_t)count)
+      {
+         route_selection_faulted();
          return NULL;
+      }
+      route_selection_succeeded();
       return candidates[selected];
    }
+   if (g_route_selection_authority)
+   {
+      /* Authority declared, provider gone: refuse. The in-process balancer below
+       * is the built-in policy for processes that never had a module, not a
+       * silent understudy for one that failed. */
+      aimee_log(LOG_ERROR, "routing",
+                "selection authority declared but no provider is installed; refusing to route "
+                "%d candidates rather than fall back to the built-in balancer",
+                count);
+      route_selection_faulted();
+      return NULL;
+   }
    unsigned pick = __atomic_fetch_add(&cursor, 1u, __ATOMIC_RELAXED);
+   route_selection_succeeded();
    return candidates[pick % (unsigned int)count];
 }
 
@@ -459,9 +544,25 @@ int delegate_pick_for_role(agent_config_t *cfg, const char *role, const char *co
       uint32_t selected = 0;
       if (g_route_selection_provider(1, (uint32_t)pool_n, &selected) != 0 ||
           selected >= (uint32_t)pool_n)
+      {
+         route_selection_faulted();
          return -1;
+      }
+      route_selection_succeeded();
       return pool[selected];
    }
+   if (g_route_selection_authority)
+   {
+      /* Same rule as agent_pick_balanced: an authority that lost its provider
+       * refuses rather than reverting to the built-in random pick. */
+      aimee_log(LOG_ERROR, "routing",
+                "selection authority declared but no provider is installed; refusing to pick "
+                "among %d role candidates",
+                pool_n);
+      route_selection_faulted();
+      return -1;
+   }
+   route_selection_succeeded();
    return pool[delegate_role_rand() % (unsigned)pool_n];
 }
 
@@ -548,6 +649,19 @@ agent_t *agent_route(agent_config_t *cfg, const char *role)
    agent_t *primary_default = agent_primary_turn_default(cfg, role);
    if (primary_default)
       return primary_default;
+
+   /* An operator-selected delegate is a preference, not a hard pin. It wins
+    * only while it is enabled, role-eligible, and healthy/routable; otherwise
+    * the ordinary capability/cost router below takes over. Explicit request
+    * pins already disable every other seat before reaching this function, so a
+    * stale preference cannot override --via/--provider/--tier. */
+   if (cfg && cfg->default_delegate[0])
+   {
+      agent_t *preferred = agent_find(cfg, cfg->default_delegate);
+      if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
+          agent_is_available_for_routing(preferred))
+         return preferred;
+   }
 
    /* First pass: find the minimum tier; note if any tmux agent is there
     * (tmux sessions are stateful and always preferred over HTTP peers). */
@@ -751,6 +865,20 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
         agent_satisfies_required_caps(primary_default, required_caps, min_context, scope)))
       return primary_default;
 
+   /* Keep the operator's delegate preference in force when capability routing
+    * is enabled too. It remains a soft preference: a missing capability, scope
+    * ceiling, health/policy block, or role mismatch sends selection through the
+    * ordinary candidate router below. */
+   if (cfg && cfg->default_delegate[0])
+   {
+      agent_t *preferred = agent_find(cfg, cfg->default_delegate);
+      if (preferred && preferred->enabled && agent_supports_role(preferred, role) &&
+          agent_is_available_for_routing(preferred) && agent_scope_admits(preferred, scope) &&
+          (!(required_caps || min_context > 0) ||
+           agent_satisfies_required_caps(preferred, required_caps, min_context, scope)))
+         return preferred;
+   }
+
    /* prefer_local must be decided BEFORE min_tier, not after. Applying it to the
     * cheapest-tier candidate list only ever preferred a local seat among peers
     * that had already won on price - so an eligible local at tier 1 could never
@@ -888,11 +1016,9 @@ static agent_t *agent_route_with_caps_inner(agent_config_t *cfg, const char *rol
  * order in agent_satisfies_required_caps(). */
 static int agent_effective_context(const agent_t *ag)
 {
-   if (ag->middleware.context_window > 0)
-      return ag->middleware.context_window;
-   model_capability_t cap;
-   if (model_capability_get(agent_catalog_provider(ag), ag->model, &cap) && cap.context_window > 0)
-      return cap.context_window;
+   int declared = agent_declared_context_window(ag);
+   if (declared > 0)
+      return declared;
    if (ag->cli_kind[0])
    {
       const provider_cli_adapter_t *adapter = provider_cli_adapter_get(ag->cli_kind);

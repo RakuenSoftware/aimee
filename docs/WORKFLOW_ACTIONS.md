@@ -12,8 +12,9 @@ pinned to work already in flight.
 
 1. **Open the composer.** Select **+ New proposal**.
 2. **Write the request.** Enter a title and proposal body, then choose a saved workflow.
-3. **Name the checkout.** Enter the repository path visible to the server. Although the field says
-   optional, the Go submit endpoint rejects a blank repository.
+3. **Choose the checkout.** Choose a managed repository or enter an absolute custom checkout path
+   visible to the server. The form
+   requires this before it sends the proposal.
 4. **Use project help if needed.** **Draft with a delegate** and **Load from project** both show a preview before
    replacing the proposal body.
 5. **Submit the run.** The page opens it and begins polling.
@@ -45,6 +46,11 @@ The left rail lists runs and their derived status labels. Selecting one shows:
 The selected run is polled every four seconds while it remains open. Event reads use an incremental
 cursor, so the page appends new history instead of reconstructing state from browser events.
 
+The normal list, detail, proposal, and event views are scoped to the person who submitted the root
+run. Child slices inherit that root ownership even when an older child record has no submitter of
+its own. The appliance administrator can select **Show all (operator)** to inspect every user's run
+and trigger-origin runs, which have no browser owner. Other users are not offered that view.
+
 The current page does not expose every stored plan, diff, review, branch, slice, or worktree artifact.
 Use the PR, event detail, CLI status, and server-side artifact store when that deeper evidence is
 needed.
@@ -65,6 +71,11 @@ Controls depend on the current state:
 There is no separate **Retry** button in the current page. Fix the named condition and use **Start**
 when the pause reason is resumable. A human gate must use **Approve** or **Reject** instead.
 
+The root submitter can pause, resume, stop, or delete their own run tree. **Approve** and **Reject**
+are operator decisions and are available only to the appliance administrator. The service enforces
+the same ownership and operator checks as the browser; knowing another work-item ID does not grant
+access to its details, artifacts, history, or controls.
+
 The current human-gate record is a hashed approval artifact plus lifecycle transition. It is not a
 signed principal-and-artifact attestation. Do not treat it as a cryptographic approval record.
 
@@ -84,14 +95,25 @@ The **Triggers** panel shows what can file a run automatically.
 
 ![The Workflows trigger list beside the expanded Run policy controls](images/workflow-actions-triggers-policy.png)
 
-- **Edit config triggers.** Config-origin rules can be added, saved, and removed in this panel.
-- **Edit graph triggers at the source.** A trigger from a saved workflow's `trigger.watch-dir` node is read-only in this
+- The appliance administrator can select **+ New trigger** and choose a managed repository (or
+  enter an absolute custom server-visible checkout path), a saved workflow, the repository-relative
+  Markdown directory to watch, and an optional branch/ref, run mode, and per-run spend cap.
+- New and edited rules stay as browser drafts until **Save trigger** succeeds. The form validates
+  repository confinement and Git-ref safety before changing the shared registry, and a concurrent
+  edit reloads the current registry instead of overwriting it.
+- Non-administrators can inspect active triggers but do not see mutation controls. A malformed
+  on-disk registry is reported and held read-only so the browser cannot erase rules it failed to
+  parse.
+- A trigger originating from a saved workflow's `trigger.watch-dir` start node is read-only in this
   panel. Edit that node in **Edit Workflows** to change or disarm it.
-- **Use a supported scanner.** Go executes `watch-dir` and the compatibility name `proposals`. Other displayed source names
-  are not executed by this scanner.
+- The current Go scanner creates `watch-dir` rules; `proposals` remains a compatibility spelling for
+  existing configuration. Other source names are not offered by the browser because this scanner
+  cannot execute them.
 
 A watch rule needs a server-visible workspace, a saved workflow, a repository-relative proposal
 directory, and an optional git ref. Leaving the ref blank resolves the refreshed remote default ref.
+The browser offers valid saved workflows and repositories already managed for the signed-in
+administrator, while retaining a custom path option. The shared registry is limited to 32 rules.
 The mode and optional spend cap are stored with the admitted run, but mode alone is not an approval
 barrier in the current scheduler. Put `gate.human` in the graph when a person must decide.
 
@@ -138,6 +160,7 @@ Read the pause reason and the last events before acting. Common current reasons 
 | `fanout_limit` | reduce packets or raise the node's bounded `max_children` |
 | `budget_cap`, `turn_cap`, `wall_cap` | inspect cost and run policy before allowing more work |
 | `base_integration_conflict` | update or resolve the integration branch before resuming |
+| `git_identity_missing` | seal `AIMEE_GIT_AUTHOR_NAME` and `AIMEE_GIT_AUTHOR_EMAIL` through the install-time Vault bootstrap, then start the run |
 | `workflow_definition_invalid`, `workflow_block_unavailable` | restore the pinned definition or block version; editing only the current definition is insufficient |
 
 Do not file a replacement run merely to hide the evidence on the first one. Stop only when the run

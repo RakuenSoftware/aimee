@@ -2,111 +2,82 @@
 
 ## Purpose and non-goals
 
-`execution-policy` is required core and makes fail-closed authorization decisions for delegate,
-tool, filesystem, process, network, credential, and repository actions. It owns the decision
-contract and denial reasons, not the action implementation, secret store, workspace resolver,
-optional governance policy authoring, or append-only audit ledger.
+`execution-policy` makes fail-closed authorization decisions for tool, filesystem, process, network,
+credential, and repository actions. It owns verdicts and denial reasons. It does not execute actions,
+hold credentials, resolve workspaces, or replace the append-only audit and optional governance layers.
 
 ## Public contracts
 
-`src/modules/execution-policy/execution_policy.c` owns the tool-action policy decision: `policy_load`
-(reads the operator policy `.aimee-policy.json`) and `policy_check_tool` (the fail-closed allow/deny
-decision), extracted from `src/server/agent_policy.c`. The decision contract is declared in the shared
-`src/headers/agent_exec.h`, which this module implements while the server implements the rest of
-`agent_policy.c` and reaches the decision through the same header. This is the same arrangement by
-which `memory` owns its contract while DB1/DB2 implement storage. Per the module boundary, **schema and argument
-validation (`tool_validate`) and side-effect classification (`tool_side_effect`) stay with the
-server/`tools` surface** and are not part of this module; likewise the execution trace, metrics, env
-introspection, and manifest half of `agent_policy.c`. `pre_tool_check`
-(`src/modules/guardrails/guardrails_action_audit.c`) is a guardrails enforcement point that consumes
-this decision, and gateway request policing stays a gateway enforcement point. Both consume the
-canonical decision vocabulary rather than owning it. Consolidating the distributed enforcement points
-onto this single decision engine remains future work.
+Principal `17` serves event `8449`, stage `1`, through the public header
+`aimee/execution-policy/module_api.h`. The caller submits an already classified, bounded action and
+authenticated context; the Go handler returns a typed allow, deny, or approval verdict and reason.
 
 ## Dependencies and consumers
 
-- `config`: supplies effective local authorization, guardrail, approval, and enforcement settings.
-- `ir`: supplies typed requests, tool calls, and action facts evaluated by policy.
-- `module-runtime`: supplies required lifecycle and readiness contracts for the policy service.
+- `config`: supplies effective computer-use settings and the fixed operator-policy locations.
+- `ir`: supplies the canonical typed action evaluated by the policy engine.
+- `module-runtime`: supervises the process and authenticates principal `17` request/reply traffic.
 
-Consumers include [delegates](delegates.md), [gateway](gateway.md), `tools`, `git`, `workspace`, and
-the optional workflows and governance modules. Governance may author or distribute organizational
-policy, but core execution-policy remains the final local enforcement boundary when governance is absent.
-These names are consumers or consolidation evidence, not undeclared dependencies of execution-policy.
+Delegates, gateway, tools, Git, workspace, workflows, and governance consume the verdict. The enforcing
+caller applies it synchronously and has no local authorization fallback.
 
 ## Providers and readiness
 
-The required reference provider is the local deterministic policy path built from `guardrails`,
-agent policy, gateway policy, and configuration. Optional semantic classifiers may advise it, but
-readiness requires a local decision for every supported action class; timeout, malformed input, or
-missing policy material must produce a typed denial rather than an unfiltered execution fallback.
-Classifier output is advisory and cannot independently produce an allow or override a core denial.
+The Go implementation at `server-go/modules/execution-policy` provides the required handler. Readiness
+requires valid built-in rules and any configured policy documents. A parser error, missing required
+contract, or failed bus registration leaves the seam unavailable, causing consumers to deny actions.
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `false`; the required module cannot be hot-disabled, while individual policy inputs remain configurable.
+- `runtime_toggle.supported`: `false`; a live action path cannot lose its required authorization decision point.
 
-### Config touchpoint
-
-The module consumes `guardrail_mode` (`src/modules/config/config_fields.c:33`), the `guardrails`
-section (`src/modules/config/config_sections.c:1216`), delegate/tool restrictions, approval
-rules, and related effective settings. `config` owns parsing and truthful projection; policy owns
-interpretation at decision time. Ambiguous duplicated parsing is deferred to the config slice.
+The module reads `.aimee-policy.json` and `$AIMEE_HOME/policy.json` for forbidden commands, tool rules,
+and approval levels, plus typed settings from `config`. Policy files may narrow authority but cannot bypass hard rails.
 
 ## Surfaces
 
-Policy appears through preflight errors, approval prompts, denied tool results, gateway policing,
-guardrail diagnostics, and action audit records. The `aimee guardrails` surface exposes evidence;
-protocol, delegate, Git, and tool commands remain owned by their modules even when a policy decision
-determines whether the requested action proceeds.
+Action callers use the single `execution-policy` bus contract; operators edit the documented policy files and observe
+denials through UI, CLI, logs, and audit evidence. There is no public endpoint that accepts an invented
+principal or raw allow verdict, and no command that disables the required module during execution.
 
 ## Data and migrations
 
-Current state includes external policy JSON, `session_state_t` guardrail evidence, configuration,
-approval state, and audit references spread across owners. Migration into the module must preserve
-policy version, principal, action class, input digest, decision, reason, approval identity, and
-enforcement point without turning transient secrets or raw untrusted output into policy storage.
+The module keeps no mutable database. `Policy` documents are version-controlled or operator-managed JSON,
+while request decisions are ephemeral and their bounded outcomes are classified for the ledger. Changes
+need validation but no schema migration; historic audit records retain the policy outcome seen at execution.
 
 ## Security and privacy
 
-Inputs include untrusted repository content, tool output, subprocess arguments/environments, and
-configuration. Authorization must precede mutation and secret release; an undecidable action fails
-closed. `execution-policy` may inspect bounded metadata or secret references but must not become a
-secret cache, log raw credentials, or treat optional governance availability as a safety prerequisite.
-Full runtime non-bypass across dynamically constructed calls is a **hypothesis, unverified**.
+Caller identity comes from the bus, not request data. The module evaluates normalized actions, returns `deny` for unknown classes, and rejects
+unknown classes, and treats absence, timeout, and malformed responses as denial. Ledger records prove
+the seam fired without persisting raw tool arguments, credentials, file content, or response bodies.
 
 ## Supported journeys
 
-A typed action from [delegates](delegates.md), `tools`, `git`, or `workspace` is normalized with its
-principal, target, capability, and workspace facts; core policy evaluates it; an approval seam runs
-when permitted; and the owning executor receives allow or a concrete denial. Gateway-local policing
-uses the same canonical action vocabulary without transferring gateway ownership into this module.
+Before a delegate runs a command, the server classifies it into IR, attaches session and workspace
+identity, and calls `execution-policy`. An allow proceeds under the original bounds, an approval verdict
+parks for an authorized human, and a denial returns the stable reason without performing the action.
 
 ## Tests and failure behavior
 
-Coverage is distributed across `test_guardrails.c`, `test_agent_policy_intercept.c`,
-`test_gateway_policy.c`, tool-validation tests, Git guard tests, and workflow native-gate tests.
-Malformed actions, missing principal/workspace facts, classifier failure, or unavailable approval
-must deny safely; warning-only modes must remain explicit and cannot masquerade as enforcement.
+Tests under `server-go/modules/execution-policy` and C caller tests cover rule precedence, malformed
+frames, timeouts, approval, and denial. Unknown actions, absent policy service, invalid JSON, ambiguous
+matches, and response validation failures deny. No transport or parser error becomes an implicit allow.
 
 ## Operational diagnostics
 
-Diagnostics must report `policy_version`, principal, canonical action/tool name, target class,
-workspace, enforcement point, decision, and redacted reason. Operators must be able to distinguish
-configuration absence, invalid input, explicit denial, approval timeout, and auxiliary-classifier
-failure without logging command environments, repository contents, or credential values.
-Cross-module citations and limits are collected in the [Slice 16 validation record](../validation/core-modularization-slice-16.md).
+Use principal `17` readiness, action class, rule identifier, verdict, denial reason, and request ID.
+Correlate with the content-free ledger event and the enforcing caller log. Do not log raw arguments,
+environment variables, credentials, source content, or sensitive filesystem paths while diagnosing.
 
 ## Compatibility
 
-Decision codes, canonical action names, approval semantics, and pre/post-tool enforcement ordering
-are compatibility contracts. Moving guardrails or policy fragments under `execution-policy` must
-preserve CLI/API results and audit correlation; a compatibility shim cannot authorize independently
-or silently translate a denial into an allow.
+Event `8449`, stage `1`, verdict meanings, normalized action classes, and denial reason identifiers are
+stable contracts. The legacy `policy_check_tool` caller symbol remains a compatibility seam but cannot
+authorize locally. Additive rules must preserve fail-closed handling of unknown values.
 
 ## Extension and removal
 
-New policy sources plug into one fail-closed decision contract and may strengthen, not bypass, local
-enforcement. `agent_policy`, `gateway_policy`, workflow gates, and guardrails with similarly named
-checks require caller and behavior comparison before consolidation. A self-tested policy island with
-no production enforcement point is a dead-code candidate, not evidence that the module is optional.
+Add an action class in `IR`, wire fixtures, normalization, policy evaluation, enforcement, audit mapping,
+and denial tests together. Removing a rule requires proving no caller depends on its reason semantics.
+Removing the module requires a reviewed replacement at every action seam; bypass is not a migration.

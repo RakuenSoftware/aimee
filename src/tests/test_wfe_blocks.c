@@ -8,6 +8,7 @@
 
 #include "wfe_blocks.h"
 #include "wfe_iface.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static int sh(const char *cmd)
 {
@@ -63,7 +64,8 @@ int main(void)
    }
 
    /* --- wfe_git_freeze against a real temp git repo --- */
-   char dir[] = "/tmp/wfe_repo_XXXXXX";
+   char dir[256];
+   snprintf(dir, sizeof dir, "%s/wfe_repo_XXXXXX", platform_tmpdir());
    if (!wfe_test_mkdtemp(dir))
    {
       printf("(skip git freeze: mkdtemp) ok\n");
@@ -111,7 +113,8 @@ int main(void)
     * each CREATES the same file, the first merges and the rest hit add/add,
     * which no rebase resolves. Catch it at freeze instead of at merge. */
    {
-      char sdir[] = "/tmp/wfe_addadd_XXXXXX";
+      char sdir[256];
+      snprintf(sdir, sizeof sdir, "%s/wfe_addadd_XXXXXX", platform_tmpdir());
       if (wfe_test_mkdtemp(sdir))
       {
          /* feature branch with the file already landed by "slice 0" */

@@ -1,6 +1,11 @@
-# Proposal: P3 — Per-team/project cost attribution at the kb egress point
+# Proposal: P3: Per-team/project cost attribution at the kb egress point
 
-- **State:** proposed (pending — not started). Part of `tiered-llm-offering.md`.
+> **Archived proposal.** This records the design as it was agreed, not the
+> system as it behaves today; parts of it have since diverged. For current
+> behaviour see `docs/`, or the code.
+
+- **State:** DONE. Archived after P3 delivery.
+- **Historical state:** proposed (pending; Not started). Part of `tiered-llm-offering.md`.
 - **Author:** JBailes (drafted by the engineer agent, 2026-07-17).
 - **Depends on:** P1 (teams), P2 (kb egress seam). **Blocks:** nothing (P4 reuses
   the same rollup but does not require P3).
@@ -25,10 +30,10 @@ month," broken down by project and by model and exportable.
   per-request prompt/completion/cache tokens, `estimated_cost_usd`, `model`,
   `served_model`, `principal`, `session_id`, `delegation_id`, plus aggregations
   `_by_model`, `_by_source`, `_by_role`, `_by_tool`, `_spend_breakdown`.
-- **Cost calc** — `token_estimate_cost_ex` with 3-tier pricing (static →
+- **Cost calc**: `token_estimate_cost_ex` with 3-tier pricing (static →
   registry → authoritative DB1 `model_pricing`); `token_billable_model`
   resolves to the real billing model, never the agent name.
-- **Read surfaces** — `GET /v1/insights/overview` (`src/server_insights.c`),
+- **Read surfaces**: `GET /v1/insights/overview` (`src/server_insights.c`),
   `/v1/dashboard/*`, MCP `dashboard_metrics`, React `CostPanel` ("top
   sessions").
 
@@ -43,16 +48,16 @@ server's DB1 `token_audit`, plus `team_id`, `project_id`, and the pricing
 project are already resolved (P1), so kb writes each org row there with those
 fields populated. The server's DB1 `token_audit` is **left unchanged** and keeps
 recording personal `egress: direct` calls (no team). Both are additive, reversible
-migrations (master-plan constraint) — org rows never go into the server's DB1 table.
+migrations (master-plan constraint), org rows never go into the server's DB1 table.
 
 Each org row also carries the **authoritative originating server `cert:CN`** and,
 separately, the **user identity only when a kb-verified actor token was present** (else
-null — invariant #7's composite tagging, immutable fields). Every billable call
+null, invariant #7's composite tagging, immutable fields). Every billable call
 produces **exactly one** row via the durable request lifecycle of P2/P4/P7. The row's
 idempotency/uniqueness key is the **composite `(origin_cert_cn, request_id)`** (a bare
 request_id could collide/replay across mutually-untrusted origins), and the first
 accepted request binds the immutable team/project/pricing-version. The lifecycle has
-explicit states — `started → settled(success|denied|failed)` plus an **`indeterminate`**
+explicit states, `started → settled(success|denied|failed)` plus an **`indeterminate`**
 terminal for "vendor billed but we crashed before recording actual usage": that case
 settles at the **reserved max** (P4) and is reconciled downward if a late signal
 arrives, so a crash/retry/streaming-disconnect can neither drop nor double-count
@@ -64,7 +69,7 @@ API); every access-gating read hits the primary (invariant #9).
 
 **Where the org rows live:** org egress happens on kb, so org cost rows are
 written to a dedicated **DB2** org-token-audit table (per the implementation-plan
-storage boundary — the kb tier is Postgres/DB2, and the server must not touch DB2
+storage boundary. The kb tier is Postgres/DB2, and the server must not touch DB2
 directly). This is a **distinct store** from the server's DB1 `token_audit`, which
 is left **unchanged** and continues to record personal `direct` calls. The two are
 never merged in place; a combined "user's total spend" view is reconciled at the
@@ -78,19 +83,19 @@ point, so the price table the org tier meters against must live in Postgres (DB2
 not the server's DB1: P3a stands up a DB2 `org_model_pricing` table (model,
 provider, unit prices, **version**, effective-at), seeded by promoting the existing
 static/registry/`model_pricing` prices, and every stateless kb instance reads it
-**consistently and versioned** — a price change is a new row/version, never an
+**consistently and versioned**. A price change is a new row/version, never an
 in-place mutate, so concurrent instances always agree on the price for a given
 `(model, version)`. A per-model `current_version` pointer is advanced atomically on a
 price change; a call pins the version it read at reservation and uses that same
 version through settlement. P2 metering, P4 maximum-cost reservations, and P6 Bedrock
-pricing all resolve against this one authoritative table — never a per-instance or
+pricing all resolve against this one authoritative table, never a per-instance or
 server-local price.
 
 ## §2 Two aggregations + rollup
 
 Add **kb-native** `by_team` / `by_project` aggregations over the DB2 org-audit
 table (mirroring the *shape* of the server's existing DB1 `_by_model`, but as
-kb/DB2 query APIs — not the DB1 function symbols, which stay server-side for
+kb/DB2 query APIs, not the DB1 function symbols, which stay server-side for
 personal spend), plus a `(team, project, model, day)` rollup covering the
 reporting window. The rollup is maintained **incrementally within the same DB2
 transaction** as the audit-row write, so reads are cheap and always consistent with
@@ -104,18 +109,18 @@ the ledger; ad-hoc/backfill queries may compute directly over `org_token_audit`.
   primary), not an ad-hoc label; RLS enforces that a team-lead reads only their team's
   rows at the DB layer. **Access matrix (explicit):** an **org-admin** may query any
   authorized org scope; a **team-lead** may query **only** teams the primary currently
-  grants them — the predicate is `org_admin OR team_lead_of(requested_team)`, not
+  grants them. The predicate is `org_admin OR team_lead_of(requested_team)`, not
   org-admin-only. A team
   lead sees their own team; an org admin sees all (reuse P1 resolution).
 - Extend `CostPanel` with a team/project breakdown on the org tier view;
   `--json` export for finance.
-- CLI: `aimee spend --team X [--project Y] [--since …]` reports **org** spend by calling kb's `/v1/insights/spend` over mTLS — the CLI runs on the *server*, which **never queries DB2 directly** (storage boundary); kb is the only tier that touches org rows. A user's personal `direct` spend stays in the server's local `token_audit` and is shown by the existing local cost surfaces; the two are **not silently merged**. A combined "everything I spent" view, if offered, dedupes by tier (org rows are DB2, personal rows are the server's DB1 — no overlap) and labels each source.
+- CLI: `aimee spend --team X [--project Y] [--since …]` reports **org** spend by calling kb's `/v1/insights/spend` over mTLS. The CLI runs on the *server*, which **never queries DB2 directly** (storage boundary); kb is the only tier that touches org rows. A user's personal `direct` spend stays in the server's local `token_audit` and is shown by the existing local cost surfaces; the two are **not silently merged**. A combined "everything I spent" view, if offered, dedupes by tier (org rows are DB2, personal rows are the server's DB1, no overlap) and labels each source.
 
 ## Acceptance criteria
 
 - An org call writes a **DB2 `org_token_audit`** row carrying resolved
   `team_id`/`project_id`; a personal `direct` call writes to the **server's DB1
-  `token_audit`** unchanged (that table has no team/project columns — the org
+  `token_audit`** unchanged (that table has no team/project columns; the org
   dimension exists only in DB2).
 - `/v1/insights/spend?team=X` returns that team's realized spend, per project
   and per model, matching the sum of its rows.
@@ -137,7 +142,7 @@ per-team rollup and the cross-team authz denial.
 No caps (P4). **One pricing rule, no ambiguity:** every kb org call and P4 reservation
 atomically pins an existing DB2 `org_model_pricing` version row from the primary, and
 settlement references that **exact immutable row** (foreign key). The server's existing
-3-tier resolver stays **only for personal `direct` (DB1) pricing** — it is not a second
+3-tier resolver stays **only for personal `direct` (DB1) pricing**. It is not a second
 source for org calls. Not a
-billing / invoicing system — this is a read surface over spend aimee
+billing / invoicing system. This is a read surface over spend aimee
 already computes.

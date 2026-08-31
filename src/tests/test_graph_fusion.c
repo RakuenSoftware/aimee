@@ -6,15 +6,14 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "db2/entity_edges.h"
-#include "db2/memory_query.h"
+#include "modules/db2/c/entity_edges.h"
+#include "modules/db2/c/memory_query.h"
 
 static char g_db_path[512];
 
@@ -24,14 +23,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(g_db_path) == 0);
    db2_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }
@@ -67,8 +64,8 @@ static void test_gravity_unknown_default(void)
 static void test_edge_score_hop_decay(void)
 {
    /* 1-hop factor 1.0, 2-hop factor 0.5 — same edge, different hop. */
-   double s1 = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 1);
-   double s2 = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 2);
+   double s1 = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 1, NULL);
+   double s2 = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 2, NULL);
    assert(s1 > 0.0);
    assert(fabs(s2 - s1 * 0.5) < 1e-9);
 }
@@ -77,8 +74,8 @@ static void test_edge_score_structural_factor(void)
 {
    /* Code edge with structural_weight=3 gets a 2x structural factor vs
     * a non-code edge of the same relation. */
-   double code_edge = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 1);
-   double plain_edge = memory_graph_edge_score("defines", 0, 0, 0, 0.0, 1);
+   double code_edge = memory_graph_edge_score("defines", 1, 3, 0, 0.0, 1, NULL);
+   double plain_edge = memory_graph_edge_score("defines", 0, 0, 0, 0.0, 1, NULL);
    assert(code_edge > plain_edge);
    /* structural factor for sw=3 is 1 + 3/3 = 2.0 */
    assert(fabs(code_edge - plain_edge * 2.0) < 1e-9);
@@ -87,8 +84,8 @@ static void test_edge_score_structural_factor(void)
 static void test_edge_score_observed_factor(void)
 {
    /* Higher observed weight increases the score. */
-   double w0 = memory_graph_edge_score("calls", 0, 0, 0, 0.0, 1);
-   double w5 = memory_graph_edge_score("calls", 0, 0, 5, 0.0, 1);
+   double w0 = memory_graph_edge_score("calls", 0, 0, 0, 0.0, 1, NULL);
+   double w5 = memory_graph_edge_score("calls", 0, 0, 5, 0.0, 1, NULL);
    assert(w5 > w0);
 }
 
@@ -96,9 +93,9 @@ static void test_edge_score_utility_dominates(void)
 {
    /* Positive utility raises score; negative lowers it.
     * utility factor ranges 0.5 (at -0.5) to 3.0 (at 2.0). */
-   double neg = memory_graph_edge_score("calls", 0, 0, 0, -0.5, 1);
-   double zero = memory_graph_edge_score("calls", 0, 0, 0, 0.0, 1);
-   double pos = memory_graph_edge_score("calls", 0, 0, 0, 2.0, 1);
+   double neg = memory_graph_edge_score("calls", 0, 0, 0, -0.5, 1, NULL);
+   double zero = memory_graph_edge_score("calls", 0, 0, 0, 0.0, 1, NULL);
+   double pos = memory_graph_edge_score("calls", 0, 0, 0, 2.0, 1, NULL);
    assert(neg < zero);
    assert(pos > zero);
    /* utility factor clamps: at -0.5 → 0.5, at 2.0 → 3.0 */
@@ -109,9 +106,52 @@ static void test_edge_score_utility_dominates(void)
 static void test_edge_score_utility_clamped(void)
 {
    /* Beyond clamp bounds the factor saturates. */
-   double huge = memory_graph_edge_score("calls", 0, 0, 0, 100.0, 1);
-   double cap = memory_graph_edge_score("calls", 0, 0, 0, 2.0, 1);
+   double huge = memory_graph_edge_score("calls", 0, 0, 0, 100.0, 1, NULL);
+   double cap = memory_graph_edge_score("calls", 0, 0, 0, 2.0, 1, NULL);
    assert(fabs(huge - cap) < 1e-9);
+}
+
+/* --- confidence-class weighting (typed-fact edges) --- */
+
+static void test_confidence_factor_ladder(void)
+{
+   /* A > B > C, and a co-occurrence edge (no class) is not penalised. */
+   assert(fabs(memory_graph_confidence_factor("A") - 1.00) < 1e-9);
+   assert(fabs(memory_graph_confidence_factor("B") - 0.75) < 1e-9);
+   assert(fabs(memory_graph_confidence_factor("C") - 0.50) < 1e-9);
+   assert(fabs(memory_graph_confidence_factor(NULL) - 1.00) < 1e-9);
+   assert(fabs(memory_graph_confidence_factor("") - 1.00) < 1e-9);
+   /* Unknown class fails conservative to the class-C weight. */
+   assert(fabs(memory_graph_confidence_factor("Z") - 0.50) < 1e-9);
+}
+
+static void test_semantic_gravity_baseline(void)
+{
+   /* A typed fact on a relation with no table entry must outrank a
+    * co-occurrence edge, not tie with it. Same weight/utility/hop throughout so
+    * only the gravity and confidence terms differ. */
+   double co_occurrence = memory_graph_edge_score("co_discussed", 0, 0, 1, 0.0, 1, NULL);
+   double class_a = memory_graph_edge_score("works_for", 0, 0, 1, 0.0, 1, "A");
+   double class_b = memory_graph_edge_score("works_for", 0, 0, 1, 0.0, 1, "B");
+   double class_c = memory_graph_edge_score("works_for", 0, 0, 1, 0.0, 1, "C");
+
+   assert(class_a > class_b);
+   assert(class_b > class_c);
+   assert(class_a > co_occurrence);
+   /* Class A on the semantic baseline is 0.80 vs co_discussed's 0.45. */
+   assert(fabs(class_a / co_occurrence - (0.80 / 0.45)) < 1e-9);
+   /* Class C (0.80 * 0.5 = 0.40) lands just below a co-occurrence edge — a bare
+    * speculation should not outweigh a repeatedly observed pairing. */
+   assert(class_c < co_occurrence);
+}
+
+static void test_semantic_relation_keeps_table_prior(void)
+{
+   /* A relation that IS in the gravity table keeps its explicit prior; the
+    * semantic baseline is a fallback, not an override. */
+   double semantic_depends = memory_graph_edge_score("depends_on", 0, 0, 1, 0.0, 1, "A");
+   double cooccur_depends = memory_graph_edge_score("depends_on", 0, 0, 1, 0.0, 1, NULL);
+   assert(fabs(semantic_depends - cooccur_depends) < 1e-9);
 }
 
 /* --- code-shape detection --- */
@@ -406,6 +446,15 @@ int main(void)
    printf("ok\n");
    printf("test_edge_score_utility_clamped... ");
    test_edge_score_utility_clamped();
+   printf("ok\n");
+   printf("test_confidence_factor_ladder... ");
+   test_confidence_factor_ladder();
+   printf("ok\n");
+   printf("test_semantic_gravity_baseline... ");
+   test_semantic_gravity_baseline();
+   printf("ok\n");
+   printf("test_semantic_relation_keeps_table_prior... ");
+   test_semantic_relation_keeps_table_prior();
    printf("ok\n");
    printf("test_detect_caller_flag... ");
    test_detect_caller_flag();

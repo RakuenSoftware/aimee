@@ -1,7 +1,7 @@
 /* cmd_mcp.c: MCP operator commands. */
 #include "commands.h"
 #include "config.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "osv_check.h"
 #include "render.h"
 
@@ -73,7 +73,7 @@ static void mcp_cmd_audit(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)argc;
    (void)argv;
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "mcp audit: db1_init failed for %s\n", config_db1_path());
       return;
@@ -118,7 +118,7 @@ static void mcp_cmd_recheck(app_ctx_t *ctx, int argc, char **argv)
 {
    (void)ctx;
    const char *filter = argc >= 1 ? argv[0] : NULL;
-   if (db1_init(config_db1_path()) != 0)
+   if (!db1_store_ready())
    {
       fprintf(stderr, "mcp recheck: db1_init failed for %s\n", config_db1_path());
       return;

@@ -87,19 +87,24 @@ var methodRoutes = map[string]methodRoute{
 	"plugin.list":            {http.MethodGet, "/v1/plugins"},
 	"plugin.enable":          {http.MethodPost, "/v1/plugins/enable"},
 	"plugin.disable":         {http.MethodPost, "/v1/plugins/disable"},
-	"agent.list":             {http.MethodGet, "/v1/agent/list"},
-	"agent.stats":            {http.MethodGet, "/v1/agent/stats"},
-	"agent.add":              {http.MethodPost, "/v1/agent/add"},
-	"agent.remove":           {http.MethodPost, "/v1/agent/remove"},
-	"agent.enable":           {http.MethodPost, "/v1/agent/enable"},
-	"agent.disable":          {http.MethodPost, "/v1/agent/disable"},
-	"agent.probe":            {http.MethodPost, "/v1/agent/probe"},
-	"agent.set":              {http.MethodPost, "/v1/agent/set"},
-	"hosts.list":             {http.MethodGet, "/v1/hosts"},
+	// The model roster. A roster entry is one (endpoint, model) runtime target,
+	// so both the tab and these ops are "model"; the separate per-model
+	// capability metadata is `catalog.*`.
+	"model.list":     {http.MethodGet, "/v1/model/list"},
+	"model.stats":    {http.MethodGet, "/v1/model/stats"},
+	"model.add":      {http.MethodPost, "/v1/model/add"},
+	"model.remove":   {http.MethodPost, "/v1/model/remove"},
+	"model.enable":   {http.MethodPost, "/v1/model/enable"},
+	"model.disable":  {http.MethodPost, "/v1/model/disable"},
+	"model.probe":    {http.MethodPost, "/v1/model/probe"},
+	"model.set":      {http.MethodPost, "/v1/model/set"},
+	"model.roles":    {http.MethodPost, "/v1/model/roles"},
+	"model.personas": {http.MethodPost, "/v1/model/personas"},
+	"hosts.list":     {http.MethodGet, "/v1/hosts"},
 	// Subscription-OAuth setup (Claude / Codex "sign in with your plan").
-	"agent.cli_oauth_start":    {http.MethodPost, "/v1/agent/cli_oauth_start"},
-	"agent.cli_oauth_code":     {http.MethodPost, "/v1/agent/cli_oauth_code"},
-	"agent.cli_oauth_poll":     {http.MethodPost, "/v1/agent/cli_oauth_poll"},
+	"model.cli_oauth_start":    {http.MethodPost, "/v1/model/cli_oauth_start"},
+	"model.cli_oauth_code":     {http.MethodPost, "/v1/model/cli_oauth_code"},
+	"model.cli_oauth_poll":     {http.MethodPost, "/v1/model/cli_oauth_poll"},
 	"collab_rules.list":        {http.MethodGet, "/v1/collab_rules"},
 	"collab_rules.list_active": {http.MethodGet, "/v1/collab_rules/active"},
 	// Mutations + arg-bearing calls (POST, body carries the args; the server
@@ -155,30 +160,68 @@ func (s *server) rpcV1Call(ctx context.Context, req map[string]any) (map[string]
 	return msg, nil
 }
 
-func (s *server) handleAgents(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.socketCallForRequest(r, map[string]any{"method": "agent.list"})
+// registerModelRoutes wires the whole model-roster surface under one prefix.
+// It is called once per spelling — "/api/models" and the pre-rename
+// "/api/agents" — so the alias cannot drift from the canonical set: a route
+// added here is served under both, or under neither.
+func (s *server) registerModelRoutes(mux *http.ServeMux, prefix string) {
+	mux.HandleFunc(prefix, s.requireAuth(s.handleModels))
+	mux.HandleFunc("GET "+prefix+"/stats", s.requireAuth(s.handleModelStats))
+	mux.HandleFunc("POST "+prefix+"/add", s.requireAuth(s.handleModelAdd))
+	for op, method := range map[string]string{
+		"remove":   "model.remove",
+		"enable":   "model.enable",
+		"disable":  "model.disable",
+		"probe":    "model.probe",
+		"roles":    "model.roles",
+		"personas": "model.personas",
+		"set":      "model.set",
+	} {
+		mux.HandleFunc("POST "+prefix+"/"+op, s.requireAuth(s.modelOpHandler(method)))
+	}
+	// Subscription-OAuth setup (Claude / Codex). `start` may install the vendor
+	// CLI server-side, so it carries a much longer timeout than the poll/code hops.
+	mux.HandleFunc("POST "+prefix+"/oauth/start", s.requireAuth(s.cliOauthHandler("model.cli_oauth_start", 180*time.Second)))
+	mux.HandleFunc("POST "+prefix+"/oauth/code", s.requireAuth(s.cliOauthHandler("model.cli_oauth_code", 30*time.Second)))
+	mux.HandleFunc("POST "+prefix+"/oauth/poll", s.requireAuth(s.cliOauthHandler("model.cli_oauth_poll", 15*time.Second)))
+}
+
+// emptyRoster is the never-fail body for the roster list: both the current
+// `models` key and the pre-rename `agents` one, so neither an old nor a new GUI
+// build has to special-case a failed call.
+const emptyRoster = `{"models":[],"agents":[],"count":0}`
+
+// handleModels proxies GET /api/models -> RPC model.list. The response carries
+// the roster under BOTH `models` and `agents`: `agents` is the pre-rename key
+// and is still emitted so a GUI build from before the rename keeps rendering.
+func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "model.list"})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		fmt.Fprintf(w, `{"agents":[],"count":0}`)
+		fmt.Fprint(w, emptyRoster)
 		return
 	}
-	agents, ok := resp["agents"]
+	// A server older than the rename answers under `agents`; accept either.
+	roster, ok := resp["models"]
 	if !ok {
-		fmt.Fprintf(w, `{"agents":[],"count":0}`)
+		roster, ok = resp["agents"]
+	}
+	if !ok {
+		fmt.Fprint(w, emptyRoster)
 		return
 	}
 	var arr []json.RawMessage
-	json.Unmarshal(agents, &arr)
+	json.Unmarshal(roster, &arr)
 	count := len(arr)
-	json.NewEncoder(w).Encode(map[string]any{"agents": arr, "count": count})
+	json.NewEncoder(w).Encode(map[string]any{"models": arr, "agents": arr, "count": count})
 }
 
-// handleAgentStats proxies GET /api/agents/stats -> RPC agent.stats, returning
-// the per-delegate run stats array ({stats:[{name,total_calls,successful_calls,
+// handleModelStats proxies GET /api/models/stats -> RPC model.stats, returning
+// the per-model run stats array ({stats:[{name,total_calls,successful_calls,
 // failed_calls,success_rate,avg_latency_ms,tokens,cost}]}). Never errors hard:
 // an empty roster or a stats-less server yields {"stats":[]} so the page renders.
-func (s *server) handleAgentStats(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.socketCallForRequest(r, map[string]any{"method": "agent.stats"})
+func (s *server) handleModelStats(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "model.stats"})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil || resp == nil {
 		fmt.Fprint(w, `{"stats":[]}`)
@@ -193,13 +236,13 @@ func (s *server) handleAgentStats(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprint(w, `{"stats":[]}`)
 }
 
-// agentOpHandler proxies a roster mutation (add/remove/enable/disable/probe) to
+// modelOpHandler proxies a roster mutation (add/remove/enable/disable/probe) to
 // its RPC method. The browser POSTs a CLI-style {"args":[...]} body mirroring the
-// `aimee agent <op>` argv (e.g. add -> [name,endpoint,model,"--provider","openai",
+// `aimee model <op>` argv (e.g. add -> [name,endpoint,model,"--provider","openai",
 // "--roles","summarize,format"]; remove/enable/disable/probe -> [name]). The
 // server's dispatch envelope is returned verbatim so the UI sees the same
 // {status|error,...} shape the CLI would.
-func (s *server) agentOpHandler(method string) http.HandlerFunc {
+func (s *server) modelOpHandler(method string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Args []string `json:"args"`
@@ -265,7 +308,7 @@ func (s *server) cliOauthHandler(method string, timeout time.Duration) http.Hand
 	}
 }
 
-// argsHaveLiteralKey reports whether a CLI-style `agent add` argv carries a
+// argsHaveLiteralKey reports whether a CLI-style `model add` argv carries a
 // LITERAL --key secret (as opposed to a "$ENV" reference, which is not a secret).
 // Only a literal key must be sealed into the vault, so only then is the attested
 // forwarding path required. Handles both "--key VAL" and "--key=VAL".
@@ -289,7 +332,7 @@ func argsHaveLiteralKey(args []string) bool {
 	return false
 }
 
-// handleAgentAdd proxies POST /api/agents/add. It mirrors agentOpHandler's
+// handleModelAdd proxies POST /api/models/add. It mirrors modelOpHandler's
 // {"args":[...]} body, but when the argv carries a LITERAL --key the secret must
 // be sealed server-side. A plain UDS hop authenticates only as the (root) webchat
 // process — an empty, un-writable vault principal — so the seal is refused. That
@@ -298,7 +341,7 @@ func argsHaveLiteralKey(args []string) bool {
 // webuser:<user>; when that principal holds the vault:write:server capability the
 // key lands in the SHARED server vault. The /v1 bearer never enters webchat. A
 // keyless add / $VAR reference needs no attested identity and takes the plain path.
-func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
+func (s *server) handleModelAdd(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Args []string `json:"args"`
 	}
@@ -307,7 +350,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 
-	req := map[string]any{"method": "agent.add"}
+	req := map[string]any{"method": "model.add"}
 	if body.Args != nil {
 		req["args"] = body.Args
 	}
@@ -327,7 +370,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 		writeJSONError(w, http.StatusInternalServerError, "encode request")
 		return
 	}
-	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/agent/add", payload)
+	st, data, err := s.v1RequestWebuser(r.Context(), currentUser(r), http.MethodPost, "/v1/model/add", payload)
 	if err != nil {
 		writeJSONError(w, http.StatusBadGateway, err.Error())
 		return
@@ -335,7 +378,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 	var msg map[string]json.RawMessage
 	if len(data) > 0 {
 		if uerr := json.Unmarshal(data, &msg); uerr != nil {
-			writeJSONError(w, http.StatusBadGateway, "decode agent.add response")
+			writeJSONError(w, http.StatusBadGateway, "decode model.add response")
 			return
 		}
 	}
@@ -346,7 +389,7 @@ func (s *server) handleAgentAdd(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if st != http.StatusOK {
-		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("agent add: status %d", st))
+		writeJSONError(w, http.StatusBadGateway, fmt.Sprintf("model add: status %d", st))
 		return
 	}
 	_ = json.NewEncoder(w).Encode(msg)
@@ -681,4 +724,50 @@ func (s *server) handleLSPDiagnosticsSummary(w http.ResponseWriter, r *http.Requ
 		}
 	}
 	json.NewEncoder(w).Encode(out)
+}
+
+// handleProviderList proxies GET /api/providers -> RPC provider.list, the
+// registry of providers aimee knows how to speak to (name, base URL, auth type,
+// whether it can list its own models). Distinct from GET /api/agents, which
+// reports what is CONFIGURED: this is the menu, that is the order.
+func (s *server) handleProviderList(w http.ResponseWriter, r *http.Request) {
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.list"})
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		// Never hard-fail: the page still renders configured providers from
+		// /api/agents, it just cannot offer the catalog of new ones.
+		fmt.Fprintf(w, `{"providers":[]}`)
+		return
+	}
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// handleProviderModels proxies POST /api/providers/models {name} ->
+// RPC provider.models, asking a provider what models it offers. The reply
+// carries `models` (ids) and `details` (whatever the provider published about
+// each: display name, context window, output ceiling).
+//
+// Most endpoints publish ids only, and one of the configured ones does not even
+// list its own model, so a caller must treat missing detail as "not published"
+// rather than as zero. The error is surfaced verbatim instead of being flattened
+// to an empty list: "this provider cannot list models" and "this provider
+// returned nothing" are different facts for someone deciding what to type.
+func (s *server) handleProviderModels(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name string `json:"name"`
+	}
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if body.Name == "" {
+		writeJSONError(w, http.StatusBadRequest, "provider name required")
+		return
+	}
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.models", "name": body.Name})
+	if err != nil {
+		writeJSONError(w, http.StatusBadGateway, err.Error())
+		return
+	}
+	_ = json.NewEncoder(w).Encode(resp)
 }

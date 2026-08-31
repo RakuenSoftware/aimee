@@ -162,14 +162,14 @@ END $$;
 RESET ROLE;
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM public.kb_audit_event
+  IF (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='vault.rewrap.open.completed')<>1 THEN
     RAISE EXCEPTION 'completed open primary audit mismatch';
   END IF;
 END $$;
 ROLLBACK;
 DO $$ BEGIN
-  IF EXISTS(SELECT 1 FROM public.kb_audit_event
+  IF EXISTS(SELECT 1 FROM public.kb_audit_outbox
              WHERE action='vault.rewrap.open.completed') THEN
     RAISE EXCEPTION 'completed open audit escaped rollback';
   END IF;
@@ -211,7 +211,7 @@ END $$;
 RESET ROLE;
 DO $$
 BEGIN
-  IF (SELECT count(*) FROM public.kb_audit_event
+  IF (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='vault.rewrap.open.idle')<>1 THEN
     RAISE EXCEPTION 'idle open primary audit mismatch';
   END IF;
@@ -230,14 +230,14 @@ BEGIN
 END $$;
 RESET ROLE;
 DO $$ BEGIN
-  IF (SELECT count(*) FROM public.kb_audit_event
+  IF (SELECT count(*) FROM public.kb_audit_outbox
        WHERE action='vault.rewrap.open.idle')<>1 THEN
     RAISE EXCEPTION 'idle open replay duplicated primary audit';
   END IF;
 END $$;
 ROLLBACK;
 DO $$ BEGIN
-  IF EXISTS(SELECT 1 FROM public.kb_audit_event
+  IF EXISTS(SELECT 1 FROM public.kb_audit_outbox
              WHERE action IN ('vault.rewrap.open.idle','unrelated.audit')) THEN
     RAISE EXCEPTION 'idle open audit escaped rollback';
   END IF;

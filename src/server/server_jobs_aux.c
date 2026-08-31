@@ -1,7 +1,7 @@
 /* server/server_jobs_aux.c: RPC handlers for durable delegate jobs and aux routing. */
 #include "aimee.h"
 #include "aux_router.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include <aimee/delegates/delegate_role.h>
 #include "server.h"
 #include "json_fluent.h" /* jo_ok */

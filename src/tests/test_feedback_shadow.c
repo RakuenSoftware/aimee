@@ -7,14 +7,13 @@
 #include <string.h>
 
 #include "aimee.h"
-#include "db.h"
-#include "db1.h"
-#include "db2.h"
-#include "db2_test_shim.h"
+#include "db1_client/db1.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_test_util.h"
 #include "memory.h"
 #include "modules/memory/memory_graph_fusion.h"
-#include "../db2/shadow_delta.h"
+#include "../modules/db2/c/shadow_delta.h"
 
 static char g_db_path[512];
 
@@ -24,14 +23,12 @@ static void setup(void)
    int fd = platform_mkstemp(g_db_path, sizeof(g_db_path), "aim");
    assert(fd >= 0);
    close(fd);
-   assert(db1_init(g_db_path) == 0);
    db2_test_shim_open_path(g_db_path);
 }
 
 static void teardown(void)
 {
    db2_test_shim_close();
-   db1_shutdown();
    platform_test_remove_sqlite(g_db_path);
    g_db_path[0] = '\0';
 }

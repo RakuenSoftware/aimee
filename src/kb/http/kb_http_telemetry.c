@@ -13,7 +13,7 @@
 #include "kb_http_telemetry.h"
 
 #include "cJSON.h"
-#include "db2_tenant.h"
+#include "modules/db2/c/db2_tenant.h"
 #include "kb_identity.h"
 #include "kb_reqctx.h"
 #include "kb_verifier.h"
@@ -28,12 +28,18 @@
  * Empty = no token configured. Set once at startup by kb_http_set_telemetry_token;
  * compared constant-time against the presented bearer's SHA-256. */
 static char g_telemetry_token_hash[65];
+static int g_telemetry_enabled;
 
 void kb_http_set_telemetry_token(const char *hash)
 {
    g_telemetry_token_hash[0] = '\0';
    if (hash && hash[0])
       snprintf(g_telemetry_token_hash, sizeof(g_telemetry_token_hash), "%s", hash);
+}
+
+void kb_http_set_telemetry_enabled(int enabled)
+{
+   g_telemetry_enabled = enabled ? 1 : 0;
 }
 
 static int err(char *out, int cap, int status, const char *msg)
@@ -134,6 +140,41 @@ static int do_metrics(char *out, int cap)
    return 200;
 }
 
+int kb_http_telemetry_scrape(const char *presented, int trusted_transport, int require_bearer,
+                             char *out_buf, int out_cap)
+{
+   if (!out_buf || out_cap <= 0)
+      return 500;
+   if (!g_telemetry_enabled)
+      return err(out_buf, out_cap, 404, "not found");
+   if (require_bearer)
+   {
+      if (strnlen(g_telemetry_token_hash, sizeof(g_telemetry_token_hash)) != 64)
+         return err(out_buf, out_cap, 503, "metrics bearer is not configured");
+      if (!presented || !presented[0])
+         return err(out_buf, out_cap, 401, "authentication required");
+      char presented_hash[65];
+      org_telemetry_sha256_hex(presented, presented_hash);
+      if (!org_telemetry_token_hash_eq(presented_hash, g_telemetry_token_hash))
+         return err(out_buf, out_cap, 401, "unauthorized");
+   }
+   else if (!trusted_transport)
+      return err(out_buf, out_cap, 503, "authenticated metrics transport required");
+
+   int http = 0;
+   if (begin_owner_scope(out_buf, out_cap, &http) != 0)
+      return http;
+   int status = do_metrics(out_buf, out_cap);
+   if (status >= 200 && status < 300)
+   {
+      if (db2_tenant_scope_commit() != 0)
+         return err(out_buf, out_cap, 500, "commit failed");
+   }
+   else
+      db2_tenant_scope_rollback();
+   return status;
+}
+
 /* Parse + ingest one content-free telemetry metric. origin_cn is SERVER-SET (never
  * body text); team is NULL in P9a (never trusted from the body). Assumes an open
  * scope. Returns an HTTP status and writes {"result":...}; does NOT commit. */
@@ -204,6 +245,8 @@ int kb_http_telemetry_token_route(const char *method, const char *path, const ch
    int is_ingest = (strcmp(path, "/v1/telemetry/metrics") == 0);
    if (!is_metrics && !is_ingest)
       return -1; /* not a token-eligible route */
+   if (!g_telemetry_enabled)
+      return -1;
    /* No token configured (a valid hash is exactly 64 hex chars), or none
     * presented -> fall through to the admin path. */
    if (strnlen(g_telemetry_token_hash, 65) != 64)
@@ -405,9 +448,11 @@ int kb_http_telemetry_route(const char *method, const char *path, const char *qu
    if (!path)
       return -1;
    if (strcmp(path, "/v1/metrics") == 0)
-      return handle_admin_metrics(method, out_buf, out_cap);
+      return g_telemetry_enabled ? handle_admin_metrics(method, out_buf, out_cap)
+                                 : err(out_buf, out_cap, 404, "not found");
    if (strcmp(path, "/v1/telemetry/metrics") == 0)
-      return handle_admin_ingest(method, body, out_buf, out_cap);
+      return g_telemetry_enabled ? handle_admin_ingest(method, body, out_buf, out_cap)
+                                 : err(out_buf, out_cap, 404, "not found");
    if (strcmp(path, "/v1/telemetry/allow") == 0)
    {
       if (strcmp(method, "GET") == 0)

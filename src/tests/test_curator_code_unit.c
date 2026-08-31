@@ -13,7 +13,8 @@
 #include <unistd.h>
 #include <sqlite3.h>
 
-#include "db2_test_shim.h"
+#include <aimee/core/event_bus/module_runtime.h>
+#include "modules/db2/c/db2_test_shim.h"
 #include "cJSON.h"
 #include "config.h"
 #include "kb_curator_extract.h"
@@ -21,29 +22,25 @@
 #include "kb_curator_grounding.h"
 #include "kb_curator_provider.h"
 #include "kb_curator_sidecar.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* The deep-curator code-extract gate is now ON by compiled default, but the
  * gate-off tests below need it OFF. Point AIMEE_HOME at an isolated temp config
- * with the extract gates disabled so the real config_load() the queue functions
+ * with the extract gates disabled so the queue functions
  * call reports the gate off deterministically (and the run never touches the
  * developer's real ~/.config/aimee). */
-/* The single place this test binary names config_t. Every case that needs a
- * different extract-code gate goes through here rather than loading its own copy:
- * config_t is a secret of the config module, and one reader is the budget. */
 static void ccu_set_extract_code_gate(int on)
 {
-   config_t cfg;
-   config_load(&cfg);
-   cfg.kb_curator_extract_code_enabled = on;
-   cfg.kb_curator_extract_docs_enabled = 0;
+   assert(config_set_kb_curator_extract_code_enabled(on) == 0);
+   assert(config_set_kb_curator_extract_docs_enabled(0) == 0);
    if (!on)
-      cfg.synthesis_endpoint[0] = '\0';
-   config_save(&cfg);
+      assert(config_set_synthesis_endpoint("") == 0);
 }
 
 static void test_force_curator_gate_off(void)
 {
-   static char dir[] = "/tmp/aimee-curtest-XXXXXX";
+   static char dir[256];
+   snprintf(dir, sizeof dir, "%s/aimee-curtest-XXXXXX", platform_tmpdir());
    static int done = 0;
    if (done)
       return;
@@ -60,6 +57,38 @@ int kb_curator_queue_code_unit(const char *project, const char *file_path, const
                                int line);
 int kb_curator_queue_code_units_for_project(const char *project, const char *root_path);
 int db2_artifact_count(const char *kind, const char *state);
+
+extern aimee_module_status_t aimee_kb_synthesis_module_handler(const aimee_module_invocation_t *,
+                                                               const uint8_t *, uint32_t, uint8_t *,
+                                                               uint32_t, uint32_t *, void *);
+
+int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocation)
+{
+   (void)invocation;
+   return 0;
+}
+
+static int grounding_provider_fail;
+
+static int grounding_module_provider(aimee_kb_synthesis_claim_kind_t claim_kind,
+                                     const char *const *claims, uint32_t claim_count,
+                                     const char *const *callees, uint32_t callee_count,
+                                     aimee_kb_synthesis_grounding_decision_t *decision)
+{
+   if (grounding_provider_fail)
+      return -1;
+   uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN];
+   uint8_t response[AIMEE_KB_SYNTHESIS_RESPONSE_LEN];
+   uint32_t response_len = 0;
+   aimee_module_invocation_t invocation = {.stage_id = AIMEE_KB_SYNTHESIS_STAGE_GROUNDING};
+   if (aimee_kb_synthesis_request_encode(claim_kind, claims, claim_count, callees, callee_count,
+                                         request, sizeof(request)) != 0 ||
+       aimee_kb_synthesis_module_handler(&invocation, request, sizeof(request), response,
+                                         sizeof(response), &response_len,
+                                         NULL) != AIMEE_MODULE_STATUS_OK)
+      return -1;
+   return aimee_kb_synthesis_response_decode(response, response_len, decision);
+}
 
 /* ── gate-off tests (no DB needed) ─────────────────────────────────────── */
 
@@ -243,67 +272,39 @@ static void test_queue_dedup_via_conflict(void)
    printf("  PASS: test_queue_dedup_via_conflict\n");
 }
 
-/* ── pure grounding-gate tests (no DB) ──────────────────────────────────── */
+/* ── event-bus grounding seam tests (no DB) ─────────────────────────────── */
 
-static void test_grounding_side_effecting_predicate(void)
+static void test_grounding_requires_provider(void)
 {
-   /* Names that previously broke a mis-sorted bsearch table must still match. */
-   assert(kb_curator_callee_is_side_effecting("write") == 1);
-   assert(kb_curator_callee_is_side_effecting("fopen") == 1);
-   assert(kb_curator_callee_is_side_effecting("execl") == 1); /* execl < execle */
-   assert(kb_curator_callee_is_side_effecting("fdatasync") == 1);
-   assert(kb_curator_callee_is_side_effecting("PQexec") == 1); /* uppercase */
-   assert(kb_curator_callee_is_side_effecting("sqlite3_step") == 1);
-   assert(kb_curator_callee_is_side_effecting("strlen") == 0);
-   assert(kb_curator_callee_is_side_effecting("memcpy") == 0);
-   assert(kb_curator_callee_is_side_effecting("") == 0);
-   assert(kb_curator_callee_is_side_effecting(NULL) == 0);
-   printf("  PASS: test_grounding_side_effecting_predicate\n");
+   const char *callees[] = {"write"};
+   aimee_kb_synthesis_grounding_decision_t decision;
+   kb_curator_grounding_register_provider(NULL);
+   assert(kb_curator_grounding_decide(NULL, callees, 1, &decision) == -1);
+   printf("  PASS: test_grounding_requires_provider\n");
 }
 
-static void test_grounding_claims_no_side_effects(void)
-{
-   cJSON *p1 = cJSON_Parse("{\"side_effects\":[]}");
-   assert(kb_curator_payload_claims_no_side_effects(p1) == 1);
-   cJSON_Delete(p1);
-
-   cJSON *p2 = cJSON_Parse("{\"intent\":\"x\"}"); /* key absent */
-   assert(kb_curator_payload_claims_no_side_effects(p2) == 1);
-   cJSON_Delete(p2);
-
-   cJSON *p3 = cJSON_Parse("{\"side_effects\":[\"none\"]}");
-   assert(kb_curator_payload_claims_no_side_effects(p3) == 1);
-   cJSON_Delete(p3);
-
-   cJSON *p4 = cJSON_Parse("{\"side_effects\":[\"writes to disk\"]}");
-   assert(kb_curator_payload_claims_no_side_effects(p4) == 0);
-   cJSON_Delete(p4);
-
-   assert(kb_curator_payload_claims_no_side_effects(NULL) == 1);
-   printf("  PASS: test_grounding_claims_no_side_effects\n");
-}
-
-static void test_grounding_contradicts_pure(void)
+static void test_grounding_module_decisions(void)
 {
    const char *se_callees[] = {"strlen", "write"};
    const char *clean_callees[] = {"strlen", "memcpy"};
-   char reason[64];
+   aimee_kb_synthesis_grounding_decision_t decision;
 
    cJSON *claims_none = cJSON_Parse("{\"side_effects\":[]}");
-   assert(kb_curator_grounding_contradicts(claims_none, se_callees, 2, reason, sizeof(reason)) ==
-          1);
-   assert(strcmp(reason, "write") == 0);
-   assert(kb_curator_grounding_contradicts(claims_none, clean_callees, 2, reason, sizeof(reason)) ==
-          0);
-   assert(reason[0] == '\0');
+   assert(kb_curator_grounding_decide(claims_none, se_callees, 2, &decision) == 0);
+   assert(decision.contradicts == 1);
+   assert(strcmp(decision.reason, "write") == 0);
+   assert(kb_curator_grounding_decide(claims_none, clean_callees, 2, &decision) == 0);
+   assert(decision.contradicts == 0);
+   assert(decision.reason[0] == '\0');
    cJSON_Delete(claims_none);
 
    /* Honest non-empty claim never contradicts, even with a side-effecting edge. */
    cJSON *honest = cJSON_Parse("{\"side_effects\":[\"writes\"]}");
-   assert(kb_curator_grounding_contradicts(honest, se_callees, 2, reason, sizeof(reason)) == 0);
+   assert(kb_curator_grounding_decide(honest, se_callees, 2, &decision) == 0);
+   assert(decision.contradicts == 0);
    cJSON_Delete(honest);
 
-   printf("  PASS: test_grounding_contradicts_pure\n");
+   printf("  PASS: test_grounding_module_decisions\n");
 }
 
 /* ── DB-backed full-path gate tests ─────────────────────────────────────── */
@@ -314,14 +315,16 @@ static void test_grounding_contradicts_pure(void)
  * structural grounding gate has something to check. Reports the resulting
  * artifact/audit counts. */
 static void run_extract_scenario(const char *side_effects_json, const char *callee,
-                                 int *proposed_out, int *rejected_out, int *audit_out)
+                                 int *proposed_out, int *rejected_out, int *audit_out,
+                                 int *pending_out)
 {
    db2_test_shim_open();
    sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
    assert(db != NULL);
 
    /* A real source file on disk: ccu_read_body() fopen()s job.file_path. */
-   char src_path[] = "/tmp/aimee_ccu_src_XXXXXX";
+   char src_path[256];
+   snprintf(src_path, sizeof src_path, "%s/aimee_ccu_src_XXXXXX", platform_tmpdir());
    int src_fd = mkstemp(src_path);
    assert(src_fd >= 0);
    const char *src_body = "int target_fn(void) { return 0; }\n";
@@ -330,7 +333,8 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
 
    /* The stubbed sidecar response. `cat <file>` ignores the redirected stdin
     * the C harness supplies and just prints this canned JSON. */
-   char resp_path[] = "/tmp/aimee_ccu_resp_XXXXXX";
+   char resp_path[256];
+   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
    int resp_fd = mkstemp(resp_path);
    assert(resp_fd >= 0);
    char resp[1024];
@@ -383,6 +387,14 @@ static void run_extract_scenario(const char *side_effects_json, const char *call
    assert(sqlite3_step(st) == SQLITE_ROW);
    *audit_out = sqlite3_column_int(st, 0);
    sqlite3_finalize(st);
+   if (pending_out)
+   {
+      assert(sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM kb_code_unit_jobs WHERE status='pending'",
+                                -1, &st, NULL) == SQLITE_OK);
+      assert(sqlite3_step(st) == SQLITE_ROW);
+      *pending_out = sqlite3_column_int(st, 0);
+      sqlite3_finalize(st);
+   }
 
    db2_test_shim_close();
    unlink(src_path);
@@ -393,7 +405,7 @@ static void test_extract_rejects_false_no_side_effects(void)
 {
    /* Claims no side effects, but the call graph shows a write() edge. */
    int proposed = -1, rejected = -1, audit = -1;
-   run_extract_scenario("[]", "write", &proposed, &rejected, &audit);
+   run_extract_scenario("[]", "write", &proposed, &rejected, &audit, NULL);
    assert(proposed == 0);
    assert(rejected == 1);
    assert(audit == 1); /* rejection recorded in the audit_events log */
@@ -404,7 +416,7 @@ static void test_extract_accepts_honest_claim(void)
 {
    /* Honest non-empty claim with the same edge: committed, not rejected. */
    int proposed = -1, rejected = -1, audit = -1;
-   run_extract_scenario("[\"writes to disk\"]", "write", &proposed, &rejected, &audit);
+   run_extract_scenario("[\"writes to disk\"]", "write", &proposed, &rejected, &audit, NULL);
    assert(proposed == 1);
    assert(rejected == 0);
    assert(audit == 0);
@@ -415,11 +427,24 @@ static void test_extract_accepts_pure_function(void)
 {
    /* Claims no side effects and only calls a pure function: committed. */
    int proposed = -1, rejected = -1, audit = -1;
-   run_extract_scenario("[]", "strlen", &proposed, &rejected, &audit);
+   run_extract_scenario("[]", "strlen", &proposed, &rejected, &audit, NULL);
    assert(proposed == 1);
    assert(rejected == 0);
    assert(audit == 0);
    printf("  PASS: test_extract_accepts_pure_function\n");
+}
+
+static void test_extract_retries_when_grounding_module_fails(void)
+{
+   int proposed = -1, rejected = -1, audit = -1, pending = -1;
+   grounding_provider_fail = 1;
+   run_extract_scenario("[]", "write", &proposed, &rejected, &audit, &pending);
+   grounding_provider_fail = 0;
+   assert(proposed == 0);
+   assert(rejected == 0);
+   assert(audit == 0);
+   assert(pending == 1);
+   printf("  PASS: grounding module failure rolls back and requeues extraction\n");
 }
 
 /* The curator drain runs server-side, where thin-client-ingested files do not
@@ -435,7 +460,8 @@ static void test_extract_reads_body_from_db2_when_file_absent(void)
    assert(db != NULL);
 
    const char *src_body = "int target_fn(void) { return 0; }\n";
-   char resp_path[] = "/tmp/aimee_ccu_resp_XXXXXX";
+   char resp_path[256];
+   snprintf(resp_path, sizeof resp_path, "%s/aimee_ccu_resp_XXXXXX", platform_tmpdir());
    int resp_fd = mkstemp(resp_path);
    assert(resp_fd >= 0);
    const char *resp =
@@ -693,7 +719,8 @@ static void test_pick_sidecar_command_resolution(void)
 
    /* (b) first READABLE candidate is chosen; a missing one ahead of it is skipped,
     *     and a 0644 (non-executable) file still qualifies. */
-   char tmpl[] = "/tmp/aimee_sidecar_XXXXXX";
+   char tmpl[256];
+   snprintf(tmpl, sizeof tmpl, "%s/aimee_sidecar_XXXXXX", platform_tmpdir());
    int fd = mkstemp(tmpl);
    assert(fd >= 0);
    close(fd);
@@ -872,6 +899,9 @@ static void test_queue_code_units_skipped_without_synthesis_endpoint(void)
 
 int main(void)
 {
+   if (db2_test_shim_skip_on_postgres("curator_code_unit"))
+      return 0;
+
    printf("curator_code_unit:\n");
 
    test_force_curator_gate_off();
@@ -886,13 +916,14 @@ int main(void)
    test_provider_outage_requeues_code_unit();
    test_queue_dedup_via_conflict();
 
-   test_grounding_side_effecting_predicate();
-   test_grounding_claims_no_side_effects();
-   test_grounding_contradicts_pure();
+   test_grounding_requires_provider();
+   kb_curator_grounding_register_provider(grounding_module_provider);
+   test_grounding_module_decisions();
 
    test_extract_rejects_false_no_side_effects();
    test_extract_accepts_honest_claim();
    test_extract_accepts_pure_function();
+   test_extract_retries_when_grounding_module_fails();
    test_extract_reads_body_from_db2_when_file_absent();
    test_pick_sidecar_command_resolution();
    test_describe_wait_status();

@@ -4,13 +4,16 @@
 #include "aimee.h"
 #include "config.h"
 #include "css_analyze.h"
-#include "db2_test_shim.h"
+#include "css_render_oracle.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
-#include "../db2/code_index.h"
-#include "../db2/css_graph.h"
-#include "../db2/css_migration.h"
-#include "../db2/css_render.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/css_graph.h"
+#include "../modules/db2/c/css_migration.h"
+#include "../modules/db2/c/css_render.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -18,7 +21,7 @@
 #include <string.h>
 #include <sqlite3.h>
 
-/* Point config_load at an isolated HOME holding an aimee.yaml with the given
+/* Point legacy_config_read at an isolated HOME holding an aimee.yaml with the given
  * css_style_graph_enabled value (AIMEE_NO_CACHE bypasses the mtime cache). */
 static void set_config(int css_enabled)
 {
@@ -44,8 +47,67 @@ static const char *SNAP_A =
 static const char *SNAP_B =
     "{\"nodes\":[{\"ref\":\".btn\",\"computed\":{\"color\":\"rgb(255, 0, 0)\"}}]}";
 
+static int compare_result;
+static int compare_invalid;
+
+static int compare_provider(const char *before_json, const char *after_json, int *before_valid,
+                            int *after_valid, int *available, int *equivalent, int *diff_count)
+{
+   if (compare_result != 0)
+      return compare_result;
+   css_render_snapshot_t *before = before_json ? css_render_snapshot_parse(before_json) : NULL;
+   css_render_snapshot_t *after = after_json ? css_render_snapshot_parse(after_json) : NULL;
+   css_render_result_t *result = css_render_oracle_compare(before, after);
+   assert(result);
+   *before_valid = compare_invalid == 1 ? 2 : before != NULL;
+   *after_valid = after != NULL;
+   *available = result->available;
+   *equivalent = result->equivalent;
+   *diff_count = result->diff_count;
+   if (compare_invalid == 2)
+      *diff_count = 1;
+   else if (compare_invalid == 3)
+      *diff_count = -1;
+   css_render_result_free(result);
+   css_render_snapshot_free(before);
+   css_render_snapshot_free(after);
+   return 0;
+}
+
+static void test_injected_compare_provider(void)
+{
+   int before_valid = 7, after_valid = 7, available = 7, equivalent = 7, diff_count = 7;
+   aimee_db2_register_css_render_compare_provider(NULL);
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   assert(before_valid == 0 && after_valid == 0 && available == 0 && equivalent == 0 &&
+          diff_count == 0);
+
+   aimee_db2_register_css_render_compare_provider(compare_provider);
+   compare_result = 1;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_result = 0;
+   compare_invalid = 1;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 2;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 3;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == -1);
+   compare_invalid = 0;
+   assert(db2_css_render_compare(SNAP_A, SNAP_A, &before_valid, &after_valid, &available,
+                                 &equivalent, &diff_count) == 0);
+   assert(before_valid == 1 && after_valid == 1 && available == 1 && equivalent == 1 &&
+          diff_count == 0);
+}
+
 int main(void)
 {
+   test_injected_compare_provider();
+
    db2_test_shim_open();
    set_config(1);
 
@@ -89,9 +151,9 @@ int main(void)
 
    /* A re-added checkout cannot read the old generation's rendered evidence;
     * the next capture creates a generation-2 row while retaining history. */
-   sqlite3 *db = (sqlite3 *)db2_test_shim_handle();
-   assert(sqlite3_exec(db, "UPDATE projects SET current_generation=2 WHERE name='rend'", NULL, NULL,
-                       NULL) == SQLITE_OK);
+   char gen_err[256] = "";
+   assert(aimee_pg_exec(db2_conn(), "UPDATE projects SET current_generation=2 WHERE name='rend'",
+                        gen_err, sizeof(gen_err)) == 0);
    got = NULL;
    assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 0);
    assert(got == NULL);
@@ -99,13 +161,15 @@ int main(void)
    assert(db2_css_render_snapshot_get("rend", "Button.tsx", "before", &got) == 1);
    assert(got && strcmp(got, SNAP_B) == 0);
    free(got);
-   sqlite3_stmt *count = NULL;
-   assert(sqlite3_prepare_v2(db,
-                             "SELECT COUNT(*) FROM css_render_snapshots"
-                             " WHERE project='rend' AND unit_path='Button.tsx' AND phase='before'",
-                             -1, &count, NULL) == SQLITE_OK);
-   assert(sqlite3_step(count) == SQLITE_ROW && sqlite3_column_int(count, 0) == 2);
-   sqlite3_finalize(count);
+   aimee_pg_stmt_t *count =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT COUNT(*) FROM css_render_snapshots"
+                        " WHERE project='rend' AND unit_path='Button.tsx' AND phase='before'",
+                        gen_err, sizeof(gen_err));
+   assert(count);
+   assert(aimee_pg_step(count, gen_err, sizeof(gen_err)) == AIMEE_PG_ROW &&
+          aimee_pg_column_int(count, 0) == 2);
+   aimee_pg_finalize(count);
 
    /* a unit with no snapshots -> conservative unknown (available=0). */
    assert(db2_css_render_oracle_evaluate("rend", "Ghost.tsx", "t6", &v) == 0);

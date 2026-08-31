@@ -188,6 +188,11 @@ void text_trim_partial_utf8(char *s);
  * UTF-8 boundary such as Postgres. Returns the number of bytes replaced. */
 size_t text_sanitize_utf8(char *s);
 
+/* Return non-zero when a NUL-terminated string contains only well-formed UTF-8.
+ * NULL is treated as an empty string. Unlike text_sanitize_utf8(), this never
+ * modifies the input. */
+int text_is_valid_utf8(const char *s);
+
 /* Basic Porter-like stemming. Result written to buf. Returns buf. */
 char *stem_word(const char *word, char *buf, size_t buf_len);
 
@@ -389,8 +394,9 @@ int git_net_exec(const char *cwd, const char *const *git_argv, char **out_buf, s
 /* Returns 1 if string contains shell metacharacters (;|&$`(){}><\n\r'"\\). */
 int has_shell_metachar(const char *s);
 
-/* Shell-escape a string for use inside single quotes (' -> '\''). Caller frees. */
-char *shell_escape(const char *raw);
+/* Return one complete POSIX shell token, including its quote delimiters.
+ * Callers interpolate it as bare %s and must not add another quote layer. */
+char *shell_quote(const char *raw);
 
 /* printf-append into buf at pos, returning the new pos clamped to [0, cap].
  * Use instead of the unsafe `pos += snprintf(buf + pos, cap - pos, ...)` idiom:
@@ -446,5 +452,11 @@ int aimee_main_clone_edits_allowed(const char *repo_cwd);
  * return aimee_path_is_main_clone for it — the guard keys on the file being
  * edited, not just the session cwd. */
 int aimee_edit_target_in_main_clone(const char *file_path, const char *cwd);
+
+/* Return the largest prefix of `remaining` bytes that is at most `max_bytes`
+ * and ends on a UTF-8 character boundary. The input must be valid UTF-8.
+ * Returns 0 only when max_bytes is 0 or too small to hold the first complete
+ * character (a max of at least 4 bytes guarantees progress for valid input). */
+size_t text_utf8_chunk_len(const char *s, size_t remaining, size_t max_bytes);
 
 #endif /* DEC_UTIL_H */

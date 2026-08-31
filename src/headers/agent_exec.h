@@ -107,6 +107,9 @@ int agent_error_is_retryable(const char *error);
  * saturation refusal (AGENT_RC_AT_LIMIT) or a retryable provider error; false for
  * success (0) or a non-retryable hard failure. */
 int agent_rc_should_try_another(int rc, const char *error);
+/* Remaining milliseconds in the one request-wide delegate tool-loop budget.
+ * Returns 0 when no request cap exists and -1 after an existing cap expires. */
+int agent_request_tool_loop_remaining_ms(const agent_config_t *cfg);
 int agent_try_same_tier_fallback(agent_config_t *cfg, agent_t **current, const char *role,
                                  const char *system_prompt, const char *user_prompt, int max_tokens,
                                  int enforce_writes, agent_result_t *out, int rc);
@@ -183,7 +186,6 @@ void agent_set_ingress_source(const char *source);
 int agent_get_stats(const char *name, agent_stats_t *out, int max);
 
 /* Task type classification */
-task_type_t task_type_classify(const char *prompt);
 
 /* Resolve the effective max-turns limit for an agent invocation.
  * Primary sessions (role == NULL) ignore agent->max_turns; only delegates cap. */
@@ -199,6 +201,19 @@ const char *task_type_name(task_type_t type);
 size_t agent_exec_context_budget_chars(const agent_t *agent);
 char *agent_build_exec_context(const agent_t *agent, const agent_network_t *network,
                                const char *custom_prompt);
+/* Opening instruction for a task type. A review must be told to answer; an
+ * execution agent must be told to act. Pure so the choice is testable. */
+/* The task a delegate is actually running. A declared role wins over guessing
+ * from prose, which cannot be trusted for a review: the panel prompt contains
+ * bug-fix vocabulary and the classifier scans its keyword table in order. */
+task_type_t agent_task_type_for_role(const char *role);
+
+const char *agent_exec_instructions(task_type_t task_type);
+
+char *agent_build_exec_context_for_role(const agent_t *agent, const agent_network_t *network,
+                                        const char *role, const char *custom_prompt,
+                                        int skip_kb_context);
+
 char *agent_build_exec_context_ex(const agent_t *agent, const agent_network_t *network,
                                   const char *custom_prompt, int skip_kb_context);
 void agent_print_context(const agent_config_t *cfg);
@@ -227,10 +242,6 @@ void agent_write_metrics(void);
 void agent_introspect_env(void);
 void agent_write_manifest(const char *run_id, const agent_result_t *result, const char *role);
 char *agent_load_project_contract(const char *project_root);
-/* Compact a raw tool result string using application config.
- * tool_name may be NULL to skip per-tool overrides. Returns a heap-allocated
- * string bounded by AGENT_TOOL_OUTPUT_MAX; caller must free(). */
-char *agent_compress_tool_result(const char *raw, size_t raw_len, const char *tool_name);
 
 /* Pure clamp half of agent_tool_output_cap(): map a configured
  * tool_output_max_bytes value to an effective per-result cap. 0/negative ->
@@ -351,6 +362,13 @@ static inline int agent_http_effective_connect_timeout_ms(int request_timeout_ms
 }
 
 int agent_http_get(const char *url, const char *extra_headers, char **response_buf, int timeout_ms);
+/* GET that REPORTS a 3xx redirect target in `location` rather than following it.
+ * Deliberately non-following: a forge's log endpoint redirects to pre-signed
+ * third-party storage, and replaying the request there would hand that host the
+ * Authorization header. Only the caller knows which of its headers are
+ * host-bound, so the caller issues the second request itself. */
+int agent_http_get_location(const char *url, const char *extra_headers, char *location,
+                            size_t location_cap, char **response_buf, int timeout_ms);
 /* SSRF-safe GET: connect to the caller-validated numeric `pinned_ip` (no DNS
  * re-resolution) with Host/SNI still taken from the URL host. */
 int agent_http_get_pinned(const char *url, const char *pinned_ip, const char *extra_headers,

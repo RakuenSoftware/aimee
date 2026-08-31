@@ -78,6 +78,17 @@ char *prompt_prepend_principles(aimee_mode_t mode, const char *base_prompt);
  * prompt_principles_text). */
 const char *prompt_code_principles_text(void);
 
+/* Turn-register instructions, or NULL when `enabled` is 0.
+ *
+ * The register GRAMMAR is parsed by the Go economizer, which classifies a turn and
+ * session_compact's record path reads it to decide what belongs under Key Decisions — but
+ * nothing ever ASKED an agent to emit one, so real transcripts contain none and that
+ * extraction is empty in practice. This is the missing half: the request.
+ *
+ * A pure function of its argument so the gate and the wording are testable; the caller
+ * supplies config_fold_register_enabled(). */
+const char *prompt_turn_registers_text(int enabled);
+
 /* Engineer-mode form of prompt_prepend_principles. Caller must free(). */
 char *prompt_prepend_code_principles(const char *base_prompt);
 
@@ -103,6 +114,17 @@ char *prompt_build(prompt_tier_t tier, const char *cwd, const char *custom_file)
  * Returns a heap-allocated string; caller must free(). NULL only on OOM. */
 char *prompt_build_mode(aimee_mode_t mode, prompt_tier_t tier, const char *cwd,
                         const char *custom_file);
+
+/* Compose the manager-workflow block from explicit flags. Returns NULL when the
+ * block is withheld, otherwise a heap-allocated string the caller frees.
+ *
+ * Takes flags rather than reading config so the composition is testable without
+ * a config file on disk: what the levers COMPOSE TO is policy, and policy should
+ * not need I/O to exercise. prompt_build_mode supplies the config values.
+ *
+ * delegates_enabled withholds the whole block, not just the delegation
+ * paragraph -- see the definition for why. */
+char *prompt_manager_block(int block_enabled, int delegates_enabled, int review_enabled);
 
 /* Append lower-priority disposition guidance derived from config.
  * Returns a heap-allocated prompt string; caller must free().

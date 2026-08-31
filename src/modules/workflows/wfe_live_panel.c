@@ -31,7 +31,6 @@
 
 #include "agent_config.h"
 #include "config.h"
-#include "delegate_ensemble.h"
 #include "log.h"
 #include "roundtable_verify.h"
 
@@ -74,27 +73,28 @@ static long wfe_panel_seat_wait_secs(void)
  * look up callers, writers and alternatives themselves. The engine's own REVIEW
  * round instruction supplies the structured-items output contract
  * (severity/category/location/summary/recommendation + replayable evidence). */
+#define REVIEW_TASK_FORMAT                                                                         \
+   "Review the CHANGE UNDER REVIEW below AGAINST the ORIGINAL REQUEST below.\n\n"                  \
+   "FOCUS: %s\n\nORIGINAL REQUEST:\n%s\n\n"                                                        \
+   "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"                                          \
+   "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "               \
+   "The diff shows what CHANGED; it does not show whether the change is REAL. Look "               \
+   "the rest up — do not infer it from the diff:\n"                                                \
+   "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "            \
+   "Name the path from a real entrypoint to this code in the artifact that actually "              \
+   "ships. Code with no caller, or whose only caller needs a binary or config the "                \
+   "deployment lacks, is inert — that is a blocking defect no matter how correct the "             \
+   "code reads.\n"                                                                                 \
+   "2. PRODUCT: every added file must be something we ship. Search for what writes it. "           \
+   "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"               \
+   "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "            \
+   "confirm the replacement it points people to actually exists and works on the "                 \
+   "surface it targets. A rule with no working alternative is breakage.\n\n"                       \
+   "For every item, location is \"file:line\" from the change wherever possible, and a "           \
+   "blocking severity REQUIRES reproducible factual evidence about this code."
+
 static char *build_review_task(const wfe_review_packet_t *pkt)
 {
-   static const char *fmt =
-       "Review the CHANGE UNDER REVIEW below AGAINST the ORIGINAL REQUEST below.\n\n"
-       "FOCUS: %s\n\nORIGINAL REQUEST:\n%s\n\n"
-       "CHANGE UNDER REVIEW (diff vs the base repo):\n%s\n\n"
-       "You have aimee's tools (code_search, find_symbol, search_memory, search_docs). "
-       "The diff shows what CHANGED; it does not show whether the change is REAL. Look "
-       "the rest up — do not infer it from the diff:\n"
-       "1. REACHABLE: for new behaviour, especially a guard/gate/check, find its callers. "
-       "Name the path from a real entrypoint to this code in the artifact that actually "
-       "ships. Code with no caller, or whose only caller needs a binary or config the "
-       "deployment lacks, is inert — that is a blocking defect no matter how correct the "
-       "code reads.\n"
-       "2. PRODUCT: every added file must be something we ship. Search for what writes it. "
-       "Run bookkeeping, scope/intent records and scratch files are not deliverables.\n"
-       "3. ALTERNATIVE EXISTS: if the change forbids or removes a way of doing something, "
-       "confirm the replacement it points people to actually exists and works on the "
-       "surface it targets. A rule with no working alternative is breakage.\n\n"
-       "For every item, location is \"file:line\" from the change wherever possible, and a "
-       "blocking severity REQUIRES reproducible factual evidence about this code.";
    const char *focus =
        (pkt->focus && pkt->focus[0]) ? pkt->focus : "correctness, quality, and completeness";
    const char *proposal = (pkt->proposal && pkt->proposal[0]) ? pkt->proposal : "(none provided)";
@@ -104,20 +104,22 @@ static char *build_review_task(const wfe_review_packet_t *pkt)
    /* The former buffer already used strlen() of the complete request and diff,
     * despite formatting only 4000 request bytes. Exact sizing therefore reduces
     * allocation while making silent content truncation impossible. */
-   int needed = snprintf(NULL, 0, fmt, focus, proposal, diff);
+   int needed = snprintf(NULL, 0, REVIEW_TASK_FORMAT, focus, proposal, diff);
    if (needed < 0)
       return NULL;
    size_t cap = (size_t)needed + 1;
    char *buf = malloc(cap);
    if (!buf)
       return NULL;
-   if (snprintf(buf, cap, fmt, focus, proposal, diff) != needed)
+   if (snprintf(buf, cap, REVIEW_TASK_FORMAT, focus, proposal, diff) != needed)
    {
       free(buf);
       return NULL;
    }
    return buf;
 }
+
+#undef REVIEW_TASK_FORMAT
 
 /* Convene the review roundtable through the engine and map the verified items
  * to per-lens verdicts. Returns the number of lenses filled (nlens on success,
@@ -195,8 +197,8 @@ static int live_panel(const wfe_review_packet_t *pkt, const char *const *require
 
       /* Read the seats off the PANEL, and apply the two overrides to the PANEL —
        * it is what delegate_roundtable_run consumes. Both used to be written to a
-       * local config_t that was passed on; once the engine took an
-       * ensemble_panel_t built earlier in this loop, writing them to the config_t
+       * local legacy_config_record that was passed on; once the engine took an
+       * ensemble_panel_t built earlier in this loop, writing them to the legacy_config_record
        * became a pair of dead stores that silently dropped the min-successful and
        * replay-verify overrides. */
       const int panel_count = panel.reference_count;

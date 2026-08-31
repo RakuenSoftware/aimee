@@ -34,9 +34,9 @@ log "provision a hardened DB (three-role split + schema + grants) as owner"
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" >/dev/null
 psql -v ON_ERROR_STOP=1 "$ADMIN_URL" -c "CREATE DATABASE $DB" >/dev/null
 psql -v ON_ERROR_STOP=1 "$DB_URL" -c "CREATE EXTENSION IF NOT EXISTS vector; CREATE EXTENSION IF NOT EXISTS pg_trgm" >/dev/null
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$SRC/db2/schema_roles.sql" >/dev/null
-sed 's/__EMBED_DIM__/1024/g' "$SRC/db2/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
-psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$SRC/db2/schema_grants.sql" >/dev/null
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$SRC/modules/db2/c/schema_roles.sql" >/dev/null
+sed 's/__EMBED_DIM__/1024/g' "$SRC/modules/db2/c/schema.sql" | psql -v ON_ERROR_STOP=1 "$DB_URL" -f - >/dev/null
+psql -v ON_ERROR_STOP=1 "$DB_URL" -f "$SRC/modules/db2/c/schema_grants.sql" >/dev/null
 
 log "seed evidence as owner (definer-nested write path is owner-run on the real tier)"
 for i in $(seq 1 6); do

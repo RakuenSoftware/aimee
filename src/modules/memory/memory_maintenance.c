@@ -16,12 +16,11 @@
 #include "util.h"
 #include "cJSON.h"
 #include "db1_optional.h"
-#if !defined(AIMEE_DB2_DISABLED)
-#include "db2/curiosity.h"
-#include "db2/memory_payload.h"
-#include "db2/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
-#endif
+#include "modules/db2/c/curiosity.h"
+#include "modules/db2/c/memory_payload.h"
+#include "modules/db2/c/code_index_ops.h" /* db2_code_index_drift_candidates (auditable-correctness D7) */
 #include "log.h"
+#include "modules/db2/c/db2_internal.h" /* db2_conn */
 #include "memory.h"
 #include <pthread.h>
 #include <string.h>
@@ -54,7 +53,6 @@ void memory_maintenance_metrics(int64_t *runs_total, int64_t *skips_total, int64
    pthread_mutex_unlock(&s_mm_metrics_mu);
 }
 
-#if !defined(AIMEE_DB2_DISABLED)
 static void mm_metrics_record(double ms, int skipped, int changes)
 {
    pthread_mutex_lock(&s_mm_metrics_mu);
@@ -125,7 +123,6 @@ static int mm_should_skip(const db1_maintenance_state_t *state, int64_t current_
       return 0;
    return elapsed < interval;
 }
-#endif
 
 cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *summary)
 {
@@ -153,30 +150,28 @@ cJSON *memory_maintenance_summary_to_json(const memory_maintenance_summary_t *su
    return j;
 }
 
-#if defined(AIMEE_DB2_DISABLED)
-/* The server profile keeps DB1-backed summary/metrics helpers from this file.
- * The maintenance runner itself is DB2-owned and must run inside aimee-kb. */
-int memory_maintenance_run(unsigned int modes, int force, int dry_run,
-                           memory_maintenance_summary_t *summary)
+/* Probe once, before doing any work: without the store every db2 helper
+   below returns empty, and an empty result is indistinguishable from a
+   genuine absence. Warn once so an outage is not read as "nothing here". */
+static void maint_warn_store_unreachable(void)
 {
-   (void)modes;
-   (void)force;
-   (void)dry_run;
-   if (summary)
-      memset(summary, 0, sizeof(*summary));
-   return -1;
+   static int warned;
+   if (warned)
+      return;
+   warned = 1;
+   LOG_WARN("memory.maintenance", "maintenance cannot run: the relational store is unreachable, "
+                                  "so no sweep, promotion or expiry happens and the run must not "
+                                  "be reported as a clean pass");
 }
 
-int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out)
-{
-   if (summary_out)
-      memset(summary_out, 0, sizeof(*summary_out));
-   return 0;
-}
-#else
 int memory_maintenance_run(unsigned int modes, int force, int dry_run,
                            memory_maintenance_summary_t *summary)
 {
+   if (!db2_conn())
+   {
+      maint_warn_store_unreachable();
+      return -1;
+   }
    if (modes == 0)
       modes = MEMORY_MAINTENANCE_MODES_DEFAULT;
 
@@ -349,7 +344,6 @@ int memory_maintenance_maybe_run(memory_maintenance_summary_t *summary_out)
       *summary_out = summary;
    return summary.skipped ? 0 : 1;
 }
-#endif
 
 int memory_maintenance_last_summary(memory_maintenance_summary_t *out)
 {

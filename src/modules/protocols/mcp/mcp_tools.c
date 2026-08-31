@@ -249,8 +249,22 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *h = cJSON_AddObjectToObject(p, "handle");
       cJSON_AddStringToObject(h, "type", "string");
       cJSON_AddStringToObject(h, "description", "Handle emitted in previews, e.g. memory:123");
-      cJSON_AddItemToArray(
-          tools, mcp_tool_new("memory_get", "Fetch a full memory by id or memory:<id> handle.", s));
+      /* The EVENT-time question, which the CLI has had and agents did not.
+       * `aimee memory get --as-of <ts>` answers "was this in force then"; the tool
+       * form did not accept as_of and called the plain kb_client_memory_get, so an
+       * agent could only ever be told what a memory says NOW. A memory that was
+       * superseded last week read exactly like a current one -- the most confident
+       * possible wrong answer, and invisible because nothing errored. */
+      cJSON *ao = cJSON_AddObjectToObject(p, "as_of");
+      cJSON_AddStringToObject(ao, "type", "string");
+      cJSON_AddStringToObject(ao, "description",
+                              "Timestamp (ISO-8601) to evaluate validity at. Answers whether the "
+                              "memory was in force then, not just what it says now.");
+      cJSON_AddItemToArray(tools,
+                           mcp_tool_new("memory_get",
+                                        "Fetch a full memory by id or memory:<id> handle. Pass "
+                                        "as_of to ask whether it was in force at a past time.",
+                                        s));
    }
 
    /* list_facts */
@@ -535,8 +549,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *m = cJSON_AddObjectToObject(p, "modes");
       cJSON_AddStringToObject(m, "type", "string");
       cJSON_AddStringToObject(m, "description",
-                              "Comma-separated subset of replay|compact|prune|summarize. "
-                              "Empty = replay,compact,prune (default).");
+                              "Comma-separated subset of replay|compact|summarize. Empty = "
+                              "replay,compact. `prune` is NOT available here: it permanently "
+                              "deletes memories, so it is an operator action "
+                              "(`aimee memory maintain`); asking for it is declined, and an "
+                              "empty request omits it rather than running it.");
       cJSON *dr = cJSON_AddObjectToObject(p, "dry_run");
       cJSON_AddStringToObject(dr, "type", "boolean");
       cJSON_AddStringToObject(dr, "description",
@@ -546,8 +563,10 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(fc, "description", "Bypass the idle-guard so the cycle always runs.");
       cJSON_AddItemToArray(
           tools, mcp_tool_new("memory_maintain",
-                              "Run a memory maintenance cycle (replay/compact/prune/summarize) and "
-                              "return the summary. Idempotent; idle cycles short-circuit.",
+                              "Run a memory maintenance cycle (replay/compact/summarize) and "
+                              "return the summary. Idempotent; idle cycles short-circuit. This "
+                              "tool never deletes: the destructive `prune` mode is an operator "
+                              "action and is excluded here.",
                               s));
    }
 
@@ -599,15 +618,20 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(scope_values, cJSON_CreateString(AIMEE_CODE_SCOPE_ALL));
       cJSON_AddStringToObject(scope, "description",
                               "Search the current project (default) or explicitly all projects.");
-      cJSON *req = cJSON_CreateArray();
-      cJSON_AddItemToArray(req, cJSON_CreateString("identifier"));
-      cJSON_AddItemToObject(s, "required", req);
+      cJSON *ids = cJSON_AddObjectToObject(p, "identifiers");
+      cJSON_AddStringToObject(ids, "type", "array");
+      cJSON_AddStringToObject(ids, "description",
+                              "Look several symbols up in ONE call: [\"name_a\", \"name_b\", ...]. "
+                              "Prefer this whenever you want more than one symbol -- a round trip "
+                              "costs far more than an extra name. Replaces 'identifier' when "
+                              "present; returns one section per name, in order.");
       cJSON_AddItemToArray(
           tools,
           mcp_tool_new(AIMEE_CODE_TOOL_FIND_SYMBOL,
                        "Find a code symbol (function, class, variable) in the active indexed "
                        "project by default. Set scope=all for labeled cross-project results. "
-                       "Returns file path, line number, and kind.",
+                       "Returns file path, line number, and kind. Pass 'identifiers' to resolve "
+                       "several symbols in one call.",
                        s));
    }
 
@@ -652,8 +676,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "delegate",
               "Delegate a task to an aimee delegate agent instead of provider-native "
               "sub-agent tools (spawn_agent/Agent). Always async: returns a job_id; "
-              "poll delegate_status for the result. Has SSH to homelab hosts and full tool "
-              "execution. If already a sub-agent, return findings.",
+              "poll delegate_status for the result. Write and inspection roles run with full "
+              "tool execution, including SSH to homelab hosts; see `tools`. If already a "
+              "sub-agent, return findings.",
               cJSON_Parse(
                   "{\"type\":\"object\",\"properties\":{"
                   "\"role\":{\"type\":\"string\",\"description\":\"Delegation role (e.g. code, "
@@ -665,7 +690,20 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                   "qa, security, reviewer, architect, or custom); sets the delegate's identity "
                   "and principles.\"},"
                   "\"cwd\":{\"type\":\"string\",\"description\":\"Optional cwd to anchor delegate "
-                  "worktree isolation; defaults to the active MCP session worktree.\"}},"
+                  "worktree isolation; defaults to the active MCP session worktree.\"},"
+                  "\"via\":{\"type\":\"string\",\"description\":\"Optional hard route to a "
+                  "configured agent. Omit this to use the preferred delegate with automatic "
+                  "fallback.\"},"
+                  "\"scope\":{\"type\":\"string\",\"enum\":[\"bounded\",\"whole_task\"],"
+                  "\"description\":\"Delegate packet size. Defaults to bounded; request "
+                  "whole_task only when the delegate owns the entire task.\"},"
+                  "\"handoff_json\":{\"type\":\"boolean\",\"description\":\"Require a "
+                  "validated delegate_result_v1 handoff. Automatic for write roles; false "
+                  "explicitly disables it.\"},"
+                  "\"tools\":{\"type\":\"boolean\",\"description\":\"Give the delegate file and "
+                  "shell tools. Write and inspection roles enable these on their own; pass true "
+                  "to add them to a role that would otherwise run text-only, or false to force a "
+                  "text-only run.\"}},"
                   "\"required\":[\"role\",\"prompt\",\"persona\"]}")));
    }
    /* delegate_status */
@@ -685,44 +723,39 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           tools,
           mcp_tool_new(
               "roundtable_review",
-              "Start an asynchronous review of a supplied artifact with the configured Go "
-              "roundtable. Every seat is an ordinary delegate request. Returns a run_id "
-              "immediately; poll roundtable_status until synthesis completes.",
-              cJSON_Parse("{\"type\":\"object\",\"properties\":{"
-                          "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
-                          "under review.\",\"minLength\":20},"
-                          "\"original_request\":{\"type\":\"string\",\"description\":\"Complete "
-                          "original request used to detect goal drift.\"},"
-                          "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
-                          "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
-                          "artifact; defaults to frozen_diff.\"},"
-                          "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
-                          "available to delegate tools.\"},"
-                          "\"brief\":{\"description\":\"Optional directed review brief as a string "
-                          "or object with focus/fixes/invariants/questions string arrays.\","
-                          "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
-                          "\"properties\":{\"focus\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"fixes\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
-                          "\"string\"}}}}]},"
-                          "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
-                          "roundtable preset to use. Omit to use the configured default.\"}},"
-                          "\"required\":[\"diff\"]}")));
+              "Review a supplied artifact with the configured roundtable. Every seat is an "
+              "ordinary delegate request. Returns the synthesized verdict. This call blocks "
+              "until the review is finished -- a full panel and chair can take many minutes, "
+              "and that is expected. There is nothing to poll and no run id to follow up on.",
+              cJSON_Parse(
+                  "{\"type\":\"object\",\"properties\":{"
+                  "\"diff\":{\"type\":\"string\",\"description\":\"Unified diff or code "
+                  "under review.\",\"minLength\":20},"
+                  "\"original_request\":{\"type\":\"string\",\"description\":\"REQUIRED. The "
+                  "complete original ticket or task, verbatim. Every scope "
+                  "rule the panel applies is relative to this, so omitting it "
+                  "turns drift detection off and the review degrades to "
+                  "generic code review, which approves unrequested work. Do "
+                  "not paraphrase it into your own plan.\",\"minLength\":1},"
+                  "\"artifact_stage\":{\"type\":\"string\",\"enum\":[\"intent\",\"plan\","
+                  "\"frozen_diff\"],\"description\":\"Lifecycle stage of the supplied "
+                  "artifact; defaults to frozen_diff.\"},"
+                  "\"workdir\":{\"type\":\"string\",\"description\":\"Optional checkout "
+                  "available to delegate tools.\"},"
+                  "\"brief\":{\"description\":\"Optional directed review brief as a string "
+                  "or object with focus/fixes/invariants/questions string arrays.\","
+                  "\"anyOf\":[{\"type\":\"string\"},{\"type\":\"object\","
+                  "\"properties\":{\"focus\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"fixes\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"invariants\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}},\"questions\":{\"type\":\"array\",\"items\":{\"type\":"
+                  "\"string\"}}}}]},"
+                  "\"roundtable\":{\"type\":\"string\",\"description\":\"Saved "
+                  "roundtable preset to use. Omit to use the configured default.\"}},"
+                  "\"required\":[\"diff\",\"original_request\"]}")));
    }
 
-   /* roundtable_status */
-   {
-      cJSON_AddItemToArray(
-          tools,
-          mcp_tool_new(
-              "roundtable_status",
-              "Get an asynchronous roundtable review by run_id. Poll until status is completed, "
-              "failed, or cancelled; a completed snapshot contains the synthesized result.",
-              cJSON_Parse("{\"type\":\"object\",\"properties\":{\"run_id\":{\"type\":"
-                          "\"string\",\"description\":\"Run id returned by roundtable_review.\"}},"
-                          "\"required\":[\"run_id\"]}")));
-   }
+   /* No roundtable_status: roundtable_review blocks and returns the verdict. */
 
    /* mcp_tools_pipeline.inc: roundtable authoring pipeline (pipeline_*) MCP tool
     * definitions, #included by mcp_build_tools_list() in mcp_tools.c (kept as an
@@ -1102,10 +1135,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(cmd, "type", "string");
       cJSON_AddStringToObject(cmd, "description", "Git subcommand to run (required).");
       cJSON *en = cJSON_AddArrayToObject(cmd, "enum");
-      static const char *const git_cmds[] = {"status", "commit", "push",         "pull",  "fetch",
-                                             "branch", "log",    "diff_summary", "pr",    "issue",
-                                             "clone",  "stash",  "tag",          "reset", "restore",
-                                             "verify", NULL};
+      static const char *const git_cmds[] = {
+          "status",       "commit", "push",     "pull",   "fetch", "branch",      "log",
+          "diff_summary", "pr",     "issue",    "clone",  "stash", "tag",         "reset",
+          "restore",      "verify", "merge",    "rebase", "sync",  "cherry_pick", "revert",
+          "add",          "switch", "checkout", NULL};
       for (int i = 0; git_cmds[i]; i++)
          cJSON_AddItemToArray(en, cJSON_CreateString(git_cmds[i]));
 
@@ -1118,28 +1152,41 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
          const char *desc;
       } git_params[] = {
           {"action", "string",
-           "Sub-action for: branch (create/switch/list/delete/claim/orphan), pr "
-           "(create/view/list/edit/checks/merge_status/merge), stash "
+           "Sub-action for: branch (create/switch/list/delete/claim/release/orphan; claim "
+           "force=true transfers stale ownership, release drops it; switch creates a "
+           "local tracking branch from origin/<name> when needed), pr "
+           "(create/view/list/edit/checks/merge_status/update_branch/merge/ready), stash "
            "(push/pop/apply/list/drop), tag (create/list/delete), issue (list), verify "
-           "(run/check/conflicts/env/prepare-pr/status)."},
+           "(run/check/conflicts/env/prepare-pr/status), merge / rebase / sync / cherry_pick / "
+           "revert (omit to start one; continue/abort/skip to drive one that stopped on a "
+           "conflict)."},
           {"message", "string",
            "commit: commit message; stash: message; tag: annotated-tag message."},
-          {"files", "array", "commit / diff_summary / restore: file paths."},
+          {"files", "array", "commit / diff_summary / restore / add / checkout: file paths."},
           {"name", "string", "branch / tag: name."},
-          {"base", "string", "branch: base ref; pr / verify: base branch (default main)."},
+          {"base", "string",
+           "branch: base ref; pr / verify: base branch (default main); rebase: the branch to "
+           "rebase onto; sync: the branch to become current with (default: origin's default "
+           "branch)."},
           {"ref", "string",
            "log / diff_summary: ref or range; tag: ref to tag; reset: target ref (default "
-           "HEAD~1)."},
-          {"force", "boolean", "push: --force-with-lease; branch delete: -D."},
+           "HEAD~1); merge: branch or commit to merge in; cherry_pick / revert: the commit; "
+           "switch / checkout: the branch or ref to move to."},
+          {"force", "boolean",
+           "push: --force-with-lease; branch delete: -D; branch claim/release: transfer or remove "
+           "another session's stale ownership record."},
           {"mirror", "boolean", "push: --mirror (DESTRUCTIVE — replaces all remote refs)."},
           {"rebase", "boolean", "pull: use --rebase."},
-          {"prune", "boolean", "fetch: prune stale remote-tracking refs."},
+          {"prune", "boolean",
+           "fetch: prune stale refs only under refs/remotes/<remote>/*; local branches are never "
+           "fetch/prune destinations."},
           {"count", "integer", "log: number of commits (default 10, max 50)."},
           {"diff_stat", "boolean", "log: include per-commit diffstat."},
           {"stat_only", "boolean", "diff_summary: file-level stats only (default true)."},
           {"title", "string", "pr: title (create/edit)."},
           {"body", "string", "pr: body (create/edit)."},
-          {"number", "integer", "pr: PR number (view/edit/checks/watch/merge_status/wait)."},
+          {"number", "integer",
+           "pr: PR number (view/edit/checks/watch/merge_status/update_branch/wait)."},
           {"wait", "boolean",
            "Deprecated for pr checks: blocking waits are rejected; poll snapshots instead."},
           {"auto", "boolean",
@@ -1148,15 +1195,28 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
           {"expected_head_sha", "string", "pr merge: refuse if the head SHA has moved."},
           {"state", "string", "issue: filter open/closed/all (default open)."},
           {"url", "string", "clone: repository URL."},
-          {"path", "string", "clone: local path; verify: repo path."},
+          {"path", "string",
+           "WHICH REPOSITORY every command acts on — pass it whenever you mean a specific "
+           "checkout, not just for clone/verify. mcp_chdir_git_root takes it as the "
+           "priority-1 candidate; omit it and the repo is inferred from session state, "
+           "which in a worktree-isolated session can resolve to the SHARED checkout on "
+           "another branch. A commit or push there stages work that is not yours. "
+           "(clone: destination path; verify: repo path.)"},
           {"branch", "string", "clone: branch to checkout."},
           {"depth", "integer", "clone: shallow depth."},
-          {"mode", "string", "reset: soft / mixed (default) / hard."},
+          {"mode", "string",
+           "reset: soft / mixed (default) / hard; sync: rebase (default) / merge."},
           {"staged", "boolean", "restore: unstage (restore --staged)."},
           {"source", "string", "restore: restore from this ref."},
           {"async", "boolean", "verify run: run in background (default true)."},
           {"job_id", "integer", "verify: job id for action=status."},
           {"index", "integer", "stash: stash index for apply/drop."},
+          {"abort_on_conflict", "boolean",
+           "merge / rebase / sync / cherry_pick / revert: on a conflict, undo the operation and "
+           "report the conflicted files (default true — the tree is left untouched). Set false to "
+           "stop in the conflicted state and resolve in place, then action=continue."},
+          {"all", "boolean",
+           "add: stage every change including new files (sensitive files are unstaged again)."},
           {NULL, NULL, NULL},
       };
       for (int i = 0; git_params[i].key; i++)
@@ -1174,8 +1234,9 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        * so leave it untyped to accept either. */
       cJSON *rem = cJSON_AddObjectToObject(p, "remote");
       cJSON_AddStringToObject(rem, "description",
-                              "fetch: remote name (default origin); branch delete: true to also "
-                              "delete the remote branch.");
+                              "fetch: remote name (default origin), mapped explicitly to "
+                              "refs/remotes/<remote>/* regardless of remote.*.fetch config; "
+                              "branch delete: true to also delete the remote branch.");
 
       cJSON *req = cJSON_CreateArray();
       cJSON_AddItemToArray(req, cJSON_CreateString("command"));
@@ -1187,10 +1248,29 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
               "git",
               "Git + GitHub operations (use instead of the 'git'/'gh' CLIs via Bash). Set "
               "'command' to one of: status, commit, push, pull, fetch, branch, log, "
-              "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify. Remaining "
+              "diff_summary, pr, issue, clone, stash, tag, reset, restore, verify, merge, rebase, "
+              "sync, cherry_pick, revert, add, switch, checkout. State the INTENT and aimee does "
+              "the mechanics: command=sync brings this branch current with its base (resolves the "
+              "base, fetches, rebases, reports the gap it closed) in one call; merge/rebase/"
+              "cherry_pick/revert fetch a remote ref first, never open an editor, and on a "
+              "conflict "
+              "report the conflicted files and undo the operation, so you are never handed a "
+              "half-applied tree (abort_on_conflict=false to resolve in place, then "
+              "action=continue). command=fetch ignores unsafe configured fetch destinations, "
+              "writes/prunes only refs/remotes/<remote>/*, and verifies that HEAD, all local "
+              "branches, the index, and worktree are unchanged. command=switch creates a local "
+              "tracking branch from origin/<branch> when it does not already exist. "
+              "command=pr action=create writes its own title and body from the "
+              "branch's commits when you omit them. Remaining "
               "params apply per command (see each description); branch/pr/stash/tag/issue/"
               "verify also take an 'action' sub-selector. Use command=pr action=view to "
-              "check a PR's merge state before pushing.",
+              "check a PR's merge state before pushing. command=pr action=ready is the whole \"put "
+              "this up for review\" errand: sync, lease-protected push, and open the PR (deriving "
+              "title and body), stopping at the first real failure with that step's own "
+              "explanation. PASS 'path' WHENEVER YOU MEAN A "
+              "SPECIFIC CHECKOUT: without it the repository is inferred from session state, "
+              "and a worktree-isolated session can silently act on the shared checkout — "
+              "committing or pushing another branch's work.",
               s));
    }
 
@@ -1788,8 +1868,13 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        mcp_tool_new(
            "mutate",
            "Perform a typed memory mutation. Verbs: store (write new fact), update "
-           "(replace content in place), supersede (replace with version lineage), "
-           "forget (retire/delete), affirm (positive reinforcement), reject (reduce confidence).",
+           "(replace content, keeping the previous value as a version), supersede "
+           "(replace with version lineage), forget (retire: the memory stops "
+           "answering recall but stays in fact history), affirm (positive "
+           "reinforcement), reject (reduce confidence). No verb here destroys a "
+           "stored value — update and forget both preserve the prior content, which "
+           "stays readable via fact history. Permanently erasing a memory is an "
+           "operator action outside this tool.",
            cJSON_Parse(
                "{\"type\":\"object\",\"properties\":{"
                "\"verb\":{\"type\":\"string\","

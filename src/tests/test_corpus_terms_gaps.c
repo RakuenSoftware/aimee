@@ -5,8 +5,8 @@
 #include "curator_gaps.h"
 #include "curator_terms.h"
 #include "curiosity.h"
-#include "db2_internal.h"
-#include "db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
 #include "db_postgres.h"
 #include "kb_docs.h"
 

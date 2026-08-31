@@ -5,18 +5,17 @@
  * server_http.h. */
 #include "server_http.h" /* dev_submit_run contract */
 #include "cJSON.h"
-#include "aimee_home.h"    /* aimee_home */
-#include "router_advise.h" /* router_autonomous_pick / router_autonomous_audit */
-#include "wfe_autonomy.h"  /* wfe_autonomy_default_max_cost_usd — shared intake cap policy */
-#include "wfe_engine.h"    /* wfe_work_item_resolve */
-#include "wfe_scheduler.h" /* wfe_scheduler_notify */
-#include "wfe_store.h"     /* db1_work_item_submit_capped / _set_terminal / _set_cost_cap */
+#include "aimee_home.h"           /* aimee_home */
+#include "router_advise.h"        /* router_autonomous_pick / router_autonomous_audit */
+#include "wfe_autonomy.h"         /* wfe_autonomy_default_max_cost_usd — shared intake cap policy */
+#include "wfe_engine.h"           /* wfe_work_item_resolve */
+#include "wfe_scheduler.h"        /* wfe_scheduler_notify */
+#include "db1_client/wfe_store.h" /* db1_work_item_submit_capped / _set_terminal / _set_cost_cap */
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <time.h>
 #include <unistd.h>
 
 /* Parse a positive-integer env cap value. Returns `defval` for unset/empty/
@@ -97,6 +96,11 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       snprintf(err, errlen, "unauthenticated: no attested principal");
       return 401;
    }
+   if (wfe_autonomy_killed())
+   {
+      snprintf(err, errlen, "autonomy disabled by AIMEE_AUTONOMY_KILL_SWITCH");
+      return 503;
+   }
    /* The submitter is the cap/audit key stored in submitter[128]; a longer
     * principal would truncate and collide with another's quota bucket. */
    if (strlen(submitter) >= 128)
@@ -115,7 +119,6 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
    char dir[1024];
    snprintf(dir, sizeof dir, "%s/workflows/proposals", home ? home : "/tmp");
    char ppath[1152];
-   snprintf(ppath, sizeof ppath, "%s/wi-%ld-%d.md", dir, (long)time(NULL), (int)getpid());
 
    /* Resolve the workflow (no DB write), then create + cap-check + submitter-bind +
     * audit ATOMICALLY under one BEGIN IMMEDIATE so concurrent submits from one
@@ -129,6 +132,12 @@ int dev_submit_run(const char *proposal_md, const char *workflow_opt, const char
       snprintf(err, errlen, "%s", rerr[0] ? rerr : "failed to resolve workflow");
       return 500;
    }
+   /* Name the artifact after the RUN, not after the clock. Keyed on time+pid,
+    * two submits landing in the same second from one server shared a path: the
+    * second overwrote the first's proposal, both rows pointed at it, and the
+    * first run then executed instructions nobody gave it. The work item id is
+    * already unique, which is exactly the property the filename needs. */
+   snprintf(ppath, sizeof ppath, "%s/%s.md", dir, id);
    int sr = db1_work_item_submit_capped(id, wf_repo, ppath, wf_name, wf_ver, wf_start, submitter,
                                         max_active, rate_max, rate_secs);
    if (sr == 1)

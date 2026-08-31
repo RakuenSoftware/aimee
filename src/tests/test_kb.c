@@ -1,5 +1,6 @@
 /* test_kb.c: unit tests for the project knowledge base (kb.c) */
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -7,19 +8,21 @@
 #include <unistd.h>
 
 #include "aimee.h"
-#include "db.h"
-#include "db2.h"
-#include "db2_test_shim.h"
-#include "../db2/db2_internal.h"
-#include "../db2/db_postgres.h"
-#include "../db2/artifacts.h"
-#include "../db2/kb_payload.h"
-#include "../db2/code_index.h"
-#include "../db2/lifecycle.h"
-#include "../db2/pgvec_kb_service.h"
-#include "../db2/sketch.h"
+#include "modules/db2/c/db2.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "support/json_canonical.h"
+#include "../modules/db2/c/db2_internal.h"
+#include "../modules/db2/c/db_postgres.h"
+#include "../modules/db2/c/db2_tenant.h"
+#include "../modules/db2/c/artifacts.h"
+#include "../modules/db2/c/kb_payload.h"
+#include "../modules/db2/c/code_index.h"
+#include "../modules/db2/c/memory_scope_query.h"
+#include "../modules/db2/c/lifecycle.h"
+#include "../modules/db2/c/pgvec_kb_service.h"
+#include "../modules/db2/c/sketch.h"
 #include "kb_service_backend.h"
-#include "../db2/kb_vectors.h"
+#include "../modules/db2/c/kb_vectors.h"
 #include "kb.h"
 #include "platform_process.h"
 #include "cJSON.h"
@@ -30,6 +33,86 @@
 /* ------------------------------------------------------------------ */
 /* Test utilities                                                       */
 /* ------------------------------------------------------------------ */
+
+static int test_db2_embed_provider(const char *text, const char *command, int input_type,
+                                   float *out, int max_dim)
+{
+   if (strcmp(command, "test-invalid-dim") == 0)
+      return max_dim + 1;
+   if (strcmp(command, "test-nonfinite") == 0)
+   {
+      out[0] = NAN;
+      return 1;
+   }
+   return memory_embed_text(text, command, (embed_input_type_t)input_type, out, max_dim);
+}
+
+static void test_db2_embed_contract(void)
+{
+   float vec[8] = {0};
+   aimee_db2_register_embed_provider(NULL);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) == 0);
+   aimee_db2_register_embed_provider(test_db2_embed_provider);
+   assert(db2_kb_embed_text("hello", "test-invalid-dim", DB2_EMBED_QUERY, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", "test-nonfinite", DB2_EMBED_QUERY, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, -1, vec, 8) == 0);
+   assert(db2_kb_embed_text("hello", MEMORY_EMBED_TEST_FIXTURE, DB2_EMBED_QUERY, vec, 8) > 0);
+   printf("  PASS: DB2 embedding contract fails closed on unavailable or malformed answers\n");
+}
+
+static int test_identity_key_mode;
+
+static int test_db2_identity_key_provider(int kind, const char *issuer, const char *subject,
+                                          int authenticated, char *out, size_t cap)
+{
+   if (test_identity_key_mode == 1)
+      return -1;
+   if (test_identity_key_mode == 2)
+   {
+      snprintf(out, cap, "oidc:ambiguous:extra:separator");
+      return 0;
+   }
+   if (test_identity_key_mode == 3)
+   {
+      memset(out, 'x', cap);
+      return 0;
+   }
+   kb_principal_t principal;
+   memset(&principal, 0, sizeof(principal));
+   principal.kind = (kb_principal_kind_t)kind;
+   snprintf(principal.issuer, sizeof(principal.issuer), "%s", issuer);
+   snprintf(principal.subject, sizeof(principal.subject), "%s", subject);
+   principal.authenticated = authenticated;
+   return kb_identity_key(&principal, out, cap);
+}
+
+static void test_db2_identity_key_contract(void)
+{
+   kb_principal_t principal = {.kind = KB_PRIN_OIDC, .authenticated = 1};
+   snprintf(principal.issuer, sizeof(principal.issuer), "%s", "https://idp.example/tenant:a");
+   snprintf(principal.subject, sizeof(principal.subject), "%s", "subject%42");
+   char key[576] = "not-cleared";
+
+   aimee_db2_register_identity_key_provider(NULL);
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
+   test_identity_key_mode = 1;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 2;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 3;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   test_identity_key_mode = 0;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == 0);
+   assert(strcmp(key, "oidc:https%3A//idp.example/tenant%3Aa:subject%2542") == 0);
+   principal.authenticated = 0;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   principal.authenticated = 1;
+   principal.kind = KB_PRIN_NONE;
+   assert(db2_tenant_identity_key(&principal, key, sizeof(key)) == -1 && key[0] == '\0');
+   aimee_db2_register_identity_key_provider(test_db2_identity_key_provider);
+   printf("  PASS: DB2 identity-key contract rejects unavailable or malformed answers\n");
+}
 
 static int test_kb_vector_upsert_document(int64_t document_id, const float *vec, int dim,
                                           const char *payload_json, void *ctx)
@@ -202,7 +285,8 @@ static void test_resolve_project_empty_string(void)
 
 static void test_build_empty_dir(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_empty_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_empty_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -226,7 +310,8 @@ static void test_build_empty_dir(void)
 
 static void test_build_single_file(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_single_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_single_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -252,8 +337,14 @@ static void test_build_single_file(void)
    char *result = kb_search("test_single", "installation", MEMORY_EMBED_TEST_FIXTURE, 3);
    assert(result != NULL);
    /* Should find the Installation section */
-   assert(strstr(result, "README.md") != NULL || strcmp(result, "No results found.") != 0);
+   assert(strstr(result, "README.md") != NULL);
    free(result);
+
+   /* Build, search, and status must describe the same active corpus. */
+   db2_kb_service_project_status_t status;
+   assert(db2_kb_service_collect_project_status("test_single", &status) == 0);
+   assert(status.chunks > 0);
+   assert(status.chunks == stats.chunks_added);
 
    close_test_db();
 
@@ -265,7 +356,8 @@ static void test_build_single_file(void)
 
 static void test_build_sanitizes_malformed_utf8(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_utf8_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_utf8_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
    char fpath[512];
    snprintf(fpath, sizeof(fpath), "%s/legacy.md", tmpdir);
@@ -316,7 +408,8 @@ static void test_chunk_insert_sanitizes_replayed_malformed_utf8(void)
 
 static void test_build_incremental_update(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_incr_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_incr_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -356,7 +449,8 @@ static void test_build_incremental_update(void)
 
 static void test_bloom_dedupe_skips_duplicate_content(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_bloom_dup_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_bloom_dup_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -394,7 +488,8 @@ static void test_bloom_dedupe_skips_duplicate_content(void)
 
 static void test_minhash_shadow_signatures_persist(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_lsh_shadow_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_lsh_shadow_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -441,7 +536,7 @@ static void test_minhash_shadow_signatures_persist(void)
    int saw_supersedes = 0;
    for (int i = 0; i < pn; i++)
       if (strcmp(proposed[i].kind, "kb_near_duplicate") == 0 &&
-          strstr(proposed[i].payload_json, "\"proposed_relation\":\"supersedes\""))
+          strstr(json_canonical(proposed[i].payload_json), "\"proposed_relation\":\"supersedes\""))
          saw_supersedes = 1;
    assert(saw_supersedes);
 
@@ -468,7 +563,15 @@ static void test_minhash_shadow_signatures_persist(void)
 
 static void test_async_embedding_queue_and_drain(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_async_XXXXXX";
+   char oversized_identity[128];
+   memset(oversized_identity, 'x', sizeof(oversized_identity));
+   assert(db2_kb_service_async_queue_drain(NULL, NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(db2_kb_service_async_queue_drain("", NULL, 0, NULL, NULL, NULL, NULL) == -1);
+   assert(db2_kb_service_async_queue_drain(oversized_identity, NULL, 0, NULL, NULL, NULL, NULL) ==
+          -1);
+
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_async_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -498,13 +601,24 @@ static void test_async_embedding_queue_and_drain(void)
    assert(aimee_pg_column_int(vc_st, 0) == 0);
    aimee_pg_finalize(vc_st);
 
-   assert(db2_kb_service_async_queue_drain(MEMORY_EMBED_TEST_FIXTURE, 5,
+   assert(db2_kb_service_async_queue_drain("test-async-drain", MEMORY_EMBED_TEST_FIXTURE, 5,
                                            pgvec_kb_vector_collection_name(),
                                            test_kb_vector_upsert_document, NULL, &qstats) == 0);
    assert(qstats.pending == 0);
    assert(qstats.running == 0);
    assert(qstats.failed == 0);
    assert(qstats.done > 0);
+
+   char claim_err[128] = "";
+   aimee_pg_stmt_t *claim_st =
+       aimee_pg_prepare(db2_conn(),
+                        "SELECT COUNT(*) FROM kb_async_jobs WHERE claimed_by = 'test-async-drain'"
+                        " AND status = 'done'",
+                        claim_err, sizeof(claim_err));
+   assert(claim_st != NULL);
+   assert(aimee_pg_step(claim_st, claim_err, sizeof(claim_err)) == AIMEE_PG_ROW);
+   assert(aimee_pg_column_int(claim_st, 0) > 0);
+   aimee_pg_finalize(claim_st);
 
    vc_st = aimee_pg_prepare(db2_conn(), vector_count_sql, vc_err, sizeof(vc_err));
    assert(vc_st != NULL);
@@ -554,7 +668,8 @@ static int kb_count_vector_ops(const char *collection, const char *status)
  * NULL-embedder build tests never exercise. */
 static void test_build_sync_embeddings_and_vectors(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_syncembed_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_syncembed_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
@@ -588,7 +703,8 @@ static void test_build_sync_embeddings_and_vectors(void)
  * chunk must still be recorded exactly once (pins the batch-flush mutation). */
 static void test_build_vector_batch_flush(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_batch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_batch_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
@@ -622,7 +738,8 @@ static void test_build_vector_batch_flush(void)
  * no skips (pins files_scanned / files_indexed / files_skipped aggregation). */
 static void test_build_multi_file_counts(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_multi_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_multi_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char p[512];
@@ -667,7 +784,8 @@ static void test_search_empty_kb(void)
 
 static void test_search_finds_content(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_search_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_search_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -701,7 +819,8 @@ static void test_search_finds_content(void)
 
 static void test_search_requires_query_embedding(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_embedfail_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_embedfail_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -733,7 +852,8 @@ static void test_search_json_empty(void)
    assert(result != NULL);
    /* Empty result set must be valid JSON with a results array and fusion_mode field. */
    assert(strstr(result, "\"results\":[]") != NULL);
-   assert(strstr(result, "\"fusion_mode\":") != NULL);
+   /* The configured/default strategy is still reported when there are no hits. */
+   assert(strstr(result, "\"fusion_mode\":\"rrf\"") != NULL);
    free(result);
    close_test_db();
    printf("  PASS: kb_search_json empty KB returns valid JSON with results array\n");
@@ -741,7 +861,8 @@ static void test_search_json_empty(void)
 
 static void test_search_json_structured(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_jsearch_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_jsearch_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -751,10 +872,17 @@ static void test_search_json_structured(void)
                      "## Authentication\n\n"
                      "Bearer token in the Authorization header.\n");
 
+   char storage_path[512];
+   snprintf(storage_path, sizeof(storage_path), "%s/storage.md", tmpdir);
+   write_file(storage_path, "# Storage\n\nDatabase retention and backup windows.\n");
+   char network_path[512];
+   snprintf(network_path, sizeof(network_path), "%s/network.md", tmpdir);
+   write_file(network_path, "# Network\n\nProxy routes and connection timeouts.\n");
+
    open_test_db();
    kb_stats_t stats;
    kb_build(tmpdir, "test_jsearch", MEMORY_EMBED_TEST_FIXTURE, 1, &stats);
-   assert(stats.chunks_added > 0);
+   assert(stats.chunks_added >= 3);
 
    char *result =
        kb_search_json("test_jsearch", "bearer token authentication", MEMORY_EMBED_TEST_FIXTURE, 3);
@@ -770,18 +898,52 @@ static void test_search_json_structured(void)
    assert(strstr(result, "api.md") != NULL);
    /* The legacy [path:line-range] header MUST NOT leak into the JSON payload. */
    assert(strstr(result, "[") == NULL || strstr(result, "[") > strstr(result, "\"results\":["));
+
+   cJSON *strong_root = cJSON_Parse(result);
+   assert(strong_root != NULL);
+   cJSON *strong_mode = cJSON_GetObjectItemCaseSensitive(strong_root, "fusion_mode");
+   cJSON *strong_results = cJSON_GetObjectItemCaseSensitive(strong_root, "results");
+   cJSON *strong_first = cJSON_GetArrayItem(strong_results, 0);
+   cJSON *strong_score_item = cJSON_GetObjectItemCaseSensitive(strong_first, "score");
+   assert(cJSON_IsString(strong_mode) && strcmp(strong_mode->valuestring, "rrf") == 0);
+   assert(cJSON_IsNumber(strong_score_item));
+   double strong_score = strong_score_item->valuedouble;
+   assert(strong_score > 0.0 && strong_score < 0.04);
+   cJSON_Delete(strong_root);
    free(result);
+
+   /* MEMORY_EMBED_TEST_FIXTURE deliberately embeds distinct text differently.
+    * A dense-only weak query must use the same RRF score space as the strong
+    * lexical+dense hit above, not retain a raw cosine that can look larger. */
+   char *weak = kb_search_json("test_jsearch", "authenticatio", MEMORY_EMBED_TEST_FIXTURE, 3);
+   assert(weak != NULL);
+   cJSON *weak_root = cJSON_Parse(weak);
+   assert(weak_root != NULL);
+   cJSON *weak_mode = cJSON_GetObjectItemCaseSensitive(weak_root, "fusion_mode");
+   cJSON *weak_results = cJSON_GetObjectItemCaseSensitive(weak_root, "results");
+   cJSON *weak_first = cJSON_GetArrayItem(weak_results, 0);
+   cJSON *weak_score_item = cJSON_GetObjectItemCaseSensitive(weak_first, "score");
+   assert(cJSON_IsString(weak_mode) && strcmp(weak_mode->valuestring, "rrf") == 0);
+   assert(cJSON_IsNumber(weak_score_item));
+   /* The old path exposed the raw dense score here (typically >0.5). */
+   assert(weak_score_item->valuedouble > 0.0 && weak_score_item->valuedouble < 0.02);
+   cJSON_Delete(weak_root);
+   free(weak);
 
    close_test_db();
    unlink(fpath);
+   unlink(storage_path);
+   unlink(network_path);
    platform_test_rmrf(tmpdir);
    printf("  PASS: kb_search_json returns structured per-hit fields\n");
 }
 
 static void test_search_json_scope_all_keeps_active_project_first(void)
 {
-   char local_dir[] = "/tmp/aimee_kb_local_first_a_XXXXXX";
-   char other_dir[] = "/tmp/aimee_kb_local_first_b_XXXXXX";
+   char local_dir[256];
+   snprintf(local_dir, sizeof local_dir, "%s/aimee_kb_local_first_a_XXXXXX", platform_tmpdir());
+   char other_dir[256];
+   snprintf(other_dir, sizeof other_dir, "%s/aimee_kb_local_first_b_XXXXXX", platform_tmpdir());
    assert(mkdtemp(local_dir) != NULL);
    assert(mkdtemp(other_dir) != NULL);
    char local_path[512], other_path[512];
@@ -822,7 +984,8 @@ static void test_search_max_cap_above_legacy_limit(void)
    /* Regression: prior to the configurable cap, kb_search silently clamped
     * max_results to 8.  Default cap is 50, so a request for 20 with 12 distinct
     * chunks must be honored. */
-   char tmpdir[] = "/tmp/aimee_kb_test_cap_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_cap_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -870,7 +1033,8 @@ static void test_search_max_cap_above_legacy_limit(void)
 
 static void test_clear(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_clear_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_clear_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
 
@@ -904,13 +1068,15 @@ static void test_clear(void)
 
 static void test_purge_fence_blocks_ingest(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_test_fence_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_test_fence_XXXXXX", platform_tmpdir());
    char *d = mkdtemp(tmpdir);
    assert(d != NULL);
    char fpath[512];
    snprintf(fpath, sizeof(fpath), "%s/notes.md", tmpdir);
    write_file(fpath, "# Notes\n\nFenced project notes.\n");
-   char other_tmpdir[] = "/tmp/aimee_kb_test_other_XXXXXX";
+   char other_tmpdir[256];
+   snprintf(other_tmpdir, sizeof other_tmpdir, "%s/aimee_kb_test_other_XXXXXX", platform_tmpdir());
    assert(mkdtemp(other_tmpdir) != NULL);
    char other_fpath[512];
    snprintf(other_fpath, sizeof(other_fpath), "%s/notes.md", other_tmpdir);
@@ -1007,8 +1173,10 @@ static void test_purge_fence_blocks_ingest(void)
 
 static void test_project_isolation(void)
 {
-   char tmpdir1[] = "/tmp/aimee_kb_proj1_XXXXXX";
-   char tmpdir2[] = "/tmp/aimee_kb_proj2_XXXXXX";
+   char tmpdir1[256];
+   snprintf(tmpdir1, sizeof tmpdir1, "%s/aimee_kb_proj1_XXXXXX", platform_tmpdir());
+   char tmpdir2[256];
+   snprintf(tmpdir2, sizeof tmpdir2, "%s/aimee_kb_proj2_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir1) != NULL);
    assert(mkdtemp(tmpdir2) != NULL);
 
@@ -1056,7 +1224,8 @@ static void test_project_isolation(void)
 
 static void test_status_format(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_status_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_status_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    char fpath[512];
@@ -1092,7 +1261,8 @@ static void test_status_format(void)
 
 static void test_excludes_node_modules(void)
 {
-   char tmpdir[] = "/tmp/aimee_kb_excl_XXXXXX";
+   char tmpdir[256];
+   snprintf(tmpdir, sizeof tmpdir, "%s/aimee_kb_excl_XXXXXX", platform_tmpdir());
    assert(mkdtemp(tmpdir) != NULL);
 
    /* Create node_modules directory with a .md file (should be excluded) */
@@ -1124,6 +1294,31 @@ static void test_excludes_node_modules(void)
    printf("  PASS: node_modules directory is excluded from indexing\n");
 }
 
+static void test_memory_get_json_preserves_long_content(void)
+{
+   open_test_db();
+   db2_memory_scope_context_clear();
+
+   char content[5001];
+   memset(content, 'q', sizeof(content) - 1);
+   content[sizeof(content) - 1] = '\0';
+   memory_t stored;
+   assert(memory_insert(TIER_L2, KIND_FACT, "kb-get-long-content", content, 0.9, "test-session",
+                        &stored) == 0);
+
+   cJSON *response = db2_kb_service_memory_get_json(stored.id, NULL);
+   assert(response != NULL);
+   cJSON *memory = cJSON_GetObjectItemCaseSensitive(response, "memory");
+   cJSON *returned = cJSON_GetObjectItemCaseSensitive(memory, "content");
+   assert(cJSON_IsString(returned));
+   assert(strlen(returned->valuestring) == strlen(content));
+   assert(strcmp(returned->valuestring, content) == 0);
+   cJSON_Delete(response);
+
+   close_test_db();
+   printf("  PASS: memory.get JSON preserves long content\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* Main                                                                 */
 /* ------------------------------------------------------------------ */
@@ -1131,6 +1326,9 @@ static void test_excludes_node_modules(void)
 int main(void)
 {
    printf("test_kb:\n");
+
+   test_db2_embed_contract();
+   test_db2_identity_key_contract();
 
    /* kb_resolve_project tests */
    test_resolve_project_explicit();
@@ -1168,6 +1366,8 @@ int main(void)
 
    /* Status test */
    test_status_format();
+
+   test_memory_get_json_preserves_long_content();
 
    /* Exclusion test */
    test_excludes_node_modules();

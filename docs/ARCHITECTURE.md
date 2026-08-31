@@ -10,17 +10,47 @@ module events through one bounded bus.
 flowchart LR
     T[AI tool] -->|hooks / MCP / ACP| C[aimee thin client]
     B[Browser] --> W[aimee-runtime-web]
-    C -->|local UDS or authenticated /v1| S[aimee-server]
+
+    subgraph RUNTIME[Server container]
+        S[aimee-server resource plane]
+        F[aimee-wfe workflow harness]
+        SB[server event-bus host]
+        SM[supervised process modules]
+        M[aimee store module]
+        PG[postgres module]
+
+        S <--> SB
+        F -->|typed DB1 calls| SB
+        SB <--> SM
+        SB <--> M
+        M --> PG
+    end
+
+    subgraph KNOWLEDGE[KB container]
+        K[aimee-kb resource plane]
+        KB[kb event-bus host]
+        KM[supervised process modules]
+        K <--> KB
+        KB <--> KM
+    end
+
+    C -->|local UDS or authenticated /v1| S
     W -->|authenticated /v1| S
-    W -->|workflow API| F[aimee-wfe]
+    W -->|workflow API| F
     F -->|typed resource calls| S
-    S -->|typed /v1| K[aimee-kb, one-KB profile]
+    S -->|typed /v1| K
     S -->|provider API| P[model providers]
-    K -->|remote model role, when configured| X[model endpoint]
-    S --> D1[(DB1 SQLite)]
-    F --> WF[(workflow SQLite)]
+    K -->|local sidecar or remote synthesis endpoint| X[synthesis model]
+    PG --> D1[(DB1 PostgreSQL)]
     K --> D2[(DB2 PostgreSQL + pgvector)]
 ```
+
+The table below describes the **current** topology, which is mid-migration. It is not the
+target. aimee is moving off the C mono-application onto Go modules, and the ownership it
+records, such as `aimee-server` holding provider calls and `aimee-runtime-web` serving its own HTTP,
+It is what exists today, not what is being built toward. Read [the module
+doctrine](#module-doctrine) for the target before using this table to decide where code
+belongs.
 
 | Process | Owns | Does not own |
 | --- | --- | --- |
@@ -59,14 +89,54 @@ opens DB1.
 The event bus carries typed module events. It is not a network transport and does not replace
 authenticated `/v1` calls.
 
+## Module doctrine
+
+This is the target the migration is moving toward. Where it disagrees with the process table
+above, the doctrine is the design and the table is the current state.
+
+C owns exactly four things:
+
+1. the event bus, for inter- and intra-module communication;
+2. mTLS, MCP, and communication with the outside world;
+3. the HTTP and related APIs that expose internal information;
+4. the tap for auditing and governance.
+
+C ends up a small codebase. Everything else, meaning all logic and all state, including registries,
+queues, rendezvous, provider and turn binding, and policy, lives in a Go module under
+`server-go/modules/`. A concurrency primitive is not transport: a condition variable or a
+FIFO is logic, and belongs in Go as channels.
+
+Modules get no HTTP APIs. A module never binds a socket and never accepts a connection.
+`runtime-web` and `control-web` are modules and get no exemption: their HTTP surface belongs
+to C, while their logic stays in the module and speaks only the bus.
+
+Direct module-to-module communication is forbidden. Every exchange between modules goes over
+the event bus, so that governance and auditing see all of it.
+
+External communication is banned from every module, with two structural doors: communication
+initiated from outside arrives over the event bus through C, and communication a module
+initiates leaves through the `egress` module. Direction selects the door; it never grants a
+module the right to open a connection itself. Until `egress` exists, a module may make
+internally-initiated outbound calls (the delegate module reaching an LLM and the git module
+reaching its forge are both valid and load-bearing), but every such call must be logged to
+the event bus. There is no unmonitored external communication. See [One egress
+module](proposals/pending/module-egress-single-point.md).
+
 ```mermaid
 flowchart LR
-    P[producer] --> O[private outbound ring]
+    P[producer or module bridge] --> O[private outbound ring]
     O --> H[bus host]
     H --> I[private inbound ring]
     I --> C[consumer]
-    H --> A[ordered audit / capture tap]
+    H --> T[ordered full-stream tap]
     H <--> R[shared payload arena]
+    T --> CAP[diagnostic capture]
+    T --> OBS[authorized observability drain]
+    P -. declared ledger metadata event .-> O
+    H --> DS[durability sink consumer]
+    DS --> WORM[(daemon WORM ledger)]
+    H -. overflow / producer-reap facts .-> WORM
+    CAP -. gap / prune facts .-> WORM
 ```
 
 Each daemon creates one host. Admitted clients receive a read-only control region, their own queue
@@ -83,8 +153,11 @@ The current load-bearing consumer is observability:
 - MCP and tool-call activity;
 - tool completion outcomes.
 
-The host tap sees accepted events before routing. It writes an ordered capture stream while the
-consumer drains typed records to the WORM ledger or DB1. Storage stays off the request path.
+The host tap writes its own ordered diagnostic stream. Ledger-classified module
+calls emit bounded intent/reply metadata through the durable emitter, while
+capture gaps, pruning, overflow, and producer reap use direct rare-event sinks.
+Those WORM paths do not depend on capture being healthy. Capture can therefore
+remain prunable without making an absent interval look idle.
 
 Small events are inline. Large events use generation-checked arena leases. Backpressure is bounded;
 a producer blocks or receives `would_block`, and shed delivery is represented by an overflow event.
@@ -94,23 +167,27 @@ See [Event bus](EVENT_BUS.md).
 
 ## Storage
 
-There are two product data tiers and one workflow store.
+There are two product data tiers and separate WORM evidence stores.
 
 | Store | Owner | Contents |
 | --- | --- | --- |
-| DB1, SQLite | `aimee-server` | sessions, working memory, local state, agent jobs, policy and audit state, caches |
-| Workflow SQLite | `aimee-wfe` | definitions, immutable snapshots, work items, lifecycle events, artifacts, retries and parks |
+| DB1, PostgreSQL | `aimee` domain module through `postgres` | sessions, working memory, local state, agent jobs, policy and audit state, caches, workflow definitions and lifecycle rows |
 | DB2, PostgreSQL + pgvector | `aimee-kb` | durable memories, documents, facts, evidence, code graph, embeddings, curation state |
+| Server WORM, SQLite | `aimee-server` | append-only evidence chain, keyed checkpoints, sealed snapshots |
+| KB WORM, SQLite | `aimee-kb-worm` | append-only KB evidence chain, keyed checkpoints, sealed snapshots |
 
 The DB1/DB2 boundary is compile-enforced:
 
-- server builds disable DB2 and never link libpq;
-- KB builds disable DB1 and never link SQLite;
+- the server links no database driver at all: it reaches DB1 through the store module
+  over the bus, and DB2 through typed `/v1` calls;
+- KB builds never open DB1;
 - thin clients link neither;
 - calls across the boundary use public typed APIs.
 
-The WORM hash primitive is the narrow exception shared by both stores. It contains hashing only, with no
-database handles or queries, so both stores produce the same chain format.
+The server and KB worker share the complete SQLite WORM implementation, not two
+engine-specific approximations. Their files, keys, and process compartments are
+separate. PostgreSQL DB2 retains only the immutable producer outbox and delivery
+ledger needed for atomic KB mutation intent and idempotent delivery.
 
 New KB containers run a private PostgreSQL 18 cluster when no external `AIMEE_DB2_URL` is set. It is
 still DB2, still owned by the KB, and still independently exportable.
@@ -145,8 +222,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 2. The server authorizes the principal and calls the KB's typed endpoint.
 3. The KB owns the transaction, lexical/dense indexes, and evidence.
 4. Mutations publish a PII-safe audit identity on the KB bus.
-5. Recall returns bounded evidence; optional synthesis runs inside the selected KB container or at
-   that KB's configured remote endpoint.
+5. Recall returns bounded evidence; optional synthesis runs in that KB's model-specific sidecar or
+   at its configured remote endpoint.
 
 ### Delegate turn
 
@@ -161,8 +238,8 @@ The client opens no database and starts no daemon. Warm state stays in `aimee-se
 
 1. **Admit immutable input.** `aimee-wfe` validates and snapshots the definition and request.
 2. **Persist before dispatch.** The scheduler writes the transition before starting work.
-3. **Cross a typed resource boundary.** Agent and roundtable work calls the C server; credentials never cross
-   back into the workflow store.
+3. **Cross a typed resource boundary.** Agent and roundtable work calls the C server; credentials never enter
+   the workflow rows in DB1.
 4. **Confine each slice.** Every child gets its own worktree and branch.
 5. **Keep evidence separate.** Verification, review, merge, and forge operations produce distinct artifacts.
 6. **Stop at human authority.** A human gate parks until a browser or API decision arrives. The service stores

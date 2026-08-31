@@ -9,10 +9,11 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static int make_dir(char path[128])
 {
-   snprintf(path, 128, "/tmp/aimee-p7d3-lock-XXXXXX");
+   snprintf(path, 128, "%s/aimee-p7d3-lock-XXXXXX", platform_tmpdir());
    assert(mkdtemp(path));
    assert(chmod(path, 0700) == 0);
    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);

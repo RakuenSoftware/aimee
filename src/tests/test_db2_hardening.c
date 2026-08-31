@@ -1,7 +1,7 @@
 /* test_db2_hardening.c: pure DSN verify-full parsing (I1). The runtime-role check
  * needs a live server and is covered by the PG-integration gate. */
 
-#include "db2_hardening.h"
+#include "modules/db2/c/db2_hardening.h"
 
 #include <stdio.h>
 

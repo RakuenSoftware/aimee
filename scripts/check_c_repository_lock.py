@@ -41,6 +41,12 @@ def main() -> int:
             return fail("core vendored mirror differs from its repository pin")
 
         expected_ids = inventory.get("required", []) + inventory.get("optional", [])
+        # Declared, not positional: see validate_module_process_contracts. A
+        # module's ref is its permanent identity, so classification and list
+        # order must not move it.
+        declared_refs = inventory.get("principal_refs")
+        if not isinstance(declared_refs, dict) or set(declared_refs) != set(expected_ids):
+            return fail("canonical inventory principal_refs must cover the inventory")
         if len(modules) != len(expected_ids):
             return fail(f"expected {len(expected_ids)} module pins, found {len(modules)}")
         by_id = {item.get("id"): item for item in modules if isinstance(item, dict)}
@@ -48,31 +54,40 @@ def main() -> int:
             return fail("module pin set differs from canonical inventory")
         required = set(inventory.get("required", []))
         contracts = exporter.process_contracts.validate()
-        for principal_ref, module_id in enumerate(expected_ids, start=1):
+        for module_id in expected_ids:
+            principal_ref = declared_refs[module_id]
             item = by_id[module_id]
             classification = "required" if module_id in required else "optional"
             if item.get("classification") != classification:
                 return fail(f"{module_id}: classification mismatch")
+            contract = contracts[module_id]
+            descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
+            external_pin = exporter.external_module_pin(
+                module_id, classification, descriptor, contract
+            )
+            if external_pin is not None:
+                if item != external_pin:
+                    return fail(f"{module_id}: external repository pin is stale")
+                continue
             if item.get("repository") != f"{exporter.REMOTE_ROOT}/aimee-module-{module_id}.git":
                 return fail(f"{module_id}: unexpected repository")
             if item.get("version") != version or item.get("ref") != f"v{version}":
                 return fail(f"{module_id}: version is not pinned to v{version}")
-            contract = contracts[module_id]
             if item.get("execution") != contract["execution"] or item.get("placements") != contract["placements"]:
                 return fail(f"{module_id}: execution/placement mismatch")
             if contract["execution"] == "process":
                 expected_serve = [stage["event_kind"] for stage in contract["stages"]]
-                if (item.get("principal_class") != exporter.PRINCIPAL_CLASS or
+                if (item.get("runtime") != contract["runtime"] or
+                        item.get("principal_class") != exporter.PRINCIPAL_CLASS or
                         item.get("principal_ref") != principal_ref or
                         item.get("serve") != expected_serve):
-                    return fail(f"{module_id}: process identity/grant mismatch")
+                    return fail(f"{module_id}: process runtime/identity/grant mismatch")
             elif any(key in item for key in ("principal_class", "principal_ref", "serve")):
                 return fail(f"{module_id}: core component has process identity")
             if not isinstance(item.get("commit"), str) or not COMMIT.fullmatch(item["commit"]):
                 return fail(f"{module_id}: commit is not an exact SHA-1")
-            descriptor = exporter.load_json(ROOT / f"src/modules/{module_id}/module.yaml")
-            owned = exporter.module_owned_files(module_id, descriptor)
-            expected_digest = exporter.digest_files([ROOT / path for path in owned])
+            repository_files = exporter.module_repository_files(module_id, descriptor)
+            expected_digest = exporter.digest_files([ROOT / path for path in repository_files])
             if item.get("source_sha256") != expected_digest:
                 return fail(f"{module_id}: vendored mirror differs from its repository pin")
     except (OSError, UnicodeError, json.JSONDecodeError, exporter.ExportError) as exc:

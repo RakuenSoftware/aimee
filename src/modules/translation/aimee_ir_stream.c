@@ -35,6 +35,7 @@ void openai_stream_state_init(openai_stream_state_t *st)
       return;
    memset(st, 0, sizeof *st);
    st->text_block = -1;
+   st->reasoning_block = -1;
    for (int i = 0; i < AIMEE_STREAM_MAX_TOOLS; i++)
       st->tool_block[i] = -1;
 }
@@ -64,7 +65,55 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       }
    }
 
+   /* Reasoning first: these providers stream the whole reasoning block before any
+    * content, and emitting it as its own THINKING block (rather than folding it into
+    * the text block) is what lets a consumer tell thought from answer. Two spellings
+    * are in the wild -- `reasoning_content` (DeepSeek, vLLM, llama.cpp) and
+    * `reasoning` (OpenRouter); OpenAI's own API sends neither. */
+   const char *reasoning = delta ? ostr(delta, "reasoning_content") : NULL;
+   if (!reasoning && delta)
+      reasoning = ostr(delta, "reasoning");
+   if (reasoning && reasoning[0])
+   {
+      if (st->reasoning_block < 0)
+      {
+         aimee_delta_t *d = SLOT();
+         if (d)
+         {
+            d->type = AIMEE_DELTA_BLOCK_START;
+            d->kind = AIMEE_BLK_THINKING;
+            d->block_id = st->next_block;
+            st->reasoning_block = st->next_block++;
+         }
+      }
+      aimee_delta_t *d = SLOT();
+      if (d)
+      {
+         d->type = AIMEE_DELTA_BLOCK_DELTA;
+         d->kind = AIMEE_BLK_THINKING;
+         d->block_id = st->reasoning_block;
+         d->text_delta = reasoning;
+      }
+   }
+
    const char *content = delta ? ostr(delta, "content") : NULL;
+   const cJSON *tcs = delta ? cJSON_GetObjectItemCaseSensitive((cJSON *)delta, "tool_calls") : NULL;
+
+   /* Reasoning is over once content or a tool call starts: close the block there
+    * rather than deferring to `finish`, so a consumer can tell "still thinking" from
+    * "answering". A later reasoning delta just opens a fresh THINKING block. */
+   if (st->reasoning_block >= 0 && ((content && content[0]) || (tcs && cJSON_IsArray(tcs))))
+   {
+      aimee_delta_t *d = SLOT();
+      if (d)
+      {
+         d->type = AIMEE_DELTA_BLOCK_STOP;
+         d->kind = AIMEE_BLK_THINKING;
+         d->block_id = st->reasoning_block;
+         st->reasoning_block = -1;
+      }
+   }
+
    if (content && content[0])
    {
       if (st->text_block < 0)
@@ -88,7 +137,6 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
       }
    }
 
-   const cJSON *tcs = delta ? cJSON_GetObjectItemCaseSensitive((cJSON *)delta, "tool_calls") : NULL;
    if (tcs && cJSON_IsArray(tcs))
    {
       const cJSON *tc = NULL;
@@ -129,6 +177,17 @@ int openai_chunk_to_deltas(const cJSON *chunk, openai_stream_state_t *st, aimee_
 
    if (finish && !st->stopped)
    {
+      if (st->reasoning_block >= 0)
+      {
+         aimee_delta_t *d = SLOT();
+         if (d)
+         {
+            d->type = AIMEE_DELTA_BLOCK_STOP;
+            d->kind = AIMEE_BLK_THINKING;
+            d->block_id = st->reasoning_block;
+            st->reasoning_block = -1;
+         }
+      }
       if (st->text_block >= 0)
       {
          aimee_delta_t *d = SLOT();
@@ -374,6 +433,220 @@ int bedrock_converse_stream_to_deltas(const char *event_type, const cJSON *paylo
    }
 
    /* a genuinely-unknown event_type (a future Converse event) -> 0 deltas. */
+   return 0;
+}
+
+/* Read a usage counter LENIENTLY -- matching anthropic_backend_parse's treatment of
+ * the same fields on the non-stream path (absent/garbage leaves the counter
+ * untouched) rather than the Converse parser's strict validation, so the two
+ * Anthropic parsers agree about what a usage block means. */
+static void anthropic_usage(const cJSON *usage, const char *name, long *out)
+{
+   const cJSON *it = usage ? cJSON_GetObjectItemCaseSensitive((cJSON *)usage, name) : NULL;
+   if (cJSON_IsNumber(it) && isfinite(it->valuedouble) && it->valuedouble >= 0 &&
+       it->valuedouble <= (double)LONG_MAX)
+      *out = (long)it->valuedouble;
+}
+
+/* Anthropic content_block.type -> IR block kind. An unrecognised type maps to
+ * AIMEE_BLK_UNKNOWN rather than dropping the stream, so a future block type still
+ * gets well-formed START/STOP bracketing around deltas we ignore. */
+static aimee_block_type_t anthropic_block_kind(const char *type)
+{
+   if (!type)
+      return AIMEE_BLK_UNKNOWN;
+   if (strcmp(type, "text") == 0)
+      return AIMEE_BLK_TEXT;
+   /* redacted_thinking carries no plaintext, but it IS a reasoning block -- keeping it
+    * THINKING means a consumer counting reasoning is not fooled by redaction. */
+   if (strcmp(type, "thinking") == 0 || strcmp(type, "redacted_thinking") == 0)
+      return AIMEE_BLK_THINKING;
+   if (strcmp(type, "tool_use") == 0)
+      return AIMEE_BLK_TOOL_USE;
+   return AIMEE_BLK_UNKNOWN;
+}
+
+/* content-block index -> block_id, bounded by the per-index kind table. */
+static int anthropic_index(const cJSON *payload, int *out)
+{
+   const cJSON *it = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "index");
+   if (!cJSON_IsNumber(it) || !isfinite(it->valuedouble) || it->valuedouble < 0 ||
+       it->valuedouble >= AIMEE_STREAM_MAX_TOOLS)
+      return -1;
+   /* Integrality without floor(): the range check above makes the int cast safe, and
+    * avoiding libm here keeps every caller of this parser free of a -lm dependency. */
+   if ((double)(int)it->valuedouble != it->valuedouble)
+      return -1;
+   *out = (int)it->valuedouble;
+   return 0;
+}
+
+void anthropic_backend_stream_state_init(anthropic_backend_stream_state_t *st)
+{
+   if (!st)
+      return;
+   memset(st, 0, sizeof *st);
+   /* Absent a stop_reason (message_stop with no preceding final message_delta), fall
+    * back to end_turn -- the same default openai's finish_to_stop applies to NULL. */
+   st->pending_stop_reason = AIMEE_STOP_END_TURN;
+}
+
+int anthropic_stream_to_deltas(const char *event_type, const cJSON *payload,
+                               anthropic_backend_stream_state_t *st, aimee_delta_t *out, int max)
+{
+   if (!event_type || !st || !out || max <= 0)
+      return 0;
+
+   if (strcmp(event_type, "ping") == 0)
+      return 0;
+
+   if (strcmp(event_type, "message_start") == 0)
+   {
+      const cJSON *msg =
+          payload ? cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "message") : NULL;
+      const char *role = msg ? ostr(msg, "role") : NULL;
+      if (!cJSON_IsObject(msg) || !role || strcmp(role, "assistant") != 0 || st->started ||
+          st->terminal_emitted)
+         return -1;
+      anthropic_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)msg, "usage"), "input_tokens",
+                      &st->pending_usage_in);
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_TURN_START;
+      st->started = 1;
+      return 1;
+   }
+
+   if (strcmp(event_type, "content_block_start") == 0)
+   {
+      int idx;
+      if (!payload || anthropic_index(payload, &idx) != 0)
+         return -1;
+      const cJSON *cb = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "content_block");
+      if (!cJSON_IsObject(cb) || st->kind_set[idx])
+         return -1;
+      aimee_block_type_t kind = anthropic_block_kind(ostr(cb, "type"));
+      const char *tool_id = (kind == AIMEE_BLK_TOOL_USE) ? ostr(cb, "id") : NULL;
+      const char *tool_name = (kind == AIMEE_BLK_TOOL_USE) ? ostr(cb, "name") : NULL;
+      if (kind == AIMEE_BLK_TOOL_USE && (!tool_id || !tool_name))
+         return -1; /* a tool_use block with no id/name cannot be answered */
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_BLOCK_START;
+      out[0].block_id = idx;
+      out[0].kind = kind;
+      out[0].tool_id = tool_id;
+      out[0].tool_name = tool_name;
+      st->kind[idx] = kind;
+      st->kind_set[idx] = 1;
+      return 1;
+   }
+
+   if (strcmp(event_type, "content_block_delta") == 0)
+   {
+      int idx;
+      if (!payload || anthropic_index(payload, &idx) != 0)
+         return -1;
+      const cJSON *delta = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "delta");
+      if (!cJSON_IsObject(delta) || !st->kind_set[idx])
+         return -1; /* Anthropic always brackets deltas with a content_block_start */
+      const char *dtype = ostr(delta, "type");
+      if (!dtype)
+         return -1;
+
+      /* signature_delta: see the header's KNOWN GAPS. The IR delta model has nowhere
+       * to put a signature, so it is dropped openly rather than mangled into text. */
+      if (strcmp(dtype, "signature_delta") == 0)
+         return 0;
+
+      aimee_block_type_t kind;
+      const char *text = NULL, *args = NULL;
+      if (strcmp(dtype, "text_delta") == 0)
+      {
+         kind = AIMEE_BLK_TEXT;
+         text = ostr(delta, "text");
+      }
+      else if (strcmp(dtype, "thinking_delta") == 0)
+      {
+         kind = AIMEE_BLK_THINKING;
+         text = ostr(delta, "thinking");
+      }
+      else if (strcmp(dtype, "input_json_delta") == 0)
+      {
+         /* partial_json is a JSON-STRING fragment accumulated across deltas -- emit it
+          * verbatim, do NOT parse (same contract as Converse's toolUse.input). */
+         kind = AIMEE_BLK_TOOL_USE;
+         args = ostr(delta, "partial_json");
+      }
+      else
+         return 0; /* a future delta variant -> ignore it, keep the stream */
+
+      if (!text && !args)
+         return -1; /* a KNOWN variant missing its own payload field */
+      if (st->kind[idx] != kind)
+         return -1;
+
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_BLOCK_DELTA;
+      out[0].block_id = idx;
+      out[0].kind = kind;
+      if (args)
+         out[0].tool_args_delta = args;
+      else
+         out[0].text_delta = text;
+      return 1;
+   }
+
+   if (strcmp(event_type, "content_block_stop") == 0)
+   {
+      int idx;
+      if (!payload || anthropic_index(payload, &idx) != 0 || !st->kind_set[idx])
+         return -1;
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_BLOCK_STOP;
+      out[0].block_id = idx;
+      out[0].kind = st->kind[idx];
+      return 1;
+   }
+
+   if (strcmp(event_type, "message_delta") == 0)
+   {
+      if (!payload || !st->started || st->terminal_emitted)
+         return -1;
+      const cJSON *delta = cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "delta");
+      if (!cJSON_IsObject(delta))
+         return -1;
+      /* stop_reason is null on a non-final message_delta; only the last one sets it. */
+      const char *sr = ostr(delta, "stop_reason");
+      if (sr)
+         st->pending_stop_reason = aimee_stop_reason_parse(sr);
+      anthropic_usage(cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "usage"), "output_tokens",
+                      &st->pending_usage_out);
+      return 0; /* message_stop emits the single terminal IR delta */
+   }
+
+   if (strcmp(event_type, "message_stop") == 0)
+   {
+      if (!st->started || st->terminal_emitted)
+         return -1;
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_TURN_STOP;
+      out[0].stop_reason = st->pending_stop_reason;
+      out[0].usage_in = st->pending_usage_in;
+      out[0].usage_out = st->pending_usage_out;
+      st->terminal_emitted = 1;
+      return 1;
+   }
+
+   if (strcmp(event_type, "error") == 0)
+   {
+      const cJSON *e = payload ? cJSON_GetObjectItemCaseSensitive((cJSON *)payload, "error") : NULL;
+      const char *msg = e ? ostr(e, "message") : NULL;
+      memset(&out[0], 0, sizeof out[0]);
+      out[0].type = AIMEE_DELTA_ERROR;
+      out[0].error_message = msg ? msg : "anthropic stream error";
+      return 1;
+   }
+
+   /* a genuinely-unknown event_type (a future Anthropic event) -> 0 deltas. */
    return 0;
 }
 

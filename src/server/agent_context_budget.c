@@ -29,8 +29,8 @@ size_t agent_exec_context_budget_chars(const agent_t *agent)
    int output_tokens = agent->max_tokens;
    if (output_tokens <= 0)
    {
-      int model_ceiling = model_max_output(agent_catalog_provider(agent), agent->model);
-      int reserve_cap = agent->middleware.context_window / 4;
+      int model_ceiling = agent_declared_max_output(agent);
+      int reserve_cap = agent_declared_context_window(agent) / 4;
       output_tokens =
           (model_ceiling > 0 && model_ceiling < reserve_cap) ? model_ceiling : reserve_cap;
    }

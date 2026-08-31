@@ -7,7 +7,7 @@
  * the SUBCOMMAND was wrong. That message sends people hunting for a missing route
  * that already exists.
  *
- * The first cut of the helper walked rpc_routes with sizeof/sizeof, which runs
+ * The first cut of the helper walked cli_command_routes with sizeof/sizeof, which runs
  * off the end into the table's {NULL,...} sentinel and segfaults in strcmp. The
  * unknown-command case below is the regression guard for that crash. */
 
@@ -20,6 +20,7 @@
 #include "cJSON.h"
 #include "cli_client.h"
 #include "cli_v1_routes_internal.h"
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 /* A command that is not in the table at all: must report zero and must not walk
  * into the NULL sentinel. This is the segfault guard. */
@@ -122,7 +123,8 @@ static void test_kb_status_reports_backlog_and_degradation(void)
    cJSON *resp = cJSON_Parse(payload);
    assert(resp);
 
-   char path[] = "/tmp/aimee-kbstatus-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-kbstatus-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    fflush(stdout);
@@ -163,7 +165,8 @@ static void capture_printer(void (*printer)(const char *, cJSON *), const char *
 {
    cJSON *resp = cJSON_Parse(payload);
    assert(resp);
-   char path[] = "/tmp/aimee-v1print-XXXXXX";
+   char path[256];
+   snprintf(path, sizeof path, "%s/aimee-v1print-XXXXXX", platform_tmpdir());
    int fd = mkstemp(path);
    assert(fd >= 0);
    fflush(stdout);
@@ -203,7 +206,7 @@ static void test_agent_roles_printer_reports_roles(void)
        "{\"name\":\"codex\",\"status\":\"ok\","
        "\"roles\":[\"code\",\"review\",\"validate\",\"all\"],\"personas\":[\"all\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_roles, "model.roles", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    /* The roles that were written must be visible... */
@@ -224,7 +227,7 @@ static void test_agent_roles_printer_read_is_not_reported_as_a_write(void)
    static const char *payload = "{\"name\":\"codex\",\"read_only\":true,"
                                 "\"roles\":[\"code\",\"diagnose\",\"all\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_roles, "agent.roles", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_roles, "model.roles", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "diagnose") != NULL);
@@ -239,7 +242,7 @@ static void test_agent_personas_printer_reports_personas(void)
    static const char *payload = "{\"name\":\"codex\",\"status\":\"ok\","
                                 "\"roles\":[\"code\"],\"personas\":[\"engineer\",\"qa\"]}";
    char out[1024] = "";
-   capture_printer(pt_print_agent_personas, "agent.personas", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_personas, "model.personas", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "engineer") != NULL);
@@ -258,7 +261,7 @@ static void test_agent_list_printer_shows_roles(void)
        "\"model\":\"gpt-5.5\",\"endpoint\":\"https://example.invalid\",\"tools_enabled\":true,"
        "\"roles\":[\"code\",\"review\",\"validate\"]}]}";
    char out[2048] = "";
-   capture_printer(pt_print_agent_list, "agent.list", payload, out, sizeof(out));
+   capture_printer(pt_print_agent_list, "model.list", payload, out, sizeof(out));
 
    assert(strstr(out, "codex") != NULL);
    assert(strstr(out, "roles:") != NULL);
@@ -318,9 +321,289 @@ static void test_gated_method_refuses_without_confirmation(void)
    printf("  workspace remove refuses without --confirm on a non-tty\n");
 }
 
+/* An unquoted memory body must not be truncated to its first word.
+ *
+ * `aimee memory store <key> <content>` read positional[1] and nothing else, so
+ * a caller who forgot to quote the content -- which arrives as one positional
+ * PER WORD -- stored the first word and lost the rest. It exited 0 and printed
+ * "stored memory 60", so nothing said the memory had been gutted.
+ *
+ * Observed live on a deployment: storing a 16-word fact stored the single word
+ * "The". The loss is silent and on the WRITE path, so it is not discovered when
+ * it happens; it is discovered later as a memory that does not say what was
+ * meant, or as a search that cannot find what was stored.
+ *
+ * memory identity / prefer shared the defect through marshal_user_capture. */
+static void test_memory_store_keeps_unquoted_content(void)
+{
+   char *argv[] = {(char *)"k", (char *)"one", (char *)"two", (char *)"three", (char *)"four"};
+   cJSON *req = marshal_memory_store(5, argv);
+   assert(req);
+   cJSON *content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "one two three four") == 0);
+   cJSON *key = cJSON_GetObjectItemCaseSensitive(req, "key");
+   assert(cJSON_IsString(key) && strcmp(key->valuestring, "k") == 0);
+   cJSON_Delete(req);
+
+   /* The ordinary quoted form is unchanged: one positional stays one value. */
+   char *quoted[] = {(char *)"k", (char *)"one two three four"};
+   req = marshal_memory_store(2, quoted);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "one two three four") == 0);
+   cJSON_Delete(req);
+
+   /* The --content flag still wins when there is no positional body. */
+   char *flagged[] = {(char *)"k", (char *)"--content=from the flag"};
+   req = marshal_memory_store(2, flagged);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "from the flag") == 0);
+   cJSON_Delete(req);
+
+   /* identity shares the marshaller family and the same fix. */
+   char *ident[] = {(char *)"role", (char *)"staff", (char *)"platform", (char *)"engineer"};
+   req = marshal_memory_identity(4, ident);
+   assert(req);
+   content = cJSON_GetObjectItemCaseSensitive(req, "content");
+   assert(cJSON_IsString(content));
+   assert(strcmp(content->valuestring, "staff platform engineer") == 0);
+   cJSON_Delete(req);
+
+   printf("  unquoted memory content is kept whole, not truncated to word one\n");
+}
+
+/* A pending count with nothing draining it must SAY so on `aimee kb status`.
+ *
+ * memory.store enqueues a memory_facts job whenever typed facts are on (the
+ * default); the only consumer runs on the curator LLM lane, which deliberately
+ * does not start without a synthesis endpoint. Both decisions are right, and
+ * together they mean a supported configuration queues one row per stored memory
+ * that nothing will ever claim. The warning for it was written into
+ * kb_service_health_object() while its own comment named the symptom on the
+ * OTHER surface -- so the command an operator runs kept printing a bare number.
+ *
+ * Reproduced live: 65 jobs, oldest 34 hours, attempts 0, under "status: ok".
+ * An undrainable queue and a busy one print the same pending count; only this
+ * line distinguishes them, so it must survive a verdict that stays ok. */
+static void test_kb_status_warns_about_undrainable_queue(void)
+{
+   static const char *payload =
+       "{\"summary_status\":\"ok\",\"project\":\"\",\"chunks\":2,"
+       "\"queue\":{\"pending\":65,\"running\":0,\"done\":0,\"failed\":0,\"total\":65},"
+       "\"warnings\":[\"typed-fact extraction: 65 job(s) queued with nothing to drain "
+       "them - no synthesis endpoint is configured\"],"
+       "\"ingest_queue\":{\"pending\":0,\"running\":0,\"done_last_24h\":0}}";
+   char out[2048] = "";
+   capture_printer(pt_print_kb_status, "kb.status", payload, out, sizeof(out));
+
+   /* The verdict is still ok -- that is the point, the warning cannot depend on
+    * a degraded status to be shown. */
+   assert(strstr(out, "ok") != NULL);
+   assert(strstr(out, "65 pending") != NULL);
+   assert(strstr(out, "WARNING") != NULL);
+   assert(strstr(out, "nothing to drain") != NULL);
+   printf("  kb status warns when the queue has nothing to drain it\n");
+}
+
+/* `config deploy-env` must be REACHABLE from the thin client.
+ *
+ * It was implemented in cmd_data.c and registered in that local subcommand table,
+ * but had no /v1 route -- so on a managed deployment, where the operator's `aimee`
+ * IS the thin client, the command its own doc comment recommends
+ * (`eval "$(aimee config deploy-env)" && docker compose up -d`) answered
+ * "'deploy-env' is not a subcommand of 'config'; try: show, get, set".
+ *
+ * That is not a cosmetic gap. Recreating a managed container without that env
+ * drops every variable the compose file interpolates: EMBEDDER_MODEL, so the kb
+ * refuses to serve, and AIMEE_KB_VARIANT, so ${AIMEE_KB_VARIANT:+-...} resolves
+ * to the EMBEDDERLESS aimee-kb image -- silently, which is the exact outcome
+ * config_emit_deploy_env's own comments were written to prevent.
+ *
+ * The help-coverage gate cannot catch this: it checks that routed commands are
+ * documented, not that implemented ones are routed. */
+static void test_config_deploy_env_is_routed(void)
+{
+   char buf[256];
+   int n = cli_v1_subcommands("config", buf, sizeof(buf));
+   assert(n > 0);
+   assert(strstr(buf, "deploy-env") != NULL);
+   /* the neighbours stay routed */
+   assert(strstr(buf, "show") != NULL);
+   assert(strstr(buf, "get") != NULL);
+   assert(strstr(buf, "set") != NULL);
+   printf("  config deploy-env is routed to the thin client\n");
+}
+
+/* `memory get <id> --as-of <ts>` must reach the server, and its answer must be
+ * printed.
+ *
+ * db2_memory_valid_at() had no production caller at all: the supersession WRITE
+ * that closes valid_until was live, but nothing could ever READ the interval, so
+ * "was this true on 12 June" was unanswerable for rows though the data was being
+ * recorded. A DB2 primitive with only tests calling it is not a feature.
+ *
+ * The id must stay positional even with the flag present, and "unknown" has to
+ * survive as a third answer -- the server returns it when it could not tell, and
+ * folding that into "no" is how a bitemporal query lies. */
+static void test_memory_get_as_of_is_wired(void)
+{
+   char *argv[] = {(char *)"42", (char *)"--as-of=2026-06-12 00:00:00"};
+   cJSON *req = marshal_memory_get(2, argv);
+   assert(req);
+   cJSON *id = cJSON_GetObjectItemCaseSensitive(req, "id");
+   assert(cJSON_IsNumber(id) && (int)id->valuedouble == 42);
+   cJSON *as_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
+   assert(cJSON_IsString(as_of));
+   assert(strcmp(as_of->valuestring, "2026-06-12 00:00:00") == 0);
+   cJSON_Delete(req);
+
+   /* Without the flag the field is absent, not empty: the server only answers
+    * the time question when it was asked. */
+   char *plain[] = {(char *)"42"};
+   req = marshal_memory_get(1, plain);
+   assert(req);
+   assert(cJSON_GetObjectItemCaseSensitive(req, "as_of") == NULL);
+   cJSON_Delete(req);
+
+   char out[1024] = "";
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"},"
+                   "\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":false}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at 2026-06-12 00:00:00: no") != NULL);
+
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"},"
+                   "\"as_of\":\"2026-06-12 00:00:00\",\"valid_at\":\"unknown\"}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at 2026-06-12 00:00:00: unknown") != NULL);
+
+   /* A plain get prints no time line at all. */
+   capture_printer(pt_print_memory_get, "memory.get",
+                   "{\"status\":\"ok\",\"memory\":{\"id\":42,\"key\":\"k\",\"content\":\"c\"}}",
+                   out, sizeof(out));
+   assert(strstr(out, "valid at") == NULL);
+
+   printf("  memory get --as-of reaches the server and prints its answer\n");
+}
+
+/* `memory recall --query` must reach the field the server actually reads.
+ *
+ * It was marshalled as its own `query` key that nothing consumed:
+ * handle_memory_recall reads task_hint, limit_tokens and session_start, and the
+ * only other jo_str(req,"query") in the tree belongs to kb.search. So the flag
+ * sent text, had it dropped, and fell back to the "session start" hint --
+ * returning the recency bundle while looking like it had searched. Verified on a
+ * deployment: a query matching three stored memories almost verbatim returned
+ * none of them.
+ *
+ * An explicit --task must still win, so no existing invocation changes. */
+static void test_memory_recall_query_feeds_the_hint(void)
+{
+   char *q[] = {(char *)"--query=nightly export manifest"};
+   cJSON *req = marshal_memory_recall(1, q);
+   assert(req);
+   cJSON *hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint));
+   assert(strcmp(hint->valuestring, "nightly export manifest") == 0);
+   /* the dead key is gone, not merely ignored */
+   assert(cJSON_GetObjectItemCaseSensitive(req, "query") == NULL);
+   cJSON_Delete(req);
+
+   /* --task wins over --query. */
+   char *both[] = {(char *)"--task=explicit task", (char *)"--query=ignored"};
+   req = marshal_memory_recall(2, both);
+   assert(req);
+   hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint) && strcmp(hint->valuestring, "explicit task") == 0);
+   cJSON_Delete(req);
+
+   /* Neither given: the session-start bundle, exactly as before. */
+   req = marshal_memory_recall(0, NULL);
+   assert(req);
+   hint = cJSON_GetObjectItemCaseSensitive(req, "task_hint");
+   assert(cJSON_IsString(hint) && strcmp(hint->valuestring, "session start") == 0);
+   cJSON_Delete(req);
+
+   printf("  memory recall --query feeds the hint the server reads\n");
+}
+
+/* MCP is an alternate transport, not a larger capability surface. The generic
+ * CLI projection must preserve the registered tool name and arguments, and the
+ * ergonomic ast-grep alias must reach that exact same dispatch. */
+static void test_every_mcp_tool_has_cli_dispatch(void)
+{
+   char *generic[] = {(char *)"ast_grep_search", (char *)"--lang", (char *)"python",
+                      (char *)"pattern=$OBJ.open($PATH)", (char *)"limit=12"};
+   cJSON *req = marshal_tool_call(5, generic);
+   assert(req);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "tool")->valuestring, "ast_grep_search") ==
+          0);
+   cJSON *args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(cJSON_IsObject(args));
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "lang")->valuestring, "python") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$OBJ.open($PATH)") == 0);
+   assert(cJSON_GetObjectItemCaseSensitive(args, "limit")->valueint == 12);
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(req, "cwd")));
+   cJSON_Delete(req);
+
+   char *alias[] = {(char *)"--lang", (char *)"python", (char *)"--path", (char *)"app",
+                    (char *)"$OBJ.open($PATH)"};
+   req = marshal_index_ast_grep(5, alias);
+   assert(req);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "method")->valuestring, "mcp.call") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(req, "tool")->valuestring, "ast_grep_search") ==
+          0);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   const char *cwd = cJSON_GetObjectItemCaseSensitive(req, "cwd")->valuestring;
+   const char *path = cJSON_GetObjectItemCaseSensitive(args, "path")->valuestring;
+   assert(strncmp(path, cwd, strlen(cwd)) == 0);
+   assert(strcmp(path + strlen(cwd), "/app") == 0);
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$OBJ.open($PATH)") == 0);
+   cJSON_Delete(req);
+
+   char *assignment[] = {(char *)"--lang", (char *)"python", (char *)"--path", (char *)"app",
+                         (char *)"$X.replace(day=$Y)"};
+   req = marshal_index_ast_grep(5, assignment);
+   assert(req);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "pattern")->valuestring,
+                 "$X.replace(day=$Y)") == 0);
+   cJSON_Delete(req);
+
+   char *default_path[] = {(char *)"--lang=python", (char *)"$OBJ.open($PATH)"};
+   req = marshal_index_ast_grep(2, default_path);
+   assert(req);
+   args = cJSON_GetObjectItemCaseSensitive(req, "arguments");
+   assert(cJSON_IsString(cJSON_GetObjectItemCaseSensitive(args, "path")));
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(args, "path")->valuestring,
+                 cJSON_GetObjectItemCaseSensitive(req, "cwd")->valuestring) == 0);
+   cJSON_Delete(req);
+
+   cli_v1_route_t route = {0};
+   char *sub[] = {(char *)"ast-grep"};
+   assert(cli_v1_lookup("index", 1, sub, &route) == 1);
+   assert(strcmp(route.method, "index.ast_grep") == 0);
+   assert(strcmp(route.server_method, "mcp.call") == 0);
+   printf("  every MCP tool has CLI dispatch; ast-grep has a first-class alias\n");
+}
+
 int main(void)
 {
+   test_every_mcp_tool_has_cli_dispatch();
    printf("test_cli_v1_subcommands\n");
+   test_memory_store_keeps_unquoted_content();
+   test_memory_get_as_of_is_wired();
+   test_memory_recall_query_feeds_the_hint();
+   test_kb_status_warns_about_undrainable_queue();
+   test_config_deploy_env_is_routed();
    test_unknown_command_is_safe();
    test_known_command_lists_subcommands();
    test_list_formatting();

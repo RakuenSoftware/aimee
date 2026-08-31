@@ -9,11 +9,14 @@
  *   1024 -> pplx-embed-v1-0.6b
  *   2560 -> pplx-embed-v1-4b
  *
- * Exercised against the in-memory sqlite shim. */
+ * Exercised against the in-memory sqlite shim, and against real Postgres at the
+ * width the template's column actually has (see main). */
 #include "../headers/aimee.h"
-#include "../db2/db2_test_shim.h"
-#include "../db2/lifecycle.h"      /* db2_set_embedding_dim */
-#include "../db2/memory_vectors.h" /* pgvec_memory_vector_upsert_memory + search */
+#include "../headers/config_embedder_dims.h"
+#include "../modules/db2/c/db2_test_shim.h"
+#include "../modules/db2/c/db_postgres.h"    /* aimee_pg_is_shim */
+#include "../modules/db2/c/lifecycle.h"      /* db2_set_embedding_dim */
+#include "../modules/db2/c/memory_vectors.h" /* pgvec_memory_vector_upsert_memory + search */
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,9 +67,25 @@ int main(void)
 {
    db2_test_shim_open();
 
-   check_dim(1024, 384);  /* pplx-0.6b column; the builtin 384-dim vector must be rejected */
-   check_dim(2560, 1024); /* pplx-4b column; a 1024-dim (0.6b) vector must be rejected */
-   check_dim(2560, 384);  /* pplx-4b column; the builtin 384-dim vector must be rejected too */
+   if (aimee_pg_is_shim())
+   {
+      /* The shim's embedding column is untyped text, so the configured dim can be
+       * moved freely and every shipping width is reachable. */
+      check_dim(1024, 384);  /* pplx-0.6b column; the builtin 384-dim vector must be rejected */
+      check_dim(2560, 1024); /* pplx-4b column; a 1024-dim (0.6b) vector must be rejected */
+      check_dim(2560, 384);  /* pplx-4b column; the builtin 384-dim vector must be rejected too */
+   }
+   else
+   {
+      /* Against real Postgres the column is halfvec(N), fixed when the test template
+       * was built, and db2_set_embedding_dim only moves the in-memory guard -- it does
+       * not re-type the column. Widths other than the template's are therefore
+       * unreachable here. Exercise the guard at the width the column really has: that
+       * is the half of this test a schemaless backend cannot verify at all, because
+       * only a real halfvec column can confirm the matching vector actually persisted
+       * rather than being stored as text nobody would ever read back as a vector. */
+      check_dim(CONFIG_EMBEDDER_DIMS_DEFAULT, CONFIG_EMBEDDER_DIMS_DEFAULT * 2);
+   }
 
    printf("test_memory_embed_dim_guard: OK\n");
    return 0;

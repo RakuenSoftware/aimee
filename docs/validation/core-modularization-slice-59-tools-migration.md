@@ -17,14 +17,14 @@ toolset session-state + tool-definition JSON builders) share a filename, and `ag
 symbols implemented in **both**. The decomposition (self-reviewed; the roundtable was unavailable this
 cycle) is:
 
-- The `tools` module owns the dispatch/implementation surface — `agent_tools.c`,
-  `agent_tools_dispatch.c`, `agent_tools_anchored.c` — plus the contract `agent_tools.h` and the
+- The `tools` module owns the dispatch/implementation surface, `agent_tools.c`,
+  `agent_tools_dispatch.c`, `agent_tools_anchored.c`, plus the contract `agent_tools.h` and the
   private seam `agent_tools_internal.h`. These move under `src/modules/tools/`.
 - `src/server/agent_tools.c` implements the turn/snapshot/toolset session-state slice of the same
   contract (`agent_tools_begin_turn`, `agent_tools_set_snap_id`, `agent_tools_set_active_toolset`). It
   is **left in the server** as a not-module-local implementation, the same arrangement by which `memory`
   owns its contract while DB1/DB2 implement storage (slice 56). This keeps the boundary honest and makes
-  the `agent_tools.c` name collision moot — only the posix `agent_tools.c` moves.
+  the `agent_tools.c` name collision moot, only the posix `agent_tools.c` moves.
 
 `server/agent_tools.c` does not include `agent_tools_internal.h`; the two halves communicate only
 through the public `agent_tools.h`, so the split introduces no new coupling. The `delegation_active_id`
@@ -68,8 +68,8 @@ make -C src ../aimee-server      # links the relocated tool objects and every ag
 ```
 
 Validated on the .253 aimee-test container: full Make build and full CMake configure/build (the
-relocated sources compile at `modules/tools/`, and every `agent_tools.h` consumer — server, posix,
-delegates, Windows path, tests — resolves the header through the added `-Imodules/tools`). This slice
+relocated sources compile at `modules/tools/`, and every `agent_tools.h` consumer, server, posix,
+delegates, Windows path, tests, resolves the header through the added `-Imodules/tools`). This slice
 was self-reviewed (the roundtable was unavailable this cycle: kimi quota-exhausted, MiniMax unresponsive)
 under explicit operator authorization for self-review-only.
 

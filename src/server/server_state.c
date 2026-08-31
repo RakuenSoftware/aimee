@@ -3,11 +3,11 @@
 #include "aimee.h"
 #include <aimee/ir/aimee_ir_metrics.h>
 #include "shadow_mirror.h"
-#include "gw_mutate_stats.h" /* gw_stat_to_json — gateway-mutation economizer counters */
-#include "tool_condense.h"   /* tool_condense_stats_snapshot — tool-output condense savings */
-#include "token_audit.h"     /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
+#include "economizer_module_client.h" /* Go-owned tool-output condense savings */
+#include "token_audit.h"              /* db1_token_audit_spend_breakdown — avoided-$ aggregate */
 #include "embedder_catalog.h"
 #include "server.h"
+#include "headers/module_commands.h"
 #include "dashboard.h"
 #include "render.h"                   /* decision_to_json + db2_decision_log_list */
 #include <aimee/audit/audit_ledger.h> /* audit_ledger_read — server-incurred tool-action audit */
@@ -20,8 +20,7 @@
 #include "modules/workspace/workspace_provider.h"
 #include "modules/workspace/workspace_handle.h"
 #include "modules/workspace/workspace_runner_registry.h"
-#include "modules/git/forge_credentials.h"
-#include "db1.h"
+#include "db1_client/db1.h"
 #include "kb_client.h"
 #include "log.h" /* aimee_log — name the real KB failure in the server log */
 #include "compute_pool.h"
@@ -40,7 +39,6 @@
 #include <stdatomic.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
 
 /* Send a response object and delete it. Returns send rc. */
 int send_and_free(server_conn_t *conn, cJSON *resp)
@@ -75,9 +73,9 @@ int server_memory_scope_begin(cJSON *req)
             snprintf(workspace, sizeof(workspace), "%s", resolved_workspace);
       }
    }
-   kb_client_memory_scope_context_set(workspace, project,
-                                      scope_arg && strcmp(scope_arg, "all") == 0);
-   return (!workspace[0] && !project[0]) ? 1 : 0;
+   int include_all = scope_arg && strcmp(scope_arg, "all") == 0;
+   kb_client_memory_scope_context_set(workspace, project, include_all);
+   return (!include_all && !workspace[0] && !project[0]) ? 1 : 0;
 }
 
 int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -85,22 +83,30 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    (void)ctx;
 
    cJSON *jkw = cJSON_GetObjectItemCaseSensitive(req, "keywords");
-   int limit = jo_int(req, "limit", 10);
-
+   cJSON *jlimit = cJSON_GetObjectItemCaseSensitive(req, "limit");
+   if (jlimit &&
+       (!cJSON_IsNumber(jlimit) || !isfinite(jlimit->valuedouble) || jlimit->valuedouble < 1 ||
+        jlimit->valuedouble > 32 || jlimit->valuedouble != (double)(int)jlimit->valuedouble))
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search limit must be an integer between 1 and 32",
+                                    NULL);
+   int limit = jlimit ? (int)jlimit->valuedouble : 10;
    if (!cJSON_IsArray(jkw) || cJSON_GetArraySize(jkw) == 0)
-      return server_send_error(conn, "missing or empty keywords array", NULL);
-
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "missing or empty keywords array", NULL);
    int count = cJSON_GetArraySize(jkw);
    if (count > 16)
-      count = 16;
-
+      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.search accepts at most 16 keywords", NULL);
    char *clusters[16];
    for (int i = 0; i < count; i++)
    {
       cJSON *item = cJSON_GetArrayItem(jkw, i);
-      clusters[i] = cJSON_IsString(item) ? item->valuestring : "";
+      if (!cJSON_IsString(item) || !item->valuestring[0])
+         return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+                                       "memory.search keywords must be non-empty strings", NULL);
+      clusters[i] = item->valuestring;
    }
-
    /* Build query string for fact search */
    char query_buf[2048];
    int qpos = 0;
@@ -144,6 +150,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       free(json);
       if (!err)
          return server_send_error(conn, detail, NULL);
+      server_error_kind_apply(err, active_context_missing ? SERVER_ERR_INVALID_ARGUMENT
+                                                          : SERVER_ERR_UNAVAILABLE);
       cJSON_AddBoolToObject(err, "active_context_missing", active_context_missing);
       return send_and_free(conn, err);
    }
@@ -174,54 +182,77 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return send_and_free(conn, resp);
 }
 
+/* THE command, in the shape the core command table can route.
+ *
+ * Every surface needs the same thing from a command -- a result -- but the RPC
+ * handlers were written to WRITE ONE to a connection and return int, so there was
+ * nothing for a table to hand back to MCP or ACP. That shape is why capability
+ * surface ended up declared four separate times: a command reachable over RPC had
+ * no result-returning form to register, so each surface grew its own list.
+ *
+ * Splitting it costs nothing at the wire: server_send_error and jo_err build the
+ * identical {status:"error", message} envelope, so the bytes on the RPC path are
+ * unchanged. handle_memory_store below is now only the connection write. */
+cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
+{
+   const char *key, *content;
+   if (jo_need_str((cJSON *)req, "key", &key) < 0 ||
+       jo_need_str((cJSON *)req, "content", &content) < 0)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a key and content", NULL);
+   /* An empty key or content is a malformed REQUEST, not a storage failure. The
+    * store already refuses it, but the refusal surfaced as "failed to store
+    * memory" -- which reads as the database declining a valid write and sends
+    * the caller to look at the store. jo_need_str only proves the field is a
+    * string and present; "" satisfies that. Refused here, beside the sibling
+    * argument checks (memory.delete's positive id, facts.retract's non-empty
+    * source), and with the same kind so a client can tell the two apart. */
+   if (!key[0] || !content[0])
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store requires a non-empty key and content", NULL);
+
+   const char *tier = jo_str((cJSON *)req, "tier", TIER_L0);
+   const char *kind = jo_str((cJSON *)req, "kind", KIND_FACT);
+   double confidence = jo_num((cJSON *)req, "confidence", 1.0);
+   const char *sid = jo_str((cJSON *)req, "session_id", "");
+   memory_t out;
+   server_memory_scope_begin((cJSON *)req);
+   int store_rc =
+       kb_client_memory_insert_as(tier, kind, key, content, "", confidence, sid, authority, &out);
+   kb_client_memory_scope_context_clear();
+   if (store_rc != 0)
+      return jo_err("failed to store memory");
+
+   cJSON *resp = jo_ok();
+   jo_add_i64(resp, "id", out.id);
+   return resp;
+}
+
 int handle_memory_store(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
-
-   const char *key, *content;
-   if (jo_need_str(req, "key", &key) < 0 || jo_need_str(req, "content", &content) < 0)
-      return server_send_error(conn, "missing key or content", NULL);
-
-   const char *tier = jo_str(req, "tier", TIER_L0);
-   const char *kind = jo_str(req, "kind", KIND_FACT);
-   double confidence = jo_num(req, "confidence", 1.0);
-   const char *sid = jo_str(req, "session_id", "");
-
-   memory_t out;
-   int rc = kb_client_memory_insert(tier, kind, key, content, confidence, sid, &out);
-
-   cJSON *resp;
-   if (rc == 0)
-   {
-      resp = jo_ok();
-      jo_add_i64(resp, "id", out.id);
-   }
-   else
-   {
-      resp = jo_err("failed to store memory");
-   }
-   return send_and_free(conn, resp);
+   /* Whose words these are follows the connection's kernel-attested identity, the
+    * same rule facts.retract uses (server_facts.c) and for the same reason: this
+    * row's provenance decides whether the typed-fact drain may mine Class-A facts
+    * out of it, and a caller must not be able to claim that by asking. A bearer
+    * over TCP/TLS is a service or an agent, not a person. */
+   return send_and_free(
+       conn, memory_store_command(req, server_account_memory_authority(server_request_account())));
 }
 
-int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+cJSON *memory_list_command(const cJSON *req)
 {
-   (void)ctx;
-
-   const char *tier = jo_str(req, "tier", NULL);
-   const char *kind = jo_str(req, "kind", NULL);
-   int limit = jo_int(req, "limit", 20);
-   int active_context_missing = server_memory_scope_begin(req);
+   const char *tier = jo_str((cJSON *)req, "tier", NULL);
+   const char *kind = jo_str((cJSON *)req, "kind", NULL);
+   int limit = jo_int((cJSON *)req, "limit", 20);
+   int active_context_missing = server_memory_scope_begin((cJSON *)req);
    memory_t results[64];
    int count = kb_client_memory_list(tier, kind, limit, results, 64);
+   kb_client_memory_scope_context_clear(); /* cleared on BOTH paths, as before */
    if (count < 0)
-   {
-      kb_client_memory_scope_context_clear();
-      return server_send_error(conn,
-                               "knowledge service unavailable; the memory store is unreachable "
-                               "(server-side maintenance is required)",
-                               NULL);
-   }
-   kb_client_memory_scope_context_clear();
+      return jo_err("knowledge service unavailable; the memory store is unreachable "
+                    "(server-side maintenance is required)");
+
    cJSON *arr = cJSON_CreateArray();
    for (int i = 0; i < count; i++)
       cJSON_AddItemToArray(arr, memory_to_json(&results[i]));
@@ -229,7 +260,13 @@ int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *resp = jo_ok();
    cJSON_AddItemToObject(resp, "memories", arr);
    jo_add_bool(resp, "active_context_missing", active_context_missing);
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_list_command(req));
 }
 
 int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -251,14 +288,14 @@ int handle_memory_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
 /* cJSON stores numbers as doubles. Reject fractional and unrepresentable IDs
  * instead of truncating them into a different memory's integer primary key. */
-static int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
+int memory_request_positive_id(cJSON *req, const char *field, int64_t *out)
 {
    cJSON *item = cJSON_GetObjectItemCaseSensitive(req, field);
    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) || item->valuedouble <= 0.0 ||
-       item->valuedouble > 9007199254740991.0 || floor(item->valuedouble) != item->valuedouble)
+       item->valuedouble >= 9223372036854775808.0 || floor(item->valuedouble) != item->valuedouble)
       return -1;
    *out = (int64_t)item->valuedouble;
-   return 0;
+   return *out <= INT64_C(9007199254740991) ? 0 : -1;
 }
 
 /* Replace a memory with a corrected one, linking the two.
@@ -301,9 +338,11 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.supersede session_id must be a string", NULL);
    const char *sid = cJSON_IsString(jsid) ? jsid->valuestring : "";
-
    memory_t mem;
-   if (kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem) != 0)
+   server_memory_scope_begin(req);
+   int supersede_rc = kb_client_memory_supersede(old_id, jnew->valuestring, conf, sid, &mem);
+   kb_client_memory_scope_context_clear();
+   if (supersede_rc != 0)
       return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
@@ -332,70 +371,124 @@ int handle_memory_supersede(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
  * interface a user has — a memory stored by mistake (a secret, a typo, a test
  * fixture written against a live deployment) could not be taken back.
  *
- * Gated on CAP_MEMORY_WRITE, so it follows the same write-tier grant rules as
- * memory.store rather than inventing its own. */
-int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+ * Gated on CAP_MEMORY_ADMIN — deliberately NOT the CAP_MEMORY_WRITE that
+ * memory.store carries. This is the one memory path that destroys rather than
+ * versions, so it is graded like rules.delete: holding "may remember" is not
+ * holding "may forget". The model-facing MCP `forget` verb has no such authority
+ * and retires the memory instead.
+ *
+ * The capability decides whether the caller MAY delete. It does not decide
+ * whether the caller is a person, and only a person's delete destroys: the
+ * capability travels with a bearer, and CAP_MEMORY_ADMIN sits inside
+ * CAPS_AUTHENTICATED, so a TCP bearer under remote_writes=DATA/FULL clears this
+ * gate. Destroying a row and its provenance is irreversible and the audit event
+ * carries only the id, so a token that leaked cannot be allowed to spend the
+ * user's one non-recoverable verb. An un-attested caller that clears the
+ * capability still deletes — it retires the memory, which memory_fact_history
+ * can still read — so this narrows the blast radius rather than the feature. */
+cJSON *memory_delete_command(cJSON *req, const char *account)
 {
-   (void)ctx;
-
    int64_t id = 0;
    if (memory_request_positive_id(req, "id", &id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT,
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.delete requires a positive integer id", NULL);
 
-   if (kb_client_memory_delete(id) != 0)
-      return server_send_error_kind(conn, SERVER_ERR_NOT_FOUND,
+   memory_authority_t authority = server_account_memory_authority(account);
+   server_memory_scope_begin(req);
+   int delete_rc = kb_client_memory_delete_as(id, authority);
+   kb_client_memory_scope_context_clear();
+   if (delete_rc != 0)
+      return server_error_kind_json(SERVER_ERR_NOT_FOUND,
                                     "no such memory, or the knowledge service refused", NULL);
 
    cJSON *resp = jo_ok();
    cJSON_AddNumberToObject(resp, "id", (double)id);
    cJSON_AddBoolToObject(resp, "deleted", 1);
-   return server_send_ok(conn, resp);
+   /* Say which happened. "deleted" alone would report a retire as a destroy, and
+    * a caller correcting a mistake needs to know whether the value is really gone
+    * or still readable through memory_fact_history. */
+   cJSON_AddBoolToObject(resp, "destroyed", authority == MEMORY_AUTHORITY_USER);
+   return resp;
 }
 
-int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+int handle_memory_delete(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    (void)ctx;
+   return server_send_ok(conn, memory_delete_command(req, server_request_account()));
+}
 
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(req, "id");
-   if (!cJSON_IsNumber(jid))
-      return server_send_error(conn, "missing id", NULL);
+cJSON *memory_get_command(cJSON *req)
+{
+   int64_t id = 0;
+   if (memory_request_positive_id(req, "id", &id) != 0)
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.get requires a positive integer id", NULL);
 
-   memory_t m;
-   int rc = kb_client_memory_get((int64_t)jid->valuedouble, &m);
+   /* `memory get --as-of <ts>` asks the EVENT-time question, and this handler is
+    * the only thing between the flag and aimee-kb, which owns the interval. It
+    * used to read nothing but the id, so the flag was marshalled, sent, and
+    * silently dropped here: the client printed the row and no verdict, which
+    * reads exactly like "not in force". */
+   cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(req, "as_of");
+   const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
+   cJSON *memory_json = NULL;
+   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
+   server_memory_scope_begin(req);
+   int rc = kb_client_memory_get_json_as_of(id, as_of, &memory_json, &verdict);
+   kb_client_memory_scope_context_clear();
 
    cJSON *resp;
    if (rc == 0)
    {
       resp = jo_ok();
-      cJSON *mj = memory_to_json(&m);
-      if (mj)
+      /* Echo the question with the answer: the client prints "valid at <ts>:
+       * <verdict>", and a verdict with no timestamp beside it is unreadable.
+       * "unknown" stays a string, distinct from false -- "could not tell" and
+       * "was not in force" are different answers. */
+      if (verdict != KB_VALID_AT_UNASKED && as_of)
+      {
+         cJSON_AddStringToObject(resp, "as_of", as_of);
+         if (verdict == KB_VALID_AT_UNKNOWN)
+            cJSON_AddStringToObject(resp, "valid_at", "unknown");
+         else
+            cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
+      }
+      if (memory_json)
       {
          /* Merge memory fields into resp */
-         cJSON *child = mj->child;
+         cJSON *child = memory_json->child;
          while (child)
          {
             cJSON *next = child->next;
-            cJSON_DetachItemViaPointer(mj, child);
+            cJSON_DetachItemViaPointer(memory_json, child);
             cJSON_AddItemToObject(resp, child->string, child);
             child = next;
          }
-         cJSON_Delete(mj);
+         cJSON_Delete(memory_json);
       }
    }
    else if (rc > 0)
    {
-      resp = jo_err("memory not found");
+      resp = server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
    }
    else
    {
       char *typed = kb_client_last_result_json("memory lookup failed");
       resp = typed ? cJSON_Parse(typed) : NULL;
       free(typed);
-      if (!resp)
-         resp = jo_err("knowledge service unavailable");
+      if (resp)
+         server_error_kind_apply(resp, SERVER_ERR_UNAVAILABLE);
+      else
+         resp =
+             server_error_kind_json(SERVER_ERR_UNAVAILABLE, "knowledge service unavailable", NULL);
    }
-   return send_and_free(conn, resp);
+   return resp;
+}
+
+int handle_memory_get(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   (void)ctx;
+   return send_and_free(conn, memory_get_command(req));
 }
 
 int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
@@ -536,6 +629,8 @@ int handle_kb_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
       return server_send_error(conn, "kb.search scope must be current or all", NULL);
    if (scope && strcmp(scope, "all") == 0)
    {
+      if (!conn || (conn->capabilities & CAP_CROSS_SCOPE_READ) == 0)
+         return server_send_error(conn, "forbidden: scope=all requires operator authority", NULL);
       if (!project || !project[0])
       {
          const char *cwd = jo_str(req, "cwd", NULL);
@@ -601,21 +696,6 @@ int handle_curator_contradictions(server_ctx_t *ctx, server_conn_t *conn, cJSON 
    free(json);
    if (!resp)
       return server_send_error(conn, "knowledge service /v1/contradictions failed", NULL);
-   return send_and_free(conn, resp);
-}
-
-int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
-{
-   (void)ctx;
-   /* Inbound push from aimee-kb: a source doc's derived curator artifacts were
-    * invalidated. The subscriber (this server) has now received the event. */
-   const char *source_kind = jo_str(req, "source_kind", "");
-   const char *source_id = jo_str(req, "source_id", "");
-   int stale = jo_int(req, "artifacts_stale", 0);
-   (void)source_kind;
-   (void)source_id;
-   cJSON *resp = jo_ok();
-   cJSON_AddNumberToObject(resp, "received", stale);
    return send_and_free(conn, resp);
 }
 
@@ -1233,8 +1313,8 @@ int handle_primary_set(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    if (jo_need_str(req, "session_id", &sid) < 0 || jo_need_str(req, "agent", &agent) < 0)
       return server_send_error(conn, "missing session_id or agent", NULL);
 
-   agent_config_t acfg;
-   if (agent_load_config(&acfg) != 0 || !agent_find(&acfg, agent))
+   agent_t agbuf;
+   if (agent_registry_find(agent, &agbuf) != 0)
       return server_send_error(conn, "no such agent", NULL);
 
    session_primary_set(sid, agent);
@@ -1437,6 +1517,10 @@ int handle_dashboard_metrics(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
                                     (double)aimee_ir_metric_total((aimee_ir_metric_t)m));
    }
 
+   /* One row per attached plugin instance. Serialised by module_commands,
+    * which owns the snapshot this reads -- see aimee_module_commands_report. */
+   aimee_module_commands_report(resp);
+
    /* Shadow-traffic mirror: sent vs dropped-at-cap. Dropped is not a failure (the
     * mirror is best-effort) but it must be visible — a high drop rate means the
     * in-flight cap is throttling coverage, not that parity is clean. */
@@ -1470,15 +1554,22 @@ int handle_economizer_stats(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    cJSON *resp = jo_ok();
 
-   cJSON *gw = cJSON_AddObjectToObject(resp, "gateway");
-   if (gw)
-      gw_stat_to_json(gw);
+   /* The gateway counters live in the economizer module; this endpoint is only
+    * the surface that publishes them. An unreachable module leaves the object
+    * empty rather than reporting zeros, so "no data" cannot be misread as "the
+    * lever ran and did nothing". */
+   cJSON *gw_stats = econ_module_stats_snapshot();
+   if (gw_stats)
+      cJSON_AddItemToObject(resp, "gateway", gw_stats);
+   else
+      cJSON_AddObjectToObject(resp, "gateway");
 
    cJSON *tc = cJSON_AddObjectToObject(resp, "tool_condense");
    if (tc)
    {
-      tool_condense_totals_t t;
-      tool_condense_stats_snapshot(&t);
+      econ_module_tool_totals_t t;
+      int tool_stats_available = econ_module_tool_stats(&t) == 0;
+      cJSON_AddBoolToObject(tc, "available", tool_stats_available);
       cJSON_AddNumberToObject(tc, "recognized", (double)t.recognized);
       cJSON_AddNumberToObject(tc, "applied", (double)t.applied);
       cJSON_AddNumberToObject(tc, "applied_raw_bytes", (double)t.applied_raw);
@@ -1646,7 +1737,7 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * config_reload_if_changed() tick — the same read-your-writes fix workspace.add
     * already carries, which this path was simply never given.
     *
-    * config_load() returns the SNAPSHOT in the server, not the file, so until that
+    * legacy_config_read() returns the SNAPSHOT in the server, not the file, so until that
     * tick every reader still saw the removed entry. Measured: `workspace remove`
     * followed immediately by `workspace add` answered "already registered", and a
     * second `workspace remove` answered "removed" again — both reading a registry
@@ -1656,11 +1747,6 @@ int handle_workspace_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
     * A remove that a caller cannot immediately act on is worse than a slow one:
     * scripted setup (and the wizard) issue these back to back. */
    (void)config_reload_if_changed();
-
-   /* Closing a workspace revokes any brokered forge token for it (zeroed in
-    * memory) — the "revoked on session close" half of the forge-credential
-    * contract (workspace-resource-plane §4). No-op when none was installed. */
-   forge_cred_revoke(target);
 
    cJSON *resp = jo_ok();
    jo_add_str(resp, "removed", target);
@@ -1914,8 +2000,8 @@ int handle_identity_snapshot(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    if (platform_mkdir_p(out_dir, 0755) != 0)
       return server_send_error(conn, "identity snapshot: could not create output directory", NULL);
-   if (db1_init(config_db1_path()) != 0)
-      return server_send_error(conn, "identity snapshot: could not initialize DB1", NULL);
+   if (!db1_store_ready())
+      return server_send_error(conn, "identity snapshot: DB1 store unavailable", NULL);
 
    cJSON *snap = identity_snapshot_build();
    if (!snap)

@@ -74,6 +74,10 @@ const char *aimee_ir_metric_name(aimee_ir_metric_t m)
       return "ir_resp_mismatch";
    case AIMEE_IR_M_RESP_MATCH:
       return "ir_resp_match";
+   case AIMEE_IR_M_REASONING_OBSERVED:
+      return "ir_reasoning_observed";
+   case AIMEE_IR_M_REASONING_INCOMPLETE:
+      return "ir_reasoning_incomplete";
    case AIMEE_IR_M__COUNT:
    default:
       return "unknown";

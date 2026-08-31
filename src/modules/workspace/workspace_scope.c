@@ -33,74 +33,27 @@ void ws_scope_register_ref_validator(ws_scope_ref_validator_fn validator)
 
 int ws_scope_name_valid(const char *name)
 {
-   if (!name || !name[0])
+   /* One owner for what a name may be. This used to restate the module's rule
+    * in C -- the same alphabet, the same 64-byte cap, the same refusal of "."
+    * and ".." -- with nothing in the build keeping the two copies in step, so
+    * either could be tightened alone and the seams would disagree about the
+    * same string.
+    *
+    * A name is simply a ref with no separator in it: the module answers a
+    * slash-free ref by asking exactly the name question. So reject the
+    * separator here, which is the only part that is about being a single
+    * component, and let the module decide the rest. */
+   if (!name || !name[0] || strchr(name, '/'))
       return 0;
-   size_t n = strlen(name);
-   if (n > WS_NAME_MAX)
-      return 0;
-   if (strcmp(name, ".") == 0 || strcmp(name, "..") == 0)
-      return 0;
-   /* First char alnum (no leading '.', '-' — keeps names off hidden files and
-    * away from looking like CLI flags downstream). */
-   unsigned char c0 = (unsigned char)name[0];
-   int alnum0 = (c0 >= 'A' && c0 <= 'Z') || (c0 >= 'a' && c0 <= 'z') || (c0 >= '0' && c0 <= '9');
-   if (!alnum0)
-      return 0;
-   for (size_t i = 0; i < n; i++)
-   {
-      unsigned char c = (unsigned char)name[i];
-      int ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') ||
-               c == '.' || c == '_' || c == '-';
-      if (!ok)
-         return 0;
-   }
-   return 1;
+   return ws_scope_project_ref_valid(name, strlen(name));
 }
 
 int ws_scope_project_ref_valid(const char *buf, size_t len)
 {
-   if (g_ref_validator)
-   {
-      int allowed = 0;
-      return g_ref_validator(buf, len, &allowed) == 0 && allowed;
-   }
-   if (!buf || len == 0 || len > WS_REF_MAX)
+   if (!g_ref_validator || !buf || len == 0 || len > WS_REF_MAX)
       return 0;
-   /* Embedded NUL is rejected by byte-scan — callers pass (buf, len) straight
-    * from the parser; the ref is NOT assumed NUL-terminated. */
-   size_t slash = len; /* index of the single allowed '/' */
-   for (size_t i = 0; i < len; i++)
-   {
-      if (buf[i] == '\0')
-         return 0;
-      if (buf[i] == '/')
-      {
-         if (slash != len)
-            return 0; /* second '/' — deeper nesting rejected */
-         slash = i;
-      }
-   }
-   /* Each component must independently pass ws_scope_name_valid — the ONLY
-    * character-set / traversal authority. No new alphabet is introduced. */
-   char comp[WS_NAME_MAX + 1];
-   if (slash == len)
-   {
-      if (len > WS_NAME_MAX)
-         return 0;
-      memcpy(comp, buf, len);
-      comp[len] = '\0';
-      return ws_scope_name_valid(comp);
-   }
-   size_t org_len = slash, repo_len = len - slash - 1;
-   if (org_len == 0 || org_len > WS_NAME_MAX || repo_len == 0 || repo_len > WS_NAME_MAX)
-      return 0;
-   memcpy(comp, buf, org_len);
-   comp[org_len] = '\0';
-   if (!ws_scope_name_valid(comp))
-      return 0;
-   memcpy(comp, buf + slash + 1, repo_len);
-   comp[repo_len] = '\0';
-   return ws_scope_name_valid(comp);
+   int allowed = 0;
+   return g_ref_validator(buf, len, &allowed) == 0 && allowed;
 }
 
 /* Split a VALIDATED ref into org (may be empty for a flat ref) + repo. Returns

@@ -15,6 +15,7 @@
 #include "../headers/agent_exec.h"
 #include "../headers/agent_protocol.h"
 #include <aimee/delegates/delegate_driver.h>
+#include "gw_stage_governance.h"
 #include "../headers/log.h"
 #include "../headers/server_http.h"
 #include "../vendor/headers/cJSON.h"
@@ -47,7 +48,7 @@ static const char *g_stream_payload;
  * to police. NULL = empty "{}" (preserves shape-test behavior). */
 static const char *g_response_body;
 static int g_response_status = 200;
-/* P2c policy gate. The real config_load is stubbed here to honor this global;
+/* P2c policy gate. The real legacy_config_read is stubbed here to honor this global;
  * flip g_prevent to 1 to enable the response-side tool policing. */
 static int g_prevent = 0;
 /* Tool-use fixtures for parsed_with_tool_uses. The JSON is a cJSON array of
@@ -57,8 +58,37 @@ static int g_prevent = 0;
 static const char *g_tool_uses_json;
 static const char *g_upstream_stop_reason;
 
+static int governance_event_bus_provider(int policy_active, const char *const *tool_names,
+                                         uint32_t tool_count, const char *stop_reason,
+                                         aimee_governance_decision_t *decision)
+{
+   memset(decision, 0, sizeof(*decision));
+   decision->keep_mask = aimee_governance_mask_for_count(tool_count);
+   snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+            stop_reason ? stop_reason : "");
+   if (!policy_active)
+      return 0;
+   decision->keep_mask = 0;
+   for (uint32_t i = 0; i < tool_count; ++i)
+   {
+      int denied =
+          strcmp(tool_names[i], "Agent") == 0 || strcmp(tool_names[i], "spawn_agent") == 0 ||
+          strcmp(tool_names[i], "RemoteTrigger") == 0 || strcmp(tool_names[i], "Task") == 0;
+      if (denied)
+         decision->drop_count++;
+      else
+         decision->keep_mask |= 1u << i;
+   }
+   uint32_t kept = tool_count - decision->drop_count;
+   if (!decision->stop_reason[0] || kept == 0)
+      snprintf(decision->stop_reason, sizeof(decision->stop_reason), "%s",
+               kept > 0 ? "tool_use" : "end_turn");
+   return 0;
+}
+
 static void reset_capture(void)
 {
+   gw_response_governance_register_provider(governance_event_bus_provider);
    free(g_last_body);
    g_last_body = NULL;
    free(g_last_extra);
@@ -93,6 +123,40 @@ agent_t *agent_find(agent_config_t *cfg, const char *name)
 agent_t *agent_default_primary(agent_config_t *cfg)
 {
    return cfg && cfg->agent_count ? &cfg->agents[0] : NULL;
+}
+
+/* Registry accessors (see agent_config.h): the production ones read a cached
+ * registry in place; here they answer from this file's stubbed loader so the
+ * test's fixture still decides the outcome. */
+int agent_registry_find(const char *name, agent_t *out)
+{
+   agent_config_t cfg;
+   if (!name || !out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_find(&cfg, name);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_default_primary(agent_t *out)
+{
+   agent_config_t cfg;
+   if (!out || agent_load_config(&cfg) != 0)
+      return -1;
+   agent_t *found = agent_default_primary(&cfg);
+   if (!found)
+      return -1;
+   *out = *found;
+   return 0;
+}
+
+int agent_registry_resolve_ingress_model(const char *model, agent_t *out)
+{
+   if (model && model[0] && strcmp(model, "aimee") != 0)
+      return agent_registry_find(model, out);
+   return agent_registry_default_primary(out);
 }
 
 void delegate_drivers_init(void)
@@ -252,38 +316,10 @@ void agent_record_token_audit_kind(const agent_result_t *result, const char *rol
    (void)source;
    (void)usage_kind;
 }
-/* Context economizer (gateway seam) is default-off and not under test here; the
- * shadow-mode hook in messages_run_request_pipeline references these three, so stub
- * them as no-ops to keep the minimal P2c link from pulling the economizer + its
- * db1/token_tracker dependency chain. */
-#include "context_reduce.h"
-int context_reduce(cJSON *messages, const char *system_prompt, const char *model,
-                   const char *session_id, reduce_seam_t seam, const reduce_config_t *cfg,
-                   reduce_state_t *st, reduce_result_t *out)
-{
-   (void)messages;
-   (void)system_prompt;
-   (void)model;
-   (void)session_id;
-   (void)seam;
-   (void)cfg;
-   (void)st;
-   if (out)
-      memset(out, 0, sizeof(*out));
-   return 0;
-}
-void context_reduce_result_free(reduce_result_t *out)
-{
-   (void)out;
-}
-void agent_record_reduce_ledger(const struct reduce_result_s *r, const char *model,
-                                const char *agent_name, const char *role)
-{
-   (void)r;
-   (void)model;
-   (void)agent_name;
-   (void)role;
-}
+/* The context_reduce / result_free / reduce-ledger stubs that stood here are gone:
+ * the C reducer moved to the Go economizer module, so messages_run_request_pipeline
+ * references none of those symbols any more and the minimal P2c link stays minimal
+ * without them. */
 void agent_ingress_record_cost(const char *agent_name, const char *agent_model,
                                const char *requested_model, const char *stop_reason,
                                int prompt_tokens, int completion_tokens, int cache_write_tokens,
@@ -307,7 +343,7 @@ int agent_ingress_accounting_enabled(void)
 }
 
 /* Pre-injection stubs. query_from_messages returns a non-NULL query when a turn
- * is present so messages_apply_preinject proceeds; build returns the per-test
+ * is present so pre-injection proceeds; build returns the per-test
  * envelope (default NULL = no-op, so the passthrough/shape tests are unaffected).
  * The injection-coverage test sets g_stub_preinject_env. */
 static char *g_stub_preinject_env = NULL;
@@ -333,26 +369,7 @@ int agent_http_last_retry_after(void)
  * helpers (they don't matter for response-side policing) to keep the test
  * focused on what B2 tests. */
 
-/* Minimal config_load: only `gateway_prevent_subagents` is read by the
- * police function. Tests set g_prevent to flip the policy on/off. The real
- * config.c depends on the home dir + YAML loader, which are out of scope
- * for a minimal-link integration test. */
-int config_load(config_t *cfg)
-{
-   if (cfg)
-   {
-      memset(cfg, 0, sizeof(*cfg));
-      cfg->gateway_prevent_subagents = g_prevent;
-      /* module toggles are -1 (unspecified) in production; memset-0 would read as disabled and
-       * wrongly gate the governance/memory modules this test exercises. */
-      cfg->module_memory = cfg->module_governance = -1;
-      cfg->module_delegates = cfg->module_workflows = -1;
-   }
-   return 0;
-}
-
-/* Accessor stubs: the production seam moved from config_load to per-field
- * accessors. These mirror exactly what the stub above produced —
+/* Accessor stubs mirror this fixture's policy —
  * gateway_prevent_subagents tracks g_prevent, and pin_model (an int) was
  * left zeroed —
  * so the assertions below are unchanged. */
@@ -366,7 +383,7 @@ int config_gateway_pin_model(void)
    return 0;
 }
 
-/* Same migration for the economizer seam: the config_load stub above leaves the
+/* The economizer fixture leaves the
  * economizer zeroed, so the live-config form must report OFF. */
 int econ_mode_current(void)
 {
@@ -402,8 +419,9 @@ static const cJSON *obj(const cJSON *parent, const char *key)
 
 /* P2c parser: populates parsed_response_t.calls[] from the JSON list in
  * g_tool_uses_json, leaves content empty, and copies g_upstream_stop_reason
- * into parsed.stop_reason. The real gateway_policy_police_parsed_response
- * then mutates this struct in place; anthropic_response_from_parsed reads
+ * into parsed.stop_reason. The fake event-bus provider returns the same
+ * decision as the real Go module; the production C seam applies it before
+ * anthropic_response_from_parsed reads
  * call_count to render the wire. */
 static void parsed_with_tool_uses(cJSON *root, const char *body, parsed_response_t *out)
 {
@@ -594,10 +612,9 @@ int main(void)
    return 0;
 }
 
-/* anthropic_http.c now asks config_present() + per-field accessors instead of
- * loading a config_t. These reproduce exactly what the config_load stub they
- * replaced produced: config readable, modules unspecified (-1) so the env
- * default decides, economizer on, and the P5 anthropic-inject opt-in off. */
+/* This policing integration fixture explicitly enables
+ * the governance module; the module's unspecified production default is
+ * covered by test_response_governance_stage.c. */
 int config_present(void)
 {
    return 1;
@@ -605,7 +622,7 @@ int config_present(void)
 
 int config_module_governance(void)
 {
-   return -1;
+   return 1;
 }
 
 int config_ingress_preinject_anthropic_enabled(void)

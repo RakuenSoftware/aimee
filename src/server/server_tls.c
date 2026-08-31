@@ -2,11 +2,14 @@
  * client-cert verification + revocation. */
 #include "server_tls.h"
 #include "server_conn_io.h" /* register/clear the per-conn SSL on the I/O shim */
-#include "config.h"         /* config_default_dir, config_load */
+#include "config.h"         /* config_default_dir, legacy_config_read */
 #include "aimee.h"          /* MAX_PATH_LEN */
 #include "pki.h"            /* pki_ca_ensure, pki_is_revoked */
 #include "log.h"
+#include "cJSON.h"
 #include <aimee/core/connection/tls_openssl.h>
+
+#include <time.h>
 
 #include <openssl/bn.h>
 #include <openssl/err.h>
@@ -46,6 +49,8 @@ static pthread_mutex_t g_management_ctx_mu = PTHREAD_MUTEX_INITIALIZER;
 static unsigned char g_management_cert_hash[32];
 static unsigned char g_management_key_hash[32];
 static unsigned char g_management_ca_hash[32];
+
+static int exact_cert_eku(X509 *cert, int required_nid);
 
 #define MANAGEMENT_PEM_MAX (1024U * 1024U)
 
@@ -159,10 +164,15 @@ static int mtls_verify_cb(int preverify_ok, X509_STORE_CTX *ctx)
    if (!preverify_ok)
       return 0; /* chain/time/CA failure -> reject */
    if (X509_STORE_CTX_get_error_depth(ctx) != 0)
-      return 1; /* only the leaf carries the client serial */
+      return 1; /* EKU and revocation are leaf-only; CA/intermediate EKU is irrelevant */
    X509 *cert = X509_STORE_CTX_get_current_cert(ctx);
    if (!cert)
       return 1;
+   if (!exact_cert_eku(cert, NID_client_auth))
+   {
+      X509_STORE_CTX_set_error(ctx, X509_V_ERR_INVALID_PURPOSE);
+      return 0;
+   }
    ASN1_INTEGER *sn = X509_get_serialNumber(cert);
    BIGNUM *bn = sn ? ASN1_INTEGER_to_BN(sn, NULL) : NULL;
    char *hex = bn ? BN_bn2hex(bn) : NULL;
@@ -222,6 +232,85 @@ static int ctx_use_private_key_pem(SSL_CTX *ctx, const char *pem)
    return ok ? 0 : -1;
 }
 
+static int exact_cert_eku(X509 *cert, int required_nid)
+{
+   int pos = cert ? X509_get_ext_by_NID(cert, NID_ext_key_usage, -1) : -1;
+   if (pos < 0 || X509_get_ext_by_NID(cert, NID_ext_key_usage, pos) >= 0)
+      return 0;
+   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
+   int ok = eku && sk_ASN1_OBJECT_num(eku) == 1 &&
+            OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == required_nid;
+   EXTENDED_KEY_USAGE_free(eku);
+   return ok;
+}
+
+/* Enforce the reciprocal half of pair separation. kb_client_mtls rejects a KB
+ * client identity that collides with an already-installed listener identity;
+ * this rejects a listener identity installed or rotated after the KB identity. */
+static int distinct_from_kb_client_identity(X509 *server_cert)
+{
+   char path[MAX_PATH_LEN];
+   int n = snprintf(path, sizeof(path), "%s/kb-client-identity.json", config_default_dir());
+   if (n <= 0 || (size_t)n >= sizeof(path))
+      return 0;
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT;
+   struct stat st;
+   int valid_file = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && st.st_uid == geteuid() &&
+                    st.st_nlink == 1 && !(st.st_mode & (S_IRWXG | S_IRWXO)) && st.st_size > 0 &&
+                    st.st_size < 32768;
+   char *raw = valid_file ? calloc(1, (size_t)st.st_size + 1) : NULL;
+   size_t used = 0;
+   while (raw && used < (size_t)st.st_size)
+   {
+      ssize_t got = read(fd, raw + used, (size_t)st.st_size - used);
+      if (got < 0 && errno == EINTR)
+         continue;
+      if (got <= 0)
+         break;
+      used += (size_t)got;
+   }
+   close(fd);
+   cJSON *root = raw && used == (size_t)st.st_size ? cJSON_ParseWithLength(raw, used) : NULL;
+   cJSON *cert_item = root ? cJSON_GetObjectItemCaseSensitive(root, "cert") : NULL;
+   BIO *client_bio = cJSON_IsString(cert_item) && cert_item->valuestring[0]
+                         ? BIO_new_mem_buf(cert_item->valuestring, -1)
+                         : NULL;
+   X509 *client_cert = client_bio ? PEM_read_bio_X509(client_bio, NULL, NULL, NULL) : NULL;
+   EVP_PKEY *server_key = server_cert ? X509_get_pubkey(server_cert) : NULL;
+   EVP_PKEY *client_key = client_cert ? X509_get_pubkey(client_cert) : NULL;
+   /* EVP_PKEY_eq: 1 = same key, 0 = different key, -1 = different key TYPES,
+    * -2 = comparison unsupported for this type. Only 1 is a genuine collision.
+    *
+    * This tested `== 0`, which silently folded -1 into "collides". -1 is the
+    * STRONGEST evidence of separation there is — an EC key cannot be an RSA key
+    * — so a correctly-separated identity pair was rejected as a reused key. It
+    * was also unrecoverable: pki_ensure_self_signed_server_cert always issues EC
+    * (gen_ec_key), while a managed KB enrollment issues RSA, so every
+    * reprovisioning produced the same EC-vs-RSA mismatch and TLS stayed off
+    * permanently. Observed in the field as "tls_port set but TLS cert/key not
+    * loadable; TLS DISABLED" on a server whose cert and key were both fine,
+    * which takes the whole remote /v1 surface down and leaves no way to fix it
+    * from configuration.
+    *
+    * -2 and an unreadable/unparseable client identity remain fail-closed: the
+    * point of this gate is to PROVE separation, and unproven is not proven. */
+   int cmp = (server_key && client_key) ? EVP_PKEY_eq(server_key, client_key) : -2;
+   int distinct = (cmp == 0 || cmp == -1);
+   EVP_PKEY_free(server_key);
+   EVP_PKEY_free(client_key);
+   X509_free(client_cert);
+   BIO_free(client_bio);
+   cJSON_Delete(root);
+   if (raw)
+   {
+      OPENSSL_cleanse(raw, (size_t)st.st_size + 1);
+      free(raw);
+   }
+   return distinct;
+}
+
 /* Build a fresh SSL_CTX from the given cert/key/mtls settings, WITHOUT touching g_ctx.
  * Returns the ctx (caller owns) or NULL on any load failure — so both init and a live reload
  * validate-or-keep: a bad cert never disturbs the running listener. */
@@ -267,6 +356,20 @@ static SSL_CTX *tls_build_ctx(const char *cert_path, const char *key_path, int m
    {
       aimee_log(LOG_WARN, "server.tls", "failed to load TLS cert/Vault key (%s): %s", cert_path,
                 ERR_error_string(ERR_get_error(), NULL));
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   if (!exact_cert_eku(SSL_CTX_get0_certificate(ctx), NID_server_auth))
+   {
+      aimee_log(LOG_WARN, "server.tls", "TLS certificate must have only the serverAuth EKU: %s",
+                cert_path);
+      SSL_CTX_free(ctx);
+      return NULL;
+   }
+   if (!distinct_from_kb_client_identity(SSL_CTX_get0_certificate(ctx)))
+   {
+      aimee_log(LOG_WARN, "server.tls", "TLS certificate reuses the KB client identity key: %s",
+                cert_path);
       SSL_CTX_free(ctx);
       return NULL;
    }
@@ -378,18 +481,6 @@ static int ctx_use_captured_ca(SSL_CTX *ctx, const captured_pem_t *pem)
    }
    sk_X509_INFO_pop_free(info, X509_INFO_free);
    return ok && certs > 0 ? 0 : -1;
-}
-
-static int exact_cert_eku(X509 *cert, int required_nid)
-{
-   int pos = cert ? X509_get_ext_by_NID(cert, NID_ext_key_usage, -1) : -1;
-   if (pos < 0 || X509_get_ext_by_NID(cert, NID_ext_key_usage, pos) >= 0)
-      return 0;
-   EXTENDED_KEY_USAGE *eku = X509_get_ext_d2i(cert, NID_ext_key_usage, NULL, NULL);
-   int ok = eku && sk_ASN1_OBJECT_num(eku) == 1 &&
-            OBJ_obj2nid(sk_ASN1_OBJECT_value(eku, 0)) == required_nid;
-   EXTENDED_KEY_USAGE_free(eku);
-   return ok;
 }
 
 static int end_entity_key_usage(X509 *cert, int exact_digital_signature)
@@ -879,6 +970,52 @@ static SSL *server_tls_management_accept(int fd)
    return tls_accept_with_ssl(fd, ssl);
 }
 
+/* The store usually attaches in under a second, but image pulls, PostgreSQL
+   recovery, and nested-container CPU contention can delay its first usable
+   reply well beyond five seconds. That old deadline permanently disabled the
+   TLS listener even when the module became healthy moments later. Keep a
+   bounded startup window, but make it long enough to cover the deployment's
+   normal dependency recovery envelope. */
+#define TLS_STORE_WAIT_MS 60000
+#define TLS_STORE_POLL_MS 50
+
+/* Wait for the store before the mTLS ramp runs.
+ *
+ * The ramp inside server_tls_init_default reads and writes DB1, and DB1 lives
+ * in a module that attaches on its own schedule: it connects to the bus socket
+ * the daemon owns, so it cannot begin until the daemon is already listening.
+ * Racing it is permanent -- the ramp self-test fails, init returns non-zero, and
+ * TLS stays DISABLED for the life of the process while a healthy module attaches
+ * a moment later. Observed as "tls_port set but TLS cert/key not loadable"
+ * beside a running module, and in CI as an adoption run timing out on a TLS
+ * listener that was never coming.
+ *
+ * The probe is a parameter rather than a direct call so this file keeps no DB1
+ * dependency: its unit test links it alone, deliberately. Only waits when mTLS
+ * is configured on, since that is the only mode whose init needs the store. A
+ * module that is coming normally attaches quickly; one that is not leaves TLS
+ * refused after the bounded window and says why. */
+int server_tls_wait_for_store(int (*store_ready)(void))
+{
+   if (!store_ready || config_server_api_mtls() <= 0)
+      return 1;
+   for (int waited_ms = 0; waited_ms < TLS_STORE_WAIT_MS && !store_ready();
+        waited_ms += TLS_STORE_POLL_MS)
+   {
+      struct timespec ts = {0, TLS_STORE_POLL_MS * 1000000L};
+      nanosleep(&ts, NULL);
+   }
+   if (!store_ready())
+   {
+      aimee_log(LOG_WARN, "server.tls",
+                "the store did not answer within %dms; the mTLS ramp needs it, so TLS may be "
+                "refused",
+                TLS_STORE_WAIT_MS);
+      return 0;
+   }
+   return 1;
+}
+
 int server_tls_init_default(void)
 {
    char cert[MAX_PATH_LEN], key[MAX_PATH_LEN];
@@ -886,7 +1023,10 @@ int server_tls_init_default(void)
    snprintf(key, sizeof(key), "%s/tls/server.key", config_default_dir());
    int effective_mtls = pki_mtls_ramp_init(config_server_api_mtls());
    if (effective_mtls < 0)
-      return -1;
+      /* NOT a certificate problem, and it must not be reported as one: the ramp
+       * self-test is DB1 stage 19 (db1-pki), so this is what a missing or
+       * unreachable db1 module looks like from here. */
+      return SERVER_TLS_INIT_ERR_MTLS_RAMP;
    if (effective_mtls == 1)
       aimee_log(LOG_WARN, "server.tls",
                 "mTLS migration is optional: bearer-only clients remain accepted until the "
@@ -901,8 +1041,27 @@ int server_tls_init_default(void)
     * revocation snapshot is loaded BEFORE server_tls_init loads the client CA
     * file and the verify callback starts consulting the snapshot. */
    if (effective_mtls > 0 && pki_ca_ensure() != 0)
-      return -1;
-   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca());
+      return SERVER_TLS_INIT_ERR_CLIENT_CA;
+   return server_tls_init(cert, NULL, effective_mtls, config_server_api_mtls_client_ca()) == 0
+              ? SERVER_TLS_INIT_OK
+              : SERVER_TLS_INIT_ERR_IDENTITY;
+}
+
+const char *server_tls_init_result_str(int result)
+{
+   switch (result)
+   {
+   case SERVER_TLS_INIT_OK:
+      return "ok";
+   case SERVER_TLS_INIT_ERR_MTLS_RAMP:
+      return "the mTLS ramp self-test refused (DB1 pki unreachable; is the db1 module running?)";
+   case SERVER_TLS_INIT_ERR_CLIENT_CA:
+      return "aimee's client CA could not be created or loaded";
+   case SERVER_TLS_INIT_ERR_IDENTITY:
+      return "the server certificate or its Vault-held key could not be loaded";
+   }
+   /* An out-of-range code is a bug, and a bug must not name a specific cause. */
+   return "unknown";
 }
 
 SSL *server_tls_begin(int fd)

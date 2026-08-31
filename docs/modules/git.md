@@ -7,6 +7,18 @@ forge operations, and provenance-bearing repository records submitted through me
 boundary. It does not own workspace path authority, code-intelligence storage/indexing/retrieval,
 federated OIDC governance, generic tool dispatch, or secret custody.
 
+### Go process stages
+
+The supervised `git-operation` and `git-ref-validation` stages run in the shared
+pure-Go module runtime. The first preserves the GOPS/GCLS contract, classifies
+the bounded operation, and marks operations that require credentials. The
+second owns the conservative branch/ref allowlist used before checkout and
+managed push. Both production decisions cross the local event bus and fail
+closed when the process is unavailable or returns malformed data; there is no
+server-local ref-policy fallback. The C adapter remains a wire-parity fixture.
+Repository execution, verification, OAuth, forge, SSH, and credential
+implementation units remain C relocation work.
+
 ## Public contracts
 
 `src/modules/git` owns `git_ops`, MCP `handle_git_*` operations beginning at
@@ -15,13 +27,13 @@ projects, forge credentials/API, OAuth device flows, and SSH-agent setup. The ap
 is `memory.repository-record.ingest.v1`: Git is submit-only, while [memory](memory.md) retains schema,
 redaction acceptance, persistence, embedding, reranking, and code intelligence.
 
-The descriptor declares this module's twenty-six sources, eighteen module-root headers, fourteen
+The descriptor declares this module's twenty-seven sources, eighteen module-root headers, fourteen
 direct tests, and this document; it sets `ownership_complete: true`. All eighteen headers are
 declared as `private_headers` because they live at the module root rather than under
 `src/modules/git/include/aimee/git/`, the layout the header-layout checker treats as private; sixteen
 pair with a source, and two have no paired source: `git_verify_internal.h` (the verify-family seam)
-and `mcp_git.h` (the shared MCP-git header). Make compiles all twenty-six sources; CMake compiles the
-twelve the thin `aimee` client reaches (the eight `git_verify_*` sources and the four `mcp_git_*`
+and `mcp_git.h` (the shared MCP-git header). Make compiles all twenty-seven sources; CMake compiles the
+thirteen the thin `aimee` client reaches (the eight `git_verify_*` sources and the five `mcp_git_*`
 tools) and omits the fourteen credential, OAuth, ops, forge-vault, host, org-repos, and PR-API sources
 that are server/kb-side, the same intentional thin-client boundary recorded for gateway, learning,
 workspace, vault, and config. This descriptor's `ownership_complete` latch is independent of the
@@ -59,17 +71,114 @@ or a requested forge capability is absent instead of claiming a generic ready st
 ### Config touchpoint
 
 The module consumes project verification config, Git identity, forge/provider credentials, live-forge
-gates registered at `src/modules/config/config_fields.c:146`,
+gates registered in the external config-module field metadata,
 gates, and shell-Git restrictions; `config` owns general parsing and projection. OAuth-for-forge settings
 belong to Git providers. Federated OIDC/SSO settings belong to optional governance and must not appear as
 a required Git configuration dependency.
 
 ## Surfaces
 
-Surfaces include native/MCP `git_status`, diff, log, branch, commit, push, pull, fetch, clone, restore,
-reset, stash, tag, issue, PR, and `aimee git verify` operations plus project/forge credential flows.
-Protocol and tools modules expose these operations, but Git owns their repository semantics, credential
-containment, verification gates, and mutation results.
+Surfaces include native/MCP `git_status`, diff, log, branch, add, commit, push, pull, fetch, clone,
+restore, reset, stash, tag, issue, PR, merge, rebase, sync, cherry-pick, revert, switch, checkout and
+verify operations plus project/forge credential flows. Protocol and tools modules expose these operations,
+but Git owns their repository semantics, credential containment, verification gates, and mutation results.
+
+The `aimee` CLI reaches all of them through one wildcard `/v1` route (`{"git", NULL, "git.cli", ...}` in
+`cli_v1_routes.c`, marshalled by `marshal_git_cli`) that dispatches `mcp.call` with `tool=git_<command>`.
+Previously only `git verify` was routed and every other `aimee git ...` answered "is not a subcommand of
+'git'"; the CLI grammar is uniform rather than per-command: `aimee git <command> [primary] [key=value ...]`,
+where the table in `marshal_git_cli` holds the only per-command knowledge (what a bare first, and
+sometimes second, word means). Values are typed the way verify's already are, `continue`/`abort`/`skip` are
+recognised as actions, and the repository defaults to the caller's directory unless `path=` names one.
+`git verify` keeps its own marshaller: its row precedes the wildcard, and the lookup takes the first
+match.
+
+`cmd_git` in `src/cmd_infra.c` parses the same commands for the in-process (non-thin) path; the
+two agree today but are separate parsers, and folding them together is untaken work.
+
+### History integration: merge, rebase, sync, cherry_pick, revert
+
+`src/modules/git/mcp_git_integrate.c` owns the operations that bring one line of history into another.
+They are one operation with five names. Each can stop mid-flight on a conflict, each leaves a state that
+must be continued or abandoned, and each commits and so needs an identity, so they share one driver and
+differ only by a row in `OPS`.
+
+They are modeled, not passed through, because the caller states the intent and aimee does the mechanics:
+
+- a remote-looking ref is **fetched first**, so `merge origin/main` cannot merge a stale copy;
+- the **editor is disabled** (`core.editor`/`sequence.editor`), because a blocked editor is
+  indistinguishable from a hang;
+- a **dirty tree is refused up front**, since a conflict in one cannot be cleanly undone;
+- a conflict is reported as **the list of conflicted files**, and by default the operation is **aborted**,
+  so the caller is never handed a half-applied tree it must know how to clean up. `abort_on_conflict=false`
+  opts into resolving in place, then `action=continue` (which refuses while markers remain) or
+  `action=abort`;
+- a continuation **commits with the vaulted operator identity**, via the same `mcp_git_identity_flags`
+  `git_commit` uses, because otherwise a conflict resolution would produce an authorless merge commit;
+- an operation already in progress is named, with the way out, instead of letting a second one start on
+  top of it;
+- the result says **what changed** (`pre..post`, commit count, diffstat) rather than echoing git's prose.
+
+`command=sync` is the whole "make this branch current with the branch it will merge into" errand in one
+call: resolve the base (given, else origin's default branch, qualified to the remote's copy), fetch it,
+rebase (default; `mode=merge`) it in, and report the gap it closed. Rebase is the default so a PR branch
+reviews as the work alone.
+
+Writing to `main`/`master` is refused here as everywhere else, so integrating into the default branch
+remains `command=pr action=merge`.
+
+### Staging and ref movement
+
+`command=add` (`files`, or `all` to include new files) is the staging `git_commit` cannot reach: commit
+stages tracked changes or the paths it was handed, so a new file had no route. Sensitive paths are
+dropped, and for `all` the screen runs against the resulting **index** rather than the caller's argument
+list, so a pattern-based add cannot slip a `.env` past `command=commit`.
+
+`command=switch` and `command=checkout` are routing, not second implementations: `switch` is
+`branch action=switch` (keeping the worktree lock and ownership registration in one place), and
+`checkout` is `restore` when `files` is given and `switch` otherwise.
+
+### Repository selection and raw-shell boundary
+
+For MCP Git operations, an explicit `path` is repository identity, not a hint.
+It is never redirected through stale session state or replaced by a fallback
+checkout. A registered detached workspace routes Git to the client that owns
+that path; a server-visible path runs directly; an inaccessible path fails
+closed with a rebind/adopt/mount/serve explanation. This also permits Git
+operations in another registered repository's managed worktree without relying
+on shell working-directory persistence. `git_clone` is the exception because
+its `path` is a destination that may not exist yet.
+
+This repository-selection contract does not broaden raw Bash authority. The
+attention guard's session-scratchpad carve-out and its parsing of compound
+`cd`, redirects, and heredocs remain a separate subsystem; raw-shell behavior
+outside registered/managed worktrees is intentionally deferred here. Git MCP
+callers should pass `path` on each call instead of depending on a preceding
+shell `cd`, since shell working directories are not session-persistent.
+
+### `pr action=ready`: the whole "put this up for review" errand
+
+Sync, push, open the PR. It exists because doing them separately makes the caller hold one piece of
+knowledge it should not need (the sync rebases, which rewrites history, so the push after it must be a
+lease-protected force), and because a failure halfway otherwise leaves the caller working out which step
+broke. `ready` runs them in order, **stops at the first real failure and returns that step's own
+explanation** (sync's conflict report already says how to resolve it), and otherwise reports each step on
+its own line. It is idempotent: run it again after more commits and it re-syncs, re-pushes, and says the
+PR is already open rather than failing.
+
+Composition depends on one convention: a git tool reports failure in the text it returns, leading with
+`error` or `conflict`. `mcp_git_response_failed` is the single definition of that check. A wrapper that
+prefixed its own context to a failure (which `sync` originally did) makes a conflict read as success, so
+`sync` now appends its context on failure and prepends it only on success.
+
+### PR title and body are derived
+
+`command=pr action=create` no longer requires `title`. When it is omitted, `pr_derive_from_commits`
+writes both from the commits the branch has that the base does not: a single commit lends its subject and
+its message body verbatim; several keep the conventional-commit prefix they agree on and get a bulleted
+list plus the diffstat. Deterministic, with no model call: the commit subjects already are the summary, so
+asking the caller to write one costs a turn to say the same thing. An explicit `title` always wins, and a
+branch with no commits ahead of base is told exactly that.
 
 ## Data and migrations
 
@@ -111,6 +220,8 @@ tests are not claimed: `test_forge_app_token.c` exercises the root-level `src/fo
 git-module source, and `test_forge_credentials_live.c` is the `forge-cred-live` integration harness
 that needs a running forge. It provides supplementary coverage of `forge_credentials.c`, which already has a unit
 test. Together with guardrail Git tests and integration tool calls they cover current behavior.
+The Go handler, C parity fixture, and `test_git_ops` cover ref acceptance,
+rejection, and missing-provider failure in addition to operation classification.
 Missing repository, denied mutation, dirty/conflicting state, invalid ref/path, failed
 signature/redaction, absent credential, forge error, or failed verify step must return typed failure;
 non-Git base workspace operations continue normally.

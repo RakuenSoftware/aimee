@@ -10,6 +10,10 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* Installs workspace's own name rule over its wire contract; see
+ * tests/support/webuser_name_validator.c. */
+void webuser_test_install_name_validator(void);
+
 int main(void)
 {
    /* --- the tmpfs gate against real mounts --- */
@@ -21,6 +25,14 @@ int main(void)
 
    char base[256];
    snprintf(base, sizeof(base), "/dev/shm/aimee-wrt-test-%d", (int)getpid());
+
+   /* Name validation fails closed until the event-bus provider is installed,
+    * matching ws_scope_project_ref_valid: there is no local copy of the rule to
+    * fall back to. */
+   setenv("AIMEE_RUNTIME_DIR", base, 1);
+   char closed[512];
+   assert(webuser_runtime_dir("webuser:alice", closed, sizeof(closed)) == -1);
+   webuser_test_install_name_validator();
 
    /* --- success path on tmpfs: one 0700 environment dir, shared by actors --- */
    setenv("AIMEE_RUNTIME_DIR", base, 1);
@@ -38,7 +50,13 @@ int main(void)
    strcpy(x, "STALE");
    assert(webuser_runtime_dir("uid:1000", x, sizeof(x)) == -1 && x[0] == '\0');
    assert(webuser_runtime_dir("webuser:..", x, sizeof(x)) == -1);
+   /* A separator must stay refused even though workspace's validator admits
+    * `owner/project`: a runtime dir name is one component, and delegating this
+    * case would let a principal name a path. */
    assert(webuser_runtime_dir("webuser:a/b", x, sizeof(x)) == -1);
+   assert(webuser_runtime_dir("webuser:../etc", x, sizeof(x)) == -1);
+   assert(webuser_runtime_dir("webuser:a/../b", x, sizeof(x)) == -1);
+   assert(webuser_runtime_dir("webuser:/abs", x, sizeof(x)) == -1);
 
    /* cleanup removes the dir (and any sockets in it) */
    char sock[600];

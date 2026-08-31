@@ -23,7 +23,7 @@ static inline void memory_autofree_impl(void *p)
 }
 #define MEMORY_AUTOFREE __attribute__((cleanup(memory_autofree_impl)))
 
-/* memory_config_load_heap() lived here because config_t is ~750 KiB and memory
+/* memory_config_load_heap() lived here because legacy_config_record is ~750 KiB and memory
  * retrieval is a deep chain where several stages read config -- stacking
  * automatic copies exhausted the 8 MiB thread stack, so the snapshots went on
  * the heap with MEMORY_AUTOFREE to cover every early return.
@@ -193,8 +193,7 @@ void memory_alias_join_tokens(char *buf, size_t buf_len, char tokens[][64], int 
 void memory_coref_audit_record(int64_t memory_id, const char *session_id, const char *outcome,
                                const char *entity, const char *mode, double confidence);
 int memory_coref_has_pronoun(const char *content);
-int memory_coref_llm_resolve(int64_t memory_id, const char *content,
-                             const char *session_buf);
+int memory_coref_llm_resolve(int64_t memory_id, const char *content, const char *session_buf);
 const char *memory_coref_mode_effective(void);
 int memory_coref_window_effective(void);
 void memory_entity_insert(int64_t memory_id, const char *entity, const char *role, double weight);
@@ -273,6 +272,9 @@ int memory_query_wants_future(const char *norm_query);
 int memory_query_wants_past(const char *norm_query);
 int memory_query_wants_recent(const char *norm_query);
 memory_ranker_input_t memory_ranker_input_from(const memory_t *m);
+void memory_record_lane_outcome_metrics(const memory_query_plan_t *plan, const memory_t *matches,
+                                        int served, const memory_candidate_source_t *source_stats,
+                                        int source_stats_count);
 void memory_record_query_plan_metrics(const memory_query_plan_t *plan, double elapsed_ms);
 void memory_record_query_stage_metric(const memory_query_plan_t *plan, const char *stage_name);
 int memory_rerank_matches(const char *raw_query, memory_t *matches, int count, int limit,

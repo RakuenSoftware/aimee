@@ -4,10 +4,11 @@
  * <config_default_dir()>/roundtables/<name>.json. This mirrors the persona
  * registry (persona.c) for path/list/validate idioms, but stores structured JSON
  * (a preset is pure config, not prose). Selecting a preset "active" overlays it
- * onto the live config_t via config_save/config_reload; the roundtable runtime
- * (delegate_ensemble.c) is untouched and keeps reading config_t. */
+ * onto the live legacy_config_record via config_save/config_reload; the roundtable runtime
+ * (delegate_ensemble.c) is untouched and keeps reading legacy_config_record. */
 #include "roundtable_preset.h"
-#include "config.h" /* config_default_dir, config_t, config_load_file, config_save, config_reload */
+#include "artifact_trust.h"
+#include "config.h" /* config_default_dir, legacy_config_record, config_load_file, config_save, config_reload */
 #include "log.h"
 #include "platform_path.h" /* platform_mkdir_p */
 #include <ctype.h>
@@ -47,6 +48,23 @@ static char *rt_read_file(const char *path)
    size_t n = fread(buf, 1, (size_t)len, f);
    fclose(f);
    buf[n] = '\0';
+   const char *base = strrchr(path, '/');
+   base = base ? base + 1 : path;
+   char artifact_id[RT_PRESET_NAME_MAX];
+   snprintf(artifact_id, sizeof(artifact_id), "%s", base);
+   char *dot = strrchr(artifact_id, '.');
+   if (dot)
+      *dot = '\0';
+   char *canonical = realpath(path, NULL);
+   char trust_err[256];
+   if (!canonical || artifact_trust_verify_bytes("ensemble-template", artifact_id, canonical, buf,
+                                                 n, NULL, trust_err, sizeof(trust_err)) != 0)
+   {
+      free(canonical);
+      free(buf);
+      return NULL;
+   }
+   free(canonical);
    return buf;
 }
 
@@ -274,6 +292,30 @@ int roundtable_preset_from_json(const char *body, const char *url_name, roundtab
       *errmsg = "chairman_enabled requires a chairman";
       return -1;
    }
+
+   /* CHAIRING, SYNTHESIS AND DISCUSSION ALL REQUIRE SOMEONE TO DISAGREE WITH.
+    *
+    * A chairman arbitrates between seats; synthesis reconciles their findings;
+    * discussion is seats talking to each other. On a panel of one there is no
+    * second opinion to arbitrate, reconcile or talk to -- a lone seat would be
+    * discussing with itself. Each option can only add a delegate call and a way
+    * to fail.
+    *
+    * Measured on a real one-seat completeness review: the seat returned a correct
+    * blocking finding, the chair then died on "unknown persona 'chairman'", and
+    * the whole run reported FAILED -- so a caller polling roundtable_status
+    * discards findings that were exactly right.
+    *
+    * Refused at intake rather than normalised silently, so an operator asking for
+    * these on one seat is told the request is meaningless instead of having it
+    * quietly dropped. */
+   if (out->seat_count <= 1 && (out->chairman_enabled || out->chairman[0] || out->discussion))
+   {
+      cJSON_Delete(req);
+      *errmsg = "a roundtable of one has nobody to chair, synthesise or discuss with: "
+                "drop chairman/discussion or add seats";
+      return -1;
+   }
    cJSON_Delete(req);
    return 0;
 }
@@ -379,7 +421,7 @@ void roundtable_preset_from_current_config(const char *name, roundtable_preset_t
 }
 
 /* Translate a preset into the config module's plain apply-struct. config never
- * learns the preset file format; this module never touches a config_t. */
+ * learns the preset file format; this module never touches a legacy_config_record. */
 static void preset_to_config_apply(const roundtable_preset_t *p, config_roundtable_preset_t *out)
 {
    memset(out, 0, sizeof(*out));

@@ -52,7 +52,7 @@ export default function TabTutorial({ route }: { route: string }) {
         style={{
           position: 'absolute', top: 10, right: 12, zIndex: 20,
           width: 26, height: 26, borderRadius: '50%', cursor: 'pointer',
-          border: '1px solid #ccd', background: '#fff', color: '#68a',
+          border: '1px solid var(--sg-border-medium)', background: 'var(--sg-surface)', color: 'var(--sg-info)',
           fontSize: 14, fontWeight: 700, lineHeight: 1,
         }}
       >?</button>
@@ -68,18 +68,18 @@ export default function TabTutorial({ route }: { route: string }) {
       style={{
         position: 'absolute', top: 10, right: 12, zIndex: 25,
         maxWidth: 380, width: 'min(380px, calc(100% - 24px))',
-        background: '#fff', borderRadius: 10, border: '1px solid #dde',
+        background: 'var(--sg-surface)', borderRadius: 10, border: '1px solid var(--sg-border-medium)',
         boxShadow: '0 8px 30px rgba(0,0,0,0.18)', padding: '16px 18px',
-        fontFamily: 'system-ui', color: '#334',
+        fontFamily: 'system-ui', color: 'var(--sg-text)',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-        <span style={{ fontSize: 15, fontWeight: 700, color: '#223' }}>{tut.title}</span>
+        <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--sg-text)' }}>{tut.title}</span>
         <button
           aria-label="Close tab help"
           title="Close"
           onClick={dismiss}
-          style={{ background: 'none', border: 'none', color: '#9aa', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
+          style={{ background: 'none', border: 'none', color: 'var(--sg-text-hint)', cursor: 'pointer', fontSize: 18, lineHeight: 1, padding: 0 }}
         >×</button>
       </div>
       {tut.body.map((line, i) => (
@@ -89,7 +89,7 @@ export default function TabTutorial({ route }: { route: string }) {
         {tut.seeAlso ? (
           <button
             onClick={() => { dismiss(); navigate(tut.seeAlso!); }}
-            style={{ background: 'none', border: 'none', color: '#68a', cursor: 'pointer', fontSize: 12.5, padding: 0 }}
+            style={{ background: 'none', border: 'none', color: 'var(--sg-info)', cursor: 'pointer', fontSize: 12.5, padding: 0 }}
           >
             See also: {tutorialFor(tut.seeAlso)?.title ?? tut.seeAlso} →
           </button>
@@ -97,8 +97,8 @@ export default function TabTutorial({ route }: { route: string }) {
         <button
           onClick={dismiss}
           style={{
-            padding: '5px 14px', borderRadius: 6, border: '1px solid #ccd',
-            background: '#f4f6fb', color: '#446', cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
+            padding: '5px 14px', borderRadius: 6, border: '1px solid var(--sg-border-medium)',
+            background: 'var(--sg-surface-alt)', color: 'var(--sg-text-muted)', cursor: 'pointer', fontSize: 12.5, fontWeight: 600,
           }}
         >Got it</button>
       </div>

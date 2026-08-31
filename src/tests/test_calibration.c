@@ -18,14 +18,14 @@
 #include <string.h>
 #include "calibration.h"
 #include "artifacts.h"
-#include "db2_test_shim.h"
-#include "db2_internal.h"
+#include "modules/db2/c/db2_test_shim.h"
+#include "modules/db2/c/db2_internal.h"
 #include "db_postgres.h"
 #include "config.h"
-#include "config_learning.h"
 #include "kb_calibrate.h"
 #include "platform_process.h"
 #include <cJSON.h>
+#include "platform_test_util.h" /* platform_tmpdir: honour TMPDIR, do not leak into /tmp */
 
 static void open_db(void)
 {
@@ -238,20 +238,13 @@ static void test_surface_list_discovers_audit_tuples(void)
    printf("  surface_list_discovers_audit_tuples: ok\n");
 }
 
-/* kb_calibrate_run reads config through accessors now. This suite links the real
- * config module, so the two cases that drive it write an aimee.yaml under an
- * isolated AIMEE_HOME rather than handing over a struct -- the values are the
- * ones those cases always set, and the round-trip is asserted so a key that
- * silently stopped parsing cannot turn these into tests of the defaults.
- *
- * (test_config_defaults below still builds a config_t by hand and calls
- * config_apply_calibration_settings directly. That is testing the PARSER, which
- * legitimately takes a struct, and is left alone.) */
+/* kb_calibrate_run reads config through accessors. These tests publish changes
+ * through the module contract and assert the round-trip before running it. */
 static char g_cal_home[256];
 
 static void cal_isolate_home(void)
 {
-   snprintf(g_cal_home, sizeof(g_cal_home), "/tmp/aimee-test-calibration-XXXXXX");
+   snprintf(g_cal_home, sizeof(g_cal_home), "%s/aimee-test-calibration-XXXXXX", platform_tmpdir());
    assert(mkdtemp(g_cal_home) != NULL);
    assert(setenv("AIMEE_HOME", g_cal_home, 1) == 0);
    assert(setenv("AIMEE_NO_CACHE", "1", 1) == 0);
@@ -259,15 +252,9 @@ static void cal_isolate_home(void)
 
 static void cal_write_config(int enabled, int buckets, int conformal_window)
 {
-   char path[512];
-   snprintf(path, sizeof(path), "%s/aimee.yaml", config_default_dir());
-   FILE *fp = fopen(path, "w");
-   assert(fp != NULL);
-   fprintf(fp, "calibration:\n");
-   fprintf(fp, "  enabled: %s\n", enabled ? "true" : "false");
-   fprintf(fp, "  buckets: %d\n", buckets);
-   fprintf(fp, "  conformal_window: %d\n", conformal_window);
-   fclose(fp);
+   assert(config_set_calibration_enabled(enabled) == 0);
+   assert(config_set_calibration_buckets(buckets) == 0);
+   assert(config_set_calibration_conformal_window(conformal_window) == 0);
    assert(config_calibration_enabled() == enabled);
    assert(config_calibration_buckets() == buckets);
    assert(config_calibration_conformal_window() == conformal_window);
@@ -276,53 +263,39 @@ static void cal_write_config(int enabled, int buckets, int conformal_window)
 /* ---- 6. calibration config defaults ---- */
 static void test_config_defaults(void)
 {
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_calibration_settings(&cfg, NULL);
-
-   assert(cfg.calibration_enabled == 1); /* default: shadow (observe-only) */
-   assert(cfg.calibration_buckets == 10);
-   assert(fabs(cfg.calibration_prior_alpha0 - 2.0) < 1e-9);
-   assert(fabs(cfg.calibration_prior_beta0 - 1.0) < 1e-9);
-   assert(fabs(cfg.calibration_credible_delta - 0.10) < 1e-9);
-   assert(cfg.calibration_conformal_window == 500);
-   assert(fabs(cfg.calibration_conformal_epsilon - 0.05) < 1e-9);
-   assert(fabs(cfg.calibration_tau_memory_auto - 0.70) < 1e-9);
-   assert(fabs(cfg.calibration_tau_memory_flag - 0.55) < 1e-9);
-   assert(fabs(cfg.calibration_tau_working_profile_auto - 0.80) < 1e-9);
-   assert(fabs(cfg.calibration_tau_working_profile_flag - 0.65) < 1e-9);
-   assert(strcmp(cfg.calibration_prompt_version, "v1") == 0);
-   assert(strcmp(cfg.calibration_model_version, "beta-binomial-v1") == 0);
-   assert(cfg.calibration_command[0] == '\0');
+   assert(config_calibration_enabled() == 1); /* default: shadow (observe-only) */
+   assert(config_calibration_buckets() == 10);
+   assert(fabs(config_calibration_prior_alpha0() - 2.0) < 1e-9);
+   assert(fabs(config_calibration_prior_beta0() - 1.0) < 1e-9);
+   assert(fabs(config_calibration_credible_delta() - 0.10) < 1e-9);
+   assert(config_calibration_conformal_window() == 500);
+   assert(fabs(config_calibration_conformal_epsilon() - 0.05) < 1e-9);
+   assert(fabs(config_calibration_tau_memory_auto() - 0.70) < 1e-9);
+   assert(fabs(config_calibration_tau_memory_flag() - 0.55) < 1e-9);
+   assert(fabs(config_calibration_tau_working_profile_auto() - 0.80) < 1e-9);
+   assert(fabs(config_calibration_tau_working_profile_flag() - 0.65) < 1e-9);
+   assert(strcmp(config_calibration_prompt_version(), "v1") == 0);
+   assert(strcmp(config_calibration_model_version(), "beta-binomial-v1") == 0);
+   assert(config_calibration_command()[0] == '\0');
 
    printf("  config_defaults: ok\n");
 }
 
 static void test_config_tau_and_versions(void)
 {
-   const char *json = "{\"intelligence\":{\"calibrate\":{"
-                      "\"prompt_version\":\"prompt-v2\","
-                      "\"model_version\":\"model-v3\","
-                      "\"tau\":{"
-                      "\"memory\":{\"auto\":0.72,\"flag\":0.51},"
-                      "\"working_profile.auto\":0.83,"
-                      "\"working_profile.flag\":0.61,"
-                      "\"unknown.auto\":0.99"
-                      "}}}}";
-   cJSON *root = cJSON_Parse(json);
-   assert(root != NULL);
+   assert(config_set_calibration_tau_memory_auto(0.72) == 0);
+   assert(config_set_calibration_tau_memory_flag(0.51) == 0);
+   assert(config_set_calibration_tau_working_profile_auto(0.83) == 0);
+   assert(config_set_calibration_tau_working_profile_flag(0.61) == 0);
+   assert(config_set_calibration_prompt_version("prompt-v2") == 0);
+   assert(config_set_calibration_model_version("model-v3") == 0);
 
-   config_t cfg;
-   memset(&cfg, 0, sizeof(cfg));
-   config_apply_calibration_settings(&cfg, root);
-   cJSON_Delete(root);
-
-   assert(fabs(cfg.calibration_tau_memory_auto - 0.72) < 1e-9);
-   assert(fabs(cfg.calibration_tau_memory_flag - 0.51) < 1e-9);
-   assert(fabs(cfg.calibration_tau_working_profile_auto - 0.83) < 1e-9);
-   assert(fabs(cfg.calibration_tau_working_profile_flag - 0.61) < 1e-9);
-   assert(strcmp(cfg.calibration_prompt_version, "prompt-v2") == 0);
-   assert(strcmp(cfg.calibration_model_version, "model-v3") == 0);
+   assert(fabs(config_calibration_tau_memory_auto() - 0.72) < 1e-9);
+   assert(fabs(config_calibration_tau_memory_flag() - 0.51) < 1e-9);
+   assert(fabs(config_calibration_tau_working_profile_auto() - 0.83) < 1e-9);
+   assert(fabs(config_calibration_tau_working_profile_flag() - 0.61) < 1e-9);
+   assert(strcmp(config_calibration_prompt_version(), "prompt-v2") == 0);
+   assert(strcmp(config_calibration_model_version(), "model-v3") == 0);
 
    printf("  config_tau_and_versions: ok\n");
 }
