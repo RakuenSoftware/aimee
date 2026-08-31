@@ -412,6 +412,7 @@
       "src/headers/code_audit_graph.h",
       "src/headers/code_match.h",
       "src/headers/collab_rules.h",
+      "src/headers/config.h",
       "src/headers/config_embedder_dims.h",
       "src/headers/context_discover.h",
       "src/headers/dstr.h",

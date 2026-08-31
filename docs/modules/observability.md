@@ -27,7 +27,7 @@ remains available when a remote collector is unreachable, while required TLS con
 
 ## Configuration and activation
 
-- `runtime_toggle.supported`: `true`; the package is disabled by default and can be enabled in images that expose an approved telemetry destination.
+- `runtime_toggle.supported`: `false`; hosting services configure the package at startup rather than toggling it through the module runtime.
 
 OTLP endpoint, protocol, headers, TLS, service identity, sampling, and metrics listener settings are
 deployment-owned. Configure secrets through approved custody; a blank exporter keeps telemetry local.

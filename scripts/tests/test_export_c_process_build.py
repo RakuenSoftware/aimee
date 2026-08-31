@@ -61,6 +61,21 @@ class CProcessBuildTests(unittest.TestCase):
         with self.assertRaisesRegex(exporter.ExportError, "contracts must be a string array"):
             exporter.module_owned_files("db2", descriptor)
 
+    def test_external_module_pin_tracks_the_canonical_go_dependency(self) -> None:
+        descriptor = exporter.load_json(REPO_ROOT / "src/modules/config/module.yaml")
+        contract = exporter.process_contracts.validate()["config"]
+        pin = exporter.external_module_pin("config", "required", descriptor, contract)
+        self.assertIsNotNone(pin)
+        assert pin is not None
+        dependency = exporter.go_dependency_version(
+            "github.com/RakuenSoftware/aimee-module-config"
+        )
+        self.assertEqual(pin["repository"],
+                         "https://github.com/RakuenSoftware/aimee-module-config.git")
+        self.assertEqual(pin["ref"], dependency)
+        self.assertEqual(pin["version"], dependency)
+        self.assertEqual(pin["commit"], dependency.rsplit("-", 1)[-1])
+
     def test_generated_header_inputs_are_owned_and_cmake_generates_out_of_tree(self) -> None:
         descriptor = self.descriptor()
         descriptor["c_build"]["generated_headers"] = [{
