@@ -62,7 +62,24 @@ def validate() -> dict[str, str]:
         candidate = (contract.get("candidate_commit_pin") or {}).get("commit")
         if not isinstance(candidate, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate):
             raise ValueError("candidate implementation commit is not fully pinned")
-        subprocess.run(["git", "cat-file", "-e", f"{candidate}^{{commit}}"], cwd=ROOT, check=True)
+        runtime_tree = (contract.get("candidate_commit_pin") or {}).get("runtime_src_tree")
+        if not isinstance(runtime_tree, str) or not re.fullmatch(r"[0-9a-f]{40}", runtime_tree):
+            raise ValueError("candidate runtime source tree is not fully pinned")
+        candidate_present = subprocess.run(
+            ["git", "cat-file", "-e", f"{candidate}^{{commit}}"],
+            cwd=ROOT,
+            capture_output=True,
+        ).returncode == 0
+        if candidate_present:
+            observed_tree = subprocess.run(
+                ["git", "rev-parse", f"{candidate}:src"],
+                cwd=ROOT,
+                text=True,
+                capture_output=True,
+                check=True,
+            ).stdout.strip()
+            if observed_tree != runtime_tree:
+                raise ValueError("candidate commit does not match its pinned runtime source tree")
     tasks = manifest.get("tasks")
     if not isinstance(tasks, list) or len(tasks) != 45:
         raise ValueError("manifest must contain exactly 45 tasks")

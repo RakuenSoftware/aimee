@@ -75,4 +75,6 @@ saved-file `didOpen`/`didChange` synchronization, provider and document generati
 freshness hashes, workspace-relative containment, typed failures, and bounded source. The unit
 contract directly exercises batching, truncation, stale source, unavailable providers, binary
 input, and input/returned-path escapes. The required Linux/macOS job retains a separate S1
-real-provider artifact after first reproducing the unchanged S0 baseline.
+real-provider artifact after first reproducing the unchanged S0 baseline. Candidate probes also
+require runtime source tree `50ac137b5d93bf44ccc2ba774b251912da65ae1f`, allowing the exact source
+to be verified in GitHub's shallow PR merge checkout without relying on unavailable parent objects.

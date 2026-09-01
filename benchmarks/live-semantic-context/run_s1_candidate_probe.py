@@ -23,6 +23,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pyright-langserver", type=Path, required=True)
     parser.add_argument("--pyright", type=Path, required=True)
     parser.add_argument("--candidate-commit", required=True)
+    parser.add_argument("--candidate-src-tree", required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--assert-candidate", action="store_true")
     return parser.parse_args()
@@ -64,16 +65,17 @@ def main() -> int:
     args = parse_args()
     if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_commit):
         raise SystemExit("--candidate-commit must be a full lowercase commit SHA")
-    subprocess.run(
-        ["git", "cat-file", "-e", f"{args.candidate_commit}^{{commit}}"], cwd=ROOT, check=True
-    )
-    subprocess.run(
-        ["git", "merge-base", "--is-ancestor", args.candidate_commit, "HEAD"],
+    if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_src_tree):
+        raise SystemExit("--candidate-src-tree must be a full lowercase Git tree ID")
+    checkout_src_tree = subprocess.run(
+        ["git", "rev-parse", "HEAD:src"],
         cwd=ROOT,
+        text=True,
+        capture_output=True,
         check=True,
-    )
+    ).stdout.strip()
     runtime_diff = subprocess.run(
-        ["git", "diff", "--quiet", args.candidate_commit, "--", "src"], cwd=ROOT
+        ["git", "diff", "--quiet", "HEAD", "--", "src"], cwd=ROOT
     )
     untracked_runtime = subprocess.run(
         ["git", "ls-files", "--others", "--exclude-standard", "--", "src"],
@@ -82,7 +84,11 @@ def main() -> int:
         capture_output=True,
         check=True,
     ).stdout.strip()
-    runtime_tree_matches_candidate = runtime_diff.returncode == 0 and not untracked_runtime
+    runtime_tree_matches_candidate = (
+        checkout_src_tree == args.candidate_src_tree
+        and runtime_diff.returncode == 0
+        and not untracked_runtime
+    )
     env = os.environ.copy()
     common = {
         "lsp_test": args.lsp_test.resolve(),
@@ -93,6 +99,8 @@ def main() -> int:
         "schema_version": 1,
         "purpose": "S1 candidate saved-file synchronization correctness probe",
         "candidate_commit": args.candidate_commit,
+        "candidate_src_tree": args.candidate_src_tree,
+        "checkout_src_tree": checkout_src_tree,
         "runtime_tree_matches_candidate": runtime_tree_matches_candidate,
         "source_commit": subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True
