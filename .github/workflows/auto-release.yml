@@ -61,34 +61,7 @@ jobs:
 
       - name: Infer the next version in the declared series
         id: bump
-        run: |
-          # The tree declares MAJOR.MINOR and nothing else. The patch is whatever
-          # comes next in that series, so a patch release needs no commit and
-          # cannot disagree with what was tagged. Moving series is an explicit
-          # edit of AIMEE_VERSION_SERIES, never inferred.
-          series=$(awk '$1 == "#define" && $2 == "AIMEE_VERSION_SERIES" {gsub(/"/, "", $3); print $3; exit}' \
-            src/headers/aimee_version.h)
-          if ! [[ "$series" =~ ^[0-9]+\.[0-9]+$ ]]; then
-            echo "::error::AIMEE_VERSION_SERIES must be MAJOR.MINOR; got '${series:-<empty>}'"
-            exit 1
-          fi
-          # Highest patch already tagged in THIS series. Tags from other series
-          # are irrelevant: a 0.4.0 tag must not make the 0.3 line jump.
-          latest=$(git tag --list "v${series}.*" --sort=-v:refname | head -n1)
-          if [ -z "$latest" ]; then
-            next="${series}.0"
-          else
-            patch="${latest##*.}"
-            [[ "$patch" =~ ^[0-9]+$ ]] || { echo "::error::cannot read a patch number from tag ${latest}"; exit 1; }
-            next="${series}.$((patch + 1))"
-          fi
-          if git rev-parse -q --verify "refs/tags/v${next}" >/dev/null; then
-            echo "::error::tag v${next} already exists; aborting to avoid clobbering a release"
-            exit 1
-          fi
-          echo "version=$next" >> "$GITHUB_OUTPUT"
-          echo "series=$series" >> "$GITHUB_OUTPUT"
-          echo "Next version: v${next} (series ${series}, highest in series ${latest:-<none>})"
+        run: scripts/next-release-version.sh "$GITHUB_OUTPUT"
 
       - name: Publish the proposed version for the approver
         run: |
@@ -145,6 +118,7 @@ jobs:
       id-token: write
     with:
       version: ${{ needs.version.outputs.version }}
+      publish: true
 
   # Synthesis sidecars are built by publish-llm.yml, outside publish-images.yml.
   # Promote the already-tested pinned manifests; a release must not rebuild them.
@@ -158,6 +132,7 @@ jobs:
       packages: write
     with:
       version: ${{ needs.version.outputs.version }}
+      publish: true
 
   images:
     # The thin-client reusable job includes signed artifact publication. Keeping
@@ -171,6 +146,7 @@ jobs:
       id-token: write
     with:
       version: ${{ needs.version.outputs.version }}
+      publish: true
 
   # Undo the tag when the release did not actually ship.
   #
