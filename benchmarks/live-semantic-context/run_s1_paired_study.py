@@ -209,7 +209,8 @@ def grade(task: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
         (item.get("file"), item.get("line"), item.get("symbol"))
         for item in answer.get("targets", []) if isinstance(item, dict)
     }
-    authority_ok = answer.get("authority") in ("local_checkout:.", "local_checkout", ".")
+    authority = answer.get("authority")
+    authority_ok = isinstance(authority, str) and "local_checkout" in authority and "." in authority
     return {
         "task_success": answer.get("answer_status") == "ok" and observed == expected and authority_ok,
         "exact_target_correctness": observed == expected,
@@ -250,6 +251,7 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             "-c", f"mcp_servers.s1.command={toml_string('python3')}",
             "-c", "mcp_servers.s1.args=[" + toml_string(str(MCP_SERVER)) + "]",
             "-c", mcp_env_override(env_values),
+            "-c", "mcp_servers.s1.default_tools_approval_mode=\"approve\"",
             "--disable", "shell_tool", "--disable", "view_image", "--disable", "multi_agent",
             "--disable", "multi_agent_v2", "--disable", "apps", "--disable", "browser_use",
             "--disable", "computer_use", "--disable", "skill_search", "--disable", "plugins",
@@ -277,6 +279,11 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
         cell_eligible = len(completed_tool_items) == len(calls)
         decisive = answer.get("decisive_evidence") or {}
         eligible_tool_names = {item["tool"] for item in calls}
+        decisive_matches_log = any(
+            item["tool"] == "lsp_context"
+            and decisive.get("timestamp_ms") == (item.get("result") or {}).get("observed_at_monotonic_ms")
+            for item in calls
+        )
         cell_grade = grade(task, answer)
         cell_grade["task_success"] = cell_grade["task_success"] and cell_eligible
         return {
@@ -289,7 +296,7 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             "tool_calls": len(calls), "tool_log": str(tool_log), "raw_events": str(raw_events),
             "candidate_used_before_decisive_edit": (
                 arm == "batched_context" and "lsp_context" in eligible_tool_names
-                and decisive.get("tool") == "lsp_context"
+                and str(decisive.get("tool", "")).endswith("lsp_context") and decisive_matches_log
             ),
             "stderr": completed.stderr[:4000], **lineage,
         }
