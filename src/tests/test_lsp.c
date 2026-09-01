@@ -706,6 +706,7 @@ static void test_definition_with_interleaved_notifications(const char *argv0)
    assert(platform_unsetenv("AIMEE_HOME") == 0);
    assert(platform_unsetenv("AIMEE_PROFILE") == 0);
    assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+   assert(configure_real_provider(exe, "--fake-lsp", ".c") == 0);
 
    lsp_manager_init();
    int version = 0;
