@@ -872,9 +872,9 @@ jobs:
             zstd="$(brew --prefix zstd)"
             export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
             make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -I$libpq/include -I$openssl/include -I$zstd/include" \
+              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -Wno-deprecated-declarations -I$libpq/include -I$openssl/include -I$zstd/include" \
               EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
-              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
+              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
               build/obj/tests/unit-test-lsp
           else
             make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
