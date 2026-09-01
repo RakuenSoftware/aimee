@@ -2,7 +2,7 @@
 
 - **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
   real-provider PR gate passed on PR #2950. The S1 candidate implementation is complete and pinned
-  at `d2257cbf569dba65b20b943b44e1549832793f3c`; correctness probes and paired cells must use that
+  at `795631825e13e070b2d5d3061a3248b493f2b75b`; correctness probes and paired cells must use that
   exact implementation. Later slices require a measured promotion decision.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01
@@ -628,15 +628,18 @@ The arms are:
 3. the same production baseline plus batched `lsp context`.
 
 All arms receive identical non-LSP tools. The benchmark does not require an Aimee call, and a task
-where the agent correctly avoids the candidate remains valid evidence.
+where the agent correctly avoids the candidate remains valid evidence. The 135 paired value cells
+run with healthy providers. The six frozen provider-failure overlays run separately as 12 LSP-only
+adversarial cells so a typed-failure safety check cannot replace or inflate a normal paired task.
 
 S1 task families include:
 
 - **Semantic disambiguation.** Overloads, same-named symbols, re-exports, interface dispatch, Go
   receiver methods, and C function-pointer targets for which literal search produces plausible
   distractors.
-- **Reference-backed change.** A checked change whose correct edit set depends on semantic
-  references rather than every textual match.
+- **Reference-origin localization.** A real use-site whose canonical workspace definition must be
+  distinguished from textual matches. The frozen `reference_backed_change` family name is retained
+  for corpus compatibility, but these are read-only localization tasks, not edit-diff claims.
 - **Fresh edits.** Body edits, formatting, inserted lines, signature changes, and external saved-file
   edits before a second semantic query.
 - **Batching.** Two to sixteen related anchors whose serial lookup and reads would otherwise require
@@ -664,6 +667,12 @@ Every arm reports:
 - whether the candidate was used before the decisive edit and whether the final answer cited
   evidence from the requested authority.
 
+The frozen client executes each cell as one user turn, so `agent_turns` is reported but constant and
+cannot identify internal round trips. Before promotion cells, the analysis plan therefore names
+paired tool-call reduction as the round-trip endpoint, alongside wall time. The checked provider
+fixture—not the localization answers—supplies the complete reference recall and false-positive
+denominator. Neither metric is inferred from keyword search.
+
 ### Promotion thresholds
 
 - **Authority isolation.** Zero cross-project, cross-worktree, or unauthorized dependency results in
@@ -685,7 +694,7 @@ Every arm reports:
   separately and is not treated as failed adoption.
 - **Material task value.** Against arm 1, arm 3 must either improve task success by at least five
   absolute percentage points with a paired 95 percent confidence interval excluding zero, or hold
-  task success while reducing median agent turns by at least 20 percent and median total wall time
+  task success while reducing median tool calls by at least 20 percent and median total wall time
   by at least 10 percent on semantic-eligible tasks, with paired intervals excluding zero. Tool
   schema, provider startup, and preparation costs are included.
 - **Control non-regression.** The candidate does not reduce control-task success and adds no more
@@ -744,7 +753,8 @@ recorded by immutable workflow, job, artifact, and digest in the checked S1 cont
 implementation is now authorized. See
 [`live-semantic-context-s0`](../../validation/live-semantic-context-s0.md).
 
-The S1 local candidate is implemented and commit-pinned. Its checked core exercises batched typed
+The S1 local candidate is implemented and commit-pinned at
+`795631825e13e070b2d5d3061a3248b493f2b75b`. Its checked core exercises batched typed
 envelopes, source budgets, exact hashes, provider/document generations, stale-file detection,
 binary refusal, and both input and returned-path containment. The protected Linux/macOS provider
 job first reproduces the frozen S0 observation and then exercises synchronized gopls and Pyright

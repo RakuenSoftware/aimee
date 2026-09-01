@@ -27,6 +27,7 @@ SYSTEM_PROMPT = BASE / "prompts" / "s1-agent-system-v1.md"
 RESULT_SCHEMA = BASE / "schemas" / "s1-result-v1.json"
 MCP_SERVER = BASE / "s1_mcp_server.py"
 BRIDGE_SOURCE = BASE / "s1_lsp_bridge.c"
+TOOL_SCHEMAS = json.loads((BASE / "tools" / "s1-tool-schemas-v1.json").read_text())
 ARMS = ("production", "location_only", "batched_context")
 
 LINK_OBJECTS = [
@@ -200,7 +201,8 @@ def parse_events(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return events, terminal[0]["usage"]
 
 
-def grade(task: dict[str, Any], arm: str, answer: dict[str, Any]) -> dict[str, Any]:
+def grade(task: dict[str, Any], arm: str, answer: dict[str, Any],
+          failure_active: bool = False) -> dict[str, Any]:
     expected = {
         (item["file"], item["line"], item["symbol"])
         for item in (task.get("setup") or {}).get("post_edit_targets", task["oracle"]["targets"])
@@ -211,7 +213,7 @@ def grade(task: dict[str, Any], arm: str, answer: dict[str, Any]) -> dict[str, A
     }
     authority = answer.get("authority")
     authority_ok = isinstance(authority, str) and "local_checkout" in authority
-    failure = task.get("failure_overlay") if arm != "production" else None
+    failure = task.get("failure_overlay") if failure_active and arm != "production" else None
     if failure:
         expected_status = failure["expected_status"]
         typed_failure_preserved = answer.get("answer_status") == expected_status and not observed
@@ -232,6 +234,9 @@ def grade(task: dict[str, Any], arm: str, answer: dict[str, Any]) -> dict[str, A
         "exact_target_correctness": exact_target_correctness,
         "authority_cited": authority_ok,
         "false_empty_count": int(answer.get("answer_status") == "empty"),
+        "false_ok_empty_count": int(
+            answer.get("answer_status") == "ok" and not observed and bool(expected)
+        ),
         "stale_result_count": int(answer.get("answer_status") == "stale" and expected_status != "stale"),
         "false_current_results": int(bool(failure) and answer.get("answer_status") == "ok"),
         "expected_targets": sorted(expected),
@@ -240,7 +245,8 @@ def grade(task: dict[str, Any], arm: str, answer: dict[str, Any]) -> dict[str, A
 
 
 def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: Path,
-             lineage: dict[str, str], run_id: str, ordinal: int) -> dict[str, Any]:
+             lineage: dict[str, str], run_id: str, ordinal: int,
+             failure_active: bool = False) -> dict[str, Any]:
     cell_root = Path(tempfile.mkdtemp(prefix=f"aimee-s1-{task['id']}-{arm}-"))
     workspace = cell_root / "work"
     raw_events = args.output / "raw" / f"{ordinal:03d}-{task['id']}-{arm}.jsonl"
@@ -257,7 +263,7 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             "S1_PROVIDER_ARG": provider_arg, "S1_PROVIDER_EXTENSION": extension,
             "S1_RG": str(args.rg.resolve()), "S1_AST_GREP": str(args.ast_grep.resolve()),
         }
-        failure = task.get("failure_overlay") or {}
+        failure = (task.get("failure_overlay") or {}) if failure_active else {}
         if failure:
             env_values["S1_FAILURE_INJECTION"] = failure["injection"]
             env_values["S1_FAILURE_STATUS"] = failure["expected_status"]
@@ -303,8 +309,31 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             and decisive.get("timestamp_ms") == (item.get("result") or {}).get("observed_at_monotonic_ms")
             for item in calls
         )
-        cell_grade = grade(task, arm, answer)
+        cell_grade = grade(task, arm, answer, failure_active)
         cell_grade["task_success"] = cell_grade["task_success"] and cell_eligible
+        lsp_calls = [item for item in calls if item["tool"].startswith("lsp_")]
+        tool_input_bytes = sum(len(json.dumps(item.get("arguments"), sort_keys=True,
+                                                    separators=(",", ":")).encode())
+                               for item in calls)
+        tool_output_bytes = sum(len(json.dumps(item.get("result"), sort_keys=True,
+                                                     separators=(",", ":")).encode())
+                                for item in calls)
+        tool_latencies_ms = [
+            item["completed_at_monotonic_ms"] - item["started_at_monotonic_ms"]
+            for item in calls
+        ]
+        lsp_latencies_ms = [
+            item["completed_at_monotonic_ms"] - item["started_at_monotonic_ms"]
+            for item in lsp_calls
+        ]
+        tool_schema_bytes = len(json.dumps(
+            TOOL_SCHEMAS["non_lsp_tools"] + TOOL_SCHEMAS["arm_lsp_tools"][arm],
+            sort_keys=True, separators=(",", ":"),
+        ).encode())
+        preparation_bytes = (
+            len(cell_prompt(task).encode()) + len(SYSTEM_PROMPT.read_bytes())
+            + len(RESULT_SCHEMA.read_bytes()) + tool_schema_bytes
+        )
         return {
             "run_id": run_id, "task_id": task["id"], "family": task["family"], "arm": arm,
             "ordinal": ordinal, "semantic_eligible": task["semantic_eligible"],
@@ -313,6 +342,25 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             "answer": answer, "grade": cell_grade,
             "usage": usage, "wall_seconds": wall_seconds, "agent_turns": 1,
             "tool_calls": len(calls), "tool_log": str(tool_log), "raw_events": str(raw_events),
+            "measurement": {
+                "preparation_bytes": preparation_bytes,
+                "tool_schema_bytes": tool_schema_bytes,
+                "tool_input_bytes": tool_input_bytes,
+                "tool_output_bytes": tool_output_bytes,
+                "tool_latency_ms": tool_latencies_ms,
+                "provider_cold_latency_ms": lsp_latencies_ms[0] if lsp_latencies_ms else None,
+                "provider_warm_latency_ms": lsp_latencies_ms[1:],
+                "provider_setup_success": (
+                    None if failure_active or not lsp_calls else all(
+                        (item.get("result") or {}).get("status") != "unavailable"
+                        for item in lsp_calls
+                    )
+                ),
+                "provider_process_count": None,
+                "provider_peak_rss_kib": None,
+                "reference_recall": None,
+                "reference_false_positive_rate": None,
+            },
             "candidate_used_before_decisive_edit": (
                 arm == "batched_context" and "lsp_context" in eligible_tool_names
                 and str(decisive.get("tool", "")).endswith("lsp_context") and decisive_matches_log
@@ -338,6 +386,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--model", default="gpt-5.6-sol")
     parser.add_argument("--reasoning", default="medium")
     parser.add_argument("--execute", action="store_true")
+    parser.add_argument(
+        "--failure-suite", action="store_true",
+        help="run the 12 LSP-only adversarial overlay cells instead of the paired value study",
+    )
     return parser.parse_args()
 
 
@@ -351,12 +403,16 @@ def main() -> int:
     lineage = validate_lineage(args.codex.resolve(), contract)
     lineage.update(validate_non_lsp_tools(args, contract))
     selected = manifest["tasks"]
+    if args.failure_suite:
+        selected = [task for task in selected if task.get("failure_overlay")]
     if args.task:
         wanted = set(args.task)
         selected = [task for task in selected if task["id"] in wanted]
         if {task["id"] for task in selected} != wanted:
             raise SystemExit("unknown task id selected")
     plan = arm_plan(selected, contract["run_order"]["seed"])
+    if args.failure_suite:
+        plan = [cell for cell in plan if cell[1] != "production"]
     if args.arm:
         wanted_arms = set(args.arm)
         plan = [cell for cell in plan if cell[1] in wanted_arms]
@@ -368,6 +424,7 @@ def main() -> int:
         "schema_version": 1, "created_at": datetime.now(timezone.utc).isoformat(),
         "cells": [{"task_id": task["id"], "arm": arm} for task, arm in plan],
         "cell_count": len(plan), "seed": contract["run_order"]["seed"], **lineage,
+        "study_kind": "adversarial_failure" if args.failure_suite else "paired_value",
     }
     print(json.dumps({"preflight": preflight}, indent=2), flush=True)
     if not args.execute:
@@ -381,13 +438,19 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="aimee-s1-bridge-") as bridge_dir:
         bridge = build_bridge(Path(bridge_dir))
         for ordinal, (task, arm) in enumerate(plan, 1):
-            row = run_cell(task, arm, args, bridge, lineage, run_id, ordinal)
+            row = run_cell(
+                task, arm, args, bridge, lineage, run_id, ordinal,
+                failure_active=args.failure_suite,
+            )
             rows.append(row)
             print(json.dumps({"completed": ordinal, "task": task["id"], "arm": arm,
                               "success": (row.get("grade") or {}).get("task_success"),
                               "infrastructure_failure": row["infrastructure_failure"]}), flush=True)
     artifact = {
-        "schema_version": 1, "claim_status": "complete" if len(plan) == 135 else "calibration_only",
+        "schema_version": 1,
+        "study_kind": "adversarial_failure" if args.failure_suite else "paired_value",
+        "claim_status": "complete" if len(plan) == (12 if args.failure_suite else 135)
+        else "calibration_only",
         "created_at": datetime.now(timezone.utc).isoformat(), "run_id": run_id,
         "contract_sha256": sha256(CONTRACT), "manifest_sha256": sha256(MANIFEST),
         "cells": rows, "lineage": lineage,

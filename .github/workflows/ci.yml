@@ -898,6 +898,7 @@ jobs:
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
             --candidate-commit 795631825e13e070b2d5d3061a3248b493f2b75b \
             --candidate-src-tree bd04b26c677a07f00fea043759a3a82f9625753d \
+            --cold-starts 20 \
             --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
             --assert-candidate
       - name: Retain the provider observation

@@ -60,8 +60,10 @@ not a performance distribution. The PR gate checks semantic outcomes and that ti
 fields exist; it does not assert the recorded millisecond or RSS values because shared runners are
 noisy. The macOS matrix passed against both pinned providers on PR #2950, closing the last
 pre-implementation S0 gate; the immutable run, job, artifact, and digest are recorded in the S1
-experiment contract. The 20-clean-start availability trial and paired model study remain S1
-promotion evidence, not prerequisites for freezing the comparison.
+experiment contract. The 20-clean-start availability trial and paired model study are S1 promotion
+evidence, not prerequisites for freezing the comparison. The provider PR job now runs and retains
+all 20 clean candidate starts for each pinned provider on both Linux and macOS; a missing or failed
+start stays in the denominator.
 
 The TypeScript language server was also tried during S0. It did not complete the current client's
 request sequence within a bounded 25-second probe. It is excluded from the deterministic two-server
@@ -99,3 +101,12 @@ the experiment contract. All removable built-ins are disabled, the remaining ide
 are declared ineligible evidence, and their use invalidates a cell while remaining visible in the
 raw event stream. Run without `--execute` for a no-inference lineage/order preflight; execution also
 requires explicit paths to the digest-pinned Codex, ripgrep, ast-grep, gopls, and Pyright binaries.
+
+Calibration also established two execution facts before promotion data. Provider-failure overlays
+are not comparable to a healthy production arm, so the 135-cell paired value study now runs all 45
+tasks under normal conditions and `--failure-suite` runs the six frozen overlays as 12 separate
+LSP-only adversarial cells. Codex records one user turn for every `exec` cell, so that constant is
+reported but cannot measure internal round trips; the preregistered paired efficiency endpoint is
+tool calls plus end-to-end wall time. `summarize_s1_results.py` reports complete-pair arm metrics and
+5,000-replicate paired percentile-bootstrap intervals while leaving the promotion decision
+incomplete until the failure, cold-start, and checked reference-quality evidence are all present.

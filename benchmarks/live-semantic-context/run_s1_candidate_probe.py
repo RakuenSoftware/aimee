@@ -24,9 +24,62 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--pyright", type=Path, required=True)
     parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--candidate-src-tree", required=True)
+    parser.add_argument("--cold-starts", type=int, default=1)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--assert-candidate", action="store_true")
     return parser.parse_args()
+
+
+def trial_success(provider: dict) -> bool:
+    observation = provider.get("observation", {})
+    probe = observation.get("probe") or {}
+    return bool(
+        provider.get("available")
+        and not observation.get("timed_out")
+        and observation.get("exit_code") == 0
+        and probe.get("synchronized")
+        and probe.get("document_version") == 1
+        and isinstance(probe.get("provider_generation"), (int, float))
+        and probe.get("provider_generation", 0) > 0
+        and probe.get("definition_matched")
+        and probe.get("reference_count") == 3
+        and probe.get("active_servers_after_query") == 1
+    )
+
+
+def aggregate_provider(name: str, trials: list[dict]) -> dict:
+    successful = sum(trial_success(trial) for trial in trials)
+    reference_counts = [
+        (trial.get("observation", {}).get("probe") or {}).get("reference_count")
+        for trial in trials
+        if isinstance((trial.get("observation", {}).get("probe") or {}).get(
+            "reference_count"
+        ), int)
+    ]
+    return {
+        "name": name,
+        "available": all(trial.get("available") for trial in trials),
+        "cold_start_attempts": len(trials),
+        "cold_start_successes": successful,
+        "cold_start_success_rate": successful / len(trials),
+        "reference_recall": (
+            sum(min(count, 3) / 3 for count in reference_counts) / len(reference_counts)
+            if reference_counts else None
+        ),
+        "reference_false_positive_rate": (
+            sum(max(count - 3, 0) / max(count, 1) for count in reference_counts)
+            / len(reference_counts) if reference_counts else None
+        ),
+        "peak_process_tree_count": max(
+            (trial.get("observation") or {}).get("peak_process_tree_count", 0)
+            for trial in trials
+        ),
+        "peak_process_tree_rss_kib": max(
+            (trial.get("observation") or {}).get("peak_process_tree_rss_kib", 0)
+            for trial in trials
+        ),
+        "trials": trials,
+    }
 
 
 def candidate_errors(report: dict) -> list[str]:
@@ -38,31 +91,21 @@ def candidate_errors(report: dict) -> list[str]:
         if not provider["available"]:
             errors.append(f"{name}: pinned binary is missing")
             continue
-        observation = provider.get("observation", {})
-        probe = observation.get("probe") or {}
-        if observation.get("timed_out"):
-            errors.append(f"{name}: synchronized probe timed out")
-        if observation.get("exit_code") != 0:
-            errors.append(f"{name}: synchronized probe exited nonzero")
-        if not probe.get("synchronized"):
-            errors.append(f"{name}: didOpen synchronization was not acknowledged")
-        if probe.get("document_version") != 1:
-            errors.append(f"{name}: first synchronized document version was not 1")
-        if not isinstance(probe.get("provider_generation"), (int, float)) or probe.get(
-            "provider_generation", 0
-        ) <= 0:
-            errors.append(f"{name}: provider generation was not recorded")
-        if not probe.get("definition_matched"):
-            errors.append(f"{name}: checked definition target did not resolve")
-        if probe.get("reference_count", 0) < 3:
-            errors.append(f"{name}: checked references were incomplete")
-        if probe.get("active_servers_after_query") != 1:
-            errors.append(f"{name}: expected exactly one retained provider")
+        if provider.get("cold_start_attempts") != report["cold_starts_per_provider"]:
+            errors.append(f"{name}: cold-start denominator is incomplete")
+        if provider.get("cold_start_success_rate", 0) < 0.95:
+            errors.append(f"{name}: fewer than 95 percent of clean cold starts passed")
+        if provider.get("reference_recall") != 1.0:
+            errors.append(f"{name}: checked reference recall is incomplete")
+        if provider.get("reference_false_positive_rate") != 0.0:
+            errors.append(f"{name}: checked reference result has false positives")
     return errors
 
 
 def main() -> int:
     args = parse_args()
+    if args.cold_starts < 1:
+        raise SystemExit("--cold-starts must be positive")
     if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_commit):
         raise SystemExit("--candidate-commit must be a full lowercase commit SHA")
     if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_src_tree):
@@ -95,6 +138,26 @@ def main() -> int:
         "env": env,
         "probe_mode": "--real-provider-synced",
     }
+    provider_specs = [
+        (
+            "gopls", args.gopls, "-", FIXTURES / "go", "main.go", 8, 9, 3,
+            [str(args.gopls), "version"],
+        ),
+        (
+            "pyright", args.pyright_langserver, "--stdio", FIXTURES / "python",
+            "sample.py", 6, 12, 1, [str(args.pyright), "--version"],
+        ),
+    ]
+    providers = []
+    for name, command, server_arg, fixture, file_name, line, column, expected_line, version in provider_specs:
+        trials = [
+            provider_record(
+                name, command, server_arg, fixture, file_name, line, column, expected_line, 3,
+                version_command=version, **common,
+            )
+            for _ in range(args.cold_starts)
+        ]
+        providers.append(aggregate_provider(name, trials))
     report = {
         "schema_version": 1,
         "purpose": "S1 candidate saved-file synchronization correctness probe",
@@ -106,17 +169,8 @@ def main() -> int:
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True
         ).stdout.strip(),
         "environment": {"platform": platform.platform(), "python": platform.python_version()},
-        "providers": [
-            provider_record(
-                "gopls", args.gopls, "-", FIXTURES / "go", "main.go", 8, 9, 3, 3,
-                version_command=[str(args.gopls), "version"], **common,
-            ),
-            provider_record(
-                "pyright", args.pyright_langserver, "--stdio", FIXTURES / "python",
-                "sample.py", 6, 12, 1, 3,
-                version_command=[str(args.pyright), "--version"], **common,
-            ),
-        ],
+        "cold_starts_per_provider": args.cold_starts,
+        "providers": providers,
     }
     errors = candidate_errors(report)
     report["candidate_matched"] = not errors

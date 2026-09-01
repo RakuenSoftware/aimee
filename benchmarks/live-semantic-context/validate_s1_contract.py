@@ -22,6 +22,8 @@ INSTRUMENTATION = {
     "mcp_server": BASE / "s1_mcp_server.py",
     "native_bridge": BASE / "s1_lsp_bridge.c",
     "result_schema": BASE / "schemas" / "s1-result-v1.json",
+    "result_summarizer": BASE / "summarize_s1_results.py",
+    "candidate_probe": BASE / "run_s1_candidate_probe.py",
 }
 REQUIRED_FAMILIES = {
     "semantic_disambiguation",
