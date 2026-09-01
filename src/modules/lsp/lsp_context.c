@@ -215,7 +215,8 @@ cJSON *lsp_context_execute(const lsp_context_provider_t *provider, const cJSON *
             char *target_before = NULL;
             size_t target_before_len = 0;
             char target_before_hash[65] = "";
-            if (provider->read_file(provider->ctx, target, &target_before, &target_before_len) != 0 ||
+            if (provider->read_file(provider->ctx, target, &target_before, &target_before_len) !=
+                    0 ||
                 aimee_sha256_hex(target_before, target_before_len, target_before_hash) != 0)
                source_failed = 1;
             free(target_before);
@@ -227,16 +228,16 @@ cJSON *lsp_context_execute(const lsp_context_provider_t *provider, const cJSON *
                 span ? cJSON_GetObjectItemCaseSensitive(span, "source_version") : NULL;
             if (!cJSON_IsString(content))
                source_failed = 1;
-            else if (!source_failed &&
-                     (!cJSON_IsString(source_version) ||
-                      strcmp(source_version->valuestring, target_before_hash)))
+            else if (!source_failed && (!cJSON_IsString(source_version) ||
+                                        strcmp(source_version->valuestring, target_before_hash)))
                source_stale = 1;
             else if (!source_failed)
             {
                char *target_after = NULL;
                size_t target_after_len = 0;
                char target_after_hash[65] = "";
-               if (provider->read_file(provider->ctx, target, &target_after, &target_after_len) != 0 ||
+               if (provider->read_file(provider->ctx, target, &target_after, &target_after_len) !=
+                       0 ||
                    aimee_sha256_hex(target_after, target_after_len, target_after_hash) != 0)
                   source_failed = 1;
                else if (strcmp(target_before_hash, target_after_hash))
