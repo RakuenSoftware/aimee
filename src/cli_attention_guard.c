@@ -1435,10 +1435,13 @@ static int attn_git_default_ref(const char *dir, const char *defbr, char *out, s
    /* Both resolve: take whichever already contains the other, so neither a local
     * branch left behind nor one carrying unpushed default-branch commits can
     * shrink the yardstick. Ties (identical refs) fall to the local name. */
-   char cmd[2600];
-   snprintf(cmd, sizeof(cmd),
-            "git -C '%s' merge-base --is-ancestor '%s^{commit}' '%s^{commit}' >/dev/null 2>&1", dir,
-            remote, defbr);
+   char cmd[2800];
+   int n =
+       snprintf(cmd, sizeof(cmd),
+                "git -C '%s' merge-base --is-ancestor '%s^{commit}' '%s^{commit}' >/dev/null 2>&1",
+                dir, remote, defbr);
+   if (n < 0 || (size_t)n >= sizeof(cmd))
+      return 0;
    int local_contains_remote = system(cmd) == 0;
    snprintf(out, outlen, "%s", local_contains_remote ? defbr : remote);
    return 1;
