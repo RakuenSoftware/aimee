@@ -97,6 +97,7 @@ void lsp_manager_diag_summary(int *errors, int *warnings, int *active_servers)
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdlib.h>
 #include <sys/select.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -111,6 +112,8 @@ void lsp_manager_diag_summary(int *errors, int *warnings, int *active_servers)
 #define LSP_MAX_FILES          128
 #define LSP_REQUEST_TIMEOUT_MS 5000
 #define LSP_STARTUP_TIMEOUT_MS 10000
+#define LSP_RESPONSE_BUF_SIZE  (512 * 1024)
+#define LSP_READER_BUF_SIZE    (1024 * 1024)
 
 /* -----------------------------------------------------------------------
  * Types
@@ -258,7 +261,9 @@ static void dispatch_message(lsp_server_t *srv, cJSON *msg, const char *raw_json
 
 static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms)
 {
-   char buf[512 * 1024];
+   char *buf = malloc(LSP_RESPONSE_BUF_SIZE);
+   if (!buf)
+      return NULL;
    struct timespec start;
    if (clock_gettime(CLOCK_MONOTONIC, &start) != 0)
       memset(&start, 0, sizeof(start));
@@ -290,7 +295,7 @@ static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms
          break;
       }
 
-      int n = lsp_frame_read(srv->stdout_fd, buf, sizeof(buf));
+      int n = lsp_frame_read(srv->stdout_fd, buf, LSP_RESPONSE_BUF_SIZE);
       if (n < 0)
       {
          if (errno == EINTR)
@@ -306,19 +311,27 @@ static cJSON *read_response_locked(lsp_server_t *srv, int req_id, int timeout_ms
 
       cJSON *mid = cJSON_GetObjectItemCaseSensitive(msg, "id");
       if (cJSON_IsNumber(mid) && (int)mid->valuedouble == req_id)
+      {
+         free(buf);
          return msg;
+      }
 
       dispatch_message(srv, msg, buf);
       cJSON_Delete(msg);
    }
 
+   free(buf);
    return NULL;
 }
 
 static void *reader_thread(void *arg)
 {
    lsp_server_t *srv = (lsp_server_t *)arg;
-   char buf[1024 * 1024]; /* 1MB read buffer — sufficient for most LSP messages */
+   /* macOS pthread stacks can be only 512 KiB, so protocol buffers must not
+    * live on the reader stack. */
+   char *buf = malloc(LSP_READER_BUF_SIZE);
+   if (!buf)
+      return NULL;
 
    while (srv->active && srv->stdout_fd >= 0)
    {
@@ -342,7 +355,7 @@ static void *reader_thread(void *arg)
          pthread_mutex_unlock(&srv->io_lock);
          break;
       }
-      int n = lsp_frame_read(srv->stdout_fd, buf, sizeof(buf));
+      int n = lsp_frame_read(srv->stdout_fd, buf, LSP_READER_BUF_SIZE);
       pthread_mutex_unlock(&srv->io_lock);
       if (n < 0)
          break; /* EOF or error — server likely exited */
@@ -357,6 +370,7 @@ static void *reader_thread(void *arg)
       cJSON_Delete(msg);
    }
 
+   free(buf);
    return NULL;
 }
 
