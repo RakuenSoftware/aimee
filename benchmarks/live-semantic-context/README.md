@@ -58,9 +58,10 @@ python3 benchmarks/live-semantic-context/validate_s1_contract.py
 [`s0-baseline-observation.json`](s0-baseline-observation.json) is one immutable Linux observation,
 not a performance distribution. The PR gate checks semantic outcomes and that timing/resource
 fields exist; it does not assert the recorded millisecond or RSS values because shared runners are
-noisy. The macOS matrix result is the last pre-implementation S0 gate. The 20-clean-start
-availability trial and paired model study remain S1 promotion evidence, not prerequisites for
-freezing the comparison.
+noisy. The macOS matrix passed against both pinned providers on PR #2950, closing the last
+pre-implementation S0 gate; the immutable run, job, artifact, and digest are recorded in the S1
+experiment contract. The 20-clean-start availability trial and paired model study remain S1
+promotion evidence, not prerequisites for freezing the comparison.
 
 The TypeScript language server was also tried during S0. It did not complete the current client's
 request sequence within a bounded 25-second probe. It is excluded from the deterministic two-server

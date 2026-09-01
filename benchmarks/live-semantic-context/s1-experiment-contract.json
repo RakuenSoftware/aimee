@@ -1,8 +1,21 @@
 {
   "schema_version": 1,
-  "state": "preregistered-design-incomplete",
-  "candidate_implementation_allowed": false,
-  "reason": "The comparison, checked corpus, model execution contract, prompt, tools, and thresholds are frozen. Candidate implementation remains closed until the macOS real-provider gate passes.",
+  "state": "preregistered-ready",
+  "candidate_implementation_allowed": true,
+  "reason": "The comparison and all pre-implementation S0 gates are frozen and complete. Candidate implementation may begin, but no candidate-arm cell may run until its implementation commit is pinned.",
+  "s0_gate_evidence": {
+    "pull_request": 2950,
+    "head_commit": "a415b76208245612fbfe58b5d695285b3e2b5ee3",
+    "workflow_run": 33520936934,
+    "macos_job": 99900203992,
+    "macos_job_conclusion": "success",
+    "macos_observation_artifact": 9805765992,
+    "macos_observation_artifact_digest": "sha256:265bee5987cd1bfc2cffac50acf673d26cd5c48a9f4887360ed21e6e04b471f9",
+    "macos_observation_source_commit": "d62c7d784b1f8c975ec57d0c6d6cb99f0c5d9170",
+    "macos_observation_platform": "macOS-26.5.2-arm64-arm-64bit-Mach-O",
+    "macos_observation_baseline_matched": true,
+    "observed_at": "2026-09-01T14:43:50Z"
+  },
   "content_pins": {
     "task_manifest": "s1-task-manifest.json",
     "task_manifest_sha256": "612e64f133ed338c30fff51d52f10823dc22ee3fa5905894a1d38b087fa5dae1",
@@ -118,7 +131,5 @@
     "control": "no success loss, no more than one median tool call, and no more than 0.05 median wall-time increase",
     "platform": "Linux and macOS execute; Windows and detached worktrees advertise unsupported before invocation"
   },
-  "unresolved_pins": [
-    "macOS real-provider gate observation on the PR commit"
-  ]
+  "unresolved_pins": []
 }

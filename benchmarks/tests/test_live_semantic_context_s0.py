@@ -62,19 +62,24 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         self.assertEqual(set(self.observation["known_red_baseline"]), expected_gaps)
         self.assertTrue(all(self.observation["known_red_baseline"].values()))
 
-    def test_s1_stays_closed_until_the_comparison_is_fully_pinned(self) -> None:
-        self.assertEqual(self.contract["state"], "preregistered-design-incomplete")
-        self.assertFalse(self.contract["candidate_implementation_allowed"])
+    def test_s1_comparison_is_fully_pinned_before_candidate_code(self) -> None:
+        self.assertEqual(self.contract["state"], "preregistered-ready")
+        self.assertTrue(self.contract["candidate_implementation_allowed"])
         self.assertEqual(
             [arm["id"] for arm in self.contract["arms"]],
             ["production", "location_only", "batched_context"],
         )
         self.assertGreaterEqual(self.contract["task_contract"]["semantic_eligible_minimum"], 30)
         self.assertGreaterEqual(self.contract["task_contract"]["control_minimum"], 15)
-        self.assertEqual(
-            self.contract["unresolved_pins"],
-            ["macOS real-provider gate observation on the PR commit"],
-        )
+        self.assertEqual(self.contract["unresolved_pins"], [])
+        evidence = self.contract["s0_gate_evidence"]
+        self.assertEqual(evidence["pull_request"], 2950)
+        self.assertEqual(evidence["head_commit"], "a415b76208245612fbfe58b5d695285b3e2b5ee3")
+        self.assertEqual(evidence["workflow_run"], 33520936934)
+        self.assertEqual(evidence["macos_job"], 99900203992)
+        self.assertEqual(evidence["macos_job_conclusion"], "success")
+        self.assertTrue(evidence["macos_observation_baseline_matched"])
+        self.assertRegex(evidence["macos_observation_artifact_digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertEqual(self.contract["promotion"]["authority_isolation_failures"], 0)
         self.assertEqual(self.contract["promotion"]["false_current_results"], 0)
         self.assertEqual(self.contract["promotion"]["false_ok_empty_failures"], 0)

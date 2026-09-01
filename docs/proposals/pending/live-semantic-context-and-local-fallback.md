@@ -1,8 +1,9 @@
 # Proposal: Live semantic context at the filesystem-authority boundary
 
-- **State:** IN PROGRESS. S0 has a Linux/macOS PR-gate candidate and a frozen checked comparison.
-  S1 remains closed until the macOS matrix leg passes on the PR commit. Later slices require a
-  measured promotion decision.
+- **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
+  real-provider PR gate passed on PR #2950, so S1 candidate implementation is authorized. Running
+  candidate cells still requires pinning the completed implementation commit. Later slices require
+  a measured promotion decision.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01
 - **Charter roles:** Recall, Enforce, Execute, Evaluate-Optimize, Gate-Promote
@@ -732,14 +733,15 @@ is not "Aimee has LSP" and not feature parity with another product. It is one at
 exact semantic targets plus current bounded source in one batched call improve semantic-eligible
 coding work over shipping Aimee and ordinary local inspection.
 
-The S0 Linux baseline and its cross-platform real-provider PR-gate candidate are implemented. gopls resolves the checked
+The S0 Linux baseline and cross-platform real-provider PR gate are implemented and passed. gopls resolves the checked
 definition and references but recorded a roughly 30-second warm reference request in the first
 immutable observation. Pyright resolves the checked references but returns a definition shape the
 current client does not parse. Both reproduce cold diagnostics as zero while no provider is active.
 The 45-task corpus now pins real use-site anchors, independent definition oracles, saved-file shifts,
 batch cases, controls, and typed failure overlays against one immutable source commit. Model,
-prompt, tool-schema, provider, and schedule inputs are content-pinned. The checked S1 contract keeps
-candidate implementation disabled only until the macOS observation passes. See
+prompt, tool-schema, provider, and schedule inputs are content-pinned. The macOS PR observation is
+recorded by immutable workflow, job, artifact, and digest in the checked S1 contract, so candidate
+implementation is now authorized. See
 [`live-semantic-context-s0`](../../validation/live-semantic-context-s0.md).
 
 S1 is the only authorized behavioral candidate after those S0 prerequisites are complete.

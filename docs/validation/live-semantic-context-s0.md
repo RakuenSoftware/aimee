@@ -55,12 +55,20 @@ classification, experiment stop state, and CI aggregation wiring.
 
 ## Decision
 
-Do not implement S1 until the new macOS matrix leg passes on the PR commit. The comparison design,
-45-task checked corpus, model execution contract, system prompt, tool schemas, provider versions,
-run order, and promotion thresholds are now frozen in `s1-experiment-contract.json`. The corpus
-uses real use-site anchors with independent definition oracles instead of definition-to-itself
-probes. This is a value safeguard: deterministic protocol work alone cannot establish that semantic
-context improves coding outcomes over shipping Aimee and ordinary local inspection.
+The macOS matrix leg passed on PR #2950 at head `a415b76208245612fbfe58b5d695285b3e2b5ee3`.
+Workflow run `33520936934`, job `99900203992`, retained artifact `9805765992`, and its SHA-256 digest
+are pinned in `s1-experiment-contract.json`. The artifact proves both real providers started on
+macOS, gopls returned the intended definition and all three references, and Pyright reproduced the
+predeclared `LocationLink` limitation while returning all three references. This closes S0 and
+authorizes S1 candidate implementation.
+
+The comparison design, 45-task checked corpus, model execution contract, system prompt, tool
+schemas, provider versions, run order, and promotion thresholds were frozen before authorization.
+The corpus uses real use-site anchors with independent definition oracles instead of
+definition-to-itself probes. This remains the value safeguard: deterministic protocol work alone
+cannot establish that semantic context improves coding outcomes over shipping Aimee and ordinary
+local inspection. The completed candidate implementation commit must be pinned before the first
+candidate-arm cell runs.
 
 ## Commands executed
 
