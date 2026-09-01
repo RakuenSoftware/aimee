@@ -824,7 +824,15 @@ jobs:
   lsp-real-providers:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: linux
+          - os: macos-latest
+            artifact: macos
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -836,11 +844,15 @@ jobs:
         with:
           node-version: 20.19.2
       - name: Install native build dependencies
+        if: runner.os == 'Linux'
         run: |
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           timeout 240 sudo apt-get update -q
           timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
             libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
+      - name: Install native build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libpq openssl@3 zstd
       - name: Install pinned real language servers
         env:
           GOBIN: ${{ runner.temp }}/lsp-tools/go/bin
@@ -853,8 +865,20 @@ jobs:
             pyright@1.1.413
       - name: Build the LSP probe and config fixture
         run: |
-          make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-            build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
+          if [ "$RUNNER_OS" = macOS ]; then
+            libpq="$(brew --prefix libpq)"
+            openssl="$(brew --prefix openssl@3)"
+            zstd="$(brew --prefix zstd)"
+            export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
+            make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              EXTRA_C_FLAGS="-I$libpq/include -I$openssl/include -I$zstd/include" \
+              EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
+              build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+          else
+            make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+          fi
       - name: Assert the pinned S0 real-provider baseline
         run: |
           python3 benchmarks/live-semantic-context/run_s0_baseline.py \
@@ -863,14 +887,14 @@ jobs:
             --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
             --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
-            --output "${RUNNER_TEMP}/lsp-s0-baseline.json" \
+            --output "${RUNNER_TEMP}/lsp-s0-${{ matrix.artifact }}-baseline.json" \
             --assert-baseline
       - name: Retain the provider observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
-          name: lsp-s0-real-provider-baseline
-          path: ${{ runner.temp }}/lsp-s0-baseline.json
+          name: lsp-s0-real-provider-${{ matrix.artifact }}-baseline
+          path: ${{ runner.temp }}/lsp-s0-${{ matrix.artifact }}-baseline.json
           if-no-files-found: warn
 
   # Stable protected context for the sharded suite. It remains named

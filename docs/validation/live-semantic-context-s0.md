@@ -43,21 +43,23 @@ pass.
 
 ## PR enforcement
 
-The `lsp-real-providers` CI job installs the exact gopls and Pyright pins, builds the native probe
-and real Go config fixture, runs the redistributed Go and Python fixtures, and uploads the raw JSON
-observation. Its result is folded into the protected `unit-tests` aggregate, so a pull request to
-`testing` or `main` cannot pass that required context without exercising both real providers.
+The `lsp-real-providers` CI matrix installs the exact gopls and Pyright pins on Linux and macOS,
+builds the native probe and real Go config fixture, runs the redistributed Go and Python fixtures,
+and uploads one raw JSON observation per platform. Its combined result is folded into the protected
+`unit-tests` aggregate, so a pull request to `testing` or `main` cannot pass that required context
+without exercising both real providers on both claimed platforms.
 
 The benchmark smoke suite also validates the immutable observation, fixture hashes, known-red
 classification, experiment stop state, and CI aggregation wiring.
 
 ## Decision
 
-Do not implement S1 yet. The comparison design and promotion thresholds are frozen in
-`s1-experiment-contract.json`, but candidate implementation remains closed until the checked 45-task
-manifest, model endpoint and prompt hashes, and macOS provider observation are pinned. This is a
-value safeguard: deterministic protocol work alone cannot establish that semantic context improves
-coding outcomes over shipping Aimee and ordinary local inspection.
+Do not implement S1 until the new macOS matrix leg passes on the PR commit. The comparison design,
+45-task checked corpus, model execution contract, system prompt, tool schemas, provider versions,
+run order, and promotion thresholds are now frozen in `s1-experiment-contract.json`. The corpus
+uses real use-site anchors with independent definition oracles instead of definition-to-itself
+probes. This is a value safeguard: deterministic protocol work alone cannot establish that semantic
+context improves coding outcomes over shipping Aimee and ordinary local inspection.
 
 ## Commands executed
 

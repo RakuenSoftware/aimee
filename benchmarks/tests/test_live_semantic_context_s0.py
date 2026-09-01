@@ -1,6 +1,7 @@
 import hashlib
 import json
 from pathlib import Path
+import subprocess
 import unittest
 
 
@@ -70,14 +71,56 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         )
         self.assertGreaterEqual(self.contract["task_contract"]["semantic_eligible_minimum"], 30)
         self.assertGreaterEqual(self.contract["task_contract"]["control_minimum"], 15)
-        self.assertTrue(self.contract["unresolved_pins"])
+        self.assertEqual(
+            self.contract["unresolved_pins"],
+            ["macOS real-provider gate observation on the PR commit"],
+        )
         self.assertEqual(self.contract["promotion"]["authority_isolation_failures"], 0)
         self.assertEqual(self.contract["promotion"]["false_current_results"], 0)
         self.assertEqual(self.contract["promotion"]["false_ok_empty_failures"], 0)
 
+    def test_s1_corpus_and_model_visible_bytes_are_checked(self) -> None:
+        manifest = json.loads((BASE / "s1-task-manifest.json").read_text())
+        self.assertEqual(manifest["counts"], {
+            "total": 45, "semantic_eligible": 30, "controls": 15,
+        })
+        self.assertEqual(len({task["id"] for task in manifest["tasks"]}), 45)
+        pins = self.contract["content_pins"]
+        for key, relative in (
+            ("task_manifest", "s1-task-manifest.json"),
+            ("agent_system_prompt", "prompts/s1-agent-system-v1.md"),
+            ("tool_schemas", "tools/s1-tool-schemas-v1.json"),
+        ):
+            self.assertEqual(pins[key], relative)
+            self.assertEqual(
+                pins[f"{key}_sha256"], hashlib.sha256((BASE / relative).read_bytes()).hexdigest()
+            )
+        completed = subprocess.run(
+            ["python3", str(BASE / "validate_s1_contract.py")],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_model_execution_is_exact_and_candidate_commit_is_a_run_pin(self) -> None:
+        model = self.contract["model_execution_pin"]
+        self.assertEqual(model["model_identifier"], "gpt-5.6-sol")
+        self.assertEqual(model["reasoning"], "medium")
+        self.assertEqual(model["client_version"], "0.151.0")
+        self.assertRegex(model["linux_x86_64_executable_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            self.contract["candidate_commit_pin"]["timing"],
+            "before the first candidate-arm cell, after candidate implementation",
+        )
+
     def test_real_provider_job_blocks_the_protected_unit_aggregate(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
         self.assertIn("lsp-real-providers:", workflow)
+        self.assertIn("- os: macos-latest", workflow)
+        self.assertIn("runs-on: ${{ matrix.os }}", workflow)
         self.assertIn("--assert-baseline", workflow)
         self.assertIn("LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}", workflow)
         self.assertIn('[ "$LSP_REAL_RESULT" = success ]', workflow)

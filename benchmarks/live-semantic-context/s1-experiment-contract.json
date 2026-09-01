@@ -2,7 +2,29 @@
   "schema_version": 1,
   "state": "preregistered-design-incomplete",
   "candidate_implementation_allowed": false,
-  "reason": "The comparison and thresholds are frozen, but the checked 45-task manifest, macOS baseline, and provider-backed model endpoint pin are not complete.",
+  "reason": "The comparison, checked corpus, model execution contract, prompt, tools, and thresholds are frozen. Candidate implementation remains closed until the macOS real-provider gate passes.",
+  "content_pins": {
+    "task_manifest": "s1-task-manifest.json",
+    "task_manifest_sha256": "612e64f133ed338c30fff51d52f10823dc22ee3fa5905894a1d38b087fa5dae1",
+    "agent_system_prompt": "prompts/s1-agent-system-v1.md",
+    "agent_system_prompt_sha256": "89200834e9b5ed6cf34d983a5c23cf6e9388aefcdcaa493952bf7896e0cae105",
+    "tool_schemas": "tools/s1-tool-schemas-v1.json",
+    "tool_schemas_sha256": "6ef6a375ebd8da4aad734474edb2f1dfee54f837470ddab2c82fbd9199a95405"
+  },
+  "model_execution_pin": {
+    "provider": "openai-codex",
+    "model_identifier": "gpt-5.6-sol",
+    "reasoning": "medium",
+    "endpoint_contract_version": "openai-codex/gpt-5.6-sol",
+    "client": "codex-cli",
+    "client_version": "0.151.0",
+    "linux_x86_64_executable_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+    "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
+  },
+  "candidate_commit_pin": {
+    "timing": "before the first candidate-arm cell, after candidate implementation",
+    "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
+  },
   "arms": [
     {
       "id": "production",
@@ -97,10 +119,6 @@
     "platform": "Linux and macOS execute; Windows and detached worktrees advertise unsupported before invocation"
   },
   "unresolved_pins": [
-    "45-task checked manifest and its content hash",
-    "model identifier and immutable provider endpoint/version",
-    "agent system prompt and tool-schema content hashes",
-    "Aimee candidate commit",
-    "macOS provider observation"
+    "macOS real-provider gate observation on the PR commit"
   ]
 }

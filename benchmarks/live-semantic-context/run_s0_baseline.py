@@ -37,34 +37,37 @@ def sha256_tree(path: Path) -> str:
     return digest.hexdigest()
 
 
-def process_tree(root_pid: int) -> set[int]:
+def process_tree_sample(root_pid: int) -> tuple[set[int], int]:
+    """Return descendants and summed RSS using the portable POSIX process table."""
+    completed = subprocess.run(
+        ["ps", "-axo", "pid=,ppid=,rss="],
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    if completed.returncode:
+        return {root_pid}, 0
+    children: dict[int, list[int]] = {}
+    rss_by_pid: dict[int, int] = {}
+    for line in completed.stdout.splitlines():
+        fields = line.split()
+        if len(fields) != 3:
+            continue
+        try:
+            pid, parent, rss = (int(value) for value in fields)
+        except ValueError:
+            continue
+        children.setdefault(parent, []).append(pid)
+        rss_by_pid[pid] = rss
     found = {root_pid}
     pending = [root_pid]
     while pending:
-        pid = pending.pop()
-        children_path = Path(f"/proc/{pid}/task/{pid}/children")
-        try:
-            children = [int(value) for value in children_path.read_text().split()]
-        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
-            continue
-        for child in children:
+        for child in children.get(pending.pop(), []):
             if child not in found:
                 found.add(child)
                 pending.append(child)
-    return found
-
-
-def rss_kib(pids: set[int]) -> int:
-    total = 0
-    for pid in pids:
-        try:
-            for line in Path(f"/proc/{pid}/status").read_text().splitlines():
-                if line.startswith("VmRSS:"):
-                    total += int(line.split()[1])
-                    break
-        except (FileNotFoundError, PermissionError, ProcessLookupError, ValueError):
-            pass
-    return total
+    return found, sum(rss_by_pid.get(pid, 0) for pid in found)
 
 
 def run_observed(command: list[str], env: dict[str, str], timeout_seconds: float) -> dict:
@@ -82,9 +85,9 @@ def run_observed(command: list[str], env: dict[str, str], timeout_seconds: float
     peak_rss_kib = 0
     timed_out = False
     while process.poll() is None:
-        descendants = process_tree(process.pid)
+        descendants, rss = process_tree_sample(process.pid)
         peak_processes = max(peak_processes, len(descendants))
-        peak_rss_kib = max(peak_rss_kib, rss_kib(descendants))
+        peak_rss_kib = max(peak_rss_kib, rss)
         if time.monotonic() - started >= timeout_seconds:
             timed_out = True
             os.killpg(process.pid, signal.SIGTERM)
@@ -93,7 +96,7 @@ def run_observed(command: list[str], env: dict[str, str], timeout_seconds: float
             except subprocess.TimeoutExpired:
                 os.killpg(process.pid, signal.SIGKILL)
             break
-        time.sleep(0.01)
+        time.sleep(0.05)
     stdout, stderr = process.communicate()
     elapsed_ms = round((time.monotonic() - started) * 1000)
     parsed = None
