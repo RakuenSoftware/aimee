@@ -282,7 +282,8 @@ int hook_session_token_load(const char *home, const char *session_id, const char
    buf[strcspn(buf, "\r\n")] = '\0';
    if (!token_shape_valid(buf))
       return -1;
-   snprintf(out, HOOK_SESSION_TOKEN_CAP, "%s", buf);
+   memcpy(out, buf, HOOK_SESSION_TOKEN_HEX_LEN);
+   out[HOOK_SESSION_TOKEN_HEX_LEN] = '\0';
    memset(buf, 0, sizeof(buf));
    return 0;
 }
