@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "captured_at": "2026-09-01T12:52:00Z",
+  "source_commit": "cccb1490560810a3da92691f381f9ab59040bb7c",
+  "runtime_behavior_changed": false,
+  "environment": {
+    "kernel": "Linux 7.0.14-4-pve x86_64",
+    "go": "1.24.4",
+    "node": "20.19.2",
+    "python": "3.13.5"
+  },
+  "providers": [
+    {
+      "name": "gopls",
+      "version": "v0.20.0",
+      "module_sum": "h1:fxOYZXKl6IsOTKIh6IgjDbIDHlr5btOtOUkrGOgFDB4=",
+      "binary_sha256": "3187cda8d9206e51abc2e476431270a152d7f72b5cb1672bd3305b283ae90137",
+      "fixture_sha256": "3221329d369055c647d5cd35d3bb2ebd0afe73900ad28a4e2f3ada8ea9fa7012",
+      "available": true,
+      "classification": "ready",
+      "cold_diagnostics": 0,
+      "cold_active_servers": 0,
+      "definition_count": 1,
+      "definition_matched": true,
+      "reference_count": 3,
+      "cold_definition_ms": 64,
+      "warm_references_ms": 29999,
+      "active_servers_after_query": 1,
+      "total_elapsed_ms": 30741,
+      "peak_process_tree_count": 3,
+      "peak_process_tree_rss_kib": 659224
+    },
+    {
+      "name": "pyright",
+      "version": "1.1.413",
+      "npm_integrity": "sha512-1lpxKrh0DHHpfAQOfciZo2ojua2jase3wwO9at8kldc+F/p1PBscxA5CQ3G1qg5lMOMhXo6ZaiMLMXEAqADIAg==",
+      "binary_sha256": "f200762078eb9880faf421a5b30f9ef3055b1d85c6f10780d75db4da8d8499f1",
+      "fixture_sha256": "930014d11ccf844d2b075f40f578ed6d6a723d6f42766873ff25d57706510f17",
+      "available": true,
+      "classification": "location_link_unsupported_unsynchronized",
+      "expected_reference_counts_before_document_sync": [0, 3],
+      "cold_diagnostics": 0,
+      "cold_active_servers": 0,
+      "definition_count": 0,
+      "definition_matched": false,
+      "reference_count": 3,
+      "cold_definition_ms": 191,
+      "warm_references_ms": 320,
+      "active_servers_after_query": 1,
+      "total_elapsed_ms": 1180,
+      "peak_process_tree_count": 3,
+      "peak_process_tree_rss_kib": 698572
+    }
+  ],
+  "known_red_baseline": {
+    "cold_diagnostics_false_empty": true,
+    "absolute_workspace_is_caller_selected": true,
+    "post_write_freshness_is_unproved": true,
+    "windows_live_provider_is_unsupported": true,
+    "crash_and_timeout_share_text_shaped_failure": true,
+    "detached_worktree_authority_is_unproved": true,
+    "location_link_is_not_parsed": true
+  }
+}

@@ -1,0 +1,117 @@
+{
+  "analysis": {
+    "agent_turn_endpoint_eligible": false,
+    "agent_turn_note": "codex exec records one user turn per cell; tool calls are the frozen agentic round-trip endpoint",
+    "bootstrap_replicates": 5000,
+    "bootstrap_seed": 91173,
+    "method": "paired nonparametric percentile bootstrap over task-level deltas"
+  },
+  "arm_metrics": {
+    "batched_context": {
+      "authority_citation_rate": 1.0,
+      "cells": 6,
+      "eligible_cells": 6,
+      "exact_target_denominator": 0,
+      "exact_target_rate": null,
+      "false_empty_count": 0,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": 1.0,
+      "median_input_tokens": 31142.5,
+      "median_output_tokens": 273.0,
+      "median_preparation_bytes": 4833.5,
+      "median_tool_calls": 1.0,
+      "median_tool_input_bytes": 152.0,
+      "median_tool_output_bytes": 110.5,
+      "median_wall_seconds": 13.7372814679984,
+      "stale_result_count": 0,
+      "task_success_rate": 1.0
+    },
+    "location_only": {
+      "authority_citation_rate": 1.0,
+      "cells": 6,
+      "eligible_cells": 6,
+      "exact_target_denominator": 0,
+      "exact_target_rate": null,
+      "false_empty_count": 0,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": 1.0,
+      "median_input_tokens": 31665.0,
+      "median_output_tokens": 303.0,
+      "median_preparation_bytes": 4965.5,
+      "median_tool_calls": 1.0,
+      "median_tool_input_bytes": 195.0,
+      "median_tool_output_bytes": 110.0,
+      "median_wall_seconds": 12.916765289992327,
+      "stale_result_count": 0,
+      "task_success_rate": 1.0
+    },
+    "production": {
+      "authority_citation_rate": null,
+      "cells": 0,
+      "eligible_cells": 0,
+      "exact_target_denominator": 0,
+      "exact_target_rate": null,
+      "false_empty_count": 0,
+      "false_ok_empty_count": 0,
+      "median_agent_turns": null,
+      "median_input_tokens": null,
+      "median_output_tokens": null,
+      "median_preparation_bytes": null,
+      "median_tool_calls": null,
+      "median_tool_input_bytes": null,
+      "median_tool_output_bytes": null,
+      "median_wall_seconds": null,
+      "stale_result_count": 0,
+      "task_success_rate": null
+    }
+  },
+  "candidate_adoption": {
+    "denominator": 0,
+    "rate": null
+  },
+  "claim_status": "complete",
+  "material_value_gate": {
+    "choice_a_task_success": false,
+    "choice_b_round_trips_and_wall_time": false,
+    "passes_either_choice": false
+  },
+  "paired": {
+    "all": {
+      "complete_pairs": 0,
+      "median_input_token_reduction": null,
+      "median_tool_call_reduction": null,
+      "median_wall_time_reduction": null,
+      "task_success_absolute_delta": null
+    },
+    "control": {
+      "complete_pairs": 0,
+      "median_input_token_reduction": null,
+      "median_tool_call_reduction": null,
+      "median_wall_time_reduction": null,
+      "task_success_absolute_delta": null
+    },
+    "semantic": {
+      "complete_pairs": 0,
+      "median_input_token_reduction": null,
+      "median_tool_call_reduction": null,
+      "median_wall_time_reduction": null,
+      "task_success_absolute_delta": null
+    }
+  },
+  "promotion_decision": "incomplete",
+  "run_id": "live-semantic-s1-44e8c4027cac486e",
+  "safety": {
+    "authority_citation_failures": 0,
+    "false_current_results": 0,
+    "false_ok_empty_count": 0,
+    "typed_failure_denominator": 12,
+    "typed_failure_preservation_rate": 1.0
+  },
+  "schema_version": 1,
+  "study_kind": "adversarial_failure",
+  "unresolved_promotion_evidence": [
+    "separate 12-cell adversarial failure artifact",
+    "20 clean cold starts per provider and claimed platform",
+    "checked fixture reference-quality aggregate"
+  ]
+}

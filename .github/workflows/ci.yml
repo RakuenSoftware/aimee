@@ -818,12 +818,118 @@ jobs:
           test "$(psql -XAt "$AIMEE_DB2_URL" -c "select value from kb_meta where key='schema_embedding_dim'")" = "384"
           test "$(psql -XAt "$AIMEE_DB2_URL" -c "select count(*) from information_schema.tables where table_schema=current_schema() and table_name in ('memories','kb_documents','kb_async_jobs')")" = "3"
 
+  # This is part of the protected unit-test aggregate below. The fake LSP peer
+  # proves framing; these pinned providers prove what the shipping client can
+  # and cannot do with real protocol implementations before a PR reaches main.
+  lsp-real-providers:
+    needs: change-scope
+    if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            artifact: linux
+          - os: macos-latest
+            artifact: macos
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
+          cache-dependency-path: server-go/go.sum
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 20.19.2
+      - name: Install native build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
+          timeout 240 sudo apt-get update -q
+          timeout 240 sudo apt-get install -y -q gcc make libsqlite3-dev \
+            libcurl4-openssl-dev libpam0g-dev libssl-dev libpq-dev
+      - name: Install native build dependencies (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libpq openssl@3 zstd
+      - name: Install pinned real language servers
+        env:
+          GOBIN: ${{ runner.temp }}/lsp-tools/go/bin
+          GOCACHE: ${{ runner.temp }}/lsp-tools/go/cache
+          GOMODCACHE: ${{ runner.temp }}/lsp-tools/go/mod
+        run: |
+          mkdir -p "$GOBIN" "$GOCACHE" "$GOMODCACHE" "${RUNNER_TEMP}/lsp-tools/npm"
+          go install golang.org/x/tools/gopls@v0.20.0
+          npm install --prefix "${RUNNER_TEMP}/lsp-tools/npm" --no-audit --no-fund \
+            pyright@1.1.413
+      - name: Build the LSP probe
+        run: |
+          jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
+          if [ "$RUNNER_OS" = macOS ]; then
+            libpq="$(brew --prefix libpq)"
+            openssl="$(brew --prefix openssl@3)"
+            zstd="$(brew --prefix zstd)"
+            export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
+            make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -Wno-deprecated-declarations -I$libpq/include -I$openssl/include -I$zstd/include" \
+              EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
+              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
+              build/obj/tests/unit-test-lsp
+          else
+            make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+              build/obj/tests/unit-test-lsp
+          fi
+      - name: Assert the pinned S0 real-provider baseline
+        run: |
+          python3 benchmarks/live-semantic-context/run_s0_baseline.py \
+            --lsp-test src/build/obj/tests/unit-test-lsp \
+            --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
+            --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
+            --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --output "${RUNNER_TEMP}/lsp-s0-${{ matrix.artifact }}-baseline.json" \
+            --assert-baseline
+      - name: Assert the pinned S1 saved-file synchronization path
+        run: |
+          python3 benchmarks/live-semantic-context/run_s1_candidate_probe.py \
+            --lsp-test src/build/obj/tests/unit-test-lsp \
+            --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
+            --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
+            --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
+            --cold-starts 20 \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json"
+          python3 benchmarks/live-semantic-context/validate_s1_release_candidate.py \
+            --probe-report "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
+            --cold-starts 20 \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-release-validation.json" \
+            --assert-release-candidate
+      - name: Retain the provider observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lsp-s0-real-provider-${{ matrix.artifact }}-baseline
+          path: ${{ runner.temp }}/lsp-s0-${{ matrix.artifact }}-baseline.json
+          if-no-files-found: warn
+      - name: Retain the candidate provider observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lsp-s1-real-provider-${{ matrix.artifact }}-candidate
+          path: ${{ runner.temp }}/lsp-s1-${{ matrix.artifact }}-*.json
+          if-no-files-found: warn
+
   # Stable protected context for the sharded suite. It remains named
   # `unit-tests`, so branch protection needs no transition window, and it also
   # makes the already-separate real-Postgres RLS gate part of that required
   # result instead of running it redundantly in every unit build.
   unit-tests:
-    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests]
+    needs: [change-scope, unit-test-shards, unit-test-shards-pg, db2-process-replay, p1-rls-gate, go-unit-tests, lsp-real-providers]
     if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -837,6 +943,7 @@ jobs:
           DB2_REPLAY_RESULT: ${{ needs.db2-process-replay.result }}
           P1_RESULT: ${{ needs.p1-rls-gate.result }}
           GO_RESULT: ${{ needs.go-unit-tests.result }}
+          LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}
         run: |
           if [ "$CHANGE_SCOPE_RESULT" = success ] && [ "$DOCS_ONLY" = true ]; then
             echo "Documentation-only change: unit shards (sqlite and Postgres) and P1 gate skipped."
@@ -866,7 +973,11 @@ jobs:
             echo "Go unit-test result: $GO_RESULT" >&2
             exit 1
           }
-          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, and the Go unit tests passed."
+          [ "$LSP_REAL_RESULT" = success ] || {
+            echo "Real-provider LSP result: $LSP_REAL_RESULT" >&2
+            exit 1
+          }
+          echo "All unit-test shards (sqlite and real Postgres), DB2 process replay, the P1 RLS gate, the Go unit tests, and the real-provider LSP baseline passed."
 
   # The data-plane identity mint, end to end, against a live Postgres and a live
   # signed-HWM KMS helper.
@@ -1778,9 +1889,16 @@ jobs:
           # update with backoff so a transient mirror hiccup doesn't fail the job.
           sudo rm -f /etc/apt/sources.list.d/microsoft*.list 2>/dev/null || true
           i=0; until timeout 240 sudo apt-get update -q; do i=$((i+1)); [ "$i" -ge 5 ] && break; echo "apt-get update retry $i (transient repo failure)"; sleep $((i*4)); done
-          timeout 240 sudo apt-get install -y -q gcc make \
-            libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
-            libpq-dev
+          for attempt in 1 2 3; do
+            if timeout 240 sudo apt-get install -y -q gcc make \
+              libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
+              libpq-dev; then
+              break
+            fi
+            test "$attempt" -lt 3 || exit 1
+            echo "apt-get install retry $attempt (transient mirror timeout)"
+            sleep $((attempt * 5))
+          done
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
 

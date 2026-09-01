@@ -551,6 +551,12 @@ static void test_osv_offline_cache_miss_allows(void)
  * via the DUMP_TOOLS path in test_mcp_client_registry.c. Regenerate after an
  * intentional tool change: DUMP_TOOLS=1 ./unit-test-mcp-client-registry 2>&1. */
 #define MCP_TOOLS_GOLDEN_COUNT 54
+#ifdef AIMEE_WINDOWS
+#define MCP_LSP_GOLDEN "lsp {col,command,file,line,workspace} req:command\n"
+#else
+#define MCP_LSP_GOLDEN                                                                             \
+   "lsp {anchors,col,command,file,line,max_source_bytes,operation,workspace} req:command\n"
+#endif
 #define MCP_TOOLS_GOLDEN                                                                           \
    "ask_user {choices,question} req:question\n"                                                    \
    "ast_grep_search {lang,path,pattern} req:lang,pattern\n"                                        \
@@ -588,9 +594,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "learning "                                                                                     \
    "{command,correction_text,description,evidence_refs,limit,polarity,signal_type,sink,state,"     \
    "target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"        \
-   "list_curiosity_items {limit,state} req:\n"                                                     \
-   "lsp {col,command,file,line,workspace} req:command\n"                                           \
-   "memory "                                                                                       \
+   "list_curiosity_items {limit,state} req:\n" MCP_LSP_GOLDEN "memory "                            \
    "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
    "project,query,reason,scope,tier,verb,workspace} req:command\n"                                 \
    "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
@@ -1257,8 +1261,13 @@ static void test_flat_list_keeps_family_members(void)
 
    /* Every tool the native surface declares must survive in the flat list, or it is
     * registered, resolvable in a toolset, and never offered to the model. */
-   const char *native[] = {"index_find_callers", "index_blast_radius", "index_structure",
-                           "get_context_block",  "search_graph",       "ast_grep_search"};
+   const char *native[] = {
+       "index_find_callers", "index_blast_radius", "index_structure",
+       "get_context_block",  "search_graph",       "ast_grep_search",
+#ifndef AIMEE_WINDOWS
+       "lsp_context",
+#endif
+   };
    for (size_t i = 0; i < sizeof(native) / sizeof(native[0]); i++)
       assert(tools_have(flat, native[i]));
 

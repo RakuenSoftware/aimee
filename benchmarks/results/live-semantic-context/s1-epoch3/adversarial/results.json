@@ -1,0 +1,970 @@
+{
+  "cells": [
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout",
+        "decisive_evidence": {
+          "timestamp_ms": 9425,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            20,
+            "canonical"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4966,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 195,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 109,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 1,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/001-f01-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f01",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/001-f01-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 19712,
+        "input_tokens": 31682,
+        "output_tokens": 304,
+        "reasoning_output_tokens": 105
+      },
+      "wall_seconds": 14.120970683026826
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout",
+        "decisive_evidence": {
+          "timestamp_ms": 11498,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            20,
+            "canonical"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4834,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 152,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 110,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 2,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/002-f01-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f01",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/002-f01-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 31477,
+        "output_tokens": 269,
+        "reasoning_output_tokens": 108
+      },
+      "wall_seconds": 15.665811297978507
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unsupported",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 8568,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unsupported",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            24,
+            "fsync_dir"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4833,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 152,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 113,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 3,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/003-f02-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f02",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/003-f02-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 19712,
+        "input_tokens": 30790,
+        "output_tokens": 277,
+        "reasoning_output_tokens": 118
+      },
+      "wall_seconds": 13.350808438990498
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unsupported",
+        "authority": "local_checkout (workspace_root=., detached=false)",
+        "decisive_evidence": {
+          "timestamp_ms": 9175,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unsupported",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            24,
+            "fsync_dir"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4965,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 194,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 113,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 4,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/004-f02-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f02",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/004-f02-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 30940,
+        "output_tokens": 354,
+        "reasoning_output_tokens": 127
+      },
+      "wall_seconds": 13.41289433898055
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 11052,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            32,
+            "durable_mkdir"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4842,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 152,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 111,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 5,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/005-f03-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f03",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/005-f03-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 31503,
+        "output_tokens": 313,
+        "reasoning_output_tokens": 141
+      },
+      "wall_seconds": 16.087392682005884
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 15030,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            32,
+            "durable_mkdir"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4974,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 195,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 111,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 6,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/006-f03-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f03",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/006-f03-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 31648,
+        "output_tokens": 302,
+        "reasoning_output_tokens": 104
+      },
+      "wall_seconds": 19.0953478020092
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout",
+        "decisive_evidence": {
+          "timestamp_ms": 8514,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            38,
+            "write_new"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4834,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 153,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 109,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 7,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/007-f04-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f04",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/007-f04-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 18944,
+        "input_tokens": 30808,
+        "output_tokens": 314,
+        "reasoning_output_tokens": 108
+      },
+      "wall_seconds": 13.094409181998344
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unavailable",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 7674,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unavailable",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            38,
+            "write_new"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4966,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 195,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 109,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 8,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/008-f04-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f04",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/008-f04-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 32560,
+        "output_tokens": 287,
+        "reasoning_output_tokens": 83
+      },
+      "wall_seconds": 11.264253986999393
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "stale",
+        "authority": "local_checkout (workspace_root: .)",
+        "decisive_evidence": {
+          "timestamp_ms": 7296,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "stale",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            46,
+            "replace"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4830,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 153,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 103,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 9,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/009-f05-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f05",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/009-f05-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 30763,
+        "output_tokens": 252,
+        "reasoning_output_tokens": 79
+      },
+      "wall_seconds": 11.805316282989224
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "stale",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 9122,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "stale",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            46,
+            "replace"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4962,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 195,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 103,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 10,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/010-f05-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f05",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/010-f05-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 30949,
+        "output_tokens": 310,
+        "reasoning_output_tokens": 78
+      },
+      "wall_seconds": 12.420636241004104
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unauthorized",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 9338,
+          "tool": "mcp__s1__lsp_context"
+        },
+        "targets": []
+      },
+      "arm": "batched_context",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": true,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unauthorized",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            58,
+            "load"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4824,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 152,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 116,
+        "tool_schema_bytes": 2262
+      },
+      "ordinal": 11,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/011-f06-batched_context.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f06",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/011-f06-batched_context.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 24832,
+        "input_tokens": 32379,
+        "output_tokens": 268,
+        "reasoning_output_tokens": 102
+      },
+      "wall_seconds": 14.123754497006303
+    },
+    {
+      "agent_turns": 1,
+      "answer": {
+        "answer_status": "unauthorized",
+        "authority": "local_checkout:.",
+        "decisive_evidence": {
+          "timestamp_ms": 6950,
+          "tool": "mcp__s1__lsp_definition"
+        },
+        "targets": []
+      },
+      "arm": "location_only",
+      "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+      "ast_grep_version": "ast-grep 0.45.0",
+      "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+      "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+      "candidate_used_before_decisive_edit": false,
+      "cell_eligible": true,
+      "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+      "codex_version": "codex-cli 0.151.0",
+      "family": "fresh_saved_edit",
+      "grade": {
+        "authority_cited": true,
+        "exact_target_correctness": null,
+        "expected_behavior": "typed_failure",
+        "expected_status": "unauthorized",
+        "expected_targets": [
+          [
+            "benchmarks/code-agent-effectiveness/checkpoint_runner.py",
+            58,
+            "load"
+          ]
+        ],
+        "false_current_results": 0,
+        "false_empty_count": 0,
+        "false_ok_empty_count": 0,
+        "observed_targets": [],
+        "stale_result_count": 0,
+        "task_success": true,
+        "typed_failure_preserved": true
+      },
+      "ineligible_completed_tool_items": [],
+      "infrastructure_failure": false,
+      "measurement": {
+        "preparation_bytes": 4956,
+        "provider_cold_latency_ms": 0,
+        "provider_peak_rss_kib": null,
+        "provider_process_count": null,
+        "provider_setup_success": null,
+        "provider_warm_latency_ms": [],
+        "reference_false_positive_rate": null,
+        "reference_recall": null,
+        "tool_input_bytes": 195,
+        "tool_latency_ms": [
+          0
+        ],
+        "tool_output_bytes": 116,
+        "tool_schema_bytes": 2394
+      },
+      "ordinal": 12,
+      "raw_events": "/tmp/aimee-s1-promotion-epoch3-failures/raw/012-f06-location_only.jsonl",
+      "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+      "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "run_id": "live-semantic-s1-44e8c4027cac486e",
+      "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321",
+      "semantic_eligible": true,
+      "stderr": "Reading additional input from stdin...\n",
+      "task_id": "f06",
+      "tool_calls": 1,
+      "tool_log": "/tmp/aimee-s1-promotion-epoch3-failures/tools/012-f06-location_only.jsonl",
+      "usage": {
+        "cache_write_input_tokens": 0,
+        "cached_input_tokens": 16896,
+        "input_tokens": 32520,
+        "output_tokens": 277,
+        "reasoning_output_tokens": 81
+      },
+      "wall_seconds": 10.997363731003134
+    }
+  ],
+  "claim_status": "complete",
+  "contract_sha256": "345610b19bad3644260d731dea1ffd225971d74b57c26f041a2d55f2cda1bee1",
+  "created_at": "2026-09-01T18:06:20.135811+00:00",
+  "lineage": {
+    "ast_grep_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f",
+    "ast_grep_version": "ast-grep 0.45.0",
+    "candidate_commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+    "candidate_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+    "codex_sha256": "9739cbc928b9c573be83256acd46668f5dd4f119d2d09e05246895ca2aaf0c9a",
+    "codex_version": "codex-cli 0.151.0",
+    "ripgrep_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849",
+    "ripgrep_version": "ripgrep 15.2.0 (rev e89fff89ac)",
+    "runner_commit": "682bd5c55ff4ba6b4b131de7debef2af5e906321"
+  },
+  "manifest_sha256": "612e64f133ed338c30fff51d52f10823dc22ee3fa5905894a1d38b087fa5dae1",
+  "run_id": "live-semantic-s1-44e8c4027cac486e",
+  "schema_version": 1,
+  "study_kind": "adversarial_failure"
+}

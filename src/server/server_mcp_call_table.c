@@ -14,6 +14,9 @@
 #include "memory.h"
 #include "index.h"
 #include "code_span.h"
+#include "guardrails.h"
+#include "aimee_sha256.h"
+#include "util.h"
 #include "db1_client/db1.h"
 #include "kb_client.h"
 #include "config.h"
@@ -22,6 +25,7 @@
 #include "modules/git/mcp_git.h"
 #include "modules/git/git_verify.h"
 #include "modules/workspace/workspace_turn.h"
+#include <aimee/workspace/workspace.h>
 #include "notes.h"
 #include "agent_coord.h"
 #include "agent_tasks.h"
@@ -31,6 +35,7 @@
 #include "platform_path.h"
 #include "aimee_session_guidance.h" /* THE standing guidance; one definition, all surfaces */
 #include "lsp.h"
+#include "lsp_context.h"
 #include "server_mcp_learning.h"
 #include "server_mcp_process.h"
 #include "server_mcp_skill.h"
@@ -747,6 +752,179 @@ static cJSON *mcph_lsp_definition_or_references(struct mcp_call *c)
       }
    }
    return text_content(out);
+}
+
+static int lsp_context_read_file(const char *path, char **out, size_t *out_len)
+{
+   *out = NULL;
+   *out_len = 0;
+   FILE *fp = fopen(path, "rb");
+   if (!fp || fseek(fp, 0, SEEK_END) != 0)
+   {
+      if (fp)
+         fclose(fp);
+      return -1;
+   }
+   long size = ftell(fp);
+   if (size < 0 || size > 4 * 1024 * 1024 || fseek(fp, 0, SEEK_SET) != 0)
+   {
+      fclose(fp);
+      return -1;
+   }
+   char *bytes = malloc((size_t)size + 1);
+   if (!bytes || fread(bytes, 1, (size_t)size, fp) != (size_t)size)
+   {
+      free(bytes);
+      fclose(fp);
+      return -1;
+   }
+   fclose(fp);
+   bytes[size] = '\0';
+   *out = bytes;
+   *out_len = (size_t)size;
+   return 0;
+}
+
+static int lsp_context_contained(const char *root, const char *path)
+{
+   size_t n = strlen(root);
+   return !strncmp(root, path, n) && (path[n] == '/' || path[n] == '\0');
+}
+
+static int lsp_context_active_root(const char *cwd, char *out, size_t out_cap, char *project,
+                                   size_t project_cap, char *worktree, size_t worktree_cap)
+{
+   char cwd_real[MAX_PATH_LEN];
+   if (!cwd || !realpath(cwd, cwd_real))
+      return -1;
+   size_t best = 0;
+   int best_index = -1;
+   for (int i = 0; i < config_workspace_count(); i++)
+   {
+      char candidate[MAX_PATH_LEN];
+      if (!realpath(config_workspaces(i), candidate) || !lsp_context_contained(candidate, cwd_real))
+         continue;
+      size_t len = strlen(candidate);
+      if (len > best)
+      {
+         best = len;
+         best_index = i;
+         snprintf(out, out_cap, "%s", candidate);
+      }
+   }
+   if (best_index < 0)
+      return -1;
+   const char *provider = config_workspace_providers(best_index);
+   if (provider && provider[0] && strcmp(provider, "shared"))
+      return 1;
+
+   char active[MAX_PATH_LEN], active_real[MAX_PATH_LEN];
+   if (workspace_active_root_from_cwd(cwd_real, active, sizeof(active)) != 0 ||
+       !realpath(active, active_real) || !lsp_context_contained(out, active_real))
+      return -1;
+   snprintf(out, out_cap, "%s", active_real);
+
+   char digest[65];
+   if (aimee_sha256_hex(active_real, strlen(active_real), digest) != 0)
+      return -1;
+   snprintf(worktree, worktree_cap, "local:%s", digest);
+   if (server_active_project_from_cwd(active_real, project, project_cap) != 0 || !project[0])
+      snprintf(project, project_cap, "%s", worktree);
+   return 0;
+}
+
+static int lsp_context_read(void *ctx, const char *path, char **out, size_t *out_len)
+{
+   (void)ctx;
+   return lsp_context_read_file(path, out, out_len);
+}
+
+static int lsp_context_authorize(void *ctx, const char *relative, char *resolved,
+                                 size_t resolved_cap)
+{
+   const char *root = ctx;
+   char joined[MAX_PATH_LEN];
+   if ((size_t)snprintf(joined, sizeof(joined), "%s/%s", root, relative) >= sizeof(joined))
+      return -1;
+   return guardrails_check_sensitive_path(joined, resolved, resolved_cap) ? -1 : 0;
+}
+
+static int lsp_context_sync(void *ctx, const char *workspace, const char *file, const char *text,
+                            int *version_out, unsigned long *generation_out, char *errbuf,
+                            size_t errbuf_size)
+{
+   (void)ctx;
+   return lsp_manager_sync_document(workspace, file, text, version_out, generation_out, errbuf,
+                                    errbuf_size);
+}
+
+static int lsp_context_query(void *ctx, const char *operation, const char *workspace,
+                             const char *file, int line, int column, lsp_location_t *out, int max,
+                             char *errbuf, size_t errbuf_size)
+{
+   (void)ctx;
+   if (!strcmp(operation, "definition"))
+      return lsp_manager_definition(workspace, file, line, column, out, max, errbuf, errbuf_size);
+   return lsp_manager_references(workspace, file, line, column, out, max, errbuf, errbuf_size);
+}
+
+static cJSON *lsp_context_source(void *ctx, const char *relative, int line_start, int line_end,
+                                 int max_lines)
+{
+   return code_span_read(NULL, ctx, relative, line_start, line_end, max_lines);
+}
+
+static cJSON *mcph_lsp_context(struct mcp_call *c)
+{
+#ifdef AIMEE_WINDOWS
+   cJSON *unsupported = cJSON_CreateObject();
+   cJSON_AddStringToObject(unsupported, "status", "unsupported");
+   cJSON_AddStringToObject(unsupported, "provider", "local_lsp");
+   cJSON_AddStringToObject(unsupported, "reason", "live LSP providers are unsupported on Windows");
+   if (c->structured)
+      *c->structured = cJSON_Duplicate(unsupported, 1);
+   return json_result_content(unsupported);
+#else
+   cJSON *cwd_arg = cJSON_GetObjectItemCaseSensitive(c->jargs, "cwd");
+   const char *cwd = cJSON_IsString(cwd_arg) && cwd_arg->valuestring[0] ? cwd_arg->valuestring
+                                                                        : run_cmd_get_cwd();
+   char fallback[MAX_PATH_LEN];
+   if (!cwd && (!c->conn || c->conn->capabilities == (uint32_t)CAPS_ALL) &&
+       getcwd(fallback, sizeof(fallback)))
+      cwd = fallback;
+   char root[MAX_PATH_LEN], project[MAX_PATH_LEN], worktree[72];
+   cJSON *response = cJSON_CreateObject();
+   cJSON_AddStringToObject(response, "provider", "local_lsp");
+   int root_state = lsp_context_active_root(cwd, root, sizeof(root), project, sizeof(project),
+                                            worktree, sizeof(worktree));
+   if (root_state != 0)
+   {
+      cJSON_AddStringToObject(response, "status", root_state > 0 ? "unsupported" : "unavailable");
+      cJSON_AddStringToObject(response, "reason",
+                              root_state > 0 ? "active worktree is not locally shared"
+                                             : "no verified active local worktree");
+      goto done;
+   }
+
+   lsp_context_provider_t provider = {.provider = "local_lsp",
+                                      .root = root,
+                                      .project = project,
+                                      .worktree = worktree,
+                                      .ctx = root,
+                                      .authorize = lsp_context_authorize,
+                                      .read_file = lsp_context_read,
+                                      .sync = lsp_context_sync,
+                                      .query = lsp_context_query,
+                                      .source = lsp_context_source};
+   cJSON_Delete(response);
+   response = lsp_context_execute(&provider, c->jargs);
+   goto done;
+
+done:
+   if (c->structured)
+      *c->structured = cJSON_Duplicate(response, 1);
+   return json_result_content(response);
+#endif
 }
 
 static cJSON *mcph_session_search(struct mcp_call *c)
@@ -2060,6 +2238,7 @@ static const struct
     {"lsp_diagnostics", mcph_lsp_diagnostics, NULL},
     {"lsp_definition", mcph_lsp_definition_or_references, NULL},
     {"lsp_references", mcph_lsp_definition_or_references, NULL},
+    {"lsp_context", mcph_lsp_context, "core,review_indexed"},
     {"session_context_search", mcph_session_context_search, NULL},
     {"session_context_expand", mcph_session_context_expand, NULL},
     {"session_context_status", mcph_session_context_status, NULL},

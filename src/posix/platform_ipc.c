@@ -13,6 +13,32 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+static int unix_stream_socket(void)
+{
+#ifdef SOCK_CLOEXEC
+   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+#else
+   int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+#endif
+   if (fd < 0)
+      return -1;
+#ifndef SOCK_CLOEXEC
+   int flags = fcntl(fd, F_GETFD, 0);
+   if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0)
+   {
+      close(fd);
+      return -1;
+   }
+#endif
+   return fd;
+}
+
+static int set_nonblocking(int fd)
+{
+   int flags = fcntl(fd, F_GETFL, 0);
+   return flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ? -1 : 0;
+}
+
 int platform_ipc_listen(const char *path, int backlog)
 {
    /* Ensure parent directory exists */
@@ -25,10 +51,14 @@ int platform_ipc_listen(const char *path, int backlog)
       mkdir(dir, 0700);
    }
 
-   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+   int fd = unix_stream_socket();
    if (fd < 0)
       return -1;
-   fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+   if (set_nonblocking(fd) != 0)
+   {
+      close(fd);
+      return -1;
+   }
 
    struct sockaddr_un addr;
    memset(&addr, 0, sizeof(addr));
@@ -58,7 +88,20 @@ int platform_ipc_listen(const char *path, int backlog)
 
 int platform_ipc_accept(int listen_fd)
 {
+#if defined(__linux__) && defined(SOCK_CLOEXEC) && defined(SOCK_NONBLOCK)
    int fd = accept4(listen_fd, NULL, NULL, SOCK_CLOEXEC | SOCK_NONBLOCK);
+#else
+   int fd = accept(listen_fd, NULL, NULL);
+   if (fd >= 0)
+   {
+      int flags = fcntl(fd, F_GETFD, 0);
+      if (flags < 0 || fcntl(fd, F_SETFD, flags | FD_CLOEXEC) < 0 || set_nonblocking(fd) != 0)
+      {
+         close(fd);
+         fd = -1;
+      }
+   }
+#endif
    if (fd < 0)
       return -1;
    return fd;
@@ -66,7 +109,7 @@ int platform_ipc_accept(int listen_fd)
 
 int platform_ipc_connect(const char *path, int timeout_ms)
 {
-   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+   int fd = unix_stream_socket();
    if (fd < 0)
       return -1;
 
@@ -118,10 +161,14 @@ connected:
 
 int platform_ipc_probe(const char *path)
 {
-   int fd = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+   int fd = unix_stream_socket();
    if (fd < 0)
       return -1;
-   fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+   if (set_nonblocking(fd) != 0)
+   {
+      close(fd);
+      return -1;
+   }
 
    struct sockaddr_un addr;
    memset(&addr, 0, sizeof(addr));
