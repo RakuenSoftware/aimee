@@ -852,8 +852,9 @@ jobs:
           npm install --prefix "${RUNNER_TEMP}/lsp-tools/npm" --no-audit --no-fund \
             pyright@1.1.413
       - name: Build the LSP probe and config fixture
-        run: make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-          build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+        run: |
+          make -C src -j"$(nproc)" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
+            build/obj/aimee-module-config build/obj/tests/unit-test-lsp
       - name: Assert the pinned S0 real-provider baseline
         run: |
           python3 benchmarks/live-semantic-context/run_s0_baseline.py \
