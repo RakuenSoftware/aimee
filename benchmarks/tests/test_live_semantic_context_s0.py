@@ -118,23 +118,23 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         self.assertRegex(model["linux_x86_64_executable_sha256"], r"^[0-9a-f]{64}$")
         self.assertEqual(
             self.contract["candidate_commit_pin"]["timing"],
-            "before the first candidate-arm cell, after candidate implementation",
+            "before the first epoch-2 promotion cell, after the retained calibration exposed and verified the cross-file defect",
         )
         self.assertEqual(
             self.contract["candidate_commit_pin"]["commit"],
-            "d2257cbf569dba65b20b943b44e1549832793f3c",
+            "795631825e13e070b2d5d3061a3248b493f2b75b",
         )
         self.assertEqual(
             self.contract["candidate_commit_pin"]["runtime_src_tree"],
-            "50ac137b5d93bf44ccc2ba774b251912da65ae1f",
+            "bd04b26c677a07f00fea043759a3a82f9625753d",
         )
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
         self.assertIn(
-            "--candidate-commit d2257cbf569dba65b20b943b44e1549832793f3c",
+            "--candidate-commit 795631825e13e070b2d5d3061a3248b493f2b75b",
             workflow,
         )
         self.assertIn(
-            "--candidate-src-tree 50ac137b5d93bf44ccc2ba774b251912da65ae1f",
+            "--candidate-src-tree bd04b26c677a07f00fea043759a3a82f9625753d",
             workflow,
         )
 

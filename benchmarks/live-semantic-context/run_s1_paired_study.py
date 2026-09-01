@@ -200,7 +200,7 @@ def parse_events(path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     return events, terminal[0]["usage"]
 
 
-def grade(task: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
+def grade(task: dict[str, Any], arm: str, answer: dict[str, Any]) -> dict[str, Any]:
     expected = {
         (item["file"], item["line"], item["symbol"])
         for item in (task.get("setup") or {}).get("post_edit_targets", task["oracle"]["targets"])
@@ -210,11 +210,30 @@ def grade(task: dict[str, Any], answer: dict[str, Any]) -> dict[str, Any]:
         for item in answer.get("targets", []) if isinstance(item, dict)
     }
     authority = answer.get("authority")
-    authority_ok = isinstance(authority, str) and "local_checkout" in authority and "." in authority
+    authority_ok = isinstance(authority, str) and "local_checkout" in authority
+    failure = task.get("failure_overlay") if arm != "production" else None
+    if failure:
+        expected_status = failure["expected_status"]
+        typed_failure_preserved = answer.get("answer_status") == expected_status and not observed
+        task_success = typed_failure_preserved and authority_ok
+        exact_target_correctness = None
+        expected_behavior = "typed_failure"
+    else:
+        expected_status = "ok"
+        typed_failure_preserved = None
+        task_success = answer.get("answer_status") == "ok" and observed == expected and authority_ok
+        exact_target_correctness = observed == expected
+        expected_behavior = "exact_targets"
     return {
-        "task_success": answer.get("answer_status") == "ok" and observed == expected and authority_ok,
-        "exact_target_correctness": observed == expected,
+        "task_success": task_success,
+        "expected_behavior": expected_behavior,
+        "expected_status": expected_status,
+        "typed_failure_preserved": typed_failure_preserved,
+        "exact_target_correctness": exact_target_correctness,
         "authority_cited": authority_ok,
+        "false_empty_count": int(answer.get("answer_status") == "empty"),
+        "stale_result_count": int(answer.get("answer_status") == "stale" and expected_status != "stale"),
+        "false_current_results": int(bool(failure) and answer.get("answer_status") == "ok"),
         "expected_targets": sorted(expected),
         "observed_targets": sorted(observed),
     }
@@ -284,7 +303,7 @@ def run_cell(task: dict[str, Any], arm: str, args: argparse.Namespace, bridge: P
             and decisive.get("timestamp_ms") == (item.get("result") or {}).get("observed_at_monotonic_ms")
             for item in calls
         )
-        cell_grade = grade(task, answer)
+        cell_grade = grade(task, arm, answer)
         cell_grade["task_success"] = cell_grade["task_success"] and cell_eligible
         return {
             "run_id": run_id, "task_id": task["id"], "family": task["family"], "arm": arm,

@@ -86,7 +86,7 @@
   },
   "instrumentation_pins": {
     "paired_runner": "run_s1_paired_study.py",
-    "paired_runner_sha256": "dbba65c7794b89dd5c898211e60e0daee88de4d3284eca3ad9ad93564f969390",
+    "paired_runner_sha256": "16f4718294e38f28932e8ef00fefbfd3b9d1d4b3b0377291f80b79ec7a1a954f",
     "mcp_server": "s1_mcp_server.py",
     "mcp_server_sha256": "8dfcdeb620901bea0e0742fd1a4f0656a06e930861f5b5df53458bdf1261e6be",
     "native_bridge": "s1_lsp_bridge.c",

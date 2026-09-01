@@ -107,6 +107,47 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             self.assertEqual(result["status"], "ok")
             self.assertEqual(result["locations"][0]["file"], "main.go")
 
+    def test_grade_accepts_checked_authority_without_punctuation(self) -> None:
+        runner = load_runner()
+        task = {
+            "oracle": {"targets": [{"file": "main.go", "line": 3, "symbol": "add"}]},
+        }
+        result = runner.grade(task, "batched_context", {
+            "answer_status": "ok",
+            "authority": "local_checkout (worktree local:x)",
+            "targets": [{"file": "main.go", "line": 3, "symbol": "add"}],
+        })
+        self.assertTrue(result["task_success"])
+        self.assertTrue(result["exact_target_correctness"])
+
+    def test_grade_requires_lsp_arms_to_preserve_injected_typed_failure(self) -> None:
+        runner = load_runner()
+        task = {
+            "oracle": {"targets": [{"file": "main.go", "line": 3, "symbol": "add"}]},
+            "failure_overlay": {"expected_status": "unavailable"},
+        }
+        result = runner.grade(task, "batched_context", {
+            "answer_status": "unavailable", "authority": "local_checkout:.", "targets": [],
+        })
+        self.assertTrue(result["task_success"])
+        self.assertTrue(result["typed_failure_preserved"])
+        self.assertIsNone(result["exact_target_correctness"])
+        self.assertEqual(result["false_current_results"], 0)
+
+        false_current = runner.grade(task, "location_only", {
+            "answer_status": "ok", "authority": "local_checkout:.",
+            "targets": [{"file": "main.go", "line": 3, "symbol": "add"}],
+        })
+        self.assertFalse(false_current["task_success"])
+        self.assertEqual(false_current["false_current_results"], 1)
+
+        production = runner.grade(task, "production", {
+            "answer_status": "ok", "authority": "local_checkout:.",
+            "targets": [{"file": "main.go", "line": 3, "symbol": "add"}],
+        })
+        self.assertTrue(production["task_success"])
+        self.assertEqual(production["expected_behavior"], "exact_targets")
+
 
 if __name__ == "__main__":
     unittest.main()
