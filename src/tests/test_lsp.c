@@ -934,6 +934,27 @@ static void test_context_envelope_and_failures(void)
    cJSON_Delete(result);
    cJSON_Delete(args);
 
+   char target_source[PATH_MAX];
+   snprintf(target_source, sizeof(target_source), "%s/target.c", root);
+   write_text_file(target_source, "int target(void) { return 1; }\n");
+   snprintf(fixture.location, sizeof(fixture.location), "%s", target_source);
+   fixture.read_count = fixture.sync_count = fixture.query_count = 0;
+   args = context_args("definition", "sample.c", 1, 0);
+   result = lsp_context_execute(&provider, args);
+   assert(strcmp(json_string(result, "status"), "ok") == 0);
+   first = cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(result, "results"), 0);
+   locations = cJSON_GetObjectItemCaseSensitive(first, "locations");
+   location = cJSON_GetArrayItem(locations, 0);
+   span = cJSON_GetObjectItemCaseSensitive(location, "source");
+   char *target_text = read_text_file(target_source);
+   char target_hash[65];
+   assert(target_text && aimee_sha256_hex(target_text, strlen(target_text), target_hash) == 0);
+   assert(strcmp(json_string(span, "source_version"), target_hash) == 0);
+   free(target_text);
+   cJSON_Delete(result);
+   cJSON_Delete(args);
+   snprintf(fixture.location, sizeof(fixture.location), "%s", source);
+
    args = context_args("definition", "../outside.c", 1, 0);
    result = lsp_context_execute(&provider, args);
    assert(strcmp(json_string(result, "status"), "unauthorized") == 0);

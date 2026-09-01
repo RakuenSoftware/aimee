@@ -212,6 +212,13 @@ cJSON *lsp_context_execute(const lsp_context_provider_t *provider, const cJSON *
          cJSON_AddNumberToObject(location, "column", locations[li].col + 1);
          if (source_budget > 0)
          {
+            char *target_before = NULL;
+            size_t target_before_len = 0;
+            char target_before_hash[65] = "";
+            if (provider->read_file(provider->ctx, target, &target_before, &target_before_len) != 0 ||
+                aimee_sha256_hex(target_before, target_before_len, target_before_hash) != 0)
+               source_failed = 1;
+            free(target_before);
             int start = locations[li].line > 4 ? locations[li].line - 3 : 1;
             cJSON *span =
                 provider->source(provider->ctx, relative, start, locations[li].line + 5, 9);
@@ -220,11 +227,21 @@ cJSON *lsp_context_execute(const lsp_context_provider_t *provider, const cJSON *
                 span ? cJSON_GetObjectItemCaseSensitive(span, "source_version") : NULL;
             if (!cJSON_IsString(content))
                source_failed = 1;
-            else if (!cJSON_IsString(source_version) ||
-                     strcmp(source_version->valuestring, before_hash))
+            else if (!source_failed &&
+                     (!cJSON_IsString(source_version) ||
+                      strcmp(source_version->valuestring, target_before_hash)))
                source_stale = 1;
-            else
+            else if (!source_failed)
             {
+               char *target_after = NULL;
+               size_t target_after_len = 0;
+               char target_after_hash[65] = "";
+               if (provider->read_file(provider->ctx, target, &target_after, &target_after_len) != 0 ||
+                   aimee_sha256_hex(target_after, target_after_len, target_after_hash) != 0)
+                  source_failed = 1;
+               else if (strcmp(target_before_hash, target_after_hash))
+                  source_stale = 1;
+               free(target_after);
                size_t bytes = strlen(content->valuestring);
                if ((int)bytes > source_budget)
                {
