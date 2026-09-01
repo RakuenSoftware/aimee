@@ -186,8 +186,7 @@ static int real_provider_probe_main(int argc, char **argv)
    free(old_no_cache_copy);
    platform_test_rmrf(tmp_home);
 
-   return cold_diag_count == 0 && cold_active == 0 && definition_matched &&
-                  ref_count >= min_refs
+   return cold_diag_count == 0 && cold_active == 0 && definition_matched && ref_count >= min_refs
               ? 0
               : 1;
 }
