@@ -71,6 +71,42 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             records = [json.loads(line) for line in log_path.read_text().splitlines()]
             self.assertEqual([record["tool"] for record in records], ["file_read"])
 
+    def test_location_surface_translates_checked_absolute_paths(self) -> None:
+        workspace = (BASE / "fixtures" / "go").resolve()
+        with tempfile.TemporaryDirectory(prefix="aimee-s1-location-test-") as temporary:
+            temporary_path = Path(temporary)
+            bridge = temporary_path / "bridge.py"
+            bridge.write_text(
+                "#!/usr/bin/env python3\n"
+                "import json,sys\n"
+                "for line in sys.stdin:\n"
+                " request=json.loads(line)\n"
+                " anchor=request['anchors'][0]\n"
+                " print(json.dumps({'status':'ok','locations':[anchor]}), flush=True)\n"
+            )
+            bridge.chmod(0o700)
+            log_path = temporary_path / "tools.jsonl"
+            env = {
+                **os.environ,
+                "S1_WORKSPACE": str(workspace), "S1_ARM": "location_only",
+                "S1_TOOL_LOG": str(log_path), "S1_BRIDGE": str(bridge),
+                "S1_PROVIDER_COMMAND": "/bin/true", "S1_PROVIDER_ARG": "-",
+                "S1_PROVIDER_EXTENSION": ".go",
+            }
+            request = {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+                "name": "lsp_definition", "arguments": {
+                    "workspace": str(workspace), "file": str(workspace / "main.go"),
+                    "line": 8, "column": 9,
+                },
+            }}
+            completed = subprocess.run(
+                ["python3", str(BASE / "s1_mcp_server.py")], input=json.dumps(request) + "\n",
+                env=env, text=True, capture_output=True, timeout=10, check=True,
+            )
+            result = json.loads(completed.stdout)["result"]["structuredContent"]
+            self.assertEqual(result["status"], "ok")
+            self.assertEqual(result["locations"][0]["file"], "main.go")
+
 
 if __name__ == "__main__":
     unittest.main()

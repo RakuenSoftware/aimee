@@ -88,7 +88,7 @@
     "paired_runner": "run_s1_paired_study.py",
     "paired_runner_sha256": "dbba65c7794b89dd5c898211e60e0daee88de4d3284eca3ad9ad93564f969390",
     "mcp_server": "s1_mcp_server.py",
-    "mcp_server_sha256": "ffc6c6b899a71b72d568b64640ea4d4ee0ff1cf3d91e7c954e9b09b290e768b8",
+    "mcp_server_sha256": "8dfcdeb620901bea0e0742fd1a4f0656a06e930861f5b5df53458bdf1261e6be",
     "native_bridge": "s1_lsp_bridge.c",
     "native_bridge_sha256": "ea0993f2f4c70e37cda49a8b452c1d81b27769343fe46524392110a58664caf3",
     "result_schema": "schemas/s1-result-v1.json",

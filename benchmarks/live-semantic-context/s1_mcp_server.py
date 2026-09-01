@@ -212,8 +212,16 @@ def lsp_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
             "anchors": arguments.get("anchors"),
             "max_source_bytes": arguments.get("max_source_bytes", 8192),
         })
+    try:
+        requested_workspace = Path(str(arguments.get("workspace", ""))).resolve(strict=True)
+        requested_file = Path(str(arguments.get("file", ""))).resolve(strict=True)
+        if requested_workspace != WORKSPACE or not contained(requested_file):
+            raise ValueError("shipping LSP paths do not name the checked worktree")
+        relative_file = str(requested_file.relative_to(WORKSPACE))
+    except (OSError, ValueError) as error:
+        return {"status": "unauthorized", "reason": str(error)}
     anchor = {
-        "file": arguments.get("file"),
+        "file": relative_file,
         "line": arguments.get("line"),
         "column": arguments.get("column"),
     }
