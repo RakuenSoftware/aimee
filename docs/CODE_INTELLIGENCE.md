@@ -66,6 +66,52 @@ Text and vector matches find names and concepts. The call/import/dependency grap
 neighbors. Memory links add prior decisions and known constraints. Fusion keeps the evidence for each
 signal so a client can explain the result.
 
+## Live language-server commands
+
+The durable index and the live LSP path answer different questions. Use the index to discover a
+concept, history, or cross-repository relationship. Use LSP only when you already have an exact
+file position and need the configured language server's definition or references.
+
+Configure an operator-installed server in `aimee.yaml` on the host that runs the command:
+
+```yaml
+lsp_servers:
+  - name: gopls
+    command: /usr/local/bin/gopls
+    extensions: [.go]
+```
+
+The current CLI accepts 1-based line and column positions:
+
+```bash
+aimee index lsp-def /absolute/worktree/main.go 8 9 --workspace /absolute/worktree
+aimee index lsp-refs /absolute/worktree/main.go 8 9 --workspace /absolute/worktree
+aimee index lsp-diag /absolute/worktree/main.go --workspace /absolute/worktree
+```
+
+`index lsp-rename` is an existing mutating expert command and is not exposed through the grouped
+agent tool. Inspect its result and the worktree diff before retaining a change. MCP compatibility
+calls use the grouped `lsp` commands `diagnostics`, `definition`, and `references`; their positions
+are 0-based.
+
+This is currently a prototype path with important limits:
+
+- the caller supplies absolute workspace and file paths, so the process assumes those paths belong
+  to the intended local or bind-mounted worktree;
+- detached thin-client worktrees are not routed to the client that owns their files;
+- the manager does not send document open, change, or close notifications and returns no content
+  hash or document version, so freshness after a write is unproved;
+- diagnostics reads stored notifications only and does not start a provider, so zero diagnostics
+  with zero active servers is not proof of a clean worktree;
+- failures are text shaped, and a crash and timeout can both appear as a request timeout;
+- definitions encoded as LSP `LocationLink` are not parsed by the current client; and
+- live providers are unsupported on Windows. Definition and reference calls say so, while the
+  diagnostic call currently returns an indistinguishable empty result.
+
+The S0 real-provider baseline under `benchmarks/live-semantic-context` pins and checks these facts
+in pull requests. Do not describe this path as synchronized, sandboxed, detached-worktree safe, or
+generally ready until the corresponding contract is promoted.
+
 ## Task-conditioned context
 
 `GET /v1/code/context` is the strict, bounded ingress contract over the hybrid ranker. It requires

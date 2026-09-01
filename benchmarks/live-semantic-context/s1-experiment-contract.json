@@ -1,0 +1,106 @@
+{
+  "schema_version": 1,
+  "state": "preregistered-design-incomplete",
+  "candidate_implementation_allowed": false,
+  "reason": "The comparison and thresholds are frozen, but the checked 45-task manifest, macOS baseline, and provider-backed model endpoint pin are not complete.",
+  "arms": [
+    {
+      "id": "production",
+      "code_context_mode": "on",
+      "lsp_surface": "none"
+    },
+    {
+      "id": "location_only",
+      "code_context_mode": "on",
+      "lsp_surface": "shipping_definition_and_references"
+    },
+    {
+      "id": "batched_context",
+      "code_context_mode": "on",
+      "lsp_surface": "candidate_definition_and_references_with_bounded_source"
+    }
+  ],
+  "identical_non_lsp_tools": [
+    "local_text_search",
+    "local_structure_search",
+    "file_read",
+    "code_span_get",
+    "file_edit",
+    "test_execution"
+  ],
+  "task_contract": {
+    "semantic_eligible_minimum": 30,
+    "control_minimum": 15,
+    "required_families": [
+      "semantic_disambiguation",
+      "reference_backed_change",
+      "fresh_saved_edit",
+      "batched_anchors",
+      "control_literal_or_short_file",
+      "failure_injection"
+    ],
+    "required_before_candidate_code": [
+      "immutable repository commit per task",
+      "checked expected target or diff",
+      "declared filesystem authority",
+      "semantic eligibility label",
+      "provider and language",
+      "identical task prompt across arms"
+    ]
+  },
+  "provider_pins": [
+    {
+      "name": "gopls",
+      "version": "v0.20.0"
+    },
+    {
+      "name": "pyright",
+      "version": "1.1.413"
+    }
+  ],
+  "run_order": {
+    "method": "per-task deterministic permutation",
+    "seed": 41904,
+    "repetitions": 1,
+    "reruns": "infrastructure failures only, with the original cell retained"
+  },
+  "required_metrics": [
+    "task_success",
+    "exact_target_correctness",
+    "reference_recall",
+    "reference_false_positive_rate",
+    "false_empty_count",
+    "stale_result_count",
+    "input_output_schema_and_preparation_bytes",
+    "agent_turns",
+    "tool_calls",
+    "cold_and_warm_latency",
+    "provider_process_count",
+    "provider_peak_rss",
+    "provider_setup_success",
+    "candidate_used_before_decisive_edit",
+    "authority_cited"
+  ],
+  "promotion": {
+    "authority_isolation_failures": 0,
+    "false_current_results": 0,
+    "false_ok_empty_failures": 0,
+    "exact_definition_fixture_pass_rate": 1.0,
+    "clean_cold_starts_per_claimed_platform": 20,
+    "cold_start_success_rate_minimum": 0.95,
+    "semantic_task_adoption_minimum": 0.8,
+    "material_value": {
+      "choice_a": "task success improves by at least 0.05 absolute with paired 95% CI excluding zero",
+      "choice_b": "task success holds, median turns fall at least 0.20, and median wall time falls at least 0.10, each with paired intervals excluding zero"
+    },
+    "control": "no success loss, no more than one median tool call, and no more than 0.05 median wall-time increase",
+    "platform": "Linux and macOS execute; Windows and detached worktrees advertise unsupported before invocation"
+  },
+  "unresolved_pins": [
+    "45-task checked manifest and its content hash",
+    "model identifier and immutable provider endpoint/version",
+    "agent system prompt and tool-schema content hashes",
+    "Aimee candidate commit",
+    "macOS provider observation"
+  ]
+}

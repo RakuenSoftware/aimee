@@ -9,7 +9,9 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <time.h>
 #include <unistd.h>
+#include "cJSON.h"
 #include "lsp.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -41,6 +43,153 @@ static void restore_env_var(const char *name, const char *old_value)
       assert(platform_setenv(name, old_value) == 0);
    else
       assert(platform_unsetenv(name) == 0);
+}
+
+static long long monotonic_milliseconds(void)
+{
+   struct timespec now;
+   assert(clock_gettime(CLOCK_MONOTONIC, &now) == 0);
+   return (long long)now.tv_sec * 1000LL + now.tv_nsec / 1000000LL;
+}
+
+static int real_provider_probe_main(int argc, char **argv)
+{
+   if (argc != 11)
+   {
+      fprintf(stderr,
+              "usage: %s --real-provider <command> <arg-or-dash> <workspace> <file> "
+              "<line> <col> <expected-file> <expected-line> <min-refs>\n",
+              argv[0]);
+      return 2;
+   }
+
+   const char *command = argv[2];
+   const char *server_arg = strcmp(argv[3], "-") == 0 ? NULL : argv[3];
+   const char *workspace = argv[4];
+   const char *file = argv[5];
+   int line = atoi(argv[6]) - 1;
+   int col = atoi(argv[7]) - 1;
+   const char *expected_file = argv[8];
+   int expected_line = atoi(argv[9]) - 1;
+   int min_refs = atoi(argv[10]);
+   const char *ext = strrchr(file, '.');
+   if (!command[0] || !workspace[0] || !file[0] || !expected_file[0] || !ext || line < 0 ||
+       col < 0 || expected_line < 0 || min_refs < 0)
+   {
+      fprintf(stderr, "real-provider probe received an invalid argument\n");
+      return 2;
+   }
+
+   char tmp_home[512];
+   snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-lsp-real-home-XXXXXX", platform_tmpdir());
+   if (!platform_mkdtemp(tmp_home))
+      return 2;
+
+   char appdir[PATH_MAX];
+   char cfgpath[PATH_MAX];
+   snprintf(appdir, sizeof(appdir), "%s/.config/aimee", tmp_home);
+   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", appdir);
+   if (platform_mkdir_p(appdir, 0700) != 0)
+   {
+      platform_test_rmrf(tmp_home);
+      return 2;
+   }
+
+   char cfg[4096];
+   if (server_arg)
+      snprintf(cfg, sizeof(cfg),
+               "lsp_servers:\n"
+               "  - name: real-provider-probe\n"
+               "    command: %s\n"
+               "    args:\n"
+               "      - %s\n"
+               "    extensions:\n"
+               "      - %s\n",
+               command, server_arg, ext);
+   else
+      snprintf(cfg, sizeof(cfg),
+               "lsp_servers:\n"
+               "  - name: real-provider-probe\n"
+               "    command: %s\n"
+               "    extensions:\n"
+               "      - %s\n",
+               command, ext);
+   write_text_file(cfgpath, cfg);
+
+   const char *old_home = getenv("HOME");
+   char *old_home_copy = old_home ? strdup(old_home) : NULL;
+   const char *old_aimee_home = getenv("AIMEE_HOME");
+   char *old_aimee_home_copy = old_aimee_home ? strdup(old_aimee_home) : NULL;
+   const char *old_aimee_profile = getenv("AIMEE_PROFILE");
+   char *old_aimee_profile_copy = old_aimee_profile ? strdup(old_aimee_profile) : NULL;
+   const char *old_no_cache = getenv("AIMEE_NO_CACHE");
+   char *old_no_cache_copy = old_no_cache ? strdup(old_no_cache) : NULL;
+
+   assert(platform_setenv("HOME", tmp_home) == 0);
+   assert(platform_unsetenv("AIMEE_HOME") == 0);
+   assert(platform_unsetenv("AIMEE_PROFILE") == 0);
+   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
+
+   lsp_manager_init();
+   lsp_diag_t cold_diags[4];
+   int cold_diag_count = lsp_manager_diagnostics(workspace, file, cold_diags, 4);
+   int cold_errors = 0, cold_warnings = 0, cold_active = 0;
+   lsp_manager_diag_summary(&cold_errors, &cold_warnings, &cold_active);
+
+   long long definition_started_ms = monotonic_milliseconds();
+   lsp_location_t defs[32];
+   char def_err[256] = "";
+   int def_count =
+       lsp_manager_definition(workspace, file, line, col, defs, 32, def_err, sizeof(def_err));
+   long long cold_definition_ms = monotonic_milliseconds() - definition_started_ms;
+   int definition_matched = 0;
+   for (int i = 0; i < def_count; i++)
+      if (strcmp(defs[i].file, expected_file) == 0 && defs[i].line == expected_line)
+         definition_matched = 1;
+
+   lsp_location_t refs[64];
+   char refs_err[256] = "";
+   long long references_started_ms = monotonic_milliseconds();
+   int ref_count =
+       lsp_manager_references(workspace, file, line, col, refs, 64, refs_err, sizeof(refs_err));
+   long long warm_references_ms = monotonic_milliseconds() - references_started_ms;
+   int active_after_query = 0;
+   lsp_manager_diag_summary(NULL, NULL, &active_after_query);
+
+   cJSON *result = cJSON_CreateObject();
+   assert(result != NULL);
+   cJSON_AddNumberToObject(result, "cold_diagnostics", cold_diag_count);
+   cJSON_AddNumberToObject(result, "cold_active_servers", cold_active);
+   cJSON_AddNumberToObject(result, "definition_count", def_count);
+   cJSON_AddBoolToObject(result, "definition_matched", definition_matched);
+   cJSON_AddNumberToObject(result, "reference_count", ref_count);
+   cJSON_AddNumberToObject(result, "cold_definition_ms", (double)cold_definition_ms);
+   cJSON_AddNumberToObject(result, "warm_references_ms", (double)warm_references_ms);
+   cJSON_AddNumberToObject(result, "active_servers_after_query", active_after_query);
+   cJSON_AddStringToObject(result, "definition_error", def_err);
+   cJSON_AddStringToObject(result, "references_error", refs_err);
+   char *rendered = cJSON_PrintUnformatted(result);
+   assert(rendered != NULL);
+   printf("%s\n", rendered);
+   fflush(stdout);
+   free(rendered);
+   cJSON_Delete(result);
+
+   lsp_manager_shutdown_all();
+   restore_env_var("HOME", old_home_copy);
+   restore_env_var("AIMEE_HOME", old_aimee_home_copy);
+   restore_env_var("AIMEE_PROFILE", old_aimee_profile_copy);
+   restore_env_var("AIMEE_NO_CACHE", old_no_cache_copy);
+   free(old_home_copy);
+   free(old_aimee_home_copy);
+   free(old_aimee_profile_copy);
+   free(old_no_cache_copy);
+   platform_test_rmrf(tmp_home);
+
+   return cold_diag_count == 0 && cold_active == 0 && definition_matched &&
+                  ref_count >= min_refs
+              ? 0
+              : 1;
 }
 
 static int fake_lsp_main(void)
@@ -554,6 +703,8 @@ int main(int argc, char **argv)
 {
    if (argc > 1 && strcmp(argv[1], "--fake-lsp") == 0)
       return fake_lsp_main();
+   if (argc > 1 && strcmp(argv[1], "--real-provider") == 0)
+      return real_provider_probe_main(argc, argv);
 
    test_severity_label();
 
