@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "state": "preregistered-ready",
+  "state": "candidate-pinned",
   "candidate_implementation_allowed": true,
-  "reason": "The comparison and all pre-implementation S0 gates are frozen and complete. Candidate implementation may begin, but no candidate-arm cell may run until its implementation commit is pinned.",
+  "reason": "The comparison and S0 gates were frozen before implementation. The completed S1 candidate is now pinned, so candidate correctness probes and paired cells may run only against that exact commit.",
   "s0_gate_evidence": {
     "pull_request": 2950,
     "head_commit": "a415b76208245612fbfe58b5d695285b3e2b5ee3",
@@ -35,6 +35,9 @@
     "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
   },
   "candidate_commit_pin": {
+    "commit": "22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
+    "subject": "feat: add batched live semantic context spike",
+    "pinned_at": "2026-09-01T16:06:00Z",
     "timing": "before the first candidate-arm cell, after candidate implementation",
     "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
   },

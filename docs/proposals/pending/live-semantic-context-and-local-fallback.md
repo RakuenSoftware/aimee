@@ -1,9 +1,9 @@
 # Proposal: Live semantic context at the filesystem-authority boundary
 
 - **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
-  real-provider PR gate passed on PR #2950, so S1 candidate implementation is authorized. Running
-  candidate cells still requires pinning the completed implementation commit. Later slices require
-  a measured promotion decision.
+  real-provider PR gate passed on PR #2950. The S1 candidate implementation is complete and pinned
+  at `22fe08cb13ed3e8a11511d1fccf7d98c0febdb03`; correctness probes and paired cells must use that
+  exact implementation. Later slices require a measured promotion decision.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01
 - **Charter roles:** Recall, Enforce, Execute, Evaluate-Optimize, Gate-Promote
@@ -743,6 +743,12 @@ prompt, tool-schema, provider, and schedule inputs are content-pinned. The macOS
 recorded by immutable workflow, job, artifact, and digest in the checked S1 contract, so candidate
 implementation is now authorized. See
 [`live-semantic-context-s0`](../../validation/live-semantic-context-s0.md).
+
+The S1 local candidate is implemented and commit-pinned. Its checked core exercises batched typed
+envelopes, source budgets, exact hashes, provider/document generations, stale-file detection,
+binary refusal, and both input and returned-path containment. The protected Linux/macOS provider
+job first reproduces the frozen S0 observation and then exercises synchronized gopls and Pyright
+definition/reference answers as a separate retained candidate artifact.
 
 S1 is the only authorized behavioral candidate after those S0 prerequisites are complete.
 S2-S4 are contingent options, not committed scope. A negative S1 result is a successful experiment

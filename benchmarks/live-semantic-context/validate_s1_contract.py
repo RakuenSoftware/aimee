@@ -58,6 +58,11 @@ def validate() -> dict[str, str]:
     manifest = json.loads(MANIFEST.read_text())
     contract = json.loads(CONTRACT.read_text())
     tools = json.loads(TOOLS.read_text())
+    if contract.get("state") == "candidate-pinned":
+        candidate = (contract.get("candidate_commit_pin") or {}).get("commit")
+        if not isinstance(candidate, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate):
+            raise ValueError("candidate implementation commit is not fully pinned")
+        subprocess.run(["git", "cat-file", "-e", f"{candidate}^{{commit}}"], cwd=ROOT, check=True)
     tasks = manifest.get("tasks")
     if not isinstance(tasks, list) or len(tasks) != 45:
         raise ValueError("manifest must contain exactly 45 tasks")

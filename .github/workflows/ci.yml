@@ -896,6 +896,7 @@ jobs:
             --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
             --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --candidate-commit 22fe08cb13ed3e8a11511d1fccf7d98c0febdb03 \
             --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
             --assert-candidate
       - name: Retain the provider observation

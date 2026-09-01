@@ -63,7 +63,7 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         self.assertTrue(all(self.observation["known_red_baseline"].values()))
 
     def test_s1_comparison_is_fully_pinned_before_candidate_code(self) -> None:
-        self.assertEqual(self.contract["state"], "preregistered-ready")
+        self.assertEqual(self.contract["state"], "candidate-pinned")
         self.assertTrue(self.contract["candidate_implementation_allowed"])
         self.assertEqual(
             [arm["id"] for arm in self.contract["arms"]],
@@ -119,6 +119,15 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         self.assertEqual(
             self.contract["candidate_commit_pin"]["timing"],
             "before the first candidate-arm cell, after candidate implementation",
+        )
+        self.assertEqual(
+            self.contract["candidate_commit_pin"]["commit"],
+            "22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
+        )
+        workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
+        self.assertIn(
+            "--candidate-commit 22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
+            workflow,
         )
 
     def test_real_provider_job_blocks_the_protected_unit_aggregate(self) -> None:

@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import re
 import subprocess
 import sys
 
@@ -21,6 +22,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--gopls", type=Path, required=True)
     parser.add_argument("--pyright-langserver", type=Path, required=True)
     parser.add_argument("--pyright", type=Path, required=True)
+    parser.add_argument("--candidate-commit", required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument("--assert-candidate", action="store_true")
     return parser.parse_args()
@@ -28,6 +30,8 @@ def parse_args() -> argparse.Namespace:
 
 def candidate_errors(report: dict) -> list[str]:
     errors: list[str] = []
+    if not report["runtime_tree_matches_candidate"]:
+        errors.append("runtime source tree does not match the pinned candidate commit")
     for provider in report["providers"]:
         name = provider["name"]
         if not provider["available"]:
@@ -58,6 +62,27 @@ def candidate_errors(report: dict) -> list[str]:
 
 def main() -> int:
     args = parse_args()
+    if not re.fullmatch(r"[0-9a-f]{40}", args.candidate_commit):
+        raise SystemExit("--candidate-commit must be a full lowercase commit SHA")
+    subprocess.run(
+        ["git", "cat-file", "-e", f"{args.candidate_commit}^{{commit}}"], cwd=ROOT, check=True
+    )
+    subprocess.run(
+        ["git", "merge-base", "--is-ancestor", args.candidate_commit, "HEAD"],
+        cwd=ROOT,
+        check=True,
+    )
+    runtime_diff = subprocess.run(
+        ["git", "diff", "--quiet", args.candidate_commit, "--", "src"], cwd=ROOT
+    )
+    untracked_runtime = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard", "--", "src"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout.strip()
+    runtime_tree_matches_candidate = runtime_diff.returncode == 0 and not untracked_runtime
     env = os.environ.copy()
     common = {
         "lsp_test": args.lsp_test.resolve(),
@@ -67,6 +92,8 @@ def main() -> int:
     report = {
         "schema_version": 1,
         "purpose": "S1 candidate saved-file synchronization correctness probe",
+        "candidate_commit": args.candidate_commit,
+        "runtime_tree_matches_candidate": runtime_tree_matches_candidate,
         "source_commit": subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True, capture_output=True, check=True
         ).stdout.strip(),

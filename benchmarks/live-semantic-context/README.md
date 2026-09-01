@@ -66,3 +66,13 @@ promotion evidence, not prerequisites for freezing the comparison.
 The TypeScript language server was also tried during S0. It did not complete the current client's
 request sequence within a bounded 25-second probe. It is excluded from the deterministic two-server
 gate and retained as compatibility evidence, not reported as ready.
+
+## S1 candidate pin
+
+The completed local candidate is immutable at
+`22fe08cb13ed3e8a11511d1fccf7d98c0febdb03`. It adds the grouped batched context operation, exact
+saved-file `didOpen`/`didChange` synchronization, provider and document generations, whole-file
+freshness hashes, workspace-relative containment, typed failures, and bounded source. The unit
+contract directly exercises batching, truncation, stale source, unavailable providers, binary
+input, and input/returned-path escapes. The required Linux/macOS job retains a separate S1
+real-provider artifact after first reproducing the unchanged S0 baseline.
