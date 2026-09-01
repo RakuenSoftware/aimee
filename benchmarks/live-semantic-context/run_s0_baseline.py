@@ -161,8 +161,12 @@ def provider_record(
         record["classification"] = "timeout"
     elif probe.get("definition_matched") and probe.get("reference_count", 0) >= min_references:
         record["classification"] = "ready"
-    elif probe.get("definition_count") == 0 and probe.get("reference_count", 0) >= min_references:
-        record["classification"] = "location_link_unsupported"
+    elif (
+        name == "pyright"
+        and probe.get("definition_count") == 0
+        and probe.get("reference_count") in (0, min_references)
+    ):
+        record["classification"] = "location_link_unsupported_unsynchronized"
     else:
         record["classification"] = "semantic_probe_failed"
     return record
@@ -183,16 +187,20 @@ def baseline_matches(report: dict) -> tuple[bool, list[str]]:
             errors.append(f"{name}: cold false-empty baseline changed")
         if probe.get("active_servers_after_query") != 1:
             errors.append(f"{name}: did not retain exactly one active provider")
-        if probe.get("reference_count", 0) < 3:
-            errors.append(f"{name}: references were incomplete")
         if not isinstance(probe.get("cold_definition_ms"), (int, float)):
             errors.append(f"{name}: cold definition latency was not recorded")
         if not isinstance(probe.get("warm_references_ms"), (int, float)):
             errors.append(f"{name}: warm reference latency was not recorded")
     if providers["gopls"].get("classification") != "ready":
         errors.append("gopls: definition/reference baseline is not ready")
-    if providers["pyright"].get("classification") != "location_link_unsupported":
-        errors.append("pyright: expected current LocationLink parsing gap was not reproduced")
+    gopls_probe = providers["gopls"].get("observation", {}).get("probe") or {}
+    if gopls_probe.get("reference_count", 0) < 3:
+        errors.append("gopls: references were incomplete")
+    pyright_probe = providers["pyright"].get("observation", {}).get("probe") or {}
+    if pyright_probe.get("reference_count") not in (0, 3):
+        errors.append("pyright: reference result was outside the observed unsynchronized states")
+    if providers["pyright"].get("classification") != "location_link_unsupported_unsynchronized":
+        errors.append("pyright: expected LocationLink and synchronization gaps were not reproduced")
     return not errors, errors
 
 

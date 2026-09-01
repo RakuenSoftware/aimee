@@ -29,6 +29,13 @@ by its caller. Source inspection preserves the other red conditions: no saved-do
 hash, no detached-worktree routing, text-shaped timeout/crash failures, and unsupported Windows
 execution.
 
+The first two PR runs added a second Pyright observation: the same pinned provider and fixture
+returned either all three references or zero references depending on whether its background
+analysis completed before the request. Definition remained empty in both runs because the client
+does not parse `LocationLink`. The PR contract accepts only those two known reference states and
+keeps the combined result classified as unsynchronized and unsupported. It does not retry until a
+preferred answer appears.
+
 The TypeScript language server 4.3.4 with TypeScript 5.9.3 was tried as an additional provider. It
 did not finish the current client's request sequence within a bounded 25-second run. It is retained
 as a compatibility observation and is not called ready or used to make the deterministic CI check

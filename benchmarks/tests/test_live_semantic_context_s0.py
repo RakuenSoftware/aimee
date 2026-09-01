@@ -33,16 +33,21 @@ class LiveSemanticContextS0Test(unittest.TestCase):
                 providers[name]["fixture_sha256"], tree_hash(BASE / "fixtures" / fixture)
             )
             self.assertRegex(providers[name]["binary_sha256"], r"^[0-9a-f]{64}$")
-            self.assertGreaterEqual(providers[name]["reference_count"], 3)
             self.assertGreater(providers[name]["peak_process_tree_count"], 1)
             self.assertGreater(providers[name]["peak_process_tree_rss_kib"], 0)
+        self.assertGreaterEqual(providers["gopls"]["reference_count"], 3)
+        self.assertIn(providers["pyright"]["reference_count"], (0, 3))
 
     def test_red_baseline_cannot_be_relabelled_ready(self) -> None:
         providers = {item["name"]: item for item in self.observation["providers"]}
         self.assertEqual(providers["gopls"]["classification"], "ready")
         self.assertEqual(providers["gopls"]["cold_diagnostics"], 0)
         self.assertEqual(providers["gopls"]["cold_active_servers"], 0)
-        self.assertEqual(providers["pyright"]["classification"], "location_link_unsupported")
+        self.assertEqual(
+            providers["pyright"]["classification"],
+            "location_link_unsupported_unsynchronized",
+        )
+        self.assertEqual(providers["pyright"]["expected_reference_counts_before_document_sync"], [0, 3])
         self.assertFalse(providers["pyright"]["definition_matched"])
         expected_gaps = {
             "cold_diagnostics_false_empty",

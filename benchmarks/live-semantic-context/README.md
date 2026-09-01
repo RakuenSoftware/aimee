@@ -6,8 +6,9 @@ manager without enabling the proposed `lsp context` behavior.
 The checked observation is intentionally red in several places. A green CI job means the recorded
 baseline was reproduced, not that the live LSP path is production-ready. In particular, cold
 diagnostics still report zero before a provider starts, Pyright definitions still expose the
-client's missing `LocationLink` support, and no response proves saved-file freshness or worktree
-authority.
+client's missing `LocationLink` support, and Pyright references can be either zero or the complete
+three-item set before background analysis finishes because Aimee has no document synchronization
+barrier. No response proves saved-file freshness or worktree authority.
 
 ## Reproduce
 
