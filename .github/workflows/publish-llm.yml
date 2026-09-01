@@ -53,6 +53,11 @@ on:
         description: 'Approved release version; promotes the pinned build to :<version> + :latest'
         required: true
         type: string
+      publish:
+        description: 'Promote the pinned manifests; false validates that the exact promotion sources exist'
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: publish-llm-${{ github.ref }}
@@ -161,7 +166,7 @@ jobs:
       # Registry-side promotion of the pinned build. This intentionally does not
       # pull or rebuild the multi-gigabyte synthesis images during a release.
       - name: Promote to :${{ inputs.version }} and :latest
-        if: ${{ inputs.version != '' }}
+        if: ${{ inputs.version != '' && inputs.publish }}
         run: |
           set -euo pipefail
           pinned='${{ steps.have.outputs.pinned }}'
@@ -174,6 +179,19 @@ jobs:
             --tag "${image}:${{ inputs.version }}" \
             --tag "${image}:latest" \
             "$pinned"
+
+      # A promotion PR must prove the immutable source manifest exists. The
+      # real release runs the adjacent promotion command against this exact
+      # value; validation suppresses only the registry tag mutation.
+      - name: Validate release promotion source
+        if: ${{ inputs.version != '' && !inputs.publish }}
+        run: |
+          pinned='${{ steps.have.outputs.pinned }}'
+          docker manifest inspect "$pinned" >/dev/null || {
+            echo "::error::$pinned is not published; release promotion would fail"
+            exit 1
+          }
+          echo "validated release source $pinned"
 
       - name: Report
         run: |

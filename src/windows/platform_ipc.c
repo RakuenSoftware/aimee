@@ -7,9 +7,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-static WCHAR *path_to_pipe_name(const char *path)
+static int pipe_name_a(const char *path, char *buf, size_t buf_sz)
 {
-   static WCHAR pipe_name[256];
+   if (!buf || buf_sz == 0)
+      return -1;
+
    char username[128] = "user";
    DWORD user_len = GetEnvironmentVariableA("USERNAME", username, sizeof(username));
    if (user_len == 0 || user_len >= sizeof(username))
@@ -35,21 +37,40 @@ static WCHAR *path_to_pipe_name(const char *path)
       sanitized[si++] = 'a';
    sanitized[si] = '\0';
 
-   swprintf(pipe_name, sizeof(pipe_name) / sizeof(pipe_name[0]), L"\\\\.\\pipe\\%S-%S", sanitized,
-            username);
-   return pipe_name;
-}
+   static const char prefix[] = "\\\\.\\pipe\\";
+   const size_t prefix_len = sizeof(prefix) - 1;
+   if (buf_sz <= prefix_len + 2)
+      return -1;
 
-static void pipe_name_a(const char *path, char *buf, size_t buf_sz)
-{
-   WCHAR *wname = path_to_pipe_name(path);
-   snprintf(buf, buf_sz, "\\\\.\\pipe\\%S", wname + 9);
+   /* Windows caps a named-pipe path at 256 characters. Preserve the complete
+    * username when possible and use the remaining payload for the sanitized
+    * endpoint name. Common names are unchanged; unusually long inputs are
+    * bounded before they reach CreateNamedPipeA rather than being truncated by
+    * a wide/narrow printf conversion. */
+   const size_t payload_len = buf_sz - prefix_len - 1;
+   size_t username_len = strlen(username);
+   if (username_len > payload_len - 2)
+      username_len = payload_len - 2;
+   size_t sanitized_len = strlen(sanitized);
+   if (sanitized_len > payload_len - username_len - 1)
+      sanitized_len = payload_len - username_len - 1;
+
+   char *dst = buf;
+   memcpy(dst, prefix, prefix_len);
+   dst += prefix_len;
+   memcpy(dst, sanitized, sanitized_len);
+   dst += sanitized_len;
+   *dst++ = '-';
+   memcpy(dst, username, username_len);
+   dst[username_len] = '\0';
+   return 0;
 }
 
 int platform_ipc_listen(const char *path, int backlog)
 {
    char pipe_name[256];
-   pipe_name_a(path, pipe_name, sizeof(pipe_name));
+   if (pipe_name_a(path, pipe_name, sizeof(pipe_name)) != 0)
+      return -1;
    DWORD instances = (backlog > 0) ? (DWORD)backlog : PIPE_UNLIMITED_INSTANCES;
    HANDLE h = CreateNamedPipeA(pipe_name, PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED,
                                PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, instances, 4096,
@@ -88,7 +109,8 @@ int platform_ipc_accept(int listen_fd)
 int platform_ipc_connect(const char *path, int timeout_ms)
 {
    char pipe_name[256];
-   pipe_name_a(path, pipe_name, sizeof(pipe_name));
+   if (pipe_name_a(path, pipe_name, sizeof(pipe_name)) != 0)
+      return -1;
    DWORD wait_ms = (timeout_ms <= 0) ? NMPWAIT_WAIT_FOREVER : (DWORD)timeout_ms;
 
    for (;;)
@@ -111,7 +133,8 @@ int platform_ipc_connect(const char *path, int timeout_ms)
 int platform_ipc_probe(const char *path)
 {
    char pipe_name[256];
-   pipe_name_a(path, pipe_name, sizeof(pipe_name));
+   if (pipe_name_a(path, pipe_name, sizeof(pipe_name)) != 0)
+      return -1;
    HANDLE h = CreateFileA(pipe_name, GENERIC_READ | GENERIC_WRITE, 0, NULL, OPEN_EXISTING,
                           FILE_ATTRIBUTE_NORMAL, NULL);
    if (h == INVALID_HANDLE_VALUE)
