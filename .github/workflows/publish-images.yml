@@ -23,10 +23,11 @@
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
 #
-# This workflow is deliberately reusable-only. The sole caller is
-# auto-release.yml, whose tag job is blocked by the protected `release`
-# environment. Do not add tag-push or workflow-dispatch triggers here: either
-# would create a second path to GHCR that bypasses the human release approval.
+# This workflow is deliberately reusable-only. auto-release.yml calls it with
+# publish=true after release approval; main-merge-approval.yml calls the same
+# per-image, per-architecture builds with publish=false before main approval. Do
+# not add tag-push or workflow-dispatch triggers here: either would create a
+# second path to GHCR that bypasses the human release approval.
 name: Publish images
 
 on:
@@ -36,6 +37,11 @@ on:
         description: 'Version without leading v (e.g. 0.2.1)'
         required: true
         type: string
+      publish:
+        description: 'Push digests/manifests and sign them; false performs the exact per-arch builds only'
+        required: false
+        type: boolean
+        default: true
 
 concurrency:
   group: publish-images-${{ github.ref }}-${{ inputs.version }}
@@ -106,7 +112,7 @@ jobs:
       - name: Normalize owner to lowercase
         run: echo "OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_ENV"
 
-      # Logging in on a pull request too, so the PR build can READ the prebuilt
+      # Logging in during validation too, so the PR build can READ the prebuilt
       # aimee-model-* layers instead of re-downloading gigabytes from Hugging
       # Face. Logging in is not pushing: `push=` on the build step below is what
       # decides that, and it stays false for a pull request. A fork's
@@ -114,7 +120,7 @@ jobs:
       # inline fetch if the read is not permitted.
       - name: Log in to ghcr.io
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9
-        continue-on-error: ${{ github.event_name == 'pull_request' }}
+        continue-on-error: ${{ !inputs.publish }}
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -151,19 +157,20 @@ jobs:
             AIMEE_VERSION=${{ needs.prep.outputs.version }}
             WITH_RUNTIME_WEB=1
             ${{ matrix.image.extra_args }}
-          # push=false on a pull_request: build only, publish nothing.
-          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=${{ github.event_name != 'pull_request' }}
+          # Promotion validation calls this same reusable workflow with
+          # publish=false: build the release image, publish nothing.
+          outputs: type=image,name=ghcr.io/${{ env.OWNER }}/${{ matrix.image.name }},push-by-digest=true,name-canonical=true,push=${{ inputs.publish }}
 
       # Digests only exist when something was pushed, so both steps and the whole
-      # merge job below are skipped on a pull request.
+      # merge job below are skipped in non-publishing validation.
       - name: Export digest
-        if: github.event_name != 'pull_request'
+        if: inputs.publish
         run: |
           mkdir -p /tmp/digests
           echo "${{ steps.build.outputs.digest }}" > "/tmp/digests/${{ matrix.image.name }}-${{ matrix.platform.arch }}"
 
       - name: Upload digest
-        if: github.event_name != 'pull_request'
+        if: inputs.publish
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: digest-${{ matrix.image.name }}-${{ matrix.platform.arch }}
@@ -174,8 +181,8 @@ jobs:
   # tag it (sha, semver/version, latest).
   merge:
     needs: [prep, build]
-    # Nothing to merge when nothing was pushed. A PR stops after the build.
-    if: github.event_name != 'pull_request'
+    # Nothing to merge when validation intentionally pushed no digests.
+    if: inputs.publish
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:

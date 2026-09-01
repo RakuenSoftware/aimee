@@ -59,6 +59,7 @@ require_job_permission() {
 auto_release="$repo_root/.github/workflows/auto-release.yml"
 main_approval="$repo_root/.github/workflows/main-merge-approval.yml"
 publish_images="$repo_root/.github/workflows/publish-images.yml"
+publish_llm="$repo_root/.github/workflows/publish-llm.yml"
 release_client="$repo_root/.github/workflows/release-thin-client.yml"
 
 require_reusable_only "$publish_images"
@@ -77,6 +78,14 @@ grep -Fq 'uses: ./.github/workflows/publish-images.yml' "$auto_release" ||
     fail "$auto_release must call the guarded image publisher"
 grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$auto_release" ||
     fail "$auto_release must call the guarded thin-client publisher"
+
+# Release and promotion validation must infer one version through one code path.
+# Copying the awk/tag logic back into either workflow recreates the exact drift
+# this gate exists to prevent.
+for workflow in "$auto_release" "$main_approval"; do
+    grep -Fq 'scripts/next-release-version.sh "$GITHUB_OUTPUT"' "$workflow" ||
+        fail "$workflow must use the shared next-release-version script"
+done
 
 # Both publishers create keyless signatures and request an OIDC token. GitHub
 # validates reusable-workflow permissions only when auto-release is triggered;
@@ -118,5 +127,36 @@ approval_job=$(awk '
 printf '%s\n' "$approval_job" |
     grep -Eq '^    environment:[[:space:]]+main-merge-approval[[:space:]]*$' ||
     fail "$main_approval must deploy through the protected main-merge-approval environment"
+
+# Main approval is the protected merge boundary. It must remain downstream of
+# the same reusable release workflows, all in non-publishing validation mode;
+# otherwise a green approval can race ahead of a build failure discovered only
+# after the merge to main.
+printf '%s\n' "$approval_job" |
+    grep -Fq 'needs: [thin-clients, llm-images, images]' ||
+    fail "$main_approval approval must wait for every release validation workflow"
+
+for release_job in thin-clients llm-images images; do
+    validation_block=$(job_block "$main_approval" "$release_job")
+    printf '%s\n' "$validation_block" | grep -Fq 'publish: false' ||
+        fail "$main_approval $release_job must validate without publishing"
+    publish_block=$(job_block "$auto_release" "$release_job")
+    printf '%s\n' "$publish_block" | grep -Fq 'publish: true' ||
+        fail "$auto_release $release_job must explicitly publish after approval"
+done
+
+grep -Fq 'uses: ./.github/workflows/release-thin-client.yml' "$main_approval" ||
+    fail "$main_approval must validate through the release thin-client workflow"
+grep -Fq 'uses: ./.github/workflows/publish-images.yml' "$main_approval" ||
+    fail "$main_approval must validate through the release image workflow"
+grep -Fq 'uses: ./.github/workflows/publish-llm.yml' "$main_approval" ||
+    fail "$main_approval must validate through the release LLM workflow"
+
+grep -Fq 'Validate payload and create checksums' "$release_client" ||
+    fail "$release_client must assemble and validate the payload before publishing"
+grep -Fq 'push=${{ inputs.publish }}' "$publish_images" ||
+    fail "$publish_images must use the explicit publish input for registry writes"
+grep -Fq 'Validate release promotion source' "$publish_llm" ||
+    fail "$publish_llm must validate pinned promotion sources without retagging them"
 
 echo "release-policy: approval topology is intact"

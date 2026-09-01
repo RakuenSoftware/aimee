@@ -7,10 +7,11 @@
 # endpoint (AIMEE_SERVER_URL / --server); see the thin-client cross-platform
 # proposal.
 #
-# This workflow is deliberately reusable-only. The sole caller is
-# auto-release.yml, after its tag job receives approval from the protected
-# `release` environment. Do not add tag-push or workflow-dispatch triggers here:
-# either would create a release path that bypasses the human approval.
+# This workflow is deliberately reusable-only. auto-release.yml calls it with
+# publish=true after release approval; main-merge-approval.yml calls the same
+# build and payload assembly with publish=false before main approval. Do not add
+# tag-push or workflow-dispatch triggers here: either would create a release path
+# that bypasses the human approval.
 name: release-thin-client
 
 on:
@@ -20,6 +21,11 @@ on:
         description: 'Version without leading v (e.g. 0.2.1)'
         required: true
         type: string
+      publish:
+        description: 'Publish/sign the GitHub Release; false builds and assembles the exact payload only'
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -57,8 +63,9 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      # Resolve the approved version string to embed (without leading v) and
-      # ensure the gated tag job created exactly that tag.
+      # Resolve the version string to embed (without leading v). A real release
+      # also requires the gated tag. Promotion validation deliberately has no
+      # tag yet, but compiles the exact same versioned artifact matrix.
       - name: Resolve version
         id: ver
         shell: bash
@@ -68,10 +75,12 @@ jobs:
             echo "::error::approved release version must be MAJOR.MINOR.PATCH; got '${v:-<empty>}'"
             exit 1
           fi
-          git rev-parse -q --verify "refs/tags/v$v" >/dev/null || {
-            echo "::error::approved release tag v$v does not exist"
-            exit 1
-          }
+          if [ "${{ inputs.publish }}" = "true" ]; then
+            git rev-parse -q --verify "refs/tags/v$v" >/dev/null || {
+              echo "::error::approved release tag v$v does not exist"
+              exit 1
+            }
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
 
       # --- Linux: authoritative make build of the lean thin client ---
@@ -244,9 +253,6 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # Publish a GitHub Release when triggered by a tag push, or when a version
-    # was supplied via call/dispatch (the orchestrator created the tag first).
-    if: ${{ inputs.version != '' || startsWith(github.ref, 'refs/tags/') }}
     steps:
       # Scope to the thin-client binaries only. When invoked via auto-release
       # (workflow_call), the publish-images workflow shares this run and uploads
@@ -258,16 +264,39 @@ jobs:
           pattern: aimee-*
           path: dist
           merge-multiple: true
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
-      - name: Create checksums and keyless signature bundles
+
+      # This is part of both validation and publication. It proves the reusable
+      # matrix produced the complete payload that the release action will see,
+      # including the Windows filename and both Linux architectures.
+      - name: Validate payload and create checksums
         working-directory: dist
         run: |
+          for asset in \
+            aimee-linux-x86_64 \
+            aimee-linux-arm64 \
+            aimee-macos-universal \
+            aimee-windows-x86_64.exe; do
+            test -f "$asset" || { echo "::error::release payload is missing $asset"; exit 1; }
+          done
+          test "$(find . -maxdepth 1 -type f -name 'aimee-*' | wc -l)" -eq 4 || {
+            echo "::error::release payload contains an unexpected thin-client asset set"
+            find . -maxdepth 1 -type f -print
+            exit 1
+          }
           sha256sum aimee-* > SHA256SUMS
+
+      - name: Install Cosign
+        if: inputs.publish
+        uses: sigstore/cosign-installer@f713795cb21599bc4e5c4b58cbad1da852d7eeb9 # v3
+      - name: Create keyless signature bundles
+        if: inputs.publish
+        working-directory: dist
+        run: |
           for asset in aimee-* SHA256SUMS; do
             cosign sign-blob --yes --bundle "${asset}.sigstore.json" "$asset"
           done
       - name: Publish release
+        if: inputs.publish
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65
         with:
           # Empty tag_name -> action falls back to the pushed tag (github.ref).

@@ -8,12 +8,58 @@ permissions:
   contents: read
 
 # The default branch ruleset requires a successful deployment to this
-# environment. The environment and branch rules must require an approval from a
-# reviewer other than the PR author, with admin bypass disabled. The source tree
-# cannot prove live GitHub settings, so the quarterly access/ruleset export is
-# retained with the assurance evidence bundle.
+# environment. The approval job is deliberately downstream of the SAME reusable
+# workflows used by auto-release.yml. A testing -> main PR therefore cannot even
+# ask for approval until the exact versioned thin clients, release payload,
+# container images, and pinned LLM promotion sources have passed. Only the
+# irreversible tag/sign/push operations are disabled during validation.
 jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.bump.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - name: Infer the exact version release would build
+        id: bump
+        run: scripts/next-release-version.sh "$GITHUB_OUTPUT"
+
+  thin-clients:
+    needs: version
+    uses: ./.github/workflows/release-thin-client.yml
+    permissions:
+      contents: write
+      id-token: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: false
+
+  llm-images:
+    needs: [version, thin-clients]
+    uses: ./.github/workflows/publish-llm.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: false
+
+  images:
+    needs: [version, thin-clients]
+    uses: ./.github/workflows/publish-images.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: false
+
   approval:
+    needs: [thin-clients, llm-images, images]
     environment: main-merge-approval
     runs-on: ubuntu-latest
     steps:
