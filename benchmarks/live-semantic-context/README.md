@@ -111,3 +111,14 @@ reported but cannot measure internal round trips; the preregistered paired effic
 tool calls plus end-to-end wall time. `summarize_s1_results.py` reports complete-pair arm metrics and
 5,000-replicate paired percentile-bootstrap intervals while leaving the promotion decision
 incomplete until the failure, cold-start, and checked reference-quality evidence are all present.
+
+## S1 result
+
+Evidence epoch 3 completed all 135 paired cells and 12 adversarial cells without infrastructure or
+eligibility failures. Batched context was exact on 45/45 tasks, reached 96.67% semantic-task
+adoption, reduced median semantic tool calls by 66.67% (paired 95% CI 50.00–66.67%), and reduced
+median semantic wall time by 38.69% (paired 95% CI 33.27–41.80%). All controls remained exact with
+zero median tool-call increase. Linux and macOS each passed 20/20 clean starts for both providers,
+with complete checked references and no extras. The preregistered efficiency branch therefore
+passes. Raw evidence, byte pins, the safety result, and the bounded interpretation are recorded in
+[`live-semantic-context-s1`](../../docs/validation/live-semantic-context-s1.md).

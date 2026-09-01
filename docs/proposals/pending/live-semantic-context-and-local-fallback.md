@@ -1,9 +1,9 @@
 # Proposal: Live semantic context at the filesystem-authority boundary
 
-- **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
-  real-provider PR gate passed on PR #2950. The S1 candidate implementation is complete and pinned
-  at `474bd69954237fca249eb44e942caeab4270ad5e`; correctness probes and paired cells must use that
-  exact implementation. Later slices require a measured promotion decision.
+- **State:** IN PROGRESS. S1 passed its preregistered material-value and safety gates on evidence
+  epoch 3. The promoted scope is the narrow local, saved-file definition/reference context
+  operation pinned at `474bd69954237fca249eb44e942caeab4270ad5e`. S2 productionization is
+  authorized; S3 and S4 remain separately gated.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01
 - **Charter roles:** Recall, Enforce, Execute, Evaluate-Optimize, Gate-Promote
@@ -760,6 +760,14 @@ binary refusal, and both input and returned-path containment. The protected Linu
 job first reproduces the frozen S0 observation and then exercises synchronized gopls and Pyright
 definition/reference answers as a separate retained candidate artifact.
 
-S1 is the only authorized behavioral candidate after those S0 prerequisites are complete.
-S2-S4 are contingent options, not committed scope. A negative S1 result is a successful experiment
-outcome and closes the roadmap after independently useful correctness repairs.
+Evidence epoch 3 completed 135/135 eligible paired cells and 12/12 eligible adversarial cells.
+Batched context was exact on 45/45 tasks and passed the material efficiency branch: on 30 semantic
+pairs, median tool calls fell 66.67% (paired 95% CI 50.00–66.67%) and median wall time fell 38.69%
+(paired 95% CI 33.27–41.80%), with task success holding. Adoption was 96.67%; controls had no
+success or median tool-call regression. Linux and macOS each passed 20/20 clean starts for gopls
+and Pyright with complete checked references and no extras. See
+[`live-semantic-context-s1`](../../validation/live-semantic-context-s1.md) for raw-evidence pins,
+safety results, operational cost, and the bounded interpretation.
+
+S2 is now authorized only for the passing local workflow. S3 detached routing and S4 optional
+methods remain contingent and do not inherit S1's result.
