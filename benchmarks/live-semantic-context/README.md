@@ -78,3 +78,20 @@ input, and input/returned-path escapes. The required Linux/macOS job retains a s
 real-provider artifact after first reproducing the unchanged S0 baseline. Candidate probes also
 require runtime source tree `50ac137b5d93bf44ccc2ba774b251912da65ae1f`, allowing the exact source
 to be verified in GitHub's shallow PR merge checkout without relying on unavailable parent objects.
+
+## Paired-study runner
+
+`run_s1_paired_study.py` validates the candidate source tree, exact Codex CLI executable, model,
+reasoning level, ripgrep, ast-grep, providers, and every instrumentation digest before dispatch. It
+creates a clean non-detached clone at the task commit for every cell, applies only the manifest's
+checked saved-file mutation, exposes the frozen arm through `s1_mcp_server.py`, retains raw Codex
+JSONL and tool JSONL, and grades the structured result against the hidden oracle. The native
+`s1_lsp_bridge.c` is linked to the same production `lsp_manager` and `lsp_context` objects as the
+candidate unit gate; it is instrumentation, not a second semantic implementation.
+
+Codex CLI 0.151.0 always adds `apply_patch` and generic MCP resource helpers when a local MCP server
+is present. This was discovered before the first cell and is recorded as a pre-data amendment in
+the experiment contract. All removable built-ins are disabled, the remaining identical helpers
+are declared ineligible evidence, and their use invalidates a cell while remaining visible in the
+raw event stream. Run without `--execute` for a no-inference lineage/order preflight; execution also
+requires explicit paths to the digest-pinned Codex, ripgrep, ast-grep, gopls, and Pyright binaries.

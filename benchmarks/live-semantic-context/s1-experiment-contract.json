@@ -67,6 +67,31 @@
     "file_edit",
     "test_execution"
   ],
+  "non_lsp_execution_pins": {
+    "ripgrep": {
+      "version_output": "ripgrep 15.2.0 (rev e89fff89ac)",
+      "linux_x86_64_executable_sha256": "e62198eb19b136b88c330af83647b5a962cb99b6b1f066758568f12de1974849"
+    },
+    "ast_grep": {
+      "version_output": "ast-grep 0.45.0",
+      "linux_x86_64_executable_sha256": "a2bca754d16fbaa90bee2626758668a168b33a8e84c0d10ba46753d8d3a9772f"
+    }
+  },
+  "instrumentation_pins": {
+    "paired_runner": "run_s1_paired_study.py",
+    "paired_runner_sha256": "418d2579cf81e3b5f7235f566f6f1c413dafc3612367a88b0e2503229f2cb89b",
+    "mcp_server": "s1_mcp_server.py",
+    "mcp_server_sha256": "ffc6c6b899a71b72d568b64640ea4d4ee0ff1cf3d91e7c954e9b09b290e768b8",
+    "native_bridge": "s1_lsp_bridge.c",
+    "native_bridge_sha256": "ea0993f2f4c70e37cda49a8b452c1d81b27769343fe46524392110a58664caf3",
+    "result_schema": "schemas/s1-result-v1.json",
+    "result_schema_sha256": "6f9db49390c02edf6f896324b2a21bf02dc15d314da51e69f02ece13d9d554ca"
+  },
+  "execution_amendment_before_first_cell": {
+    "reason": "Codex CLI adds apply_patch and generic MCP resource helpers whenever an MCP server is configured; its MCP interface also prefixes tool names. These identical built-ins cannot be removed independently in client 0.151.0.",
+    "acceptance": "The frozen task MCP schemas remain the only eligible evidence tools. Shell, browser, image, collaboration, apps, memory, plugin, and skill tools are disabled. Any call to an identical Codex built-in makes the cell ineligible and is retained in raw JSONL.",
+    "timing": "Recorded before any model cell was dispatched."
+  },
   "task_contract": {
     "semantic_eligible_minimum": 30,
     "control_minimum": 15,

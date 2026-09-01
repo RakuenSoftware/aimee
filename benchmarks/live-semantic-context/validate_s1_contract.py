@@ -17,6 +17,12 @@ MANIFEST = BASE / "s1-task-manifest.json"
 CONTRACT = BASE / "s1-experiment-contract.json"
 PROMPT = BASE / "prompts" / "s1-agent-system-v1.md"
 TOOLS = BASE / "tools" / "s1-tool-schemas-v1.json"
+INSTRUMENTATION = {
+    "paired_runner": BASE / "run_s1_paired_study.py",
+    "mcp_server": BASE / "s1_mcp_server.py",
+    "native_bridge": BASE / "s1_lsp_bridge.c",
+    "result_schema": BASE / "schemas" / "s1-result-v1.json",
+}
 REQUIRED_FAMILIES = {
     "semantic_disambiguation",
     "reference_backed_change",
@@ -209,6 +215,15 @@ def validate() -> dict[str, str]:
         expected = pins.get(name)
         if expected is not None and expected != observed:
             raise ValueError(f"{name}: contract {expected} != observed {observed}")
+    instrumentation_pins = contract.get("instrumentation_pins") or {}
+    for name, path in INSTRUMENTATION.items():
+        if instrumentation_pins.get(name) != str(path.relative_to(BASE)):
+            raise ValueError(f"{name}: instrumentation path is not pinned")
+        observed = sha256_file(path)
+        expected = instrumentation_pins.get(f"{name}_sha256")
+        if expected != observed:
+            raise ValueError(f"{name}: instrumentation digest {expected} != observed {observed}")
+        hashes[f"{name}_sha256"] = observed
     return hashes
 
 
