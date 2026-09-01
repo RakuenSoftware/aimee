@@ -896,8 +896,8 @@ jobs:
             --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
             --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
-            --candidate-commit 795631825e13e070b2d5d3061a3248b493f2b75b \
-            --candidate-src-tree bd04b26c677a07f00fea043759a3a82f9625753d \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
             --cold-starts 20 \
             --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
             --assert-candidate

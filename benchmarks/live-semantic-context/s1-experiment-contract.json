@@ -35,18 +35,18 @@
     "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
   },
   "candidate_commit_pin": {
-    "commit": "795631825e13e070b2d5d3061a3248b493f2b75b",
-    "runtime_src_tree": "bd04b26c677a07f00fea043759a3a82f9625753d",
-    "subject": "fix: validate semantic source against target file",
-    "pinned_at": "2026-09-01T17:08:46Z",
-    "timing": "before the first epoch-2 promotion cell, after the retained calibration exposed and verified the cross-file defect",
+    "commit": "474bd69954237fca249eb44e942caeab4270ad5e",
+    "runtime_src_tree": "e6ba59ceba5a40323b006e834ac28ef39a2abc46",
+    "subject": "style: format semantic source validation",
+    "pinned_at": "2026-09-01T17:52:43Z",
+    "timing": "before the first epoch-3 promotion cell, after the PR lint gate rejected the unformatted candidate source tree",
     "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
   },
   "evidence_epoch": {
-    "number": 2,
-    "reason": "The first eligible calibration exposed a cross-file false-stale defect: target source was compared to the anchor-file hash. The candidate now hashes the target before and after bounded source retrieval.",
-    "supersedes_candidate_commit": "d2257cbf569dba65b20b943b44e1549832793f3c",
-    "prior_model_cells": "calibration only; retained outside promotion evidence",
+    "number": 3,
+    "reason": "The PR lint gate rejected the epoch-2 source formatting. The candidate source was mechanically formatted, its behavior and LSP unit results remained unchanged, and every earlier model cell was stopped or demoted to calibration.",
+    "supersedes_candidate_commit": "795631825e13e070b2d5d3061a3248b493f2b75b",
+    "prior_model_cells": "epochs 1 and 2 are calibration only; retained outside promotion evidence",
     "restart": "All paired promotion cells start from this epoch and use only the new candidate pin."
   },
   "arms": [
@@ -106,7 +106,7 @@
   "analysis_amendment_before_promotion_cells": {
     "reason": "Calibration proved that failure overlays replace the normal task condition and that codex exec records one user turn for every cell regardless of internal tool round trips.",
     "acceptance": "The 135 primary cells run without injected provider failures. The six frozen overlays run separately as 12 LSP-only adversarial cells. Agent turns remain reported but are ineligible as a varying endpoint; paired tool-call reduction measures agentic round trips.",
-    "timing": "Recorded after calibration and before any epoch-2 promotion cell; all calibration cells remain excluded."
+    "timing": "Recorded after calibration and before any epoch-3 promotion cell; all calibration cells remain excluded."
   },
   "task_contract": {
     "semantic_eligible_minimum": 30,

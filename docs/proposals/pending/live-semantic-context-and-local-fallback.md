@@ -2,7 +2,7 @@
 
 - **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
   real-provider PR gate passed on PR #2950. The S1 candidate implementation is complete and pinned
-  at `795631825e13e070b2d5d3061a3248b493f2b75b`; correctness probes and paired cells must use that
+  at `474bd69954237fca249eb44e942caeab4270ad5e`; correctness probes and paired cells must use that
   exact implementation. Later slices require a measured promotion decision.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01
@@ -754,7 +754,7 @@ implementation is now authorized. See
 [`live-semantic-context-s0`](../../validation/live-semantic-context-s0.md).
 
 The S1 local candidate is implemented and commit-pinned at
-`795631825e13e070b2d5d3061a3248b493f2b75b`. Its checked core exercises batched typed
+`474bd69954237fca249eb44e942caeab4270ad5e`. Its checked core exercises batched typed
 envelopes, source budgets, exact hashes, provider/document generations, stale-file detection,
 binary refusal, and both input and returned-path containment. The protected Linux/macOS provider
 job first reproduces the frozen S0 observation and then exercises synchronized gopls and Pyright
