@@ -35,9 +35,9 @@
     "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
   },
   "candidate_commit_pin": {
-    "commit": "22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
-    "subject": "feat: add batched live semantic context spike",
-    "pinned_at": "2026-09-01T16:06:00Z",
+    "commit": "d2257cbf569dba65b20b943b44e1549832793f3c",
+    "subject": "test: configure fake LSP provider explicitly",
+    "pinned_at": "2026-09-01T16:11:57Z",
     "timing": "before the first candidate-arm cell, after candidate implementation",
     "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
   },

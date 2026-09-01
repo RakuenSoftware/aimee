@@ -122,11 +122,11 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         )
         self.assertEqual(
             self.contract["candidate_commit_pin"]["commit"],
-            "22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
+            "d2257cbf569dba65b20b943b44e1549832793f3c",
         )
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
         self.assertIn(
-            "--candidate-commit 22fe08cb13ed3e8a11511d1fccf7d98c0febdb03",
+            "--candidate-commit d2257cbf569dba65b20b943b44e1549832793f3c",
             workflow,
         )
 

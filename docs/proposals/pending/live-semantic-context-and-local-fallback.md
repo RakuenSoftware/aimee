@@ -2,7 +2,7 @@
 
 - **State:** IN PROGRESS. S0 and its frozen checked comparison are complete. The Linux/macOS
   real-provider PR gate passed on PR #2950. The S1 candidate implementation is complete and pinned
-  at `22fe08cb13ed3e8a11511d1fccf7d98c0febdb03`; correctness probes and paired cells must use that
+  at `d2257cbf569dba65b20b943b44e1549832793f3c`; correctness probes and paired cells must use that
   exact implementation. Later slices require a measured promotion decision.
 - **Author:** JBailes with Codex
 - **Date:** 2026-09-01

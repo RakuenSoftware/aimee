@@ -70,7 +70,7 @@ gate and retained as compatibility evidence, not reported as ready.
 ## S1 candidate pin
 
 The completed local candidate is immutable at
-`22fe08cb13ed3e8a11511d1fccf7d98c0febdb03`. It adds the grouped batched context operation, exact
+`d2257cbf569dba65b20b943b44e1549832793f3c`. It adds the grouped batched context operation, exact
 saved-file `didOpen`/`didChange` synchronization, provider and document generations, whole-file
 freshness hashes, workspace-relative containment, typed failures, and bounded source. The unit
 contract directly exercises batching, truncation, stale source, unavailable providers, binary
