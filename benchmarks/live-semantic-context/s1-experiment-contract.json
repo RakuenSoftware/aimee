@@ -35,12 +35,19 @@
     "acceptance": "A cell is ineligible unless its result records this exact model, reasoning level, endpoint contract, client version, and executable digest."
   },
   "candidate_commit_pin": {
-    "commit": "d2257cbf569dba65b20b943b44e1549832793f3c",
-    "runtime_src_tree": "50ac137b5d93bf44ccc2ba774b251912da65ae1f",
-    "subject": "test: configure fake LSP provider explicitly",
-    "pinned_at": "2026-09-01T16:11:57Z",
-    "timing": "before the first candidate-arm cell, after candidate implementation",
+    "commit": "795631825e13e070b2d5d3061a3248b493f2b75b",
+    "runtime_src_tree": "bd04b26c677a07f00fea043759a3a82f9625753d",
+    "subject": "fix: validate semantic source against target file",
+    "pinned_at": "2026-09-01T17:08:46Z",
+    "timing": "before the first epoch-2 promotion cell, after the retained calibration exposed and verified the cross-file defect",
     "acceptance": "Every cell must record one identical full Aimee commit; mixed or dirty checkouts are ineligible."
+  },
+  "evidence_epoch": {
+    "number": 2,
+    "reason": "The first eligible calibration exposed a cross-file false-stale defect: target source was compared to the anchor-file hash. The candidate now hashes the target before and after bounded source retrieval.",
+    "supersedes_candidate_commit": "d2257cbf569dba65b20b943b44e1549832793f3c",
+    "prior_model_cells": "calibration only; retained outside promotion evidence",
+    "restart": "All paired promotion cells start from this epoch and use only the new candidate pin."
   },
   "arms": [
     {

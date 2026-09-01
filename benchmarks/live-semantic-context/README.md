@@ -70,14 +70,18 @@ gate and retained as compatibility evidence, not reported as ready.
 ## S1 candidate pin
 
 The completed local candidate is immutable at
-`d2257cbf569dba65b20b943b44e1549832793f3c`. It adds the grouped batched context operation, exact
+`795631825e13e070b2d5d3061a3248b493f2b75b`. It adds the grouped batched context operation, exact
 saved-file `didOpen`/`didChange` synchronization, provider and document generations, whole-file
 freshness hashes, workspace-relative containment, typed failures, and bounded source. The unit
 contract directly exercises batching, truncation, stale source, unavailable providers, binary
 input, and input/returned-path escapes. The required Linux/macOS job retains a separate S1
 real-provider artifact after first reproducing the unchanged S0 baseline. Candidate probes also
-require runtime source tree `50ac137b5d93bf44ccc2ba774b251912da65ae1f`, allowing the exact source
+require runtime source tree `bd04b26c677a07f00fea043759a3a82f9625753d`, allowing the exact source
 to be verified in GitHub's shallow PR merge checkout without relying on unavailable parent objects.
+The first eligible model calibration found and fixed a cross-file false-stale defect before the
+promotion run: bounded target source is now hashed against the target file before and after the
+read, rather than against the anchor file. Evidence epoch 2 restarts every promotion cell at this
+pin; the earlier calibration is retained but cannot contribute to a claim.
 
 ## Paired-study runner
 
