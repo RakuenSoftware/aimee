@@ -127,6 +127,9 @@ class LiveSemanticContextS0Test(unittest.TestCase):
         self.assertIn("- os: macos-latest", workflow)
         self.assertIn("runs-on: ${{ matrix.os }}", workflow)
         self.assertIn("--assert-baseline", workflow)
+        self.assertIn("run_s1_candidate_probe.py", workflow)
+        self.assertIn("--assert-candidate", workflow)
+        self.assertIn("lsp-s1-real-provider-${{ matrix.artifact }}-candidate", workflow)
         self.assertIn("LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}", workflow)
         self.assertIn('[ "$LSP_REAL_RESULT" = success ]', workflow)
 

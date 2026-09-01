@@ -396,6 +396,7 @@ static const struct fam_def MCP_FAMILIES[] = {
      {{"diagnostics", "lsp_diagnostics"},
       {"definition", "lsp_definition"},
       {"references", "lsp_references"},
+      {"context", "lsp_context"},
       {NULL, NULL}}},
     {AIMEE_CODE_TOOL_INDEX,
      "command",

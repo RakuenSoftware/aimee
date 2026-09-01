@@ -5134,6 +5134,8 @@ $(TESTPREFIX)/unit-test-workspace-manifest: $(OBJDIR)/tests/test_workspace_manif
 $(TESTPREFIX)/unit-test-lsp: $(OBJDIR)/tests/test_lsp.o \
                               $(OBJDIR)/modules/lsp/lsp_client.o \
                               $(OBJDIR)/modules/lsp/lsp_manager.o \
+                              $(OBJDIR)/modules/lsp/lsp_context.o \
+                              $(OBJDIR)/aimee_sha256.o \
 $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
                               $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o \
                               $(OBJDIR)/aimee_home.o \

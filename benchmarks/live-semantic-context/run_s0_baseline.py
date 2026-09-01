@@ -138,6 +138,7 @@ def provider_record(
     lsp_test: Path,
     env: dict[str, str],
     version_command: list[str],
+    probe_mode: str = "--real-provider",
 ) -> dict:
     record = {
         "name": name,
@@ -154,7 +155,7 @@ def provider_record(
     record["version"] = command_version(version_command)
     source = (fixture / file_name).resolve()
     invocation = [
-        str(lsp_test), "--real-provider", str(command), server_arg,
+        str(lsp_test), probe_mode, str(command), server_arg,
         str(fixture.resolve()), str(source), str(line), str(column),
         str(source), str(expected_line), str(min_references),
     ]

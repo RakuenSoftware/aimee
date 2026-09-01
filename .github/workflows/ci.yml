@@ -889,12 +889,28 @@ jobs:
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
             --output "${RUNNER_TEMP}/lsp-s0-${{ matrix.artifact }}-baseline.json" \
             --assert-baseline
+      - name: Assert the pinned S1 saved-file synchronization path
+        run: |
+          python3 benchmarks/live-semantic-context/run_s1_candidate_probe.py \
+            --lsp-test src/build/obj/tests/unit-test-lsp \
+            --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
+            --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
+            --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
+            --assert-candidate
       - name: Retain the provider observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: lsp-s0-real-provider-${{ matrix.artifact }}-baseline
           path: ${{ runner.temp }}/lsp-s0-${{ matrix.artifact }}-baseline.json
+          if-no-files-found: warn
+      - name: Retain the candidate provider observation
+        if: ${{ always() }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: lsp-s1-real-provider-${{ matrix.artifact }}-candidate
+          path: ${{ runner.temp }}/lsp-s1-${{ matrix.artifact }}-candidate.json
           if-no-files-found: warn
 
   # Stable protected context for the sharded suite. It remains named

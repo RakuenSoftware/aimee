@@ -1730,6 +1730,54 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
                        s));
    }
 
+   /* lsp_context */
+#ifndef AIMEE_WINDOWS
+   {
+      cJSON *s = cJSON_CreateObject();
+      cJSON_AddStringToObject(s, "type", "object");
+      cJSON_AddBoolToObject(s, "additionalProperties", 0);
+      cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      cJSON *op = cJSON_AddObjectToObject(p, "operation");
+      cJSON_AddStringToObject(op, "type", "string");
+      cJSON *op_enum = cJSON_AddArrayToObject(op, "enum");
+      cJSON_AddItemToArray(op_enum, cJSON_CreateString("definition"));
+      cJSON_AddItemToArray(op_enum, cJSON_CreateString("references"));
+      cJSON *anchors = cJSON_AddObjectToObject(p, "anchors");
+      cJSON_AddStringToObject(anchors, "type", "array");
+      cJSON_AddNumberToObject(anchors, "minItems", 1);
+      cJSON_AddNumberToObject(anchors, "maxItems", 16);
+      cJSON *item = cJSON_AddObjectToObject(anchors, "items");
+      cJSON_AddStringToObject(item, "type", "object");
+      cJSON_AddBoolToObject(item, "additionalProperties", 0);
+      cJSON *ip = cJSON_AddObjectToObject(item, "properties");
+      cJSON *file = cJSON_AddObjectToObject(ip, "file");
+      cJSON_AddStringToObject(file, "type", "string");
+      cJSON *line = cJSON_AddObjectToObject(ip, "line");
+      cJSON_AddStringToObject(line, "type", "integer");
+      cJSON_AddNumberToObject(line, "minimum", 1);
+      cJSON *column = cJSON_AddObjectToObject(ip, "column");
+      cJSON_AddStringToObject(column, "type", "integer");
+      cJSON_AddNumberToObject(column, "minimum", 1);
+      cJSON *ireq = cJSON_AddArrayToObject(item, "required");
+      cJSON_AddItemToArray(ireq, cJSON_CreateString("file"));
+      cJSON_AddItemToArray(ireq, cJSON_CreateString("line"));
+      cJSON_AddItemToArray(ireq, cJSON_CreateString("column"));
+      cJSON *budget = cJSON_AddObjectToObject(p, "max_source_bytes");
+      cJSON_AddStringToObject(budget, "type", "integer");
+      cJSON_AddNumberToObject(budget, "minimum", 256);
+      cJSON_AddNumberToObject(budget, "maximum", 32768);
+      cJSON *req = cJSON_AddArrayToObject(s, "required");
+      cJSON_AddItemToArray(req, cJSON_CreateString("operation"));
+      cJSON_AddItemToArray(req, cJSON_CreateString("anchors"));
+      cJSON_AddItemToArray(
+          tools,
+          mcp_tool_new("lsp_context",
+                       "Resolve up to 16 saved-file anchors through the active local worktree's "
+                       "language server and return typed freshness plus bounded source.",
+                       s));
+   }
+#endif
+
    /* ensemble_start */
    {
       cJSON *s = cJSON_CreateObject();
