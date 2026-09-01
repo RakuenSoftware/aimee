@@ -594,7 +594,11 @@ if [ -d "$DEPLOY_ENV_DIR" ]; then
         AIMEE_API_ENDPOINT="unix:$AIMEE_HOME/aimee-http.sock" \
         aimee config deploy-env \
         >"$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null; then
+        # The root shell owns the redirect, not the runuser child. Compose later
+        # opens the adjacent .env as the uid-1000 deploy worker, so retain the
+        # owner-only mode but transfer ownership before the atomic rename.
         chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
+        chown aimee:aimee "$DEPLOY_ENV_DIR/.env.tmp" 2>/dev/null || true
         mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"
         log "wrote managed compose env ($DEPLOY_ENV_DIR/.env) from config"
     else
