@@ -69,6 +69,32 @@ grep -q 'mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"' "$entrypoint" 
     && r=yes || r=no
 check "written via a temp file and renamed into place" "yes" "$r"
 
+# The entrypoint owns this redirect, so the temp file starts root:root even
+# though `aimee config deploy-env` runs as the service account. Docker Compose
+# automatically opens the adjacent .env before it applies the worker's explicit
+# environment; root:root 0600 therefore makes every browser deploy fail before
+# the one-shot Vault bootstrap starts. Transfer only this root-created file to
+# the service account, retain 0600, and do it before the atomic rename.
+grep -q 'chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp"' "$entrypoint" && r=yes || r=no
+check "compose env remains owner-only" "yes" "$r"
+
+grep -q 'chown aimee:aimee "$DEPLOY_ENV_DIR/.env.tmp"' "$entrypoint" && r=yes || r=no
+check "compose env is readable by the deploy worker" "yes" "$r"
+
+mode_line=$(grep -n 'chmod 0600 "$DEPLOY_ENV_DIR/.env.tmp"' "$entrypoint" |
+                head -n1 | cut -d: -f1)
+owner_line=$(grep -n 'chown aimee:aimee "$DEPLOY_ENV_DIR/.env.tmp"' "$entrypoint" |
+                 head -n1 | cut -d: -f1)
+rename_line=$(grep -n 'mv -f "$DEPLOY_ENV_DIR/.env.tmp" "$DEPLOY_ENV_DIR/.env"' "$entrypoint" |
+                  head -n1 | cut -d: -f1)
+if [ -n "$mode_line" ] && [ -n "$owner_line" ] && [ -n "$rename_line" ] &&
+   [ "$mode_line" -lt "$owner_line" ] && [ "$owner_line" -lt "$rename_line" ]; then
+    r=ordered
+else
+    r=unsafe
+fi
+check "mode and owner are fixed before rename" "ordered" "$r"
+
 # 3. A failure to write must NOT stop the server. The file is a safety net for
 #    later compose callers; the server's own deploy path builds its child
 #    environment directly and works without it. Refusing to boot over it would
