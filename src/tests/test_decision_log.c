@@ -12,13 +12,13 @@ static void test_record_is_active(void)
 {
    db2_decision_log_row_t row;
    int rc = db2_decision_log_record("deploy-window", "opt-a|opt-b", "opt-a", "lower risk",
-                                    "jbailes", 7, "2026-09-01", 0, &row);
+                                    "jbailes", 7, "2999-09-01", 0, &row);
    assert(rc == 0);
    assert(strcmp(row.status, "active") == 0);
    assert(strcmp(row.subject, "deploy-window") == 0);
    assert(strcmp(row.chosen, "opt-a") == 0);
    assert(strcmp(row.author, "jbailes") == 0);
-   assert(strcmp(row.revisit_when, "2026-09-01") == 0);
+   assert(strcmp(row.revisit_when, "2999-09-01") == 0);
    assert(row.linked_policy_id == 7);
    assert(row.id > 0);
    printf("  PASS: test_record_is_active\n");
