@@ -44,8 +44,9 @@ pass.
 ## PR enforcement
 
 The `lsp-real-providers` CI matrix installs the exact gopls and Pyright pins on Linux and macOS,
-builds the native probe and real Go config fixture, runs the redistributed Go and Python fixtures,
-and uploads one raw JSON observation per platform. Its combined result is folded into the protected
+builds the native probe, configures its existing in-process config-contract peer, runs the
+redistributed Go and Python fixtures, and uploads one raw JSON observation per platform. Its
+combined result is folded into the protected
 `unit-tests` aggregate, so a pull request to `testing` or `main` cannot pass that required context
 without exercising both real providers on both claimed platforms.
 
@@ -64,7 +65,7 @@ context improves coding outcomes over shipping Aimee and ordinary local inspecti
 ## Commands executed
 
 ```text
-make -C src -j2 build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+make -C src -j2 build/obj/tests/unit-test-lsp
 src/build/obj/tests/unit-test-lsp
 python3 benchmarks/live-semantic-context/run_s0_baseline.py ... --assert-baseline
 ```

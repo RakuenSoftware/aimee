@@ -863,7 +863,7 @@ jobs:
           go install golang.org/x/tools/gopls@v0.20.0
           npm install --prefix "${RUNNER_TEMP}/lsp-tools/npm" --no-audit --no-fund \
             pyright@1.1.413
-      - name: Build the LSP probe and config fixture
+      - name: Build the LSP probe
         run: |
           jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 3)"
           if [ "$RUNNER_OS" = macOS ]; then
@@ -872,18 +872,18 @@ jobs:
             zstd="$(brew --prefix zstd)"
             export PKG_CONFIG_PATH="$libpq/lib/pkgconfig:$openssl/lib/pkgconfig:$zstd/lib/pkgconfig"
             make -C src -j"$jobs" CC=clang GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              EXTRA_C_FLAGS="-I$libpq/include -I$openssl/include -I$zstd/include" \
+              EXTRA_C_FLAGS="-Wno-unused-command-line-argument -I$libpq/include -I$openssl/include -I$zstd/include" \
               EXTRA_L_FLAGS="-L$libpq/lib -L$openssl/lib -L$zstd/lib" \
-              build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+              TEST_L_FLAGS='-Os -flto -ffunction-sections -fdata-sections -lsqlite3 $(PQ_LIB) -lm -lpthread -lzstd -lz $(CORE_CONNECTION_LIB) -lssl -lcrypto $(PAM_LIBS) -framework Security -framework CoreFoundation $(EXTRA_L_FLAGS)' \
+              build/obj/tests/unit-test-lsp
           else
             make -C src -j"$jobs" GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 \
-              build/obj/aimee-module-config build/obj/tests/unit-test-lsp
+              build/obj/tests/unit-test-lsp
           fi
       - name: Assert the pinned S0 real-provider baseline
         run: |
           python3 benchmarks/live-semantic-context/run_s0_baseline.py \
             --lsp-test src/build/obj/tests/unit-test-lsp \
-            --config-module src/build/obj/aimee-module-config \
             --gopls "${RUNNER_TEMP}/lsp-tools/go/bin/gopls" \
             --pyright-langserver "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright-langserver" \
             --pyright "${RUNNER_TEMP}/lsp-tools/npm/node_modules/.bin/pyright" \

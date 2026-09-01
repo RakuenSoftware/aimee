@@ -12,13 +12,11 @@ barrier. No response proves saved-file freshness or worktree authority.
 
 ## Reproduce
 
-Build the config fixture and test probe, install the exact providers into a temporary tool root,
-then run:
+Build the test probe, install the exact providers into a temporary tool root, then run:
 
 ```bash
 python3 benchmarks/live-semantic-context/run_s0_baseline.py \
   --lsp-test src/build/obj/tests/unit-test-lsp \
-  --config-module src/build/obj/aimee-module-config \
   --gopls "$TOOL_ROOT/go/bin/gopls" \
   --pyright-langserver "$TOOL_ROOT/npm/node_modules/.bin/pyright-langserver" \
   --pyright "$TOOL_ROOT/npm/node_modules/.bin/pyright" \

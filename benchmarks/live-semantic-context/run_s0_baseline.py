@@ -210,7 +210,6 @@ def baseline_matches(report: dict) -> tuple[bool, list[str]]:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--lsp-test", type=Path, required=True)
-    parser.add_argument("--config-module", type=Path, required=True)
     parser.add_argument("--gopls", type=Path, required=True)
     parser.add_argument("--pyright-langserver", type=Path, required=True)
     parser.add_argument("--pyright", type=Path, required=True)
@@ -222,8 +221,6 @@ def parse_args() -> argparse.Namespace:
 def main() -> int:
     args = parse_args()
     env = os.environ.copy()
-    env["AIMEE_CONFIG_TEST_MODULE"] = str(args.config_module.resolve())
-    env["AIMEE_CONFIG_TEST_HOST_HOME"] = env.get("HOME", "")
     report = {
         "schema_version": 1,
         "purpose": "shipping LSP manager S0 baseline; no S1 behavior enabled",

@@ -12,6 +12,7 @@
 #include <time.h>
 #include <unistd.h>
 #include "cJSON.h"
+#include "config_client.h"
 #include "lsp.h"
 #include "platform_path.h"
 #include "platform_test_util.h"
@@ -52,6 +53,32 @@ static long long monotonic_milliseconds(void)
    return (long long)now.tv_sec * 1000LL + now.tv_nsec / 1000000LL;
 }
 
+static int configure_real_provider(const char *command, const char *server_arg, const char *ext)
+{
+   cJSON *servers = cJSON_CreateArray();
+   cJSON *server = cJSON_CreateObject();
+   cJSON *args = cJSON_CreateArray();
+   cJSON *extensions = cJSON_CreateArray();
+   if (!servers || !server || !args || !extensions ||
+       !cJSON_AddStringToObject(server, "name", "real-provider-probe") ||
+       !cJSON_AddStringToObject(server, "command", command) ||
+       (server_arg && !cJSON_AddItemToArray(args, cJSON_CreateString(server_arg))) ||
+       !cJSON_AddItemToArray(extensions, cJSON_CreateString(ext)))
+   {
+      cJSON_Delete(servers);
+      cJSON_Delete(server);
+      cJSON_Delete(args);
+      cJSON_Delete(extensions);
+      return -1;
+   }
+   cJSON_AddItemToObject(server, "args", args);
+   cJSON_AddItemToObject(server, "extensions", extensions);
+   cJSON_AddItemToArray(servers, server);
+   if (config_client_set_value("lsp_servers", servers) != 0)
+      return -1;
+   return config_client_set_number("lsp_server_count", 1.0);
+}
+
 static int real_provider_probe_main(int argc, char **argv)
 {
    if (argc != 11)
@@ -80,55 +107,11 @@ static int real_provider_probe_main(int argc, char **argv)
       return 2;
    }
 
-   char tmp_home[512];
-   snprintf(tmp_home, sizeof(tmp_home), "%s/aimee-test-lsp-real-home-XXXXXX", platform_tmpdir());
-   if (!platform_mkdtemp(tmp_home))
-      return 2;
-
-   char appdir[PATH_MAX];
-   char cfgpath[PATH_MAX];
-   snprintf(appdir, sizeof(appdir), "%s/.config/aimee", tmp_home);
-   snprintf(cfgpath, sizeof(cfgpath), "%s/aimee.yaml", appdir);
-   if (platform_mkdir_p(appdir, 0700) != 0)
+   if (configure_real_provider(command, server_arg, ext) != 0)
    {
-      platform_test_rmrf(tmp_home);
+      fprintf(stderr, "real-provider probe could not configure the in-process config peer\n");
       return 2;
    }
-
-   char cfg[4096];
-   if (server_arg)
-      snprintf(cfg, sizeof(cfg),
-               "lsp_servers:\n"
-               "  - name: real-provider-probe\n"
-               "    command: %s\n"
-               "    args:\n"
-               "      - %s\n"
-               "    extensions:\n"
-               "      - %s\n",
-               command, server_arg, ext);
-   else
-      snprintf(cfg, sizeof(cfg),
-               "lsp_servers:\n"
-               "  - name: real-provider-probe\n"
-               "    command: %s\n"
-               "    extensions:\n"
-               "      - %s\n",
-               command, ext);
-   write_text_file(cfgpath, cfg);
-
-   const char *old_home = getenv("HOME");
-   char *old_home_copy = old_home ? strdup(old_home) : NULL;
-   const char *old_aimee_home = getenv("AIMEE_HOME");
-   char *old_aimee_home_copy = old_aimee_home ? strdup(old_aimee_home) : NULL;
-   const char *old_aimee_profile = getenv("AIMEE_PROFILE");
-   char *old_aimee_profile_copy = old_aimee_profile ? strdup(old_aimee_profile) : NULL;
-   const char *old_no_cache = getenv("AIMEE_NO_CACHE");
-   char *old_no_cache_copy = old_no_cache ? strdup(old_no_cache) : NULL;
-
-   assert(platform_setenv("HOME", tmp_home) == 0);
-   assert(platform_unsetenv("AIMEE_HOME") == 0);
-   assert(platform_unsetenv("AIMEE_PROFILE") == 0);
-   assert(platform_setenv("AIMEE_NO_CACHE", "1") == 0);
 
    lsp_manager_init();
    lsp_diag_t cold_diags[4];
@@ -176,15 +159,6 @@ static int real_provider_probe_main(int argc, char **argv)
    cJSON_Delete(result);
 
    lsp_manager_shutdown_all();
-   restore_env_var("HOME", old_home_copy);
-   restore_env_var("AIMEE_HOME", old_aimee_home_copy);
-   restore_env_var("AIMEE_PROFILE", old_aimee_profile_copy);
-   restore_env_var("AIMEE_NO_CACHE", old_no_cache_copy);
-   free(old_home_copy);
-   free(old_aimee_home_copy);
-   free(old_aimee_profile_copy);
-   free(old_no_cache_copy);
-   platform_test_rmrf(tmp_home);
 
    return cold_diag_count == 0 && cold_active == 0 && definition_matched && ref_count >= min_refs
               ? 0
