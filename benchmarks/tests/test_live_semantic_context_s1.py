@@ -41,6 +41,16 @@ def load_candidate_probe():
     return module
 
 
+def load_release_validator():
+    spec = importlib.util.spec_from_file_location(
+        "s1_release_validator", BASE / "validate_s1_release_candidate.py"
+    )
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 class LiveSemanticContextS1Test(unittest.TestCase):
     def test_contract_and_instrumentation_pins(self) -> None:
         subprocess.run(
@@ -241,6 +251,92 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(aggregate["reference_recall"], 1.0)
         self.assertEqual(aggregate["reference_false_positive_rate"], 0.0)
         self.assertEqual(aggregate["peak_process_tree_count"], 3)
+
+    def test_release_validator_accepts_descendant_with_unchanged_semantic_surface(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        candidate_tree = "e6ba59ceba5a40323b006e834ac28ef39a2abc46"
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        checkout_src_tree = subprocess.run(
+            ["git", "rev-parse", "HEAD:src"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        trials = [{} for _ in range(20)]
+        report = {
+            "schema_version": 1,
+            "candidate_commit": candidate,
+            "candidate_src_tree": candidate_tree,
+            "source_commit": head,
+            "checkout_src_tree": checkout_src_tree,
+            "cold_starts_per_provider": 20,
+            "providers": [
+                {
+                    "name": name, "available": True,
+                    "cold_start_attempts": 20, "cold_start_successes": 20,
+                    "reference_recall": 1.0,
+                    "reference_false_positive_rate": 0.0,
+                    "trials": trials,
+                }
+                for name in ("gopls", "pyright")
+            ],
+        }
+        result = validator.validate(report, candidate, candidate_tree, 20)
+        self.assertTrue(result["candidate_is_ancestor"])
+        self.assertEqual(
+            result["candidate_changed_src_paths"], list(validator.PROTECTED_PATHS)
+        )
+        self.assertEqual(result["changed_protected_paths"], [])
+        self.assertEqual(result["release_candidate_errors"], [])
+        self.assertTrue(result["release_candidate_matched"])
+
+        report["providers"][0]["cold_start_attempts"] = 19
+        result = validator.validate(report, candidate, candidate_tree, 20)
+        self.assertIn(
+            "gopls: cold-start denominator is incomplete",
+            result["release_candidate_errors"],
+        )
+
+    def test_release_validator_rejects_protected_candidate_drift(self) -> None:
+        validator = load_release_validator()
+        earlier = "795631825e13e070b2d5d3061a3248b493f2b75b"
+        earlier_tree = subprocess.run(
+            ["git", "rev-parse", f"{earlier}:src"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        head = subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        checkout_src_tree = subprocess.run(
+            ["git", "rev-parse", "HEAD:src"], cwd=ROOT, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip()
+        report = {
+            "schema_version": 1,
+            "candidate_commit": earlier,
+            "candidate_src_tree": earlier_tree,
+            "source_commit": head,
+            "checkout_src_tree": checkout_src_tree,
+            "cold_starts_per_provider": 1,
+            "providers": [
+                {
+                    "name": name, "available": True,
+                    "cold_start_attempts": 1, "cold_start_successes": 1,
+                    "reference_recall": 1.0,
+                    "reference_false_positive_rate": 0.0,
+                    "trials": [{}],
+                }
+                for name in ("gopls", "pyright")
+            ],
+        }
+        result = validator.validate(report, earlier, earlier_tree, 1)
+        self.assertIn(
+            "src/modules/lsp/lsp_context.c", result["changed_protected_paths"]
+        )
+        self.assertFalse(result["release_candidate_matched"])
 
 
 if __name__ == "__main__":

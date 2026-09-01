@@ -141,13 +141,20 @@ class LiveSemanticContextS0Test(unittest.TestCase):
     def test_real_provider_job_blocks_the_protected_unit_aggregate(self) -> None:
         workflow = (ROOT / ".github" / "workflows" / "ci.yml").read_text()
         self.assertIn("lsp-real-providers:", workflow)
-        self.assertIn("- os: macos-latest", workflow)
-        self.assertIn("runs-on: ${{ matrix.os }}", workflow)
-        self.assertIn("--assert-baseline", workflow)
-        self.assertIn("run_s1_candidate_probe.py", workflow)
-        self.assertIn("--assert-candidate", workflow)
-        self.assertIn("--cold-starts 20", workflow)
-        self.assertIn("lsp-s1-real-provider-${{ matrix.artifact }}-candidate", workflow)
+        provider_job = workflow.split("  lsp-real-providers:", 1)[1].split(
+            "\n  unit-tests:", 1
+        )[0]
+        self.assertIn("- os: macos-latest", provider_job)
+        self.assertIn("runs-on: ${{ matrix.os }}", provider_job)
+        self.assertIn("--assert-baseline", provider_job)
+        self.assertIn("run_s1_candidate_probe.py", provider_job)
+        self.assertIn("validate_s1_release_candidate.py", provider_job)
+        self.assertIn("--assert-release-candidate", provider_job)
+        self.assertIn("fetch-depth: 0", provider_job)
+        self.assertIn("--cold-starts 20", provider_job)
+        self.assertIn(
+            "lsp-s1-real-provider-${{ matrix.artifact }}-candidate", provider_job
+        )
         self.assertIn("LSP_REAL_RESULT: ${{ needs.lsp-real-providers.result }}", workflow)
         self.assertIn('[ "$LSP_REAL_RESULT" = success ]', workflow)
 

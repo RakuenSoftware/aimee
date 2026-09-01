@@ -78,8 +78,12 @@ freshness hashes, workspace-relative containment, typed failures, and bounded so
 contract directly exercises batching, truncation, stale source, unavailable providers, binary
 input, and input/returned-path escapes. The required Linux/macOS job retains a separate S1
 real-provider artifact after first reproducing the unchanged S0 baseline. Candidate probes also
-require runtime source tree `e6ba59ceba5a40323b006e834ac28ef39a2abc46`, allowing the exact source
-to be verified in GitHub's shallow PR merge checkout without relying on unavailable parent objects.
+record frozen runtime source tree `e6ba59ceba5a40323b006e834ac28ef39a2abc46`. The paired-study
+instrumentation continues to require that exact tree. The PR gate separately requires the frozen
+candidate to be an ancestor of the tested merge checkout and byte-compares the complete
+semantic-context implementation/test surface against it. This permits unrelated files added by a
+newer `testing` base while rejecting any drift in the evidenced feature, and the real providers
+still execute against the actual merge checkout.
 The first eligible model calibration found and fixed a cross-file false-stale defect before the
 promotion run: bounded target source is now hashed against the target file before and after the
 read, rather than against the anchor file. The epoch-2 PR lint gate then rejected formatting in that

@@ -836,6 +836,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
         with:
           go-version-file: server-go/go.mod
@@ -899,8 +901,14 @@ jobs:
             --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
             --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
             --cold-starts 20 \
-            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
-            --assert-candidate
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json"
+          python3 benchmarks/live-semantic-context/validate_s1_release_candidate.py \
+            --probe-report "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-candidate.json" \
+            --candidate-commit 474bd69954237fca249eb44e942caeab4270ad5e \
+            --candidate-src-tree e6ba59ceba5a40323b006e834ac28ef39a2abc46 \
+            --cold-starts 20 \
+            --output "${RUNNER_TEMP}/lsp-s1-${{ matrix.artifact }}-release-validation.json" \
+            --assert-release-candidate
       - name: Retain the provider observation
         if: ${{ always() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -913,7 +921,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: lsp-s1-real-provider-${{ matrix.artifact }}-candidate
-          path: ${{ runner.temp }}/lsp-s1-${{ matrix.artifact }}-candidate.json
+          path: ${{ runner.temp }}/lsp-s1-${{ matrix.artifact }}-*.json
           if-no-files-found: warn
 
   # Stable protected context for the sharded suite. It remains named
