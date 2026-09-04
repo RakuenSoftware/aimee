@@ -32,7 +32,7 @@
 #include <aimee/learning/learning.h>
 #include <aimee/learning/module_api.h>
 #include <aimee/memory/module_api.h>
-#include "modules/db2/support/db2_pii_classifier.h" /* the §7 PII gate provider seam */
+#include <aimee/memory/pii_provider.h> /* the §7 PII gate provider seam */
 #include <aimee/postgres/module_api.h>
 
 #include <limits.h>
@@ -45,6 +45,7 @@
 
 #define KB_MODULE_STAGE_DEADLINE_NS (500ULL * 1000000ULL)
 #define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
+#define KB_MODULE_MEMORY_DATA_DEADLINE_NS (5ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
 
@@ -414,6 +415,69 @@ static int kb_memory_pii_sensitivity(const char *const *rel_types, int count, in
    return rc;
 }
 
+void memory_pii_register_inject_classifier(
+    int (*classifier)(int sensitivity, double confidence, int turn_requests_sensitive,
+                      int *allowed));
+int memory_embed_command_is_http(const char *command);
+
+static int kb_memory_pii_inject(int sensitivity, double confidence,
+                                int turn_requests_sensitive, int *allowed)
+{
+   if (!allowed)
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   if (!request)
+      return -1;
+   cJSON_AddStringToObject(request, "operation", "pii-inject");
+   cJSON_AddNumberToObject(request, "sensitivity", (double)sensitivity);
+   cJSON_AddNumberToObject(request, "confidence", confidence);
+   cJSON_AddBoolToObject(request, "turn_requests_sensitive", turn_requests_sensitive != 0);
+   char *encoded = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   if (!encoded)
+      return -1;
+   uint8_t *wire_response = malloc(AIMEE_MODULE_MESSAGE_MAX_BODY);
+   uint32_t response_len = 0;
+   int rc = -1;
+   if (wire_response && strlen(encoded) <= UINT32_MAX &&
+       call_module(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
+                   (uint32_t)strlen(encoded), wire_response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                   &response_len) == 0)
+   {
+      cJSON *response = cJSON_ParseWithLength((const char *)wire_response, response_len);
+      cJSON *value = response ? cJSON_GetObjectItemCaseSensitive(response, "allowed") : NULL;
+      if (cJSON_IsBool(value))
+      {
+         *allowed = cJSON_IsTrue(value) ? 1 : 0;
+         rc = 0;
+      }
+      cJSON_Delete(response);
+   }
+   free(wire_response);
+   free(encoded);
+   return rc;
+}
+
+cJSON *kb_module_memory_data(const cJSON *request_json)
+{
+   if (!request_json)
+      return NULL;
+   char *request = cJSON_PrintUnformatted(request_json);
+   size_t request_len = request ? strlen(request) : 0;
+   uint8_t *response = calloc(AIMEE_MODULE_MESSAGE_MAX_BODY + 1u, 1u);
+   uint32_t response_len = 0;
+   cJSON *root = NULL;
+   if (request && request_len > 0 && request_len <= AIMEE_MODULE_MESSAGE_MAX_BODY &&
+       request_len <= UINT32_MAX && response &&
+       call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
+                               (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                               &response_len, KB_MODULE_MEMORY_DATA_DEADLINE_NS) == 0)
+      root = cJSON_ParseWithLength((const char *)response, response_len);
+   free(request);
+   free(response);
+   return root;
+}
+
 _Static_assert(AIMEE_DB2_FACT_ATTR_MAX == AIMEE_MEMORY_SCAN_ATTR_MAX,
                "memory wire attribute capacity must match the DB2 host contract");
 
@@ -439,12 +503,6 @@ static int scan_fact_turn(const char *text, int *is_retraction, int *has_attr,
                 : -1;
    free(request);
    return rc;
-}
-
-static int embed_command_is_http(const char *command)
-{
-   return command && (strncmp(command, "http://", strlen("http://")) == 0 ||
-                      strncmp(command, "https://", strlen("https://")) == 0);
 }
 
 static int json_optional_flag(const cJSON *root, const char *name, int *value)
@@ -541,9 +599,9 @@ static int embed_text(const char *text, const char *command, int input_type, flo
    if (!text || !command || !command[0] || !out || max_dim <= 0 ||
        (input_type != AIMEE_DB2_EMBED_DOCUMENT && input_type != AIMEE_DB2_EMBED_QUERY))
       return 0;
-   if (!embed_command_is_http(command))
-      return memory_embed_text(text, command, (embed_input_type_t)input_type, out, max_dim);
-   return embed_over_module(text, command, input_type, out, max_dim);
+   return memory_embed_command_is_http(command)
+              ? embed_over_module(text, command, input_type, out, max_dim)
+              : 0;
 }
 
 int kb_module_postgres_health_probe(int *schema_ok, int *have_pg_trgm, int *kb_tables_ok)
@@ -604,6 +662,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
    memory_pii_register_turn_classifier(kb_memory_pii_turn);
    memory_pii_register_sensitivity_batch(kb_memory_pii_sensitivity);
+   memory_pii_register_inject_classifier(kb_memory_pii_inject);
    aimee_db2_register_embed_provider(embed_text);
    aimee_db2_register_identity_key_provider(kb_identity_key_from_fields);
    aimee_db2_register_css_render_compare_provider(css_render_compare);

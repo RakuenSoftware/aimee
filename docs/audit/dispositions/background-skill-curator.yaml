@@ -26,7 +26,7 @@
     "schema_or_data_migration": false
   },
   "preserved": {
-    "generic_memory_maintenance": "src/modules/memory/memory_maintenance.c",
+    "generic_memory_maintenance": "server-go/modules/memory/data.go",
     "generic_maintenance_state": "src/db1/maintenance.c",
     "kb_synthesis_curator": "src/modules/kb-synthesis/kb_curator_pipeline.c",
     "kb_curator_config": "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"

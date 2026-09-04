@@ -29,7 +29,7 @@ static int counting_batch(const char *const *rel_types, int count, rel_sensitivi
 {
    g_batch_calls++;
    for (int i = 0; i < count; i++)
-      out[i] = memory_pii_rel_sensitivity(rel_types[i]);
+      out[i] = rel_types[i] && strcmp(rel_types[i], "age") == 0 ? SENS_PII : SENS_NORMAL;
    return 0;
 }
 
@@ -37,8 +37,9 @@ static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, i
 {
    if (!verdict)
       return -1;
-   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
-                                          (memory_node_kind_t)tail_kind, NULL);
+   (void)head_kind;
+   (void)tail_kind;
+   *verdict = rel_type && rel_type[0] ? DB2_FACT_GATE_ACCEPT : DB2_FACT_GATE_BADARG;
    return 0;
 }
 
@@ -46,6 +47,7 @@ int main(void)
 {
    db2_test_shim_open();
    aimee_db2_register_fact_gate_provider(check_fact_gate);
+   memory_pii_register_sensitivity_batch(counting_batch);
    assert(db2_rel_types_ensure_seed() == 0);
 
    /* user facts via the gate (USER authority -> Class A, conf 1.0, above floor):
@@ -196,7 +198,7 @@ int main(void)
       assert(g_batch_calls == 1);
 
       memory_pii_register_sensitivity_batch(NULL);
-      assert(db2_fact_recall_block("user", 1, buf, sizeof(buf)) >= 1);
+      assert(db2_fact_recall_block("user", 1, buf, sizeof(buf)) == -1);
    }
 
    /* bad args. */

@@ -5,7 +5,6 @@
 #include "aimee.h"
 #include "db1_client/db1.h"
 #include "headers/cmd_hooks_scope.h"
-#include "memory_redirect.h"
 #include "platform_process.h"
 #include "agent_config.h"
 #include "agent_coord.h"
@@ -403,36 +402,6 @@ void cmd_hooks(app_ctx_t *ctx, int argc, char **argv)
             }
             fprintf(stderr, "aimee: %s\n", reason);
             exit(2);
-         }
-      }
-
-      /* Memory interception: redirect an agent's local memory-file write into
-       * the central store, reusing the deny-with-message channel. */
-      {
-         cJSON *ti = (tool_input && tool_input[0]) ? cJSON_Parse(tool_input) : NULL;
-         if (ti)
-         {
-            /* The thin client resolves the project against the real cwd/git repo
-             * and forwards it; required when this server is remote. Sourced from
-             * the top-level hook input only — any value nested in tool_input is
-             * intentionally ignored (the agent must not pick its own store key). */
-            const char *hp = NULL;
-            cJSON *hpj = cJSON_GetObjectItemCaseSensitive(json, "harness_project");
-            if (cJSON_IsString(hpj) && hpj->valuestring && hpj->valuestring[0])
-               hp = hpj->valuestring;
-            char mr_msg[1024] = "";
-            int mr = memory_redirect_check(tool_name, ti, cwd, hp, mr_msg, sizeof(mr_msg));
-            cJSON_Delete(ti);
-            if (mr == 2)
-            {
-               if (hook_client_uses_pretool_json())
-               {
-                  emit_pretool_deny_json(mr_msg);
-                  exit(0);
-               }
-               fprintf(stderr, "aimee: %s\n", mr_msg);
-               exit(2);
-            }
          }
       }
 

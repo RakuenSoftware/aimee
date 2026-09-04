@@ -66,7 +66,10 @@ bash /root/install-config-module.sh start-server >/root/config-start-server.log 
 # If db1 is not answering by then the ramp refuses and TLS is disabled for the
 # life of the process -- reported as "tls_port set but TLS cert/key not
 # loadable", which blames the certificate.
-bash /root/install-db1-module.sh start >/root/db1-start.log 2>&1 &
+# PostgreSQL must be serving before the store applies its embedded schema. Run
+# the pair serially in one background job while the daemon waits for DB1 PKI.
+( bash /root/install-postgres-module-server.sh start >/root/postgres-start-server.log 2>&1 && \
+  bash /root/install-db1-module.sh start >/root/db1-start.log 2>&1 ) &
 echo $! > /root/server.pid
 sleep 10
 echo "server pid=$(cat /root/server.pid)"

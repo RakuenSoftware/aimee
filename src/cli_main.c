@@ -28,7 +28,6 @@
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
 #include "cJSON.h"
-#include "memory_redirect.h"
 #include <ctype.h>
 #include <signal.h>
 #include <stdio.h>

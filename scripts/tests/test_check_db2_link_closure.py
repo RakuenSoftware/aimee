@@ -757,16 +757,16 @@ class LinkClosureTest(unittest.TestCase):
 
     def test_real_repository_reduces_owned_input_and_bounded_contract_debt(self) -> None:
         contract = json.loads((REPO / checker.CONTRACT).read_text(encoding="utf-8"))
-        self.assertEqual(contract["summary"]["unresolved_symbols"], 140)
+        self.assertEqual(contract["summary"]["unresolved_symbols"], 151)
         self.assertEqual(
             contract["summary"]["dispositions"]["descriptor-owned-copy/generated-input"], 0
         )
         self.assertEqual(contract["summary"]["dispositions"]["system-link"], 140)
         self.assertEqual(
-            contract["summary"]["dispositions"]["portable-core-promotion"], 0
+            contract["summary"]["dispositions"]["portable-core-promotion"], 6
         )
         self.assertEqual(
-            contract["summary"]["dispositions"]["injected-module-contract"], 0
+            contract["summary"]["dispositions"]["injected-module-contract"], 5
         )
         self.assertFalse(any(
             row["symbol"].startswith("cJSON_") for row in contract["unresolved"]
@@ -803,21 +803,13 @@ class LinkClosureTest(unittest.TestCase):
         self.assertFalse(any(
             row["symbol"] == "code_match_line" for row in contract["unresolved"]
         ))
-        self.assertFalse(any(
-            row["symbol"] == "memory_ontology_node_kind_to_text"
-            for row in contract["unresolved"]
-        ))
-        self.assertFalse(any(
-            row["symbol"] == "memory_pii_should_inject"
-            for row in contract["unresolved"]
-        ))
-        self.assertFalse(any(
-            row["symbol"] in {
-                "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-                "memory_pii_turn_requests_sensitive",
-            }
-            for row in contract["unresolved"]
-        ))
+        unresolved = {row["symbol"]: row["disposition"] for row in contract["unresolved"]}
+        for symbol in {
+            "memory_ontology_node_kind_to_text", "memory_pii_should_inject",
+            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
+            "memory_pii_turn_requests_sensitive",
+        }:
+            self.assertEqual(unresolved[symbol], "injected-module-contract")
         self.assertFalse(any(
             row["symbol"] in {"code_import_identity", "code_import_resolves_path"}
             for row in contract["unresolved"]
@@ -902,64 +894,6 @@ class LinkClosureTest(unittest.TestCase):
         )
         self.assertIn(
             code_audit_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
-        node_kind_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/node_kind_text_primitives.c"
-        )
-        self.assertEqual(
-            node_kind_support["defines"], ["memory_ontology_node_kind_to_text"]
-        )
-        self.assertEqual(node_kind_support["resolves"], node_kind_support["defines"])
-        self.assertEqual(node_kind_support["allowed_undefined"], [])
-        self.assertEqual(
-            node_kind_support["source_sha256"],
-            hashlib.sha256((REPO / node_kind_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            node_kind_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
-        pii_gate_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/pii_inject_gate_primitives.c"
-        )
-        self.assertEqual(
-            pii_gate_support["defines"], ["memory_pii_should_inject"]
-        )
-        self.assertEqual(pii_gate_support["resolves"], pii_gate_support["defines"])
-        self.assertEqual(pii_gate_support["allowed_undefined"], [])
-        self.assertEqual(
-            pii_gate_support["source_sha256"],
-            hashlib.sha256((REPO / pii_gate_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            pii_gate_support["path"],
-            json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
-        )
-        pii_classifier_support = next(
-            unit for unit in contract["descriptor_support_units"]
-            if unit["path"] == "src/modules/db2/support/pii_classifier_primitives.c"
-        )
-        self.assertEqual(pii_classifier_support["defines"], [
-            "memory_pii_register_sensitivity_batch", "memory_pii_register_turn_classifier",
-            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-            "memory_pii_turn_requests_sensitive",
-        ])
-        self.assertEqual(pii_classifier_support["resolves"], [
-            "memory_pii_rel_sensitivity", "memory_pii_rel_sensitivity_batch",
-            "memory_pii_turn_requests_sensitive",
-        ])
-        self.assertEqual(pii_classifier_support["allowed_undefined"], [
-            "__ctype_tolower_loc", "rel_type_normalize", "rel_types_seed_lookup", "strlen",
-        ])
-        self.assertEqual(
-            pii_classifier_support["source_sha256"],
-            hashlib.sha256((REPO / pii_classifier_support["path"]).read_bytes()).hexdigest(),
-        )
-        self.assertIn(
-            pii_classifier_support["path"],
             json.loads((REPO / checker.DESCRIPTOR).read_text(encoding="utf-8"))["sources"],
         )
 

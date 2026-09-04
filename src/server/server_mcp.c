@@ -530,9 +530,20 @@ cJSON *tool_memory_ask(cJSON *args, cJSON **structured_out)
    cJSON *trace = cJSON_AddObjectToObject(structured, "evidence_trace");
    if (trace)
    {
-      cJSON_AddStringToObject(trace, "decision",
-                              memory_answer_evidence_decision_str(&result.evidence));
-      cJSON_AddStringToObject(trace, "reason", memory_answer_evidence_reason_str(&result.evidence));
+      const char *decision = result.evidence.decision == MEMORY_ANSWER_DECISION_ANSWERABLE
+                                 ? "answerable"
+                             : result.evidence.decision == MEMORY_ANSWER_DECISION_ABSTAIN
+                                 ? "abstain"
+                                 : "exempt";
+      static const char *const reasons[] = {
+          "ok",          "structural_empty", "structural_no_extract", "citation_required",
+          "grounding_low", "chunk_floor",      "curated_exempt",        "db_unavailable"};
+      int reason_index = (int)result.evidence.reason;
+      const char *reason = reason_index >= 0 && reason_index < (int)(sizeof(reasons) / sizeof(reasons[0]))
+                               ? reasons[reason_index]
+                               : "unknown";
+      cJSON_AddStringToObject(trace, "decision", decision);
+      cJSON_AddStringToObject(trace, "reason", reason);
       cJSON *ids = cJSON_AddArrayToObject(trace, "candidate_ids");
       for (int i = 0; ids && i < result.evidence.candidate_id_count; i++)
          cJSON_AddItemToArray(ids, cJSON_CreateNumber((double)result.evidence.candidate_ids[i]));
