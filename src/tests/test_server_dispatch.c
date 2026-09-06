@@ -1340,6 +1340,22 @@ int handle_chat_send_stream(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    return stub_handler(conn, "chat.send_stream");
 }
 
+int handle_provider_connections(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "provider.connections");
+}
+int handle_provider_save_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "provider.save_connection");
+}
+int handle_provider_remove_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "provider.remove_connection");
+}
+int handle_provider_connection_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
+{
+   return stub_handler(conn, "provider.connection_models");
+}
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
    return stub_handler(conn, "model.list");

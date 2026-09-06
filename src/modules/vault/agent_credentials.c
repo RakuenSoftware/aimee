@@ -188,7 +188,10 @@ int agent_has_resolvable_credentials(const agent_t *agent)
        * whether an entry exists. */
       int is_codex = strcmp(agent->auth_type, "codex-oauth") == 0;
       if (vault_service_has_server_principal(agent->name, is_codex ? VAULT_CODEX_TOKEN_CRED
-                                                                   : VAULT_API_KEY_CRED))
+                                                                   : VAULT_API_KEY_CRED) ||
+          (agent->registration[0] &&
+           vault_service_has_server_principal(agent->registration, is_codex ? VAULT_CODEX_TOKEN_CRED
+                                                                            : VAULT_API_KEY_CRED)))
          return 1;
    }
    for (int i = 0; i < agent->credential_count; i++)
@@ -360,8 +363,12 @@ void agent_build_extra_headers(const agent_t *agent, char *buf, size_t buf_len)
       if (g_request_codex_account_id[0])
          snprintf(acct, sizeof(acct), "%s", g_request_codex_account_id);
       else
-         /* miss leaves acct empty (helper guarantees) -> header is skipped below. */
-         (void)agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct));
+      /* miss leaves acct empty (helper guarantees) -> header is skipped below. */
+      {
+         if (!agent->registration[0] ||
+             !agent_vault_get(agent->registration, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct)))
+            (void)agent_vault_get(agent->name, VAULT_CODEX_ACCOUNT_CRED, acct, sizeof(acct));
+      }
       if (acct[0])
       {
          if (!strstr(buf, "originator:"))
@@ -541,7 +548,9 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
          return 0;
       }
       char token[MAX_API_KEY_LEN];
-      if (agent_vault_get(agent->name, VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
+      if ((agent->registration[0] &&
+           agent_vault_get(agent->registration, VAULT_CODEX_TOKEN_CRED, token, sizeof(token))) ||
+          agent_vault_get(agent->name, VAULT_CODEX_TOKEN_CRED, token, sizeof(token)))
       {
          snprintf(buf, buf_len, "Authorization: Bearer %s", token);
          return 0;
@@ -608,10 +617,17 @@ int agent_resolve_auth(const agent_t *agent, char *buf, size_t buf_len)
     * auth types below (not codex-oauth / auth_cmd), to avoid a wasted decrypt on
     * turns that never consult it. */
    char primary_key[MAX_API_KEY_LEN];
-   int have_primary_key =
-       (vault_service_inject_api_key(agent_get_request_vault_principal(), agent->name, primary_key,
-                                     sizeof(primary_key), time(NULL)) == VAULT_OK &&
-        primary_key[0]);
+   int have_primary_key = 0;
+   if (agent->registration[0])
+      have_primary_key =
+          vault_service_inject_api_key(agent_get_request_vault_principal(), agent->registration,
+                                       primary_key, sizeof(primary_key), time(NULL)) == VAULT_OK &&
+          primary_key[0];
+   if (!have_primary_key)
+      have_primary_key =
+          vault_service_inject_api_key(agent_get_request_vault_principal(), agent->name,
+                                       primary_key, sizeof(primary_key), time(NULL)) == VAULT_OK &&
+          primary_key[0];
 
    /* x-api-key auth (Anthropic): resolve via the vault, auth_cmd or api_key */
    if (strcmp(auth_type, "x-api-key") == 0)

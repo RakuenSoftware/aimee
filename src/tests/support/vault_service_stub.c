@@ -13,6 +13,8 @@
 #include <string.h>
 
 char test_vault_server_codex_oauth[4096];
+char test_vault_api_key_agent[64];
+char test_vault_api_key[4096];
 
 vault_status_t vault_service_inject_api_key(const char *principal, const char *agent, char *api_key,
                                             size_t api_key_len, long now_epoch)
@@ -22,6 +24,11 @@ vault_status_t vault_service_inject_api_key(const char *principal, const char *a
    (void)api_key;
    (void)api_key_len;
    (void)now_epoch;
+   if (agent && test_vault_api_key_agent[0] && strcmp(agent, test_vault_api_key_agent) == 0)
+   {
+      snprintf(api_key, api_key_len, "%s", test_vault_api_key);
+      return VAULT_OK;
+   }
    return VAULT_NO_ENTRY; /* miss -> caller keeps its config/env key */
 }
 
@@ -43,6 +50,9 @@ vault_status_t vault_service_get(const char *principal, const char *agent, const
  * credential sees it as both present and gettable. */
 int vault_service_has_server_principal(const char *agent, const char *cred)
 {
+   if (agent && cred && test_vault_api_key_agent[0] && strcmp(agent, test_vault_api_key_agent) == 0 &&
+       strcmp(cred, VAULT_API_KEY_CRED) == 0)
+      return test_vault_api_key[0] != '\0';
    return agent && cred && strcmp(agent, "codex") == 0 && strcmp(cred, "oauth") == 0 &&
           test_vault_server_codex_oauth[0];
 }

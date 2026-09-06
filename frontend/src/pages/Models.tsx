@@ -1,15 +1,8 @@
-/* Models — the operator-facing list of RUNTIME TARGETS: one row per
- * (endpoint, model) pair, which is exactly what routing schedules.
- *
- * This is the flat, per-target view. The Providers tab groups these same records
- * by provider and nests its models underneath, so credentials and endpoints are
- * entered once per provider rather than once per model. Both pages read the same
- * roster; this one is where a single model's routing knobs and its role/persona
- * bindings are edited.
- */
+/* Models: model selection, limits, prices, and routing configuration. */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { Panel, Badge, Spinner, Modal, InlineStatus, EmptyState, KeyValue, Button } from "@rakuensoftware/smoothgui";
 import PrimaryChooser from "../setup/PrimaryChooser";
+import AddProviderModel from "../providers/AddProviderModel";
 
 /* ---- API types ---- */
 
@@ -27,6 +20,18 @@ interface ModelCfg {
   max_turns?: number;
   max_parallel?: number;
   context_window?: number;
+  registration?: string;
+  max_output?: number;
+  effective_context_window?: number;
+  effective_max_output?: number;
+  context_window_source?: string;
+  max_output_source?: string;
+  price_in_per_mtok?: number;
+  price_out_per_mtok?: number;
+  price_cached_per_mtok?: number;
+  price_in_declared?: boolean;
+  price_out_declared?: boolean;
+  price_cached_declared?: boolean;
   roles?: string[];
   personas?: string[];
 }
@@ -64,7 +69,9 @@ type ProbeState = {
 
 async function getJSON<T>(url: string): Promise<T> {
   const r = await fetch(url, { headers: { "X-CSRF-Token": window._csrf || "" } });
-  return (await r.json()) as T;
+  const data = await r.json();
+  if (!r.ok) throw new Error(data.error || data.message || "Model service unavailable");
+  return data as T;
 }
 async function postArgs<T>(url: string, args: string[]): Promise<T> {
   const r = await fetch(url, {
@@ -119,7 +126,7 @@ export default function Models() {
       // against a server that has not been upgraded yet.
       getJSON<{ models?: ModelCfg[]; agents?: ModelCfg[] }>("/api/models")
         .then((d) => setModels(d.models || d.agents || []))
-        .catch(() => setModels([])),
+        .catch((error) => setStatus({ kind: "err", msg: error instanceof Error ? error.message : "Model service unavailable" })),
       getJSON<{ stats: ModelStats[] }>("/api/models/stats")
         .then((d) => {
           const map: Record<string, ModelStats> = {};
@@ -172,7 +179,7 @@ export default function Models() {
 
   return (
     <div style={{ padding: 16, fontFamily: "system-ui", height: "100%", overflow: "auto" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 10, marginBottom: 12 }}>
         <strong style={{ fontSize: 18 }}>Models</strong>
         <Badge label={`${models.length}`} variant="neutral" />
         <Button onClick={refresh} size="md" title="Reload the model list and run stats.">
@@ -279,7 +286,12 @@ function ModelCard({
               variant={cfg.enabled ? "success" : "neutral"}
             />
           </div>
-          <KeyValue label="provider" value={cfg.provider || "—"} />
+          <KeyValue label="provider" value={cfg.registration || cfg.provider || "—"} />
+          <KeyValue label="context window" value={cfg.effective_context_window ? `${cfg.effective_context_window.toLocaleString()} (${cfg.context_window_source || "resolved"})` : "unknown"} />
+          <KeyValue label="max output" value={cfg.effective_max_output ? `${cfg.effective_max_output.toLocaleString()} (${cfg.max_output_source || "resolved"})` : "unknown"} />
+          <KeyValue label="input / output / cached price" value={[
+            [cfg.price_in_per_mtok, cfg.price_in_declared], [cfg.price_out_per_mtok, cfg.price_out_declared], [cfg.price_cached_per_mtok, cfg.price_cached_declared],
+          ].map(([v, declared]) => declared ? `$${v || 0}/Mtok (declared)` : typeof v === "number" && v > 0 ? `$${v}/Mtok (resolved)` : "unknown").join(" / ")} />
           <KeyValue label="model" value={cfg.model || "—"} />
           <KeyValue label="endpoint" value={cfg.endpoint || "(cli / none)"} mono />
           {typeof cfg.cost_tier === "number" && (
@@ -291,9 +303,6 @@ function ModelCard({
           {typeof cfg.max_turns === "number" && cfg.max_turns >= 0 && (
             <KeyValue label="max turns" value={String(cfg.max_turns)} />
           )}
-          {cfg.context_window ? (
-            <KeyValue label="context" value={`${cfg.context_window.toLocaleString()} tok`} />
-          ) : null}
           <KeyValue label="tools" value={cfg.tools_enabled ? "enabled" : "disabled"} />
           <StaticChips label="roles" values={cfg.roles || []} />
           <StaticChips label="personas" values={cfg.personas || []} emptyHint="(none = all)" />
@@ -402,6 +411,10 @@ function ModelEditModal({
   const [maxTurns, setMaxTurns] = useState(String(cfg.max_turns ?? -1));
   const [maxParallel, setMaxParallel] = useState(String(cfg.max_parallel ?? 0));
   const [contextWindow, setContextWindow] = useState(String(cfg.context_window ?? 0));
+  const [maxOutput, setMaxOutput] = useState(String(cfg.max_output || ""));
+  const [priceIn, setPriceIn] = useState(cfg.price_in_declared ? String(cfg.price_in_per_mtok ?? 0) : "");
+  const [priceOut, setPriceOut] = useState(cfg.price_out_declared ? String(cfg.price_out_per_mtok ?? 0) : "");
+  const [priceCached, setPriceCached] = useState(cfg.price_cached_declared ? String(cfg.price_cached_per_mtok ?? 0) : "");
   const [tools, setTools] = useState(!!cfg.tools_enabled);
   const [enabled, setEnabled] = useState(!!cfg.enabled);
   const [primaryOnly, setPrimaryOnly] = useState(!!cfg.primary_only);
@@ -421,20 +434,23 @@ function ModelEditModal({
     // to "all".
     const args = [
       cfg.name,
-      "--provider", provider,
       "--model", model.trim(),
-      "--endpoint", endpoint.trim(),
+      ...(!cfg.registration ? ["--provider", provider, "--endpoint", endpoint.trim()] : []),
       "--cost-tier", costTier || "0",
       "--max-turns", maxTurns || "-1",
       "--max-parallel", maxParallel || "0",
       "--context-window", contextWindow || "0",
+      "--max-output", maxOutput.trim() || "0",
+      "--price-in", priceIn.trim(),
+      "--price-out", priceOut.trim(),
+      "--price-cached", priceCached.trim(),
       "--tools", tools ? "on" : "off",
       "--enabled", enabled ? "true" : "false",
       "--primary-only", primaryOnly ? "on" : "off",
       "--roles", roles.join(","),
       "--personas", personas.join(","),
     ];
-    if (apiKey.trim()) args.push("--key", apiKey.trim());
+    if (!cfg.registration && apiKey.trim()) args.push("--key", apiKey.trim());
     try {
       const res = await postArgs<{ error?: string }>("/api/models/set", args);
       if (res.error) setErr(res.error);
@@ -479,7 +495,7 @@ function ModelEditModal({
     >
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
         <L label="provider" title="The backend provider used to run this model.">
-          <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy}>
+          <select value={provider} onChange={(e) => setProvider(e.target.value)} style={inp} disabled={busy || !!cfg.registration}>
             {(PROVIDERS.includes(provider) ? PROVIDERS : [provider, ...PROVIDERS]).map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -499,7 +515,7 @@ function ModelEditModal({
             onChange={(e) => setEndpoint(e.target.value)}
             style={inp}
             placeholder="https://host:port/v1"
-            disabled={busy}
+            disabled={busy || !!cfg.registration}
           />
         </L>
         <L label="cost tier" title="Relative cost tier used when routing picks a model.">
@@ -514,7 +530,19 @@ function ModelEditModal({
         <L label="context window (tok, 0 = auto)" title="Context window in tokens; 0 auto-detects.">
           <input type="number" value={contextWindow} onChange={(e) => setContextWindow(e.target.value)} style={inp} min={0} disabled={busy} />
         </L>
-        <L label="API key (blank = keep current)" title="Set an API key or $ENV_VAR reference; leave blank to keep the current key.">
+        <L label="max output (tokens, blank = auto)">
+          <input type="number" min={0} value={maxOutput} onChange={e => setMaxOutput(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        <L label="input price ($/Mtok, blank = not stated)">
+          <input type="number" min={0} step="any" value={priceIn} onChange={e => setPriceIn(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        <L label="output price ($/Mtok, blank = not stated)">
+          <input type="number" min={0} step="any" value={priceOut} onChange={e => setPriceOut(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        <L label="cached-read price ($/Mtok, blank = not stated)">
+          <input type="number" min={0} step="any" value={priceCached} onChange={e => setPriceCached(e.target.value)} style={inp} disabled={busy} />
+        </L>
+        {!cfg.registration && <L label="API key (blank = keep current)" title="Set an API key or $ENV_VAR reference; leave blank to keep the current key.">
           <input
             type="password"
             value={apiKey}
@@ -523,7 +551,7 @@ function ModelEditModal({
             placeholder="sk-…  or  $ENV_VAR"
             disabled={busy}
           />
-        </L>
+        </L>}
       </div>
 
       <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
@@ -596,22 +624,16 @@ function ModelEditModal({
   );
 }
 
-/* ---- add model: the SAME chooser + flows as the wizard's add ----
- * One code path (PrimaryChooser) drives both surfaces; its 'delegate' mode only
- * collects a roster name + roles and skips the --default promotion. Fine-tuning
- * (cost tier, disable, endpoint tweaks) lives in the edit modal afterwards. */
-
+/* Saved connections are the normal add flow. Keep subscription authentication
+ * available here as well as in the initial setup wizard. */
 function AddModel({ onDone }: { onDone: (msg: string, ok: boolean) => void }) {
-  return (
-    <Panel title="Add model">
-      <div style={{ padding: "12px" }}>
-        <PrimaryChooser
-          mode="delegate"
-          onConfigured={(provider) => onDone(`added ${provider} model`, true)}
-        />
-      </div>
-    </Panel>
-  );
+  const [subscription, setSubscription] = useState(false);
+  return <Panel title="Add model">
+    <div style={{ padding: 12 }}>
+      <Button onClick={() => setSubscription(v => !v)}>{subscription ? "Use a saved provider" : "Connect a subscription or new account"}</Button>
+      {subscription ? <PrimaryChooser mode="delegate" onConfigured={provider => onDone(`added ${provider} model`, true)} /> : <AddProviderModel onDone={onDone} />}
+    </div>
+  </Panel>;
 }
 
 /* ---- small presentational helpers ---- */

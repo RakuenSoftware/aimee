@@ -1,1102 +1,204 @@
-/* model_registry.c: model alias resolution and provider autodetection */
-#include "aimee.h"
-#include "aimee_home.h"
+/* Native ABI adapter for the Go providers module's model registry. */
 #include "model_registry.h"
+#include "providers_client.h"
 #include "cJSON.h"
-#include "models_dev.h"
-#include <errno.h>
-#include <fcntl.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
-#include <strings.h>
-#include <sys/stat.h>
-#include <unistd.h>
 
-/* --- Alias table ---
- * Short aliases → canonical provider + model ID.
- * Keep in sync with assistant knowledge cutoff: August 2025.
- */
-typedef struct
+static const char *string(cJSON *o, const char *k)
 {
-   const char *alias;
-   const char *provider;
-   const char *model_id;
-} alias_entry_t;
-
-static const alias_entry_t g_aliases[] = {
-    /* Anthropic Claude */
-    {"opus", "anthropic", "claude-opus-4-6"},
-    {"opus4", "anthropic", "claude-opus-4-6"},
-    {"claude-opus", "anthropic", "claude-opus-4-6"},
-    {"sonnet", "anthropic", "claude-sonnet-4-6"},
-    {"sonnet4", "anthropic", "claude-sonnet-4-6"},
-    {"claude-sonnet", "anthropic", "claude-sonnet-4-6"},
-    {"haiku", "anthropic", "claude-haiku-4-5-20251001"},
-    {"haiku4", "anthropic", "claude-haiku-4-5-20251001"},
-    {"claude-haiku", "anthropic", "claude-haiku-4-5-20251001"},
-    {"claude", "anthropic", "claude-sonnet-4-6"},
-
-    /* OpenAI */
-    {"gpt4o", "openai", "gpt-4o"},
-    {"gpt-4o", "openai", "gpt-4o"},
-    {"gpt4", "openai", "gpt-4-turbo"},
-    {"gpt-4", "openai", "gpt-4-turbo"},
-    {"gpt4-turbo", "openai", "gpt-4-turbo"},
-    {"gpt35", "openai", "gpt-3.5-turbo"},
-    {"gpt-35", "openai", "gpt-3.5-turbo"},
-    {"gpt3", "openai", "gpt-3.5-turbo"},
-    {"o1", "openai", "o1"},
-    {"o1-mini", "openai", "o1-mini"},
-    {"o3", "openai", "o3"},
-    {"o3-mini", "openai", "o3-mini"},
-
-    /* Google Gemini */
-    {"gemini", "gemini", "gemini-1.5-pro"},
-    {"gemini-pro", "gemini", "gemini-1.5-pro"},
-    {"gemini-flash", "gemini", "gemini-1.5-flash"},
-    {"gemini-2", "gemini", "gemini-2.0-flash"},
-    {"gemini-25", "gemini", "gemini-2.5-pro"},
-
-    /* Mistral */
-    {"mistral", "mistral", "mistral-large-latest"},
-    {"mistral-large", "mistral", "mistral-large-latest"},
-    {"mistral-small", "mistral", "mistral-small-latest"},
-    {"codestral", "mistral", "codestral-latest"},
-
-    /* Sentinel */
-    {NULL, NULL, NULL},
-};
-
-int model_alias_resolve(const char *alias, model_info_t *out)
-{
-   if (!alias || !alias[0] || !out)
-      return 0;
-
-   for (int i = 0; g_aliases[i].alias != NULL; i++)
-   {
-      if (strcasecmp(g_aliases[i].alias, alias) == 0)
-      {
-         snprintf(out->provider, sizeof(out->provider), "%s", g_aliases[i].provider);
-         snprintf(out->model_id, sizeof(out->model_id), "%s", g_aliases[i].model_id);
-         return 1;
-      }
-   }
-   return 0;
+   const char *v = cJSON_GetStringValue(cJSON_GetObjectItem(o, k));
+   return v ? v : "";
 }
-
-/* --- Provider detection table ---
- * Map model ID prefixes/substrings to provider names.
- */
-typedef struct
+static double number(cJSON *o, const char *k)
 {
-   const char *prefix; /* substring to match (case-insensitive) */
-   const char *provider;
-} detect_entry_t;
-
-static const detect_entry_t g_detect[] = {
-    {"claude", "anthropic"},
-    {"gpt-", "openai"},
-    {"gpt4", "openai"},
-    {"o1", "openai"},
-    {"o3", "openai"},
-    {"text-davinci", "openai"},
-    {"gemini", "gemini"},
-    {"palm", "gemini"},
-    {"mistral", "mistral"},
-    {"codestral", "mistral"},
-    {"minimax", "minimax"},
-    {"kimi", "moonshotai"},
-    {NULL, NULL},
-};
-
-const char *model_detect_provider(const char *model_id)
-{
-   if (!model_id || !model_id[0])
-      return NULL;
-
-   for (int i = 0; g_detect[i].prefix != NULL; i++)
-   {
-      /* Case-insensitive substring match from start */
-      size_t plen = strlen(g_detect[i].prefix);
-      if (strncasecmp(model_id, g_detect[i].prefix, plen) == 0)
-         return g_detect[i].provider;
-   }
-
-   /* Check for substring match anywhere (e.g. "mistral-claude-...") */
-   for (int i = 0; g_detect[i].prefix != NULL; i++)
-   {
-      /* Only do substring for longer prefixes to avoid false positives */
-      if (strlen(g_detect[i].prefix) >= 4)
-      {
-         /* Case-insensitive search using manual scan */
-         const char *hay = model_id;
-         const char *needle = g_detect[i].prefix;
-         size_t nlen = strlen(needle);
-         while (*hay)
-         {
-            if (strncasecmp(hay, needle, nlen) == 0)
-               return g_detect[i].provider;
-            hay++;
-         }
-      }
-   }
-
-   /* Unknown: treat as OpenAI-compatible */
-   return "openai";
+   cJSON *v = cJSON_GetObjectItem(o, k);
+   return cJSON_IsNumber(v) ? v->valuedouble : 0;
 }
-
-/* --- Context window table ---
- * Map model ID prefixes to context window sizes (in tokens).
- * Order matters: longer/more-specific prefixes first for correct matching.
- */
-typedef struct
+static cJSON *call(const char *op, const char *provider, const char *model, const char *name)
 {
-   const char *prefix;
-   int context_window;
-} ctx_window_entry_t;
-
-static const ctx_window_entry_t g_ctx_windows[] = {
-    /* Anthropic Claude */
-    {"claude-opus-4", 200000},
-    {"claude-sonnet-4", 200000},
-    {"claude-haiku-4", 200000},
-    {"claude-3-5-sonnet", 200000},
-    {"claude-3-5-haiku", 200000},
-    {"claude-3-opus", 200000},
-    {"claude-3-sonnet", 200000},
-    {"claude-3-haiku", 200000},
-    {"claude-2", 100000},
-    {"claude", 200000}, /* fallback for any claude model */
-
-    /* OpenAI */
-    {"gpt-5.5", 272000},
-    {"gpt-5.4", 272000},
-    {"gpt-5.3", 272000},
-    {"gpt-5.2", 272000},
-    {"gpt-5", 272000},
-    {"gpt-4o", 128000},
-    {"gpt-4-turbo", 128000},
-    {"gpt-4-0125", 128000},
-    {"gpt-4-1106", 128000},
-    {"gpt-4-32k", 32768},
-    {"gpt-4", 8192},
-    {"gpt-3.5-turbo-16k", 16384},
-    {"gpt-3.5-turbo", 16384},
-    {"o1", 200000},
-    {"o3", 200000},
-
-    /* Google Gemini */
-    {"gemini-2.5", 1000000},
-    {"gemini-2.0", 1000000},
-    {"gemini-1.5-pro", 1000000},
-    {"gemini-1.5-flash", 1000000},
-    {"gemini-1.0", 32768},
-    {"gemini", 1000000}, /* fallback */
-
-    /* Mistral */
-    {"codestral", 256000},
-    {"mistral-large", 128000},
-    {"mistral-small", 128000},
-    {"mistral", 128000}, /* fallback */
-
-    /* MiniMax. Prefix matching is first-match-wins, so the bare "minimax"
-     * fallback must stay LAST in this group. NOTE the fallback is a KNOWN
-     * UNDER-estimate for any family newer than the named entries: a future
-     * MiniMax-M4 matches "minimax" and reports 200000. That is deliberate —
-     * under-reporting a window excludes a model from routing, while
-     * over-reporting admits a prompt the model cannot hold — but it means a new
-     * family needs an entry here (or catalog data) to be routable at its real
-     * size. Same applies to the "kimi" fallback below. */
-    {"MiniMax-M3", 1000000},
-    {"minimax-m3", 1000000},
-    {"MiniMax-M2", 200000},
-    {"minimax-m2", 200000},
-    {"minimax", 200000}, /* fallback: oldest known family; under-estimates newer ones */
-
-    /* Moonshot / Kimi */
-    {"kimi-k3", 1048576},
-    {"kimi-k2", 262144},
-    {"kimi", 262144}, /* fallback */
-
-    /* Sentinel */
-    {NULL, 0},
-};
-
-/* Defined below, next to the dynamic capability set it reads. */
-static int capability_dynamic_context_window(const char *model_id);
-
-int model_context_window(const char *model_id)
-{
-   if (!model_id || !model_id[0])
-      return 0;
-
-   /* Catalogue first, prefix table second. The prefix table is a hand-written
-    * approximation -- it maps every "claude" id to 200000, which understates
-    * every current model by 5x (they are 1M) and cannot track a release. Ask
-    * the catalogue for a measured value and keep the table only as the fallback
-    * for ids the catalogue does not carry (claude-2, older gpt-4 variants).
-    *
-    * NOT routed through model_capability_get(): that falls through to the
-    * heuristic, and the heuristic derives its context_window FROM this
-    * function, so that path would recurse. */
-   int measured = capability_dynamic_context_window(model_id);
-   if (measured > 0)
-      return measured;
-
-   for (int i = 0; g_ctx_windows[i].prefix != NULL; i++)
-   {
-      size_t plen = strlen(g_ctx_windows[i].prefix);
-      if (strncasecmp(model_id, g_ctx_windows[i].prefix, plen) == 0)
-         return g_ctx_windows[i].context_window;
-   }
-   return 0;
+   cJSON *args = cJSON_CreateObject();
+   if (provider)
+      cJSON_AddStringToObject(args, "provider", provider);
+   if (model)
+      cJSON_AddStringToObject(args, "model", model);
+   if (name)
+      cJSON_AddStringToObject(args, "name", name);
+   cJSON *reply = providers_module_request(op, args, "server", 0);
+   cJSON_Delete(args);
+   return reply;
 }
-
-static int model_has_prefix(const char *model_id, const char *prefix)
+int providers_decode_capability(cJSON *v, model_capability_t *out)
 {
-   if (!model_id || !prefix)
-      return 0;
-   size_t plen = strlen(prefix);
-   return strncasecmp(model_id, prefix, plen) == 0;
-}
-
-static int model_contains_ci(const char *model_id, const char *needle)
-{
-   if (!model_id || !needle || !needle[0])
-      return 0;
-   size_t nlen = strlen(needle);
-   for (const char *p = model_id; *p; p++)
-      if (strncasecmp(p, needle, nlen) == 0)
-         return 1;
-   return 0;
-}
-
-static void capability_set_modalities(model_capability_t *cap)
-{
-   if (cap->flags & MODEL_CAP_AUDIO)
-      snprintf(cap->modalities, sizeof(cap->modalities), "text,image,audio");
-   else if (cap->flags & MODEL_CAP_VISION)
-      snprintf(cap->modalities, sizeof(cap->modalities), "text,image");
-   else
-      snprintf(cap->modalities, sizeof(cap->modalities), "text");
-}
-
-static const char *model_semantic_id(const char *model_id)
-{
-   const char *slash = model_id ? strrchr(model_id, '/') : NULL;
-   return (slash && slash[1]) ? slash + 1 : model_id;
-}
-
-static int model_capability_get_heuristic(const char *provider, const char *model_id,
-                                          model_capability_t *out)
-{
-   if (!model_id || !model_id[0] || !out)
+   if (!cJSON_IsObject(v) || !out)
       return 0;
    memset(out, 0, sizeof(*out));
-   const char *semantic_id = model_semantic_id(model_id);
-   const char *effective_provider =
-       provider && provider[0] ? provider : model_detect_provider(model_id);
-   /* OpenRouter ids include the upstream provider prefix; keep the caller's
-    * provider identity outside this function, but infer capabilities from the
-    * upstream model family. */
-   if (effective_provider && strcasecmp(effective_provider, "openrouter") == 0)
-      effective_provider = model_detect_provider(semantic_id);
-
-   snprintf(out->provider, sizeof(out->provider), "%s",
-            provider && provider[0] ? provider : (effective_provider ? effective_provider : ""));
-   snprintf(out->model_id, sizeof(out->model_id), "%s", model_id);
-   out->context_window = model_context_window(model_id);
-   if (out->context_window <= 0 && semantic_id && semantic_id != model_id)
-      out->context_window = model_context_window(semantic_id);
-   out->max_output = 0;
-
-   if (effective_provider && strcasecmp(effective_provider, "anthropic") == 0)
+#define S(field, key) snprintf(out->field, sizeof(out->field), "%s", string(v, key))
+   S(provider, "provider");
+   S(model_id, "model");
+   S(display_name, "display_name");
+   S(modalities, "modalities");
+   S(knowledge_cutoff, "knowledge_cutoff");
+#undef S
+#define N(field, key) out->field = number(v, key)
+   N(context_window, "context_window");
+   N(max_output, "max_output");
+   N(cost_in_per_mtok, "cost_in_per_mtok");
+   N(cost_out_per_mtok, "cost_out_per_mtok");
+   N(cost_cache_read_per_mtok, "cost_cache_read_per_mtok");
+   N(flags, "flags_mask");
+#undef N
+   out->open_weights = cJSON_IsTrue(cJSON_GetObjectItem(v, "open_weights"));
+   out->deprecated = cJSON_IsTrue(cJSON_GetObjectItem(v, "deprecated"));
+   cJSON *bands = cJSON_GetObjectItem(v, "price_bands");
+   int n = cJSON_GetArraySize(bands);
+   out->price_bands_truncated = n > MODEL_PRICE_BANDS_MAX;
+   out->price_band_count = n > MODEL_PRICE_BANDS_MAX ? MODEL_PRICE_BANDS_MAX : n;
+   for (int i = 0; i < out->price_band_count; i++)
    {
-      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
-      if (model_has_prefix(semantic_id, "claude-3") ||
-          model_has_prefix(semantic_id, "claude-opus-4") ||
-          model_has_prefix(semantic_id, "claude-sonnet-4") ||
-          model_has_prefix(semantic_id, "claude-haiku-4"))
-         out->flags |= MODEL_CAP_VISION | MODEL_CAP_PDF;
-      if (model_contains_ci(semantic_id, "opus") || model_contains_ci(semantic_id, "sonnet"))
-         out->flags |= MODEL_CAP_REASONING;
+      cJSON *b = cJSON_GetArrayItem(bands, i);
+      out->price_bands[i].above_tokens = number(b, "above_tokens");
+      out->price_bands[i].in_per_mtok = number(b, "in_per_mtok");
+      out->price_bands[i].out_per_mtok = number(b, "out_per_mtok");
+      out->price_bands[i].cache_read_per_mtok = number(b, "cache_read_per_mtok");
    }
-   else if (effective_provider && strcasecmp(effective_provider, "openai") == 0)
-   {
-      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
-      if (model_has_prefix(semantic_id, "gpt-4o") || model_has_prefix(semantic_id, "gpt-5"))
-         out->flags |= MODEL_CAP_VISION;
-      if (model_has_prefix(semantic_id, "gpt-5") || model_has_prefix(semantic_id, "o1") ||
-          model_has_prefix(semantic_id, "o3"))
-         out->flags |= MODEL_CAP_REASONING;
-   }
-   else if (effective_provider && strcasecmp(effective_provider, "gemini") == 0)
-   {
-      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING | MODEL_CAP_VISION | MODEL_CAP_PDF;
-      if (model_has_prefix(semantic_id, "gemini-2.5"))
-         out->flags |= MODEL_CAP_REASONING;
-   }
-   else if (effective_provider && strcasecmp(effective_provider, "mistral") == 0)
-   {
-      out->flags = MODEL_CAP_STREAMING | MODEL_CAP_TOOLS;
-   }
-   else if (effective_provider && strcasecmp(effective_provider, "minimax") == 0)
-   {
-      out->flags = MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
-   }
-   /* Moonshot/Kimi. Required once an agent's CATALOG identity resolves to
-    * "moonshotai": without this branch the heuristic falls through with flags
-    * == 0 whenever the models.dev cache is cold, which is STRICTLY WORSE than
-    * the old (wrong) "anthropic" identity that at least yielded TOOLS.
-    * REASONING is granted only to the k2/k3 families it is actually known for —
-    * an unknown or future Moonshot id gets the tool-using floor and must earn
-    * REASONING from catalog data, since over-granting it here would select the
-    * long per-call timeout and satisfy a REASONING capability requirement for a
-    * model nobody has verified. */
-   else if (effective_provider && (strcasecmp(effective_provider, "moonshotai") == 0 ||
-                                   strcasecmp(effective_provider, "moonshot") == 0))
-   {
-      out->flags = MODEL_CAP_TOOLS | MODEL_CAP_STREAMING;
-      if (model_has_prefix(semantic_id, "kimi-k2") || model_has_prefix(semantic_id, "kimi-k3"))
-         out->flags |= MODEL_CAP_REASONING;
-   }
-
-   /* Output-token ceiling inferred when the model isn't in the static table.
-    * Reasoning models must budget for a (sometimes large) hidden reasoning trace
-    * plus the visible answer, so they get a higher ceiling than plain chat
-    * models; both are clamped to the context window. This is the model-specified
-    * cap the request builders use instead of any hardcoded default. */
-   if (out->max_output <= 0)
-      out->max_output = (out->flags & MODEL_CAP_REASONING) ? 32768 : 8192;
-   if (out->context_window > 0 && out->max_output > out->context_window)
-      out->max_output = out->context_window;
-
-   out->deprecated = model_contains_ci(model_id, "deprecated") ? 1 : 0;
-   capability_set_modalities(out);
    return 1;
 }
-
-/* The model's output-token ceiling, the single source of truth for a request's
- * max_tokens when the caller/agent didn't pin one explicitly. Resolves the
- * registry's per-model max_output (static table or inferred); falls back to a
- * conservative ceiling only for a genuinely unknown model. Never returns 0, so
- * callers can always emit a concrete, model-appropriate cap. */
-int model_max_output(const char *provider, const char *model_id)
+int model_alias_resolve(const char *alias, model_info_t *out)
 {
-   model_capability_t cap;
-   if (model_id && model_id[0] && model_capability_get(provider, model_id, &cap) &&
-       cap.max_output > 0)
-      return cap.max_output;
-   return 8192;
+   cJSON *r = call("metadata.alias", NULL, NULL, alias);
+   cJSON *v = cJSON_GetObjectItem(r, "model");
+   int ok = out && cJSON_IsObject(v);
+   if (ok)
+   {
+      snprintf(out->provider, sizeof(out->provider), "%s", string(v, "provider"));
+      snprintf(out->model_id, sizeof(out->model_id), "%s", string(v, "model"));
+   }
+   cJSON_Delete(r);
+   return ok;
 }
-
+const char *model_detect_provider(const char *id)
+{
+   static _Thread_local char provider[MODEL_PROVIDER_MAX];
+   cJSON *r = call("metadata.detect", NULL, id, NULL);
+   snprintf(provider, sizeof(provider), "%s", string(r, "provider"));
+   cJSON_Delete(r);
+   return provider[0] ? provider : NULL;
+}
+int model_alias_list(model_info_t *out, int max)
+{
+   cJSON *r = call("metadata.aliases", NULL, NULL, NULL);
+   cJSON *a = cJSON_GetObjectItem(r, "models");
+   int n = number(r, "count");
+   for (int i = 0; out && i < max && i < n; i++)
+   {
+      cJSON *v = cJSON_GetArrayItem(a, i);
+      snprintf(out[i].provider, sizeof(out[i].provider), "%s", string(v, "provider"));
+      snprintf(out[i].model_id, sizeof(out[i].model_id), "%s", string(v, "model"));
+   }
+   cJSON_Delete(r);
+   return n;
+}
+int model_capability_get(const char *provider, const char *id, model_capability_t *out)
+{
+   cJSON *r = call("metadata.show", provider, id, NULL);
+   int ok = providers_decode_capability(cJSON_GetObjectItem(r, "model"), out);
+   cJSON_Delete(r);
+   return ok;
+}
+int model_context_window(const char *id)
+{
+   cJSON *r = call("metadata.context_window", NULL, id, NULL);
+   int n = number(cJSON_GetObjectItem(r, "model"), "context_window");
+   cJSON_Delete(r);
+   return n;
+}
+int model_max_output(const char *provider, const char *id)
+{
+   cJSON *r = call("metadata.max_output", provider, id, NULL);
+   model_capability_t cap;
+   int ok = providers_decode_capability(cJSON_GetObjectItem(r, "model"), &cap);
+   cJSON_Delete(r);
+   return ok ? cap.max_output : 0;
+}
+int model_capability_resolve_ref(const char *ref, char *provider, size_t pn, char *id, size_t in,
+                                 model_capability_t *out)
+{
+   cJSON *r = call("metadata.show", NULL, NULL, ref);
+   model_capability_t cap;
+   int ok = providers_decode_capability(cJSON_GetObjectItem(r, "model"), &cap);
+   if (ok && ((provider && strlen(cap.provider) >= pn) || (id && strlen(cap.model_id) >= in)))
+      ok = 0;
+   if (ok)
+   {
+      if (provider && pn)
+         snprintf(provider, pn, "%s", cap.provider);
+      if (id && in)
+         snprintf(id, in, "%s", cap.model_id);
+      if (out)
+         *out = cap;
+   }
+   cJSON_Delete(r);
+   return ok;
+}
+int model_capability_list(model_capability_t *out, int max, unsigned required, int open)
+{
+   cJSON *a = cJSON_CreateObject();
+   cJSON_AddNumberToObject(a, "limit", max);
+   cJSON_AddNumberToObject(a, "required_flags", required);
+   cJSON_AddBoolToObject(a, "open_weights_only", open);
+   cJSON *r = providers_module_request("metadata.list", a, "server", 0);
+   cJSON_Delete(a);
+   int n = number(r, "count");
+   cJSON *v = cJSON_GetObjectItem(r, "models");
+   for (int i = 0; out && i < max && i < cJSON_GetArraySize(v); i++)
+      providers_decode_capability(cJSON_GetArrayItem(v, i), &out[i]);
+   cJSON_Delete(r);
+   return n;
+}
+int model_capability_refresh(char *msg, size_t n)
+{
+   cJSON *r = call("metadata.refresh", NULL, NULL, NULL);
+   if (msg && n)
+      snprintf(msg, n, "%s", string(r, "message"));
+   int count = number(r, "count");
+   cJSON_Delete(r);
+   return count;
+}
+/* Enum/string conversion is part of the native ABI, with no catalog policy. */
 unsigned model_capability_flag_from_name(const char *name)
 {
-   if (!name || !name[0])
+   static const char *names[] = {"reasoning", "tools",     "vision",           "pdf",
+                                 "audio",     "streaming", "thinking_adaptive"};
+   if (!name)
       return 0;
-   if (strcasecmp(name, "reasoning") == 0)
-      return MODEL_CAP_REASONING;
-   if (strcasecmp(name, "tools") == 0 || strcasecmp(name, "tool") == 0)
+   for (int i = 0; i < 7; i++)
+      if (!strcasecmp(name, names[i]))
+         return 1u << i;
+   if (!strcasecmp(name, "tool"))
       return MODEL_CAP_TOOLS;
-   if (strcasecmp(name, "vision") == 0 || strcasecmp(name, "image") == 0)
+   if (!strcasecmp(name, "image"))
       return MODEL_CAP_VISION;
-   if (strcasecmp(name, "pdf") == 0)
-      return MODEL_CAP_PDF;
-   if (strcasecmp(name, "audio") == 0)
-      return MODEL_CAP_AUDIO;
-   if (strcasecmp(name, "streaming") == 0 || strcasecmp(name, "stream") == 0)
+   if (!strcasecmp(name, "stream"))
       return MODEL_CAP_STREAMING;
    return 0;
 }
-
-void model_capability_format_flags(unsigned flags, char *buf, size_t buf_len)
+void model_capability_format_flags(unsigned flags, char *buf, size_t n)
 {
-   if (!buf || buf_len == 0)
+   static const char *names[] = {"reasoning", "tools",     "vision",           "pdf",
+                                 "audio",     "streaming", "thinking_adaptive"};
+   if (!buf || !n)
       return;
-   buf[0] = '\0';
-   struct
-   {
-      unsigned flag;
-      const char *name;
-   } rows[] = {{MODEL_CAP_REASONING, "reasoning"},
-               {MODEL_CAP_TOOLS, "tools"},
-               {MODEL_CAP_VISION, "vision"},
-               {MODEL_CAP_PDF, "pdf"},
-               {MODEL_CAP_AUDIO, "audio"},
-               {MODEL_CAP_STREAMING, "streaming"},
-               {0, NULL}};
-   for (int i = 0; rows[i].name; i++)
-   {
-      if (!(flags & rows[i].flag))
-         continue;
-      size_t used = strlen(buf);
-      if (used >= buf_len)
-         break;
-      snprintf(buf + used, buf_len - used, "%s%s", used ? "," : "", rows[i].name);
-   }
-   if (!buf[0])
-      snprintf(buf, buf_len, "-");
-}
-
-int model_capability_resolve_ref(const char *ref, char *provider, size_t provider_cap,
-                                 char *model_id, size_t model_id_cap, model_capability_t *out)
-{
-   if (!ref || !ref[0] || !provider || provider_cap == 0 || !model_id || model_id_cap == 0 || !out)
-      return 0;
-
-   model_info_t info;
-   if (!strchr(ref, ':') && model_alias_resolve(ref, &info))
-   {
-      int pn = snprintf(provider, provider_cap, "%s", info.provider);
-      int mn = snprintf(model_id, model_id_cap, "%s", info.model_id);
-      if (pn < 0 || (size_t)pn >= provider_cap || mn < 0 || (size_t)mn >= model_id_cap)
-         return 0;
-      return model_capability_get(provider, model_id, out);
-   }
-
-   const char *colon = strchr(ref, ':');
-   if (colon && colon > ref && colon[1])
-   {
-      size_t plen = (size_t)(colon - ref);
-      if (plen >= provider_cap)
-         return 0;
-      memcpy(provider, ref, plen);
-      provider[plen] = '\0';
-      int mn = snprintf(model_id, model_id_cap, "%s", colon + 1);
-      if (mn < 0 || (size_t)mn >= model_id_cap)
-         return 0;
-   }
-   else if (colon)
-      return 0;
-   else
-   {
-      int mn = snprintf(model_id, model_id_cap, "%s", ref);
-      if (mn < 0 || (size_t)mn >= model_id_cap)
-         return 0;
-      const char *detected = model_detect_provider(model_id);
-      int pn = snprintf(provider, provider_cap, "%s", detected ? detected : "");
-      if (pn < 0 || (size_t)pn >= provider_cap)
-         return 0;
-   }
-   return model_capability_get(provider, model_id, out);
-}
-
-int model_alias_list(model_info_t *out, int max)
-{
-   int count = 0;
-   for (int i = 0; g_aliases[i].alias != NULL; i++)
-      count++;
-
-   if (!out || max <= 0)
-      return count;
-
-   int n = count < max ? count : max;
-   for (int i = 0; i < n; i++)
-   {
-      snprintf(out[i].provider, sizeof(out[i].provider), "%s", g_aliases[i].provider);
-      snprintf(out[i].model_id, sizeof(out[i].model_id), "%s:%s", g_aliases[i].alias,
-               g_aliases[i].model_id);
-   }
-   return count;
-}
-
-typedef struct
-{
-   const char *provider;
-   const char *model_id;
-   int context_window;
-   int max_output;
-   double cost_in_per_mtok;
-   double cost_out_per_mtok;
-   unsigned flags;
-   const char *modalities;
-   const char *knowledge_cutoff;
-   int open_weights;
-   int deprecated;
-} capability_entry_t;
-
-/* Models the CATALOGUE DOES NOT CARRY, and nothing else.
- *
- * This table used to hold rows for models the catalogue also describes, and
- * those rows were maintained by hand against an assistant knowledge cutoff. They
- * drifted, as hand-maintained copies of someone else's data do: measured against
- * data/models_dev_snapshot.json, three of the nine disagreed, and not subtly --
- * claude-sonnet-4-6 and claude-opus-4-6 both claimed 200000/8192 where the
- * catalogue says 1000000/128000. A max_output of 8192 against a real ceiling of
- * 128000 truncates a reply at a sixteenth of what the model can produce.
- *
- * Those rows normally lose to the catalogue (it is consulted first), so the
- * damage only surfaces when the catalogue load comes up empty -- which is
- * exactly when nobody is watching, and precisely the failure that already
- * happened once: a stale row outranked the snapshot's own numbers when the
- * nested-schema reader returned zero entries.
- *
- * A row that agrees with the catalogue is dead weight; a row that disagrees can
- * only ever be wrong. Both kinds are gone. What remains is the one case the
- * catalogue cannot answer: a model it does not list at all. Deprecation moved to
- * g_local_deprecations below, because that IS knowledge the catalogue lacks. */
-static const capability_entry_t g_capabilities[] = {
-    {"anthropic", "claude-3-5-sonnet", 200000, 8192, 3.00, 15.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_PDF | MODEL_CAP_STREAMING,
-     "text,image", "2025-04", 0, 0},
-    {"gemini", "gemini-1.5-pro", 1000000, 8192, 1.25, 5.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_AUDIO |
-         MODEL_CAP_STREAMING,
-     "text,image,audio", "2025-08", 0, 0},
-    {"google", "gemini-1.5-pro", 1000000, 8192, 1.25, 5.00,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_VISION | MODEL_CAP_AUDIO |
-         MODEL_CAP_STREAMING,
-     "text,image,audio", "2025-08", 0, 0},
-    {"groq", "llama-3-70b-instruct", 8192, 4096, 0.59, 0.79,
-     MODEL_CAP_REASONING | MODEL_CAP_TOOLS | MODEL_CAP_STREAMING, "text", "2023-12", 1, 0},
-    {NULL, NULL, 0, 0, 0.0, 0.0, 0, NULL, NULL, 0, 0},
-};
-
-/* Models THIS PROJECT has retired, whatever the catalogue says.
- *
- * The catalogue reports a model as live while the vendor still lists it, so a
- * model retired here comes back routable on every refresh unless the decision is
- * recorded somewhere. It is recorded here — a name, not a copy of the vendor's
- * numbers, so it cannot drift the way the capability rows did. */
-typedef struct
-{
-   const char *provider;
-   const char *model_id;
-} deprecation_entry_t;
-
-static const deprecation_entry_t g_local_deprecations[] = {
-    {"openai", "gpt-4-turbo"},
-    {NULL, NULL},
-};
-
-#define MODEL_CAP_DYNAMIC_MAX 1024
-static model_capability_t g_dynamic_caps[MODEL_CAP_DYNAMIC_MAX];
-static int g_dynamic_count = -1; /* -1 means not loaded yet */
-
-static char *read_text_file_all(const char *path, size_t *len_out)
-{
-   if (!path || !path[0])
-      return NULL;
-   FILE *fp = fopen(path, "rb");
-   if (!fp)
-      return NULL;
-   if (fseek(fp, 0, SEEK_END) != 0)
-   {
-      fclose(fp);
-      return NULL;
-   }
-   long sz = ftell(fp);
-   if (sz < 0 || sz > 16L * 1024L * 1024L)
-   {
-      fclose(fp);
-      return NULL;
-   }
-   if (fseek(fp, 0, SEEK_SET) != 0)
-   {
-      fclose(fp);
-      return NULL;
-   }
-   char *buf = malloc((size_t)sz + 1);
-   if (!buf)
-   {
-      fclose(fp);
-      return NULL;
-   }
-   size_t n = fread(buf, 1, (size_t)sz, fp);
-   fclose(fp);
-   buf[n] = '\0';
-   if (len_out)
-      *len_out = n;
-   return buf;
-}
-
-static int mkdir_p_local(const char *path)
-{
-   if (!path || !path[0])
-      return -1;
-   char tmp[MAX_PATH_LEN];
-   snprintf(tmp, sizeof(tmp), "%s", path);
-   for (char *p = tmp + 1; *p; p++)
-   {
-      if (*p == '/')
+   buf[0] = 0;
+   for (int i = 0; i < 7; i++)
+      if (flags & (1u << i))
       {
-         *p = '\0';
-         if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
-            return -1;
-         *p = '/';
+         size_t len = strlen(buf);
+         if (len < n)
+            snprintf(buf + len, n - len, "%s%s", len ? "," : "", names[i]);
       }
-   }
-   if (mkdir(tmp, 0700) != 0 && errno != EEXIST)
-      return -1;
-   return 0;
 }
-
-static int write_text_file_atomic(const char *path, const char *text, size_t nbytes)
+void model_capability_flags_string(unsigned flags, char *buf, size_t n)
 {
-   if (!path || !path[0] || !text)
-      return -1;
-   char tmp[MAX_PATH_LEN];
-   snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-   int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0600);
-   if (fd < 0)
-      return -1;
-   ssize_t wn = write(fd, text, nbytes);
-   if (wn != (ssize_t)nbytes)
-   {
-      close(fd);
-      unlink(tmp);
-      return -1;
-   }
-   if (close(fd) != 0)
-   {
-      unlink(tmp);
-      return -1;
-   }
-   if (rename(tmp, path) != 0)
-   {
-      unlink(tmp);
-      return -1;
-   }
-   return 0;
-}
-
-static int model_cache_path(char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return -1;
-   const char *xdg = getenv("XDG_CACHE_HOME");
-   if (xdg && xdg[0])
-   {
-      snprintf(out, out_len, "%s/aimee/models_dev.json", xdg);
-      return 0;
-   }
-   const char *home = getenv("HOME");
-   if (!home || !home[0])
-      return -1;
-   snprintf(out, out_len, "%s/.cache/aimee/models_dev.json", home);
-   return 0;
-}
-
-static int model_override_path(char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return -1;
-   const char *env = getenv("AIMEE_MODEL_CAPABILITY_OVERRIDES");
-   if (env && env[0])
-   {
-      snprintf(out, out_len, "%s", env);
-      return 0;
-   }
-   const char *home = aimee_home();
-   if (!home || !home[0])
-      return -1;
-   snprintf(out, out_len, "%s/model_capability_overrides.json", home);
-   return 0;
-}
-
-static int model_snapshot_path(char *out, size_t out_len)
-{
-   if (!out || out_len == 0)
-      return -1;
-   const char *env = getenv("AIMEE_MODELS_DEV_SNAPSHOT");
-   if (env && env[0])
-   {
-      snprintf(out, out_len, "%s", env);
-      return 0;
-   }
-   const char *candidates[] = {"data/models_dev_snapshot.json", "../data/models_dev_snapshot.json",
-                               NULL};
-   for (int i = 0; candidates[i]; i++)
-   {
-      if (access(candidates[i], R_OK) == 0)
-      {
-         snprintf(out, out_len, "%s", candidates[i]);
-         return 0;
-      }
-   }
-   return -1;
-}
-
-static int capability_copy_from_json(cJSON *obj, model_capability_t *out)
-{
-   if (!cJSON_IsObject(obj) || !out)
-      return 0;
-   cJSON *jprovider = cJSON_GetObjectItemCaseSensitive(obj, "provider");
-   cJSON *jmodel = cJSON_GetObjectItemCaseSensitive(obj, "model");
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(obj, "id");
-   const char *provider = cJSON_GetStringValue(jprovider);
-   const char *model = cJSON_GetStringValue(jmodel);
-   const char *id = cJSON_GetStringValue(jid);
-   char provider_buf[MODEL_PROVIDER_MAX] = "";
-   char model_buf[MODEL_ID_MAX] = "";
-
-   if ((!provider || !provider[0]) && id && id[0])
-   {
-      const char *slash = strchr(id, '/');
-      if (slash && slash > id && slash[1])
-      {
-         size_t plen = (size_t)(slash - id);
-         if (plen >= sizeof(provider_buf))
-            plen = sizeof(provider_buf) - 1;
-         memcpy(provider_buf, id, plen);
-         provider_buf[plen] = '\0';
-         provider = provider_buf;
-         snprintf(model_buf, sizeof(model_buf), "%s", slash + 1);
-         model = model_buf;
-      }
-   }
-   if (!provider || !provider[0] || !model || !model[0])
-      return 0;
-
-   memset(out, 0, sizeof(*out));
-   snprintf(out->provider, sizeof(out->provider), "%s", provider);
-   snprintf(out->model_id, sizeof(out->model_id), "%s", model);
-
-   cJSON *jctx = cJSON_GetObjectItemCaseSensitive(obj, "context_window");
-   cJSON *jmax = cJSON_GetObjectItemCaseSensitive(obj, "max_output");
-   cJSON *jin = cJSON_GetObjectItemCaseSensitive(obj, "cost_in_per_mtok");
-   cJSON *jout = cJSON_GetObjectItemCaseSensitive(obj, "cost_out_per_mtok");
-   cJSON *jflags = cJSON_GetObjectItemCaseSensitive(obj, "flags");
-   cJSON *jcutoff = cJSON_GetObjectItemCaseSensitive(obj, "knowledge_cutoff");
-   cJSON *jopen = cJSON_GetObjectItemCaseSensitive(obj, "open_weights");
-   cJSON *jdep = cJSON_GetObjectItemCaseSensitive(obj, "deprecated");
-
-   out->context_window =
-       cJSON_IsNumber(jctx) ? (int)jctx->valuedouble : model_context_window(model);
-   out->max_output = cJSON_IsNumber(jmax) ? (int)jmax->valuedouble : 0;
-   out->cost_in_per_mtok = cJSON_IsNumber(jin) ? jin->valuedouble : 0.0;
-   out->cost_out_per_mtok = cJSON_IsNumber(jout) ? jout->valuedouble : 0.0;
-   out->flags = cJSON_IsNumber(jflags) ? (unsigned)jflags->valuedouble : 0;
-   if (out->flags && !(out->flags & MODEL_CAP_STREAMING))
-      out->flags |= MODEL_CAP_STREAMING;
-   out->open_weights = cJSON_IsTrue(jopen) || (cJSON_IsNumber(jopen) && jopen->valueint != 0);
-   out->deprecated = cJSON_IsTrue(jdep) || (cJSON_IsNumber(jdep) && jdep->valueint != 0);
-   if (cJSON_IsString(jcutoff) && jcutoff->valuestring)
-      snprintf(out->knowledge_cutoff, sizeof(out->knowledge_cutoff), "%s", jcutoff->valuestring);
-   capability_set_modalities(out);
-   return 1;
-}
-
-static int capability_load_from_text(const char *json_text, model_capability_t *out, int max)
-{
-   if (!json_text || !out || max <= 0)
-      return 0;
-   cJSON *root = cJSON_Parse(json_text);
-   if (!root)
-      return 0;
-   cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "models");
-   if (!cJSON_IsArray(arr) && cJSON_IsArray(root))
-      arr = root;
-   if (!cJSON_IsArray(arr))
-   {
-      cJSON_Delete(root);
-      return 0;
-   }
-
-   int written = 0;
-   cJSON *item;
-   cJSON_ArrayForEach(item, arr)
-   {
-      if (written >= max)
-         break;
-      if (capability_copy_from_json(item, &out[written]))
-         written++;
-   }
-   cJSON_Delete(root);
-   return written;
-}
-
-static int capability_load_from_file(const char *path, model_capability_t *out, int max)
-{
-   size_t n = 0;
-   char *text = read_text_file_all(path, &n);
-   if (!text)
-      return 0;
-   int count = capability_load_from_text(text, out, max);
-   free(text);
-   return count;
-}
-
-static void capability_apply_overrides(model_capability_t *caps, int *count_io, int max_caps)
-{
-   if (!caps || !count_io || *count_io < 0)
-      return;
-   char path[MAX_PATH_LEN];
-   if (model_override_path(path, sizeof(path)) != 0 || access(path, R_OK) != 0)
-      return;
-
-   model_capability_t overrides[256];
-   int n = capability_load_from_file(path, overrides, 256);
-   for (int i = 0; i < n; i++)
-   {
-      int replaced = 0;
-      for (int j = 0; j < *count_io; j++)
-      {
-         if (strcasecmp(caps[j].provider, overrides[i].provider) == 0 &&
-             strcasecmp(caps[j].model_id, overrides[i].model_id) == 0)
-         {
-            caps[j] = overrides[i];
-            replaced = 1;
-            break;
-         }
-      }
-      if (!replaced && *count_io < max_caps)
-         caps[(*count_io)++] = overrides[i];
-   }
-}
-
-static void capability_dynamic_load_once(void)
-{
-   if (g_dynamic_count >= 0)
-      return;
-
-   int count = 0;
-   char path[MAX_PATH_LEN];
-   if (model_cache_path(path, sizeof(path)) == 0 && access(path, R_OK) == 0)
-      count = capability_load_from_file(path, g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX);
-   if (count <= 0 && model_snapshot_path(path, sizeof(path)) == 0)
-      count = capability_load_from_file(path, g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX);
-
-   /* Both loads above parse the FLAT schema -- a top-level "models" ARRAY. The
-    * bundled models.dev snapshot is NESTED ({provider: {models: {id: {...}}}}),
-    * so that parse returns zero and this in-memory catalogue has always been
-    * empty. An empty dynamic set silently hands every lookup to the
-    * hand-written g_capabilities table below it, which is why a stale row
-    * (claude-sonnet-4-6 at 200k/8192) outranked the snapshot's own 1M/128k.
-    *
-    * Fall back to the nested reader. Loaded ONCE here on purpose:
-    * models_dev_cache_lookup() re-parses the whole file per call, so resolving
-    * this at lookup time would put a 226KB JSON parse in the hot path. */
-   if (count <= 0)
-   {
-      count = models_dev_cache_list(g_dynamic_caps, MODEL_CAP_DYNAMIC_MAX, 0, 0);
-      if (count > MODEL_CAP_DYNAMIC_MAX)
-         count = MODEL_CAP_DYNAMIC_MAX; /* documented to report the full match count */
-      /* The cache readers set the capability FLAGS but leave the derived
-       * `modalities` string empty; every other source arrives with it filled. */
-      for (int i = 0; i < count; i++)
-         capability_set_modalities(&g_dynamic_caps[i]);
-   }
-
-   /* Carry local deprecation forward. The catalogue treats "still listed
-    * upstream" as live (fill_cap_from_nested: absent key means live), so a model
-    * this project has already retired -- gpt-4-turbo, say -- comes back marked
-    * live and becomes routable again. Deprecation is the one thing this project
-    * knows that the catalogue does not, and routing AWAY from a model is the
-    * conservative direction, so OR it in rather than let the catalogue clear it.
-    * Numbers and capabilities still come from the catalogue; only this flag is
-    * merged. Runs before overrides so an operator can still override the result
-    * either way. */
-   for (int i = 0; i < count && i < MODEL_CAP_DYNAMIC_MAX; i++)
-   {
-      if (g_dynamic_caps[i].deprecated)
-         continue;
-      for (int j = 0; g_local_deprecations[j].provider != NULL; j++)
-      {
-         if (strcasecmp(g_local_deprecations[j].provider, g_dynamic_caps[i].provider) == 0 &&
-             strcasecmp(g_local_deprecations[j].model_id, g_dynamic_caps[i].model_id) == 0)
-         {
-            g_dynamic_caps[i].deprecated = 1;
-            break;
-         }
-      }
-   }
-
-   if (count > 0)
-      capability_apply_overrides(g_dynamic_caps, &count, MODEL_CAP_DYNAMIC_MAX);
-   g_dynamic_count = count > 0 ? count : 0;
-}
-
-/* Context window from the catalogue only (no static table, no heuristic) --
- * see the recursion note in model_context_window(). Reads the in-memory
- * dynamic set, so this stays a scan rather than a per-call JSON parse. */
-static int capability_dynamic_context_window(const char *model_id)
-{
-   if (!model_id || !model_id[0])
-      return 0;
-   capability_dynamic_load_once();
-   for (int i = 0; i < g_dynamic_count; i++)
-   {
-      if (g_dynamic_caps[i].context_window > 0 &&
-          strcasecmp(g_dynamic_caps[i].model_id, model_id) == 0)
-         return g_dynamic_caps[i].context_window;
-   }
-   return 0;
-}
-
-int model_capability_refresh(char *msg, size_t msg_len)
-{
-   char snapshot_path[MAX_PATH_LEN];
-   char cache_path[MAX_PATH_LEN];
-   int copied_cache = 0;
-   int loaded = 0;
-
-   if (model_snapshot_path(snapshot_path, sizeof(snapshot_path)) == 0)
-   {
-      size_t nbytes = 0;
-      char *text = read_text_file_all(snapshot_path, &nbytes);
-      if (text)
-      {
-         model_capability_t tmp[MODEL_CAP_DYNAMIC_MAX];
-         loaded = capability_load_from_text(text, tmp, MODEL_CAP_DYNAMIC_MAX);
-         if (loaded > 0 && model_cache_path(cache_path, sizeof(cache_path)) == 0)
-         {
-            char dir[MAX_PATH_LEN];
-            snprintf(dir, sizeof(dir), "%s", cache_path);
-            char *slash = strrchr(dir, '/');
-            if (slash)
-            {
-               *slash = '\0';
-               if (mkdir_p_local(dir) == 0 && write_text_file_atomic(cache_path, text, nbytes) == 0)
-                  copied_cache = 1;
-            }
-         }
-         free(text);
-      }
-   }
-
-   g_dynamic_count = -1;
-   capability_dynamic_load_once();
-   if (g_dynamic_count > 0)
-      loaded = g_dynamic_count;
-
-   if (msg && msg_len > 0)
-   {
-      if (loaded > 0)
-      {
-         snprintf(msg, msg_len, "model metadata refreshed (%d entries%s)", loaded,
-                  copied_cache ? ", cache updated" : "");
-      }
-      else
-         snprintf(msg, msg_len, "model metadata refresh unavailable; using built-in fallback");
-   }
-   return loaded;
-}
-
-static void capability_entry_copy(const capability_entry_t *entry, model_capability_t *out)
-{
-   memset(out, 0, sizeof(*out));
-   snprintf(out->provider, sizeof(out->provider), "%s", entry->provider);
-   snprintf(out->model_id, sizeof(out->model_id), "%s", entry->model_id);
-   out->context_window = entry->context_window;
-   out->max_output = entry->max_output;
-   out->cost_in_per_mtok = entry->cost_in_per_mtok;
-   out->cost_out_per_mtok = entry->cost_out_per_mtok;
-   out->flags = entry->flags;
-   snprintf(out->modalities, sizeof(out->modalities), "%s", entry->modalities);
-   snprintf(out->knowledge_cutoff, sizeof(out->knowledge_cutoff), "%s", entry->knowledge_cutoff);
-   out->open_weights = entry->open_weights;
-   out->deprecated = entry->deprecated;
-}
-
-int model_capability_get(const char *provider, const char *model_id, model_capability_t *out)
-{
-   if (!model_id || !model_id[0] || !out)
-      return 0;
-
-   model_info_t alias;
-   const char *lookup_model = model_id;
-   const char *lookup_provider = provider;
-   if ((!provider || !provider[0]) && model_alias_resolve(model_id, &alias))
-   {
-      lookup_provider = alias.provider;
-      lookup_model = alias.model_id;
-   }
-   if (!lookup_provider || !lookup_provider[0])
-      lookup_provider = model_detect_provider(lookup_model);
-
-   /* Operator overrides win over all other sources (including static table). */
-   if (models_dev_override_lookup(lookup_provider, lookup_model, out))
-      return 1;
-
-   capability_dynamic_load_once();
-   for (int i = 0; i < g_dynamic_count; i++)
-   {
-      model_capability_t *cap = &g_dynamic_caps[i];
-      if (lookup_provider && lookup_provider[0] && strcasecmp(cap->provider, lookup_provider) != 0)
-         continue;
-      if (strcasecmp(cap->model_id, lookup_model) == 0)
-      {
-         *out = *cap;
-         return 1;
-      }
-   }
-
-   for (int i = 0; g_capabilities[i].provider != NULL; i++)
-   {
-      const capability_entry_t *entry = &g_capabilities[i];
-      if (lookup_provider && strcasecmp(entry->provider, lookup_provider) != 0)
-         continue;
-      if (strcasecmp(entry->model_id, lookup_model) == 0)
-      {
-         capability_entry_copy(entry, out);
-         return 1;
-      }
-   }
-
-   /* models.dev cache (disk cache → bundled snapshot). Both cache readers set
-    * the capability FLAGS from the registry's modalities object but leave the
-    * derived `modalities` string empty, so fill it here rather than in each
-    * reader - every other source already arrives with it populated, and a
-    * consumer reading the field would otherwise see "" only for catalogued
-    * models. This went unnoticed while the bundled snapshot was unreachable and
-    * these lookups never succeeded. */
-   if (models_dev_cache_lookup(lookup_provider, lookup_model, out))
-   {
-      capability_set_modalities(out);
-      return 1;
-   }
-
-   return model_capability_get_heuristic(lookup_provider, lookup_model, out);
-}
-
-int model_capability_list(model_capability_t *out, int max, unsigned required_flags,
-                          int open_weights_only)
-{
-   capability_dynamic_load_once();
-   if (g_dynamic_count > 0)
-   {
-      int count = 0;
-      int written = 0;
-      for (int i = 0; i < g_dynamic_count; i++)
-      {
-         model_capability_t *entry = &g_dynamic_caps[i];
-         if (required_flags && (entry->flags & required_flags) != required_flags)
-            continue;
-         if (open_weights_only && !entry->open_weights)
-            continue;
-         if (out && written < max)
-            out[written++] = *entry;
-         count++;
-      }
-      return count;
-   }
-
-   int count = 0;
-   int written = 0;
-   for (int i = 0; g_capabilities[i].provider != NULL; i++)
-   {
-      const capability_entry_t *entry = &g_capabilities[i];
-      if (required_flags && (entry->flags & required_flags) != required_flags)
-         continue;
-      if (open_weights_only && !entry->open_weights)
-         continue;
-      if (out && written < max)
-         capability_entry_copy(entry, &out[written++]);
-      count++;
-   }
-
-   /* Augment with models.dev cache entries not already in the static table. */
-   int cache_slots = (out && max > written) ? max - written : 0;
-   model_capability_t *cache_buf = (out && cache_slots > 0) ? out + written : NULL;
-   int cache_count =
-       models_dev_cache_list(cache_buf, cache_slots, required_flags, open_weights_only);
-   count += cache_count;
-   return count;
-}
-
-void model_capability_flags_string(unsigned flags, char *out, size_t out_len)
-{
-   model_capability_format_flags(flags, out, out_len);
+   model_capability_format_flags(flags, buf, n);
 }

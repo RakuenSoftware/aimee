@@ -1,86 +1,84 @@
-/* server_vault_agent_migration.c — bind agents.json to first-boot Vault ingestion. */
+/* Pre-bus ABI transport to the Go providers parser; no roster policy in C. */
 #include "server.h"
-
-#include "agent_config.h"
-#include "vault_service.h"
+#include "config.h"
 #include "vault_store.h"
-
-#include <errno.h>
-#include <openssl/crypto.h>
+#include "cJSON.h"
+#include <poll.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
+extern char **environ;
 
-/* Validate first-boot delegate variables against the durable roster and return
- * its canonical spelling. The registry accessor reads the cached registry in
- * place and copies out one agent; the old agent_load_config here was "cached"
- * but still memset and memcpy'd 343 KB per call. */
 static int server_bootstrap_resolve_agent(const char *name, char *canon, size_t cap)
 {
-   agent_t agent;
-   if (agent_registry_find(name, &agent) != 0)
+   int input[2], output[2];
+   if (pipe(input) != 0)
       return 0;
-   snprintf(canon, cap, "%s", agent.name);
-   return 1;
-}
-
-/* Canonicalize legacy agents.json credentials into per-agent Vault slots. A
- * $VAR is only first-boot transport: vault_env_bootstrap_init() has already
- * sealed and unset it and populated the locked runtime cache, so agent loading
- * resolves it without consulting getenv(). Once sealed in the agent slot, the
- * reference is removed too. An unresolved reference contains no credential and
- * is safe to retain for a later first boot. */
-static int server_migrate_agent_config_credentials(void)
-{
-   agent_config_t cfg;
-   if (agent_load_config(&cfg) != 0)
+   if (pipe(output) != 0)
    {
-      /* A pristine first boot may not have generated agents.json. A present but
-       * unreadable registry still fails closed because it may hold plaintext. */
-      if (access(agent_config_path(), F_OK) != 0 && errno == ENOENT)
-         return 0;
-      return -1;
+      close(input[0]);
+      close(input[1]);
+      return 0;
    }
-
-   int changed = 0;
-   for (int i = 0; i < cfg.agent_count; i++)
+   posix_spawn_file_actions_t actions;
+   posix_spawn_file_actions_init(&actions);
+   posix_spawn_file_actions_adddup2(&actions, input[0], STDIN_FILENO);
+   posix_spawn_file_actions_adddup2(&actions, output[1], STDOUT_FILENO);
+   posix_spawn_file_actions_addclose(&actions, input[1]);
+   posix_spawn_file_actions_addclose(&actions, output[0]);
+   char *args[] = {"/usr/local/libexec/aimee-modules/aimee-module-providers",
+                   "__aimee_provider_bootstrap_lookup", NULL};
+   pid_t child;
+   int started = posix_spawn(&child, args[0], &actions, NULL, args, environ);
+   posix_spawn_file_actions_destroy(&actions);
+   close(input[0]);
+   close(output[1]);
+   if (started != 0)
    {
-      agent_t *agent = &cfg.agents[i];
-      const int stored_literal = agent->api_key_disk[0] && agent->api_key_disk[0] != '$';
-      const int resolved_reference =
-          agent->api_key_disk[0] == '$' && agent->api_key[0] && agent->api_key[0] != '$';
-      if (!stored_literal && !resolved_reference)
-         continue;
-      if (!agent->name[0] || !agent->api_key[0])
-      {
-         OPENSSL_cleanse(&cfg, sizeof(cfg));
-         return -1;
-      }
-
-      if (!vault_store_has_entry(VAULT_SERVER_PRINCIPAL, agent->name, VAULT_API_KEY_CRED) &&
-          vault_service_set_server(agent->name, VAULT_API_KEY_CRED, agent->api_key) != VAULT_OK)
-      {
-         OPENSSL_cleanse(&cfg, sizeof(cfg));
-         return -1;
-      }
-      OPENSSL_cleanse(agent->api_key, sizeof(agent->api_key));
-      OPENSSL_cleanse(agent->api_key_disk, sizeof(agent->api_key_disk));
-      changed = 1;
+      close(input[1]);
+      close(output[0]);
+      return 0;
    }
-
-   if (changed && agent_save_config(&cfg) != 0)
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "name", name);
+   cJSON_AddStringToObject(request, "home", config_default_dir());
+   char *body = cJSON_PrintUnformatted(request);
+   cJSON_Delete(request);
+   FILE *stream = fdopen(input[1], "w");
+   if (stream)
    {
-      OPENSSL_cleanse(&cfg, sizeof(cfg));
-      return -1;
+      if (body)
+         fputs(body, stream);
+      fclose(stream);
    }
-   OPENSSL_cleanse(&cfg, sizeof(cfg));
-   return 0;
+   else
+      close(input[1]);
+   free(body);
+   char buffer[256] = {0};
+   struct pollfd fd = {.fd = output[0], .events = POLLIN};
+   ssize_t n = poll(&fd, 1, 5000) > 0 ? read(output[0], buffer, sizeof(buffer) - 1) : -1;
+   close(output[0]);
+   if (n <= 0)
+      kill(child, SIGKILL);
+   int status = 0;
+   waitpid(child, &status, 0);
+   if (n <= 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0)
+      return 0;
+   cJSON *reply = cJSON_Parse(buffer);
+   const char *value = cJSON_GetStringValue(cJSON_GetObjectItem(reply, "name"));
+   int ok = value && value[0] && strlen(value) < cap;
+   if (ok)
+      snprintf(canon, cap, "%s", value);
+   cJSON_Delete(reply);
+   return ok;
 }
 
 int server_vault_bootstrap_prepare(void)
 {
    server_vault_bootstrap_set_resolver(server_bootstrap_resolve_agent);
-   int provisioned = server_vault_bootstrap();
-   if (provisioned < 0 || server_migrate_agent_config_credentials() != 0)
-      return -1;
-   return provisioned;
+   return server_vault_bootstrap();
 }

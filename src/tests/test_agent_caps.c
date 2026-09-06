@@ -1379,9 +1379,8 @@ void test_registration_grouping(void)
    /* Generated targets carry the registration that produced them. */
    assert(strcmp(sol->registration, "codex") == 0);
    assert(strcmp(luna->registration, "codex") == 0);
-   /* The legacy agent was NOT generated, so it belongs to no registration and is
-    * therefore not a sibling - even though a name-prefix parse would say it is. */
-   assert(legacy->registration[0] == '\0');
+   /* Legacy models acquire their own saved provider, never a prefix sibling. */
+   assert(strcmp(legacy->registration, "codex:legacy") == 0);
 
    /* ROUND TRIP. agent_save_config writes cfg->agents, and expansion has already
     * replaced the registration with its generated targets - so a save collapses
@@ -1402,7 +1401,7 @@ void test_registration_grouping(void)
       assert(strcmp(sol_rt->registration, "codex") == 0);
       assert(strcmp(luna_rt->registration, "codex") == 0);
       const agent_t *legacy_rt = agent_find(&rt, "codex:legacy");
-      assert(legacy_rt && legacy_rt->registration[0] == '\0');
+      assert(legacy_rt && strcmp(legacy_rt->registration, "codex:legacy") == 0);
    }
 
    {

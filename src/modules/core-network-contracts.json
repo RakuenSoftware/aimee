@@ -11,8 +11,16 @@
       "audit_disposition": "transport logs metadata; governed callers remain responsible for purpose and decision evidence",
       "review_boundary": "changes require Runtime Security and credential-custody review",
       "matches": [
-        {"primitive": "http", "path": "src/posix/agent_bridge.c", "count": 11},
-        {"primitive": "http", "path": "src/windows/agent_bridge.c", "count": 9}
+        {
+          "primitive": "http",
+          "path": "src/posix/agent_bridge.c",
+          "count": 11
+        },
+        {
+          "primitive": "http",
+          "path": "src/windows/agent_bridge.c",
+          "count": 9
+        }
       ]
     },
     {
@@ -25,22 +33,46 @@
       "audit_disposition": "provider calls feed token/action audit; transport metadata excludes bodies and credentials",
       "review_boundary": "new files or calls require provider-boundary and Audit review",
       "matches": [
-        {"primitive": "http", "path": "src/cmd_agent.c", "count": 2},
-        {"primitive": "http", "path": "src/cmd_agent_setup.c", "count": 2},
-        {"primitive": "http", "path": "src/forge_app_token.c", "count": 3},
-        {"primitive": "http", "path": "src/provider_client.c", "count": 2},
-        {"primitive": "http", "path": "src/server/anthropic_http.c", "count": 3},
-        {"primitive": "http", "path": "src/server/anthropic_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/http_retry.c", "count": 1},
-        {"primitive": "http", "path": "src/server/llama_native_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/minimax_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/mistral_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/ollama_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/openai_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/openrouter_profile.c", "count": 1},
-        {"primitive": "http", "path": "src/server/otel.c", "count": 1},
-        {"primitive": "http", "path": "src/server/server_agent.c", "count": 2},
-        {"primitive": "http", "path": "src/server/shadow_mirror.c", "count": 1}
+        {
+          "primitive": "http",
+          "path": "src/cmd_agent.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/cmd_agent_setup.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/forge_app_token.c",
+          "count": 3
+        },
+        {
+          "primitive": "http",
+          "path": "src/provider_client.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/server/anthropic_http.c",
+          "count": 3
+        },
+        {
+          "primitive": "http",
+          "path": "src/server/http_retry.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/server/otel.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/server/shadow_mirror.c",
+          "count": 1
+        }
       ]
     },
     {
@@ -53,11 +85,31 @@
       "audit_disposition": "gateway action/result audit plus metadata-only transport logs",
       "review_boundary": "new platforms and destination widening require Gateway and Runtime Security review",
       "matches": [
-        {"primitive": "http", "path": "src/gateway/platform_ntfy.c", "count": 2},
-        {"primitive": "http", "path": "src/gateway/platform_telegram.c", "count": 3},
-        {"primitive": "http", "path": "src/gateway/platform_webhook.c", "count": 1},
-        {"primitive": "http", "path": "src/gateway/stt.c", "count": 1},
-        {"primitive": "http", "path": "src/gateway/tts.c", "count": 2}
+        {
+          "primitive": "http",
+          "path": "src/gateway/platform_ntfy.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/gateway/platform_telegram.c",
+          "count": 3
+        },
+        {
+          "primitive": "http",
+          "path": "src/gateway/platform_webhook.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/gateway/stt.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/gateway/tts.c",
+          "count": 2
+        }
       ]
     },
     {
@@ -70,9 +122,21 @@
       "audit_disposition": "ingest and KB governance paths emit durable outcomes; transport excludes content",
       "review_boundary": "new KB destinations require KB and Data Authorization review",
       "matches": [
-        {"primitive": "http", "path": "src/kb/kb_ocr_sidecar.c", "count": 1},
-        {"primitive": "http", "path": "src/kb/kb_tsr_sidecar.c", "count": 2},
-        {"primitive": "http", "path": "src/modules/kb_client/kb_client.c", "count": 3}
+        {
+          "primitive": "http",
+          "path": "src/kb/kb_ocr_sidecar.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/kb/kb_tsr_sidecar.c",
+          "count": 2
+        },
+        {
+          "primitive": "http",
+          "path": "src/modules/kb_client/kb_client.c",
+          "count": 3
+        }
       ]
     },
     {
@@ -102,9 +166,21 @@
       "audit_disposition": "web tool decision/action audit; response content is not copied into immutable evidence",
       "review_boundary": "destination-policy changes require Guardrails and Runtime Security review",
       "matches": [
-        {"primitive": "http", "path": "src/posix/web_egress.c", "count": 1},
-        {"primitive": "http", "path": "src/windows/web_egress.c", "count": 1},
-        {"primitive": "dns", "path": "src/posix/web_egress.c", "count": 2}
+        {
+          "primitive": "http",
+          "path": "src/posix/web_egress.c",
+          "count": 1
+        },
+        {
+          "primitive": "http",
+          "path": "src/windows/web_egress.c",
+          "count": 1
+        },
+        {
+          "primitive": "dns",
+          "path": "src/posix/web_egress.c",
+          "count": 2
+        }
       ]
     },
     {
@@ -117,13 +193,41 @@
       "audit_disposition": "listener authentication/authorization paths own request audit; socket creation is not egress",
       "review_boundary": "new Internet listeners require route, authentication, rate-limit, and deployment review",
       "matches": [
-        {"primitive": "inet_socket", "path": "src/aimee_forwarder.c", "count": 1},
-        {"primitive": "inet_socket", "path": "src/gateway/platform_webhook.c", "count": 1},
-        {"primitive": "inet_socket", "path": "src/kb/http/kb_http_listener.c", "count": 1},
-        {"primitive": "inet_socket", "path": "src/kb/http/kb_tls_serve.c", "count": 1},
-        {"primitive": "inet_socket", "path": "src/modules/webuser/webuser_editor.c", "count": 2},
-        {"primitive": "inet_socket", "path": "src/posix/dashboard.c", "count": 1},
-        {"primitive": "inet_socket", "path": "src/server/server_http.c", "count": 2}
+        {
+          "primitive": "inet_socket",
+          "path": "src/aimee_forwarder.c",
+          "count": 1
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/gateway/platform_webhook.c",
+          "count": 1
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/kb/http/kb_http_listener.c",
+          "count": 1
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/kb/http/kb_tls_serve.c",
+          "count": 1
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/modules/webuser/webuser_editor.c",
+          "count": 2
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/posix/dashboard.c",
+          "count": 1
+        },
+        {
+          "primitive": "inet_socket",
+          "path": "src/server/server_http.c",
+          "count": 2
+        }
       ]
     },
     {
@@ -149,12 +253,36 @@
       "audit_disposition": "owning protocol records outcomes; resolution and handshake do not persist addresses or credentials",
       "review_boundary": "new resolution/handshake sites require connection-core and Runtime Security review",
       "matches": [
-        {"primitive": "dns", "path": "src/core/connection/socket.c", "count": 2},
-        {"primitive": "dns", "path": "src/kb/http/kb_http_resolver.c", "count": 1},
-        {"primitive": "dns", "path": "src/kb/http/kb_metrics_listener.c", "count": 1},
-        {"primitive": "dns", "path": "src/kb/kb_mgmt_endpoint.c", "count": 1},
-        {"primitive": "dns", "path": "src/kb/kb_mgmt_status_listener.c", "count": 1},
-        {"primitive": "tls_connect", "path": "src/core/connection/tls_openssl.c", "count": 2}
+        {
+          "primitive": "dns",
+          "path": "src/core/connection/socket.c",
+          "count": 2
+        },
+        {
+          "primitive": "dns",
+          "path": "src/kb/http/kb_http_resolver.c",
+          "count": 1
+        },
+        {
+          "primitive": "dns",
+          "path": "src/kb/http/kb_metrics_listener.c",
+          "count": 1
+        },
+        {
+          "primitive": "dns",
+          "path": "src/kb/kb_mgmt_endpoint.c",
+          "count": 1
+        },
+        {
+          "primitive": "dns",
+          "path": "src/kb/kb_mgmt_status_listener.c",
+          "count": 1
+        },
+        {
+          "primitive": "tls_connect",
+          "path": "src/core/connection/tls_openssl.c",
+          "count": 2
+        }
       ]
     },
     {
@@ -167,8 +295,16 @@
       "audit_disposition": "store mutations and WORM delivery have transaction/durability evidence; DSNs are never logged",
       "review_boundary": "new PostgreSQL connection owners require DB2 and Data Authorization review",
       "matches": [
-        {"primitive": "postgres", "path": "src/kb/kb_worm_worker_main.c", "count": 1},
-        {"primitive": "postgres", "path": "src/modules/db2/c/db_postgres.c", "count": 1}
+        {
+          "primitive": "postgres",
+          "path": "src/kb/kb_worm_worker_main.c",
+          "count": 1
+        },
+        {
+          "primitive": "postgres",
+          "path": "src/modules/db2/c/db_postgres.c",
+          "count": 1
+        }
       ]
     },
     {
@@ -181,14 +317,46 @@
       "audit_disposition": "Git action and verification outcomes are durable; plaintext tokens are excluded",
       "review_boundary": "new credential consumers fail this ratchet and require Git, Vault, and Runtime Security review",
       "matches": [
-        {"primitive": "credentialed_git", "path": "src/modules/git/git_cred_inject.c", "count": 2},
-        {"primitive": "credentialed_git", "path": "src/modules/git/git_ops.c", "count": 2},
-        {"primitive": "credentialed_git", "path": "src/modules/git/git_pr_api.c", "count": 2},
-        {"primitive": "credentialed_git", "path": "src/modules/git/git_project.c", "count": 1},
-        {"primitive": "credentialed_git", "path": "src/modules/git/mcp_git_query.c", "count": 1},
-        {"primitive": "credentialed_git", "path": "src/modules/webuser/webuser_editor.c", "count": 1},
-        {"primitive": "credentialed_git", "path": "src/modules/workflows/wfe_live_forge.c", "count": 2},
-        {"primitive": "credentialed_git", "path": "src/modules/workspace/workspace_turn.c", "count": 1}
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/git/git_cred_inject.c",
+          "count": 2
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/git/git_ops.c",
+          "count": 2
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/git/git_pr_api.c",
+          "count": 2
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/git/git_project.c",
+          "count": 1
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/git/mcp_git_query.c",
+          "count": 1
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/webuser/webuser_editor.c",
+          "count": 1
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/workflows/wfe_live_forge.c",
+          "count": 2
+        },
+        {
+          "primitive": "credentialed_git",
+          "path": "src/modules/workspace/workspace_turn.c",
+          "count": 1
+        }
       ]
     }
   ]

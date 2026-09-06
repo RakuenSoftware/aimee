@@ -33,6 +33,7 @@ int vault_env_print_credential_names(void);
  * web service can authenticate through a pipe without ever recreating a
  * plaintext credential file or environment variable. */
 int vault_env_print_webchat_bootstrap(void);
+int vault_env_module_resource(void);
 
 /* Validate that the fixed Vault records contain a complete usable first login.
  * Emits no secret and is used to fail container startup before services launch. */

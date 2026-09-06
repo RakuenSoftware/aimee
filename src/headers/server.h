@@ -638,6 +638,10 @@ cJSON *server_compute_async_json(server_ctx_t *ctx);
 
 /* Agent management handlers (server_agent.c) */
 int handle_agent_list(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_connection_models(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_connections(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_save_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
+int handle_provider_remove_connection(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_add(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_local(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
 int handle_agent_remove(server_ctx_t *ctx, server_conn_t *conn, cJSON *req);
