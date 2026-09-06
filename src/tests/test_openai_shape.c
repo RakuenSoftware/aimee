@@ -488,6 +488,56 @@ int main(void)
 
    /* --- Codex parity: terminal error events --- */
    {
+      char diagnostic[512];
+      const char *rejected =
+          "{\"detail\":\"The 'gpt-6-astra-high' model is not supported when using Codex "
+          "with a ChatGPT account.\",\"secret\":\"must-not-be-forwarded\"}";
+      openai_upstream_error_message(400, rejected, diagnostic, sizeof(diagnostic));
+      assert(strstr(diagnostic, "HTTP 400"));
+      assert(strstr(diagnostic, "gpt-6-astra-high"));
+      assert(!strstr(diagnostic, "must-not-be-forwarded"));
+      int n = openai_format_responses_failed("resp_bad_model", "aimee", 1700000000, "server_error",
+                                             diagnostic, resp, sizeof(resp));
+      assert(n > 0);
+      cJSON *event = cJSON_Parse(resp);
+      assert(event);
+      cJSON *response = cJSON_GetObjectItem(event, "response");
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(response, "status")), "failed") == 0);
+      cJSON *error = cJSON_GetObjectItem(response, "error");
+      assert(strcmp(cJSON_GetStringValue(cJSON_GetObjectItem(error, "message")), diagnostic) == 0);
+      cJSON_Delete(event);
+
+      const int statuses[] = {400, 401, 403, 404, 429, 500, 502, 503};
+      for (size_t i = 0; i < sizeof(statuses) / sizeof(statuses[0]); i++)
+      {
+         openai_upstream_error_message(statuses[i],
+                                       "{\"error\":{\"message\":\"provider rejected request\"}}",
+                                       diagnostic, sizeof(diagnostic));
+         assert(strstr(diagnostic, "provider rejected request"));
+      }
+      const char *invalid[] = {NULL,
+                               "",
+                               "<html>private proxy detail</html>",
+                               "not JSON",
+                               "{}",
+                               "{\"detail\":123}",
+                               "{\"error\":{\"message\":[]}}"};
+      for (size_t i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+      {
+         openai_upstream_error_message(502, invalid[i], diagnostic, sizeof(diagnostic));
+         assert(strcmp(diagnostic, "upstream model HTTP 502: no usable error detail") == 0);
+      }
+      openai_upstream_error_message(-1, rejected, diagnostic, sizeof(diagnostic));
+      assert(strcmp(diagnostic, "upstream model transport failed") == 0);
+      openai_upstream_error_message(400, "{\"detail\":\"bad\\nmodel\\u001b[31m\"}", diagnostic,
+                                    sizeof(diagnostic));
+      assert(!strchr(diagnostic, '\n') && !strchr(diagnostic, '\033'));
+      char tiny[2] = {'x', 'x'};
+      openai_upstream_error_message(400, rejected, tiny, sizeof(tiny));
+      assert(tiny[1] == '\0');
+      openai_upstream_error_message(400, rejected, tiny, 0);
+      openai_upstream_error_message(400, rejected, NULL, 0);
+
       int len = openai_format_responses_failed("resp_9", "aimee", 1700000000, "server_error",
                                                "upstream model request failed", resp, sizeof(resp));
       assert(len > 0);
