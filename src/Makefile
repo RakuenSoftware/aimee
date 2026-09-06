@@ -1437,8 +1437,8 @@ check-transport-artifact:
 test-transport-artifact:
 	@python3 ../tests/test_transport_artifact.py
 
-memory-retrieval-eval-check: $(TESTPREFIX)/unit-test-memory-retrieval-eval
-	$< --corpus ../tests/eval/memory_retrieval_corpus.json --baseline ../tests/eval/memory_retrieval_baseline.json
+memory-retrieval-eval-check:
+	cd ../server-go && AIMEE_MEMORY_EVAL_REQUIRED=1 go test -count=1 -v ./modules/memory -run '^TestRetrievalCorpus$$'
 
 # Virtual-context long-session benchmark gate: deterministic compression,
 # stub answerability, and baseline-vs-compacted late-turn accuracy (AC#4).

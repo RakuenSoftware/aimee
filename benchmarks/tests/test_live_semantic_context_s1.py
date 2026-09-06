@@ -338,6 +338,18 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         )
         self.assertFalse(result["release_candidate_matched"])
 
+    def test_release_build_contract_tracks_flags_and_probe_dependencies(self) -> None:
+        validator = load_release_validator()
+        makefile = (ROOT / "src/Makefile").read_text()
+        rules = (ROOT / "src/tests/Rules.mk").read_text()
+        expected = validator.build_plan(makefile, rules)
+        self.assertEqual(expected, validator.build_plan(
+            makefile + "\nunrelated-memory-target:\n\t@echo memory\n", rules))
+        self.assertNotEqual(expected, validator.build_plan(
+            makefile + "\nC_FLAGS += -DS1_BUILD_DRIFT\n", rules))
+        self.assertNotEqual(expected, validator.build_plan(makefile, rules.replace(
+            "$(OBJDIR)/modules/lsp/lsp_context.o \\\n", "", 1)))
+
 
 if __name__ == "__main__":
     unittest.main()

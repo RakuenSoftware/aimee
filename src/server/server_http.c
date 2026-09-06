@@ -2,8 +2,7 @@
  *
  * Hand-rolled HTTP/1.1 server on a dedicated Unix socket, mirroring the
  * aimee-kb HTTP server. First resource: /v1/personas. */
-/* _GNU_SOURCE: struct ucred / SO_PEERCRED peer-credential capture is a GNU
- * extension; declare it before any include. */
+/* GNU peer-credential extensions must be enabled before any include. */
 #ifndef _GNU_SOURCE
 #define _GNU_SOURCE
 #endif
@@ -57,7 +56,6 @@
 #include <fcntl.h>
 #include <sys/socket.h>
 #include <sys/un.h>
-#include <time.h>
 #include <unistd.h>
 #include <stdatomic.h>
 

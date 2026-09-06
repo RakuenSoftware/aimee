@@ -560,17 +560,25 @@ func (s *postgresDataStore) Search(ctx context.Context, scope Scope, query, kind
 FROM user_memories
 WHERE lifecycle_state = 'active'
   AND (valid_until IS NULL OR valid_until > now())
-  AND ($1 = '%%' OR key ILIKE $1 OR content ILIKE $1)
+  AND ($5 = '' OR key ILIKE $1 OR content ILIKE $1
+       OR to_tsvector('english', key || ' ' || content) @@ plainto_tsquery('english', $5))
   AND ($2 = '' OR kind = $2) AND ($3 = '' OR tier = $3)
-ORDER BY confidence DESC, updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit)
+ORDER BY (lower(key)=lower($5)) DESC,
+  ts_rank_cd(to_tsvector('english', key || ' ' || content), plainto_tsquery('english', $5)) DESC,
+  confidence DESC, updated_at DESC, id DESC LIMIT $4`, pattern, kind, tier, limit, query)
 	} else {
 		rows, err = s.db.Query(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
 WHERE lifecycle_state = 'active' AND scope_type = $1 AND scope_value = $2
-  AND ($3 = '%%' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3)
+  AND ($7 = '' OR key ILIKE $3 OR content ILIKE $3 OR use_cases ILIKE $3
+       OR to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,''))
+          @@ plainto_tsquery('english', $7))
   AND ($4 = '' OR kind = $4) AND ($5 = '' OR tier = $5)
-ORDER BY confidence DESC, updated_at DESC, id DESC LIMIT $6`,
-			scope.Type, scope.Value, pattern, kind, tier, limit)
+ORDER BY (lower(key)=lower($7)) DESC,
+  ts_rank_cd(to_tsvector('english', key || ' ' || content || ' ' || COALESCE(use_cases,'')),
+             plainto_tsquery('english', $7)) DESC,
+  confidence DESC, updated_at DESC, id DESC LIMIT $6`,
+			scope.Type, scope.Value, pattern, kind, tier, limit, query)
 	}
 	if err != nil {
 		return nil, err

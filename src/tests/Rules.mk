@@ -3202,6 +3202,7 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
 	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
+	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/db2 -run '^TestMemoryPostgresReplay$$'
 
 # --- Postgres-backed unit tests -------------------------------------------
 #

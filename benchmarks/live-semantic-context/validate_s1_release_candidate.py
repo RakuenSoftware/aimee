@@ -17,6 +17,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 
@@ -41,6 +42,40 @@ PROTECTED_PATHS = (
     "src/tests/test_lsp.c",
     "src/tests/test_mcp_client_registry.c",
 )
+
+BUILD_PATHS = ("src/Makefile", "src/tests/Rules.mk")
+
+
+def build_plan(makefile: str, rules: str) -> list[str]:
+    """Compare the actual probe's compiler/linker commands and dependencies.
+
+    Whole Makefiles also own unrelated modules. Expanding the probe target in
+    an isolated object directory retains flags, recipes and dependency changes
+    without freezing every other build target to the evidence commit.
+    """
+    include = "include tests/Rules.mk"
+    if makefile.count(include) != 1:
+        raise ValueError("probe Makefile must include tests/Rules.mk exactly once")
+    with tempfile.TemporaryDirectory(prefix="aimee-s1-build-") as directory:
+        root = Path(directory)
+        (root / "Rules.mk").write_text(rules)
+        (root / "Makefile").write_text(makefile.replace(include, f"include {root}/Rules.mk"))
+        command = [
+            "make", "--dry-run", "--always-make", "--no-print-directory",
+            "-f", str(root / "Makefile"), f"OBJDIR={root}/obj",
+            "GIT_VERSION=s1-build-contract", "GIT_COMMIT_TIME=1700000000",
+            f"{root}/obj/tests/unit-test-lsp",
+        ]
+        result = subprocess.run(command, cwd=ROOT / "src", text=True,
+                                capture_output=True, check=True, timeout=60)
+        return [line.replace(directory, "<probe-build>")
+                for line in result.stdout.splitlines() if line.strip()]
+
+
+def build_files_match(candidate_commit: str) -> bool:
+    candidate = [git_output("show", f"{candidate_commit}:{path}") for path in BUILD_PATHS]
+    current = [(ROOT / path).read_text() for path in BUILD_PATHS]
+    return build_plan(*candidate) == build_plan(*current)
 
 
 def parse_args() -> argparse.Namespace:
@@ -103,6 +138,12 @@ def validate(
     changed = git_output(
         "diff", "--name-only", candidate_commit, "--", *PROTECTED_PATHS
     ).splitlines()
+    if any(path in BUILD_PATHS for path in changed):
+        try:
+            if build_files_match(candidate_commit):
+                changed = [path for path in changed if path not in BUILD_PATHS]
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(f"could not verify semantic-context build contract: {exc}")
     untracked = git_output(
         "ls-files", "--others", "--exclude-standard", "--", *PROTECTED_PATHS
     ).splitlines()
