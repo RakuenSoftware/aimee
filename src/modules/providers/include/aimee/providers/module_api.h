@@ -60,8 +60,8 @@
  *
  * Event-kind block 43; blocks 23-31 and 35-42 are taken (see the other
  * module_api.h headers). One stage per event kind, numbered from 1. */
-#define AIMEE_PROVIDERS_EVENT_RESOLVE  11009u
-#define AIMEE_PROVIDERS_EVENT_VALIDATE 11010u
+#define AIMEE_PROVIDERS_EVENT_RESOLVE  12545u
+#define AIMEE_PROVIDERS_EVENT_VALIDATE 12546u
 
 #define AIMEE_PROVIDERS_STAGE_RESOLVE  1u
 #define AIMEE_PROVIDERS_STAGE_VALIDATE 2u

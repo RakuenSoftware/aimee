@@ -136,6 +136,10 @@ func validHTTPHeaders(purpose string, headers map[string]string, credentialPrese
 		switch lower {
 		case "authorization":
 			return false
+		case "anthropic-version":
+			if purpose != "provider" {
+				return false
+			}
 		case "accept", "content-type":
 		default:
 			return false
@@ -169,6 +173,21 @@ func (p policy) handleHTTP(invocation bus.ModuleInvocation, body []byte) ([]byte
 		if err != nil {
 			encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "egress denied: " + err.Error()})
 			return encoded, bus.ModuleStatusOK
+		}
+	} else if request.Purpose == "provider" {
+		if invocation.PrincipalRef != ProvidersClientRef {
+			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if request.CredentialPresent {
+			parsed, err := url.Parse(decision.Target)
+			if err != nil {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			bearer, err = p.credentials.decrypt(time.Now(), invocation, request, parsed.Scheme+"://"+parsed.Host)
+			if err != nil {
+				encoded, _ := encodeHTTPResponse(HTTPResponse{Error: "provider credential unavailable: " + err.Error()})
+				return encoded, bus.ModuleStatusOK
+			}
 		}
 	} else if request.CredentialPresent || request.Credential != nil || request.CredentialHandle != "" ||
 		request.CredentialScope != "" || request.CredentialResource != "" {
@@ -231,7 +250,11 @@ func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest
 		httpRequest.Header.Set(name, value)
 	}
 	if len(bearer) > 0 {
-		httpRequest.Header.Set("Authorization", "Bearer "+string(bearer))
+		if request.Purpose == "provider" && request.CredentialScope == "x-api-key" {
+			httpRequest.Header.Set("x-api-key", string(bearer))
+		} else {
+			httpRequest.Header.Set("Authorization", "Bearer "+string(bearer))
+		}
 	}
 	response, err := client.Do(httpRequest)
 	if err != nil {

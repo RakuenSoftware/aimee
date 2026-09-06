@@ -35,6 +35,7 @@ import (
 	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
 	"github.com/JBailes/aimee/server-go/modules/memory"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
+	"github.com/JBailes/aimee/server-go/modules/providers"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/roundtable/panel"
@@ -351,6 +352,17 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		config.PrincipalRef = 8
 		config.Stages = []bus.ModuleStage{{EventKind: learning.EventKind, StageID: learning.StageObserve}}
 		config.Handler = learning.Handle
+	case "providers":
+		config.ModuleName = name
+		config.PrincipalRef = providers.PrincipalRef
+		config.Stages = []bus.ModuleStage{{EventKind: providers.EventResolve, StageID: providers.StageResolve}, {EventKind: providers.EventValidate, StageID: providers.StageValidate}, {EventKind: providers.EventManage, StageID: providers.StageManage}}
+		handler, err := providers.NewProcessHandler(ctx, moduleBusSocket, sandboxHome())
+		if err != nil {
+			log.Printf("providers unavailable: %v", err)
+			return config, false
+		}
+		config.Handler = handler
+
 	case "routing":
 		config.ModuleName = name
 		config.PrincipalRef = 9
@@ -836,6 +848,12 @@ func run(ctx context.Context, args []string) error {
 }
 
 func main() {
+	if handled, code := providers.RunBootstrapLookup(os.Args); handled {
+		os.Exit(code)
+	}
+	if handled, code := providers.RunProbeWorker(os.Args); handled {
+		os.Exit(code)
+	}
 	if handled, code := delegates.RunWatchdog(os.Args); handled {
 		os.Exit(code)
 	}

@@ -21,7 +21,8 @@
     "audit",
     "sandbox",
     "aimee",
-    "egress"
+    "egress",
+    "providers"
   ],
   "optional": [
     "governance",
@@ -68,9 +69,16 @@
     "db2": 29,
     "aimee": 30,
     "observability": 31,
-    "egress": 32
+    "egress": 32,
+    "providers": 33
   },
   "retired_principal_refs": [],
-  "plugin_principal_ref_band": { "first": 200, "limit": 456 },
-  "retired_principal_ref_band": { "first": 456, "limit": 512 }
+  "plugin_principal_ref_band": {
+    "first": 200,
+    "limit": 456
+  },
+  "retired_principal_ref_band": {
+    "first": 456,
+    "limit": 512
+  }
 }

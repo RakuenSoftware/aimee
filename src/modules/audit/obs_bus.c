@@ -1439,7 +1439,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
     * caller, stage, trace, lengths and status are recorded below in WORM; raw
     * payload capture is deliberately suppressed. The forge request still
     * carries its legacy token until credential-handle migration completes. */
-   int sensitive_transport = frame->event_kind == 7428u ||
+   int sensitive_transport = frame->event_kind == 7428u || frame->event_kind == 12547u ||
                              (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&
