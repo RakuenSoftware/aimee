@@ -117,6 +117,14 @@
           "event_kind": 5894,
           "durability": "capture",
           "durability_reason": "command metadata declaration; the resulting command execution is audited separately"
+        },
+        {
+          "id": 7,
+          "name": "memory-data",
+          "event_kind": 5895,
+          "durability": "ledger",
+          "durability_reason": "scoped memory reads and state transitions require a durable access record",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },
@@ -1299,6 +1307,18 @@
       ],
       "request": [
         12290
+      ]
+    },
+    {
+      "id": "memory-postgres",
+      "principal_ref": 73,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-memory",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "request": [
+        11266
       ]
     }
   ]

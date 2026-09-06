@@ -2263,6 +2263,11 @@ int main(void)
       assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/api/rotate_bearer") == 1);
       assert(server_http_mtls_transport_allowed(1, 2, 0, "GET", "/v1/cert/sign") == 0);
       assert(server_http_mtls_transport_allowed(1, 2, 0, "POST", "/v1/cert/sign/extra") == 0);
+      assert(server_http_mtls_recheck_status(PKI_CERT_VALID) == 200);
+      assert(server_http_mtls_recheck_status(PKI_CERT_REVOKED) == 403);
+      assert(server_http_mtls_recheck_status(PKI_CERT_EXPIRED) == 403);
+      assert(server_http_mtls_recheck_status(PKI_CERT_UNKNOWN) == 403);
+      assert(server_http_mtls_recheck_status(PKI_CERT_ERROR) == 503);
       assert(server_http_route_allowed_caps(1, fallback, "POST", "/v1/memory/store",
                                             SERVER_REMOTE_WRITES_OFF) == 0);
       assert(server_http_route_allowed_caps(1, CAPS_AUTHENTICATED, "POST", "/v1/memory/store",

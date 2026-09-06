@@ -10,25 +10,16 @@
 #include "modules/db2/c/db_postgres.h"
 #include "modules/db2/c/memory_scope_query.h"
 #include "../modules/db2/c/typed_facts.h"
-#include "../modules/db2/c/fact_recall.h"     /* db2_fact_recall_block */
 #include "../modules/db2/c/fact_lifecycle.h"  /* FACT_AUTHORITY_MODEL */
 #include "../modules/db2/c/rel_types_store.h" /* db2_fact_commit */
 #include "modules/memory/memory_fact_gate.h"  /* FACT_GATE_NOVEL */
 #include "modules/memory/memory_ontology.h"   /* NODE_PERSON, NODE_OTHER */
-
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
-{
-   if (!verdict)
-      return -1;
-   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
-                                          (memory_node_kind_t)tail_kind, NULL);
-   return 0;
-}
+#include "support/memory_policy_stub.h"
 
 int main(void)
 {
    db2_test_shim_open();
-   aimee_db2_register_fact_gate_provider(check_fact_gate);
+   test_memory_policy_register();
 
    const char *T = "2026-01-01T00:00:00Z";
 
@@ -81,44 +72,22 @@ int main(void)
 
    /* db2_fact_commit path (entity_edges) — the one the memory-fact extractor and
     * auto-inject use. Unlike the strict CSS assert above, this gate ACCEPTs a
-    * free-form (NOVEL) relation as a provisional semantic edge. Model-derived
-    * assertions remain candidates and therefore stay out of default recall. */
+    * free-form (NOVEL) relation as a provisional semantic edge. */
    assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
-   /* Candidate quarantine: inference is reviewable, but not recallable. */
-   char facts[1024] = "";
-   int fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
-   assert(fn == 0 && strstr(facts, "works_as") == NULL);
    /* Authenticated-user evidence promotes the exact candidate to persistent. */
    assert(db2_fact_commit("user", NODE_PERSON, "works_as", "engineer", NODE_OTHER,
                           FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
-   fn = db2_fact_recall_block("user", 0, facts, sizeof(facts));
-   assert(fn >= 1 && strstr(facts, "works_as") != NULL && strstr(facts, "engineer") != NULL);
-
-   /* But an unknown relation whose NAME plainly denotes PII is still gated:
-    * withheld on an ordinary turn, surfaced only when the turn asks. (PII facts
-    * remain in the typed-fact layer, recall-gated — only credentials are dropped;
-    * see the api_key assertion below.) */
+   /* Unknown PII relations remain candidates until promoted by authenticated
+    * user evidence. Recall policy itself is covered by the Go memory owner. */
    assert(db2_fact_commit("user", NODE_PERSON, "home_address", "12 Oak St", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_NOVEL);
-   char ord[1024] = "";
-   (void)db2_fact_recall_block("user", 0, ord, sizeof(ord));
-   assert(strstr(ord, "home_address") == NULL); /* PII-looking: withheld by default */
-   char sens[1024] = "";
-   (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
-   assert(strstr(sens, "home_address") == NULL); /* candidate stays quarantined */
    assert(db2_fact_commit("user", NODE_PERSON, "home_address", "12 Oak St", NODE_OTHER,
                           FACT_AUTHORITY_USER, 1) == FACT_GATE_NOVEL);
-   (void)db2_fact_recall_block("user", 1, sens, sizeof(sens));
-   assert(strstr(sens, "home_address") != NULL); /* persistent and explicitly requested */
-
    /* Personal-data boundary (Track A): a CREDENTIAL relation is withheld from the
-    * shared KB entirely — never committed to DB2, so it never surfaces there. */
+    * shared KB entirely. */
    assert(db2_fact_commit("user", NODE_PERSON, "api_key", "sk-123", NODE_OTHER,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_REJECT_SENSITIVE);
-   char cred[1024] = "";
-   (void)db2_fact_recall_block("user", 1, cred, sizeof(cred));
-   assert(strstr(cred, "api_key") == NULL); /* not in the shared KB, even when asked */
 
    /* The semantic channel applies valid-time and transaction-time independently,
     * labels old versions, retains exact evidence locators, and rejects malformed

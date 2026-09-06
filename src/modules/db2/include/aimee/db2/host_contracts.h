@@ -20,12 +20,14 @@ extern "C"
 
    /* Deprecated no-op retained for binary compatibility. */
    void aimee_db2_register_audit_hash_provider(aimee_db2_audit_hash_fn provider);
-   typedef void (*aimee_db2_audit_hash_v2_fn)(
-       long long seq, const char *ts, const char *actor_role, const char *actor_principal,
-       const char *actor_issuer, const char *actor_subject, const char *transport_cn,
-       long long team_id, const char *selected_default_from, const char *action,
-       const char *subject, const char *verdict, const char *key_id, const char *detail,
-       const char *prev_hash, char out_hex[65]);
+   typedef void (*aimee_db2_audit_hash_v2_fn)(long long seq, const char *ts, const char *actor_role,
+                                              const char *actor_principal, const char *actor_issuer,
+                                              const char *actor_subject, const char *transport_cn,
+                                              long long team_id, const char *selected_default_from,
+                                              const char *action, const char *subject,
+                                              const char *verdict, const char *key_id,
+                                              const char *detail, const char *prev_hash,
+                                              char out_hex[65]);
    void aimee_db2_register_audit_hash_v2_provider(aimee_db2_audit_hash_v2_fn provider);
 
    /* Score one synthesis candidate against its evidence bundle. The provider
@@ -85,6 +87,19 @@ extern "C"
     * removes a provider; extraction then fails and scanning cannot delete. */
    void aimee_db2_register_fact_extract_provider(aimee_db2_fact_extract_fn provider);
    void aimee_db2_register_fact_scan_provider(aimee_db2_fact_scan_fn provider);
+
+   /* Render the bounded typed-fact context block through the memory owner. Exactly
+    * one of entity/query is non-NULL. The provider returns 0 and writes a
+    * nonnegative fact count on success; absence or malformed output fails closed. */
+#ifndef AIMEE_DB2_FACT_RECALL_CONTRACT
+#define AIMEE_DB2_FACT_RECALL_CONTRACT 1
+   typedef int (*aimee_db2_fact_recall_fn)(const char *entity, const char *query,
+                                           int turn_requests_sensitive, char *out, size_t cap,
+                                           int *count);
+
+   /* Install the host's memory recall adapter. NULL removes it. */
+   void aimee_db2_register_fact_recall_provider(aimee_db2_fact_recall_fn provider);
+#endif
 
    enum
    {

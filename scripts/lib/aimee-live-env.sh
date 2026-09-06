@@ -551,6 +551,8 @@ live_env_prepare_modules() {
    }
    [ -x src/build/obj/aimee-module-postgres ] ||
       cp "$multicall" src/build/obj/aimee-module-postgres
+   [ -x src/build/obj/aimee-module-memory ] ||
+      cp "$multicall" src/build/obj/aimee-module-memory
    local bundle="src/build/obj/module-bundle"
    [ -r "$bundle/grants/server/config.grant" ] ||
       python3 scripts/export_c_repositories.py --runtime-bundle "$bundle" >/dev/null 2>&1 || true
@@ -594,17 +596,30 @@ live_env_start_kb_modules() {
       src/build/obj/module-bundle/grants/kb/config.grant >"$grants/config.grant"
    sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-postgres|" \
       src/build/obj/module-bundle/grants/kb/postgres.grant >"$grants/postgres.grant"
+   live_env_memory_grants kb "$grants"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/kb-config-module.log" LIVE_KB_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants"
    live_env_arm_module "$PWD/src/build/obj/aimee-module-postgres" "$bus" \
       "$AIMEE_HOME/kb-postgres-module.log" LIVE_KB_POSTGRES_PID \
       "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_DB2_URL=$AIMEE_DB2_URL"
+   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
+      "$AIMEE_HOME/kb-memory-module.log" LIVE_KB_MEMORY_PID \
+      "AIMEE_MODULE_POLICY_DIR=$grants" "AIMEE_MODULE_PLACEMENT=kb"
+}
+
+live_env_memory_grants() {
+   local placement=$1 grants=$2 name
+   for name in memory memory-postgres memory-egress; do
+      sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-memory|" \
+         "src/build/obj/module-bundle/grants/$placement/$name.grant" \
+         >"$grants/$name.grant" || exit 2
+   done
 }
 
 live_env_stop_kb_modules() {
    local var pid
-   for var in LIVE_KB_CONFIG_PID LIVE_KB_POSTGRES_PID; do
+   for var in LIVE_KB_CONFIG_PID LIVE_KB_POSTGRES_PID LIVE_KB_MEMORY_PID; do
       eval "pid=\${$var:-}"
       [ -n "$pid" ] || continue
       kill "$pid" 2>/dev/null || true
@@ -665,6 +680,7 @@ live_env_start_module() {
       src/build/obj/module-bundle/grants/server/config.grant \
       >"$AIMEE_HOME/modules.d/server/config.grant"
    local bus="$AIMEE_HOME/server-module-bus.sock"
+   live_env_memory_grants server "$AIMEE_HOME/modules.d/server"
    # Postgres first: the store checks for its backend as it comes up.
    live_env_arm_module "$PWD/$pgmodule" "$bus" "$AIMEE_HOME/pg-module.log" \
       LIVE_PG_MODULE_PID "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" \
@@ -677,6 +693,9 @@ live_env_start_module() {
    live_env_arm_module "$PWD/src/build/obj/aimee-module-config" "$bus" \
       "$AIMEE_HOME/server-config-module.log" LIVE_SERVER_CONFIG_PID \
       "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server"
+   live_env_arm_module "$PWD/src/build/obj/aimee-module-memory" "$bus" \
+      "$AIMEE_HOME/server-memory-module.log" LIVE_SERVER_MEMORY_PID \
+      "AIMEE_MODULE_POLICY_DIR=$AIMEE_HOME/modules.d/server" "AIMEE_MODULE_PLACEMENT=server"
 }
 
 # Everything the store's own processes said, for a failure that cannot say why.
@@ -687,7 +706,8 @@ live_env_start_module() {
 live_env_dump_module_logs() {
    local f
    for f in "$AIMEE_HOME/db1-module.log" "$AIMEE_HOME/pg-module.log" \
-            "$AIMEE_HOME/server-config-module.log" "$LIVE_SRV_LOG"; do
+            "$AIMEE_HOME/server-config-module.log" "$AIMEE_HOME/server-memory-module.log" \
+            "$AIMEE_HOME/kb-memory-module.log" "$LIVE_SRV_LOG"; do
       [ -r "$f" ] || continue
       echo "---- ${f##*/} ----" >&2
       tail -40 "$f" >&2
@@ -727,7 +747,7 @@ live_env_await_store() {
 
 live_env_stop_module() {
    local var pid
-   for var in LIVE_MODULE_PID LIVE_PG_MODULE_PID LIVE_SERVER_CONFIG_PID; do
+   for var in LIVE_MODULE_PID LIVE_PG_MODULE_PID LIVE_SERVER_CONFIG_PID LIVE_SERVER_MEMORY_PID; do
       eval "pid=\${$var:-}"
       [ -n "$pid" ] || continue
       kill "$pid" 2>/dev/null || true
