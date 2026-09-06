@@ -1,0 +1,14 @@
+{
+  "unlock_seconds": 0.1880149380012881,
+  "container_ready_seconds": 0.334886013999494,
+  "unlock_method": "supplied fixture key through private stdin; no TPM operation",
+  "vault_service_included": false,
+  "rows_after_restart": 100600,
+  "payload_check": "passed",
+  "containers": "stopped",
+  "mounts": "unmounted",
+  "luks_mapping": "closed",
+  "loop_devices": "detached",
+  "images_and_fixture_key": "retained",
+  "completed": "2026-09-06T15:59:21.304771+00:00"
+}

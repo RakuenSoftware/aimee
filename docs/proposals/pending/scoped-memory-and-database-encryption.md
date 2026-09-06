@@ -276,15 +276,16 @@ encrypted payload and its search projections in one transaction. The current
 projections without decrypting bodies. Return candidate IDs through the search
 contract and resolve bodies through the authorized read operation.
 
-For substring search, persist a distinct set of overlapping three-character
-fragments for each searched field, including punctuation and whitespace. Store
-the set as `text[]` with PostgreSQL's
+For substring search, persist distinct sets of overlapping one-, two-, and
+three-character fragments for each searched field, including punctuation and
+whitespace. Store them together as `text[]` with PostgreSQL's
 [GIN array index](https://www.postgresql.org/docs/current/gin.html#GIN-BUILTIN-OPCLASSES).
 For deterministic `lower(content) LIKE pattern` comparisons, extract fragments
 from the same PostgreSQL-lowered content. Extract required query fragments from
 literal runs in the actual bound pattern, respecting its wildcard and escape
-rules. A candidate must contain every required fragment (`@>`). For example,
-`%crypt%` requires `cry`, `ryp`, and `ypt`; every exact match contains all three.
+rules. Use three-character fragments for runs of at least three characters, and
+the complete run for shorter literals. A candidate must contain every required
+fragment (`@>`). For example, `%crypt%` requires `cry`, `ryp`, and `ypt`; every exact match contains all three.
 Fragment membership may admit false positives, which the payload reader rejects.
 
 Preserve each call site's current pattern construction. The
@@ -296,7 +297,7 @@ required substring fragments directly because it adds word-boundary padding.
 
 PostgreSQL decrypts authorized candidates and evaluates the original `LIKE`,
 `ILIKE`, equality, and ranking expressions against their plaintext. For patterns
-with no three-character literal run, negated predicates, or collation/case rules
+with no literal characters, negated predicates, or collation/case rules
 without a proven conservative fragment filter, scan the metadata-filtered,
 authorized rows. Preserve the original SQL semantics in that fallback. The
 [trigram compatibility rewriter](../../../src/modules/db2/c/db_postgres.c) currently
@@ -310,6 +311,13 @@ that order until the page is full or the candidate set is exhausted. Batch size
 controls memory use; it must never become an undisclosed result cutoff. Preserve
 the existing tie behavior and use a consistent snapshot for a batched query.
 
+Use a bounded candidate probe to choose between resolving a complete small ID
+list and traversing the full candidate set in metadata order. The measured probe
+used a 512-ID threshold and fetched one extra ID to detect overflow. Overflow
+selects the full ordered path; it never truncates search results. Run the probe
+and retrieval in the same snapshot. Verify both plans: a direct ordered join can
+scan an entire projection when no row matches, despite its available GIN index.
+
 Bind projections to the payload revision and normalization version. Writes,
 deletes, and migration update them atomically; include rows with missing or stale
 projections in the authorized fallback until rebuilt. Fragment sets are readable
@@ -320,7 +328,9 @@ for partial words, punctuation, escaped wildcards, wildcard patterns, Unicode,
 short and empty inputs, OR branches, updates, deletion, and multi-batch results.
 These searches are feasible with encrypted payloads. Selective fragment filters
 reduce decryption work; short or broad patterns can still require a full authorized
-scan. No constant-latency claim follows from this design.
+scan. One- and two-character projections let short literal searches use candidate
+selection too; they add storage and write work. No constant-latency claim follows
+from this design.
 
 ### Encrypting a vector column changes indexed search
 
@@ -473,41 +483,47 @@ requires manual conversion or leaves existing installations needing repair does
 not meet this criterion. Resolve that incompatibility before shipping under 0.4.0;
 a breaking migration would require reconsidering the release as 0.5.0.
 
-## Cipher timings leave the retrieval cost unmeasured
+## Docker measurements put the cost in candidate count
 
-A temporary local C benchmark on 2026-09-06 compiled the existing
-[vault primitives](../../../src/modules/vault/vault_crypto.c) with `cc -O2` and
-OpenSSL 3.5.6. Each size ran 20,000 iterations. Writes generated a fresh 32-byte
-data key, wrapped it with AES-KW, and encrypted the body with AES-GCM and a fresh
-nonce. Reads unwrapped and authenticated/decrypted the body; recovered bytes were
-checked for equality.
+The [benchmark report](../../../benchmarks/encryption/results/2026-09-06-253/report.md)
+records the 2026-09-06 runs on .253: real Docker Engine 28.5.2, PostgreSQL 18.6,
+and matched ordinary and LUKS-backed ext4 storage. Each configuration contained
+100,000 synthetic 4 KiB bodies. The harness used the selected PGP options and
+checked matching results across plaintext and encrypted queries.
 
-| Body size | Envelope write | Envelope read |
+| Warm query on LUKS, 100,000 eligible rows | Plaintext bodies | Encrypted bodies |
 |---|---:|---:|
-| 1 KiB | 3.69 microseconds | 4.58 microseconds |
-| 4 KiB | 3.86 microseconds | 4.95 microseconds |
-| 16 KiB | 5.42 microseconds | 6.46 microseconds |
-| 64 KiB | 11.44 microseconds | 12.37 microseconds |
+| Lexical search, 20 matches | 0.25 ms | 1.82 ms |
+| Selective substring, 20 matches | 1.24 ms | 4.54 ms |
+| Broad substring, ordered first page | 0.48 ms | 2.48 ms |
+| Full body-similarity ranking | 33.11 s | 43.29 s |
 
-These exploratory averages exclude database access, vault/bus calls, authorization,
-serialization, external custody, and the additional scope layers. The temporary
-harness was discarded; the measurement did not record CPU details or a source
-commit. The figures establish no deployment performance guarantee.
+The selective substring plan decrypted 40 candidates to return 20 exact matches.
+A two-character no-match lookup with only three-character projections scanned
+all 100,000 encrypted bodies and took 9.69 seconds on LUKS. Adding short fragments
+and the candidate probe reduced that same lookup to 0.06 ms. The probe preserves
+complete results when it switches paths. These measurements support the short
+projections and explicit candidate strategy specified above.
 
-The [existing envelope constants](../../../src/modules/vault/vault_crypto.h) add
-68 bytes: a 40-byte wrapped key, 12-byte nonce, and 16-byte tag. Scope layers and
-identity/version metadata add further overhead. These constants describe the
-existing AES-GCM envelope. The selected PGP payload format also performs S2K
-derivation per message and has different overhead. Bounded vault-side caching or
-batches avoid repeated custody work while preserving each operation's checks.
+The encrypted table and indexes occupied 1,069 MiB against 416 MiB for plaintext.
+The separate short-fragment prototype added 230 MiB. Compression and projection
+size depend on the corpus; combining the fragment arrays may change that cost.
+Prepared-input batch writes are recorded separately in the report.
 
-Benchmark ingestion, insert/read/recall, rotation, and recovery on each supported
-PostgreSQL deployment. Include realistic sizes and concurrency, warm/cold caches,
-and external custody. Compare payload encryption, database encryption, and both enabled. Report
-p50/p95/p99 latency, throughput, CPU, storage, and index-load cost. Measure search
-changes separately from cipher cost, including `pgcrypto` decryption scans and
-indexed candidate selection. The AES-GCM timings above do not measure `pgcrypto`.
-We have no overall percentage estimate yet.
+Warm selective searches changed little with LUKS. Direct sequential reads through
+the file-backed storage path fell from 5,567 to 2,701 MiB/s, and random 4 KiB reads
+rose from 8.08 to 16.57 microseconds. Those reads bypassed the inner filesystem's
+page cache while leaving ZFS caching intact. They establish no cold-device rate
+or single application-wide encryption percentage.
+
+The existing Vault primitives took 2.37 microseconds to generate a data key and
+wrap it through three scope layers, and 1.33 microseconds to unwrap all three.
+Wrong scope keys, changed associated data, and tampered ciphertext were rejected.
+SQL timings used prepared synthetic record keys; the scope test measured cipher
+work. Vault service calls, authorization, production projection generation,
+migration, rotation, and recovery workloads require implementation measurements.
+Five repetitions on a shared host provide descriptive medians. Service latency
+targets need measurements of the complete application path.
 
 ## Deliver authority separation before enabling the mode
 
