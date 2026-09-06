@@ -57,8 +57,8 @@ static int actor_from_json(const cJSON *object, fact_actor_t *out)
    int rank = 0, authenticated = 0;
    if (!out || !principal || !principal[0] || !role || !role[0] ||
        json_integer(object, "rank", &rank) != 0 ||
-       json_integer(object, "authenticated", &authenticated) != 0 ||
-       rank < FACT_ACTOR_MODEL || rank > FACT_ACTOR_USER)
+       json_integer(object, "authenticated", &authenticated) != 0 || rank < FACT_ACTOR_MODEL ||
+       rank > FACT_ACTOR_USER)
       return -1;
    memset(out, 0, sizeof(*out));
    if (strlen(principal) >= sizeof(out->principal) || strlen(role) >= sizeof(out->role) ||
@@ -97,7 +97,8 @@ static int commit_candidates(const cJSON *array)
       fact_actor_t actor;
       if (!subject || !subject[0] || !relation || !relation[0] || !object || !object[0] ||
           !assertion_kind || !assertion_kind[0] || !cJSON_IsObject(actor_json) ||
-          !cJSON_IsObject(evidence_json) || json_integer(item, "subject_kind", &subject_kind) != 0 ||
+          !cJSON_IsObject(evidence_json) ||
+          json_integer(item, "subject_kind", &subject_kind) != 0 ||
           json_integer(item, "object_kind", &object_kind) != 0 ||
           actor_from_json(actor_json, &actor) != 0)
          return -1;
@@ -171,9 +172,8 @@ int kb_memory_facts_drain(int batch)
       cJSON_AddStringToObject(claim, "operation", "memory-facts-claim");
       cJSON *claim_response = kb_module_memory_data(claim);
       cJSON_Delete(claim);
-      const cJSON *work = claim_response
-                              ? cJSON_GetObjectItemCaseSensitive(claim_response, "fact_work")
-                              : NULL;
+      const cJSON *work =
+          claim_response ? cJSON_GetObjectItemCaseSensitive(claim_response, "fact_work") : NULL;
       if (!cJSON_IsObject(work))
       {
          cJSON_Delete(claim_response);
@@ -210,9 +210,9 @@ int kb_memory_facts_drain(int batch)
 
       db2_lease_release_idle();
       char err[MF_ERRBUF] = "";
-      char *provider_response = kb_curator_llm_run(
-          KB_CURATOR_STAGE_EXTRACT_DOCS, system_prompt, request_json, NULL, "", MF_LLM_OUT_CAP,
-          err, sizeof(err));
+      char *provider_response =
+          kb_curator_llm_run(KB_CURATOR_STAGE_EXTRACT_DOCS, system_prompt, request_json, NULL, "",
+                             MF_LLM_OUT_CAP, err, sizeof(err));
       free(request_json);
       if (!provider_response)
       {
@@ -224,9 +224,8 @@ int kb_memory_facts_drain(int batch)
 
       cJSON *parsed = parse_response(job_id, provider_response);
       free(provider_response);
-      const cJSON *model = parsed
-                               ? cJSON_GetObjectItemCaseSensitive(parsed, "fact_candidates")
-                               : NULL;
+      const cJSON *model =
+          parsed ? cJSON_GetObjectItemCaseSensitive(parsed, "fact_candidates") : NULL;
       int committed = commit_candidates(model);
       if (!parsed || committed < 0)
          (void)finish_job(job_id, 0, "memory module rejected provider response");

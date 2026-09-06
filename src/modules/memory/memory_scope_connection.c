@@ -19,10 +19,13 @@ void db2_memory_scope_context_set_exact(const char *workspace, const char *proje
    memset(&current_scope, 0, sizeof(current_scope));
    current_scope.active = 1;
    current_scope.include_all = include_all != 0;
-   snprintf(current_scope.workspace, sizeof(current_scope.workspace), "%s", workspace ? workspace : "");
+   snprintf(current_scope.workspace, sizeof(current_scope.workspace), "%s",
+            workspace ? workspace : "");
    snprintf(current_scope.project, sizeof(current_scope.project), "%s", project ? project : "");
-   snprintf(current_scope.scope_type, sizeof(current_scope.scope_type), "%s", scope_type ? scope_type : "");
-   snprintf(current_scope.scope_value, sizeof(current_scope.scope_value), "%s", scope_value ? scope_value : "");
+   snprintf(current_scope.scope_type, sizeof(current_scope.scope_type), "%s",
+            scope_type ? scope_type : "");
+   snprintf(current_scope.scope_value, sizeof(current_scope.scope_value), "%s",
+            scope_value ? scope_value : "");
 }
 
 void db2_memory_scope_context_set(const char *workspace, const char *project, int include_all)
@@ -32,8 +35,10 @@ void db2_memory_scope_context_set(const char *workspace, const char *project, in
 
 void db2_memory_scope_context_restore(const db2_memory_scope_context_t *context)
 {
-   if (context) current_scope = *context;
-   else memset(&current_scope, 0, sizeof(current_scope));
+   if (context)
+      current_scope = *context;
+   else
+      memset(&current_scope, 0, sizeof(current_scope));
 }
 
 void db2_memory_scope_context_clear(void)
@@ -43,20 +48,25 @@ void db2_memory_scope_context_clear(void)
 
 void db2_memory_scope_context_get(db2_memory_scope_context_t *out)
 {
-   if (out) *out = current_scope;
+   if (out)
+      *out = current_scope;
 }
 
 int db2_memory_scope_context_rank(int64_t memory_id)
 {
-   if (!current_scope.active) return 1;
-   if (current_scope.include_all) return 1;
+   if (!current_scope.active)
+      return 1;
+   if (current_scope.include_all)
+      return 1;
    return memory_scope_visibility_rank(memory_id, current_scope.workspace, current_scope.project);
 }
 
 int db2_memory_scope_context_rank_batch(const int64_t *ids, int n, int *out_ranks)
 {
-   if (!ids || !out_ranks || n < 0) return -1;
-   for (int i = 0; i < n; ++i) out_ranks[i] = db2_memory_scope_context_rank(ids[i]);
+   if (!ids || !out_ranks || n < 0)
+      return -1;
+   for (int i = 0; i < n; ++i)
+      out_ranks[i] = db2_memory_scope_context_rank(ids[i]);
    return n;
 }
 
@@ -67,7 +77,8 @@ int db2_memory_scope_context_allows(int64_t memory_id)
 
 void db2_memory_scope_bind_current(aimee_pg_stmt_t *statement)
 {
-   if (!statement) return;
+   if (!statement)
+      return;
    aimee_pg_bind_int(statement, "?101", current_scope.active);
    aimee_pg_bind_int(statement, "?102", current_scope.include_all);
    aimee_pg_bind_text(statement, "?103", current_scope.workspace);

@@ -1238,11 +1238,7 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_ingest.c",
-        "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
-        "src/tests/test_rel_types_store.c",
-        "src/tests/test_typed_facts.c"
+        "src/tests/test_rel_types_store.c"
       ],
       "locations": [
         {
@@ -1254,6 +1250,21 @@
       "signature_sha256": "8f2225aa4902b730d36b0d307d6312d7ad44dc383db012512b86283e2c93ef94",
       "status": "private-test-only",
       "symbol": "aimee_db2_register_fact_gate_provider"
+    },
+    {
+      "consumers": [
+        "src/tests/test_fact_recall.c"
+      ],
+      "locations": [
+        {
+          "header": "src/modules/db2/c/fact_recall.h",
+          "line": 22
+        }
+      ],
+      "signature": "void aimee_db2_register_fact_recall_provider ( aimee_db2_fact_recall_fn provider )",
+      "signature_sha256": "199a66c3ef24a11fd7884fa2de60365af5676eeb5d9e55291109e9b1460a761a",
+      "status": "private-test-only",
+      "symbol": "aimee_db2_register_fact_recall_provider"
     },
     {
       "consumers": [
@@ -1403,7 +1414,6 @@
     {
       "consumers": [
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/modules/kb-synthesis/kb_curator_extract.c",
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
@@ -1441,7 +1451,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_reasoning.c",
         "src/kb/kb_service_code_embed.c",
@@ -1508,7 +1517,6 @@
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_ranker.c",
         "src/kb/kb_ranker_fit.c",
@@ -1701,7 +1709,6 @@
     },
     {
       "consumers": [
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/modules/kb-synthesis/kb_curator_extract.c",
         "src/modules/kb-synthesis/kb_curator_extract_code.c",
@@ -1747,7 +1754,6 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_service_code_embed.c",
         "src/modules/kb-synthesis/kb_curator_extract.c",
@@ -2037,7 +2043,6 @@
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_ranker.c",
         "src/kb/kb_ranker_fit.c",
@@ -2241,7 +2246,6 @@
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_ranker.c",
         "src/kb/kb_ranker_fit.c",
@@ -2422,7 +2426,6 @@
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_ranker.c",
         "src/kb/kb_ranker_fit.c",
@@ -5064,7 +5067,6 @@
         "src/kb/db2_adapters/kb_service_backend_export.c",
         "src/kb/kb_bandit.c",
         "src/kb/kb_ingest_workers.c",
-        "src/kb/kb_memory_facts.c",
         "src/kb/kb_mining.c",
         "src/kb/kb_ranker.c",
         "src/kb/kb_ranker_fit.c",
@@ -7355,7 +7357,6 @@
     {
       "consumers": [
         "src/tests/test_entity_registry.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -8158,7 +8159,6 @@
     {
       "consumers": [
         "src/tests/test_entity_registry.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -8482,9 +8482,7 @@
       "symbol": "db2_fact_actor_capture_memory"
     },
     {
-      "consumers": [
-        "src/kb/kb_memory_facts.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_mutation.h",
@@ -8493,7 +8491,7 @@
       ],
       "signature": "int db2_fact_actor_for_memory ( int64_t memory_id , fact_actor_t * out )",
       "signature_sha256": "a0817533765b98d855a3f952afd78dee8b02de3b52eabdaa4bec8e796e718f5f",
-      "status": "audit-pending",
+      "status": "internal-unconsumed",
       "symbol": "db2_fact_actor_for_memory"
     },
     {
@@ -8515,9 +8513,7 @@
     },
     {
       "consumers": [
-        "src/kb/kb_memory_facts.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_graph_scoring.c"
       ],
       "locations": [
@@ -8528,7 +8524,7 @@
       ],
       "signature": "int db2_fact_actor_internal ( fact_actor_rank_t rank , fact_actor_t * out )",
       "signature_sha256": "eabe9f84df2605ef2f92343eb7f6d8e270acd870b35a4c07ca271c23748e86de",
-      "status": "audit-pending",
+      "status": "private-test-only",
       "symbol": "db2_fact_actor_internal"
     },
     {
@@ -8551,7 +8547,6 @@
       "consumers": [
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_rel_types_store.c",
         "src/tests/test_typed_facts.c"
       ],
@@ -8759,9 +8754,7 @@
       "symbol": "db2_fact_ingest_text"
     },
     {
-      "consumers": [
-        "src/kb/kb_memory_facts.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_ingest.h",
@@ -8770,7 +8763,7 @@
       ],
       "signature": "int db2_fact_ingest_text_as_actor ( const char * text , const fact_actor_t * actor , int enabled , const fact_evidence_input_t * evidence , const char * assertion_kind , const char * valid_from , const char * valid_until )",
       "signature_sha256": "3f9b210dc8a264719b2ffe9528f8ed391b00906fd5e096587dfcfad87e625ebd",
-      "status": "audit-pending",
+      "status": "internal-unconsumed",
       "symbol": "db2_fact_ingest_text_as_actor"
     },
     {
@@ -8802,7 +8795,6 @@
     {
       "consumers": [
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_graph_scoring.c"
       ],
       "locations": [
@@ -8890,13 +8882,12 @@
     },
     {
       "consumers": [
-        "src/tests/test_fact_recall.c",
-        "src/tests/test_typed_facts.c"
+        "src/tests/test_fact_recall.c"
       ],
       "locations": [
         {
           "header": "src/modules/db2/c/fact_recall.h",
-          "line": 24
+          "line": 32
         }
       ],
       "signature": "int db2_fact_recall_block ( const char * entity , int turn_requests_sensitive , char * out , size_t cap )",
@@ -8912,7 +8903,7 @@
       "locations": [
         {
           "header": "src/modules/db2/c/fact_recall.h",
-          "line": 33
+          "line": 41
         }
       ],
       "signature": "int db2_fact_recall_in_query ( const char * query , int turn_requests_sensitive , char * out , size_t cap )",
@@ -8924,7 +8915,6 @@
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_rel_types_store.c"
       ],
       "locations": [
@@ -16792,7 +16782,6 @@
       "consumers": [
         "src/kb/kb_demote.c",
         "src/kb/kb_intel_payload.c",
-        "src/kb/kb_memory_facts.c",
         "src/tests/test_kb_http_routes.c",
         "src/tests/test_memory_advanced.c"
       ],
@@ -16971,9 +16960,14 @@
           "line": 73
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
+      },
       "signature": "int db2_memory_health_clear_effectiveness ( int64_t memory_id )",
       "signature_sha256": "c82ea53ebcce66af7bc7cf3f96c6422aa84695e026530afae7b1f97a9bd8efb2",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_clear_effectiveness"
     },
     {
@@ -17010,9 +17004,14 @@
           "line": 68
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.retention_enforce operation applies the complete fixed restricted and sensitive retention policy while DB2 owns deletion of canonical relational memory rows."
+      },
       "signature": "int db2_memory_health_delete_by_sensitivity ( const char * sensitivity , int days )",
       "signature_sha256": "7a9761df6afd0f7711c7f80fc76c70583d1592c43cce9f2c68f8bdd3a7794832",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_delete_by_sensitivity"
     },
     {
@@ -17023,9 +17022,14 @@
           "line": 34
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_demote operation applies the fixed host effectiveness threshold while DB2 owns the canonical relational tier update."
+      },
       "signature": "int db2_memory_health_demote_low_effectiveness ( double threshold )",
       "signature_sha256": "2648fef6d81f23e5e44eba57d21e20f8b0e2a2ed8793e56addbe1388e726c2c9",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_demote_low_effectiveness"
     },
     {
@@ -17036,9 +17040,14 @@
           "line": 41
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_stats operation returns the aggregate effectiveness summary under the fixed host low-effectiveness threshold while DB2 owns the canonical relational memory corpus."
+      },
       "signature": "int db2_memory_health_effectiveness_stats ( double low_threshold , double * avg_effectiveness , int * low_effectiveness , int * high_impact )",
       "signature_sha256": "0abdaf5a98171ba75b9c8b6bd65670f7737843d0ef54d02fc459c831aa81a2ff",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_effectiveness_stats"
     },
     {
@@ -17049,9 +17058,14 @@
           "line": 45
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.l2_memory_ids operation hands the bounded L2 identifier set across the boundary so the host can join it against DB1 surfacing evidence while DB2 keeps the canonical relational tier."
+      },
       "signature": "int db2_memory_health_list_l2_memory_ids ( int64_t * out , int max )",
       "signature_sha256": "955d6d91daa19ba4cff77b8af126938bc4a6aa3b0c9ea57b29615aa146cb19ba",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_list_l2_memory_ids"
     },
     {
@@ -17062,9 +17076,14 @@
           "line": 26
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_retention operation applies the complete fixed snapshot and contradiction retention policy in one action, so neither half is reachable alone and no partially pruned state is exposed across the bus."
+      },
       "signature": "int db2_memory_health_prune_old ( int days )",
       "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_prune_old"
     },
     {
@@ -17075,9 +17094,14 @@
           "line": 30
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_retention operation runs contradiction pruning together with health-snapshot pruning under one fixed policy, so this half is never invoked on its own."
+      },
       "signature": "int db2_memory_health_prune_old_contradictions ( int days )",
       "signature_sha256": "ae9eda0fb8546c7a1c10b2665718519f24d19cde1cb250f615b2cf48c8c0d2a5",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_prune_old_contradictions"
     },
     {
@@ -17088,9 +17112,14 @@
           "line": 63
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_counters operation returns the complete rolling-window aggregate under the fixed host promotion policy; DB2 owns every count and the host derives only ratios from them."
+      },
       "signature": "int db2_memory_health_query_counters ( int promote_use_count , double promote_confidence , db2_memory_health_query_counters_t * out )",
       "signature_sha256": "07a19db46b4eb5496de2db2d8be823485644c416fefdb08a0acb8229e115f1e6",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_query_counters"
     },
     {
@@ -17101,9 +17130,14 @@
           "line": 14
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+      },
       "signature": "void db2_memory_health_record ( int total_memories , int contradictions_detected , int promotions , int demotions , int expirations )",
       "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_record"
     },
     {
@@ -17114,9 +17148,14 @@
           "line": 72
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.effectiveness_update operation preserves the host-computed binary64 value while DB2 owns the canonical effectiveness column update."
+      },
       "signature": "int db2_memory_health_set_effectiveness ( int64_t memory_id , double value )",
       "signature_sha256": "4bf8c5f279d8ad36105f1bd8a928a0200acf561a29c8e9d136e666250a60aec8",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_health_set_effectiveness"
     },
     {
@@ -17883,9 +17922,14 @@
           "line": 55
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation wipes the L0 rows together with their provenance, so this half never runs alone and no partially expired L0 state is observable across the bus."
+      },
       "signature": "int db2_memory_promotion_delete_l0 ( void )",
       "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_l0"
     },
     {
@@ -17896,9 +17940,14 @@
           "line": 54
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation clears L0 provenance immediately before the rows it describes, inside one DB2 action that owns both halves."
+      },
       "signature": "int db2_memory_promotion_delete_l0_provenance ( void )",
       "signature_sha256": "b7a4943321c6bf9b9c61fe87df88a9d7976301df407d5140d9d0ac0ac69103cc",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_l0_provenance"
     },
     {
@@ -17909,9 +17958,14 @@
           "line": 60
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation applies each kind's own idle window from the private lifecycle thresholds, so the stale-L1 delete is never reachable with a caller-chosen kind or window."
+      },
       "signature": "int db2_memory_promotion_delete_stale_l1 ( const char * kind , const char * days_neg_str )",
       "signature_sha256": "b807fd1e5981a78c35170a8428a29dedcef2b5ed06ec5808d0fff25614abea19",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_stale_l1"
     },
     {
@@ -17922,9 +17976,14 @@
           "line": 59
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
+      },
       "signature": "int db2_memory_promotion_delete_stale_l1_provenance ( const char * kind , const char * days_neg_str )",
       "signature_sha256": "609166d24ddec974dacd63dcc93d05b05b15d5e472eb7829d5e7c16a22af8ba6",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_delete_stale_l1_provenance"
     },
     {
@@ -17935,9 +17994,14 @@
           "line": 51
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
+      },
       "signature": "int db2_memory_promotion_demote_cascade ( const char * ts )",
       "signature_sha256": "7a998434c41d41721e6cb739fc20cac3f70675a7fdfdde3b20d2de539ff65b6e",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_cascade"
     },
     {
@@ -17963,9 +18027,14 @@
           "line": 46
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
+      },
       "signature": "int db2_memory_promotion_demote_kind ( const char * ts , const char * kind , double demote_confidence , const char * days_neg_str )",
       "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_demote_kind"
     },
     {
@@ -18067,9 +18136,14 @@
           "line": 78
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy \u2014 tier, kinds, confidence floor, use count, and settling window \u2014 so callers cannot promote rows into the slow-changing tier on terms of their own."
+      },
       "signature": "int db2_memory_promotion_promote_stable_l2_to_l3 ( const char * ts )",
       "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_promote_stable_l2_to_l3"
     },
     {
@@ -18080,9 +18154,14 @@
           "line": 84
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
+      },
       "signature": "int db2_memory_promotion_reclassify_directives ( int require_approval )",
       "signature_sha256": "88e3de895e181cfa0e53afb4a04454b155146ff7e1666a483f350f9079216153",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_reclassify_directives"
     },
     {
@@ -18093,9 +18172,14 @@
           "line": 88
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
+      },
       "signature": "int db2_memory_promotion_record_l4_approval ( int64_t memory_id , const char * approver , const char * note )",
       "signature_sha256": "17003e46e85876231f57f99d229d9f06770970e58b39958f063ddf3927578f72",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_promotion_record_l4_approval"
     },
     {
@@ -18874,9 +18958,14 @@
           "line": 80
         }
       ],
+      "review": {
+        "disposition": "wire-operation",
+        "family": "memory",
+        "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
+      },
       "signature": "int db2_memory_stats_counts ( memory_stats_t * out )",
       "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
-      "status": "internal-unconsumed",
+      "status": "reviewed",
       "symbol": "db2_memory_stats_counts"
     },
     {
@@ -20402,7 +20491,6 @@
         "src/kb/kb_main.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_ontology_evolution.c",
         "src/tests/test_rel_types_store.c"
       ],
@@ -22094,7 +22182,6 @@
         "src/tests/test_evidence_embed.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_features.c",
         "src/tests/test_feedback_shadow.c",
         "src/tests/test_fidelity.c",
@@ -22233,7 +22320,6 @@
         "src/tests/test_evidence_embed.c",
         "src/tests/test_fact_ingest.c",
         "src/tests/test_fact_lifecycle.c",
-        "src/tests/test_fact_recall.c",
         "src/tests/test_features.c",
         "src/tests/test_fidelity.c",
         "src/tests/test_guardrails.c",
@@ -25524,8 +25610,7 @@
     },
     {
       "consumers": [
-        "src/kb/kb_main.c",
-        "src/tests/test_pgvec.c"
+        "src/kb/kb_main.c"
       ],
       "locations": [
         {
@@ -25544,9 +25629,7 @@
       "symbol": "pgvec_memory_vector_collection_exists"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25566,7 +25649,6 @@
     {
       "consumers": [
         "src/kb/kb_main.c",
-        "src/tests/test_pgvec.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -25588,7 +25670,6 @@
     {
       "consumers": [
         "src/tests/test_memory_retrieval_eval.c",
-        "src/tests/test_pgvec.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -25621,9 +25702,7 @@
       "symbol": "pgvec_memory_vector_delete_points_for_memory"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25661,9 +25740,7 @@
       "symbol": "pgvec_memory_vector_near_duplicate_pairs"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25681,9 +25758,7 @@
       "symbol": "pgvec_memory_vector_scope_hint_clear"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25703,8 +25778,7 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/tests/test_memory_embed_dim_guard.c",
-        "src/tests/test_pgvec.c"
+        "src/tests/test_memory_embed_dim_guard.c"
       ],
       "locations": [
         {
@@ -25723,9 +25797,7 @@
       "symbol": "pgvec_memory_vector_search_record_type"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -25745,7 +25817,6 @@
     {
       "consumers": [
         "src/tests/test_memory_embed_dim_guard.c",
-        "src/tests/test_pgvec.c",
         "src/tests/test_pgvec_neardup.c"
       ],
       "locations": [
@@ -25765,9 +25836,7 @@
       "symbol": "pgvec_memory_vector_upsert_memory"
     },
     {
-      "consumers": [
-        "src/tests/test_pgvec.c"
-      ],
+      "consumers": [],
       "locations": [
         {
           "header": "src/modules/db2/c/memory_vectors.h",
@@ -26157,15 +26226,15 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "56c6240d15c663f03dacf820c6f982f685c554560f18b029bdd13cbd526f3a90",
+  "fingerprint": "fddef65b96e89c433b2ada87594d73dc623d04337713bb31a29121a08c954371",
   "module": "db2",
   "schema_version": 1,
   "summary": {
-    "audit_pending": 519,
-    "declarations": 1482,
+    "audit_pending": 516,
+    "declarations": 1483,
     "headers": 142,
-    "internal_unconsumed": 374,
-    "private_test_only": 319,
-    "reviewed": 270
+    "internal_unconsumed": 356,
+    "private_test_only": 321,
+    "reviewed": 290
   }
 }

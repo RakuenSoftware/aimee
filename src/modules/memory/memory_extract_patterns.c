@@ -23,8 +23,8 @@ void memory_extract_register_turn_scanner(memory_pattern_turn_scanner_fn scanner
 int memory_extract_patterns(const char *text, pattern_triple_t *out, int max)
 {
    int count = 0;
-   if (!text || !out || max <= 0 || !g_extractor ||
-       g_extractor(text, out, max, &count) != 0 || count < 0 || count > max)
+   if (!text || !out || max <= 0 || !g_extractor || g_extractor(text, out, max, &count) != 0 ||
+       count < 0 || count > max)
       return -1;
    return count;
 }

@@ -106,9 +106,9 @@ cJSON *server_module_memory_data(const cJSON *request)
       free(encoded);
       return NULL;
    }
-   int rc = call_module(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
-                        (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                        &response_len);
+   int rc =
+       call_module(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded, (uint32_t)request_len,
+                   response, AIMEE_MODULE_MESSAGE_MAX_BODY, &response_len);
    free(encoded);
    cJSON *decoded = NULL;
    if (rc == 0 && response_len > 0)
@@ -297,8 +297,8 @@ static int memory_pii_sensitivity(const char *const *rel_types, int count, rel_s
    return rc;
 }
 
-static int memory_pii_inject(int sensitivity, double confidence,
-                             int turn_requests_sensitive, int *allowed)
+static int memory_pii_inject(int sensitivity, double confidence, int turn_requests_sensitive,
+                             int *allowed)
 {
    if (!allowed)
       return -1;

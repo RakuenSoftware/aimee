@@ -43,8 +43,8 @@
 #include <string.h>
 #include <time.h>
 
-#define KB_MODULE_STAGE_DEADLINE_NS (500ULL * 1000000ULL)
-#define KB_MODULE_EMBED_DEADLINE_NS (25ULL * 1000000000ULL)
+#define KB_MODULE_STAGE_DEADLINE_NS       (500ULL * 1000000ULL)
+#define KB_MODULE_EMBED_DEADLINE_NS       (25ULL * 1000000000ULL)
 #define KB_MODULE_MEMORY_DATA_DEADLINE_NS (5ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
@@ -415,13 +415,13 @@ static int kb_memory_pii_sensitivity(const char *const *rel_types, int count, in
    return rc;
 }
 
-void memory_pii_register_inject_classifier(
-    int (*classifier)(int sensitivity, double confidence, int turn_requests_sensitive,
-                      int *allowed));
+void memory_pii_register_inject_classifier(int (*classifier)(int sensitivity, double confidence,
+                                                             int turn_requests_sensitive,
+                                                             int *allowed));
 int memory_embed_command_is_http(const char *command);
 
-static int kb_memory_pii_inject(int sensitivity, double confidence,
-                                int turn_requests_sensitive, int *allowed)
+static int kb_memory_pii_inject(int sensitivity, double confidence, int turn_requests_sensitive,
+                                int *allowed)
 {
    if (!allowed)
       return -1;
@@ -476,6 +476,44 @@ cJSON *kb_module_memory_data(const cJSON *request_json)
    free(request);
    free(response);
    return root;
+}
+
+static int recall_facts(const char *entity, const char *query, int turn_requests_sensitive,
+                        char *out, size_t cap, int *count)
+{
+   if ((!entity && !query) || (entity && query) || !out || !cap || !count)
+      return -1;
+   cJSON *request = cJSON_CreateObject();
+   if (!request || !cJSON_AddStringToObject(request, "operation", "fact-recall") ||
+       (entity && !cJSON_AddStringToObject(request, "entity", entity)) ||
+       (query && !cJSON_AddStringToObject(request, "query", query)) ||
+       !cJSON_AddBoolToObject(request, "turn_requests_sensitive", turn_requests_sensitive != 0) ||
+       !cJSON_AddNumberToObject(request, "content_capacity", (double)cap))
+   {
+      cJSON_Delete(request);
+      return -1;
+   }
+   cJSON *response = kb_module_memory_data(request);
+   cJSON_Delete(request);
+   const cJSON *block = response ? cJSON_GetObjectItemCaseSensitive(response, "block") : NULL;
+   const cJSON *written = response ? cJSON_GetObjectItemCaseSensitive(response, "count") : NULL;
+   if ((!cJSON_IsString(block) && !cJSON_IsNull(block)) || !cJSON_IsNumber(written) ||
+       written->valueint < 0)
+   {
+      cJSON_Delete(response);
+      return -1;
+   }
+   const char *text = cJSON_IsString(block) && block->valuestring ? block->valuestring : "";
+   size_t len = strlen(text);
+   if (len >= cap)
+   {
+      cJSON_Delete(response);
+      return -1;
+   }
+   memcpy(out, text, len + 1);
+   *count = written->valueint;
+   cJSON_Delete(response);
+   return 0;
 }
 
 _Static_assert(AIMEE_DB2_FACT_ATTR_MAX == AIMEE_MEMORY_SCAN_ATTR_MAX,
@@ -660,6 +698,7 @@ void kb_module_stage_adapters_configure(void)
    aimee_db2_register_fact_gate_provider(check_fact_gate);
    aimee_db2_register_fact_extract_provider(extract_facts);
    aimee_db2_register_fact_scan_provider(scan_fact_turn);
+   aimee_db2_register_fact_recall_provider(recall_facts);
    memory_pii_register_turn_classifier(kb_memory_pii_turn);
    memory_pii_register_sensitivity_batch(kb_memory_pii_sensitivity);
    memory_pii_register_inject_classifier(kb_memory_pii_inject);

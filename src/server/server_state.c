@@ -146,8 +146,8 @@ int handle_memory_search(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    cJSON *module_reply = server_module_memory_data(request);
    cJSON_Delete(request);
    if (!module_reply)
-      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE,
-                                    "user memory module unavailable", NULL);
+      return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "user memory module unavailable",
+                                    NULL);
    cJSON *records = cJSON_GetObjectItemCaseSensitive(module_reply, "records");
    cJSON *farr = cJSON_CreateArray();
    if (cJSON_IsArray(records))

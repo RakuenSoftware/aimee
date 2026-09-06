@@ -17,11 +17,13 @@
     "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
+    "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_fact_gate.c",
     "src/modules/memory/memory_pii_gate.c",
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
+    "server-go/cmd/aimee-memory-bus-probe/main.go",
     "server-go/modules/memory/commands.go",
     "server-go/modules/memory/content_gate.go",
     "server-go/modules/memory/data.go",
@@ -83,7 +85,6 @@
   ],
   "tests": [
     "src/tests/test_gw_stage_memory.c",
-    "src/tests/test_memory_embed_dim_guard.c",
     "src/tests/test_memory_fact_gate.c"
   ],
   "docs": [

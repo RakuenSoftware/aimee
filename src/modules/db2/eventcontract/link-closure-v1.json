@@ -2,7 +2,7 @@
   "schema_version": 2,
   "module": "db2",
   "source_revision": "95146b7b7b55126d2926987e0dfaf68aabf54df3",
-  "source_fingerprint": "6749313ba5cc9962d8e59fece9a14832d709b4a5dfff0d0551a1a52da973db0e",
+  "source_fingerprint": "e080d8f3d1e4bac37fbd1b445c9c792df22d1a7e8db06e6fad426cb467ba7774",
   "probe": {
     "compile_driver": "src/Makefile",
     "extra_c_flags": "-fno-lto -fno-common -fno-stack-protector -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -DAIMEE_DB1_DISABLED -DAIMEE_DISABLE_DB2_SQLITE_SHIM",
@@ -1917,14 +1917,6 @@
       "evidence": "C/POSIX, libpq, SQLite, libm, pthread, or OpenSSL ABI symbol; retain only as an explicit descriptor system dependency."
     },
     {
-      "symbol": "aimee_module_json_call",
-      "references": [
-        "src/modules/db2/c/fact_recall.c"
-      ],
-      "disposition": "portable-core-promotion",
-      "evidence": "Legacy project-owned support symbol outside the DB2 boundary; promote a minimal portable API or reclassify with stronger owner evidence before closure."
-    },
-    {
       "symbol": "atoi",
       "references": [
         "src/modules/db2/c/db_postgres.c",
@@ -2246,6 +2238,7 @@
       "symbol": "memchr",
       "references": [
         "src/modules/db2/c/canonical_index.c",
+        "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/management_jwks_runtime.c",
         "src/modules/db2/c/vault_operator_rewrap_runtime.c",
         "src/modules/db2/support/runtime_config_primitives.c"
@@ -2871,7 +2864,6 @@
         "src/modules/db2/c/epistemic_directives.c",
         "src/modules/db2/c/evidence_lifecycle.c",
         "src/modules/db2/c/fact_identity.c",
-        "src/modules/db2/c/fact_recall.c",
         "src/modules/db2/c/kb_audit_worm.c",
         "src/modules/db2/c/kb_payload.c",
         "src/modules/db2/c/management_action_journal.c",
@@ -3121,15 +3113,15 @@
   "summary": {
     "translation_units": 125,
     "descriptor_support_units": 19,
-    "unresolved_symbols": 150,
+    "unresolved_symbols": 149,
     "dispositions": {
       "descriptor-owned-copy/generated-input": 0,
       "injected-module-contract": 3,
-      "portable-core-promotion": 7,
+      "portable-core-promotion": 6,
       "private-implementation": 0,
       "remove/dead": 0,
       "system-link": 140
     }
   },
-  "fingerprint": "a7dcd21bc17fb73214fb01191c7a0015b2e103927898f17fc8cd8e9a2418e21f"
+  "fingerprint": "0fe82d3435e145beb5bf466bfea6310cea0d286be1939e3739dbc8576fd62338"
 }

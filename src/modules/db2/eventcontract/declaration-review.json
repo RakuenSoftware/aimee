@@ -1257,6 +1257,76 @@
       "reason": "The typed memory.find_id_by_key_kind operation replaces the presentation-only lookup with bounded canonical key and kind fields plus explicit found state and identifier."
     },
     {
+      "symbol": "db2_memory_health_clear_effectiveness",
+      "signature_sha256": "c82ea53ebcce66af7bc7cf3f96c6422aa84695e026530afae7b1f97a9bd8efb2",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.effectiveness_update operation carries the positive memory identifier and explicit clear state while DB2 owns the canonical nullable column update."
+    },
+    {
+      "symbol": "db2_memory_health_delete_by_sensitivity",
+      "signature_sha256": "7a9761df6afd0f7711c7f80fc76c70583d1592c43cce9f2c68f8bdd3a7794832",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.retention_enforce operation applies the complete fixed restricted and sensitive retention policy while DB2 owns deletion of canonical relational memory rows."
+    },
+    {
+      "symbol": "db2_memory_health_demote_low_effectiveness",
+      "signature_sha256": "2648fef6d81f23e5e44eba57d21e20f8b0e2a2ed8793e56addbe1388e726c2c9",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.effectiveness_demote operation applies the fixed host effectiveness threshold while DB2 owns the canonical relational tier update."
+    },
+    {
+      "symbol": "db2_memory_health_effectiveness_stats",
+      "signature_sha256": "0abdaf5a98171ba75b9c8b6bd65670f7737843d0ef54d02fc459c831aa81a2ff",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.effectiveness_stats operation returns the aggregate effectiveness summary under the fixed host low-effectiveness threshold while DB2 owns the canonical relational memory corpus."
+    },
+    {
+      "symbol": "db2_memory_health_list_l2_memory_ids",
+      "signature_sha256": "955d6d91daa19ba4cff77b8af126938bc4a6aa3b0c9ea57b29615aa146cb19ba",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.l2_memory_ids operation hands the bounded L2 identifier set across the boundary so the host can join it against DB1 surfacing evidence while DB2 keeps the canonical relational tier."
+    },
+    {
+      "symbol": "db2_memory_health_prune_old",
+      "signature_sha256": "72dc451b17a01e95eb74f03a61f51af72057b38fdbe34f82a9db392a02b4a760",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.health_retention operation applies the complete fixed snapshot and contradiction retention policy in one action, so neither half is reachable alone and no partially pruned state is exposed across the bus."
+    },
+    {
+      "symbol": "db2_memory_health_prune_old_contradictions",
+      "signature_sha256": "ae9eda0fb8546c7a1c10b2665718519f24d19cde1cb250f615b2cf48c8c0d2a5",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.health_retention operation runs contradiction pruning together with health-snapshot pruning under one fixed policy, so this half is never invoked on its own."
+    },
+    {
+      "symbol": "db2_memory_health_query_counters",
+      "signature_sha256": "07a19db46b4eb5496de2db2d8be823485644c416fefdb08a0acb8229e115f1e6",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.health_counters operation returns the complete rolling-window aggregate under the fixed host promotion policy; DB2 owns every count and the host derives only ratios from them."
+    },
+    {
+      "symbol": "db2_memory_health_record",
+      "signature_sha256": "1721479092870132f590c9472bd062ad44b298ca88a30abd0f100b5564daf726",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.health_record operation carries only the three host-observed cycle counters; DB2 owns the corpus total and the fixed one-day conflict window it inserts alongside them."
+    },
+    {
+      "symbol": "db2_memory_health_set_effectiveness",
+      "signature_sha256": "4bf8c5f279d8ad36105f1bd8a928a0200acf561a29c8e9d136e666250a60aec8",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.effectiveness_update operation preserves the host-computed binary64 value while DB2 owns the canonical effectiveness column update."
+    },
+    {
       "symbol": "db2_memory_key_exists",
       "signature_sha256": "209f3694a02607a189dccf2e451c0d13190cf52ff4a48270996ef0718bdd5828",
       "disposition": "wire-operation",
@@ -1269,6 +1339,69 @@
       "disposition": "wire-operation",
       "family": "memory",
       "reason": "The typed memory.key_exists_in_tier_pair operation replaces the bounded canonical-key and tier-pair probe while preserving its Boolean hit-or-miss result."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_l0",
+      "signature_sha256": "912605e89f87fb0961d3e301d51dfbf71edd4ea9bec00ac6c3cfb73f1dc30938",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.expire operation wipes the L0 rows together with their provenance, so this half never runs alone and no partially expired L0 state is observable across the bus."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_l0_provenance",
+      "signature_sha256": "b7a4943321c6bf9b9c61fe87df88a9d7976301df407d5140d9d0ac0ac69103cc",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.expire operation clears L0 provenance immediately before the rows it describes, inside one DB2 action that owns both halves."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_stale_l1",
+      "signature_sha256": "b807fd1e5981a78c35170a8428a29dedcef2b5ed06ec5808d0fff25614abea19",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.expire operation applies each kind's own idle window from the private lifecycle thresholds, so the stale-L1 delete is never reachable with a caller-chosen kind or window."
+    },
+    {
+      "symbol": "db2_memory_promotion_delete_stale_l1_provenance",
+      "signature_sha256": "609166d24ddec974dacd63dcc93d05b05b15d5e472eb7829d5e7c16a22af8ba6",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.expire operation clears stale-L1 provenance immediately before the rows it describes, under the same per-kind window and inside the same DB2 action."
+    },
+    {
+      "symbol": "db2_memory_promotion_demote_cascade",
+      "signature_sha256": "7a998434c41d41721e6cb739fc20cac3f70675a7fdfdde3b20d2de539ff65b6e",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.demote operation cascades reduced confidence to dependants of the rows it just demoted, matched by the stamp it issued; exposing the cascade alone would let a caller match rows a different action had stamped."
+    },
+    {
+      "symbol": "db2_memory_promotion_demote_kind",
+      "signature_sha256": "1a8dc69de29ad0e38b3465d730a1963cb251cabd32cdefa2e0243ea4c93c5f7f",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.demote operation applies each kind's own confidence floor and resistance-scaled idle window from the private lifecycle thresholds, so the per-kind demotion is never reachable with a caller-chosen threshold or window."
+    },
+    {
+      "symbol": "db2_memory_promotion_promote_stable_l2_to_l3",
+      "signature_sha256": "7774ad32c2c5d27c72f22ce7ebdcf2608add0a25daddc4b23f5bdec5d52f5e4f",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.promote_stable operation applies the complete fixed stability policy — tier, kinds, confidence floor, use count, and settling window — so callers cannot promote rows into the slow-changing tier on terms of their own."
+    },
+    {
+      "symbol": "db2_memory_promotion_reclassify_directives",
+      "signature_sha256": "88e3de895e181cfa0e53afb4a04454b155146ff7e1666a483f350f9079216153",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.reclassify_directives operation fixes the tiers and directive kinds and carries only the approval gate, which is a genuine caller choice: the batch path runs ungated while the operator approval path requires a recorded approval for policies."
+    },
+    {
+      "symbol": "db2_memory_promotion_record_l4_approval",
+      "signature_sha256": "17003e46e85876231f57f99d229d9f06770970e58b39958f063ddf3927578f72",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.record_l4_approval operation fixes the approved tier and carries the bounded approver and note an operator supplies; DB2 owns the approval row that memory.reclassify_directives later reads under its gate."
     },
     {
       "symbol": "db2_memory_provenance_delete",
@@ -1346,6 +1479,13 @@
       "disposition": "private-db2",
       "family": "memory",
       "reason": "Renaming and closing the prior row is an internal step of the future composite memory.supersede transaction; callers cannot safely sequence this mutation across the event bus."
+    },
+    {
+      "symbol": "db2_memory_stats_counts",
+      "signature_sha256": "efca90ae907b5403f429a06f1db17932f70a1941071d46e86b4e5630ab4a4a3b",
+      "disposition": "wire-operation",
+      "family": "memory",
+      "reason": "The typed memory.stats_counts operation returns the complete tier, kind, and conflict breakdown of the canonical relational corpus; the host layers its own PageRank timings on top and DB2 owns none of those."
     },
     {
       "symbol": "db2_memory_workspace_matches",

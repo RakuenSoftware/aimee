@@ -21,8 +21,8 @@ fact_gate_verdict_t memory_fact_gate_check(memory_node_kind_t head_kind, const c
    if (!g_checker)
       return FACT_GATE_DEFER;
    int verdict = FACT_GATE_DEFER;
-   if (g_checker(head_kind, rel_type, tail_kind, &verdict) != 0 ||
-       verdict < FACT_GATE_ACCEPT || verdict > FACT_GATE_BADARG)
+   if (g_checker(head_kind, rel_type, tail_kind, &verdict) != 0 || verdict < FACT_GATE_ACCEPT ||
+       verdict > FACT_GATE_BADARG)
       return FACT_GATE_DEFER;
    return (fact_gate_verdict_t)verdict;
 }

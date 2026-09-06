@@ -43,22 +43,19 @@ static int memory_content_gate_call(const char *content, size_t capacity,
       return -1;
    }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = aimee_module_json_call(
-       AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
-       AIMEE_MODULE_MESSAGE_MAX_BODY, 5000, &result);
+   cJSON *response = aimee_module_json_call(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA,
+                                            request, AIMEE_MODULE_MESSAGE_MAX_BODY, 5000, &result);
    if (!response)
       return -1;
 
-   const cJSON *status =
-       cJSON_GetObjectItemCaseSensitive(response, "sensitive_status");
+   const cJSON *status = cJSON_GetObjectItemCaseSensitive(response, "sensitive_status");
    const cJSON *ephemeral = cJSON_GetObjectItemCaseSensitive(response, "ephemeral");
    const cJSON *evidence = cJSON_GetObjectItemCaseSensitive(response, "evidence");
    const char *redacted =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "redacted"));
    const char *classification =
        cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(response, "classification"));
-   if (!cJSON_IsNumber(status) || status->valueint < 0 || status->valueint > 2 ||
-       !classification)
+   if (!cJSON_IsNumber(status) || status->valueint < 0 || status->valueint > 2 || !classification)
    {
       cJSON_Delete(response);
       return -1;
@@ -123,8 +120,7 @@ const char *memory_scan_content(char *content, size_t content_len)
    }
    if (reply.redacted && content && strlen(reply.redacted) < content_len)
       memcpy(content, reply.redacted, strlen(reply.redacted) + 1);
-   const char *classification = strcmp(reply.classification, "restricted") == 0
-                                    ? "restricted"
+   const char *classification = strcmp(reply.classification, "restricted") == 0  ? "restricted"
                                 : strcmp(reply.classification, "sensitive") == 0 ? "sensitive"
                                                                                  : "normal";
    memory_content_gate_reply_clear(&reply);

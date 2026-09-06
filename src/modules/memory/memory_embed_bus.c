@@ -51,7 +51,7 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "base_url", command) ||
        !cJSON_AddStringToObject(request, "input_type",
-                               input_type == EMBED_INPUT_QUERY ? "query" : "document") ||
+                                input_type == EMBED_INPUT_QUERY ? "query" : "document") ||
        !cJSON_AddStringToObject(request, "text", text) ||
        !cJSON_AddNumberToObject(request, "max_dim", max_dim))
    {
@@ -60,9 +60,9 @@ int memory_embed_text(const char *text, const char *command, embed_input_type_t 
    }
 
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED,
-                                            request, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                                            MEMORY_EMBED_BUS_TIMEOUT_MS, &result);
+   cJSON *response =
+       aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED, request,
+                              AIMEE_MODULE_MESSAGE_MAX_BODY, MEMORY_EMBED_BUS_TIMEOUT_MS, &result);
    if (!response)
       return 0;
 
@@ -107,7 +107,8 @@ int memory_embedder_last_result_unauthorized(void)
 
 int memory_embed_serving_id(const char *command, char *out, size_t out_len)
 {
-   if (!command || !command[0] || !out || out_len == 0) return -1;
+   if (!command || !command[0] || !out || out_len == 0)
+      return -1;
    out[0] = '\0';
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "serving-id") ||
@@ -117,10 +118,11 @@ int memory_embed_serving_id(const char *command, char *out, size_t out_len)
       return -1;
    }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
-   cJSON *response = aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED,
-                                            request, AIMEE_MODULE_MESSAGE_MAX_BODY,
-                                            MEMORY_EMBED_BUS_TIMEOUT_MS, &result);
-   const cJSON *serving = response ? cJSON_GetObjectItemCaseSensitive(response, "serving_id") : NULL;
+   cJSON *response =
+       aimee_module_json_call(AIMEE_MEMORY_EVENT_EMBED, AIMEE_MEMORY_STAGE_EMBED, request,
+                              AIMEE_MODULE_MESSAGE_MAX_BODY, MEMORY_EMBED_BUS_TIMEOUT_MS, &result);
+   const cJSON *serving =
+       response ? cJSON_GetObjectItemCaseSensitive(response, "serving_id") : NULL;
    const cJSON *error = response ? cJSON_GetObjectItemCaseSensitive(response, "error") : NULL;
    if (!cJSON_IsString(serving) || !serving->valuestring ||
        (cJSON_IsString(error) && error->valuestring && error->valuestring[0]))
@@ -139,7 +141,8 @@ int memory_embed_texts(const char *const *texts, int n, const char *command,
    if (!texts || n <= 0 || !out || dim <= 0)
       return 0;
    for (int i = 0; i < n; ++i)
-      if (memory_embed_text(texts[i], command, input_type, out + (size_t)i * (size_t)dim, dim) != dim)
+      if (memory_embed_text(texts[i], command, input_type, out + (size_t)i * (size_t)dim, dim) !=
+          dim)
          return 0;
    return n;
 }

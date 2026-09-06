@@ -1512,13 +1512,18 @@ void handle_conn(int fd, int is_tcp, int is_management)
       pki_cert_status_t cs = pki_cert_check(rc_serial, (long)time(NULL));
       if (cs != PKI_CERT_VALID)
       {
-         LOG_INFO("server.http", "%s %s -> 403 (mtls re-check: %s serial=%s) req_id=%s", method,
-                  path, pki_cert_status_str(cs), rc_serial, request_id);
-         send_response(fd, 403,
-                       "{\"error\":{\"message\":\"client certificate is no longer valid "
-                       "(revoked, expired, or unrecognized)\",\"type\":"
-                       "\"authentication_error\"}}",
-                       request_id);
+         int status = server_http_mtls_recheck_status(cs);
+         LOG_INFO("server.http", "%s %s -> %d (mtls re-check: %s serial=%s) req_id=%s", method,
+                  path, status, pki_cert_status_str(cs), rc_serial, request_id);
+         send_response(
+             fd, status,
+             status == 503
+                 ? "{\"error\":{\"message\":\"client certificate authority is temporarily "
+                   "unavailable\",\"type\":\"service_unavailable\"}}"
+                 : "{\"error\":{\"message\":\"client certificate is no longer valid "
+                   "(revoked, expired, or unrecognized)\",\"type\":"
+                   "\"authentication_error\"}}",
+             request_id);
          return;
       }
       mtls_authenticated = 1;

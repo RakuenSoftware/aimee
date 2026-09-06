@@ -89,7 +89,6 @@
         {"primitive": "http", "path": "src/modules/git/git_oauth_github.c", "count": 3},
         {"primitive": "http", "path": "src/modules/git/git_org_repos.c", "count": 2},
         {"primitive": "http", "path": "src/modules/git/git_pr_api.c", "count": 5},
-        {"primitive": "http", "path": "src/modules/memory/memory_core_helpers_b.c", "count": 2},
         {"primitive": "http", "path": "src/modules/protocols/mcp/mcp_client.c", "count": 4}
       ]
     },

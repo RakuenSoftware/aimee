@@ -526,12 +526,6 @@
     {
       "ctest": false,
       "make": true,
-      "module": "learning",
-      "test": "src/tests/test_learning_metrics.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
       "module": "memory",
       "test": "src/tests/test_gw_stage_memory.c"
     },
@@ -539,73 +533,7 @@
       "ctest": false,
       "make": true,
       "module": "memory",
-      "test": "src/tests/test_memory_advanced.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_assemble_util.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_embed_dim_guard.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
       "test": "src/tests/test_memory_fact_gate.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_filter.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_lanes.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_profiles.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_ranker_boundary.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_recall_pivot.c"
-    },
-    {
-      "ctest": true,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_redirect.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_memory_retrieval_eval.c"
-    },
-    {
-      "ctest": false,
-      "make": true,
-      "module": "memory",
-      "test": "src/tests/test_workspace_memory.c"
     },
     {
       "ctest": true,

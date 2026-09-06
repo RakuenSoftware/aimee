@@ -35,7 +35,7 @@ different scope and table boundaries.
 
 C is restricted to transport and host integration:
 
-- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_embed_bus.c`,
+- `memory_data_bus.c`, `memory_domain_bus.c`, `memory_domain_runtime_bus.c`, `memory_embed_bus.c`,
   `memory_extract_patterns.c`, `memory_content_gate_bus.c`,
   `memory_fact_gate.c`, and `memory_pii_gate.c` encode/decode bounded event-bus
   messages. `memory_scope_connection.c` only binds caller scope to an already

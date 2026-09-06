@@ -13,6 +13,7 @@ ALLOWED_C = {
     "src/modules/memory/memory_content_gate_bus.c",
     "src/modules/memory/memory_data_bus.c",
     "src/modules/memory/memory_domain_bus.c",
+    "src/modules/memory/memory_domain_runtime_bus.c",
     "src/modules/memory/memory_scope_connection.c",
     "src/modules/memory/memory_embed_bus.c",
     "src/modules/memory/memory_extract_patterns.c",

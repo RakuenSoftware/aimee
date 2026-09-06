@@ -21,7 +21,10 @@
 
 static memory_audit_hook_fn memory_audit_hook;
 
-void memory_set_audit_hook(memory_audit_hook_fn hook) { memory_audit_hook = hook; }
+void memory_set_audit_hook(memory_audit_hook_fn hook)
+{
+   memory_audit_hook = hook;
+}
 
 void memory_audit_emit(const char *op, int64_t id, const char *tier, const char *kind,
                        const char *key, double confidence, const char *session_id)
@@ -193,12 +196,11 @@ char *memory_content_dup(int64_t memory_id)
       return NULL;
    }
    cJSON *response = memory_data_call(request);
-   const cJSON *records =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "records") : NULL;
+   const cJSON *records = response ? cJSON_GetObjectItemCaseSensitive(response, "records") : NULL;
    const cJSON *record = cJSON_IsArray(records) ? cJSON_GetArrayItem(records, 0) : NULL;
-   const cJSON *content =
-       record ? cJSON_GetObjectItemCaseSensitive(record, "content") : NULL;
-   char *copy = cJSON_IsString(content) && content->valuestring ? strdup(content->valuestring) : NULL;
+   const cJSON *content = record ? cJSON_GetObjectItemCaseSensitive(record, "content") : NULL;
+   char *copy =
+       cJSON_IsString(content) && content->valuestring ? strdup(content->valuestring) : NULL;
    cJSON_Delete(response);
    return copy;
 }
@@ -216,16 +218,14 @@ int memory_valid_at(int64_t memory_id, const char *as_of)
       return -1;
    }
    cJSON *response = memory_data_call(request);
-   const cJSON *valid =
-       response ? cJSON_GetObjectItemCaseSensitive(response, "valid_at") : NULL;
+   const cJSON *valid = response ? cJSON_GetObjectItemCaseSensitive(response, "valid_at") : NULL;
    int result = cJSON_IsBool(valid) ? cJSON_IsTrue(valid) : -1;
    cJSON_Delete(response);
    return result;
 }
 
-int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len,
-                                char *source_out, int source_len, char *version_out,
-                                int version_len)
+int db2_memory_provenance_by_id(int64_t memory_id, char *kind_out, int kind_len, char *source_out,
+                                int source_len, char *version_out, int version_len)
 {
    memory_t record;
    if (memory_get(memory_id, &record) != 0)
@@ -384,7 +384,8 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
        !cJSON_AddStringToObject(request, "tier", tier) ||
        !cJSON_AddStringToObject(request, "kind", kind) ||
        !cJSON_AddStringToObject(request, "epistemic_kind",
-                               epistemic_kind && epistemic_kind[0] ? epistemic_kind : "world_fact") ||
+                                epistemic_kind && epistemic_kind[0] ? epistemic_kind
+                                                                    : "world_fact") ||
        !cJSON_AddStringToObject(request, "key", key) ||
        !cJSON_AddStringToObject(request, "content", content) ||
        !cJSON_AddStringToObject(request, "use_cases", use_cases ? use_cases : "") ||
@@ -406,8 +407,8 @@ int memory_insert_ex(const char *tier, const char *kind, const char *key, const 
                      const char *use_cases, double confidence, const char *session_id,
                      memory_authority_t authority, memory_t *out)
 {
-   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases,
-                                     confidence, session_id, authority, out);
+   return memory_insert_epistemic_ex(tier, kind, "world_fact", key, content, use_cases, confidence,
+                                     session_id, authority, out);
 }
 
 int memory_insert(const char *tier, const char *kind, const char *key, const char *content,
@@ -445,7 +446,8 @@ int memory_update_content_as(int64_t id, const char *content, memory_authority_t
       *new_id_out = (int64_t)new_id->valuedouble;
    int result = code->valueint;
    cJSON_Delete(response);
-   if (result == 0) memory_audit_emit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
+   if (result == 0)
+      memory_audit_emit("memory.update", id, NULL, NULL, NULL, 0.0, NULL);
    return result;
 }
 
@@ -465,7 +467,8 @@ int memory_delete_as(int64_t id, memory_authority_t authority)
    const cJSON *deleted = response ? cJSON_GetObjectItemCaseSensitive(response, "deleted") : NULL;
    int result = cJSON_IsBool(deleted) && cJSON_IsTrue(deleted) ? 0 : -1;
    cJSON_Delete(response);
-   if (result == 0) memory_audit_emit("memory.delete", id, NULL, NULL, NULL, 0.0, NULL);
+   if (result == 0)
+      memory_audit_emit("memory.delete", id, NULL, NULL, NULL, 0.0, NULL);
    return result;
 }
 
@@ -476,8 +479,10 @@ int memory_delete(int64_t id)
 
 int memory_fold_session(const char *session_id, char *summary_out, size_t summary_out_len)
 {
-   if (summary_out && summary_out_len > 0) summary_out[0] = '\0';
-   if (!session_id || !session_id[0]) return -1;
+   if (summary_out && summary_out_len > 0)
+      summary_out[0] = '\0';
+   if (!session_id || !session_id[0])
+      return -1;
    cJSON *request = cJSON_CreateObject();
    if (!request || !cJSON_AddStringToObject(request, "operation", "fold-session") ||
        !cJSON_AddStringToObject(request, "session_id", session_id))

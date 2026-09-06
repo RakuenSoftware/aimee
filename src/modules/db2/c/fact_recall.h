@@ -3,7 +3,7 @@
  * current (active, non-superseded, non-suppressed) typed facts into the
  * <aimee-context> block, withholding sensitive attributes unless the turn asks
  * for them. This header preserves the KB ABI; the implementation is an event-
- * bus adapter to the shared Go memory module and never accesses DB2 directly. */
+ * bus provider installed by the host and never accesses DB2 directly. */
 #ifndef DEC_DB2_FACT_RECALL_H
 #define DEC_DB2_FACT_RECALL_H 1
 
@@ -12,6 +12,14 @@
 #ifdef __cplusplus
 extern "C"
 {
+#endif
+
+#ifndef AIMEE_DB2_FACT_RECALL_CONTRACT
+#define AIMEE_DB2_FACT_RECALL_CONTRACT 1
+   typedef int (*aimee_db2_fact_recall_fn)(const char *entity, const char *query,
+                                           int turn_requests_sensitive, char *out, size_t cap,
+                                           int *count);
+   void aimee_db2_register_fact_recall_provider(aimee_db2_fact_recall_fn provider);
 #endif
 
    /* Recall `entity`'s current semantic facts and format the ones that pass §7

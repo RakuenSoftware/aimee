@@ -81,8 +81,8 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
       cJSON *jc = cJSON_GetObjectItemCaseSensitive(ti, "command");
       const char *cmd = cJSON_IsString(jc) ? jc->valuestring : NULL;
       int verdict = 0;
-      if (cmd && memory_redirect_bus("redirect-bash", client, tool, NULL, cmd, home, NULL, 0,
-                                     NULL, 0) == MEMORY_REDIRECT_REJECT)
+      if (cmd && memory_redirect_bus("redirect-bash", client, tool, NULL, cmd, home, NULL, 0, NULL,
+                                     0) == MEMORY_REDIRECT_REJECT)
       {
          snprintf(msg, msg_len,
                   "Memory files are managed by aimee — use the Write tool to set "
@@ -106,9 +106,9 @@ int server_memory_intercept(const char *tool, const char *tool_input, const char
 
    char name[HMEM_NAME_LEN];
    char reason[512] = "";
-   memory_redirect_verdict_t verdict = memory_redirect_bus(
-       "redirect-classify", client, tool, path, NULL, home, name, sizeof(name), reason,
-       sizeof(reason));
+   memory_redirect_verdict_t verdict =
+       memory_redirect_bus("redirect-classify", client, tool, path, NULL, home, name, sizeof(name),
+                           reason, sizeof(reason));
    if (verdict == MEMORY_REDIRECT_ALLOW)
    {
       cJSON_Delete(ti);

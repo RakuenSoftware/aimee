@@ -28,8 +28,7 @@ int memory_pii_turn_requests_sensitive(const char *turn_text)
 {
    int requested = 0;
    return turn_text && turn_text[0] && g_turn_classifier &&
-                  g_turn_classifier(turn_text, &requested) == 0 &&
-                  requested
+                  g_turn_classifier(turn_text, &requested) == 0 && requested
               ? 1
               : 0;
 }
