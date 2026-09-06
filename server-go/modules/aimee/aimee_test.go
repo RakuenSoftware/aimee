@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
 )
 
 // --- fake database -----------------------------------------------------------
@@ -59,7 +59,7 @@ func invoke(t *testing.T, f Family, db DB, frame []byte) ([]byte, bus.ModuleStat
 
 // --- codec -------------------------------------------------------------------
 
-// The caller-side codec in server-go/db1 and this one are mirrors. Testing them
+// The caller-side codec in server-go/aimee and this one are mirrors. Testing them
 // against each other is the only check that actually matters: each is correct
 // exactly insofar as the other can read it.
 func TestCodecMirrorsTheCallerSide(t *testing.T) {

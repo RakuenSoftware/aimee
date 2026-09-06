@@ -15,9 +15,9 @@ import (
 	"syscall"
 	"time"
 
+	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
 	database "github.com/JBailes/aimee/server-go/db"
-	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
 	"github.com/JBailes/aimee/server-go/modules/aimee/families"
@@ -80,7 +80,7 @@ const storePrincipalRef uint32 = 69
 const memoryStorePrincipalRef uint32 = 73
 
 // aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
-// to read the session directory out of db1. Same reason as the economizer's: a
+// to read the session directory out of aimeecontract. Same reason as the economizer's: a
 // serving grant requests nothing, so reaching another module's stage needs a
 // second principal granted exactly that request.
 //
@@ -125,7 +125,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 		busClient.Detach()
 		return aimee.NoDirectory{}, fmt.Sprintf("none: no module caller: %v", err)
 	}
-	directory, err := aimee.NewDB1Directory(caller, 5*time.Second)
+	directory, err := aimee.NewSessionDirectory(caller, 5*time.Second)
 	if err != nil {
 		// CloseAndWait BEFORE Detach. The caller's goroutine is polling the
 		// shared-memory region by now and Detach unmaps it; the Detach above is
@@ -136,7 +136,7 @@ func aimeeDirectory(ctx context.Context, moduleBusSocket string) (aimee.Director
 		return aimee.NoDirectory{}, fmt.Sprintf("none: %v", err)
 	}
 	return directory, fmt.Sprintf("db1 sessions (kind %d) as principal 1/%d",
-		peerwire.EventKind(aimee.DB1PrincipalRef, aimee.DB1SessionsStage), aimeeDirectoryPrincipalRef)
+		peerwire.EventKind(aimee.SessionDirectoryPrincipalRef, aimee.SessionDirectoryStage), aimeeDirectoryPrincipalRef)
 }
 
 // economizerStore seats the economizer's reducer state on DB1.
@@ -158,7 +158,7 @@ func economizerStore(ctx context.Context, moduleBusSocket string) economizer.Sta
 		busClient.Detach()
 		return nil
 	}
-	store, err := db1.NewClient(caller, 0)
+	store, err := aimeecontract.NewClient(caller, 0)
 	if err != nil {
 		// CloseAndWait before Detach: the poll goroutine is live here and
 		// Detach unmaps the region it reads.
@@ -820,7 +820,7 @@ func pluginArgvFromEnv() []string {
 // Kinds are now derived from the principal ref, so the variable is obsolete. It
 // is not merely ignored: a deployment provisioned under the old scheme has a
 // .grant whose `serve=` list names the OLD kinds, and those kinds sit in the
-// blocks belonging to postgres, db2 and db1. Starting such an instance would
+// blocks belonging to postgres, db2 and aimeecontract. Starting such an instance would
 // either be denied at attach or, worse, win the race and deny a core module.
 // Failing here with a pointer to re-provisioning is the safe outcome.
 func checkLegacyEventBase(invoke uint32) error {

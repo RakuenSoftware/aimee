@@ -16,9 +16,9 @@ import (
 	"syscall"
 	"time"
 
+	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
 	appconfig "github.com/JBailes/aimee/server-go/config"
-	db1contract "github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
 	"github.com/JBailes/aimee/server-go/internal/db1"
@@ -139,7 +139,7 @@ func main() {
 		caller.CloseAndWait()
 		attached.Detach()
 	}()
-	storeClient, err := db1contract.NewClient(caller, 0)
+	storeClient, err := aimeecontract.NewClient(caller, 0)
 	if err != nil {
 		log.Fatalf("db1 bus client: %v", err)
 	}

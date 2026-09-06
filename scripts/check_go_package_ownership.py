@@ -87,9 +87,10 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Shared caller-side PostgreSQL contract for KB and server: typed results, "
         "transactions and migrations over the bus. Owns no pool or durable state.",
     ),
-    "server-go/db1": (
+    "server-go/aimee": (
         "contract",
-        "Caller-side mirror of the db1 module's serving wire (db1-fields-v2).",
+        "Caller-side contract for the aimee domain module (principal 30). "
+        "The existing db1-fields-v2 protocol identity is unchanged.",
     ),
     "server-go/db2": (
         "contract",
@@ -124,7 +125,7 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
     "server-go/internal/db1": (
         "debt",
         "WFE vertical slice: the engine's view of the db1 module. A second "
-        "caller-side mapping alongside server-go/db1, which is itself worth "
+        "caller-side mapping alongside server-go/aimee, which is itself worth "
         "resolving.",
     ),
     "server-go/internal/db1/db1test": (

@@ -363,7 +363,7 @@ func deliveryChecks(ctx context.Context, caller *bus.ConcurrentModuleCaller,
 		if err != nil {
 			return 0, err
 		}
-		reply, err := caller.Call(ctx, peerwire.EventKind(aimee.DB1PrincipalRef, db1SessionsStage),
+		reply, err := caller.Call(ctx, peerwire.EventKind(aimee.SessionDirectoryPrincipalRef, db1SessionsStage),
 			db1SessionsStage, 0, callDeadline, frame)
 		if err != nil {
 			return 0, err

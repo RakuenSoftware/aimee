@@ -30,8 +30,8 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
 	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"

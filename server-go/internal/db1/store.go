@@ -33,7 +33,7 @@ import (
 	"math"
 	"time"
 
-	wire "github.com/JBailes/aimee/server-go/db1"
+	wire "github.com/JBailes/aimee/server-go/aimee"
 )
 
 // listCeiling bounds every list the engine asks for. The module refuses more

@@ -16,7 +16,11 @@ The `postgres` module remains the transport provider. SQL stays at principal 28,
 stage 2, event 11266, with unchanged opcodes, typed values, checksums, and transaction
 handles. Moving code does not grant a caller migration privileges.
 
-The server-domain module and KB/server memory use this same client. Existing
+The server-domain module and KB/server memory use this same client. The domain
+caller contract is now `server-go/aimee` (formerly `server-go/db1`), and session
+ownership uses `SessionDirectory` rather than a numbered database directory.
+These are domain operations, separate from the shared SQL/transaction contract.
+Their event IDs, operation numbers, and reply fields are unchanged. Existing
 server-domain API types alias the shared types while their domain callers migrate;
 there is no duplicate implementation or error sentinel. Memory does not import
 the server-domain module for database access.

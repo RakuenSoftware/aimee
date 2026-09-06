@@ -13,7 +13,7 @@
   "ownership_complete": true,
   "go_sources": [
     "server-go/modules/aimee/cmd/peerprobe/main.go",
-    "server-go/modules/aimee/db1directory.go",
+    "server-go/modules/aimee/session_directory.go",
     "server-go/modules/aimee/families/agent_work.go",
     "server-go/modules/aimee/families/agent_work_coord.go",
     "server-go/modules/aimee/families/agent_work_cron.go",
@@ -77,7 +77,7 @@
     "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/cmd/peerprobe/main_test.go",
     "server-go/modules/aimee/cmd/peerprobe/record_test.go",
-    "server-go/modules/aimee/db1directory_test.go",
+    "server-go/modules/aimee/session_directory_test.go",
     "server-go/modules/aimee/families/all_test.go",
     "server-go/modules/aimee/families/catalog_test.go",
     "server-go/modules/aimee/families/checkpoints_test.go",

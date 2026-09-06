@@ -1,4 +1,4 @@
-package db1
+package aimee
 
 // Originally GENERATED from the store's operation catalog by
 // scripts/gen_db1_contract.py. That generator went with the C store, so this
@@ -1638,7 +1638,7 @@ func (c *Client) WfeClaimFrozenCreates(ctx context.Context, parentID string, wor
 		return out, ErrConfig
 	}
 	if len(creates) > 64 {
-		return out, fmt.Errorf("db1: wfe_claim_frozen_creates takes at most 64 creates, got %d", len(creates))
+		return out, fmt.Errorf("aimee: wfe_claim_frozen_creates takes at most 64 creates, got %d", len(creates))
 	}
 	fields := make([]string, 0, 131)
 	fields = append(fields, parentID)

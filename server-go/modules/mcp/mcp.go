@@ -44,7 +44,7 @@ import (
 //
 //	kind = 4096 + principal_ref*256 + stage
 //
-// docs/modules/README.md states that rule, and server-go/db1, git, roundtable
+// docs/modules/README.md states that rule, and server-go/aimee, git, roundtable
 // and economizer all assert it in their tests. The ref is the single allocation
 // authority: refs are already unique per instance, so deriving kinds from the
 // ref makes a kind collision structurally impossible rather than something the
