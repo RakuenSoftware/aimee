@@ -6,8 +6,8 @@ study.  A PR merge checkout can legitimately contain later, unrelated source
 files from its base branch.  This validator keeps the evidence pin immutable
 while proving that every semantic-context file is byte-identical to the
 candidate and that the real-provider observations satisfy the frozen gate.
-Shared build manifests admit only the exact independent integrations reviewed
-below; changing any other build byte still invalidates the frozen candidate.
+Shared build manifests admit the exact independent integrations reviewed below
+or an unchanged compiler/linker plan for the frozen provider probe.
 """
 
 from __future__ import annotations
@@ -19,6 +19,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 
@@ -44,6 +45,39 @@ PROTECTED_PATHS = (
     "src/tests/test_mcp_client_registry.c",
 )
 
+BUILD_PATHS = ("src/Makefile", "src/tests/Rules.mk")
+
+
+def build_plan(makefile: str, rules: str) -> list[str]:
+    """Compare the actual probe's compiler/linker commands and dependencies.
+
+    Whole Makefiles also own unrelated modules. Expanding the probe target in
+    an isolated object directory retains flags, recipes and dependency changes
+    without freezing every other build target to the evidence commit.
+    """
+    include = "include tests/Rules.mk"
+    if makefile.count(include) != 1:
+        raise ValueError("probe Makefile must include tests/Rules.mk exactly once")
+    with tempfile.TemporaryDirectory(prefix="aimee-s1-build-") as directory:
+        root = Path(directory)
+        (root / "Rules.mk").write_text(rules)
+        (root / "Makefile").write_text(makefile.replace(include, f"include {root}/Rules.mk"))
+        command = [
+            "make", "--dry-run", "--always-make", "--no-print-directory",
+            "-f", str(root / "Makefile"), f"OBJDIR={root}/obj",
+            "GIT_VERSION=s1-build-contract", "GIT_COMMIT_TIME=1700000000",
+            f"{root}/obj/tests/unit-test-lsp",
+        ]
+        result = subprocess.run(command, cwd=ROOT / "src", text=True,
+                                capture_output=True, check=True, timeout=60)
+        return [line.replace(directory, "<probe-build>")
+                for line in result.stdout.splitlines() if line.strip()]
+
+
+def build_files_match(candidate_commit: str) -> bool:
+    candidate = [git_output("show", f"{candidate_commit}:{path}") for path in BUILD_PATHS]
+    current = [(ROOT / path).read_text() for path in BUILD_PATHS]
+    return build_plan(*candidate) == build_plan(*current)
 # The proxy adds a thin-client source and a separate test prerequisite. Neither
 # changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
 # removing an LSP object, changing flags, or weakening a test must still fail.
@@ -140,6 +174,13 @@ def validate(
         ):
             reviewed_build_paths.append(path)
     changed = [path for path in changed if path not in reviewed_build_paths]
+    if any(path in BUILD_PATHS for path in changed):
+        try:
+            if build_files_match(candidate_commit):
+                reviewed_build_paths.extend(path for path in changed if path in BUILD_PATHS)
+                changed = [path for path in changed if path not in BUILD_PATHS]
+        except (OSError, ValueError, subprocess.SubprocessError) as exc:
+            errors.append(f"could not verify semantic-context build contract: {exc}")
     untracked = git_output(
         "ls-files", "--others", "--exclude-standard", "--", *PROTECTED_PATHS
     ).splitlines()

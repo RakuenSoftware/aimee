@@ -11,7 +11,6 @@
 #include "harness_memory_scope.h"  /* hmem_scope_for_client */
 #include "kb_client.h"             /* kb_client_health */
 #include "json_fluent.h"           /* jo_ok */
-#include "memory_redirect.h"       /* memory_redirect_classify / _bash_targets / _rematerialize */
 #include "runtime_secret.h"
 #include "vault_config_bootstrap.h"
 #include "server.h"

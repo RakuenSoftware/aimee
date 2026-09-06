@@ -17657,6 +17657,48 @@ RETURNS JSONB LANGUAGE sql STABLE AS $$
  WHERE t.trace_id=p_trace_id AND t.scope_kind=p_scope_kind AND t.scope_id=p_scope_id
 $$;
 
+-- The embedded Go store has a separate, non-owner runtime role. The KB owner
+-- creates these objects, so the Go migrator's default privileges do not cover
+-- them. Grant only the memory domain's relations, never the Vault/control or
+-- WORM ledgers; RLS remains enabled and DDL stays with the schema owner.
+DO $memory_store_grants$
+DECLARE
+  relation_name TEXT;
+  sequence_name TEXT;
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='aimee_store_runtime') THEN
+    RETURN;
+  END IF;
+  FOREACH relation_name IN ARRAY ARRAY[
+    'anti_patterns','decision_log','derived_memory_registry','derived_rederivation_queue',
+    'entity_aliases','entity_edges','entity_registry',
+    'epistemic_directives','fact_graph_changes','fact_graph_commits',
+    'kb_async_jobs','kb_meta','memories','memory_conflicts',
+    'memory_embeddings','memory_entities','memory_episodes','memory_evidence_events','memory_fact_actors',
+    'memory_health','memory_lineage','memory_links','memory_provenance',
+    'memory_rejection_tombstones','memory_relations','memory_scene_members',
+    'memory_scenes','memory_scopes','memory_summaries','memory_units',
+    'prospective_memories','rules','vector_index_ops'
+  ] LOOP
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.%I TO aimee_store_runtime', relation_name);
+    FOR sequence_name IN
+      SELECT pg_get_serial_sequence(format('public.%I', relation_name), a.attname)
+      FROM pg_attribute a
+      WHERE a.attrelid=format('public.%I', relation_name)::regclass
+        AND a.attnum > 0 AND NOT a.attisdropped
+    LOOP
+      IF sequence_name IS NOT NULL THEN
+        EXECUTE format('GRANT USAGE, SELECT ON SEQUENCE %s TO aimee_store_runtime', sequence_name);
+      END IF;
+    END LOOP;
+  END LOOP;
+  GRANT SELECT ON tasks, fact_evidence, derived_memory_dependencies, docs,
+    document_versions, derivation_policy_versions TO aimee_store_runtime;
+  GRANT EXECUTE ON FUNCTION memory_mutation_worm_append(TEXT,TEXT,TEXT,TEXT,TEXT),
+    kb_fact_commit_worm_seal(TEXT,TEXT) TO aimee_store_runtime;
+END
+$memory_store_grants$;
+
 -- Schema build metadata (recorded LAST, after every object above, so its presence
 -- at the current values proves a complete, current migration). A HARDENED-tier
 -- runtime kb connects as a non-owner role that CANNOT apply DDL; it reads these to
@@ -17679,5 +17721,5 @@ INSERT INTO kb_meta (key, value) VALUES ('content_scope_reader_ready', '1')
 -- schema_version: BUMP in lockstep with AIMEE_DB2_SCHEMA_VERSION in db2/db_schema.h
 -- whenever a change here adds/alters an object a runtime kb depends on, so a runtime
 -- kb started against an older schema fails closed.
-INSERT INTO kb_meta (key, value) VALUES ('schema_version', '5')
+INSERT INTO kb_meta (key, value) VALUES ('schema_version', '6')
   ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value;

@@ -290,7 +290,7 @@ Scalar keys read directly from the config root (not via the CLI allowlist above)
 
 ## Environment variables
 
-The binaries read 261 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
+The binaries read 249 `AIMEE_*` environment variables (scanned from `getenv()` in `src/`, excluding tests, plus the generic first-boot credential inputs). Depending on the setting, these variables either override config-store values or provide fallbacks when no explicit config value is present. Module-activation variables use fallback semantics; deployment and runtime wiring variables commonly override stored values. A credential may enter through an environment variable only as first-boot transport (for example, a Kubernetes Secret): startup seals it into Vault, scrubs the environment, verifies custody, and fails closed before any long-lived service starts. Credentials are never runtime environment or config-file storage.
 
 ### Paths & assets
 
@@ -304,7 +304,6 @@ The binaries read 261 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_HOME` | Root of the per-user config and runtime-asset store (`aimee.yaml`, workflows, keys). DB1 is PostgreSQL and lives outside this directory. |
 | `AIMEE_MODELS_DEV_SNAPSHOT` | Path to an offline models.dev catalog snapshot. |
 | `AIMEE_OAUTH_RUNTIME_DIR` | Private directory for transient OAuth callback/session state; it must not be used for durable credentials. |
-| `AIMEE_PACK_DIR` | Directory of memory profile packs. |
 | `AIMEE_RUNTIME_DIR` | Private runtime directory for sockets, temporary credentials, and process state. |
 | `AIMEE_WORKSPACES_DIR` | Root directory for mirrored/registered workspaces. |
 
@@ -392,7 +391,6 @@ The binaries read 261 `AIMEE_*` environment variables (scanned from `getenv()` i
 | `AIMEE_CODE_INDEX_SOURCE` | Source label recorded for code-index ingestion. |
 | `AIMEE_EMBEDDERS_FILE` | Path to the embedder registry the server reads for GET /v1/embedders (the setup wizard's embedder picker). Defaults to /opt/aimee/embedders.json, then scripts/embedders.json in a source checkout. The same file the in-container embedder reads, so one declaration drives the picker, the loading and the serving flags. |
 | `AIMEE_EMBEDDER_HOST` | DNS name of the embedder sidecar container (aimee-embedder-a25m or aimee-embedder-nomic). Setting it makes aimee-kb issue the mTLS identities for the kb -> embedder hop into $AIMEE_HOME/embedder-tls at startup, independently of the synthesis hop. Unset for an external embedder reached over plain HTTPS, or when no embedder is deployed. The sidecar refuses to start without this material. |
-| `AIMEE_EMBED_HTTP_TIMEOUT_MS` | Deadline for one embedding HTTP call, default 180000. The previous hardcoded 30s was shorter than a cold model load plus a large batch, so the first request of a run could fail on a healthy embedder. |
 | `AIMEE_KB_API_CA_BUNDLE` | CA bundle path for verifying the aimee-kb TLS certificate. |
 | `AIMEE_KB_API_URL` | aimee-kb HTTP API base URL. |
 | `AIMEE_KB_CACHE_TTL_S` | KB client cache TTL (seconds). |
@@ -457,15 +455,7 @@ The binaries read 261 `AIMEE_*` environment variables (scanned from `getenv()` i
 | Variable | Description |
 |----------|-------------|
 | `AIMEE_CONTEXT_NO_KB` | Skip KB lookups during context assembly. |
-| `AIMEE_MEMORY_CITATIONS_MODE` | Citation rendering mode for memory recall. |
-| `AIMEE_MEMORY_CITATIONS_STRIP_UNVERIFIED` | Strip unverified citations from recall output. |
 | `AIMEE_MEMORY_COGNIFY_ASYNC_ENABLED` | Enable the async cognify pipeline. |
-| `AIMEE_MEMORY_COREF_MODE` | Coreference-resolution mode. |
-| `AIMEE_MEMORY_DECOMPOSE_HEURISTIC` | Override the heuristic sub-query expansion stage during recall (0 disables it). |
-| `AIMEE_MEMORY_MAINTENANCE_TRIGGER_INSERTS` | Inserts before a maintenance cycle triggers. |
-| `AIMEE_MEMORY_MAINTENANCE_TRIGGER_SECS` | Seconds before a maintenance cycle triggers. |
-| `AIMEE_MEMORY_PAGERANK_RELATIONS` | Relation types included in memory PageRank. |
-| `AIMEE_MEMORY_RERANK_MODE` | Reranker mode. |
 | `AIMEE_MEMORY_WEIGHT_PROFILE` | Recall scoring weight profile. |
 | `AIMEE_NO_CACHE` | Disable the memory-assembly cache. |
 
@@ -601,7 +591,7 @@ The binaries read 261 `AIMEE_*` environment variables (scanned from `getenv()` i
 
 > These are read by the code but have no description yet: the generator surfaces them so the reference can't silently fall behind.
 
-`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MEMORY_LEXICAL_TRACE`, `AIMEE_MEMORY_RECALL_GATE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_WORM_DB2_URL`, `AIMEE_WORM_PATH`
+`AIMEE_ARTIFACT_APPROVAL_MANIFEST`, `AIMEE_ARTIFACT_APPROVAL_PUBLIC_KEY`, `AIMEE_ARTIFACT_TRUST_MODE`, `AIMEE_AUDIT_WORM_EMERGENCY_DISABLE`, `AIMEE_AUTONOMY_KILL_SWITCH`, `AIMEE_BENCHMARK_HARDWARE_PROFILE`, `AIMEE_CLI_PATH`, `AIMEE_CONFIGURE_CLIENT_INTEGRATIONS_ONLY`, `AIMEE_DELEGATE_EGRESS_BIN`, `AIMEE_EFFECT_CONTRACT_MODE`, `AIMEE_HOOK_IDENTITY_MODE`, `AIMEE_HOOK_TRANSPORT`, `AIMEE_KB_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_KB_OBSERVABILITY_LISTEN`, `AIMEE_KB_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_KB_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_KB_OBSERVABILITY_TLS_KEY`, `AIMEE_MCP_TOOLS_WATCH_SECONDS`, `AIMEE_MCP_TOOL_ALLOWLIST`, `AIMEE_MCP_TOOL_PROSE`, `AIMEE_MODULE_BUS_SOCKET`, `AIMEE_MODULE_POLICY_DIR`, `AIMEE_OBSERVABILITY_BEARER_TOKEN_FILE`, `AIMEE_OBSERVABILITY_LISTEN`, `AIMEE_OBSERVABILITY_TLS_CERTIFICATE`, `AIMEE_OBSERVABILITY_TLS_CLIENT_CA`, `AIMEE_OBSERVABILITY_TLS_KEY`, `AIMEE_PROXY_TOKEN`, `AIMEE_SESSION_WORKTREE_BASE`, `AIMEE_SKILL_APPROVAL_MANIFEST`, `AIMEE_SKILL_APPROVAL_PUBLIC_KEY`, `AIMEE_UNVERIFIED_PROJECT_SKILLS`, `AIMEE_WORM_DB2_URL`, `AIMEE_WORM_PATH`
 
 ## External & provider environment
 
@@ -616,7 +606,6 @@ Standard and third-party environment variables aimee honors (scanned non-`AIMEE_
 | `GEMINI_API_KEY_AUTH_MECHANISM` | Selects the Gemini key auth mechanism. |
 | `GOOGLE_API_KEY` | Google API key fallback for Gemini (via `api_key_env`). |
 | `OPENAI_API_KEY` | OpenAI API key (default for OpenAI-family agents). |
-| `SYNTHESIS_API_KEY` | Bearer credential the KB presents to its configured synthesis endpoint; prefer Vault custody. |
 
 ### Provider endpoints
 

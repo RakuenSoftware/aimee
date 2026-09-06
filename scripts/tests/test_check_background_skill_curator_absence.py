@@ -24,7 +24,7 @@ class CuratorAbsenceTests(unittest.TestCase):
         (root / ".git").mkdir()
         (root / "src/server").mkdir(parents=True)
         files = set(checker.BUILD_FILES + (
-            "src/modules/memory/memory_maintenance.c",
+            "server-go/modules/memory/data.go",
             "server-go/modules/aimee/families/runtime_state.go",
             "src/modules/kb-synthesis/kb_curator_pipeline.c",
             "src/modules/kb-synthesis/kb_curator_queue.c",
@@ -81,7 +81,7 @@ class CuratorAbsenceTests(unittest.TestCase):
 
     def test_preserved_anchors_are_enforced(self) -> None:
         self.assert_rejected(
-            lambda root: (root / "src/modules/memory/memory_maintenance.c").write_text("empty"),
+            lambda root: (root / "server-go/modules/memory/data.go").write_text("empty"),
             "memory-maintenance-preserved",
         )
         self.assert_rejected(

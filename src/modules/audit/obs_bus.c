@@ -1303,6 +1303,7 @@ static const struct
     {5890u, "memory.memory-write"},
     {5892u, "memory.candidate-retrieval"},
     {5893u, "memory.reranking"},
+    {5895u, "memory.memory-data"},
     {6145u, "learning.learning-observation"},
     {6401u, "routing.route-selection"},
     {6657u, "delegates.delegate-invocation"},

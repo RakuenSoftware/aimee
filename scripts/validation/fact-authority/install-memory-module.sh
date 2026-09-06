@@ -21,8 +21,34 @@ executable=/usr/local/libexec/aimee-modules/aimee-module-memory
 publish=
 subscribe=
 request=
-serve=5889,5890,5891,5892,5893,5894
+serve=5889,5890,5891,5892,5893,5894,5895
+EOF
+
+cat > "$CONF/modules.d/kb/memory-postgres.grant" <<'EOF'
+version=1
+principal_class=1
+principal_ref=73
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=11266
+serve=
+EOF
+
+cat > "$CONF/modules.d/kb/memory-egress.grant" <<'EOF'
+version=1
+principal_class=1
+principal_ref=70
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=12290
+serve=
 EOF
 
 echo "grant installed:"
 cat "$CONF/modules.d/kb/memory.grant"
+cat "$CONF/modules.d/kb/memory-postgres.grant"
+cat "$CONF/modules.d/kb/memory-egress.grant"

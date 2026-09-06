@@ -5,8 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
@@ -135,10 +138,13 @@ func (b *embedBreaker) reportFailure(nowMS int64) {
 // the same reason): a breaker tested against the wall clock can only be tested
 // by sleeping.
 type EmbedRequest struct {
+	Operation string `json:"operation,omitempty"`
+	MemoryID  int64  `json:"memory_id,omitempty"`
 	BaseURL   string `json:"base_url"`
 	InputType string `json:"input_type"`
 	Text      string `json:"text"`
 	MaxDim    int    `json:"max_dim"`
+	Limit     int    `json:"limit,omitempty"`
 	NowMS     int64  `json:"now_ms,omitempty"`
 }
 
@@ -160,7 +166,13 @@ type EmbedResponse struct {
 	RetryAfterMS int64     `json:"retry_after_ms,omitempty"`
 	Unauthorized bool      `json:"unauthorized,omitempty"`
 	Error        string    `json:"error,omitempty"`
+	ServingID    string    `json:"serving_id,omitempty"`
+	Embedded     bool      `json:"embedded,omitempty"`
+	Repaired     int       `json:"repaired,omitempty"`
+	Failed       int       `json:"failed,omitempty"`
 }
+
+var embedLastUnauthorized atomic.Bool
 
 // EmbedIsHTTP reports whether a configured embedder command names an HTTP
 // endpoint rather than a program to run.
@@ -178,16 +190,12 @@ func nowOr(nowMS int64) int64 {
 // Embed performs one embedding, owning the breaker around it.
 func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 	request EmbedRequest) EmbedResponse {
+	embedLastUnauthorized.Store(false)
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	now := nowOr(request.NowMS)
 
-	if !EmbedIsHTTP(request.BaseURL) {
-		// A program-based embedder is still driven from C; declining here without
-		// touching the breaker keeps that path's health accounting intact.
-		return EmbedResponse{Error: "embed: base_url is not an http endpoint"}
-	}
 	if request.MaxDim <= 0 {
 		return EmbedResponse{Error: "embed: max_dim must be positive"}
 	}
@@ -204,40 +212,54 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 		return EmbedResponse{Error: "embed: empty text"}
 	}
 
-	// The polarity rides in the query string because the body IS the raw text.
-	endpoint := strings.TrimSuffix(request.BaseURL, "/") + "/embed"
-	if request.InputType != "" {
-		endpoint += "?input_type=" + url.QueryEscape(request.InputType)
+	var rawBody []byte
+	if EmbedIsHTTP(request.BaseURL) {
+		// The polarity rides in the query string because the body IS the raw text.
+		endpoint := strings.TrimSuffix(request.BaseURL, "/") + "/embed"
+		if request.InputType != "" {
+			endpoint += "?input_type=" + url.QueryEscape(request.InputType)
+		}
+		const method = "POST"
+		if executor == nil {
+			breaker.cancelProbe()
+			return EmbedResponse{Error: "embed: egress transport is not configured"}
+		}
+		body := []byte(request.Text)
+		response, err := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
+			TargetURL: endpoint, Purpose: "embedding", Method: method,
+			RequestSHA256: egress.RequestDigest(method, endpoint, body, false)},
+			Headers: map[string]string{"Content-Type": "text/plain"}, Body: body,
+			MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedTimeout.Milliseconds()})
+		if err != nil {
+			breaker.reportFailure(now)
+			return EmbedResponse{Error: "embed: " + err.Error()}
+		}
+		if response.Status == 401 || response.Status == 403 {
+			breaker.reportSuccess(now)
+			embedLastUnauthorized.Store(true)
+			return EmbedResponse{Unauthorized: true,
+				Error: fmt.Sprintf("embed: not authorized (HTTP %d)", response.Status)}
+		}
+		if response.Status < 200 || response.Status > 299 || len(response.Body) == 0 {
+			breaker.reportFailure(now)
+			return EmbedResponse{Error: fmt.Sprintf("embed: HTTP %d", response.Status)}
+		}
+		rawBody = response.Body
+	} else {
+		commandCtx, cancel := context.WithTimeout(ctx, embedTimeout)
+		defer cancel()
+		command := exec.CommandContext(commandCtx, "sh", "-c", request.BaseURL)
+		command.Stdin = strings.NewReader(request.Text)
+		command.Env = append(os.Environ(), "AIMEE_EMBED_INPUT_TYPE="+request.InputType)
+		output, err := command.Output()
+		if err != nil {
+			breaker.reportFailure(now)
+			return EmbedResponse{Error: "embed: command failed: " + err.Error()}
+		}
+		rawBody = output
 	}
-	const method = "POST"
-	if executor == nil {
-		breaker.cancelProbe()
-		return EmbedResponse{Error: "embed: egress transport is not configured"}
-	}
-	body := []byte(request.Text)
-	response, err := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
-		TargetURL: endpoint, Purpose: "embedding", Method: method,
-		RequestSHA256: egress.RequestDigest(method, endpoint, body, false)},
-		Headers: map[string]string{"Content-Type": "text/plain"}, Body: body,
-		MaxResponseBytes: int64(bus.ModuleMessageMaxBody) - 12, TimeoutMS: embedTimeout.Milliseconds()})
-	if err != nil {
-		breaker.reportFailure(now)
-		return EmbedResponse{Error: "embed: " + err.Error()}
-	}
-
-	if response.Status == 401 || response.Status == 403 {
-		// Reached and refused. Non-retryable, and it CLOSES any earlier outage.
-		breaker.reportSuccess(now)
-		return EmbedResponse{Unauthorized: true,
-			Error: fmt.Sprintf("embed: not authorized (HTTP %d)", response.Status)}
-	}
-	if response.Status < 200 || response.Status > 299 || len(response.Body) == 0 {
-		breaker.reportFailure(now)
-		return EmbedResponse{Error: fmt.Sprintf("embed: HTTP %d", response.Status)}
-	}
-
 	var raw []float64
-	if json.Unmarshal(response.Body, &raw) != nil {
+	if json.Unmarshal(rawBody, &raw) != nil {
 		breaker.reportFailure(now)
 		return EmbedResponse{Error: "embed: response is not a JSON array of numbers"}
 	}
@@ -263,8 +285,108 @@ func Embed(ctx context.Context, traceID uint64, executor egress.Executor,
 	return out
 }
 
+func EmbedServingID(ctx context.Context, traceID uint64, executor egress.Executor, command string) EmbedResponse {
+	if command == "" {
+		return EmbedResponse{Error: "embed: command is empty"}
+	}
+	var body []byte
+	if EmbedIsHTTP(command) {
+		if executor == nil {
+			return EmbedResponse{Error: "embed: egress transport is not configured"}
+		}
+		endpoint := strings.TrimSuffix(command, "/") + "/health"
+		response, err := executor.Do(ctx, traceID, egress.HTTPRequest{Request: egress.Request{
+			TargetURL: endpoint, Purpose: "embedding-health", Method: "GET",
+			RequestSHA256: egress.RequestDigest("GET", endpoint, nil, false)},
+			MaxResponseBytes: 64 * 1024, TimeoutMS: embedTimeout.Milliseconds()})
+		if err != nil || response.Status < 200 || response.Status > 299 {
+			return EmbedResponse{Error: "embed: serving identity unavailable"}
+		}
+		body = response.Body
+	} else {
+		commandCtx, cancel := context.WithTimeout(ctx, embedTimeout)
+		defer cancel()
+		output, err := exec.CommandContext(commandCtx, "sh", "-c", command+" --serving-id").Output()
+		if err != nil {
+			return EmbedResponse{Error: "embed: serving identity command failed"}
+		}
+		body = output
+	}
+	var payload map[string]any
+	if json.Unmarshal(body, &payload) == nil {
+		for _, key := range []string{"serving_id", "model", "version"} {
+			if value, ok := payload[key].(string); ok && value != "" {
+				return EmbedResponse{ServingID: value}
+			}
+		}
+	}
+	return EmbedResponse{ServingID: strings.TrimSpace(string(body))}
+}
+
+func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, data DataStore,
+	memoryID int64, command string, maxDim int) EmbedResponse {
+	failed := func(response EmbedResponse) EmbedResponse {
+		if maintenance, ok := data.(legacyDataStore); ok {
+			detail := response.Error
+			if detail == "" {
+				detail = "embedding unavailable"
+			}
+			_ = maintenance.MarkEmbeddingFailure(ctx, memoryID, detail)
+		}
+		return response
+	}
+	if data == nil || memoryID <= 0 {
+		return EmbedResponse{Error: "embed: memory store or id is unavailable"}
+	}
+	record, err := data.Get(ctx, Scope{}, memoryID)
+	if err != nil {
+		return EmbedResponse{Error: "embed: memory record unavailable"}
+	}
+	text := record.Content
+	if record.Key != "" {
+		text = record.Key + "\n" + record.Content
+	}
+	response := Embed(ctx, traceID, executor, EmbedRequest{
+		BaseURL: command, InputType: "document", Text: text, MaxDim: maxDim,
+	})
+	if response.Error != "" || response.Unavailable || response.Unauthorized || response.Truncated {
+		return failed(response)
+	}
+	embeddings, ok := data.(embeddingDataStore)
+	if !ok {
+		return failed(EmbedResponse{Error: "embed: memory store cannot persist vectors"})
+	}
+	if err := embeddings.UpsertEmbedding(ctx, record, response.Vector); err != nil {
+		return failed(EmbedResponse{Error: "embed: vector upsert failed: " + err.Error()})
+	}
+	response.Embedded = true
+	return response
+}
+
+func RepairFailedEmbeddings(ctx context.Context, traceID uint64, executor egress.Executor,
+	data DataStore, command string, maxDim, limit int) EmbedResponse {
+	maintenance, ok := data.(legacyDataStore)
+	if !ok {
+		return EmbedResponse{Error: "embed: memory store cannot enumerate failed vectors"}
+	}
+	ids, err := maintenance.FailedEmbeddingIDs(ctx, limit)
+	if err != nil {
+		return EmbedResponse{Error: "embed: failed-vector query: " + err.Error()}
+	}
+	result := EmbedResponse{}
+	for _, id := range ids {
+		response := EmbedRecord(ctx, traceID, executor, data, id, command, maxDim)
+		if response.Embedded {
+			result.Repaired++
+			continue
+		}
+		result.Failed++
+	}
+	return result
+}
+
 // handleEmbed serves memory:3 embedding.
-func handleEmbed(executor egress.Executor, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+func handleEmbed(executor egress.Executor, options handlerOptions, invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
 	var decoded EmbedRequest
 	if err := json.Unmarshal(request, &decoded); err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -272,7 +394,19 @@ func handleEmbed(executor egress.Executor, invocation bus.ModuleInvocation, requ
 	if invocation.Cancelled() {
 		return nil, bus.ModuleStatusCancelled
 	}
-	encoded, err := json.Marshal(Embed(context.Background(), invocation.TraceID, executor, decoded))
+	var response EmbedResponse
+	if decoded.Operation == "serving-id" {
+		response = EmbedServingID(context.Background(), invocation.TraceID, executor, decoded.BaseURL)
+	} else if decoded.Operation == "record" {
+		response = EmbedRecord(context.Background(), invocation.TraceID, executor, options.data,
+			decoded.MemoryID, decoded.BaseURL, decoded.MaxDim)
+	} else if decoded.Operation == "repair-failed" {
+		response = RepairFailedEmbeddings(context.Background(), invocation.TraceID, executor,
+			options.data, decoded.BaseURL, decoded.MaxDim, decoded.Limit)
+	} else {
+		response = Embed(context.Background(), invocation.TraceID, executor, decoded)
+	}
+	encoded, err := json.Marshal(response)
 	if err != nil || uint32(len(encoded)) > bus.ModuleMessageMaxBody {
 		return nil, bus.ModuleStatusInternal
 	}

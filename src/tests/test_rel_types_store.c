@@ -7,6 +7,7 @@
 #include "../modules/db2/c/entity_edges.h"
 #include "../modules/db2/c/entity_registry.h"
 #include "../modules/db2/c/db2_test_shim.h"
+#include "support/memory_policy_stub.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -32,15 +33,6 @@ static int neighbor_node_present(const db2_entity_neighbor_t *nb, int n, const c
    for (int i = 0; i < n; i++)
       if (strcmp(nb[i].node, node) == 0)
          return 1;
-   return 0;
-}
-
-static int check_fact_gate(int head_kind, const char *rel_type, int tail_kind, int *verdict)
-{
-   if (!verdict)
-      return -1;
-   *verdict = (int)memory_fact_gate_check((memory_node_kind_t)head_kind, rel_type,
-                                          (memory_node_kind_t)tail_kind, NULL);
    return 0;
 }
 
@@ -81,7 +73,7 @@ int main(void)
    assert(db2_fact_commit("invalid", NODE_PERSON, "works_for", "acme", NODE_ORG,
                           FACT_AUTHORITY_MODEL, 1) == FACT_GATE_DEFER);
    assert(semantic_count("invalid") == 0);
-   aimee_db2_register_fact_gate_provider(check_fact_gate);
+   test_memory_policy_register();
 
    /* Resolve: seeded names (normalized), absent names. */
    long id = 0;

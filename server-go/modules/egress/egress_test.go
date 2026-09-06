@@ -58,6 +58,9 @@ func TestCallerPoliciesConstrainMethodAndPath(t *testing.T) {
 	}{
 		{"memory method", MemoryClientRef, "embedding", "GET", "http://localhost/embed"},
 		{"memory path", MemoryClientRef, "embedding", "POST", "http://localhost/health"},
+		{"memory health method", MemoryClientRef, "embedding-health", "POST", "http://localhost/health"},
+		{"memory health path", MemoryClientRef, "embedding-health", "GET", "http://localhost/embed"},
+		{"memory health caller", GitClientRef, "embedding-health", "GET", "http://localhost/health"},
 		{"forge method", GitClientRef, "forge", "DELETE", "https://api.github.com/repos/o/r"},
 		{"forge path", GitClientRef, "forge", "GET", "https://api.github.com/user"},
 		{"roundtable method", RoundtableClientRef, "review_artifact", "POST", "https://github.com/o/r.patch"},

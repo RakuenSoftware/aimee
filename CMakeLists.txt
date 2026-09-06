@@ -205,7 +205,7 @@ if(WIN32)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/windows/history.c
-        ${AIMEE_SRC_DIR}/windows/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -249,7 +249,7 @@ elseif(APPLE)
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/posix/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -310,7 +310,7 @@ else()
     )
     set(PLATFORM_DATA_SRCS
         ${AIMEE_SRC_DIR}/posix/history.c
-        ${AIMEE_SRC_DIR}/posix/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/cmd_describe.c
     )
     set(PLATFORM_AGENT_SRCS
@@ -380,7 +380,7 @@ if(WIN32)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/windows/cli_client.c
-        ${AIMEE_SRC_DIR}/windows/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/windows/agent_bridge.c
         ${AIMEE_SRC_DIR}/windows/web_egress.c
     )
@@ -404,7 +404,7 @@ elseif(APPLE)
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/posix/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 else()
@@ -427,7 +427,7 @@ else()
     )
     set(KB_PLATFORM_EXTRA_SRCS
         ${AIMEE_SRC_DIR}/posix/cli_client.c
-        ${AIMEE_SRC_DIR}/posix/memory.c
+        ${AIMEE_SRC_DIR}/modules/memory/memory_content_gate_bus.c
         ${AIMEE_SRC_DIR}/posix/agent_bridge.c
     )
 endif()
@@ -474,7 +474,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/failed_queries.c
     ${AIMEE_SRC_DIR}/modules/db2/c/feedback.c
     ${AIMEE_SRC_DIR}/modules/db2/c/notes.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/prospective_memories.c
     ${AIMEE_SRC_DIR}/modules/db2/c/rules.c
     ${AIMEE_SRC_DIR}/modules/db2/c/stopwords.c
     ${AIMEE_SRC_DIR}/modules/db2/c/tasks.c
@@ -485,21 +484,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_runtime_state.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_service_backend_ingest.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_briefing.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_conflicts.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_export.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_health.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_payload.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_promotion.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_query.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_query_bookkeeping.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_entity_graph.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_row_mapper_pg.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_score_fields.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_scope_query.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_relations.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_scenes.c
     ${AIMEE_SRC_DIR}/modules/db2/c/vector_index_ops.c
     ${AIMEE_SRC_DIR}/modules/db2/c/code_index_ops.c
     ${AIMEE_SRC_DIR}/modules/db2/c/learning.c
@@ -511,7 +495,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/css_render.c
     ${AIMEE_SRC_DIR}/modules/db2/c/css_insights.c
     ${AIMEE_SRC_DIR}/modules/db2/c/db_schema.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_lint.c
     ${AIMEE_SRC_DIR}/modules/db2/c/sketch.c
     ${AIMEE_SRC_DIR}/modules/db2/c/artifacts.c
     ${AIMEE_SRC_DIR}/modules/db2/c/corpus_structural.c
@@ -536,7 +519,6 @@ set(DB2_SRCS
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_docs.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_releases.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_transport.c
-    ${AIMEE_SRC_DIR}/modules/db2/c/memory_vectors.c
     ${AIMEE_SRC_DIR}/modules/db2/c/kb_vectors.c
     ${AIMEE_SRC_DIR}/modules/db2/c/vector_status.c
     ${AIMEE_SRC_DIR}/modules/db2/c/pgvec_verify.c
@@ -601,7 +583,6 @@ set(CORE_SRCS
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tools_gateway.c
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client.c
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_client_registry.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_provider.c
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
@@ -636,23 +617,6 @@ set(CORE_SRCS
 
 set(DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_ingress.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_activation.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_context.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_directives.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_episodes.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_graph.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_health.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_improve.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_maintenance.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_prospective.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_scan.c
     ${AIMEE_SRC_DIR}/trace_analysis.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
@@ -697,7 +661,6 @@ set(DATA_SRCS
     ${AIMEE_SRC_DIR}/conversation.c
     ${AIMEE_SRC_DIR}/trajectory_export.c
     ${AIMEE_SRC_DIR}/trajectory_batch.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c
@@ -833,7 +796,6 @@ set(CMD_SRCS
     ${AIMEE_SRC_DIR}/cmd_diagnose.c
     ${AIMEE_SRC_DIR}/cmd_hooks.c
     ${AIMEE_SRC_DIR}/cmd_hooks_scope.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_redirect.c
     ${AIMEE_SRC_DIR}/cmd_agent.c
     ${AIMEE_SRC_DIR}/cmd_agent_setup.c
     ${AIMEE_SRC_DIR}/cmd_agent_trace.c
@@ -891,16 +853,10 @@ set(CLI_SRCS
     # both call these; the CLI does not link aimee-cmd, so they build in here).
     ${AIMEE_SRC_DIR}/cmd_self_update.c
     ${AIMEE_SRC_DIR}/self_update_util.c
-    # memory_redirect_check (the CLI's remote-only hooks-pre interception) calls
-    # hmem_resolve_project/_scope_for_client/_audit/_spill; the standalone `aimee`
-    # CLI does not link aimee-core, so their definers must build into the CLI
-    # directly. Without these the macOS/Windows CMake link fails undefined hmem_*.
+    # Hook project resolution is still performed client-side so a remote server
+    # receives the real workspace identity.
     ${AIMEE_SRC_DIR}/harness_memory_common.c
     ${AIMEE_SRC_DIR}/harness_memory_scope.c
-    # cli_main's remote-only hooks-pre path calls memory_redirect_check; the CLI
-    # doesn't link aimee-core, so its definer must build in directly (make links it
-    # via CLIENT_SUPPORT_OBJS). Without it the CLI link fails undefined.
-    ${AIMEE_SRC_DIR}/modules/memory/memory_redirect.c
     ${AIMEE_SRC_DIR}/harness_memory_audit.c
     ${AIMEE_SRC_DIR}/harness_memory_spill.c
     ${AIMEE_SRC_DIR}/cli_attention_guard.c
@@ -928,7 +884,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_proxy.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
-    # the lean catalog. Same rule as memory_redirect.c above: the client does not
+    # the lean catalog. The client does not
     # link aimee-core, so the definer must build in directly (make links it via
     # CLIENT_SUPPORT_OBJS). Without it the CLI link fails undefined on Windows.
     ${AIMEE_SRC_DIR}/modules/protocols/mcp/mcp_tool_profile.c
@@ -958,6 +914,12 @@ set(CLI_SRCS
 
 set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/server/server_main.c
+    ${AIMEE_SRC_DIR}/modules/memory/gw_stage_memory.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_extract_patterns.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_fact_gate.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
     ${AIMEE_SRC_DIR}/server/obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/server/module_routing_adapter.c
     ${AIMEE_SRC_DIR}/server/vault_bootstrap_privilege.c
@@ -1109,6 +1071,12 @@ list(REMOVE_ITEM SERVER_CORE_SRCS ${AIMEE_SRC_DIR}/modules/db2/c/db_postgres.c)
 
 set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/kb_main.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_data_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_embed_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_pii_gate.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_domain_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_domain_runtime_bus.c
+    ${AIMEE_SRC_DIR}/modules/memory/memory_scope_connection.c
     ${AIMEE_SRC_DIR}/kb/kb_document_inspector.c
     ${AIMEE_SRC_DIR}/kb/kb_obs_bus_adapter.c
     ${AIMEE_SRC_DIR}/kb/kb_background.c
@@ -1149,7 +1117,6 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_sidecar.c
     ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_synthesize.c
     ${AIMEE_SRC_DIR}/modules/kb-synthesis/kb_curator_version.c
-    ${AIMEE_SRC_DIR}/kb/memory_rewrite_llm.c
     ${AIMEE_SRC_DIR}/kb/kb_mining.c
     ${AIMEE_SRC_DIR}/kb/kb_workload_provider.c
     ${AIMEE_SRC_DIR}/kb/kb_workload_helper_posix.c
@@ -1184,26 +1151,9 @@ set(KB_SRCS
     ${AIMEE_SRC_DIR}/kb/http/kb_http_reflections.c
     ${AIMEE_SRC_DIR}/kb/kb_ingest_normalize.c
     ${AIMEE_SRC_DIR}/kb/kb_memory_embed.c
-    ${AIMEE_SRC_DIR}/kb/fact_grounding.c
 )
 set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/integrity_ingress.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_core.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_logic.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_effective.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_health.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_conflict.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_context.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_assemble.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_advanced.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_prospective.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_lifecycle.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_directives.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_maintenance.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_graph.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_scan.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_improve.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_episodes.c
     ${AIMEE_SRC_DIR}/index.c
     ${AIMEE_SRC_DIR}/extractors.c
     ${AIMEE_SRC_DIR}/modules/css/css_analyze.c
@@ -1219,7 +1169,6 @@ set(KB_DATA_SRCS
     ${AIMEE_SRC_DIR}/modules/workspace/workspace.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_session_lookup.c
     ${AIMEE_SRC_DIR}/modules/workspace/workspace_manifest.c
-    ${AIMEE_SRC_DIR}/modules/memory/memory_profile_pack.c
     ${AIMEE_SRC_DIR}/wiki_render.c
     ${AIMEE_SRC_DIR}/kb/kb.c
     ${AIMEE_SRC_DIR}/kb/kb_fusion.c

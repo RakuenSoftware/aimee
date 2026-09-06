@@ -49,7 +49,7 @@ executable=/usr/local/libexec/aimee-modules/aimee-module-postgres
 publish=
 subscribe=
 request=
-serve=11265
+serve=11265,11266
 EOF
 echo "postgres grant installed"
 
@@ -74,6 +74,8 @@ cd /root
 # chase.
 AIMEE_HOME="$CONF" \
 AIMEE_DB2_URL="${AIMEE_DB2_URL:-postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared}" \
+  AIMEE_STORE_URL="${AIMEE_STORE_URL:-postgresql://aimee:aimee-e2e@127.0.0.1:5432/aimee_shared}" \
+  AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-postgresql://aimee_migrator:aimee-migrate-e2e@127.0.0.1:5432/aimee_shared}" \
   nohup /usr/local/libexec/aimee-modules/aimee-module-postgres "$SOCK" \
   >/root/postgres-module.log 2>&1 &
 sleep 4

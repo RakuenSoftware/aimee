@@ -23,12 +23,6 @@ extern "C"
     * memory_link_t from headers/memory.h. */
    int db2_memory_link_query(int64_t memory_id, memory_link_t *out, int max);
 
-   /* List links touching any of the supplied memory ids in one database
-    * round-trip. IDs originate from the memories table and are rendered as
-    * validated positive integers, not request text. */
-   int db2_memory_link_query_many(const int64_t *memory_ids, int id_count, memory_link_t *out,
-                                  int max);
-
    /* Delete a single memory_links row by id. Returns 0 on success,
     * -1 on failure. */
    int db2_memory_link_delete(int64_t link_id);
