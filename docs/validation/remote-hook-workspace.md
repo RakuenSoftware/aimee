@@ -65,3 +65,24 @@ The original executable remains at
 server container for rollback. Credentials, policies, and persistent data are
 not replaced. The temporary executable hotfix survives container restarts but
 must be incorporated into the published image before a container recreation.
+
+## Validation and deployment outcome
+
+- Local lint: all 76 checks passed. Dispatch, utility, and guardrail unit
+  suites passed, including the exact `cd --` regression. The 15 semantic-context
+  release-validator/evidence tests also passed.
+- Fresh-guest run `Y3BNVNfX` on `192.168.1.253`: Debian CT 9201 and VM 9202
+  both passed dispatch, utility, guardrail, OpenAI error-shaping, nine profile,
+  and 26 proxy tests, including real Codex streaming through the mTLS proxy.
+  The harness deleted both guests and their disks. Independent checks found
+  neither guest configuration nor any associated `optane` volumes afterward.
+- The release-based Bookworm build passed dispatch, utility, and guardrail
+  suites before installation. Installed server SHA-256:
+  `0a9ee6b664c1025dec0635065468a8a45210f6fb3c49d115842da09e0c10fc3b`.
+  The Docker health check and Aimee server, knowledge-store, and vector-index
+  status all reported healthy after restart.
+- Ordinary `git push --dry-run origin fix/thin-client-codex-proxy`, followed
+  by `git push origin fix/thin-client-codex-proxy`, succeeded with the hook
+  enabled. GitHub confirmed PR #2957 at `130533a370` and started fresh CI.
+  CI results are tracked on the PR; local/fresh-guest results are not a claim
+  that every GitHub job has completed.
