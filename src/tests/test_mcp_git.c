@@ -3638,6 +3638,68 @@ static void test_worktree_branch_switch_blocked(void)
    teardown_git_repo();
 }
 
+static void test_worktree_push_publishes_session_head(void)
+{
+   setup_git_repo();
+   setup_ownership_db();
+   session_id_set_override("wt-push-session");
+
+   char remote[sizeof(g_tmpdir) + 32];
+   snprintf(remote, sizeof(remote), "%s-remote.git", g_tmpdir);
+   char cmd[1024];
+   snprintf(cmd, sizeof(cmd), "git init -q --bare '%s' && git remote add origin '%s'", remote,
+            remote);
+   assert(system(cmd) == 0);
+   assert(system("git checkout -q -b aimee/session/wt-push-session") == 0);
+   mcp_git_set_worktree(1);
+
+   /* Worktree branch creation deliberately leaves HEAD on the session ref. */
+   cJSON *args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "action", "create");
+   cJSON_AddStringToObject(args, "name", "wt-published");
+   cJSON *resp = handle_git_branch(args);
+   assert(strstr(get_mcp_text(resp), "created") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   FILE *fp = fopen("file.txt", "a");
+   assert(fp != NULL);
+   fputs("session-only commit\n", fp);
+   fclose(fp);
+   args = cJSON_CreateObject();
+   cJSON_AddStringToObject(args, "message", "advance session head");
+   resp = handle_git_commit(args);
+   assert(strstr(get_mcp_text(resp), "committed") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   int rc = -1;
+   char *head = run_cmd("git rev-parse HEAD", &rc);
+   assert(rc == 0 && head != NULL);
+   head[strcspn(head, "\r\n")] = '\0';
+
+   args = cJSON_CreateObject();
+   resp = handle_git_push(args);
+   assert(strstr(get_mcp_text(resp), "pushed:") != NULL);
+   cJSON_Delete(resp);
+   cJSON_Delete(args);
+
+   snprintf(cmd, sizeof(cmd), "git --git-dir='%s' rev-parse refs/heads/wt-published", remote);
+   char *published = run_cmd(cmd, &rc);
+   assert(rc == 0 && published != NULL);
+   published[strcspn(published, "\r\n")] = '\0';
+   assert(strcmp(published, head) == 0);
+   free(published);
+   free(head);
+
+   mcp_git_set_worktree(0);
+   session_id_clear_override();
+   teardown_ownership_db();
+   teardown_git_repo();
+   snprintf(cmd, sizeof(cmd), "rm -rf '%s'", remote);
+   assert(system(cmd) == 0);
+}
+
 /* test_mcp_git_verify_threads.inc: git_verify multithreading / timeout /
  * cancellation tests split out of test_mcp_git.c to keep that .c under the
  * 2000-line hard limit. Included mid-file (same TU) so the white-box statics
@@ -4173,6 +4235,7 @@ int main(void)
    /* Worktree-awareness tests */
    test_worktree_branch_create_no_switch();
    test_worktree_branch_switch_blocked();
+   test_worktree_push_publishes_session_head();
 
    /* Main branch protection tests */
    test_main_branch_commit_blocked();

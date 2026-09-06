@@ -47,7 +47,6 @@
 #include "model_registry.h"
 #include "model_provider.h"
 #include "db1_client/db1.h"
-#include "db1_client/user_memory.h"
 #include "token_audit.h"
 #include "dashboard.h"
 #include "log.h"
@@ -1339,10 +1338,9 @@ static int handle_session_brief_assemble(server_ctx_t *ctx, server_conn_t *conn,
    return rc;
 }
 
-/* memory.user_capture: upsert a per-user memory into db1 (Proposal 2 Phase 1
- * S2 — the write path behind `aimee memory identity/prefer`). db1 is per-user
- * by construction (aimee-server is 1:1 per user); this is how a thin client
- * populates the identity/preferences the session brief recalls. Params:
+/* memory.user_capture: upsert a per-user memory through the shared Go memory
+ * module.  The server placement is per-user and its module-bus adapter pins
+ * every request to user scope. Params:
  * {kind, key, content, tier?}. CAP_MEMORY_WRITE. */
 static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 {
@@ -1360,9 +1358,24 @@ static int handle_memory_user_capture(server_ctx_t *ctx, server_conn_t *conn, cJ
    if (!content || !content[0])
       return server_send_error_kind(conn, SERVER_ERR_INVALID_ARGUMENT, "content is required",
                                     request_id);
-   if (db1_user_memory_upsert(kind, tier, key, content, 1.0, sid) != 0)
+   cJSON *store = cJSON_CreateObject();
+   if (store)
+   {
+      cJSON_AddStringToObject(store, "operation", "store");
+      cJSON_AddStringToObject(store, "kind", kind);
+      cJSON_AddStringToObject(store, "tier", (tier && tier[0]) ? tier : "L2");
+      cJSON_AddStringToObject(store, "key", key);
+      cJSON_AddStringToObject(store, "content", content);
+      cJSON_AddNumberToObject(store, "confidence", 1.0);
+      if (sid && sid[0])
+         cJSON_AddStringToObject(store, "session_id", sid);
+   }
+   cJSON *stored = store ? server_module_memory_data(store) : NULL;
+   cJSON_Delete(store);
+   if (!stored)
       return server_send_error_kind(conn, SERVER_ERR_UNAVAILABLE, "failed to store user memory",
                                     request_id);
+   cJSON_Delete(stored);
 
    cJSON *resp = jo_ok();
    cJSON_AddStringToObject(resp, "kind", kind);

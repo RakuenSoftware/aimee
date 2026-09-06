@@ -29,7 +29,6 @@
 #include "platform_path.h" /* platform_getppid */
 #include "platform_process.h"
 #include "cJSON.h"
-#include "memory_redirect.h"
 #include <ctype.h>
 #include <signal.h>
 #include <stdio.h>
@@ -2334,8 +2333,21 @@ int main(int argc, char **argv)
                return 1;
             }
          }
+         int git_runner = 0;
+         if (strcmp(cmd, "git") == 0 && cli_v1_remote_endpoint_is_network())
+         {
+            git_runner = cli_workspace_git_runner_start();
+            if (git_runner < 0)
+            {
+               fprintf(stderr, "aimee: could not start the detached workspace runner for this Git "
+                               "command; no request was sent\n");
+               return 1;
+            }
+         }
          int rc = cli_v1_forward(sock, &route, json_output, json_fields, response_profile, sub_argc,
                                  sub_argv);
+         if (git_runner > 0)
+            cli_workspace_git_runner_stop();
          if (rc >= 0)
             return rc;
          fprintf(stderr, "aimee: server /v1 request failed for '%s'\n", cmd);

@@ -40,6 +40,15 @@
 #include <strings.h>
 #include <time.h>
 
+int server_http_mtls_recheck_status(pki_cert_status_t status)
+{
+   if (status == PKI_CERT_VALID)
+      return 200;
+   if (status == PKI_CERT_ERROR)
+      return 503;
+   return 403;
+}
+
 /* 1 if the route is a data-plane write. At the default remote_writes=off these
  * routes are local-UDS-only; remote_writes=data/full can expose them over TCP
  * after the per-route capability check. */

@@ -1879,8 +1879,25 @@ jobs:
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: aimee
+          POSTGRES_PASSWORD: aimee
+          POSTGRES_DB: memory_eval
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aimee -d memory_eval"
+          --health-interval 5s --health-timeout 5s --health-retries 12
+    env:
+      AIMEE_MEMORY_EVAL_URL: postgres://aimee:aimee@127.0.0.1:5432/memory_eval
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff
+        with:
+          go-version-file: server-go/go.mod
       - name: Runner diagnostics
         run: |
           echo "::group::Runner environment"

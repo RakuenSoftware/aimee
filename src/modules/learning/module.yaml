@@ -46,8 +46,7 @@
     "src/modules/learning/learning_signal_policy.h"
   ],
   "tests": [
-    "src/tests/test_learning_bundle.c",
-    "src/tests/test_learning_metrics.c"
+    "src/tests/test_learning_bundle.c"
   ],
   "docs": [
     "docs/modules/learning.md"

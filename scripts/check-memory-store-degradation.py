@@ -47,7 +47,27 @@ ROOT = Path(__file__).resolve().parents[1]
 # That coincidence is what makes widening look safe.
 MEM = ROOT / "src/modules/memory"
 
-DB2_CALL = re.compile(r"\bdb2_[a-z0-9_]+\s*\(")
+DB2_CALL = re.compile(r"\b(db2_[a-z0-9_]+)\s*\(")
+# The shared-memory migration preserves a number of db2_* ABI entry points in
+# transport adapters.  Those functions call the memory module; their names do
+# not mean the file reaches DB2.  Ignore functions implemented by the same
+# translation unit, while continuing to flag calls to external db2_* owners.
+DB2_DEFINITION = re.compile(
+    r"^\s*(?:[A-Za-z_][A-Za-z0-9_]*\s+)+(db2_[a-z0-9_]+)\s*\(", re.MULTILINE
+)
+DB2_ADAPTER_FILES = {
+    "memory_data_bus.c",
+    "memory_domain_bus.c",
+    "memory_domain_runtime_bus.c",
+    "memory_scope_connection.c",
+}
+adapter_definitions = set()
+for adapter_name in DB2_ADAPTER_FILES:
+    adapter = MEM / adapter_name
+    if adapter.exists():
+        adapter_definitions.update(
+            DB2_DEFINITION.findall(strip_comments_text(adapter.read_text(encoding="utf-8")))
+        )
 rows = []
 for path in sorted(MEM.glob("*.c")):
     # Comments stripped FIRST, and this is the whole point of the check rather
@@ -57,7 +77,12 @@ for path in sorted(MEM.glob("*.c")):
     # reads intent as implementation is worse than no guard, because it reports
     # the gap as covered.
     text = strip_comments_text(path.read_text(encoding="utf-8", errors="replace"))
-    calls = len(DB2_CALL.findall(text))
+    local_definitions = set(DB2_DEFINITION.findall(text))
+    calls = sum(
+        1
+        for name in DB2_CALL.findall(text)
+        if name not in local_definitions and name not in adapter_definitions
+    )
     if not calls:
         continue
     forked = "AIMEE_DB2_DISABLED" in text

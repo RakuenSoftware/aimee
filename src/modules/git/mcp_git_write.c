@@ -315,9 +315,26 @@ cJSON *handle_git_commit(cJSON *args)
 
 cJSON *handle_git_push(cJSON *args)
 {
-   /* Fetch branch once — reused for main guard, ownership, and merged-PR checks */
+   /* Resolve the branch the remote will actually receive BEFORE applying any
+    * branch policy. In a session worktree HEAD is an internal
+    * aimee/session/<id> ref; the user-owned branch is the durable destination.
+    * Applying main/ownership/merged-PR checks to the sentinel guarded the wrong
+    * ref, then the old push command pushed the stale owned ref instead of HEAD. */
    char branch[256] = "";
    get_current_branch(branch, sizeof(branch));
+   int in_worktree = mcp_git_get_worktree();
+   if (in_worktree)
+   {
+      char head_branch[256];
+      snprintf(head_branch, sizeof(head_branch), "%s", branch);
+      if (branch_own_get_session_branch(branch, sizeof(branch)) != 0)
+      {
+         if (strncmp(head_branch, "aimee/session/", 14) == 0)
+            return mcp_text("error: in worktree mode but no owned branch found. "
+                            "Use git_branch action=create to create and register a branch first.");
+         snprintf(branch, sizeof(branch), "%s", head_branch);
+      }
+   }
    if (strcmp(branch, "main") == 0 || strcmp(branch, "master") == 0)
       return main_branch_blocked("push");
    {
@@ -366,31 +383,8 @@ cJSON *handle_git_push(cJSON *args)
       return mcp_text(result);
    }
 
-   /* Determine which branch to push.
-    * In a worktree, HEAD is the session branch (aimee/session/<id>), NOT the user's
-    * working branch. Look up the session's owned branch from branch_ownership instead.
-    * In the normal path, branch is already set from the guard check above. */
    int rc;
-
-   if (mcp_git_get_worktree())
-   {
-      /* Save the current HEAD branch before the ownership lookup overwrites it. */
-      char head_branch[256];
-      snprintf(head_branch, sizeof(head_branch), "%s", branch);
-
-      if (branch_own_get_session_branch(branch, sizeof(branch)) != 0)
-      {
-         /* No registered branch found for this session.  If HEAD is already a
-          * real user branch (not the aimee/session/... sentinel), use it directly —
-          * the user may have created the branch via git directly rather than through
-          * aimee's git_branch tool. */
-         if (strncmp(head_branch, "aimee/session/", 14) == 0)
-            return mcp_text("error: in worktree mode but no owned branch found. "
-                            "Use git_branch action=create to create and register a branch first.");
-         snprintf(branch, sizeof(branch), "%s", head_branch);
-      }
-   }
-   else if (!branch[0])
+   if (!in_worktree && !branch[0])
    {
       /* Fallback: branch fetch failed earlier; try again now */
       char *branch_out = mcp_git_run("git rev-parse --abbrev-ref HEAD 2>&1", &rc);
@@ -410,13 +404,16 @@ cJSON *handle_git_push(cJSON *args)
    /* Build push command.
     * In worktree mode, always push by explicit refspec since HEAD != the target branch. */
    char cmd[512];
-   if (mcp_git_get_worktree())
+   if (in_worktree)
    {
-      /* Push the owned branch to origin with explicit refspec */
+      /* HEAD is the newly committed session ref. Publish THAT commit to the
+       * owned branch; naming only `branch` here pushes the pre-session local ref
+       * and can report success while omitting every commit made in the worktree. */
       if (force)
-         snprintf(cmd, sizeof(cmd), "git push --force-with-lease -u origin '%s' 2>&1", branch);
+         snprintf(cmd, sizeof(cmd),
+                  "git push --force-with-lease -u origin 'HEAD:refs/heads/%s' 2>&1", branch);
       else
-         snprintf(cmd, sizeof(cmd), "git push -u origin '%s' 2>&1", branch);
+         snprintf(cmd, sizeof(cmd), "git push -u origin 'HEAD:refs/heads/%s' 2>&1", branch);
    }
    else
    {

@@ -169,6 +169,12 @@ int cmd_workspace_serve(const char *workspace_id);
 int cli_workspace_serve_loop(const char *workspace_id, const char *sock, const char *endpoint,
                              const char *bearer, volatile sig_atomic_t *stop);
 
+/* Scope a detached-workspace runner to one synchronous remote Git CLI call.
+ * Returns 1 when a runner thread started, 0 when no detached runner is needed,
+ * and -1 when the remote workspace registry could not be resolved. */
+int cli_workspace_git_runner_start(void);
+void cli_workspace_git_runner_stop(void);
+
 /* Reverse-channel for interactive/bridge commands (mcp-serve, chat) against a
  * remote aimee-server: register the client's cwd as a `detached` workspace and
  * serve it on a background thread so the server's file/exec tools route back to

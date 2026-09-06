@@ -23,7 +23,31 @@ executable=/usr/local/libexec/aimee-modules/aimee-module-memory
 publish=
 subscribe=
 request=
-serve=5889,5890,5891,5892,5893,5894
+serve=5889,5890,5891,5892,5893,5894,5895
+EOF
+
+cat > "$CONF/modules.d/server/memory-postgres.grant" <<'EOF'
+version=1
+principal_class=1
+principal_ref=73
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=11266
+serve=
+EOF
+
+cat > "$CONF/modules.d/server/memory-egress.grant" <<'EOF'
+version=1
+principal_class=1
+principal_ref=70
+uid=self
+executable=/usr/local/libexec/aimee-modules/aimee-module-memory
+publish=
+subscribe=
+request=12290
+serve=
 EOF
 echo "server grant installed"
 
@@ -37,7 +61,8 @@ done
 pkill -f "aimee-module-memory $SOCK" 2>/dev/null
 sleep 1
 cd /root
-AIMEE_HOME=/root nohup /usr/local/libexec/aimee-modules/aimee-module-memory "$SOCK" \
+AIMEE_HOME=/root AIMEE_MODULE_PLACEMENT=server \
+  nohup /usr/local/libexec/aimee-modules/aimee-module-memory "$SOCK" \
   >/root/memory-module-server.log 2>&1 &
 echo $! > /root/memory-module-server.pid
 sleep 4

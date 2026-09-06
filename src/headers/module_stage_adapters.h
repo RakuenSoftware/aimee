@@ -5,6 +5,8 @@
 
 #include <stdint.h>
 
+typedef struct cJSON cJSON;
+
 /* Register every server-owned production seam with its separately supervised
  * process module. Calls fail closed; readiness keeps the listener out of
  * rotation until all required modules have attached to the local bus. */
@@ -24,5 +26,11 @@ int server_module_benchmark_score(const int64_t *retrieved, uint32_t retrieved_c
  * only captures timings and does not retain a local percentile fallback. */
 int server_module_benchmark_latency(const double *latencies, uint32_t count,
                                     aimee_benchmarks_latency_summary_t *summary);
+
+/* Invoke the Go memory module's scoped data stage. `request` must contain the
+ * DATA JSON contract; this connection adapter forcibly supplies user scope so
+ * the server cannot address workspace/project/KB rows through its local bus.
+ * Returns a newly allocated JSON reply, or NULL when the module did not answer. */
+cJSON *server_module_memory_data(const cJSON *request);
 
 #endif
