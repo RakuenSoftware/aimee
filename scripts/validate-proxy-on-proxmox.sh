@@ -60,13 +60,15 @@ for id in "$CTID" "$VMID"; do
 done
 make -s -C "$REPO/src" -j4 ../aimee build/obj/tests/unit-test-openai-shape \
   build/obj/tests/unit-test-cli-profile build/obj/tests/unit-test-server-dispatch \
-  build/obj/tests/unit-test-guardrails build/obj/tests/unit-test-util build/obj/aimee-module
+  build/obj/tests/unit-test-guardrails build/obj/tests/unit-test-util \
+  build/obj/tests/unit-test-agent build/obj/aimee-module
 tar -C "$REPO" -czf "$STAGE/payload.tgz" aimee \
   scripts/validate-proxy-fresh-guest.sh scripts/tests/test_thin_client_proxy.py \
   skills \
   --transform='s|^src/build/obj/tests/||' src/build/obj/tests/unit-test-openai-shape \
   src/build/obj/tests/unit-test-cli-profile src/build/obj/tests/unit-test-server-dispatch \
   src/build/obj/tests/unit-test-guardrails src/build/obj/tests/unit-test-util \
+  src/build/obj/tests/unit-test-agent \
   --transform='s|^src/build/obj/||' src/build/obj/aimee-module
 "${SSH[@]}" "mkdir -m 0700 '$REMOTE_DIR'"
 REMOTE_CREATED=1

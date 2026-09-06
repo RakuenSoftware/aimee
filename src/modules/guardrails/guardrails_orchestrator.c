@@ -2021,6 +2021,12 @@ static int pre_tool_check_impl(const char *tool_name, const char *input_json,
 static char *guardrails_workspace_exec(void *ctx, const char *cmd, int *exit_code)
 {
    const workspace_provider_t *provider = ctx;
+   if (!provider->exec_shell)
+   {
+      if (exit_code)
+         *exit_code = -1;
+      return NULL;
+   }
    return provider->exec_shell(provider, cmd, exit_code);
 }
 

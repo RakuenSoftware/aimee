@@ -3120,6 +3120,13 @@ static void test_remote_push_probes_and_verify_gate(void)
       remote_git_unavailable = 1;
       rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
       assert(rc == 2 && strstr(msg, "cannot resolve target worktree"));
+      /* A provider without a shell capability is unavailable too: do not
+       * dereference a missing callback or run the probe on the server. */
+      const workspace_provider_t no_shell = {.kind = WS_PROVIDER_DETACHED};
+      workspace_provider_set_active(&no_shell);
+      rc = pre_tool_check(tools[t], input, &state, MODE_APPROVE, "/launcher", msg, sizeof(msg));
+      assert(rc == 2 && strstr(msg, "cannot resolve target worktree"));
+      workspace_provider_set_active(&remote);
    }
    workspace_provider_clear_active();
    int ec;

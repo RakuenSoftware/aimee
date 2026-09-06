@@ -86,3 +86,12 @@ must be incorporated into the published image before a container recreation.
   enabled. GitHub confirmed PR #2957 at `130533a370` and started fresh CI.
   CI results are tracked on the PR; local/fresh-guest results are not a claim
   that every GitHub job has completed.
+
+The subsequent full CI run exposed a missing-shell callback in the existing
+`unit-test-agent` detached-provider fixture. ASan reproduced the null call
+locally. The adapter now treats a missing callback as unavailable, without
+falling back to server execution; the guardrail regression matrix explicitly
+covers that case. Agent and guardrail suites passed with ASan/UBSan after the
+fix. The fresh-guest harness also runs the agent suite to cover this caller.
+This defensive addition is in the PR; the live hotfix above uses the actual
+detached provider, which supplies its shell callback.

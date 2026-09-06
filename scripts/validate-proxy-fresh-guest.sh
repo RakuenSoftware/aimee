@@ -22,6 +22,7 @@ cd "$ROOT"
 "$ROOT/unit-test-cli-profile"
 "$ROOT/unit-test-server-dispatch"
 "$ROOT/unit-test-util"
+"$ROOT/unit-test-agent"
 AIMEE_TEST_MODULE_BIN="$ROOT/aimee-module" "$ROOT/unit-test-guardrails"
 AIMEE_TEST_REQUIRE_CODEX=1 AIMEE_TEST_PROXY_BINARY=/usr/local/bin/aimee \
   python3 "$ROOT/scripts/tests/test_thin_client_proxy.py" -v
