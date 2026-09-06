@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 const deduplicationProposal = `# Proposal: Document proposal-trigger blob deduplication
@@ -203,12 +203,12 @@ func TestFinalPullRequestHandoffExplainsProposalAndActualDiff(t *testing.T) {
 	runGit("add", ".")
 	runGit("commit", "-m", "document proposal watcher behavior")
 
-	store, err := db1test.Open(t, filepath.Join(root, "workflow.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "workflow.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	itemInput := db1.CreateWorkItem{
+	itemInput := workflowstore.CreateWorkItem{
 		ID: "wi_dedup", Repo: repo, ProposalPath: "proposal:dedup", WorkflowName: "build-triggered",
 		WorkflowVersion: "v1", StartStage: "pr", SourcePath: "docs/proposals/pending/automatic-wfe-trigger-blob-dedup-runbook.md",
 	}

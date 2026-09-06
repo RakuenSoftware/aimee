@@ -1,4 +1,4 @@
-package db1
+package workflowstore
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	"sort"
 	"strings"
 
-	wire "github.com/JBailes/aimee/server-go/db1"
+	wire "github.com/JBailes/aimee/server-go/aimee"
 )
 
 // FrozenCreate is one path first introduced by a slice's immutable diff. The

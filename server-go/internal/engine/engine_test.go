@@ -11,21 +11,21 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 func execOnDB(t *testing.T, path, query string, args ...any) {
 	t.Helper()
-	db1test.Exec(t, path, query, args...)
+	workflowstoretest.Exec(t, path, query, args...)
 }
 
 // expireBudgetLease simulates a crashed owner whose reservation lease has run
 // out. Replay ownership is only transferable once the lease lapses.
 func expireBudgetLease(t *testing.T, path, workItemID string) {
 	t.Helper()
-	db1test.Exec(t, path,
+	workflowstoretest.Exec(t, path,
 		`UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`,
 		workItemID)
 }
@@ -143,7 +143,7 @@ func TestRetryPassesPreviousFailureDetailToRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestRetryPassesPreviousFailureDetailToRunner(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_retry_detail", Repo: "repo", ProposalPath: "proposal", WorkflowName: "retry-detail", WorkflowVersion: def.Version, StartStage: "work"}
+	item := workflowstore.CreateWorkItem{ID: "wi_retry_detail", Repo: "repo", ProposalPath: "proposal", WorkflowName: "retry-detail", WorkflowVersion: def.Version, StartStage: "work"}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -186,7 +186,7 @@ func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func testSiblingStepsRunConcurrently(t *testing.T, maxUSD, stepCostUSD float64) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	items := []db1.CreateWorkItem{
+	items := []workflowstore.CreateWorkItem{
 		{ID: "wi_parallel", Repo: "repo", ProposalPath: "root", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: maxUSD},
 		{ID: "wi_parallel.a", Repo: "repo", ProposalPath: "a", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", ParentID: "wi_parallel"},
 		{ID: "wi_parallel.b", Repo: "repo", ProposalPath: "b", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", ParentID: "wi_parallel"},
@@ -316,7 +316,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -326,7 +326,7 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_commit_failure", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_commit_failure", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -352,11 +352,11 @@ func TestReconciledSpendSurvivesPostSpendArtifactFailure(t *testing.T) {
 
 func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1test.Open(t, path)
+	store, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_replay", Repo: "repo", ProposalPath: "replay", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_replay", Repo: "repo", ProposalPath: "replay", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -370,7 +370,7 @@ func TestReconciledSpendReopensAndCommitsExactlyOnce(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1test.Open(t, path)
+	store, err = workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -411,7 +411,7 @@ func TestUncappedDuplicateAdvanceCannotShareOneInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -420,7 +420,7 @@ func TestUncappedDuplicateAdvanceCannotShareOneInvocation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_duplicate", Repo: "repo", ProposalPath: "duplicate", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	item := workflowstore.CreateWorkItem{ID: "wi_duplicate", Repo: "repo", ProposalPath: "duplicate", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -487,7 +487,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	path := filepath.Join(root, "aimee.db")
-	store, err := db1test.Open(t, path)
+	store, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_billed_error", Repo: "repo", ProposalPath: "failure", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
+	item := workflowstore.CreateWorkItem{ID: "wi_billed_error", Repo: "repo", ProposalPath: "failure", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -512,7 +512,7 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1test.Open(t, path)
+	store, err = workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -524,6 +524,9 @@ func TestPostDispatchFailureChargesReservationAcrossRestart(t *testing.T) {
 	if resumed, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil || resumed != 1 {
 		t.Fatalf("resume count=%d err=%v", resumed, err)
 	}
+	// Opening another caller must not revoke a live owner's lease. Model the
+	// crashed owner's expiry before allowing the restarted engine to replay.
+	expireBudgetLease(t, path, item.ID)
 	artifacts, err = wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
 	if err != nil {
 		t.Fatal(err)
@@ -555,7 +558,7 @@ func TestPreDispatchRunnerFailureDoesNotConsumeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -564,7 +567,7 @@ func TestPreDispatchRunnerFailureDoesNotConsumeBudget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_predispatch", Repo: "repo", ProposalPath: "predispatch", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
+	item := workflowstore.CreateWorkItem{ID: "wi_predispatch", Repo: "repo", ProposalPath: "predispatch", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: .4}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -598,7 +601,7 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -610,7 +613,7 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 	if err := artifacts.PutProposal("wi_recover", []byte("proposal")); err != nil {
 		t.Fatal(err)
 	}
-	first := db1.CreateWorkItem{ID: "wi_recover", Repo: "repo", ProposalPath: "recover", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	first := workflowstore.CreateWorkItem{ID: "wi_recover", Repo: "repo", ProposalPath: "recover", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
 	if err := store.AdmitRoot(t.Context(), first, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -631,8 +634,8 @@ func TestTransientParkRecoversAndReleasesAdmissionCapacity(t *testing.T) {
 		!strings.Contains(events[len(events)-1].Detail, "temporary runner outage") {
 		t.Fatalf("events=%+v err=%v", events, err)
 	}
-	blocked := db1.CreateWorkItem{ID: "wi_blocked", Repo: "repo", ProposalPath: "blocked", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
-	if err := store.AdmitRoot(t.Context(), blocked, 1); !errors.Is(err, db1.ErrAdmissionFull) {
+	blocked := workflowstore.CreateWorkItem{ID: "wi_blocked", Repo: "repo", ProposalPath: "blocked", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work"}
+	if err := store.AdmitRoot(t.Context(), blocked, 1); !errors.Is(err, workflowstore.ErrAdmissionFull) {
 		t.Fatalf("admission while transiently parked: %v", err)
 	}
 	if resumed, err := store.ResumeTransient(t.Context(), "runner_unavailable", 0); err != nil || resumed != 1 {
@@ -744,7 +747,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -759,7 +762,7 @@ nodes:
 	if _, err := artifacts.PutNodeArtifact("wi_ci", "impl", "branch", []byte("head")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_ci", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{ID: "wi_ci", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
 		t.Fatal(err)
 	}
 	eng, err := New(store, artifacts, workflowDir, ciPassRunner{})
@@ -828,7 +831,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -843,7 +846,7 @@ nodes:
 	if _, err := artifacts.PutNodeArtifact("wi_noop", "impl", "branch", []byte("head")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_noop", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{ID: "wi_noop", Repo: "repo", ProposalPath: "p", WorkflowName: "slice", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
 		t.Fatal(err)
 	}
 	eng, err := New(store, artifacts, workflowDir, acceptedRunner{})
@@ -897,7 +900,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -915,7 +918,7 @@ nodes:
 	if err := artifacts.PutPlan("wi_artifacts", []byte("unrelated plan")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_artifacts", Repo: "repo", ProposalPath: "p", WorkflowName: "build", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{ID: "wi_artifacts", Repo: "repo", ProposalPath: "p", WorkflowName: "build", WorkflowVersion: def.Version, StartStage: "freeze"}); err != nil {
 		t.Fatal(err)
 	}
 	runner := &artifactRoutingRunner{t: t}
@@ -971,7 +974,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -994,7 +997,7 @@ nodes:
 	if _, err := artifacts.PutNodeArtifact("wi_e2e", "source", "proposal", []byte(proposal)); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{
 		ID: "wi_e2e", Repo: "repo", ProposalPath: "imported", WorkflowName: "build",
 		WorkflowVersion: def.Version, StartStage: "plan", Mode: "autonomous",
 	}); err != nil {
@@ -1043,7 +1046,7 @@ func TestUnmeasuredSpendIsChargedAtTheReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1052,7 +1055,7 @@ func TestUnmeasuredSpendIsChargedAtTheReservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_unmeasured", Repo: "repo", ProposalPath: "unmeasured", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_unmeasured", Repo: "repo", ProposalPath: "unmeasured", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -1094,7 +1097,7 @@ func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1103,7 +1106,7 @@ func TestMeasuredZeroCostIsNotInflated(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_measured_zero", Repo: "repo", ProposalPath: "measured-zero", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_measured_zero", Repo: "repo", ProposalPath: "measured-zero", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -1139,7 +1142,7 @@ func (r replayUnavailableRunner) Run(_ context.Context, req StepRequest) (StepRe
 // an interrupted (unresolved) reservation re-dispatches; a lost reconciled
 // (actual) one parks for a human.
 func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
-	setup := func(t *testing.T, id string) (*db1.Store, *Engine, string) {
+	setup := func(t *testing.T, id string) (*workflowstore.Store, *Engine, string) {
 		root := t.TempDir()
 		workflowDir := filepath.Join(root, "workflows")
 		if err := os.MkdirAll(workflowDir, 0o700); err != nil {
@@ -1153,7 +1156,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+		store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1162,7 +1165,7 @@ func TestLostReplayRecoversInsteadOfLooping(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		item := db1.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
+		item := workflowstore.CreateWorkItem{ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 1}
 		if err := store.CreateWorkItem(t.Context(), item); err != nil {
 			t.Fatal(err)
 		}
@@ -1238,7 +1241,7 @@ func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1247,7 +1250,7 @@ func TestPersistentRunnerFailureParksForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_persistent_fail", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	item := workflowstore.CreateWorkItem{ID: "wi_persistent_fail", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -1311,7 +1314,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1320,7 +1323,7 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_capacity", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
+	item := workflowstore.CreateWorkItem{ID: "wi_capacity", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "work", MaxCostUSD: 100}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -1350,12 +1353,12 @@ func TestCapacityBackpressureDoesNotParkForHuman(t *testing.T) {
 // delegate problem is fixed.
 func TestDelegateFailedIsOperatorResumable(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	item := db1.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 100}
+	item := workflowstore.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "pf", WorkflowName: "one", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 100}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -1414,7 +1417,7 @@ func TestParkSurvivesACancelledStepContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1423,7 +1426,7 @@ func TestParkSurvivesACancelledStepContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_park_cancelled", Repo: "repo", ProposalPath: "p",
+	item := workflowstore.CreateWorkItem{ID: "wi_park_cancelled", Repo: "repo", ProposalPath: "p",
 		WorkflowName: "one", WorkflowVersion: def.Version, StartStage: "draft", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
@@ -1576,7 +1579,7 @@ nodes:
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1591,7 +1594,7 @@ nodes:
 	if _, err := artifacts.PutNodeArtifact("wi_conflict", "pr", "pr", []byte("https://github.com/acme/repo/pull/42")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{ID: "wi_conflict",
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{ID: "wi_conflict",
 		Repo: "repo", ProposalPath: "p", WorkflowName: "slice",
 		WorkflowVersion: def.Version, StartStage: "merge"}); err != nil {
 		t.Fatal(err)

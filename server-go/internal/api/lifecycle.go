@@ -6,7 +6,7 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 func (s *Server) workflowGate(w http.ResponseWriter, r *http.Request) {
@@ -146,7 +146,7 @@ func (s *Server) workflowDelete(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusNotFound, err)
 		return
 	}
-	items := make([]db1.WorkItem, 0, len(ids))
+	items := make([]workflowstore.WorkItem, 0, len(ids))
 	for _, descendant := range ids {
 		if child, loadErr := s.db.WorkItem(r.Context(), descendant); loadErr == nil {
 			items = append(items, child)

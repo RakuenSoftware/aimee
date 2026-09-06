@@ -1,4 +1,4 @@
-package db1
+package aimee
 
 // The db1-fields-v2 wire, in Go.
 //
@@ -40,10 +40,10 @@ const FieldsMax = 1 << 16
 var (
 	// ErrFieldCount is a reply whose field count is not a whole number of rows
 	// for the operation's row width.
-	ErrFieldCount = errors.New("db1 reply field count is not a whole number of rows")
+	ErrFieldCount = errors.New("aimee reply field count is not a whole number of rows")
 	// ErrNulInField is a request field containing NUL. The module reads fields
 	// as C strings, so an embedded NUL would silently truncate one.
-	ErrNulInField = errors.New("db1 request field contains NUL")
+	ErrNulInField = errors.New("aimee request field contains NUL")
 )
 
 // EncodeFields builds a db1-fields-v2 request frame.
@@ -106,7 +106,7 @@ func DecodeFields(response []byte) (uint32, []string, error) {
 // Rows splits a flat list reply into rows of width fields each.
 func Rows(fields []string, width int) ([][]string, error) {
 	if width <= 0 {
-		return nil, fmt.Errorf("db1: row width %d is not positive", width)
+		return nil, fmt.Errorf("aimee: row width %d is not positive", width)
 	}
 	if len(fields)%width != 0 {
 		return nil, fmt.Errorf("%w: %d fields, width %d", ErrFieldCount, len(fields), width)

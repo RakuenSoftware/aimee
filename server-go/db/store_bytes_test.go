@@ -1,4 +1,4 @@
-package aimee
+package db
 
 import (
 	"bytes"
@@ -22,7 +22,7 @@ func TestRawBytesSurviveTheRoundTrip(t *testing.T) {
 	// an encoding on one side and guessing it on the other.
 	digest := []byte{0x00, 0xff, 0x80, 0x0a, 0x0d, 0x1a, 0xc3, 0x28}
 	r := &replyBuilder{}
-	f := &fakeCaller{reply: r.u32(StatusOK).str("").str("").
+	f := &fakeCaller{reply: r.u32(StoreStatusOK).str("").str("").
 		shape(1, 1).blob(digest).b}
 
 	var got []byte
@@ -53,7 +53,7 @@ func TestNullBytesAndEmptyBytesStayApart(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			r := &replyBuilder{}
-			f := &fakeCaller{reply: tc.build(r.u32(StatusOK).str("").str("").shape(1, 1)).b}
+			f := &fakeCaller{reply: tc.build(r.u32(StoreStatusOK).str("").str("").shape(1, 1)).b}
 			got := []byte("clobber me")
 			if err := newStore(t, f).QueryRow(t.Context(), "SELECT content").Scan(&got); err != nil {
 				t.Fatalf("scan: %v", err)
@@ -88,14 +88,14 @@ func TestNullBytesAndEmptyBytesStayApart(t *testing.T) {
 // to itself.
 func TestBytesAndTextDoNotSubstituteForEachOther(t *testing.T) {
 	r := &replyBuilder{}
-	f := &fakeCaller{reply: r.u32(StatusOK).str("").str("").shape(1, 1).blob([]byte{1, 2}).b}
+	f := &fakeCaller{reply: r.u32(StoreStatusOK).str("").str("").shape(1, 1).blob([]byte{1, 2}).b}
 	var s string
 	if err := newStore(t, f).QueryRow(t.Context(), "SELECT x").Scan(&s); err == nil {
 		t.Error("bytes were accepted into a string destination")
 	}
 
 	r2 := &replyBuilder{}
-	f2 := &fakeCaller{reply: r2.u32(StatusOK).str("").str("").shape(1, 1).text("hello").b}
+	f2 := &fakeCaller{reply: r2.u32(StoreStatusOK).str("").str("").shape(1, 1).text("hello").b}
 	var b []byte
 	if err := newStore(t, f2).QueryRow(t.Context(), "SELECT x").Scan(&b); err == nil {
 		t.Error("text was accepted into a []byte destination")
@@ -106,7 +106,7 @@ func TestBytesAndTextDoNotSubstituteForEachOther(t *testing.T) {
 // the slice would otherwise watch its value change underneath it.
 func TestABlobIsCopiedNotAliased(t *testing.T) {
 	r := &replyBuilder{}
-	f := &fakeCaller{reply: r.u32(StatusOK).str("").str("").shape(1, 1).blob([]byte{7, 8, 9}).b}
+	f := &fakeCaller{reply: r.u32(StoreStatusOK).str("").str("").shape(1, 1).blob([]byte{7, 8, 9}).b}
 
 	var got []byte
 	if err := newStore(t, f).QueryRow(t.Context(), "SELECT x").Scan(&got); err != nil {

@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	store "github.com/JBailes/aimee/server-go/db"
 	"github.com/jackc/pgx/v5"
 )
 

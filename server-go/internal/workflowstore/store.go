@@ -1,4 +1,5 @@
-// Package db1 is the workflow engine's view of the DB1 store.
+// Package workflowstore maps workflow engine operations to the aimee domain
+// contract. It is not a database driver and owns no connection or schema.
 //
 // It used to be the engine's SQLite driver: it opened $home/aimee.db -- the
 // DB1 module's own file -- ran its own CREATE TABLE and ALTER ladder against it,
@@ -23,7 +24,7 @@
 //   - Not-found stays sql.ErrNoRows. Callers in internal/api test for it, and a
 //     port that quietly changed which error means "no such run" would change
 //     which HTTP status a caller sees.
-package db1
+package workflowstore
 
 import (
 	"context"
@@ -33,7 +34,7 @@ import (
 	"math"
 	"time"
 
-	wire "github.com/JBailes/aimee/server-go/db1"
+	wire "github.com/JBailes/aimee/server-go/aimee"
 )
 
 // listCeiling bounds every list the engine asks for. The module refuses more
@@ -41,7 +42,7 @@ import (
 // of them" gets a number rather than a silently truncated page.
 const listCeiling = 512
 
-// Store is the engine's handle on the DB1 module.
+// Store is the engine's handle on the aimee domain module.
 type Store struct {
 	client *wire.Client
 }
@@ -54,7 +55,7 @@ type EvalCandidate = wire.EvalCandidate
 // engine no longer has a path, which is the point of the change.
 func OpenBus(client *wire.Client) (*Store, error) {
 	if client == nil {
-		return nil, errors.New("db1 store needs a module bus client")
+		return nil, errors.New("workflow store needs a module bus client")
 	}
 	return &Store{client: client}, nil
 }
@@ -66,7 +67,7 @@ func (s *Store) Close() error { return nil }
 
 func (s *Store) ready() error {
 	if s == nil || s.client == nil {
-		return errors.New("db1 store is not configured")
+		return errors.New("workflow store is not configured")
 	}
 	return nil
 }

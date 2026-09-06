@@ -8,7 +8,7 @@ package postgres
 // which presented as "the store is absent" on a system where every part had
 // been written.
 //
-// The frame is the one described in server-go/modules/aimee/store_wire.go, and
+// The frame is the one described in server-go/db/store_wire.go, and
 // that file is the specification. Nothing here re-derives it: the encodings are
 // mirrored deliberately rather than shared, because the two sides are separate
 // modules that must be able to version independently, and a shared struct would
@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -231,7 +232,8 @@ func parseStoreConfig(dsn string) (*pgxpool.Config, error) {
 func parseStoreConfigFor(name, dsn string) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: %s is not a valid DSN: %w", name, err)
+		// Parse errors can contain the original DSN, including its password.
+		return nil, fmt.Errorf("postgres: %s is not a valid DSN", name)
 	}
 	return config, nil
 }
@@ -248,6 +250,24 @@ func parseMigrationConfig(migrationDSN, runtimeDSN string) (*pgxpool.Config, err
 	if config.ConnConfig.User == runtime.ConnConfig.User {
 		return nil, fmt.Errorf("postgres: migration role %q must differ from the runtime role",
 			config.ConnConfig.User)
+	}
+	// Credentials are two capabilities on ONE database. Migrating a different
+	// target succeeds deceptively while runtime keeps serving the old schema.
+	// Compare configured endpoints, including failover order, without resolving
+	// DNS (or printing credentials). Operators must use the same endpoint names.
+	mc, rc := config.ConnConfig, runtime.ConnConfig
+	if mc.Database != rc.Database || mc.Host != rc.Host || mc.Port != rc.Port || len(mc.Fallbacks) != len(rc.Fallbacks) {
+		return nil, errors.New("postgres: migration and runtime DSNs must target the same database and endpoints")
+	}
+	for i, fallback := range mc.Fallbacks {
+		if fallback.Host != rc.Fallbacks[i].Host || fallback.Port != rc.Fallbacks[i].Port {
+			return nil, errors.New("postgres: migration and runtime DSNs must use the same failover endpoints")
+		}
+	}
+	for _, key := range []string{"search_path", "options"} {
+		if mc.RuntimeParams[key] != rc.RuntimeParams[key] {
+			return nil, fmt.Errorf("postgres: migration and runtime DSNs must use the same %s", key)
+		}
 	}
 	return config, nil
 }
@@ -317,9 +337,37 @@ func MigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
 			migrationPoolErr = err
 			return
 		}
+		runtime, err := SQLPool(ctx)
+		if err == nil {
+			err = validateStoreNamespace(ctx, runtime, pool)
+		}
+		if err != nil {
+			pool.Close()
+			migrationPoolErr = err
+			return
+		}
 		migrationPool = pool
 	})
 	return migrationPool, migrationPoolErr
+}
+
+// Role defaults and the implicit $user search-path entry can resolve identical
+// DSN text into different schemas. Check the live resolution before any domain
+// migrations, without disclosing credentials or relying on DNS aliases.
+func validateStoreNamespace(ctx context.Context, runtime, migration *pgxpool.Pool) error {
+	var runtimeDB, migrationDB string
+	var runtimeSchemas, migrationSchemas []string
+	const query = "SELECT current_database(), current_schemas(false)"
+	if err := runtime.QueryRow(ctx, query).Scan(&runtimeDB, &runtimeSchemas); err != nil {
+		return errors.New("postgres: cannot verify runtime database namespace")
+	}
+	if err := migration.QueryRow(ctx, query).Scan(&migrationDB, &migrationSchemas); err != nil {
+		return errors.New("postgres: cannot verify migration database namespace")
+	}
+	if runtimeDB != migrationDB || len(runtimeSchemas) == 0 || !slices.Equal(runtimeSchemas, migrationSchemas) {
+		return errors.New("postgres: migration and runtime roles resolve different database namespaces; configure matching search paths and schema usage grants")
+	}
+	return nil
 }
 
 // ensureSearchPathSchema creates the schema the DSN's search_path names.
@@ -625,23 +673,79 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     checksum    TEXT   NOT NULL,
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (owner, version)
-)`
+);
+-- Default application-table grants must not grant authority over the ledger.
+-- Reconcile existing installations too, under the same bootstrap lock. Only
+-- the table owner retains direct privileges; all ledger operations already use
+-- the migration capability, including reads. Role membership remains a deploy
+-- responsibility: runtime must not inherit the owner role.
+DO $ledger_acl$
+DECLARE recipient record;
+BEGIN
+    FOR recipient IN
+        SELECT DISTINCT acl.grantee
+        FROM pg_catalog.pg_class AS relation,
+             LATERAL pg_catalog.aclexplode(relation.relacl) AS acl
+        WHERE relation.oid = 'schema_migrations'::regclass
+          AND acl.grantee <> relation.relowner
+    LOOP
+        EXECUTE format('REVOKE ALL ON TABLE schema_migrations FROM %s',
+            CASE WHEN recipient.grantee = 0 THEN 'PUBLIC'
+                 ELSE quote_ident(pg_catalog.pg_get_userbyid(recipient.grantee)) END);
+    END LOOP;
+END
+$ledger_acl$`
+
+// Shared with the native knowledge-schema bootstrap. A row lock cannot guard
+// an empty ledger, and CREATE TABLE IF NOT EXISTS is not safe against concurrent
+// catalog creation. Acquire this database-wide transaction lock before either
+// DDL or history reads. Runtime queries never acquire it.
+const schemaMigrationLockSQL = "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('aimee:db:schema'))"
+
+func rollbackSchemaTransaction(tx pgx.Tx) {
+	// The request may have expired while waiting for the schema lock. Releasing
+	// the transaction must not inherit that cancelled context or retain a lease.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = tx.Rollback(ctx)
+}
+
+func beginSchemaTransaction(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, schemaMigrationLockSQL); err != nil {
+		rollbackSchemaTransaction(tx)
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, versionTableDDL); err != nil {
+		rollbackSchemaTransaction(tx)
+		return nil, err
+	}
+	return tx, nil
+}
 
 func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, bus.ModuleStatus) {
 	owner, err := r.str()
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if _, err := pool.Exec(ctx, versionTableDDL); err != nil {
+	tx, err := beginSchemaTransaction(ctx, pool)
+	if err != nil {
 		return failure(err, "current_version"), bus.ModuleStatusOK
 	}
+	defer rollbackSchemaTransaction(tx)
 	var version int64
 	var checksum string
-	err = pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT version, checksum FROM schema_migrations
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1`, owner).
 		Scan(&version, &checksum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return failure(err, "current_version"), bus.ModuleStatusOK
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return failure(err, "current_version"), bus.ModuleStatusOK
 	}
 	// No rows is a fresh database, which answers 0 rather than failing. That is
@@ -706,15 +810,11 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 			bus.ModuleStatusOK
 	}
 
-	if _, err := pool.Exec(ctx, versionTableDDL); err != nil {
-		return failure(err, "migrate"), bus.ModuleStatusOK
-	}
-
-	tx, err := pool.Begin(ctx)
+	tx, err := beginSchemaTransaction(ctx, pool)
 	if err != nil {
 		return failure(err, "migrate"), bus.ModuleStatusOK
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer rollbackSchemaTransaction(tx)
 
 	// Ordering and replay, decided inside the transaction so two modules
 	// starting together cannot both pass the check and both apply.
@@ -742,6 +842,11 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 				fmt.Sprintf("migration %s v%d was applied with checksum %s and now "+
 					"hashes to %s: an applied migration may not be edited",
 					owner, version, recordedSum, sum)), bus.ModuleStatusOK
+		}
+		// A replay executes no domain DDL, but bootstrap may have repaired
+		// legacy ledger grants. Do not roll that repair back on success.
+		if err := tx.Commit(ctx); err != nil {
+			return failure(err, "migrate"), bus.ModuleStatusOK
 		}
 		w := &writer{}
 		w.header(statusOK, "", "")

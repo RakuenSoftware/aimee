@@ -1,4 +1,4 @@
-package aimee
+package db
 
 import (
 	"context"
@@ -8,45 +8,13 @@ import (
 	"time"
 )
 
-// The store, as another module.
+// Shared database access over the authenticated module bus. KB and server
+// use the same client, wire, typed values and transaction semantics. The
+// postgres provider owns connections and credentials; callers retain their own
+// bus principals and domain authorization. This package owns no schema or pool.
 //
-// aimee keeps no database. It serves nineteen families of typed operations to its
-// callers and, to store what they give it, calls the postgres module over the
-// bus like any other module capability. That module owns the connection, the
-// DSN and the pooling policy; this file asks it, and store_wire.go is the only
-// place that knows how the asking is framed.
-//
-// Why a module and not a library: two processes holding the same store is the
-// thing moving aimee behind a module removed. A pool opened here would put it
-// straight back, and it would be invisible -- the module would look like a
-// module and behave like a second writer.
-//
-// -----------------------------------------------------------------------------
-// THE CONTRACT, agreed with the session building the postgres module. The stage
-// numbering follows the bus rule with postgres at principal ref 28: health is
-// stage 1 (11265), SQL is stage 2 (11266).
-//
-// NOT YET WIRED IN THE REGISTRY, on purpose. A stage may not be declared before
-// it is served -- TestAdvertisedStagesMatchTheContractFile enforces exactly
-// that, because a declared-but-unserved stage is worse than an absent one: the
-// daemon routes to it and the caller gets a capability error from a module that
-// is plainly running. Two entries land alongside the postgres module's SQL
-// stage, in one commit:
-//
-//   * postgres gains stage 2 (postgres-sql, kind 11266) in
-//     src/modules/process-contracts.json
-//   * aimee-postgres joins its clients at principal ref 69, requesting that
-//     kind and serving nothing, because a serving grant requests nothing
-//
-// Ref 69, having been 67 and then 68 in turn. Both were taken by the session
-// building peer messaging -- 67 for its directory client, 68 for the server's
-// own peer client -- and it landed first. Two clients on one ref are two
-// callers the bus cannot tell apart, and that surfaces long after the merge
-// that caused it rather than at it.
-//
-// Until then this module has a store client and no store, which is the honest
-// state and the one the daemon reports.
-// -----------------------------------------------------------------------------
+// Principal 28 serves SQL at stage 2 / event 11266. Those IDs and the wire
+// values remain stable when a consumer or package moves.
 
 const (
 	// PostgresPrincipalRef is the postgres module's principal.

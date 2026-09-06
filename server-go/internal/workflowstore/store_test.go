@@ -1,4 +1,4 @@
-package db1_test
+package workflowstore_test
 
 import (
 	"context"
@@ -10,23 +10,23 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 // newTestStore starts a real module for this test and returns a store on it,
 // plus the path that store lives at -- some tests have to reach around the
-// module to move the clock, and db1test.Exec needs to know where.
+// module to move the clock, and workflowstoretest.Exec needs to know where.
 // The batch size TerminalDelegateJobs claims per sweep. Spelled here because
 // this is an external test package now; it must match the unexported constant,
 // and the test that uses it asserts the batch is bounded, so a drift shows up
 // as a failure rather than as a silently weaker assertion.
 const terminalCancellationBatchSize = 8
 
-func newTestStore(t *testing.T) (*db1.Store, string) {
+func newTestStore(t *testing.T) (*workflowstore.Store, string) {
 	t.Helper()
 	storePath := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1test.Open(t, storePath)
+	store, err := workflowstoretest.Open(t, storePath)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,13 +38,13 @@ func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
 	store, storePath := newTestStore(t)
 	for i := 1; i <= terminalCancellationBatchSize+2; i++ {
 		workItemID := fmt.Sprintf("wi_terminal_batch_%02d", i)
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{ID: workItemID, Repo: "repo", ProposalPath: workItemID, WorkflowName: "build", StartStage: "impl"}); err != nil {
 			t.Fatal(err)
 		}
+		workflowstoretest.Exec(t, storePath, `INSERT INTO agent_jobs(id,status) VALUES(?,'running')`, i)
 		if err := store.SaveWorkflowDelegateJob(t.Context(), workItemID+":impl:v1:hash", workItemID, i, ""); err != nil {
 			t.Fatal(err)
 		}
-		db1test.Exec(t, storePath, `INSERT INTO agent_jobs(id,status) VALUES(?,'running')`, i)
 		if _, err := store.StopTree(t.Context(), workItemID); err != nil {
 			t.Fatal(err)
 		}
@@ -68,19 +68,19 @@ func TestTerminalDelegateJobsReturnsBoundedBatch(t *testing.T) {
 func TestPausedParentIsNotReconciledOrCancelledAsTerminal(t *testing.T) {
 	store, storePath := newTestStore(t)
 	ctx := t.Context()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_paused_parent", Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_paused_parent", Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_paused_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_parent"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_paused_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_parent"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Park(ctx, "wi_paused_parent", "slices", "manual", 0); err != nil {
 		t.Fatal(err)
 	}
+	workflowstoretest.Exec(t, storePath, `INSERT INTO agent_jobs(id,status) VALUES(81,'running')`)
 	if err := store.SaveWorkflowDelegateJob(ctx, "wi_paused_parent:slices:v1:hash", "wi_paused_parent", 81, ""); err != nil {
 		t.Fatal(err)
 	}
-	db1test.Exec(t, storePath, `INSERT INTO agent_jobs(id,status) VALUES(81,'running')`)
 	orphans, err := store.ReconcileOrphanedDescendants(ctx)
 	if err != nil || len(orphans) != 0 {
 		t.Fatalf("paused parent reconciled descendants: ids=%v err=%v", orphans, err)
@@ -94,7 +94,7 @@ func TestPausedParentIsNotReconciledOrCancelledAsTerminal(t *testing.T) {
 func TestStopTreeStopsPausedRootAndPausedDescendant(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := t.Context()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_paused_tree", Repo: "repo", ProposalPath: "paused-root", WorkflowName: "build", StartStage: "slices"},
 		{ID: "wi_paused_tree.child", Repo: "repo", ProposalPath: "paused-child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_paused_tree"},
 	} {
@@ -128,14 +128,14 @@ func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			err := store.AdmitRoot(context.Background(), db1.CreateWorkItem{ID: fmt.Sprintf("wi_admit_%d", i), Repo: "repo", ProposalPath: fmt.Sprintf("p-%d", i), WorkflowName: "build", StartStage: "start"}, cap)
+			err := store.AdmitRoot(context.Background(), workflowstore.CreateWorkItem{ID: fmt.Sprintf("wi_admit_%d", i), Repo: "repo", ProposalPath: fmt.Sprintf("p-%d", i), WorkflowName: "build", StartStage: "start"}, cap)
 			if err == nil {
 				mu.Lock()
 				admitted++
 				mu.Unlock()
 				return
 			}
-			if !errors.Is(err, db1.ErrAdmissionFull) {
+			if !errors.Is(err, workflowstore.ErrAdmissionFull) {
 				t.Errorf("admit: %v", err)
 			}
 		}(i)
@@ -153,7 +153,7 @@ func TestConcurrentRootAdmissionNeverExceedsCap(t *testing.T) {
 func TestWorkItemByGitProposalMatchesCommitQualifiedLegacyIdentity(t *testing.T) {
 	store, _ := newTestStore(t)
 	legacy := "git:" + strings.Repeat("a", 40) + ":docs/proposals/pending/p.md:" + strings.Repeat("b", 64) + ":build:autonomous"
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{
 		ID: "wi_legacy_git", Repo: "repo", ProposalPath: legacy,
 		WorkflowName: "build", StartStage: "draft",
 	}); err != nil {
@@ -166,7 +166,7 @@ func TestWorkItemByGitProposalMatchesCommitQualifiedLegacyIdentity(t *testing.T)
 }
 
 func TestGitProposalIdentityPinsBlobWorkflowAndMode(t *testing.T) {
-	if got, want := db1.GitProposalIdentity(strings.Repeat("b", 64), "build", "autonomous"),
+	if got, want := workflowstore.GitProposalIdentity(strings.Repeat("b", 64), "build", "autonomous"),
 		"git:"+strings.Repeat("b", 64)+":build:autonomous"; got != want {
 		t.Fatalf("identity=%q want=%q", got, want)
 	}
@@ -175,15 +175,15 @@ func TestGitProposalIdentityPinsBlobWorkflowAndMode(t *testing.T) {
 func TestParkedRootStillConsumesAdmissionCapacity(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	first := db1.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "parked", WorkflowName: "build", StartStage: "feature"}
+	first := workflowstore.CreateWorkItem{ID: "wi_parked", Repo: "repo", ProposalPath: "parked", WorkflowName: "build", StartStage: "feature"}
 	if err := store.AdmitRoot(ctx, first, 1); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ParkWithDetail(ctx, first.ID, first.StartStage, "runner_unavailable", "fork/exec git: resource temporarily unavailable", 0); err != nil {
 		t.Fatal(err)
 	}
-	second := db1.CreateWorkItem{ID: "wi_waiting", Repo: "repo", ProposalPath: "waiting", WorkflowName: "build", StartStage: "draft"}
-	if err := store.AdmitRoot(ctx, second, 1); !errors.Is(err, db1.ErrAdmissionFull) {
+	second := workflowstore.CreateWorkItem{ID: "wi_waiting", Repo: "repo", ProposalPath: "waiting", WorkflowName: "build", StartStage: "draft"}
+	if err := store.AdmitRoot(ctx, second, 1); !errors.Is(err, workflowstore.ErrAdmissionFull) {
 		t.Fatalf("admit with parked active root: %v", err)
 	}
 	count, err := store.ActiveRootCount(ctx)
@@ -232,7 +232,7 @@ func TestExecutedTurnCountExcludesAdministrativeEvents(t *testing.T) {
 func TestRetryLimitResumeStartsFreshBudgetAndKeepsDiagnostic(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_retry_resume", Repo: "repo", ProposalPath: "retry", WorkflowName: "build", StartStage: "impl"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_retry_resume", Repo: "repo", ProposalPath: "retry", WorkflowName: "build", StartStage: "impl"}); err != nil {
 		t.Fatal(err)
 	}
 	if parked, err := store.RecordRetry(ctx, "wi_retry_resume", "impl", "impl", "verify failed: stale docs", 1, 0); err != nil || !parked {
@@ -270,14 +270,14 @@ func TestWorkflowBudgetHeartbeatExtendsReplayReservations(t *testing.T) {
 			store, storePath := newTestStore(t)
 			createTestItem(t, store, "wi_heartbeat_"+state)
 			id := "wi_heartbeat_" + state
-			db1test.Exec(t, storePath, `UPDATE lifecycle_work_item
-SET reservation_state=?,reservation_owner='owner',reservation_lease_until=datetime('now','-1 minute')
+			workflowstoretest.Exec(t, storePath, `UPDATE lifecycle_work_item
+SET reservation_state=?,reservation_owner='owner',reservation_lease_until=now()-interval '1 minute'
 WHERE work_item_id=?`, state, id)
 			if err := store.HeartbeatWorkflowBudget(t.Context(), id, "owner"); err != nil {
 				t.Fatal(err)
 			}
-			if live := db1test.QueryInt(t, storePath,
-				`SELECT reservation_lease_until > datetime('now') `+
+			if live := workflowstoretest.QueryInt(t, storePath,
+				`SELECT (reservation_lease_until > now())::int `+
 					`FROM lifecycle_work_item WHERE work_item_id=?`, id); live != 1 {
 				t.Fatalf("the heartbeat did not extend the lease (live=%d)", live)
 			}
@@ -288,7 +288,7 @@ WHERE work_item_id=?`, state, id)
 func TestTransientPauseIsNotRepairContext(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_transient", Repo: "repo", ProposalPath: "transient", WorkflowName: "build", StartStage: "impl"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_transient", Repo: "repo", ProposalPath: "transient", WorkflowName: "build", StartStage: "impl"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.ParkWithDetail(ctx, "wi_transient", "impl", "runner_unavailable", "delegate service restarting", 0); err != nil {
@@ -305,10 +305,10 @@ func TestTransientPauseIsNotRepairContext(t *testing.T) {
 func TestWorkflowBudgetAggregatesChildrenAndParksWholeTree(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_budget", Repo: "repo", ProposalPath: "budget", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_budget", Repo: "repo", ProposalPath: "budget", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_budget.child", Repo: "repo", ProposalPath: "packet", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_budget"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_budget.child", Repo: "repo", ProposalPath: "packet", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_budget"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Move(ctx, "wi_budget.child", "impl", "review", "advance", "", "", .75); err != nil {
@@ -394,7 +394,7 @@ func TestBaseIntegrationConflictCanBeResumedAfterOperatorRepair(t *testing.T) {
 func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_stop_tree", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
 		{ID: "wi_stop_tree.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree"},
 		{ID: "wi_stop_tree.grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_stop_tree.child"},
@@ -432,13 +432,13 @@ func TestStopTerminalizesActiveWorkflowTree(t *testing.T) {
 func TestCreateChildRejectsTerminalParent(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_terminal_parent", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"}); err != nil {
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_terminal_parent", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Stop(ctx, "wi_terminal_parent"); err != nil {
 		t.Fatal(err)
 	}
-	err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_late_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_parent"})
+	err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_late_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_parent"})
 	if err == nil || !strings.Contains(err.Error(), "parent work item is not active") {
 		t.Fatalf("create child under terminal parent: %v", err)
 	}
@@ -453,7 +453,7 @@ func TestCreateChildRacingStopTreeCannotLeaveActiveOrphan(t *testing.T) {
 	for iteration := 0; iteration < 50; iteration++ {
 		rootID := fmt.Sprintf("wi_stop_race_%d", iteration)
 		childID := rootID + ".child"
-		if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: rootID, Repo: "repo", ProposalPath: rootID, WorkflowName: "build", StartStage: "slices"}); err != nil {
+		if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: rootID, Repo: "repo", ProposalPath: rootID, WorkflowName: "build", StartStage: "slices"}); err != nil {
 			t.Fatal(err)
 		}
 		start := make(chan struct{})
@@ -468,7 +468,7 @@ func TestCreateChildRacingStopTreeCannotLeaveActiveOrphan(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			<-start
-			createErr = store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: childID, Repo: "repo", ProposalPath: childID, WorkflowName: "slice", StartStage: "impl", ParentID: rootID})
+			createErr = store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: childID, Repo: "repo", ProposalPath: childID, WorkflowName: "slice", StartStage: "impl", ParentID: rootID})
 		}()
 		close(start)
 		wg.Wait()
@@ -492,7 +492,7 @@ func TestCreateChildRacingStopTreeCannotLeaveActiveOrphan(t *testing.T) {
 func TestReconcileOrphanedDescendantsStopsCorruptActiveTree(t *testing.T) {
 	store, storePath := newTestStore(t)
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_orphan_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
 		{ID: "wi_orphan_child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_root"},
 		{ID: "wi_orphan_grandchild", Repo: "repo", ProposalPath: "grandchild", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_orphan_child"},
@@ -502,7 +502,7 @@ func TestReconcileOrphanedDescendantsStopsCorruptActiveTree(t *testing.T) {
 		}
 	}
 	// Reproduce state written by the old non-cascading Stop implementation.
-	db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET state='stopped' WHERE work_item_id='wi_orphan_root'`)
+	workflowstoretest.Exec(t, storePath, `UPDATE lifecycle_work_item SET state='stopped' WHERE work_item_id='wi_orphan_root'`)
 	stopped, err := store.ReconcileOrphanedDescendants(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -526,9 +526,9 @@ func TestReconcileOrphanedDescendantsStopsCorruptActiveTree(t *testing.T) {
 	}
 }
 
-func createTestItem(t *testing.T, store *db1.Store, id string) {
+func createTestItem(t *testing.T, store *workflowstore.Store, id string) {
 	t.Helper()
-	err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{
+	err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{
 		ID: id, Repo: "repo", ProposalPath: id + ".md", WorkflowName: "build",
 		WorkflowVersion: strings.Repeat("f", 64), StartStage: "plan_gate", Mode: "autonomous",
 	})
@@ -673,19 +673,19 @@ func TestEnforcedBlockerConvergenceFallsBackWhenStructureIsUnavailable(t *testin
 
 func TestConcurrentStoreOpenDoesNotClearLiveBudgetLease(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	item := db1.CreateWorkItem{ID: "wi_live_lease", Repo: "repo", ProposalPath: "live-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_live_lease", Repo: "repo", ProposalPath: "live-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
 	if err := first.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := first.ReserveWorkflowBudget(t.Context(), item.ID, "live-owner"); err != nil {
 		t.Fatal(err)
 	}
-	second, err := db1test.Open(t, path)
+	second, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -698,11 +698,11 @@ func TestConcurrentStoreOpenDoesNotClearLiveBudgetLease(t *testing.T) {
 
 func TestExpiredPostDispatchLeaseBecomesReplayOnlyAfterRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_expired_lease", Repo: "repo", ProposalPath: "expired-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: .75}
+	item := workflowstore.CreateWorkItem{ID: "wi_expired_lease", Repo: "repo", ProposalPath: "expired-lease", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: .75}
 	if err := first.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -710,11 +710,11 @@ func TestExpiredPostDispatchLeaseBecomesReplayOnlyAfterRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
+	workflowstoretest.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := db1test.Open(t, path)
+	restarted, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -728,7 +728,7 @@ func TestExpiredPostDispatchLeaseBecomesReplayOnlyAfterRestart(t *testing.T) {
 func TestBudgetTreeParkPreservesAndConsumesInflightSibling(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := t.Context()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_park_root", Repo: "repo", ProposalPath: "park-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
 		{ID: "wi_park_a", Repo: "repo", ProposalPath: "park-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_park_root"},
 		{ID: "wi_park_b", Repo: "repo", ProposalPath: "park-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_park_root"},
@@ -769,18 +769,18 @@ func TestBudgetTreeParkPreservesAndConsumesInflightSibling(t *testing.T) {
 
 func TestBudgetTreeParkPreservesReconciledSiblingAcrossStores(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := db1test.Open(t, path)
+	second, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
 	ctx := t.Context()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_xproc_root", Repo: "repo", ProposalPath: "xproc-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
 		{ID: "wi_xproc_a", Repo: "repo", ProposalPath: "xproc-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_xproc_root"},
 		{ID: "wi_xproc_b", Repo: "repo", ProposalPath: "xproc-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_xproc_root"},
@@ -821,11 +821,11 @@ func TestBudgetTreeParkPreservesReconciledSiblingAcrossStores(t *testing.T) {
 
 func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1test.Open(t, path)
+	store, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.CreateWorkItem{ID: "wi_zero_replay", Repo: "repo", ProposalPath: "zero-replay", WorkflowName: "build", StartStage: "work"}
+	item := workflowstore.CreateWorkItem{ID: "wi_zero_replay", Repo: "repo", ProposalPath: "zero-replay", WorkflowName: "build", StartStage: "work"}
 	if err := store.CreateWorkItem(t.Context(), item); err != nil {
 		t.Fatal(err)
 	}
@@ -838,7 +838,7 @@ func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
 	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
-	store, err = db1test.Open(t, path)
+	store, err = workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -848,7 +848,7 @@ func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
 	if busy, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second"); err != nil || !busy.Busy || busy.Allowed || busy.ReplayOnly {
 		t.Fatalf("busy=%+v err=%v", busy, err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
+	workflowstoretest.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	replay, err := store.ReserveWorkflowBudget(t.Context(), item.ID, "second")
 	if err != nil || !replay.ReplayOnly || replay.Amount != 0 {
 		t.Fatalf("replay=%+v err=%v", replay, err)
@@ -869,12 +869,12 @@ func TestZeroCostReconciliationRequiresReplayAfterRestart(t *testing.T) {
 // restarted replay commit the over-budget transition.
 func TestDeniedReconciliationStaysDeniedAcrossRestart(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	ctx := t.Context()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_deny_root", Repo: "repo", ProposalPath: "deny-root", WorkflowName: "build", StartStage: "fanout", MaxCostUSD: 1},
 		{ID: "wi_deny_a", Repo: "repo", ProposalPath: "deny-a", WorkflowName: "slice", StartStage: "work", ParentID: "wi_deny_root"},
 		{ID: "wi_deny_b", Repo: "repo", ProposalPath: "deny-b", WorkflowName: "slice", StartStage: "work", ParentID: "wi_deny_root"},
@@ -897,11 +897,11 @@ func TestDeniedReconciliationStaysDeniedAcrossRestart(t *testing.T) {
 		t.Fatalf("a allowed=%v err=%v", allowed, err)
 	}
 	// Crash before ParkBudgetTree: the denied decision was never acted on.
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_deny_a")
+	workflowstoretest.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, "wi_deny_a")
 	if err := first.Close(); err != nil {
 		t.Fatal(err)
 	}
-	restarted, err := db1test.Open(t, path)
+	restarted, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -918,18 +918,18 @@ func TestDeniedReconciliationStaysDeniedAcrossRestart(t *testing.T) {
 // Two processes must not both enter replay execution for the same reservation.
 func TestConcurrentReplayAdmissionAdmitsExactlyOneOwner(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := db1test.Open(t, path)
+	second, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
 	ctx := t.Context()
-	item := db1.CreateWorkItem{ID: "wi_replay_race", Repo: "repo", ProposalPath: "replay-race", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_replay_race", Repo: "repo", ProposalPath: "replay-race", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
 	if err := first.CreateWorkItem(ctx, item); err != nil {
 		t.Fatal(err)
 	}
@@ -939,7 +939,7 @@ func TestConcurrentReplayAdmissionAdmitsExactlyOneOwner(t *testing.T) {
 	if allowed, err := first.ReconcileWorkflowBudget(ctx, item.ID, "dead-owner", .4); err != nil || !allowed {
 		t.Fatalf("allowed=%v err=%v", allowed, err)
 	}
-	db1test.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
+	workflowstoretest.Exec(t, path, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 	winner, err := first.ReserveWorkflowBudget(ctx, item.ID, "replay-one")
 	if err != nil || !winner.ReplayOnly {
 		t.Fatalf("winner=%+v err=%v", winner, err)
@@ -962,7 +962,7 @@ func TestConcurrentReplayAdmissionAdmitsExactlyOneOwner(t *testing.T) {
 func TestReconcileRejectsNonFiniteCost(t *testing.T) {
 	store, _ := newTestStore(t)
 	ctx := t.Context()
-	item := db1.CreateWorkItem{ID: "wi_nonfinite", Repo: "repo", ProposalPath: "nonfinite", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
+	item := workflowstore.CreateWorkItem{ID: "wi_nonfinite", Repo: "repo", ProposalPath: "nonfinite", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "work", MaxCostUSD: 1}
 	if err := store.CreateWorkItem(ctx, item); err != nil {
 		t.Fatal(err)
 	}
@@ -993,7 +993,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 
 	t.Run("unresolved_redispatches", func(t *testing.T) {
 		store, storePath := newTestStore(t)
-		item := db1.CreateWorkItem{ID: "wi_lost_unresolved", Repo: "r", ProposalPath: "u", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		item := workflowstore.CreateWorkItem{ID: "wi_lost_unresolved", Repo: "r", ProposalPath: "u", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
 		if err := store.CreateWorkItem(ctx, item); err != nil {
 			t.Fatal(err)
 		}
@@ -1005,7 +1005,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 			t.Fatal(err)
 		}
 		// A restart resumes: a new owner takes replay ownership.
-		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
+		workflowstoretest.Exec(t, storePath, `UPDATE lifecycle_work_item SET pause_reason='', reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
 		if err != nil || !res.ReplayOnly {
 			t.Fatalf("res=%+v err=%v", res, err)
@@ -1022,7 +1022,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 
 	t.Run("actual_parks_for_human", func(t *testing.T) {
 		store, storePath := newTestStore(t)
-		item := db1.CreateWorkItem{ID: "wi_lost_actual", Repo: "r", ProposalPath: "a", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		item := workflowstore.CreateWorkItem{ID: "wi_lost_actual", Repo: "r", ProposalPath: "a", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
 		if err := store.CreateWorkItem(ctx, item); err != nil {
 			t.Fatal(err)
 		}
@@ -1032,7 +1032,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 		if allowed, err := store.ReconcileWorkflowBudget(ctx, item.ID, "owner1", 0.4); err != nil || !allowed {
 			t.Fatalf("reconcile allowed=%v err=%v", allowed, err)
 		}
-		db1test.Exec(t, storePath, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
+		workflowstoretest.Exec(t, storePath, `UPDATE lifecycle_work_item SET reservation_lease_until=CURRENT_TIMESTAMP - INTERVAL '1 minute' WHERE work_item_id=?`, item.ID)
 		res, err := store.ReserveWorkflowBudget(ctx, item.ID, "owner2")
 		if err != nil || !res.ReplayOnly {
 			t.Fatalf("res=%+v err=%v", res, err)
@@ -1049,7 +1049,7 @@ func TestRecoverLostReplayReleasesUnresolvedAndParksActual(t *testing.T) {
 
 	t.Run("wrong_owner_refused", func(t *testing.T) {
 		store, _ := newTestStore(t)
-		item := db1.CreateWorkItem{ID: "wi_lost_owner", Repo: "r", ProposalPath: "o", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
+		item := workflowstore.CreateWorkItem{ID: "wi_lost_owner", Repo: "r", ProposalPath: "o", WorkflowName: "build", WorkflowVersion: "v1", StartStage: "impl", MaxCostUSD: 1}
 		if err := store.CreateWorkItem(ctx, item); err != nil {
 			t.Fatal(err)
 		}

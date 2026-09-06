@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	store "github.com/JBailes/aimee/server-go/db"
 )
 
 const (

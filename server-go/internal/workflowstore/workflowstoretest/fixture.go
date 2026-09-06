@@ -1,4 +1,4 @@
-// Package db1test starts the real PostgreSQL-backed store modules for Go tests.
+// Package workflowstoretest starts the real PostgreSQL-backed store modules for Go tests.
 //
 // The workflow engine's store is the module now, so a test that needs a store
 // needs one. There is no in-process substitute on purpose: a Go reimplementation
@@ -14,13 +14,14 @@
 // Layout per fixture: a temp home, a grant for DB1 and one for this process as
 // the WFE principal, the daemon started on that home, the module attached to
 // it, and a bus client for the test.
-package db1test
+package workflowstoretest
 
 import (
 	"context"
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,9 +31,9 @@ import (
 	"testing"
 	"time"
 
+	wire "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
-	wire "github.com/JBailes/aimee/server-go/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
@@ -139,7 +140,7 @@ func repoRoot() (string, error) {
 // The identity is still commonly a temp path because that keeps old test call
 // sites simple, but no file is opened. A second Open with the same identity
 // attaches to the modules already serving that isolated PostgreSQL schema.
-func Open(t testing.TB, path string) (*db1.Store, error) {
+func Open(t testing.TB, path string) (*workflowstore.Store, error) {
 	t.Helper()
 	once.Do(func() {
 		if _, _, _, err := locate(); err != nil {
@@ -149,6 +150,9 @@ func Open(t testing.TB, path string) (*db1.Store, error) {
 		}
 	})
 	if skipCause != "" {
+		if os.Getenv("AIMEE_TEST_STORE_REQUIRED") == "1" {
+			t.Fatalf("required PostgreSQL store fixture unavailable: %s", skipCause)
+		}
 		t.Skipf("PostgreSQL store fixture unavailable: %s "+
 			"(build it with `make -C src build/obj/aimee-module build/obj/aimee-module-config ../aimee-server`)", skipCause)
 	}
@@ -163,7 +167,7 @@ func Open(t testing.TB, path string) (*db1.Store, error) {
 		fixtures[path] = started
 		existing = started
 	}
-	return db1.OpenBus(existing.client)
+	return workflowstore.OpenBus(existing.client)
 }
 
 func start(t testing.TB, path string) (*fixture, error) {
@@ -187,7 +191,7 @@ func start(t testing.TB, path string) (*fixture, error) {
 			cleanupStore()
 		}
 	}()
-	home, err := os.MkdirTemp("", "db1test-")
+	home, err := os.MkdirTemp("", "workflowstoretest-")
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +286,8 @@ func start(t testing.TB, path string) (*fixture, error) {
 
 	postgresModule := exec.CommandContext(ctx, postgresModuleBin, busSock)
 	postgresModule.Env = append(os.Environ(), "HOME="+home, "AIMEE_HOME="+aimeeHome,
-		"AIMEE_STORE_URL="+storeURL)
+		"AIMEE_STORE_URL="+storeURL,
+		"AIMEE_STORE_MIGRATION_URL="+withDSNParams(os.Getenv(storeURLEnv), map[string]string{"search_path": schema}))
 	postgresLog, _ := os.Create(filepath.Join(home, "postgres.log"))
 	postgresModule.Stdout, postgresModule.Stderr = postgresLog, postgresLog
 	if err := postgresModule.Start(); err != nil {
@@ -412,7 +417,67 @@ func prepareStore(t testing.TB, baseURL, key string) (*pgxpool.Pool, *pgxpool.Po
 		adminPool.Close()
 		return nil, nil, "", "", fmt.Errorf("open isolated test schema: %w", err)
 	}
-	return adminPool, storePool, storeConfig.ConnConfig.ConnString(), schema, nil
+	// ConnString returns the ORIGINAL input, not a serialization of modified
+	// Config fields. Construct the child DSN explicitly or it writes to public.
+	runtimeRole := schema + "_runtime"
+	runtimeID := pgx.Identifier{runtimeRole}.Sanitize()
+	password := fmt.Sprintf("%x", digest[8:])
+	if _, err := adminPool.Exec(ctx, "CREATE ROLE "+runtimeID+" LOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD '"+password+"'"); err != nil {
+		storePool.Close()
+		_, _ = adminPool.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+		adminPool.Close()
+		return nil, nil, "", "", fmt.Errorf("create isolated runtime role: %w", err)
+	}
+	t.Cleanup(func() {
+		cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		pool, err := pgxpool.NewWithConfig(cleanup, adminConfig.Copy())
+		if err != nil {
+			t.Error("cannot reconnect to clean up disposable role")
+			return
+		}
+		defer pool.Close()
+		if _, err := pool.Exec(cleanup, "DROP ROLE "+runtimeID); err != nil {
+			t.Error(err)
+		}
+	})
+	for _, sql := range []string{
+		"GRANT USAGE ON SCHEMA " + pgx.Identifier{schema}.Sanitize() + " TO " + runtimeID,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + runtimeID,
+		"ALTER DEFAULT PRIVILEGES IN SCHEMA " + pgx.Identifier{schema}.Sanitize() + " GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO " + runtimeID,
+	} {
+		if _, err := adminPool.Exec(ctx, sql); err != nil {
+			storePool.Close()
+			_, _ = adminPool.Exec(ctx, "DROP SCHEMA "+pgx.Identifier{schema}.Sanitize()+" CASCADE")
+			adminPool.Close()
+			return nil, nil, "", "", fmt.Errorf("grant isolated runtime access: %w", err)
+		}
+	}
+	return adminPool, storePool, withDSNParams(baseURL, map[string]string{
+		"search_path": schema, "user": runtimeRole, "password": password,
+	}), schema, nil
+}
+
+// Preserve URI and keyword DSNs, including TLS settings, while overriding only
+// the fixture's identity and namespace. Never interpolate credentials into logs.
+func withDSNParams(dsn string, params map[string]string) string {
+	if strings.HasPrefix(dsn, "postgres://") || strings.HasPrefix(dsn, "postgresql://") {
+		parsed, err := url.Parse(dsn)
+		if err != nil {
+			return ""
+		}
+		query := parsed.Query()
+		for key, value := range params {
+			query.Set(key, value)
+		}
+		parsed.RawQuery = query.Encode()
+		return parsed.String()
+	}
+	for key, value := range params {
+		value = strings.ReplaceAll(strings.ReplaceAll(value, `\`, `\\`), "'", `\'`)
+		dsn += " " + key + "='" + value + "'"
+	}
+	return dsn
 }
 
 func attach(f *fixture) (*wire.Client, error) {
@@ -497,7 +562,7 @@ func waitFor(path string, within time.Duration) error {
 //
 // It is NOT a second writer in the sense the port removed. The engine reaches
 // the store through the module; this reaches around it deliberately, in a test,
-// to simulate elapsed time -- and it is in package db1test rather than anywhere
+// to simulate elapsed time -- and it is in package workflowstoretest rather than anywhere
 // a production caller could reach it.
 func Exec(t testing.TB, path, query string, args ...any) {
 	t.Helper()

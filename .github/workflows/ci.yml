@@ -775,6 +775,13 @@ jobs:
             UNIT_TEST_SKIP_P1=1 \
             unit-tests-pg
           ccache --show-stats
+      - name: Live workflow database and API tests
+        if: matrix.shard_index == 0
+        env:
+          AIMEE_TEST_STORE_URL: postgres://aimee:aimee@localhost:5432/aimee
+        run: |
+          make -C src -j"$(nproc)" CC="ccache gcc" \
+            GIT_VERSION=ci GIT_COMMIT_TIME=1700000000 workflow-db-e2e
       - name: Postgres logs on failure
         if: failure()
         run: docker logs --tail 200 aimee-pg-tpl || true

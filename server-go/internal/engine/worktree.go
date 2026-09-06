@@ -10,17 +10,17 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 type WorktreeManager struct {
-	db    *db1.Store
+	db    *workflowstore.Store
 	root  string
 	mu    sync.Mutex
 	locks map[string]*sync.Mutex
 }
 
-func NewWorktreeManager(db *db1.Store, root string) (*WorktreeManager, error) {
+func NewWorktreeManager(db *workflowstore.Store, root string) (*WorktreeManager, error) {
 	if db == nil || root == "" {
 		return nil, errors.New("DB1 and worktree root are required")
 	}
@@ -34,7 +34,7 @@ func NewWorktreeManager(db *db1.Store, root string) (*WorktreeManager, error) {
 	return &WorktreeManager{db: db, root: abs, locks: make(map[string]*sync.Mutex)}, nil
 }
 
-func (m *WorktreeManager) Ensure(ctx context.Context, item db1.WorkItem, feature bool) (string, string, error) {
+func (m *WorktreeManager) Ensure(ctx context.Context, item workflowstore.WorkItem, feature bool) (string, string, error) {
 	m.mu.Lock()
 	lock := m.locks[item.ID]
 	if lock == nil {
@@ -177,7 +177,7 @@ func legacySliceBranch(id string) string {
 	return "aimee/wi/" + id[:slice] + "-" + suffix
 }
 
-func (m *WorktreeManager) Cleanup(ctx context.Context, item db1.WorkItem) error {
+func (m *WorktreeManager) Cleanup(ctx context.Context, item workflowstore.WorkItem) error {
 	if item.Worktree == "" {
 		return nil
 	}

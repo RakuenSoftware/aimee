@@ -14,9 +14,9 @@ import (
 	"testing"
 
 	configcontract "github.com/JBailes/aimee/server-go/config"
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 	appconfig "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
 )
 
@@ -42,10 +42,10 @@ func setExternalConfig(server *Server, store *appconfig.Store) {
 	server.SetConfigStore(externalConfigStore{Store: store})
 }
 
-func newTestServer(t *testing.T) (*Server, *db1.Store, *wfe.ArtifactStore) {
+func newTestServer(t *testing.T) (*Server, *workflowstore.Store, *wfe.ArtifactStore) {
 	t.Helper()
 	root := t.TempDir()
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +76,7 @@ func TestProposalEndpointImportsLegacySourceWithoutTruncation(t *testing.T) {
 	if err := os.WriteFile(source, []byte(proposal), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(context.Background(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(context.Background(), workflowstore.CreateWorkItem{
 		ID: "wi_api", Repo: "repo", ProposalPath: source, WorkflowName: "build",
 		WorkflowVersion: strings.Repeat("a", 64), StartStage: "plan", Mode: "autonomous", Submitter: "alice",
 	}); err != nil {
@@ -127,7 +127,7 @@ func TestHealthIdentifiesGoImplementation(t *testing.T) {
 func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
 	server, store, _ := newTestServer(t)
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_api_stop", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices", Submitter: "alice"},
 		{ID: "wi_api_stop.child", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_api_stop"},
 	} {
@@ -158,7 +158,7 @@ func TestWorkflowStopCancelsAndStopsEveryDescendant(t *testing.T) {
 func TestWorkflowItemsAreScopedToRootSubmitterAndOperator(t *testing.T) {
 	server, store, _ := newTestServer(t)
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_alice", Repo: "repo", ProposalPath: "alice", WorkflowName: "build", StartStage: "plan", Submitter: "alice"},
 		// Older child slices have no submitter of their own. Ownership must follow
 		// the durable parent chain to the root instead of hiding or exposing them.
@@ -183,7 +183,7 @@ func TestWorkflowItemsAreScopedToRootSubmitterAndOperator(t *testing.T) {
 	ids := func(rec *httptest.ResponseRecorder) map[string]bool {
 		t.Helper()
 		var response struct {
-			Items []db1.WorkItem `json:"items"`
+			Items []workflowstore.WorkItem `json:"items"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 			t.Fatal(err)

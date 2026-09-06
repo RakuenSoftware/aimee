@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 type blockingRunner struct {
@@ -65,7 +65,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 		if err := artifacts.PutProposal(id, []byte(id)); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
 			WorkflowVersion: def.Version, StartStage: "work", Mode: "autonomous",
 		}); err != nil {
@@ -110,7 +110,7 @@ func TestSchedulerFillsFreedSlotImmediately(t *testing.T) {
 }
 
 func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
-	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
 		"wi_running":  "accepted",
 	}
 	for id, state := range states {
-		if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{
+		if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{
 			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
 			StartStage: "work", Mode: "autonomous",
 		}); err != nil {
@@ -141,7 +141,7 @@ func TestSchedulerCleansTerminalWorktreesAndRetriesFailures(t *testing.T) {
 	scheduler := NewScheduler(store, nil, 1, nil)
 	retryFails := true
 	calls := make(map[string]int)
-	scheduler.SetTerminalCleanup(func(_ context.Context, item db1.WorkItem) error {
+	scheduler.SetTerminalCleanup(func(_ context.Context, item workflowstore.WorkItem) error {
 		calls[item.ID]++
 		if item.ID == "wi_retry" && retryFails {
 			return errors.New("temporary cleanup failure")
@@ -203,7 +203,7 @@ func seedPerWorkflowItems(t *testing.T, ids []string, global int) (*Scheduler, *
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func seedPerWorkflowItems(t *testing.T, ids []string, global int) (*Scheduler, *
 		if err := artifacts.PutProposal(id, []byte(id)); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
 			WorkflowVersion: def.Version, StartStage: "work", Mode: "autonomous",
 		}); err != nil {
@@ -314,7 +314,7 @@ func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *te
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *te
 		if err := artifacts.PutProposal(id, []byte("proposal")); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+		if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 			ID: id, Repo: "repo", ProposalPath: id, WorkflowName: "one",
 			WorkflowVersion: def.Version, StartStage: "work", Mode: "autonomous",
 		}); err != nil {
@@ -395,14 +395,14 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	artifacts, _ := wfe.NewArtifactStore(filepath.Join(root, "artifacts"))
 	_ = artifacts.PutProposal("wi_cancel", []byte("proposal"))
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{ID: "wi_cancel", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work"}); err != nil {
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{ID: "wi_cancel", Repo: "repo", ProposalPath: "proposal", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work"}); err != nil {
 		t.Fatal(err)
 	}
 	runner := &blockingRunner{started: make(chan string, 1), release: make(chan struct{})}
@@ -427,12 +427,12 @@ func TestSchedulerCancelCannotAdvancePausedWorkflow(t *testing.T) {
 }
 
 func TestSchedulerReconciliationCancelsRunningOrphan(t *testing.T) {
-	store, err := db1test.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(t.TempDir(), "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_terminal_root", Repo: "repo", ProposalPath: "root", WorkflowName: "build", StartStage: "slices"},
 		{ID: "wi_running_orphan", Repo: "repo", ProposalPath: "child", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_terminal_root"},
 	} {
@@ -469,7 +469,7 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +478,7 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_live_root", Repo: "repo", ProposalPath: "live-root", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work"},
 		{ID: "wi_live_orphan", Repo: "repo", ProposalPath: "live-child", WorkflowName: "one", WorkflowVersion: report.Version, StartStage: "work", ParentID: "wi_live_root"},
 	} {

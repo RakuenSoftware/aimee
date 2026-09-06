@@ -8,9 +8,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 type crashingRunner struct{}
@@ -39,7 +39,7 @@ func TestRunnerCrashCannotAbandonOrCrashControlPlane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -51,7 +51,7 @@ func TestRunnerCrashCannotAbandonOrCrashControlPlane(t *testing.T) {
 	if err := artifacts.PutProposal("wi_crash", []byte("proposal")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: "wi_crash", Repo: "repo", ProposalPath: "proposal", WorkflowName: "build",
 		WorkflowVersion: def.Version, StartStage: "plan", Mode: "autonomous",
 	}); err != nil {
@@ -94,7 +94,7 @@ func TestMissingGitIdentityParksWithoutTransientRetry(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "aimee.db"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "aimee.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +106,7 @@ func TestMissingGitIdentityParksWithoutTransientRetry(t *testing.T) {
 	if err := artifacts.PutProposal("wi_identity", []byte("proposal")); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(t.Context(), db1.CreateWorkItem{
+	if err := store.CreateWorkItem(t.Context(), workflowstore.CreateWorkItem{
 		ID: "wi_identity", Repo: "repo", ProposalPath: "proposal", WorkflowName: "build",
 		WorkflowVersion: def.Version, StartStage: "impl", Mode: "autonomous",
 	}); err != nil {

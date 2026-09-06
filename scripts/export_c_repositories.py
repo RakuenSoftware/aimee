@@ -680,14 +680,15 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # Caller-side contracts that live outside any implementation module, mapped to
 # the modules that import them. Each is deliberately not owned by the module it
 # talks to: every peer that calls delegates may import server-go/delegate, and
-# every peer that keeps state in DB1 may import server-go/db1, without importing
+# every peer that calls runtime-domain operations may import server-go/aimee without importing
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
     "server-go/config": {"config", "providers"},
     "server-go/modules/egress": {"providers"},
     "server-go/delegate": {"delegates", "roundtable"},
-    "server-go/db1": {"economizer"},
+    "server-go/aimee": {"aimee", "economizer"},
+    "server-go/db": {"aimee", "memory"},
 }
 
 

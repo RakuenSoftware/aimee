@@ -16,14 +16,14 @@ import (
 	"syscall"
 	"time"
 
+	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
 	appconfig "github.com/JBailes/aimee/server-go/config"
-	db1contract "github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/internal/api"
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/engine"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	"github.com/JBailes/aimee/server-go/modules/observability"
 	roundtablemod "github.com/JBailes/aimee/server-go/modules/roundtable"
 	"github.com/JBailes/aimee/server-go/modules/workflows"
@@ -139,11 +139,11 @@ func main() {
 		caller.CloseAndWait()
 		attached.Detach()
 	}()
-	storeClient, err := db1contract.NewClient(caller, 0)
+	storeClient, err := aimeecontract.NewClient(caller, 0)
 	if err != nil {
 		log.Fatalf("db1 bus client: %v", err)
 	}
-	store, err := db1.OpenBus(storeClient)
+	store, err := workflowstore.OpenBus(storeClient)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -439,7 +439,7 @@ func attachWithRetry(ctx context.Context, socket string, within time.Duration) (
 // waitForStore blocks until the DB1 module answers a trivial read. Logged once
 // when it has to wait, because a slow start and a store that never arrives look
 // identical from outside until something asks.
-func waitForStore(ctx context.Context, store *db1.Store, within time.Duration) error {
+func waitForStore(ctx context.Context, store *workflowstore.Store, within time.Duration) error {
 	deadline := time.Now().Add(within)
 	announced := false
 	for {

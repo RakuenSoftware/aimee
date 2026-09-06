@@ -13,8 +13,8 @@ import (
 
 	configcontract "github.com/JBailes/aimee/server-go/config"
 	"github.com/JBailes/aimee/server-go/internal/api"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 	appconfig "github.com/RakuenSoftware/aimee-module-config/server-go/modules/config"
 )
 
@@ -258,7 +258,7 @@ nodes:
 	if _, err := registry.Save("slice", slice, ""); err != nil {
 		t.Fatal(err)
 	}
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}

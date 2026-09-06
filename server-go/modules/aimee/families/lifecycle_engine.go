@@ -169,9 +169,9 @@ const (
 	           SET cancel_attempts = m.cancel_attempts + 1, updated_at = now()
 	          FROM claimable c
 	         WHERE m.execution_key = c.execution_key AND m.job_id = c.job_id
-	     RETURNING m.execution_key, m.job_id
-	    )
-	    SELECT execution_key, job_id FROM claimed ORDER BY job_id`
+     RETURNING m.execution_key, m.job_id, m.cancel_attempts
+    )
+    SELECT execution_key, job_id FROM claimed ORDER BY cancel_attempts, job_id`
 
 	// One terminal event per run being ended, carrying the stage and hash it
 	// was at when it ended. Written from the row itself so those values are the
@@ -420,7 +420,7 @@ func wfeStopTree(ctx context.Context, db store.DB, f []string) (uint32, []string
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	ids, err := endActiveSet(ctx, tx, treeCTE, "tree", "stopped by operator", f[0])
+	ids, err := endActiveSet(ctx, tx, treeCTE, "tree", "operator_stop", f[0])
 	if err != nil {
 		return 0, nil, err
 	}
@@ -445,7 +445,7 @@ func wfeReconcileOrphans(ctx context.Context, db store.DB, f []string) (uint32, 
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	ids, err := endActiveSet(ctx, tx, orphanCTE, "orphan", "orphaned by a terminal parent")
+	ids, err := endActiveSet(ctx, tx, orphanCTE, "orphan", "ancestor_terminal")
 	if err != nil {
 		return 0, nil, err
 	}

@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
@@ -31,13 +31,13 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 	run("-C", repo, "remote", "add", "origin", repo)
 	run("-C", repo, "update-ref", "refs/remotes/origin/trunk", "HEAD")
 	run("-C", repo, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk")
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"}, {ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_parent"}} {
+	for _, in := range []workflowstore.CreateWorkItem{{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"}, {ID: "wi_child", Repo: repo, ProposalPath: "c", WorkflowName: "slice", StartStage: "impl", ParentID: "wi_parent"}} {
 		if err := store.CreateWorkItem(ctx, in); err != nil {
 			t.Fatal(err)
 		}
@@ -66,7 +66,7 @@ func TestParentUsesFeatureWorktreeAndChildBranchesFromIt(t *testing.T) {
 
 func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
 	root := t.TempDir()
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +75,7 @@ func TestCleanupIsIdempotentAfterManagedPathWasRemoved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	item := db1.WorkItem{ID: "wi_missing", Repo: filepath.Join(root, "repo"),
+	item := workflowstore.WorkItem{ID: "wi_missing", Repo: filepath.Join(root, "repo"),
 		Worktree: filepath.Join(root, "trees", "wi_missing")}
 	if err := manager.Cleanup(t.Context(), item); err != nil {
 		t.Fatalf("repeat cleanup of removed managed path: %v", err)
@@ -93,7 +93,7 @@ func TestCleanupRemovesOrphanedWorktreeWhenTheRepoIsGone(t *testing.T) {
 	// forever and the work item never reached a terminal state -- observed on a
 	// live server retrying one item ~92 times a minute.
 	root := t.TempDir()
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +111,7 @@ func TestCleanupRemovesOrphanedWorktreeWhenTheRepoIsGone(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tree, "file"), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	item := db1.WorkItem{ID: "wi_orphan", Repo: filepath.Join(root, "repo-that-was-deleted"),
+	item := workflowstore.WorkItem{ID: "wi_orphan", Repo: filepath.Join(root, "repo-that-was-deleted"),
 		Worktree: tree}
 
 	if err := manager.Cleanup(t.Context(), item); err != nil {
@@ -172,17 +172,17 @@ func TestEnsureMigratesLegacySliceWorktreeAfterReplayLosesDBPath(t *testing.T) {
 	run("-C", path, "add", "implemented.txt")
 	run("-C", path, "commit", "-m", "implementation")
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent", Repo: repo,
 		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
 		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
 		t.Fatal(err)
 	}
@@ -242,17 +242,17 @@ func TestEnsureMigratesLegacySliceWhenIdenticalTargetRefAlreadyExists(t *testing
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, legacy)
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent", Repo: repo,
 		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
 		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
 		t.Fatal(err)
 	}
@@ -304,17 +304,17 @@ func TestEnsureRestoresDurableBranchFromIdenticalDelegateAlias(t *testing.T) {
 	path := filepath.Join(trees, id)
 	run("-C", repo, "worktree", "add", "--lock", path, alias)
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: "wi_parent", Repo: repo,
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: "wi_parent", Repo: repo,
 		ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
+	if err := store.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: repo, ProposalPath: "p",
 		WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"}); err != nil {
 		t.Fatal(err)
 	}
@@ -419,13 +419,13 @@ func TestSliceWorktreeBranchesFromMergedRemoteFeatureTip(t *testing.T) {
 	run("-C", landed, "commit", "-m", "slice g0.0")
 	run("-C", landed, "push", "origin", feature)
 
-	store, err := db1test.Open(t, filepath.Join(root, "db.sqlite"))
+	store, err := workflowstoretest.Open(t, filepath.Join(root, "db.sqlite"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
 	ctx := context.Background()
-	for _, in := range []db1.CreateWorkItem{
+	for _, in := range []workflowstore.CreateWorkItem{
 		{ID: "wi_parent", Repo: repo, ProposalPath: "p", WorkflowName: "build", StartStage: "feature"},
 		{ID: "wi_parent.s1", Repo: repo, ProposalPath: "s1", WorkflowName: "slice",
 			StartStage: "impl", ParentID: "wi_parent"},

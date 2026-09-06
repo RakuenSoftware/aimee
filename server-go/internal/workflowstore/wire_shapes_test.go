@@ -1,4 +1,4 @@
-package db1_test
+package workflowstore_test
 
 // Tests about the generated wire surface rather than about the store.
 //
@@ -20,21 +20,21 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 func TestSeveralLooseScalarsAllComeBack(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	store, err := db1test.Open(t, path)
+	store, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer store.Close()
-	client := db1test.Client(t, path)
+	client := workflowstoretest.Client(t, path)
 	ctx := t.Context()
 
-	parent := db1.CreateWorkItem{ID: "wi_counts_parent", Repo: "repo", ProposalPath: "counts",
+	parent := workflowstore.CreateWorkItem{ID: "wi_counts_parent", Repo: "repo", ProposalPath: "counts",
 		WorkflowName: "build", StartStage: "slices"}
 	if err := store.CreateWorkItem(ctx, parent); err != nil {
 		t.Fatal(err)
@@ -50,7 +50,7 @@ func TestSeveralLooseScalarsAllComeBack(t *testing.T) {
 		{"wi_counts_live", ""},
 	}
 	for _, child := range children {
-		in := db1.CreateWorkItem{ID: child.id, Repo: "repo", ProposalPath: child.id,
+		in := workflowstore.CreateWorkItem{ID: child.id, Repo: "repo", ProposalPath: child.id,
 			WorkflowName: "slice", StartStage: "work", ParentID: parent.ID}
 		if err := store.CreateWorkItem(ctx, in); err != nil {
 			t.Fatal(err)

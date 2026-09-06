@@ -36,7 +36,7 @@ func (f *fakeDirectoryCaller) Call(_ context.Context, kind, stage uint32, _ uint
 	return f.reply, f.err
 }
 
-func db1Reply(t *testing.T, status uint32, cells []string) []byte {
+func sessionReply(t *testing.T, status uint32, cells []string) []byte {
 	t.Helper()
 	// Built with EncodeResponse purely as a frame builder; the status word here
 	// is db1's enum, which is why the code under test decodes it raw.
@@ -48,17 +48,17 @@ func db1Reply(t *testing.T, status uint32, cells []string) []byte {
 }
 
 func tenCells(principal string) []string {
-	cells := make([]string, db1ReplyWidth)
+	cells := make([]string, sessionReplyWidth)
 	cells[0] = "sess-1"
 	cells[1] = "cli"
-	cells[db1ReplyPrincipal] = principal
+	cells[sessionReplyPrincipal] = principal
 	return cells
 }
 
 // The request is addressed by the FORMULA, and the formula must agree with what
 // db1 actually declares. Transcribing 11782 here would pass while pointing at
 // nothing if db1's ref or stage ever moved.
-func TestDB1DirectoryAddressesTheDeclaredStage(t *testing.T) {
+func TestSessionDirectoryAddressesTheDeclaredStage(t *testing.T) {
 	raw, err := os.ReadFile(filepath.Join("..", "..", "..", "src", "modules", "process-contracts.json"))
 	if err != nil {
 		t.Fatalf("read contracts: %v", err)
@@ -89,20 +89,20 @@ func TestDB1DirectoryAddressesTheDeclaredStage(t *testing.T) {
 		if c.ID != "aimee" {
 			continue
 		}
-		if c.PrincipalRef != DB1PrincipalRef {
+		if c.PrincipalRef != SessionDirectoryPrincipalRef {
 			t.Errorf("aimee principal_ref = %d; this module addresses %d",
-				c.PrincipalRef, DB1PrincipalRef)
+				c.PrincipalRef, SessionDirectoryPrincipalRef)
 		}
 		for _, s := range c.Stages {
 			if s.Name != "aimee-sessions" {
 				continue
 			}
 			found = true
-			if s.ID != DB1SessionsStage {
+			if s.ID != SessionDirectoryStage {
 				t.Errorf("aimee-sessions stage id = %d; this module addresses %d",
-					s.ID, DB1SessionsStage)
+					s.ID, SessionDirectoryStage)
 			}
-			if got := peerwire.EventKind(DB1PrincipalRef, DB1SessionsStage); got != s.EventKind {
+			if got := peerwire.EventKind(SessionDirectoryPrincipalRef, SessionDirectoryStage); got != s.EventKind {
 				t.Errorf("addressing kind %d; the contract declares %d", got, s.EventKind)
 			}
 		}
@@ -114,7 +114,7 @@ func TestDB1DirectoryAddressesTheDeclaredStage(t *testing.T) {
 
 // Each db1 outcome maps to the response a caller can act on, and the four are
 // kept apart because the right action differs: use it, stop, fix the call, retry.
-func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
+func TestSessionDirectoryMapsEveryOutcome(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		status  uint32
@@ -124,11 +124,11 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 		wantOwner string
 		wantErr   error
 	}{
-		{name: "found", status: db1StatusOK, cells: tenCells("uid:1000"), wantOwner: "uid:1000"},
-		{name: "absent", status: db1StatusMissing, wantErr: peer.ErrNoPeer},
-		{name: "store failure", status: db1StatusFailed, wantErr: peer.ErrDirectoryUnavailable},
-		{name: "refused as invalid", status: db1StatusInvalid, wantErr: ErrDirectoryRefused},
-		{name: "refused as too long", status: db1StatusTooLong, wantErr: ErrDirectoryRefused},
+		{name: "found", status: sessionStatusOK, cells: tenCells("uid:1000"), wantOwner: "uid:1000"},
+		{name: "absent", status: sessionStatusMissing, wantErr: peer.ErrNoPeer},
+		{name: "store failure", status: sessionStatusFailed, wantErr: peer.ErrDirectoryUnavailable},
+		{name: "refused as invalid", status: sessionStatusInvalid, wantErr: ErrDirectoryRefused},
+		{name: "refused as too long", status: sessionStatusTooLong, wantErr: ErrDirectoryRefused},
 		{
 			name:   "unrecognised status is not absence",
 			status: 99,
@@ -138,13 +138,13 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 		},
 		{
 			name:   "ok with the wrong cell count",
-			status: db1StatusOK, cells: []string{"only", "three", "cells"},
+			status: sessionStatusOK, cells: []string{"only", "three", "cells"},
 			// Reading index 2 of a short reply is reading whatever is there.
 			wantErr: peer.ErrDirectoryUnavailable,
 		},
 		{
 			name:   "ok with an empty principal",
-			status: db1StatusOK, cells: tenCells(""),
+			status: sessionStatusOK, cells: tenCells(""),
 			// Held but unaddressable. Not absence: a caller told "no peer"
 			// stops, and this row needs fixing instead.
 			wantErr: peer.ErrDirectoryUnavailable,
@@ -154,9 +154,9 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			f := &fakeDirectoryCaller{err: tc.callErr}
 			if tc.callErr == nil {
-				f.reply = db1Reply(t, tc.status, tc.cells)
+				f.reply = sessionReply(t, tc.status, tc.cells)
 			}
-			d, err := NewDB1Directory(f, time.Second)
+			d, err := NewSessionDirectory(f, time.Second)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -180,32 +180,32 @@ func TestDB1DirectoryMapsEveryOutcome(t *testing.T) {
 }
 
 // The request db1 receives is the one its catalog describes: op 2, one field.
-func TestDB1DirectorySendsTheCatalogedRequest(t *testing.T) {
-	f := &fakeDirectoryCaller{reply: db1Reply(t, db1StatusOK, tenCells("uid:1000"))}
-	d, err := NewDB1Directory(f, time.Second)
+func TestSessionDirectorySendsTheCatalogedRequest(t *testing.T) {
+	f := &fakeDirectoryCaller{reply: sessionReply(t, sessionStatusOK, tenCells("uid:1000"))}
+	d, err := NewSessionDirectory(f, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := d.Owner("sess-7"); err != nil {
 		t.Fatal(err)
 	}
-	if f.gotOp != DB1OpServerSessionGet {
-		t.Errorf("op = %d; want %d (server_session_get)", f.gotOp, DB1OpServerSessionGet)
+	if f.gotOp != SessionDirectoryGetOp {
+		t.Errorf("op = %d; want %d (server_session_get)", f.gotOp, SessionDirectoryGetOp)
 	}
 	if len(f.gotCells) != 1 || f.gotCells[0] != "sess-7" {
 		t.Errorf("request cells = %q; want exactly the session id", f.gotCells)
 	}
-	if f.gotStage != DB1SessionsStage {
-		t.Errorf("stage = %d; want %d", f.gotStage, DB1SessionsStage)
+	if f.gotStage != SessionDirectoryStage {
+		t.Errorf("stage = %d; want %d", f.gotStage, SessionDirectoryStage)
 	}
 }
 
 // An empty id is refused here rather than sent. db1 answers Invalid for it, so
 // asking spends a round trip to be told what is already known -- and the refusal
 // must not read as absence.
-func TestDB1DirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
-	f := &fakeDirectoryCaller{reply: db1Reply(t, db1StatusMissing, nil)}
-	d, err := NewDB1Directory(f, time.Second)
+func TestSessionDirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
+	f := &fakeDirectoryCaller{reply: sessionReply(t, sessionStatusMissing, nil)}
+	d, err := NewSessionDirectory(f, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,8 +251,8 @@ func TestDB1DirectoryRefusesAnEmptyIDWithoutCalling(t *testing.T) {
 // scanned for it, and got 24 hits that were all correct usage. A scanner wrong
 // about every hit is the same object as a guard that passes having checked
 // nothing; it just fails loudly instead of quietly.
-func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
-	src, err := os.ReadFile("db1directory.go")
+func TestSessionDirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
+	src, err := os.ReadFile("session_directory.go")
 	if err != nil {
 		t.Fatalf("read: %v", err)
 	}
@@ -266,21 +266,21 @@ func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
 	}
 	for _, banned := range []string{"peerwire.DecodeResponse", "peerwire.Status"} {
 		if strings.Contains(code.String(), banned) {
-			t.Errorf("db1directory.go names %s outside a comment. db1's status enum "+
+			t.Errorf("session_directory.go names %s outside a comment. db1's status enum "+
 				"is not this module's: read it raw with peerwire.DecodeReply, or the "+
 				"value reads as a sensible status and means something else.", banned)
 		}
 	}
 	// The check is worth nothing if the thing it requires is absent.
 	if !strings.Contains(code.String(), "peerwire.DecodeReply") {
-		t.Error("db1directory.go no longer calls peerwire.DecodeReply; this guard is " +
+		t.Error("session_directory.go no longer calls peerwire.DecodeReply; this guard is " +
 			"now asserting the absence of something nothing needs")
 	}
 }
 
 // A refusal survives the REGISTRY, which is where it was being lost.
 //
-// The mapping tests above check DB1Directory in isolation, and it was correct
+// The mapping tests above check SessionDirectory in isolation, and it was correct
 // there the whole time. The defect lived one layer up: Registry.Owner wrapped
 // anything that was not absence into ErrDirectoryUnavailable with %v, breaking
 // the errors.Is chain, so db1 answering INVALID -- "I will not accept what you
@@ -294,7 +294,7 @@ func TestDB1DirectoryNeverReadsDB1StatusAsOurOwn(t *testing.T) {
 // only running the two together shows what a caller gets.
 func TestARefusalSurvivesTheRegistryAsARefusal(t *testing.T) {
 	r := peer.New(peer.Options{})
-	d, err := NewDB1Directory(&fakeDirectoryCaller{reply: db1Reply(t, db1StatusInvalid, nil)}, time.Second)
+	d, err := NewSessionDirectory(&fakeDirectoryCaller{reply: sessionReply(t, sessionStatusInvalid, nil)}, time.Second)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -316,11 +316,11 @@ func TestARefusalSurvivesTheRegistryAsARefusal(t *testing.T) {
 
 // A directory with no caller reports that there is none, rather than reporting
 // about a session.
-func TestDB1DirectoryWithoutACallerSaysSo(t *testing.T) {
-	if _, err := NewDB1Directory(nil, time.Second); err == nil {
+func TestSessionDirectoryWithoutACallerSaysSo(t *testing.T) {
+	if _, err := NewSessionDirectory(nil, time.Second); err == nil {
 		t.Fatal("nil caller accepted")
 	}
-	var d *DB1Directory
+	var d *SessionDirectory
 	if _, err := d.Owner("x"); !errors.Is(err, peer.ErrNoDirectory) {
 		t.Fatalf("nil directory = %v; want ErrNoDirectory", err)
 	}

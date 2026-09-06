@@ -13,12 +13,12 @@ import (
 	"sync"
 
 	appconfig "github.com/JBailes/aimee/server-go/config"
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 )
 
 type Server struct {
-	db              *db1.Store
+	db              *workflowstore.Store
 	artifacts       *wfe.ArtifactStore
 	workflowDir     string
 	workflows       *wfe.Registry
@@ -26,13 +26,13 @@ type Server struct {
 	mux             *http.ServeMux
 	notify          func()
 	cancel          func(string)
-	cleanupWorktree func(context.Context, db1.WorkItem) error
+	cleanupWorktree func(context.Context, workflowstore.WorkItem) error
 	triggerMu       sync.Mutex
 	triggerErrorsMu sync.Mutex
 	triggerErrors   map[string]string
 }
 
-func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
+func New(db *workflowstore.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*Server, error) {
 	dir := ""
 	if len(workflowDir) > 0 {
 		dir = workflowDir[0]
@@ -76,7 +76,7 @@ func New(db *db1.Store, artifacts *wfe.ArtifactStore, workflowDir ...string) (*S
 
 func (s *Server) SetSchedulerNotify(notify func())       { s.notify = notify }
 func (s *Server) SetSchedulerCancel(cancel func(string)) { s.cancel = cancel }
-func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, db1.WorkItem) error) {
+func (s *Server) SetWorktreeCleanup(cleanup func(context.Context, workflowstore.WorkItem) error) {
 	s.cleanupWorktree = cleanup
 }
 func (s *Server) SetConfigStore(store appconfig.Service) { s.config = store }
@@ -131,7 +131,7 @@ func workflowOperator(r *http.Request) bool {
 // rootSubmitter follows durable parent links instead of trusting child IDs or a
 // child row's submitter. Slice rows created by older engines did not copy the
 // submitter, but they still belong to the principal that admitted the root run.
-func (s *Server) rootSubmitter(ctx context.Context, item db1.WorkItem) (string, error) {
+func (s *Server) rootSubmitter(ctx context.Context, item workflowstore.WorkItem) (string, error) {
 	seen := make(map[string]struct{})
 	for {
 		if _, duplicate := seen[item.ID]; duplicate {
@@ -149,7 +149,7 @@ func (s *Server) rootSubmitter(ctx context.Context, item db1.WorkItem) (string, 
 	}
 }
 
-func rootSubmitterFromList(item db1.WorkItem, byID map[string]db1.WorkItem) (string, bool) {
+func rootSubmitterFromList(item workflowstore.WorkItem, byID map[string]workflowstore.WorkItem) (string, bool) {
 	seen := make(map[string]struct{})
 	for {
 		if _, duplicate := seen[item.ID]; duplicate {
@@ -171,24 +171,24 @@ func rootSubmitterFromList(item db1.WorkItem, byID map[string]db1.WorkItem) (str
 // timeline, and lifecycle endpoints. The trusted runtime attests the appliance
 // administrator as a separate capability. Human gates are operator-only; other
 // lifecycle actions allow the root owner or the operator.
-func (s *Server) authorizedWorkItem(r *http.Request, operatorOnly bool) (db1.WorkItem, error) {
+func (s *Server) authorizedWorkItem(r *http.Request, operatorOnly bool) (workflowstore.WorkItem, error) {
 	item, err := s.db.WorkItem(r.Context(), r.PathValue("id"))
 	if err != nil {
-		return db1.WorkItem{}, err
+		return workflowstore.WorkItem{}, err
 	}
 	principal := workflowPrincipal(r)
 	if workflowOperator(r) {
 		return item, nil
 	}
 	if operatorOnly || principal == "" {
-		return db1.WorkItem{}, errWorkflowAccessDenied
+		return workflowstore.WorkItem{}, errWorkflowAccessDenied
 	}
 	owner, err := s.rootSubmitter(r.Context(), item)
 	if err != nil {
-		return db1.WorkItem{}, err
+		return workflowstore.WorkItem{}, err
 	}
 	if owner == "" || owner != principal {
-		return db1.WorkItem{}, errWorkflowAccessDenied
+		return workflowstore.WorkItem{}, errWorkflowAccessDenied
 	}
 	return item, nil
 }
@@ -217,11 +217,11 @@ func (s *Server) items(w http.ResponseWriter, r *http.Request) {
 	}
 	principal := workflowPrincipal(r)
 	if !all {
-		byID := make(map[string]db1.WorkItem, len(items))
+		byID := make(map[string]workflowstore.WorkItem, len(items))
 		for _, item := range items {
 			byID[item.ID] = item
 		}
-		visible := make([]db1.WorkItem, 0, len(items))
+		visible := make([]workflowstore.WorkItem, 0, len(items))
 		for _, item := range items {
 			owner, ok := rootSubmitterFromList(item, byID)
 			if ok && owner != "" && owner == principal {
@@ -231,7 +231,7 @@ func (s *Server) items(w http.ResponseWriter, r *http.Request) {
 		items = visible
 	}
 	if items == nil {
-		items = []db1.WorkItem{}
+		items = []workflowstore.WorkItem{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items})
 }
@@ -265,7 +265,7 @@ func (s *Server) events(w http.ResponseWriter, r *http.Request) {
 		next = events[len(events)-1].ID
 	}
 	if events == nil {
-		events = []db1.Event{}
+		events = []workflowstore.Event{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"events": events, "next_after": next})
 }

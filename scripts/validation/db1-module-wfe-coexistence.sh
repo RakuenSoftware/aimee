@@ -11,7 +11,7 @@
 #     *dbPath = filepath.Join(*home, "aimee.db")
 #
 # and opens it with sql.Open. So a third process opens the same file the module
-# owns -- and it does not merely read it: internal/db1/store.go has its own
+# owns -- and it does not merely read it: internal/workflowstore/store.go has its own
 # CREATE TABLE IF NOT EXISTS and its own ALTER TABLE ladder over
 # lifecycle_work_item, lifecycle_event, lifecycle_stage_attempt,
 # lifecycle_delegate_job, agent_jobs, wfe_convergence and wfe_frozen_create --

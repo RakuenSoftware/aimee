@@ -5,7 +5,7 @@ import (
 	"errors"
 	"strings"
 
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	store "github.com/JBailes/aimee/server-go/db"
 )
 
 type MemoryLink struct {

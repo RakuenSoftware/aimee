@@ -1,12 +1,12 @@
-package db1_test
+package workflowstore_test
 
 import (
 	"path/filepath"
 	"sync"
 	"testing"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
-	"github.com/JBailes/aimee/server-go/internal/db1/db1test"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
 // Two stores on one module, which is what two engine processes would be. Starting
@@ -16,19 +16,19 @@ import (
 // and get a structured collision rather than a partial path set.
 func TestClaimFrozenCreatesSerializesTwoConnections(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "aimee.db")
-	first, err := db1test.Open(t, path)
+	first, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer first.Close()
-	second, err := db1test.Open(t, path)
+	second, err := workflowstoretest.Open(t, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer second.Close()
 
 	ctx := t.Context()
-	for _, item := range []db1.CreateWorkItem{
+	for _, item := range []workflowstore.CreateWorkItem{
 		{ID: "wi_parent", Repo: "repo", ProposalPath: "parent", WorkflowName: "build", StartStage: "slices"},
 		{ID: "wi_slice_a", Repo: "repo", ProposalPath: "slice-a", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
 		{ID: "wi_slice_b", Repo: "repo", ProposalPath: "slice-b", WorkflowName: "slice", StartStage: "freeze", ParentID: "wi_parent"},
@@ -38,9 +38,9 @@ func TestClaimFrozenCreatesSerializesTwoConnections(t *testing.T) {
 		}
 	}
 
-	stores := []*db1.Store{first, second}
+	stores := []*workflowstore.Store{first, second}
 	ids := []string{"wi_slice_a", "wi_slice_b"}
-	conflicts := make([]*db1.FrozenCreateConflict, len(stores))
+	conflicts := make([]*workflowstore.FrozenCreateConflict, len(stores))
 	errs := make([]error, len(stores))
 	start := make(chan struct{})
 	var wg sync.WaitGroup
@@ -49,7 +49,7 @@ func TestClaimFrozenCreatesSerializesTwoConnections(t *testing.T) {
 		go func(i int) {
 			defer wg.Done()
 			<-start
-			conflicts[i], errs[i] = stores[i].ClaimFrozenCreates(ctx, "wi_parent", ids[i], []db1.FrozenCreate{{
+			conflicts[i], errs[i] = stores[i].ClaimFrozenCreates(ctx, "wi_parent", ids[i], []workflowstore.FrozenCreate{{
 				Path: "docs/appliance-runbook.md", ContentHash: "blob-" + ids[i],
 			}})
 		}(i)

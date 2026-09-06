@@ -3,7 +3,7 @@ package memory
 import (
 	"context"
 
-	store "github.com/JBailes/aimee/server-go/modules/aimee"
+	store "github.com/JBailes/aimee/server-go/db"
 )
 
 // FoldSession atomically replaces a complete bounded L0 session with one L1

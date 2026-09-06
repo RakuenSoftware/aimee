@@ -167,6 +167,9 @@ func PendingMigrations(applied int64) ([]Migration, error) {
 	if err != nil {
 		return nil, err
 	}
+	if applied < 0 || applied > int64(len(all)) {
+		return nil, fmt.Errorf("db1 schema: installed version %d is outside this binary's supported history 0..%d", applied, len(all))
+	}
 	out := make([]Migration, 0, len(all))
 	for _, m := range all {
 		if m.Version > applied {

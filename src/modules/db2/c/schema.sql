@@ -1,4 +1,10 @@
--- DB2 temporal helpers (postgres-native). DB2 stores wall-clock timestamps as
+-- One database, one schema-bootstrap lock. This is the same transaction-scoped
+-- lock used by the Go postgres provider before creating or reading its ledger.
+-- Apply the complete schema in one transaction (the native bootstrap sends one
+-- SQL command; manual psql application must use --single-transaction).
+SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('aimee:db:schema'));
+
+-- Knowledge temporal helpers (postgres-native). The database stores wall-clock timestamps as
 -- TEXT in ONE canonical UTC format: ISO 8601, 'YYYY-MM-DDTHH24:MI:SSZ'.
 -- pg_now_text() returns "now" in that format; the modifier overload returns
 -- "now + interval" where the modifier is a postgres interval string

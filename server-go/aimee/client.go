@@ -1,15 +1,14 @@
-// Package db1 is the shared caller-side contract for the DB1 store's bounded
-// stages. It is deliberately outside modules/: any peer that reads or writes
-// DB1 state exchanges these frames over the bus without importing DB1's
-// implementation, which is the whole point of putting the store behind a
-// module. Independently exported callers must also be listed by
+// Package aimee is the caller-side contract for the aimee domain module's
+// bounded operations. It owns no database: SQL, transactions and migrations use
+// the separate shared db contract. Peers exchange domain frames without importing
+// the serving implementation. Independently exported callers are listed by
 // scripts/export_c_repositories.py:go_process_shared_sources.
 //
 // The wire is fixed by the catalog, server-go/modules/aimee/operations.json,
 // and the module that serves it checks its own dispatch against that catalog.
 // Keep this client in step with it:
-// the C module is the serving side of exactly these bytes.
-package db1
+// the Go domain module serves the same bytes as the retained typed C clients.
+package aimee
 
 import (
 	"context"
@@ -21,7 +20,7 @@ import (
 )
 
 const (
-	// Carved from DB1's principal ref 30 as 4096 + ref*256 + stage.
+	// Carved from the aimee principal ref 30 as 4096 + ref*256 + stage.
 	EventState uint32 = 11777
 	StageState uint32 = 1
 
@@ -51,10 +50,10 @@ const (
 )
 
 var (
-	ErrConfig       = errors.New("db1 bus client is not configured")
-	ErrInvalidKey   = errors.New("db1 state key is empty, over-long, or contains NUL")
-	ErrStateTooLong = errors.New("db1 state blob exceeds the wire cap")
-	ErrMalformed    = errors.New("db1 module returned a malformed response")
+	ErrConfig       = errors.New("aimee bus client is not configured")
+	ErrInvalidKey   = errors.New("aimee state key is empty, over-long, or contains NUL")
+	ErrStateTooLong = errors.New("aimee state blob exceeds the wire cap")
+	ErrMalformed    = errors.New("aimee module returned a malformed response")
 )
 
 // StatusError is a refusal the module reported rather than a transport failure.
@@ -64,7 +63,7 @@ type StatusError struct {
 }
 
 func (e *StatusError) Error() string {
-	return fmt.Sprintf("db1 %s refused with status %d", e.Op, e.Status)
+	return fmt.Sprintf("aimee %s refused with status %d", e.Op, e.Status)
 }
 
 // StageCaller is the bus call this contract needs, kept as an interface so
