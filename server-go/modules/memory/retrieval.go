@@ -34,17 +34,40 @@ type AnswerResult struct {
 	Error          string  `json:"error"`
 }
 
+// RecallRecord retains the record API fields and the prompt-consumer aliases.
+// A scoped handle makes a recalled numeric ID unambiguous on a later get.
+type RecallRecord struct {
+	Record
+	MemoryID int64  `json:"memory_id"`
+	Text     string `json:"text"`
+	Store    string `json:"store"`
+	Handle   string `json:"handle"`
+}
+
+func recallItems(records []Record) []RecallRecord {
+	items := make([]RecallRecord, 0, len(records))
+	for _, record := range records {
+		owner := "kb"
+		if record.Scope.Type == ScopeUser {
+			owner = "user"
+		}
+		items = append(items, RecallRecord{Record: record, MemoryID: record.ID,
+			Text: record.Content, Store: owner, Handle: fmt.Sprintf("%s:memory:%d", owner, record.ID)})
+	}
+	return items
+}
+
 type recallBundle struct {
-	Identity        []Record      `json:"identity"`
-	Preferences     []Record      `json:"preferences"`
-	ActiveContext   []Record      `json:"active_context"`
-	OpenCommitments []Record      `json:"open_commitments"`
-	Reminders       []Prospective `json:"reminders"`
-	Directives      []Directive   `json:"directives"`
-	LimitTokens     int           `json:"limit_tokens"`
-	UsedTokens      int           `json:"used_tokens"`
-	SessionStart    bool          `json:"session_start"`
-	Explain         []any         `json:"explain"`
+	Identity        []RecallRecord `json:"identity"`
+	Preferences     []RecallRecord `json:"preferences"`
+	ActiveContext   []RecallRecord `json:"active_context"`
+	OpenCommitments []RecallRecord `json:"open_commitments"`
+	Reminders       []Prospective  `json:"reminders"`
+	Directives      []Directive    `json:"directives"`
+	LimitTokens     int            `json:"limit_tokens"`
+	UsedTokens      int            `json:"used_tokens"`
+	SessionStart    bool           `json:"session_start"`
+	Explain         []any          `json:"explain"`
 }
 
 func retrievalLimit(tokens int, sessionStart bool) int {
@@ -75,10 +98,23 @@ func approximateTokens(records ...[]Record) int {
 	return (bytes + 3) / 4
 }
 
+// recallSource projects the authorized store into one retrieval shape. This is
+// storage adaptation, not a second recall implementation. Personal rows retain
+// their user scope and expiry without exposing the shared store's table.
+func (s *postgresDataStore) recallSource() string {
+	if s.placement == PlacementServer {
+		return `(SELECT id, 'user'::text AS scope_type, '_user'::text AS scope_value,
+ tier, kind, key, content, confidence, use_count, updated_at, lifecycle_state,
+ 0 AS activation_suppressed FROM user_memories
+ WHERE valid_until IS NULL OR valid_until > now()) AS recall_memories`
+	}
+	return "memories"
+}
+
 func (s *postgresDataStore) recallRecords(ctx context.Context, where string, limit int, args ...any) ([]Record, error) {
 	query := fmt.Sprintf(`SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM memories WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
-ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, where, len(args)+1)
+FROM %s WHERE lifecycle_state='active' AND activation_suppressed=0 AND (%s)
+ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, s.recallSource(), where, len(args)+1)
 	args = append(args, limit)
 	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
@@ -100,9 +136,6 @@ ORDER BY confidence DESC,use_count DESC,updated_at DESC,id DESC LIMIT $%d`, wher
 func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, tokens int, sessionStart bool) (json.RawMessage, error) {
 	started := time.Now()
 	defer runtimeMetricState.recallCalls.observe(started)
-	if err := s.requireKBDomain(); err != nil {
-		return nil, err
-	}
 	limit := retrievalLimit(tokens, sessionStart)
 	identity, err := s.recallRecords(ctx, `kind='fact' AND tier IN ('L2','L3','L4','L5') AND
 (key ILIKE '%name%' OR key ILIKE '%role%' OR key ILIKE '%identity%')`, limit/4+1)
@@ -118,7 +151,7 @@ func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, toke
 		return nil, err
 	}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
-FROM memories WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
+FROM `+s.recallSource()+` WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
 	if err != nil {
 		return nil, err
 	}
@@ -137,13 +170,19 @@ FROM memories WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC L
 	if err != nil {
 		return nil, err
 	}
-	reminders, err := s.ProspectiveMatch(ctx, query, "", "", 8)
-	if err != nil {
-		return nil, err
-	}
-	directives, err := s.DirectiveMatch(ctx, query, "", "", 4)
-	if err != nil {
-		return nil, err
+	reminders := make([]Prospective, 0)
+	directives := make([]Directive, 0)
+	// Structured reminder and directive relations currently belong to the
+	// shared schema. Their absence must not prevent recall from a user store.
+	if s.placement == PlacementKB {
+		reminders, err = s.ProspectiveMatch(ctx, query, "", "", 8)
+		if err != nil {
+			return nil, err
+		}
+		directives, err = s.DirectiveMatch(ctx, query, "", "", 4)
+		if err != nil {
+			return nil, err
+		}
 	}
 	if tokens <= 0 {
 		if sessionStart {
@@ -152,8 +191,8 @@ FROM memories WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC L
 			tokens = 600
 		}
 	}
-	bundle := recallBundle{Identity: identity, Preferences: preferences, ActiveContext: active,
-		OpenCommitments: commitments, Reminders: reminders, Directives: directives,
+	bundle := recallBundle{Identity: recallItems(identity), Preferences: recallItems(preferences), ActiveContext: recallItems(active),
+		OpenCommitments: recallItems(commitments), Reminders: reminders, Directives: directives,
 		LimitTokens: tokens, SessionStart: sessionStart, Explain: []any{}}
 	bundle.UsedTokens = approximateTokens(identity, preferences, active, commitments)
 	encoded, err := json.Marshal(bundle)

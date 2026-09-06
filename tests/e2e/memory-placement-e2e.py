@@ -88,6 +88,40 @@ class Gate:
         # The transport wraps the MCP content blocks in its result envelope.
         return code, json.dumps(body, ensure_ascii=False)
 
+    def run_local(self):
+        """First-boot regression on a composition containing only Server and its store."""
+        content = 'Personal local-only fixture person@local.invalid 🦊'
+        row = self.good('KB-free local store', self.call('store', dict(key=self.prefix, content=content)))
+        mid = row['id']
+        for explicit in ({}, {'store': 'user'}):
+            bundle = self.good('KB-free recall ' + str(explicit),
+                self.call('recall', dict(query=self.prefix, **explicit)))
+            self.check('recall returns personal text and scoped handle ' + str(explicit), any(
+                r.get('text') == content and r.get('handle') == 'user:memory:' + str(mid)
+                for r in bundle.get('recall', {}).get('active_context', [])))
+        self.good('KB-free session recall without hint', self.call('recall', dict(session_start=True)))
+        cli = self.cli('recall', '--query', self.prefix, '--store', 'user')
+        self.check('KB-free CLI recall', cli.get('store') == 'user' and any(
+            r.get('text') == content and r.get('memory_id') == mid
+            for r in cli.get('recall', {}).get('active_context', [])), cli)
+        code, mcp = self.mcp('memory_recall', dict(task_hint=self.prefix))
+        self.check('KB-free MCP recall', code == 200 and 'Personal local-only fixture' in mcp)
+        code, invalid = self.call('recall', dict(query=self.prefix, store='invalid'))
+        self.check('recall rejects invalid store', code == 400, [code, invalid])
+        self.docker('restart', self.args.server)
+        self.good('KB-free recall survives restart', self.wait('recall', dict(query=self.prefix)))
+        self.docker('stop', self.args.store_db)
+        try:
+            code, failure = self.call('recall', dict(query=self.prefix))
+            self.check('KB-free recall reports unavailable local store', code >= 500 and failure.get('status') == 'error', [code, failure])
+        finally:
+            self.docker('start', self.args.store_db)
+        self.good('KB-free recall recovers', self.wait('recall', dict(query=self.prefix)))
+        self.good('KB-free local retirement', self.call('delete', dict(id=mid)))
+        bundle = self.good('KB-free recall after retirement', self.call('recall', dict(query=self.prefix)))
+        self.check('retired personal record excluded from recall', bundle.get('recall', {}).get('active_context') == [])
+        return all(c['passed'] for c in self.checks)
+
     def run(self):
         before = self.digest()
         content = 'Personal fixture user@local.invalid 🦊 ' + 'long note αβ ' * 500
@@ -138,6 +172,10 @@ class Gate:
             code, result = self.mcp('memory_get', args)
             # Content is nested as a JSON string within the MCP text block.
             self.check('MCP get preserves selected store ' + str(args), code == 200 and json.dumps(expected, ensure_ascii=False)[1:-1] in result)
+        self.good('local preference fixture', self.call('store', dict(key='preference-' + self.prefix,
+            kind='preference', tier='L2', content='Private preference person@local.invalid')))
+        shared_recall = self.good('explicit shared recall', self.call('recall', dict(store='kb', scope='all', query=self.prefix)))
+        self.check('explicit shared recall excludes personal preferences', 'person@local.invalid' not in json.dumps(shared_recall))
         self.good('local supersede', self.call('supersede', dict(old_id=mid, new_content='corrected local fixture')))
         self.check('local mutation leaves colliding KB record unchanged', self.digest() == before)
         got = self.good('get corrected local memory', self.call('get', dict(id=mid)))
@@ -148,7 +186,7 @@ class Gate:
         before = self.digest()
         self.docker('stop', self.args.store_db)
         try:
-            for op, body in [('list', {}), ('get', {'id': mid}),
+            for op, body in [('list', {}), ('get', {'id': mid}), ('recall', {'query': self.prefix}),
                              ('store', {'key': self.prefix + '-outage', 'content': 'private outage fixture'}),
                              ('supersede', {'old_id': mid, 'new_content': 'must not reach KB'}), ('delete', {'id': mid})]:
                 code, body = self.call(op, body)
@@ -160,6 +198,18 @@ class Gate:
         self.docker('stop', self.args.kb)
         try:
             self.good('local get works with KB offline', self.call('get', dict(id=mid)))
+            recall = self.good('local recall works with KB offline', self.call('recall', dict(query=self.prefix)))
+            self.check('local recall retains scoped ID and prompt text', any(
+                r.get('memory_id') == mid and r.get('text') == 'corrected local fixture'
+                and r.get('handle') == 'user:memory:' + str(mid)
+                for r in recall.get('recall', {}).get('active_context', [])))
+            self.good('local session recall needs no hint or KB', self.call('recall', dict(session_start=True)))
+            recalled = self.cli('recall', '--query', self.prefix, '--store', 'user')
+            self.check('CLI recall works with KB offline', recalled.get('store') == 'user' and any(
+                r.get('text') == 'corrected local fixture' and r.get('memory_id') == mid
+                for r in recalled.get('recall', {}).get('active_context', [])), recalled)
+            code, recalled = self.mcp('memory_recall', dict(task_hint=self.prefix, store='user'))
+            self.check('MCP recall works with KB offline', code == 200 and 'corrected local fixture' in recalled)
             self.good('local store works with KB offline', self.call('store', dict(key=self.prefix + '-offline', content='private offline fixture')))
             code, body = self.call('list', {'store': 'kb'})
             self.check('explicit KB outage is an HTTP failure', code >= 500 and body.get('status') == 'error', [code, body])
@@ -215,13 +265,14 @@ class Gate:
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    for name in ('server', 'kb', 'store-db', 'output'):
+    for name in ('server', 'store-db', 'output'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--kb', help='Shared container; omit to test a KB-free local composition')
     parser.add_argument('--upgrade-fixture')
     args = parser.parse_args()
     gate = Gate(args)
     try:
-        passed = gate.run()
+        passed = gate.run() if args.kb else gate.run_local()
     finally:
         Path(args.output).write_text(json.dumps(gate.checks, indent=2, ensure_ascii=False) + '\n')
     raise SystemExit(0 if passed else 1)

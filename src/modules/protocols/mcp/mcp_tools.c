@@ -450,6 +450,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_store_property(p);
       cJSON *task = cJSON_AddObjectToObject(p, "task_hint");
       cJSON_AddStringToObject(task, "type", "string");
       cJSON_AddStringToObject(task, "description",

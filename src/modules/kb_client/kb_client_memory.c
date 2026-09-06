@@ -1226,8 +1226,8 @@ int64_t kb_client_memory_upsert_workflow(const char *workspace, const char *sign
  * every recall consumer (the /v1 endpoint AND the primary-agent pre-turn
  * injection) shares. The per-section merge logic lives in db1/user_memory.c
  * (db1_user_memory_merge_into_array) so it is unit-testable without kb. */
-char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
-                                      const char *graph_code_fusion_state)
+static char *memory_recall_json(const char *task_hint, int limit_tokens, int session_start,
+                                const char *graph_code_fusion_state, int include_user)
 {
    cJSON *req = cJSON_CreateObject();
    kbc_memory_add_scope_context(req);
@@ -1259,7 +1259,7 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
    /* Fast path: when this user has no db1 memory (the case until capture is
     * wired), skip the parse/merge/reserialize entirely and pass the kb bundle
     * through verbatim — recall is on the primary agent's hot per-turn loop. */
-   if (!db1_user_memory_any())
+   if (!include_user || !db1_user_memory_any())
    {
       cJSON *response = cJSON_Parse(j);
       if (response)
@@ -1292,6 +1292,20 @@ char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, i
       }
    }
    return j; /* parse/merge failed: return the kb bundle verbatim */
+}
+
+/* Explicit shared-store reads must never merge personal rows into the result. */
+char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
+                                          int session_start)
+{
+   return memory_recall_json(task_hint, limit_tokens, session_start, "on", 0);
+}
+
+/* Preserve the combined bundle for existing composed-context consumers. */
+char *kb_client_memory_recall_json_ex(const char *task_hint, int limit_tokens, int session_start,
+                                      const char *graph_code_fusion_state)
+{
+   return memory_recall_json(task_hint, limit_tokens, session_start, graph_code_fusion_state, 1);
 }
 
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start)

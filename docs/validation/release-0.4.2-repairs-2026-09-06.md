@@ -7,6 +7,11 @@ its required GitHub CI checks and the existing protected promotion/release workf
 This supersedes the [original published candidate verdict](release-0.4.2-2026-09-06.md) for the
 repaired source only. It does not declare the old `testing-6083b85` images fixed.
 
+The subsequently requested KB-optional deployment expands this release scope. The
+[local recall follow-up](release-0.4.2-local-recall-2026-09-06.md) records the newly tested
+module integration and outstanding model/vector work. This earlier qualification does not
+establish readiness for that expanded scope.
+
 ## Scope and behavior
 
 The two stores remain separate. Server memory belongs to the local user and can contain

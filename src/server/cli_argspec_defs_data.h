@@ -253,6 +253,7 @@
  "\"type\":\"true_if_set\"},"
  "{\"json\":\"limit_tokens\",\"from\":\"flag\",\"flag\":\"limit-tokens\","
  "\"type\":\"number_lenient\",\"omit_if_nonpositive\":true},"
+ "{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"},"
  "{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"},"
  "{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"},"
  "{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},"

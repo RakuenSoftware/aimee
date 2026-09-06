@@ -591,6 +591,9 @@ char *kb_client_memory_lint_json(void);
  * "alerts" or "recall".  Mirror memory_alerts / memory_recall. */
 char *kb_client_memory_alerts_json(const char *since);
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start);
+/* Shared-store recall without the legacy personal-memory merge. */
+char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
+                                          int session_start);
 /* As above, with an explicit graph-code fusion state ("off"/"shadow"/"on", NULL
  * = off). Production recall always forwards "on" (via kb_client_memory_recall_json);
  * this _ex form lets the eval/benchmark harness force a different state. */

@@ -314,9 +314,18 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
       limit_tokens = (int)jl->valuedouble;
    /* Graph-code fusion is always on for recall. */
    int active_context_missing = 0;
-   mcp_memory_scope_begin(jargs, &active_context_missing);
-   char *envelope = kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start, "on");
-   mcp_memory_scope_end();
+   int store_selection = server_memory_store_selection(jargs);
+   if (store_selection < 0)
+      return text_content("{\"status\":\"error\",\"message\":\"memory store must be user or kb\"}");
+   char *envelope;
+   if (store_selection)
+   {
+      mcp_memory_scope_begin(jargs, &active_context_missing);
+      envelope = kb_client_memory_recall_shared_json(task_hint, limit_tokens, session_start);
+      mcp_memory_scope_end();
+   }
+   else
+      envelope = server_user_memory_recall_json(task_hint, limit_tokens, session_start);
    cJSON *resp = envelope ? cJSON_Parse(envelope) : NULL;
    free(envelope);
    cJSON *recall = resp ? cJSON_GetObjectItemCaseSensitive(resp, "recall") : NULL;
@@ -368,7 +377,10 @@ static cJSON *mcph_memory_recall(struct mcp_call *c)
       /* OOM: fall through and return what we have rather than nothing. */
    }
    if (!rendered)
-      content = mcph_kb_last_result("memory recall returned no result");
+      content = store_selection
+                    ? mcph_kb_last_result("memory recall returned no result")
+                    : text_content(
+                          "{\"status\":\"error\",\"message\":\"user memory module unavailable\"}");
    else
    {
       content = text_content(rendered);

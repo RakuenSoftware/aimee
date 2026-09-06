@@ -212,6 +212,8 @@ static const sample_t SAMPLES[] = {
     {"memory.recall", {"--task", "", NULL}},
     {"memory.recall", {"", NULL}},
     {"memory.recall", {"--session-start", NULL}},
+    {"memory.recall", {"--store", "user", "--session-start", NULL}},
+    {"memory.recall", {"--store=kb", "--query", "shared", NULL}},
     {"memory.recall", {"--limit-tokens", "500", NULL}},
     {"memory.recall", {"--limit-tokens", "0", NULL}},
     {"memory.recall", {"--limit-tokens", "-5", NULL}},

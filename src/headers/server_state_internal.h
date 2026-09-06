@@ -7,7 +7,6 @@
  * files split out of it). Formerly file-local statics shared by textual .inc. */
 /* promoted cross-TU (former .inc statics) */
 /* 0: local user, 1: explicit KB, -1: invalid selector. Never inferred from IDs. */
-int server_memory_store_selection(const cJSON *req);
 int send_and_free(server_conn_t *conn, cJSON *resp);
 int workspace_rpc_args(cJSON *req, char **argv, int max);
 void ws_git_line(const char *const argv[], char *out, size_t outsz);

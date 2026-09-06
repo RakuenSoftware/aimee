@@ -1669,7 +1669,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block",
 		"diagnose", "explain", "ask":
-		if options.placement != PlacementKB {
+		if options.placement != PlacementKB && request.Operation != "recall-bundle" {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		retrieval, ok := options.data.(retrievalDataStore)

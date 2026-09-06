@@ -83,6 +83,46 @@ INSERT INTO user_memories(id,key,content) VALUES(42,'private-fixture','PII fixtu
 	}
 	check(PlacementServer, "PII fixture: local only")
 	check(PlacementKB, "shared knowledge")
+	// The same module must recall its own store without asking a KB process to
+	// assemble the envelope first. A colliding shared row must stay excluded.
+	localRecall, recallStatus := call(PlacementServer, DataRequest{
+		Operation: "recall-bundle", Query: "private-fixture", LimitTokens: 1024,
+	})
+	if recallStatus != bus.ModuleStatusOK {
+		t.Fatalf("local recall unavailable: %v", recallStatus)
+	}
+	var bundle recallBundle
+	if err := json.Unmarshal(localRecall.Payload, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.ActiveContext) != 1 || bundle.ActiveContext[0].ID != 42 ||
+		bundle.ActiveContext[0].Content != "PII fixture: local only" ||
+		bundle.ActiveContext[0].Scope.Type != ScopeUser ||
+		bundle.ActiveContext[0].Text != "PII fixture: local only" ||
+		bundle.ActiveContext[0].MemoryID != 42 || bundle.ActiveContext[0].Handle != "user:memory:42" {
+		t.Fatalf("local recall selected the wrong store: %+v", bundle)
+	}
+	// No shared relation is available during first boot of a personal composition.
+	if _, err := tx.Exec(ctx, `ALTER TABLE memories RENAME TO unavailable_shared_store;
+INSERT INTO user_memories(id,key,content,lifecycle_state,valid_until) VALUES
+(90,'private-fixture-expired','expired fixture','active',now()-interval '1 second'),
+(91,'private-fixture-retired','retired fixture','retired',NULL);`); err != nil {
+		t.Fatal(err)
+	}
+	withoutKB, statusWithoutKB := call(PlacementServer, DataRequest{Operation: "recall-bundle", SessionStart: true})
+	if statusWithoutKB != bus.ModuleStatusOK {
+		t.Fatalf("recall requires shared schema: %v", statusWithoutKB)
+	}
+	if err := json.Unmarshal(withoutKB.Payload, &bundle); err != nil {
+		t.Fatal(err)
+	}
+	if len(bundle.ActiveContext) != 1 || bundle.ActiveContext[0].ID != 42 || !bundle.SessionStart {
+		t.Fatalf("session recall exposed expired or retired rows: %+v", bundle)
+	}
+	if _, err := tx.Exec(ctx, `ALTER TABLE unavailable_shared_store RENAME TO memories;
+DELETE FROM user_memories WHERE id IN (90,91);`); err != nil {
+		t.Fatal(err)
+	}
 	for _, p := range []struct {
 		placement Placement
 		scope     string

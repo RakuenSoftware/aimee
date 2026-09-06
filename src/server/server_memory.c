@@ -7,6 +7,7 @@
 #include "kb_client.h"
 #include "json_fluent.h"
 #include "log.h"
+#include "integrity.h"
 #include <aimee/workspace/workspace.h>
 #include <math.h>
 
@@ -749,4 +750,43 @@ int handle_memory_read(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
    jo_add_bool(resp, "active_context_missing", active_context_missing);
    free(context);
    return send_and_free(conn, resp);
+}
+
+/* Personal recall uses the same memory module as shared recall, with the
+ * process's own data grant. No KB request is needed to create its envelope. */
+char *server_user_memory_recall_json(const char *hint, int limit_tokens, int session_start)
+{
+   cJSON *request = memory_data_request("recall-bundle");
+   if (!request)
+      return NULL;
+   cJSON_AddStringToObject(request, "query", hint ? hint : "");
+   cJSON_AddNumberToObject(request, "limit_tokens", limit_tokens);
+   cJSON_AddBoolToObject(request, "session_start", session_start != 0);
+   cJSON *response = server_module_memory_data(request);
+   cJSON_Delete(request);
+   cJSON *payload = response ? cJSON_DetachItemFromObjectCaseSensitive(response, "payload") : NULL;
+   cJSON_Delete(response);
+   if (!cJSON_IsObject(payload))
+   {
+      cJSON_Delete(payload);
+      return NULL;
+   }
+   cJSON *envelope = jo_ok();
+   if (!envelope)
+   {
+      cJSON_Delete(payload);
+      return NULL;
+   }
+   cJSON_AddStringToObject(envelope, "store", "user");
+   cJSON_AddItemToObject(envelope, "recall", payload);
+   char *json = cJSON_PrintUnformatted(envelope);
+   cJSON_Delete(envelope);
+   integrity_result_t gate;
+   if (json && integrity_ingress_decide(json, INTEGRITY_SOURCE_AGENT_MESSAGE, "recall", 1, &gate))
+   {
+      free(json);
+      return strdup("{\"status\":\"quarantined\",\"store\":\"user\",\"recall\":{},"
+                    "\"integrity_verdict\":\"quarantine\"}");
+   }
+   return json;
 }
