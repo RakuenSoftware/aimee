@@ -1,0 +1,30 @@
+{
+  "ordinary": {
+    "rows": 100000,
+    "body_bytes": 4096,
+    "fixture_sha256": "488ceeef425b919678ebbaeb49cf2157fcd18309027545dd5418d821a783cfe0",
+    "pgp_options": "cipher-algo=aes256,disable-mdc=0,compress-algo=0,s2k-mode=3,s2k-count=65536",
+    "timings": {
+      "fixture_seconds": 37.30986972100072,
+      "plain_load_seconds": 41.70053359200028,
+      "encrypted_load_seconds": 71.51712056100223,
+      "plain_indexes_seconds": 22.632203514996945,
+      "encrypted_indexes_seconds": 20.75108671199996
+    },
+    "roundtrip": "passed"
+  },
+  "luks": {
+    "rows": 100000,
+    "body_bytes": 4096,
+    "fixture_sha256": "488ceeef425b919678ebbaeb49cf2157fcd18309027545dd5418d821a783cfe0",
+    "pgp_options": "cipher-algo=aes256,disable-mdc=0,compress-algo=0,s2k-mode=3,s2k-count=65536",
+    "timings": {
+      "fixture_seconds": 41.19043561599756,
+      "plain_load_seconds": 26.458898499000497,
+      "encrypted_load_seconds": 95.89057076399695,
+      "plain_indexes_seconds": 26.992839726000966,
+      "encrypted_indexes_seconds": 7.2512432469993655
+    },
+    "roundtrip": "passed"
+  }
+}
