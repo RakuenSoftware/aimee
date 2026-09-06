@@ -843,6 +843,11 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 					"hashes to %s: an applied migration may not be edited",
 					owner, version, recordedSum, sum)), bus.ModuleStatusOK
 		}
+		// A replay executes no domain DDL, but bootstrap may have repaired
+		// legacy ledger grants. Do not roll that repair back on success.
+		if err := tx.Commit(ctx); err != nil {
+			return failure(err, "migrate"), bus.ModuleStatusOK
+		}
 		w := &writer{}
 		w.header(statusOK, "", "")
 		return w.buf, bus.ModuleStatusOK

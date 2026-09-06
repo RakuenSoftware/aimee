@@ -97,6 +97,18 @@ func TestSharedDatabaseRuntimeCannotRewriteMigrationHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertProtected()
+	if _, err := migration.Exec(ctx, "GRANT ALL ON TABLE schema_migrations TO "+runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	history, err := families.Migrations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := history[0]
+	if err := store.Migrate(ctx, db.MigrationRequest{Owner: first.Owner, Version: first.Version, Checksum: first.Checksum, Statements: first.Statements}); err != nil {
+		t.Fatal(err)
+	}
+	assertProtected()
 	var version int
 	if err := migration.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&version); err != nil {
 		t.Fatal(err)
