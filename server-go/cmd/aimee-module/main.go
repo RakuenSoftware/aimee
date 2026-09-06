@@ -73,6 +73,12 @@ const economizerStorePrincipalRef uint32 = 66
 // contests. Declared as aimee-postgres in src/modules/process-contracts.json.
 const storePrincipalRef uint32 = 69
 
+// memoryStorePrincipalRef is the memory module's storage-only identity.  The
+// same executable runs on both buses; each instance reaches only the postgres
+// module on that bus, while AIMEE_MODULE_PLACEMENT selects whether its SQL is
+// confined to user_memories (server) or scoped memories (kb).
+const memoryStorePrincipalRef uint32 = 73
+
 // aimeeDirectoryPrincipalRef is the aimee module's OUTBOUND identity, used only
 // to read the session directory out of db1. Same reason as the economizer's: a
 // serving grant requests nothing, so reaching another module's stage needs a
@@ -245,6 +251,28 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, err
 	return db, nil
 }
 
+func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, error) {
+	if ctx == nil || moduleBusSocket == "" {
+		return nil, errors.New("memory: no module bus to reach postgres")
+	}
+	busClient, err := bus.ConnectClient(ctx, moduleBusSocket, 1, memoryStorePrincipalRef)
+	if err != nil {
+		return nil, err
+	}
+	caller, err := bus.NewConcurrentModuleCaller(ctx, busClient)
+	if err != nil {
+		busClient.Detach()
+		return nil, err
+	}
+	db, err := aimee.NewStore(caller)
+	if err != nil {
+		caller.CloseAndWait()
+		busClient.Detach()
+		return nil, err
+	}
+	return db, nil
+}
+
 // moduleEgress attaches a second, request-only identity for outbound transport.
 // Serving rights never imply calling rights, so the module's serving principal
 // is deliberately not reused here.
@@ -345,8 +373,36 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			{EventKind: memory.EventRetrieve, StageID: memory.StageRetrieve},
 			{EventKind: memory.EventRerank, StageID: memory.StageRerank},
 			{EventKind: memory.EventDeclareCommands, StageID: memory.StageDeclareCommands},
+			{EventKind: memory.EventData, StageID: memory.StageData},
 		}
-		config.Handler = memory.NewHandler(moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef))
+		// moduleConfig() calls this with a nil context to inspect the static
+		// registry in tests. A running module always has a context and must name
+		// its placement explicitly; silently guessing here could put user data in
+		// the KB corpus or expose KB rows through a user service.
+		placement := memory.PlacementServer
+		var data memory.DataStore
+		if ctx != nil {
+			var err error
+			placement, err = memory.ParsePlacement(os.Getenv("AIMEE_MODULE_PLACEMENT"))
+			if err != nil {
+				log.Printf("memory module unavailable: %v", err)
+				return config, false
+			}
+			db, storeErr := memoryStoreBackend(ctx, moduleBusSocket)
+			if storeErr != nil {
+				log.Printf("memory module unavailable: postgres: %v", storeErr)
+				return config, false
+			}
+			data, err = memory.NewPostgresDataStore(db, placement)
+			if err != nil {
+				log.Printf("memory module unavailable: %v", err)
+				return config, false
+			}
+			log.Printf("memory module: placement=%s storage=postgres", placement)
+		}
+		config.Handler = memory.NewHandler(
+			moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef),
+			memory.WithDataStore(placement, data))
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8

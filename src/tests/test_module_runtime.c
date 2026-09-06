@@ -155,12 +155,14 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[2] = AIMEE_MEMORY_EVENT_EMBED;
       served[3] = AIMEE_MEMORY_EVENT_RETRIEVE;
       served[4] = AIMEE_MEMORY_EVENT_RERANK;
-      /* Five, stated rather than borrowed from the array bound. It used to say
+      served[5] = AIMEE_MEMORY_EVENT_DECLARE_COMMANDS;
+      served[6] = AIMEE_MEMORY_EVENT_DATA;
+      /* Seven, stated rather than borrowed from the array bound. It used to say
        * PRODUCTION_STAGE_MAX, which was 5 and therefore correct by coincidence;
        * raising the bound to hold aimee's twenty-three made this module claim
        * to serve twenty-three kinds, and the grant for the ones past its fifth
        * carried uninitialised array entries. */
-      *serve_count = 5;
+      *serve_count = 7;
       return 0;
    }
    if (strcmp(name, "learning") == 0)
@@ -842,6 +844,8 @@ int main(int argc, char **argv)
    size_t serve_count = 1;
    if (argc == 3)
       assert(production_contract(argv[2], &test_kind, &module_ref, served, &serve_count) == 0);
+   const int memory_process = argc == 3 && strcmp(argv[2], "memory") == 0;
+   const int provider_process = argc == 3 && strcmp(argv[2], "providers") == 0;
    char directory[256];
    snprintf(directory, sizeof directory, "%s/aimee-module-runtime-XXXXXX", platform_tmpdir());
    assert(mkdtemp(directory) != NULL);
@@ -849,6 +853,8 @@ int main(int argc, char **argv)
     * sandbox module persists what it learns under AIMEE_HOME, and a test that
     * exercises the write path must not touch the developer's real store. */
    assert(setenv("AIMEE_HOME", directory, 1) == 0);
+   if (memory_process)
+      assert(setenv("AIMEE_MODULE_PLACEMENT", "server", 1) == 0);
    char socket_path[PATH_MAX], executable[PATH_MAX];
    assert(snprintf(socket_path, sizeof socket_path, "%s/module.sock", directory) > 0);
    assert(realpath("/proc/self/exe", executable) != NULL);
@@ -862,7 +868,8 @@ int main(int argc, char **argv)
    uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
-   uint32_t provider_outbound[] = {12290u, 12295u, 4609u};
+   const uint32_t postgres_request[] = {AIMEE_POSTGRES_EVENT_SQL};
+   const uint32_t provider_request[] = {12290u, 12295u, 4609u};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -875,12 +882,18 @@ int main(int argc, char **argv)
                                     .executable = executable,
                                     .request = requested,
                                     .request_count = serve_count + 1},
+                                   /* The migrated memory process owns its SQL
+                                    * through a second, request-only identity.
+                                    * The smoke calls below are deliberately
+                                    * store-free, but startup must still prove
+                                    * that the shipped process can attach the
+                                    * capability it will use in production. */
                                    {.principal_class = 1,
-                                    .principal_ref = 73,
+                                    .principal_ref = memory_process ? 73 : 74,
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = module_executable,
-                                    .request = provider_outbound,
-                                    .request_count = 3}};
+                                    .request = memory_process ? postgres_request : provider_request,
+                                    .request_count = memory_process ? 1 : 3}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -889,13 +902,13 @@ int main(int argc, char **argv)
    bus_host_t host;
    assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
-   bus_runtime_config_t runtime_config = {
-       .socket_path = socket_path,
-       .socket_mode = 0600,
-       .backlog = 8,
-       .stale_after_ns = 5000000000ULL,
-       .grants = grants,
-       .grant_count = argc == 3 && strcmp(argv[2], "providers") == 0 ? 3 : 2};
+   bus_runtime_config_t runtime_config = {.socket_path = socket_path,
+                                          .socket_mode = 0600,
+                                          .backlog = 8,
+                                          .stale_after_ns = 5000000000ULL,
+                                          .grants = grants,
+                                          .grant_count =
+                                              (memory_process || provider_process) ? 3 : 2};
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
@@ -933,7 +946,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, argc == 3 && strcmp(argv[2], "providers") == 0 ? 3 : 2);
+   wait_for_clients(&host, &host_lock, (memory_process || provider_process) ? 3 : 2);
 
    pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
    atomic_init(&pump_state.stop, 0);

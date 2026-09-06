@@ -149,36 +149,11 @@
       "audit_disposition": "formally constrained core exception; higher-level action events are durable and transport bodies are excluded",
       "review_boundary": "no count or file expansion without Runtime Security approval and an egress-module migration decision",
       "matches": [
-        {
-          "primitive": "http",
-          "path": "src/modules/git/git_oauth_device.c",
-          "count": 3
-        },
-        {
-          "primitive": "http",
-          "path": "src/modules/git/git_oauth_github.c",
-          "count": 3
-        },
-        {
-          "primitive": "http",
-          "path": "src/modules/git/git_org_repos.c",
-          "count": 2
-        },
-        {
-          "primitive": "http",
-          "path": "src/modules/git/git_pr_api.c",
-          "count": 5
-        },
-        {
-          "primitive": "http",
-          "path": "src/modules/memory/memory_core_helpers_b.c",
-          "count": 2
-        },
-        {
-          "primitive": "http",
-          "path": "src/modules/protocols/mcp/mcp_client.c",
-          "count": 4
-        }
+        {"primitive": "http", "path": "src/modules/git/git_oauth_device.c", "count": 3},
+        {"primitive": "http", "path": "src/modules/git/git_oauth_github.c", "count": 3},
+        {"primitive": "http", "path": "src/modules/git/git_org_repos.c", "count": 2},
+        {"primitive": "http", "path": "src/modules/git/git_pr_api.c", "count": 5},
+        {"primitive": "http", "path": "src/modules/protocols/mcp/mcp_client.c", "count": 4}
       ]
     },
     {

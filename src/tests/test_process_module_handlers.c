@@ -12,7 +12,6 @@
 #include <aimee/governance/module_api.h>
 #include <aimee/kb-synthesis/module_api.h>
 #include <aimee/learning/module_api.h>
-#include <aimee/memory/module_api.h>
 #include <aimee/postgres/module_api.h>
 #include <aimee/providers/module_api.h>
 #include <aimee/roundtable/module_api.h>
@@ -26,7 +25,6 @@
    extern aimee_module_status_t name(const aimee_module_invocation_t *, const uint8_t *, uint32_t, \
                                      uint8_t *, uint32_t, uint32_t *, void *)
 
-DECLARE_HANDLER(aimee_memory_module_handler);
 DECLARE_HANDLER(aimee_learning_module_handler);
 DECLARE_HANDLER(aimee_delegates_module_handler);
 DECLARE_HANDLER(aimee_tools_module_handler);
@@ -45,27 +43,6 @@ int aimee_module_invocation_cancelled(const aimee_module_invocation_t *invocatio
 {
    (void)invocation;
    return 0;
-}
-
-static void test_memory(void)
-{
-   const int64_t scores[] = {0, 329999, 330000, 659999, 660000};
-   const aimee_memory_confidence_t expected[] = {
-       AIMEE_MEMORY_CONFIDENCE_LOW, AIMEE_MEMORY_CONFIDENCE_LOW, AIMEE_MEMORY_CONFIDENCE_MEDIUM,
-       AIMEE_MEMORY_CONFIDENCE_MEDIUM, AIMEE_MEMORY_CONFIDENCE_HIGH};
-   for (size_t i = 0; i < sizeof(scores) / sizeof(scores[0]); ++i)
-   {
-      uint8_t request[AIMEE_MEMORY_REQUEST_LEN], response[AIMEE_MEMORY_RESPONSE_LEN];
-      uint32_t response_len = 0;
-      aimee_module_invocation_t invocation = {.stage_id = AIMEE_MEMORY_STAGE_RERANK};
-      aimee_memory_confidence_t result;
-      assert(aimee_memory_request_encode(scores[i], request, sizeof(request)) == 0);
-      assert(aimee_memory_module_handler(&invocation, request, sizeof(request), response,
-                                         sizeof(response), &response_len,
-                                         NULL) == AIMEE_MODULE_STATUS_OK);
-      assert(aimee_memory_response_decode(response, response_len, &result) == 0);
-      assert(result == expected[i]);
-   }
 }
 
 static uint32_t learning_mask(const char *signal)
@@ -793,7 +770,6 @@ static void test_benchmarks(void)
 
 int main(void)
 {
-   test_memory();
    test_learning();
    test_postgres_health_contract();
    test_delegates();

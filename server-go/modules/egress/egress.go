@@ -34,7 +34,7 @@ const (
 	StageCredentialKey uint32 = 7
 	PolicyRevision            = "module-egress-v1"
 
-	ProvidersClientRef  uint32 = 73
+	ProvidersClientRef  uint32 = 74
 	MemoryClientRef     uint32 = 70
 	GitClientRef        uint32 = 71
 	RoundtableClientRef uint32 = 72
@@ -211,7 +211,8 @@ func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decisio
 		if address.IP == nil {
 			continue
 		}
-		if request.Purpose != "embedding" && request.Purpose != "provider" && !(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
+		if request.Purpose != "embedding" && request.Purpose != "embedding-health" && request.Purpose != "provider" &&
+			!(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
 			!publicIP(address.IP) {
 			return deny("target resolved to a non-public address")
 		}
@@ -232,8 +233,10 @@ func callerPurposeAllowed(ref uint32, request Request, target *url.URL) bool {
 	case ProvidersClientRef:
 		return request.Purpose == "provider" && (request.Method == "GET" || request.Method == "POST")
 	case MemoryClientRef:
-		return request.Purpose == "embedding" && request.Method == "POST" &&
-			strings.HasSuffix(target.EscapedPath(), "/embed")
+		return (request.Purpose == "embedding" && request.Method == "POST" &&
+			strings.HasSuffix(target.EscapedPath(), "/embed")) ||
+			(request.Purpose == "embedding-health" && request.Method == "GET" &&
+				strings.HasSuffix(target.EscapedPath(), "/health"))
 	case GitClientRef:
 		return request.Purpose == "forge" && target.Scheme == "https" && host == "api.github.com" &&
 			forgeTargetAllowed(request.Method, target.EscapedPath())

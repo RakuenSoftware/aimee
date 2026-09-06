@@ -228,13 +228,12 @@ TEST_FACT_MUTATION_MIN_OBJS = $(OBJDIR)/db2/fact_mutation.o $(OBJDIR)/db2/fact_i
                               $(OBJDIR)/modules/workflows/wfe_canonical.o \
                               $(OBJDIR)/aimee_sha256.o
 
-TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
-                 $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_candidate_fusion.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/posix/memory.o \
-                 $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_effective.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_activation.o $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
+TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/tests/support/memory_migration_stub.o $(OBJDIR)/rel_types.o $(OBJDIR)/agent_job_release.o $(OBJDIR)/delegate_exit_classify.o $(OBJDIR)/diagnose_render.o $(OBJDIR)/clarify_render.o $(OBJDIR)/interaction_event_names.o $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/db2/rel_types_store.o $(OBJDIR)/db2/entity_registry.o $(OBJDIR)/db2/fact_lifecycle.o $(OBJDIR)/db2/ontology_evolution.o $(OBJDIR)/db2/fact_ingest.o $(OBJDIR)/db2/fact_recall.o $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/integrity_gate.o \
+                 $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/modules/memory/memory_content_gate_bus.o \
                  $(OBJDIR)/workflow_learn.o \
                  $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(OBJDIR)/extractors.o $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o \
                  $(OBJDIR)/tasks.o $(OBJDIR)/render.o \
-                 $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/memory_export.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/prospective_memories.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/trace_mining.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
+                 $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/agent_hints.o $(OBJDIR)/db2/agent_outcomes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/db2/collab_rules.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_nodes.o $(OBJDIR)/db2/code_projection.o $(OBJDIR)/db2/shadow_delta.o $(OBJDIR)/modules/kb_client/kb_client_code_embed.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/tasks.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/trace_mining.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/learning.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/sketch.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/kb/kb.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/sketch.o $(OBJDIR)/approach_store.o \
                  $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o \
                  $(OBJDIR)/modules/learning/learning_evidence.o $(OBJDIR)/db2/learning_synth_ops.o \
                  $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o $(OBJDIR)/db2/demotion.o $(OBJDIR)/db2/calibration.o \
@@ -252,7 +251,7 @@ TEST_DATA_OBJS = $(TEST_CORE_OBJS) $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/rel_
 # linking both would produce duplicate-symbol errors.
 TEST_DATA_OBJS_MOCK = $(TEST_DATA_OBJS) $(OBJDIR)/tests/support/mock_agent_http.o
 
-TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redirect $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-pgvec-neardup $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
+TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-memory-scope $(TESTPREFIX)/unit-test-harness-memory-spill $(TESTPREFIX)/unit-test-harness-memory-audit $(TESTPREFIX)/unit-test-roundtable-brief $(TESTPREFIX)/unit-test-db2 $(TESTPREFIX)/unit-test-pg-prepare-classification $(TESTPREFIX)/unit-test-schema-subst $(TESTPREFIX)/unit-test-code-index-ops $(TESTPREFIX)/unit-test-code-project-lifecycle $(TESTPREFIX)/unit-test-curator-version $(TESTPREFIX)/unit-test-curator-invalidate $(TESTPREFIX)/unit-test-curator-notify $(TESTPREFIX)/unit-test-curator-queue $(TESTPREFIX)/unit-test-curator-pipeline-sched $(TESTPREFIX)/unit-test-curator-custom-stages $(TESTPREFIX)/unit-test-pgvec $(TESTPREFIX)/unit-test-rules $(TESTPREFIX)/unit-test-delegate-sandbox-image \
  $(TESTPREFIX)/unit-test-session-degraded-notice $(TESTPREFIX)/unit-test-kb-http-json \
                $(TESTPREFIX)/unit-test-cmd-hooks-scope \
                $(TESTPREFIX)/unit-test-agent \
@@ -299,15 +298,10 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-openai-shape \
                $(TESTPREFIX)/unit-test-openai-chat-policed \
                $(TESTPREFIX)/unit-test-openai-responses-store \
-               $(TESTPREFIX)/unit-test-graph-fusion \
-               $(TESTPREFIX)/unit-test-code-vectors \
                $(TESTPREFIX)/unit-test-graph-scoring \
                $(TESTPREFIX)/unit-test-code-projection \
                $(TESTPREFIX)/unit-test-entity-nodes \
-               $(TESTPREFIX)/unit-test-memory-ranker-boundary \
                $(TESTPREFIX)/unit-test-memory-lanes \
-               $(TESTPREFIX)/unit-test-memory-lane-outcome \
-               $(TESTPREFIX)/unit-test-memory-candidate-fusion \
                $(TESTPREFIX)/unit-test-workspace \
                $(TESTPREFIX)/unit-test-cross-repo-deps \
                $(TESTPREFIX)/unit-test-cross-repo-stats \
@@ -326,7 +320,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-server-session-pools \
                $(TESTPREFIX)/unit-test-presence \
                $(TESTPREFIX)/unit-test-cli-provider \
-               $(TESTPREFIX)/unit-test-context-assembly $(TESTPREFIX)/unit-test-workspace-memory \
                $(TESTPREFIX)/unit-test-dashboard \
                $(TESTPREFIX)/unit-test-log $(TESTPREFIX)/unit-test-server-error-kind \
                $(TESTPREFIX)/unit-test-aimee-home \
@@ -409,11 +402,9 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-bus-capture \
                $(TESTPREFIX)/unit-test-guardrails \
                $(TESTPREFIX)/unit-test-db2-code-audit \
-               $(TESTPREFIX)/unit-test-feedback-shadow \
                $(TESTPREFIX)/unit-test-bus-guardrail-durability \
                $(TESTPREFIX)/unit-test-mcp-git \
                $(TESTPREFIX)/unit-test-agent \
-               $(TESTPREFIX)/unit-test-memory-advanced \
                $(TESTPREFIX)/unit-test-guardrails-blast-radius \
                $(TESTPREFIX)/unit-test-code-collect \
                $(TESTPREFIX)/unit-test-server-conn-accept \
@@ -517,20 +508,13 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-delegate-ensemble \
                $(TESTPREFIX)/unit-test-rel-types \
                $(TESTPREFIX)/unit-test-fact-identity \
-               $(TESTPREFIX)/unit-test-memory-activation \
-               $(TESTPREFIX)/unit-test-memory-facts-grounding \
                $(TESTPREFIX)/unit-test-memory-fact-gate \
-               $(TESTPREFIX)/unit-test-memory-embed-dim-guard \
-               $(TESTPREFIX)/unit-test-memory-embed-http-auth \
-               $(TESTPREFIX)/unit-test-memory-embed-batch \
                $(TESTPREFIX)/unit-test-rel-types-store \
                $(TESTPREFIX)/unit-test-entity-registry \
                $(TESTPREFIX)/unit-test-fact-lifecycle \
                $(TESTPREFIX)/unit-test-mcp-memory-gate \
                $(TESTPREFIX)/unit-test-embedding-dim \
-               $(TESTPREFIX)/unit-test-embedder-probe-register \
                $(TESTPREFIX)/unit-test-ontology-evolution \
-               $(TESTPREFIX)/unit-test-extract-patterns \
                $(TESTPREFIX)/unit-test-fact-ingest $(TESTPREFIX)/unit-test-decision-log \
                $(TESTPREFIX)/unit-test-fact-recall \
                $(TESTPREFIX)/unit-test-pii-gate \
@@ -622,7 +606,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-tool-validation \
                $(TESTPREFIX)/unit-test-turn-narration \
                $(TESTPREFIX)/unit-test-markdown \
-               $(TESTPREFIX)/unit-test-kb \
                $(TESTPREFIX)/unit-test-kb-export \
                $(TESTPREFIX)/unit-test-agent-runtime-messages \
                $(TESTPREFIX)/unit-test-minimax-tool-call-args \
@@ -632,7 +615,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-server-cli-oauth \
                $(TESTPREFIX)/unit-test-workspace-manifest \
                $(TESTPREFIX)/unit-test-lsp \
-               $(TESTPREFIX)/unit-test-memory-retrieval-eval \
                $(TESTPREFIX)/unit-test-context-discover \
                $(TESTPREFIX)/unit-test-cli-session \
                $(TESTPREFIX)/unit-test-cli-session-pty \
@@ -662,25 +644,20 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-mcp-client-registry \
                $(TESTPREFIX)/unit-test-osv-check \
                $(TESTPREFIX)/unit-test-plugin-c-hook \
-               $(TESTPREFIX)/unit-test-memory-provider \
                $(TESTPREFIX)/unit-test-context-engine \
                $(TESTPREFIX)/unit-test-dogfood \
                $(TESTPREFIX)/unit-test-cmd-onboard \
-               $(TESTPREFIX)/unit-test-session-briefing \
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-memory-assemble-util \
+               $(TESTPREFIX)/unit-test-memory-bus-context \
+               $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-session-brief \
-               $(TESTPREFIX)/unit-test-learning-metrics \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
-               $(TESTPREFIX)/unit-test-learning-regret \
                $(TESTPREFIX)/unit-test-approach-memory \
                $(TESTPREFIX)/unit-test-learning-attribution \
                $(TESTPREFIX)/unit-test-policy-arms \
                $(TESTPREFIX)/unit-test-curiosity-resolve \
                $(TESTPREFIX)/unit-test-eval-candidates \
-               $(TESTPREFIX)/unit-test-memory-recall-pivot \
-               $(TESTPREFIX)/unit-test-memory-filter \
-               $(TESTPREFIX)/unit-test-memory-profiles \
                $(TESTPREFIX)/unit-test-wiki-render \
                $(TESTPREFIX)/unit-test-integrity-gate \
                $(TESTPREFIX)/unit-test-http-content-encoding \
@@ -766,7 +743,6 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-memory-redi
                $(TESTPREFIX)/unit-test-db1-agent-work-client \
                $(TESTPREFIX)/unit-test-server-http \
                $(TESTPREFIX)/unit-test-web-search-fuse \
-               $(TESTPREFIX)/unit-test-curiosity \
                $(TESTPREFIX)/unit-test-trajectory-batch \
                $(TESTPREFIX)/unit-test-server-mgmt-status \
                $(TESTPREFIX)/unit-test-server-mgmt-checkpoint-client \
@@ -820,7 +796,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-command-registry
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-ready
 TEST_TARGETS += $(TESTPREFIX)/unit-test-server-dispatch
 TEST_TARGETS += $(TESTPREFIX)/unit-test-token-audit-load
-TEST_TARGETS += 
 
 # RETIRED: unit-test-bus-memory-recall, unit-test-bus-memory-upsert and
 # unit-test-bus-guardrail-durability. Their sources went with the C store.
@@ -883,9 +858,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-log-support \
                 $(TESTPREFIX)/unit-test-db2-management-read-support \
                 $(TESTPREFIX)/unit-test-db2-model-validation-support \
-                $(TESTPREFIX)/unit-test-db2-node-kind-text-support \
-                $(TESTPREFIX)/unit-test-db2-pii-classifier-support \
-                $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support \
                 $(TESTPREFIX)/unit-test-db2-random-support \
                 $(TESTPREFIX)/unit-test-db2-rel-enum-text-support \
                 $(TESTPREFIX)/unit-test-db2-rel-seed-support \
@@ -896,7 +868,6 @@ TEST_TARGETS += $(TESTPREFIX)/unit-test-db2-module-contract \
                 $(TESTPREFIX)/unit-test-db2-time-support \
 
 MODULE_HANDLER_TEST_OBJS = \
-   $(OBJDIR)/tests/module_handlers/memory.o \
    $(OBJDIR)/tests/module_handlers/learning.o \
    $(OBJDIR)/tests/module_handlers/delegates.o \
    $(OBJDIR)/tests/module_handlers/tools.o \
@@ -916,7 +887,6 @@ $(OBJDIR)/tests/module_handlers/$(1).o: modules/$(2)/module_adapter.c
 	@mkdir -p $$(dir $$@)
 	$$(CC) $$(TEST_C_FLAGS) -Daimee_module_handler=aimee_$(1)_module_handler -c -o $$@ $$<
 endef
-$(eval $(call module_handler_test_object,memory,memory))
 $(eval $(call module_handler_test_object,learning,learning))
 $(eval $(call module_handler_test_object,delegates,delegates))
 $(eval $(call module_handler_test_object,tools,tools))
@@ -971,9 +941,6 @@ UNIT_TEST_AUX_TARGETS = $(TESTPREFIX)/unit-test-db2-dstr-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-log-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-management-read-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-model-validation-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize \
-                        $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-random-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize \
                         $(TESTPREFIX)/unit-test-db2-rel-seed-support-sanitize \
@@ -1129,10 +1096,6 @@ $(TESTPREFIX)/unit-test-harness-memory-audit: $(OBJDIR)/tests/test_harness_memor
 
 $(TESTPREFIX)/unit-test-harness-memory-scope: $(OBJDIR)/tests/test_harness_memory_scope.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/aimee_home.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-memory-redirect: $(OBJDIR)/tests/test_memory_redirect.o $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 
 $(TESTPREFIX)/unit-test-db2: $(OBJDIR)/tests/test_db2.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o \
                             $(OBJDIR)/db2/entity_edges.o
@@ -1342,10 +1305,9 @@ $(TESTPREFIX)/unit-test-css-insights: \
 $(TESTPREFIX)/unit-test-typed-facts: \
                                        $(OBJDIR)/tests/test_typed_facts.o \
                                        $(OBJDIR)/db2/typed_facts.o \
-                                       $(OBJDIR)/db2/memory_scope_query.o \
+                                       $(OBJDIR)/modules/memory/memory_scope_connection.o \
                                        $(TEST_FACT_MUTATION_MIN_OBJS) \
                                        $(OBJDIR)/db2/rel_types_store.o \
-                                       $(OBJDIR)/db2/fact_recall.o \
                                        $(OBJDIR)/db2/entity_edges.o \
                                        $(OBJDIR)/db2/entity_registry.o \
                                        $(OBJDIR)/db2/ontology_evolution.o \
@@ -1436,7 +1398,6 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_queue.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_extract.o \
                                        $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o \
-                                       $(OBJDIR)/kb/kb_memory_facts.o $(OBJDIR)/kb/fact_grounding.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_llm.o \
                                        $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_sidecar.o \
                                        $(OBJDIR)/kb_curator_provider.o \
@@ -1451,9 +1412,6 @@ $(TESTPREFIX)/unit-test-curator-queue: \
                                        $(OBJDIR)/db2/entity_edges.o \
                                        $(OBJDIR)/db2/entity_registry.o \
                                        $(OBJDIR)/db2/ontology_evolution.o \
-                                       $(OBJDIR)/db2/memory_query.o \
-                                       $(OBJDIR)/db2/memory_scope_query.o \
-                                       $(OBJDIR)/db2/memory_row_mapper_pg.o \
                                        $(OBJDIR)/modules/memory/memory_extract_patterns.o \
                                        $(OBJDIR)/modules/memory/memory_fact_gate.o \
                                        $(OBJDIR)/modules/memory/memory_pii_gate.o \
@@ -1478,42 +1436,15 @@ $(TESTPREFIX)/unit-test-curator-queue: \
 TEST_CORE_OBJS_PG = $(filter-out $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o,$(TEST_CORE_OBJS)) \
                     $(OBJDIR)/db2/db_postgres.o $(OBJDIR)/db2/entity_edges.o
 
-$(TESTPREFIX)/unit-test-pgvec-neardup: $(OBJDIR)/tests/test_pgvec_neardup.o \
-                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
-                    $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
-                    $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
-                    $(TEST_CORE_OBJS_PG)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) $(PQ_LIB)
-
 $(TESTPREFIX)/unit-test-pgvec: $(OBJDIR)/tests/test_pgvec.o \
-                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
+                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/modules/memory/memory_scope_connection.o $(OBJDIR)/db2/kb_vectors.o \
                     $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
                     $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
                     $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # memory/KB vector upsert dim guard (rejects builtin-384 vs halfvec(1024)/(2560)).
-$(TESTPREFIX)/unit-test-memory-embed-dim-guard: $(OBJDIR)/tests/test_memory_embed_dim_guard.o \
-                    $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o \
-                    $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o \
-                    $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o \
-                    $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-memory-embed-http-auth: \
-                    $(OBJDIR)/tests/test_memory_embed_http_auth.o \
-                    $(OBJDIR)/modules/memory/memory_core_helpers_b.o \
-                    $(OBJDIR)/tests/support/mock_agent_http.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # One embedder round trip per batch: the request COUNT is the behaviour under test.
-$(TESTPREFIX)/unit-test-memory-embed-batch: \
-                    $(OBJDIR)/tests/test_memory_embed_batch.o \
-                    $(OBJDIR)/modules/memory/memory_core_helpers_b.o \
-                    $(OBJDIR)/tests/support/mock_agent_http.o \
-                    $(OBJDIR)/cJSON.o $(OBJDIR)/log.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-rules: $(OBJDIR)/tests/test_rules.o $(DB1_TEST_OBJS) $(DB1_MIGRATED_OBJS) $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
                        $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                        $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/cJSON.o
@@ -1683,10 +1614,8 @@ $(TESTPREFIX)/unit-test-extractors: $(OBJDIR)/tests/test_extractors.o $(OBJDIR)/
 $(OBJDIR)/extractors_extra.o $(OBJDIR)/extractors_new_langs.o $(OBJDIR)/code_treesitter.o $(OBJDIR)/index.o $(OBJDIR)/cochange.o $(OBJDIR)/modules/css/css_analyze.o $(OBJDIR)/db2/css_graph.o $(DB2_TEST_BACKEND_OBJ) $(OBJDIR)/db2/db2_test_shim.o \
                            $(CONFIG_CLIENT_TEST_OBJS) $(OBJDIR)/yaml.o $(OBJDIR)/dstr.o $(OBJDIR)/util.o $(OBJDIR)/text.o \
                            $(OBJDIR)/platform_random.o $(OBJDIR)/log.o $(PLATFORM_BASIC_OBJS) \
-                           $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_candidate_fusion.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/approach_store.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/posix/memory.o \
-                           $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/db2/fact_lifecycle.o $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_activation.o \
-                            $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
-                           $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/tasks.o \
+                           $(TEST_DATA_OBJS_MOCK) \
+                           $(OBJDIR)/dogfood.o $(OBJDIR)/working_profile.o $(OBJDIR)/tasks.o \
                            $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/db2/feature_rows.o \
                            $(OBJDIR)/render.o $(OBJDIR)/json_fluent.o $(OBJDIR)/cJSON.o 
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -1897,21 +1826,6 @@ $(TESTPREFIX)/unit-test-index: $(OBJDIR)/tests/test_index.o $(TEST_DATA_OBJS_MOC
 # checking the stub; the postgres family suites cover it against a real
 # database. This binary links module_bus_stub, whose honest default is "no
 # module attached", so the gate is closed here and the other 511 assertions run.
-$(TESTPREFIX)/unit-test-memory-advanced: $(OBJDIR)/tests/test_memory_advanced.o $(OBJDIR)/tests/support/db1_init_mock.o $(OBJDIR)/tests/support/module_bus_stub.o $(OBJDIR)/db1_store_ready.o $(DB1_CLIENT_OBJS) $(OBJDIR)/module_json_call.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-feedback-shadow: $(OBJDIR)/tests/test_feedback_shadow.o \
-    $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-graph-fusion: $(OBJDIR)/tests/test_graph_fusion.o \
-    $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-code-vectors: $(OBJDIR)/tests/test_code_vectors.o \
-    $(OBJDIR)/kb/kb_service_code_embed.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-graph-scoring: $(OBJDIR)/tests/test_graph_scoring.o \
     $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
@@ -1925,21 +1839,12 @@ $(TESTPREFIX)/unit-test-entity-nodes: $(OBJDIR)/tests/test_entity_nodes.o \
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 
-$(TESTPREFIX)/unit-test-memory-ranker-boundary: $(OBJDIR)/tests/test_memory_ranker_boundary.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
 $(TESTPREFIX)/unit-test-memory-lanes: $(OBJDIR)/tests/test_memory_lanes.o $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-memory-lane-outcome: $(OBJDIR)/tests/test_memory_lane_outcome.o $(TEST_DATA_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
 
 # Links the real fusion TU, not a mirror: memory_candidate_fusion.c was split out
 # of memory_core_search_c.c (db2 + libpq) precisely so this policy is reachable
 # from a unit test without standing up a store.
-$(TESTPREFIX)/unit-test-memory-candidate-fusion: $(OBJDIR)/tests/test_memory_candidate_fusion.o $(OBJDIR)/modules/memory/memory_candidate_fusion.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-workspace: $(OBJDIR)/tests/test_workspace.o \
                           $(OBJDIR)/worktree_gc.o \
                           $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA)
@@ -2012,18 +1917,8 @@ $(TESTPREFIX)/unit-test-cli-launch: $(OBJDIR)/tests/test_cli_launch.o $(OBJDIR)/
 $(TESTPREFIX)/unit-test-cli-provider: $(OBJDIR)/tests/test_cli_provider.o $(OBJDIR)/posix/cli_main.o
 	$(TESTLINK) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-context-assembly: $(OBJDIR)/tests/test_context_assembly.o \
-                                 $(OBJDIR)/tests/support/delegate_role_policy_stub.o \
-                                 $(TEST_DATA_OBJS) $(TEST_WORKSPACE_OBJS_EXTRA) \
-                           $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-workspace-memory: $(OBJDIR)/tests/test_workspace_memory.o $(TEST_DATA_OBJS_MOCK) \
-                                 $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-dashboard: $(OBJDIR)/tests/test_dashboard.o \
-                          $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/memory/memory_activation.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
+                          $(OBJDIR)/dashboard.o $(OBJDIR)/dashboard_kb.o $(OBJDIR)/server/dashboard_server.o $(OBJDIR)/modules/kb_client/kb_client.o $(OBJDIR)/modules/kb_client/kb_client_cache.o $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o $(OBJDIR)/modules/kb_client/kb_client_memory.o $(OBJDIR)/modules/kb_client/kb_client_memory_audit.o $(OBJDIR)/modules/kb_client/kb_client_memory_mutations.o $(OBJDIR)/modules/kb_client/kb_client_pii.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_dashboard.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o $(OBJDIR)/modules/kb_client/kb_client_data.o \
                           $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_f.o \
                           $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/decision_log.o $(OBJDIR)/db2/kb_audit_worm.o \
                           $(CONFIG_CLIENT_TEST_OBJS) \
@@ -2066,7 +1961,7 @@ $(TESTPREFIX)/unit-test-server-dispatch: $(OBJDIR)/tests/test_server_dispatch.o 
  $(OBJDIR)/modules/workflows/wfe_enforce.o \
 	$(OBJDIR)/wfe_store_lists.o \
  $(OBJDIR)/harness_memory_common.o $(OBJDIR)/modules/delegates/delegate_sandbox_image.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/delegates/delegate_launch_args.o \
- $(OBJDIR)/modules/memory/memory_redirect.o $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
+ $(OBJDIR)/harness_memory_scope.o $(OBJDIR)/harness_memory_audit.o \
  $(OBJDIR)/tests/support/delegate_child_env_export_stub.o \
  $(OBJDIR)/server/server_config.o \
  $(OBJDIR)/tests/support/skill_jobs_stub.o \
@@ -2148,12 +2043,10 @@ $(TESTPREFIX)/unit-test-kb-client-memory: $(OBJDIR)/tests/test_kb_client_memory.
 	                                  $(OBJDIR)/integrity_gate.o $(OBJDIR)/integrity_ingress.o $(OBJDIR)/tests/support/obs_durable_stub.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_pii.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_prospective.o $(OBJDIR)/modules/kb_client/kb_client_agent.o $(OBJDIR)/modules/kb_client/kb_client_tasks.o \
-	                                  $(OBJDIR)/modules/memory/memory_activation.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_index.o $(OBJDIR)/code_collect.o \
 	                                  $(OBJDIR)/modules/kb_client/kb_client_index_parse.o \
 	                                  $(OBJDIR)/cli_client.o $(OBJDIR)/cli_v1_routes.o $(OBJDIR)/cli_v1_routes_b.o $(OBJDIR)/cli_argspec.o $(OBJDIR)/modules/workspace/workspace_client_diff.o $(OBJDIR)/cli_v1_routes_c.o $(OBJDIR)/cli_v1_routes_d.o $(OBJDIR)/aimee_client.o $(OBJDIR)/http_uds_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o $(OBJDIR)/cli_v1_routes_e.o $(OBJDIR)/cli_v1_routes_f.o $(OBJDIR)/posix/cli_client.o $(OBJDIR)/aimee_tls.o $(OBJDIR)/codex_auth.o \
 	                                  $(OBJDIR)/tests/support/mock_agent_http.o \
-	                                  $(OBJDIR)/posix/memory.o \
 	                                  $(OBJDIR)/aimee_home.o $(OBJDIR)/shared/kb_paths.o $(OBJDIR)/cJSON.o \
 	                                  $(PLATFORM_BASIC_OBJS) $(OBJDIR)/tests/support/log_stub.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
@@ -2950,7 +2843,7 @@ $(TESTPREFIX)/unit-test-trajectory-batch: $(OBJDIR)/tests/test_trajectory_batch.
                                $(CONFIG_CLIENT_TEST_OBJS) \
 \
 \
-                               $(OBJDIR)/posix/memory.o \
+                               $(OBJDIR)/modules/memory/memory_content_gate_bus.o \
                                $(OBJDIR)/log.o $(OBJDIR)/util.o $(OBJDIR)/text.o $(OBJDIR)/yaml.o $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o \
                                $(PLATFORM_BASIC_OBJS) $(OBJDIR)/interaction_event_names.o \
                            $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
@@ -3296,9 +3189,17 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lpthread
 
 .PHONY: db2-replay
+$(TESTPREFIX)/unit-test-memory-bus-context: $(OBJDIR)/tests/test_memory_bus_context.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_state.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
 db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
 	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
+	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/db2 -run '^TestMemoryPostgresReplay$$'
+	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/memory -run '^TestMemoryRuntimeRoleReplay$$'
 
 # --- Postgres-backed unit tests -------------------------------------------
 #
@@ -4523,10 +4424,6 @@ $(TESTPREFIX)/unit-test-rel-types: $(OBJDIR)/tests/test_rel_types.o \
 
 # Retrieval hysteresis: the gate is pure arithmetic over turn indices, and the
 # session store is stubbed in the test, so this links minimally.
-$(TESTPREFIX)/unit-test-memory-activation: $(OBJDIR)/tests/test_memory_activation.o \
-                               $(OBJDIR)/modules/memory/memory_activation.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 # Normalized assertion identity: pure text, no DB, so a minimal link like
 # rel_types (whose normalizer it composes with).
 $(TESTPREFIX)/unit-test-fact-identity: $(OBJDIR)/tests/test_fact_identity.o \
@@ -4534,12 +4431,8 @@ $(TESTPREFIX)/unit-test-fact-identity: $(OBJDIR)/tests/test_fact_identity.o \
                                $(OBJDIR)/modules/db2/c/fact_identity_unicode.o $(OBJDIR)/rel_types.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-# Grounding gate: pure text check, no DB, so a minimal link like rel_types.
-$(TESTPREFIX)/unit-test-memory-facts-grounding: $(OBJDIR)/tests/test_memory_facts_grounding.o
-	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
-
 $(TESTPREFIX)/unit-test-memory-fact-gate: $(OBJDIR)/tests/test_memory_fact_gate.o \
-                               $(OBJDIR)/modules/memory/memory_fact_gate.o $(OBJDIR)/rel_types.o
+                               $(OBJDIR)/modules/memory/memory_fact_gate.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 # typed-fact P1b: DB2 store + commit path, against the sqlite shim.
@@ -4574,19 +4467,9 @@ $(TESTPREFIX)/unit-test-embedding-dim: $(OBJDIR)/tests/test_embedding_dim.o \
 # Which probes embedder_probe_register installs for which embed command. Guards a
 # registration decision, not a computation: skipping the serving-identity probe along
 # with the dim probe is what made the builtin -> model switch undetectable.
-$(TESTPREFIX)/unit-test-embedder-probe-register: $(OBJDIR)/tests/test_embedder_probe_register.o \
-                               $(OBJDIR)/server/embedder_probe.o \
-                               $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # typed-fact P4: self-extending ontology promotion pipeline (§2), shim.
 $(TESTPREFIX)/unit-test-ontology-evolution: $(OBJDIR)/tests/test_ontology_evolution.o \
                                $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-# typed-fact P5: pattern-first extraction (§6) + retraction scan (§4). Pure.
-$(TESTPREFIX)/unit-test-extract-patterns: $(OBJDIR)/tests/test_extract_patterns.o \
-                               $(OBJDIR)/modules/memory/memory_extract_patterns.o $(OBJDIR)/rel_types.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # typed-fact P5: pattern-first ingest pipeline (§6 -> §1), shim.
@@ -4620,12 +4503,12 @@ $(TESTPREFIX)/unit-test-kb-doc-pdf: $(OBJDIR)/tests/test_kb_doc_pdf.o \
 
 # typed-fact P5: typed-fact recall + §7 PII gating into the envelope, shim.
 $(TESTPREFIX)/unit-test-fact-recall: $(OBJDIR)/tests/test_fact_recall.o \
-                               $(TEST_DATA_OBJS_MOCK)
+                               $(OBJDIR)/db2/fact_recall.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # typed-fact P5: per-attribute PII recall gating (§7). Pure.
 $(TESTPREFIX)/unit-test-pii-gate: $(OBJDIR)/tests/test_pii_gate.o \
-                               $(OBJDIR)/modules/memory/memory_pii_gate.o $(OBJDIR)/rel_types.o
+                               $(OBJDIR)/modules/memory/memory_pii_gate.o
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-request-context: $(OBJDIR)/tests/test_request_context.o \
@@ -6020,32 +5903,6 @@ $(TESTPREFIX)/unit-test-turn-narration: $(OBJDIR)/tests/test_turn_narration.o \
                                          $(OBJDIR)/turn_narration.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
-$(TESTPREFIX)/unit-test-kb: $(OBJDIR)/tests/test_kb.o $(OBJDIR)/kb/kb.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/db2/kb_runtime_state.o $(OBJDIR)/kb/kb_ingest_workers.o $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o $(OBJDIR)/kb/modules/kb-synthesis/kb_curator_notify.o $(OBJDIR)/kb/kb_fusion.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o \
-                             $(OBJDIR)/sketch.o $(OBJDIR)/db2/sketch.o \
-                             $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_candidate_fusion.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db2_tenant.o $(OBJDIR)/kb/kb_identity.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/kb_service_backend_memory.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/approach_store.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/tests/support/kb_ws_stub.o $(OBJDIR)/posix/memory.o \
-                             $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/db2/fact_lifecycle.o $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_activation.o \
-                              $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
-                             $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o \
-                             $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o $(OBJDIR)/kb/kb_mdl.o \
-                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                             $(OBJDIR)/db2/calibration.o \
-                             $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
-
-$(TESTPREFIX)/unit-test-memory-retrieval-eval: $(OBJDIR)/kb/kb_bandit.o $(OBJDIR)/kb/kb_bandit_registry.o $(OBJDIR)/db2/bandit.o \
-                             $(OBJDIR)/tests/test_memory_retrieval_eval.o \
-                             $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
-                             $(OBJDIR)/modules/memory/memory_core.o $(OBJDIR)/modules/memory/memory_core_crud.o $(OBJDIR)/modules/memory/memory_core_helpers.o $(OBJDIR)/modules/memory/memory_core_helpers_b.o $(OBJDIR)/modules/memory/memory_core_search.o $(OBJDIR)/modules/memory/memory_core_search_b.o $(OBJDIR)/modules/memory/memory_core_search_c.o $(OBJDIR)/modules/memory/memory_candidate_fusion.o $(OBJDIR)/modules/memory/memory_core_scope_embed.o $(OBJDIR)/modules/memory/memory_core_tiers.o $(OBJDIR)/db2/db2_init.o $(OBJDIR)/db2/db2_hardening.o $(OBJDIR)/db2/db2_pool.o $(OBJDIR)/db2/db_schema.o $(OBJDIR)/db2/kb_payload.o $(OBJDIR)/db2/kb_service_backend.o $(OBJDIR)/db2/kb_service_backend_ingest.o $(OBJDIR)/db2/memory_lifecycle.o $(OBJDIR)/db2/memory_payload.o $(OBJDIR)/db2/memory_promotion.o $(OBJDIR)/db2/memory_query.o $(OBJDIR)/db2/memory_query_bookkeeping.o $(OBJDIR)/db2/memory_entity_graph.o $(OBJDIR)/db2/memory_score_fields.o $(OBJDIR)/db2/memory_scope_query.o $(OBJDIR)/db2/memory_scenes.o $(OBJDIR)/db2/memory_briefing.o $(OBJDIR)/db2/memory_health.o $(OBJDIR)/db2/memory_row_mapper_pg.o $(OBJDIR)/db2/memory_relations.o $(OBJDIR)/db2/memory_conflicts.o $(OBJDIR)/db2/vector_index_ops.o $(OBJDIR)/db2/code_index_ops.o $(OBJDIR)/db2/rules.o $(OBJDIR)/db2/stopwords.o $(OBJDIR)/db2/tool_registry.o $(OBJDIR)/db2/feedback.o $(OBJDIR)/db2/notes.o $(OBJDIR)/db2/anti_patterns.o $(OBJDIR)/approach_store.o $(OBJDIR)/db2/curiosity.o $(OBJDIR)/db2/entity_edges.o $(OBJDIR)/db2/entity_profiles.o $(OBJDIR)/db2/epistemic_directives.o $(OBJDIR)/db2/failed_queries.o $(OBJDIR)/db2/kind_lifecycle.o $(OBJDIR)/db2/pgvec_transport.o $(OBJDIR)/db2/memory_vectors.o $(OBJDIR)/db2/kb_vectors.o $(OBJDIR)/db2/vector_status.o $(OBJDIR)/db2/pgvec_verify.o $(OBJDIR)/db2/pgvec_kb_service.o $(OBJDIR)/tests/support/mock_agent_http.o $(OBJDIR)/tests/support/memory_embed_stub.o $(OBJDIR)/tests/support/kb_client_test_stub.o $(OBJDIR)/posix/memory.o \
-                             $(OBJDIR)/modules/memory/memory_logic.o $(OBJDIR)/modules/memory/memory_health.o $(OBJDIR)/db2/fact_lifecycle.o $(TEST_FACT_MUTATION_MIN_OBJS) $(OBJDIR)/modules/memory/memory_conflict.o $(OBJDIR)/modules/memory/memory_context.o $(OBJDIR)/modules/memory/memory_assemble.o $(OBJDIR)/modules/memory/memory_activation.o \
-                              $(OBJDIR)/modules/memory/memory_advanced.o $(OBJDIR)/modules/memory/memory_prospective.o $(OBJDIR)/modules/memory/memory_lifecycle.o $(OBJDIR)/modules/memory/memory_directives.o $(OBJDIR)/modules/memory/memory_maintenance.o $(OBJDIR)/modules/memory/memory_graph.o $(OBJDIR)/modules/memory/memory_graph_fusion.o $(OBJDIR)/modules/memory/memory_scan.o $(OBJDIR)/modules/memory/memory_improve.o $(OBJDIR)/modules/memory/memory_episodes.o \
-                             $(OBJDIR)/kb/kb.o $(OBJDIR)/db2/code_index.o $(OBJDIR)/kb/kb_neardup.o $(OBJDIR)/kb/kb_conventions.o $(OBJDIR)/kb/kb_mdl.o $(OBJDIR)/sketch.o $(OBJDIR)/db2/sketch.o \
-                             $(OBJDIR)/tests/support/learning_implicit_stub.o $(OBJDIR)/dogfood.o \
-                             $(OBJDIR)/kb/kb_features.o $(OBJDIR)/kb/kb_ranker.o $(OBJDIR)/kb/kb_detect.o \
-                             $(OBJDIR)/db2/feature_rows.o $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
-                             $(OBJDIR)/db2/calibration.o \
-                             $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm -lzstd
-
 
 
 $(TESTPREFIX)/unit-test-cli-session: $(OBJDIR)/tests/test_cli_session.o \
@@ -6337,12 +6194,6 @@ $(TESTPREFIX)/unit-test-mcp-client-sse: $(OBJDIR)/tests/test_mcp_client_sse.o \
                      $(TEST_MCP_CLIENT_OBJS)
 	$(TESTLINK) -o $@ $(OBJDIR)/tests/test_mcp_client_sse.o $(TEST_MCP_CLIENT_OBJS) $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-memory-provider: $(OBJDIR)/tests/test_memory_provider.o \
-                     $(OBJDIR)/modules/memory/memory_provider.o \
-                     $(OBJDIR)/log.o \
-                     $(PLATFORM_BASIC_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-plugin-c-hook: $(OBJDIR)/tests/test_plugin_c_hook.o \
                      $(OBJDIR)/modules/module-runtime/pre_llm_hook.o \
                      $(OBJDIR)/log.o \
@@ -6357,13 +6208,6 @@ $(TESTPREFIX)/unit-test-dogfood: $(OBJDIR)/tests/test_dogfood.o \
                      $(TEST_CORE_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-
-$(TESTPREFIX)/unit-test-curiosity: $(OBJDIR)/tests/test_curiosity.o $(TEST_DATA_OBJS_MOCK) \
-                           $(OBJDIR)/tests/support/store_module_fixture.o \
-                           $(OBS_BUS_LINK_OBJS) \
-                           $(OBJDIR)/module_json_call.o $(DB1_CLIENT_OBJS) \
-                           $(CORE_EVENT_BUS_LIB)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 # KB store-side memory-audit hook + end-to-end onto aimee-kb's obs_bus/ledger:
 # memory_core_crud (db2 shim) fires the hook, the REAL KB bridge maps it, and the
@@ -6392,10 +6236,6 @@ unit-test-memory-audit-hook: $(TESTPREFIX)/unit-test-memory-audit-hook
 	$<
 
 
-$(TESTPREFIX)/unit-test-session-briefing: $(OBJDIR)/tests/test_session_briefing.o \
-                     $(OBJDIR)/session_briefing.o $(OBJDIR)/modules/skills/skill.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 # Pure helpers extracted from session_start_emit; the header is static-inline so
 # only cJSON.o is needed at link time.
 $(TESTPREFIX)/unit-test-session-start-util: $(OBJDIR)/tests/test_session_start_util.o \
@@ -6409,12 +6249,6 @@ $(TESTPREFIX)/unit-test-memory-assemble-util: $(OBJDIR)/tests/test_memory_assemb
 
 $(TESTPREFIX)/unit-test-session-brief: $(OBJDIR)/tests/test_session_brief.o \
                      $(OBJDIR)/cmd_session_history.o $(OBJDIR)/cmd_util.o $(TEST_CORE_OBJS)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-learning-metrics: $(OBJDIR)/tests/test_learning_metrics.o \
-                     $(OBJDIR)/modules/learning/learning_router.o $(OBJDIR)/modules/learning/learning_regret.o $(OBJDIR)/modules/learning/learning_implicit.o \
-                     $(OBJDIR)/modules/learning/learning_signal_policy.o \
-                     $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-curiosity-resolve: $(OBJDIR)/tests/test_curiosity_resolve.o \
@@ -6451,18 +6285,6 @@ $(TESTPREFIX)/unit-test-approach-memory: $(OBJDIR)/tests/test_approach_memory.o 
                      $(TEST_DATA_OBJS_MOCK)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
-$(TESTPREFIX)/unit-test-learning-regret: $(OBJDIR)/tests/test_learning_regret.o \
-                     $(DB1_CLIENT_OBJS) $(TEST_CORE_OBJS) $(OBJDIR)/log.o $(OBJDIR)/module_json_call.o $(OBJDIR)/modules/audit/obs_bus.o $(PLATFORM_BASIC_OBJS) $(OBJDIR)/module_commands.o \
-                     $(OBJDIR)/core/event_bus/module_client.o $(OBJDIR)/core/event_bus/module_protocol.o $(OBJDIR)/core/event_bus/bus_client.o $(OBJDIR)/core/event_bus/bus_route.o \
-                     $(OBJDIR)/tests/support/store_module_fixture.o $(OBJDIR)/tests/support/db1_init_mock.o \
-                     $(OBS_BUS_LINK_OBJS) $(CORE_EVENT_BUS_LIB) \
-                                          $(OBJDIR)/modules/learning/learning_router.o \
-                     $(OBJDIR)/modules/learning/learning_implicit.o \
-                     $(OBJDIR)/modules/learning/learning_signal_policy.o \
-                     $(OBJDIR)/modules/learning/learning_regret.o \
-                     $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
 $(TESTPREFIX)/unit-test-learning-eval-synthesis: $(OBJDIR)/tests/test_learning_eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_eval_synthesis.o \
                      $(OBJDIR)/modules/learning/learning_endogeneity.o \
@@ -6481,19 +6303,6 @@ $(TESTPREFIX)/unit-test-eval-candidates: $(OBJDIR)/tests/test_eval_candidates.o 
                      $(OBJDIR)/modules/learning/learning_approach_memory.o $(OBJDIR)/modules/learning/learning_policy_arms.o \
                      $(OBJDIR)/approach_store.o \
                      $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-memory-recall-pivot: $(OBJDIR)/tests/test_memory_recall_pivot.o \
-                     $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
-
-$(TESTPREFIX)/unit-test-memory-filter: $(OBJDIR)/tests/test_memory_filter.o $(TEST_DATA_OBJS_MOCK)
-	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS) -lm
-
-$(TESTPREFIX)/unit-test-memory-profiles: $(OBJDIR)/tests/test_memory_profiles.o \
-                     $(OBJDIR)/modules/memory/memory_profile_pack.o \
-                     $(OBJDIR)/aimee_home.o \
-                     $(OBJDIR)/cJSON.o $(PLATFORM_BASIC_OBJS)
 	$(TESTLINK) -o $@ $^ $(TEST_L_FLAGS)
 
 $(TESTPREFIX)/unit-test-wiki-render: $(OBJDIR)/tests/test_wiki_render.o \
@@ -7432,191 +7241,6 @@ unit-test-db2-rel-enum-text-support-sanitize: \
       $(TESTPREFIX)/unit-test-db2-rel-enum-text-support-sanitize
 	$<
 
-DB2_NODE_KIND_TEXT_SUPPORT_RENAMES = \
-   -Dmemory_ontology_node_kind_to_text=db2_support_memory_ontology_node_kind_to_text
-
-$(OBJDIR)/tests/db2_node_kind_text_support_impl.o: \
-                     modules/db2/support/node_kind_text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) -c -o $@ $<
-
-$(OBJDIR)/tests/db2_memory_episodes_monolith.o: modules/memory/memory_episodes.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-node-kind-text-support: \
-                     $(OBJDIR)/tests/test_db2_node_kind_text_support.o \
-                     $(OBJDIR)/tests/db2_node_kind_text_support_impl.o \
-                     $(OBJDIR)/tests/db2_memory_episodes_monolith.o
-	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(TEST_L_FLAGS)
-
-DB2_NODE_KIND_TEXT_SANITIZE_DIR = $(OBJDIR)/tests/db2-node-kind-text-support-sanitize
-
-$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o: tests/test_db2_node_kind_text_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/node_kind_text_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_NODE_KIND_TEXT_SUPPORT_RENAMES) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o: modules/memory/memory_episodes.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize: \
-                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/test.o \
-                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/support.o \
-                     $(DB2_NODE_KIND_TEXT_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-db2-node-kind-text-support unit-test-db2-node-kind-text-support-sanitize
-unit-test-db2-node-kind-text-support: $(TESTPREFIX)/unit-test-db2-node-kind-text-support
-	$<
-
-unit-test-db2-node-kind-text-support-sanitize: \
-      $(TESTPREFIX)/unit-test-db2-node-kind-text-support-sanitize
-	$<
-
-DB2_PII_INJECT_GATE_SUPPORT_RENAMES = \
-   -Dmemory_pii_should_inject=db2_support_memory_pii_should_inject
-DB2_PII_INJECT_GATE_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o: \
-                     modules/db2/support/pii_inject_gate_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
-	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/db2_memory_pii_gate_monolith.o: modules/memory/memory_pii_gate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support: \
-                     $(OBJDIR)/tests/test_db2_pii_inject_gate_support.o \
-                     $(OBJDIR)/tests/db2_pii_inject_gate_support_impl.o \
-                     $(OBJDIR)/tests/db2_memory_pii_gate_monolith.o
-	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
-
-DB2_PII_INJECT_GATE_SANITIZE_DIR = \
-                     $(OBJDIR)/tests/db2-pii-inject-gate-support-sanitize
-
-$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o: \
-                     tests/test_db2_pii_inject_gate_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/pii_inject_gate_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SUPPORT_RENAMES) \
-	      $(DB2_PII_INJECT_GATE_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) \
-	      -c -o $@ $<
-
-$(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o: \
-                     modules/memory/memory_pii_gate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_INJECT_GATE_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize: \
-                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/test.o \
-                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/support.o \
-                     $(DB2_PII_INJECT_GATE_SANITIZE_DIR)/monolith.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-db2-pii-inject-gate-support \
-        unit-test-db2-pii-inject-gate-support-sanitize
-unit-test-db2-pii-inject-gate-support: \
-      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support
-	$<
-
-unit-test-db2-pii-inject-gate-support-sanitize: \
-      $(TESTPREFIX)/unit-test-db2-pii-inject-gate-support-sanitize
-	$<
-
-DB2_PII_CLASSIFIER_SUPPORT_RENAMES = \
-   -Dmemory_pii_register_turn_classifier=db2_support_memory_pii_register_turn_classifier \
-   -Dmemory_pii_turn_requests_sensitive=db2_support_memory_pii_turn_requests_sensitive \
-   -Dmemory_pii_rel_sensitivity=db2_support_memory_pii_rel_sensitivity \
-   -Dmemory_pii_register_sensitivity_batch=db2_support_memory_pii_register_sensitivity_batch \
-   -Dmemory_pii_rel_sensitivity_batch=db2_support_memory_pii_rel_sensitivity_batch
-DB2_PII_CLASSIFIER_SECTION_FLAGS = -ffunction-sections -fdata-sections
-
-$(OBJDIR)/tests/db2_pii_classifier_support_impl.o: \
-                     modules/db2/support/pii_classifier_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
-	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/db2_pii_classifier_monolith.o: modules/memory/memory_pii_gate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/db2_pii_classifier_rel_type.o: modules/db2/support/rel_type_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
-
-$(OBJDIR)/tests/db2_pii_classifier_rel_seed.o: modules/db2/support/rel_seed_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-pii-classifier-support: \
-                     $(OBJDIR)/tests/test_db2_pii_classifier_support.o \
-                     $(OBJDIR)/tests/db2_pii_classifier_support_impl.o \
-                     $(OBJDIR)/tests/db2_pii_classifier_monolith.o \
-                     $(OBJDIR)/tests/db2_pii_classifier_rel_type.o \
-                     $(OBJDIR)/tests/db2_pii_classifier_rel_seed.o
-	$(CC) $(EXTRA_L_FLAGS) -Wl,--gc-sections -o $@ $^
-
-DB2_PII_CLASSIFIER_SANITIZE_DIR = $(OBJDIR)/tests/db2-pii-classifier-support-sanitize
-
-$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o: tests/test_db2_pii_classifier_support.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o: \
-                     modules/db2/support/pii_classifier_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SUPPORT_RENAMES) \
-	      $(DB2_PII_CLASSIFIER_SECTION_FLAGS) $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o: modules/memory/memory_pii_gate.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o: \
-                     modules/db2/support/rel_type_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o: \
-                     modules/db2/support/rel_seed_primitives.c
-	@mkdir -p $(dir $@)
-	$(CC) $(TEST_C_FLAGS) $(DB2_PII_CLASSIFIER_SECTION_FLAGS) \
-	      $(DB2_SUPPORT_SANITIZE_FLAGS) -c -o $@ $<
-
-$(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize: \
-                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/test.o \
-                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/support.o \
-                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/monolith.o \
-                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-type.o \
-                     $(DB2_PII_CLASSIFIER_SANITIZE_DIR)/rel-seed.o
-	$(CC) $(DB2_SUPPORT_SANITIZE_FLAGS) -Wl,--gc-sections -o $@ $^
-
-.PHONY: unit-test-db2-pii-classifier-support unit-test-db2-pii-classifier-support-sanitize
-unit-test-db2-pii-classifier-support: \
-                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support
-	$<
-
-unit-test-db2-pii-classifier-support-sanitize: \
-                     $(TESTPREFIX)/unit-test-db2-pii-classifier-support-sanitize
-	$<
-
 $(OBJDIR)/tests/db2_runtime_config_support_impl.o: \
                      modules/db2/support/runtime_config_primitives.c
 	@mkdir -p $(dir $@)
@@ -7951,7 +7575,7 @@ $(TESTPREFIX)/unit-test-calibration: $(OBJDIR)/tests/test_calibration.o \
 
 $(TESTPREFIX)/unit-test-demotion: $(OBJDIR)/tests/test_demotion.o \
                      $(OBJDIR)/db2/demotion.o \
-                     $(OBJDIR)/db2/memory_payload.o \
+                     $(OBJDIR)/tests/support/memory_migration_stub.o \
                      $(OBJDIR)/db2/artifacts.o $(OBJDIR)/db2/kb_audit_worm.o $(OBJDIR)/modules/audit/audit_worm_chain.o $(OBJDIR)/modules/workflows/wfe_canonical.o $(OBJDIR)/aimee_sha256.o \
                      $(OBJDIR)/db2/feature_rows.o \
                      $(OBJDIR)/kb/kb_mdl.o \

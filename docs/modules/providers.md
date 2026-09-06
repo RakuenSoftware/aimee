@@ -70,7 +70,7 @@ does not rewrite those runtime families.
 
 Principal 33 serves stages 1 (resolve), 2 (validate), and 3 (manage), on event
 kinds 12545–12547. The obsolete unregistered C declaration events collided with
-economizer and are retired. Principal 73 requests egress and config services.
+economizer and are retired. Principal 74 requests egress and config services.
 The binary declaration wire layout remains unchanged.
 
 ## Verification
