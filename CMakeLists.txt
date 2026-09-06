@@ -941,6 +941,7 @@ set(SERVER_SRCS
     ${AIMEE_SRC_DIR}/modules/vault/vault_service.c
     ${AIMEE_SRC_DIR}/modules/vault/vault_capability.c
     ${AIMEE_SRC_DIR}/server/server_vault.c
+    ${AIMEE_SRC_DIR}/server/server_memory.c
     ${AIMEE_SRC_DIR}/server/server_state.c
     ${AIMEE_SRC_DIR}/server/server_state_freshness.c
     ${AIMEE_SRC_DIR}/server/server_audit_replay_routes.c

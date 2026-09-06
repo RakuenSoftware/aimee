@@ -1,0 +1,12 @@
+{
+  "phase": "after-restart",
+  "validationKind": "real-stack",
+  "target": "https://127.0.0.1:8443",
+  "passed": [
+    "real browser login",
+    "post-restart provider, model association, and credential checks",
+    "provider deletion removes its models only; deleting last model retains provider",
+    "empty provider can be deleted and stays deleted after refresh"
+  ],
+  "pageErrors": []
+}

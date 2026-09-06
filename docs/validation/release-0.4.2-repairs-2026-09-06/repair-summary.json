@@ -1,0 +1,44 @@
+{
+  "verified_at_utc": "2026-09-06T20:44:55.648638+00:00",
+  "base_commit": "6083b85e4664f06abd5275ee5e893388734a6181",
+  "guest": 9422,
+  "guest_name": "aimee-repair-042-20260906",
+  "checks": {
+    "memory_fresh": {
+      "passed": 61,
+      "total": 61
+    },
+    "memory_upgrade": {
+      "passed": 67,
+      "total": 67
+    },
+    "c_sqlite_registered": 637,
+    "c_postgres_registered": 637,
+    "frontend_tests": 198,
+    "lint_checks": 77,
+    "learning_checks": 46,
+    "liveness_checks": 17,
+    "browser_checks": 5,
+    "published_client_checks": 6,
+    "db2_process_replay": "passed after historical-read correction",
+    "s1_validator_tests": 14
+  },
+  "images": {
+    "server": "sha256:dc501abe3739f89c3e2bbf73f9b17a09e2d0baf197365c8891504c930824fcda",
+    "kb": "sha256:270474b754f2f65b0259c3b0b9a45b705a07e33aaeaebd2224fd4beb4833caab"
+  },
+  "binaries": {
+    "aimee-runtime-web": "28c5861a99972fcd4e7c313646df195dd1f98f9929eaeed8bb6d2a17288e51fb",
+    "index.html": "6f806c8445dc763c4742433598c2f06fb910c42f0349c02b219d4c15fc5a8663",
+    "Dockerfile.kb": "8c8078d9da884990df19123c2a0e232040f63250641163b9a3abdca7589b6f01",
+    "aimee-kb": "a0e9d369bc863e81c14a21bb91bc8af1b5d0c2e240977012e5a8364b17c7a541",
+    "aimee-server": "a3d666dc92df1decdaf588f751bc12b704eb680dbbe58828973f931177121dc6",
+    "aimee-module": "3ed257f9840fa8e6765b391cb469daa105a62d93a0a47ada9f41784bdf4aa7a1",
+    "aimee": "7c92dca6fdd341d9eed05a58e1cc48578c5c58ddcea7d91adeb69b947be62d18",
+    "aimee-kb-entrypoint.sh": "6748fba4830a5a5acb8c2b64723f7d8b2f8aaff3c89dd1b80ab914d3c65854cf",
+    "Dockerfile.server": "84f8097ef6283138e9db23905795a359dc7554846354a13cfeca8606e7767c9d"
+  },
+  "next_release_version": "0.4.2",
+  "required_ci": "PR 2963: followup corrections validated locally; rerun pending",
+  "guest_cleanup": "pending after evidence export"
+}

@@ -176,6 +176,7 @@ TEST_CORE_OBJS += $(OBJDIR)/http_content_encoding.o
 TEST_WORKSPACE_OBJS_EXTRA = $(OBJDIR)/modules/workspace/workspace.o $(OBJDIR)/modules/workspace/workspace_session_lookup.o $(OBJDIR)/session_worktree_key.o $(OBJDIR)/modules/workspace/workspace_manifest.o $(OBJDIR)/modules/workspace/workspace_turn.o $(OBJDIR)/user_memory_merge.o \
 $(OBJDIR)/modules/routing/agent_config.o $(OBJDIR)/modules/vault/agent_credentials.o $(OBJDIR)/modules/routing/agent_registry.o $(OBJDIR)/modules/routing/routing.o $(OBJDIR)/tests/support/vault_service_stub.o $(OBJDIR)/tests/support/oauth_tokens_stub.o $(OBJDIR)/server/agent_adapter.o $(OBJDIR)/cmd_describe.o \
                              $(OBJDIR)/posix/cmd_describe.o \
+                             $(OBJDIR)/server/server_memory.o $(OBJDIR)/server/module_stage_adapters.o \
                              $(OBJDIR)/server/agent_runtime.o $(OBJDIR)/modules/economizer/economizer_module_client.o $(OBJDIR)/server/agent_request_build.o $(OBJDIR)/tests/support/ir_shadow_stubs.o $(OBJDIR)/server/agent_logging.o $(OBJDIR)/server/request_context.o $(OBJDIR)/server/agent_context_budget.o $(OBJDIR)/prompts.o $(OBJDIR)/server/provider_cli_adapter.o $(OBJDIR)/server/cli_codex.o $(OBJDIR)/server/cli_claude.o $(OBJDIR)/server/cli_mistral.o $(OBJDIR)/server/cli_acp.o $(OBJDIR)/conversation_context.o $(OBJDIR)/server/provider_catalog.o $(OBJDIR)/server/agent_bridge.o $(OBJDIR)/server/anthropic_shape.o $(OBJDIR)/server/tool_call_args.o $(OBJDIR)/server/agent_request_shaping.o $(OBJDIR)/server/agent_policy.o $(OBJDIR)/server/model_sampling.o \
                              $(OBJDIR)/server/agent_tasks.o $(OBJDIR)/modules/benchmarks/agent_eval.o $(OBJDIR)/modules/benchmarks/agent_eval_memory_support.o $(OBJDIR)/modules/benchmarks/agent_eval_baseline.o \
                              $(OBJDIR)/server/agent_coord.o $(OBJDIR)/server/agent_tools.o $(OBJDIR)/modules/sandbox/sandbox_learned.o $(OBJDIR)/module_json_call.o $(OBJDIR)/posix/workspace_provider.o $(OBJDIR)/server/script_runner.o $(OBJDIR)/server/script_rpc.o $(OBJDIR)/toolset.o $(OBJDIR)/server/tool_args_coerce.o $(OBJDIR)/server/tool_schema_sanitizer.o \
@@ -650,6 +651,8 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-memory-assemble-util \
                $(TESTPREFIX)/unit-test-memory-bus-context \
+               $(TESTPREFIX)/unit-test-memory-data-bus \
+               $(TESTPREFIX)/unit-test-kb-memory-list \
                $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
@@ -1053,7 +1056,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module 
 	  for t in $(UNIT_TEST_TARGETS); do \
 	    log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; \
 	    echo "  $$t"; \
-	    "./$$t" >"$$log" 2>&1; \
+	    ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; \
 	    rc="$$?"; \
 	    cat "$$log"; \
 	    rm -f "$$log"; \
@@ -1061,7 +1064,7 @@ unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module 
 	  done; \
 	else \
 	  if ! printf '%s\0' $(UNIT_TEST_TARGETS) | \
-	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; rm -f "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
+	    xargs -0 -n1 -P "$$jobs" sh -c 't="$$1"; log="$$(mktemp /tmp/aimee-test-run.XXXXXX)"; echo "  $$t"; s0=$$(date +%s); ../scripts/run-c-unit-test.sh "./$$t" >"$$log" 2>&1; rc="$$?"; s1=$$(date +%s); cat "$$log"; rm -f "$$log"; printf "%s %s\\n" "$$((s1-s0))" "$$t" >>"$$AIMEE_TEST_FAILURE_DIR/timings"; if [ "$$rc" -ne 0 ]; then echo "FAILED: $$t" >&2; printf "FAILED: %s\\n" "$$t" >"$$AIMEE_TEST_FAILURE_DIR/failure.$$$$"; fi; exit "$$rc"' _; then \
 	    echo "Unit test failures:" >&2; \
 	    if ! cat "$$fd"/failure.* >&2 2>/dev/null; then \
 	      echo "  (no marker written: a test was killed by a signal before it could" >&2; \
@@ -3192,7 +3195,7 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 $(TESTPREFIX)/unit-test-memory-bus-context: $(OBJDIR)/tests/test_memory_bus_context.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
-$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_state.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_memory.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
@@ -7913,3 +7916,9 @@ $(TESTPREFIX)/unit-test-response-completion-stage: $(OBJDIR)/tests/test_response
 $(OBJDIR)/aimee-providers-fixture: $(wildcard ../server-go/modules/providers/*.go) ../server-go/modules/providers/testdata/nativefixture/main.go
 	@mkdir -p $(dir $@)
 	cd ../server-go && go build -o ../src/$@ ./modules/providers/testdata/nativefixture
+
+$(TESTPREFIX)/unit-test-memory-data-bus: $(OBJDIR)/tests/test_memory_data_bus.o $(OBJDIR)/modules/memory/memory_data_bus.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-kb-memory-list: $(OBJDIR)/tests/test_kb_memory_list.o $(OBJDIR)/kb/db2_adapters/kb_service_backend_memory.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm

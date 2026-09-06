@@ -104,6 +104,8 @@ cJSON *marshal_workspace_prepare(int argc, char **argv)
 static void marshal_add_memory_scope(cJSON *req, const cli_args_t *opts)
 {
    const char *v;
+   if ((v = cli_args_get(opts, "store")))
+      cJSON_AddStringToObject(req, "store", v);
    if ((v = cli_args_get(opts, "project")))
       cJSON_AddStringToObject(req, "project", v);
    if ((v = cli_args_get(opts, "workspace")))
@@ -242,6 +244,7 @@ cJSON *marshal_memory_store(int argc, char **argv)
       cJSON_AddStringToObject(req, "session_id", v);
    if ((v = cli_args_get(&opts, "confidence")))
       cJSON_AddNumberToObject(req, "confidence", atof(v));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -313,6 +316,15 @@ cJSON *marshal_memory_archive(int argc, char **argv)
    return marshal_user_capture("archive", "archive", "archive:", "L1", argc, argv);
 }
 
+cJSON *marshal_memory_stats(int argc, char **argv)
+{
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
+   cJSON *req = marshal_no_args("memory.stats");
+   marshal_add_memory_scope(req, &opts);
+   return req;
+}
+
 cJSON *marshal_memory_list(int argc, char **argv)
 {
    cli_args_t opts;
@@ -350,14 +362,18 @@ cJSON *marshal_memory_get(int argc, char **argv)
       as_of = cli_args_get(&opts, "as_of");
    if (as_of && as_of[0])
       cJSON_AddStringToObject(req, "as_of", as_of);
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
 cJSON *marshal_memory_delete(int argc, char **argv)
 {
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.delete");
-   if (argc > 0)
-      cJSON_AddNumberToObject(req, "id", atoll(argv[0]));
+   if (opts.pos_count > 0)
+      cJSON_AddNumberToObject(req, "id", atoll(opts.positional[0]));
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 
@@ -366,27 +382,21 @@ cJSON *marshal_memory_delete(int argc, char **argv)
  * server-host command take the same thing. */
 cJSON *marshal_memory_supersede(int argc, char **argv)
 {
+   cli_args_t opts;
+   cli_args_parse(argc, argv, NULL, &opts);
    cJSON *req = marshal_no_args("memory.supersede");
-   int positional = 0;
-   for (int i = 0; i < argc; i++)
-   {
-      if (strncmp(argv[i], "--confidence=", 13) == 0)
-         cJSON_AddNumberToObject(req, "confidence", atof(argv[i] + 13));
-      else if (strncmp(argv[i], "--session=", 10) == 0)
-         cJSON_AddStringToObject(req, "session_id", argv[i] + 10);
-      else if (argv[i][0] == '-')
-         continue;
-      else if (positional == 0)
-      {
-         cJSON_AddNumberToObject(req, "old_id", atoll(argv[i]));
-         positional++;
-      }
-      else if (positional == 1)
-      {
-         cJSON_AddStringToObject(req, "new_content", argv[i]);
-         positional++;
-      }
-   }
+   if (opts.pos_count > 0)
+      cJSON_AddNumberToObject(req, "old_id", atoll(opts.positional[0]));
+   char *content = positionals_joined(&opts, 1);
+   if (content)
+      cJSON_AddStringToObject(req, "new_content", content);
+   free(content);
+   const char *v;
+   if ((v = cli_args_get(&opts, "confidence")))
+      cJSON_AddNumberToObject(req, "confidence", atof(v));
+   if ((v = cli_args_get(&opts, "session")))
+      cJSON_AddStringToObject(req, "session_id", v);
+   marshal_add_memory_scope(req, &opts);
    return req;
 }
 

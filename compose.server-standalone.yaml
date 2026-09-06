@@ -1,9 +1,8 @@
 # Standalone aimee-server.
 #
-# No aimee-kb and no Postgres: the server runs against a self-contained SQLite
-# DB1 and serves its DB1-backed /v1 endpoints. With no AIMEE_KB_API_URL set, the
-# kb-backed shared / vector operations are simply unavailable until a kb is wired
-# in (see compose.server.yaml for the full server + kb stack).
+# No aimee-kb: the server and its dedicated PostgreSQL store provide personal
+# memory and the local /v1 surface. Shared knowledge operations require an
+# optional KB (see compose.server.yaml for the combined deployment).
 #
 # Deploy the published image (pushed to ghcr on every merge to main), or build:
 #   docker compose -f compose.server-standalone.yaml pull && \

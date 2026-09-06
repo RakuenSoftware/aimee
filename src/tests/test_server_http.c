@@ -509,6 +509,11 @@ static void test_json_number_serialization_is_exact(void)
 
 int main(void)
 {
+   extern int server_http_declared_status(const char *json);
+   assert(server_http_declared_status("{\"status\":\"error\",\"kind\":\"not_found\"}") == 502);
+   assert(server_http_declared_status("{\"status\":\"error\",\"http_status\":404}") == 404);
+   assert(server_http_declared_status("{\"status\":\"ok\"}") == 200);
+
    test_json_number_serialization_is_exact();
    test_role_template_show_reports_what_the_role_came_to();
    printf("server_http: ");

@@ -229,9 +229,8 @@ static int kb_search_handler(const char *body, char *resp, int cap)
    return 200;
 }
 
-/* POST /v1/memory/recall: parse {task_hint|query, limit_tokens?, session_start?}
- * and recall relevant memories via aimee-kb. Returns the kb_client JSON
- * envelope verbatim; 400 on a missing hint, 502 when aimee-kb is unreachable. */
+/* Recall from the selected memory module: personal by default, shared on an
+ * explicit store=kb request. Session start does not require a task hint. */
 static int memory_recall_handler(const char *body, char *resp, int cap)
 {
    cJSON *req = body ? cJSON_Parse(body) : NULL;
@@ -239,7 +238,10 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    const cJSON *jh = req ? cJSON_GetObjectItemCaseSensitive(req, "task_hint") : NULL;
    if (!cJSON_IsString(jh) || !jh->valuestring[0])
       jh = req ? cJSON_GetObjectItemCaseSensitive(req, "query") : NULL;
-   if (!cJSON_IsString(jh) || !jh->valuestring[0])
+   const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session_start");
+   int session_start = cJSON_IsTrue(js) ? 1 : 0;
+   const char *hint = cJSON_IsString(jh) ? jh->valuestring : "";
+   if (!hint[0] && !session_start)
    {
       cJSON_Delete(req);
       snprintf(resp, (size_t)cap,
@@ -252,8 +254,6 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    int limit_tokens = (cJSON_IsNumber(jl) && jl->valuedouble >= 1.0 && jl->valuedouble <= 32768.0)
                           ? (int)jl->valuedouble
                           : 1024;
-   const cJSON *js = cJSON_GetObjectItemCaseSensitive(req, "session_start");
-   int session_start = cJSON_IsTrue(js) ? 1 : 0;
 
    /* Learn how to work with THIS user from their own turns: the UserPromptSubmit
     * hook posts each turn's prompt here as task_hint, and this handler runs in the
@@ -265,7 +265,30 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
    if (!session_start)
    {
       if (config_identity_working_profile_injection_enabled())
-         (void)working_profile_autoobserve_from_feedback(jh->valuestring);
+         (void)working_profile_autoobserve_from_feedback(hint);
+   }
+
+   int store_selection = server_memory_store_selection(req);
+   if (store_selection < 0)
+   {
+      cJSON_Delete(req);
+      snprintf(resp, (size_t)cap,
+               "{\"status\":\"error\",\"message\":\"memory store must be user or kb\"}");
+      return 400;
+   }
+   if (!store_selection)
+   {
+      char *local = server_user_memory_recall_json(hint, limit_tokens, session_start);
+      cJSON_Delete(req);
+      if (!local)
+      {
+         snprintf(resp, (size_t)cap,
+                  "{\"status\":\"error\",\"message\":\"user memory module unavailable\"}");
+         return 502;
+      }
+      snprintf(resp, (size_t)cap, "%s", local);
+      free(local);
+      return 200;
    }
 
    /* Graph-code fusion is always on for recall. */
@@ -310,7 +333,7 @@ static int memory_recall_handler(const char *body, char *resp, int cap)
       return 409;
    }
    kb_client_memory_scope_context_set(workspace, project, include_all);
-   char *j = kb_client_memory_recall_json_ex(jh->valuestring, limit_tokens, session_start, "on");
+   char *j = kb_client_memory_recall_shared_json(hint, limit_tokens, session_start);
    kb_client_memory_scope_context_clear();
    cJSON_Delete(req);
    if (!j)

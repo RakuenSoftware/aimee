@@ -124,10 +124,16 @@ cJSON *db2_kb_service_memory_list_json(const char *tier, const char *kind, int l
       cJSON_Delete(resp);
       return NULL;
    }
-   cJSON_AddStringToObject(resp, "status", "ok");
-
    memory_t rows[64];
    int n = memory_list(tier, kind, limit, rows, 64);
+   if (n < 0)
+   {
+      cJSON_AddStringToObject(resp, "status", "error");
+      cJSON_AddStringToObject(resp, "kind", "unavailable");
+      cJSON_AddStringToObject(resp, "message", "memory module unavailable");
+      return resp;
+   }
+   cJSON_AddStringToObject(resp, "status", "ok");
    for (int i = 0; i < n; i++)
    {
       cJSON *obj = kbs_memory_row_to_json(&rows[i]);
@@ -1227,10 +1233,13 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       return NULL;
 
    memory_t m;
-   if (memory_get(id, &m) != 0)
+   int get_rc = memory_get_as_of_result(id, as_of, &m);
+   if (get_rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
-      cJSON_AddStringToObject(resp, "message", "memory not found");
+      cJSON_AddStringToObject(resp, "message",
+                              get_rc > 0 ? "memory not found" : "memory module unavailable");
+      cJSON_AddStringToObject(resp, "kind", get_rc > 0 ? "not_found" : "unavailable");
       return resp;
    }
    cJSON_AddStringToObject(resp, "status", "ok");
@@ -1263,7 +1272,7 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       cJSON_Delete(resp);
       return NULL;
    }
-   char *full_content = memory_content_dup(m.id);
+   char *full_content = memory_content_as_of_dup(m.id, as_of);
    cJSON *content_json = full_content ? cJSON_CreateString(full_content) : NULL;
    free(full_content);
    if (!content_json || !cJSON_ReplaceItemInObjectCaseSensitive(obj, "content", content_json))

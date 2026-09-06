@@ -50,7 +50,8 @@
     "server-go/modules/memory/redirect.go",
     "server-go/modules/memory/scope.go",
     "server-go/modules/memory/session.go",
-    "server-go/modules/memory/trace.go"
+    "server-go/modules/memory/trace.go",
+    "server-go/modules/memory/visibility_search.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
@@ -64,7 +65,8 @@
     "server-go/modules/memory/memory_facts_test.go",
     "server-go/modules/memory/ontology_test.go",
     "server-go/modules/memory/pii_conformance_test.go",
-    "server-go/modules/memory/redirect_test.go"
+    "server-go/modules/memory/redirect_test.go",
+    "server-go/modules/memory/privacy_regression_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h",

@@ -30,7 +30,7 @@ func TestMemoryCenterRoutesAreRegistered(t *testing.T) {
 	var s server
 	mux := http.NewServeMux()
 	s.registerRoutes(mux)
-	for _, path := range []string{"/v1/memory/review", "/v1/memory/reject", "/v1/memory/restore"} {
+	for _, path := range []string{"/v1/memory/delete", "/v1/memory/review", "/v1/memory/reject", "/v1/memory/restore"} {
 		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{}`))
 		_, pattern := mux.Handler(req)
 		if pattern != path {

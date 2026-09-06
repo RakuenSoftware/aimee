@@ -115,7 +115,12 @@ check_status() {
   fi
 }
 
-cleanup() { [[ "$DO_DOWN" == 1 ]] && { bold "==> Tearing down (--down)"; "${DC[@]}" down -v || true; }; }
+cleanup() {
+  if [[ "$DO_DOWN" == 1 ]]; then
+    bold "==> Tearing down (--down)"
+    "${DC[@]}" down -v || true
+  fi
+}
 trap cleanup EXIT
 
 if [[ "$DO_UP" == 1 ]]; then
@@ -167,6 +172,15 @@ bold "==> Lazy kb degrades gracefully (no kb wired in)"
 # well-formed upstream error instead of hanging or crashing.
 check_error_body "GET /v1/rules -> upstream unavailable" '"error":"rules backend unavailable"' \
   "${SERVER_URL}/v1/rules"
+
+if [[ "${AIMEE_E2E_MEMORY_PLACEMENT:-0}" == 1 ]]; then
+  [[ "$DO_UP" == 1 ]] || { echo "memory placement tests require a disposable --up stack" >&2; exit 2; }
+  mkdir -p /tmp/aimee-e2e-evidence
+  python3 tests/e2e/memory-placement-e2e.py \
+    --server "$("${DC[@]}" ps -q aimee-server)" \
+    --store-db "$("${DC[@]}" ps -q aimee-store-db)" \
+    --output /tmp/aimee-e2e-evidence/memory-placement-local.json
+fi
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

@@ -596,8 +596,8 @@ static void test_osv_offline_cache_miss_allows(void)
    "target_key,target_memory_id,title,workflow_project,workflow_signal_type} req:command\n"        \
    "list_curiosity_items {limit,state} req:\n" MCP_LSP_GOLDEN "memory "                            \
    "{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,"       \
-   "project,query,reason,scope,tier,verb,workspace} req:command\n"                                 \
-   "memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\n"       \
+   "project,query,reason,scope,store,tier,verb,workspace} req:command\n"                           \
+   "memory_recall {cwd,limit_tokens,project,scope,session_start,store,task_hint,workspace} req:\n" \
    "note {command,content,limit,query,tag,tags,title} req:command\n"                               \
    "payload_rewrite_status {} req:\n"                                                              \
    "pdf_inspect_structure {document_key,project} req:document_key,project\n"                       \
@@ -622,7 +622,7 @@ static void test_osv_offline_cache_miss_allows(void)
    "req:diff,original_request\n"                                                                   \
    "rules {command,reason,text} req:command\n"                                                     \
    "search_docs {cwd,max_results,project,query,scope} req:query\n"                                 \
-   "search_memory {cwd,filter,project,query,scope,workspace} req:query\n"                          \
+   "search_memory {cwd,filter,project,query,scope,store,workspace} req:query\n"                    \
    "send_message {target,text} req:target,text\n"                                                  \
    "session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} "   \
    "req:command\n"                                                                                 \

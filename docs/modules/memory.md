@@ -79,6 +79,19 @@ global, with ID de-duplication and a single bounded result limit. Server calls
 are always user-scoped. Writes use active-row replacement semantics and never
 reactivate a retired KB row accidentally.
 
+### Personal recall
+
+The `recall-bundle` operation runs in either placement. Server placement reads
+its own user store through the same Go retrieval implementation; it needs no
+shared schema or KB-generated envelope. Expired and retired personal records
+are excluded. API, CLI, and MCP recall default to that local store; an explicit
+`store=kb` selects shared recall without merging personal records. Recall items
+include `text`, `memory_id`, and a scoped handle for prompt consumers.
+
+This establishes local record recall, not a complete KB-free model deployment.
+Personal vector persistence and synthesis provisioning still need integration.
+Structured reminders and directives currently require the shared schema.
+
 ## Failure behavior
 
 Required policy stages do not silently run a second implementation. Extraction

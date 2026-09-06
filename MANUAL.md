@@ -59,15 +59,33 @@ A remote client uploads file content. A server never treats a client path as a p
 
 ## Memory
 
-Use durable memory for facts that should survive tools and sessions:
+Memory has two separate stores. The server store belongs to the local user and can hold
+personal memories and PII. The KB holds shared knowledge across projects and workspaces.
+The same numeric ID can exist in both stores.
+
+The basic memory commands default to the local user store. Choose `--store kb` explicitly
+for shared knowledge; `--project`, `--workspace`, and `--scope` narrow that KB selection.
+A missing local record or unavailable local database never falls back to the KB.
 
 ```bash
-aimee memory store infrastructure "Staging is in eu-west-1"
-aimee memory search "where is staging"
+aimee memory store preference "I prefer concise progress updates"
 aimee memory list
-aimee memory get <id>
-aimee memory read
+aimee memory get <user-id>
+aimee memory store --store kb infrastructure "Staging is in eu-west-1"
+aimee memory list --store kb --scope all
+aimee memory get --store kb <kb-id>
 ```
+
+The HTTP API uses `store: "user"` (default) or `store: "kb"`. The MCP tools `mutate`,
+`memory_get`, `search_memory`, and `list_facts` use the same selector. Existing MCP
+`memory:<id>` preview handles identify KB records; explicit `user:memory:<id>` and
+`kb:memory:<id>` handles are also accepted. The Memory page opens Personal (local)
+and lets you select the KB separately.
+
+After upgrading from 0.4.1, existing KB records stay in the KB. Use `--store kb` to
+address them. Historical `--as-of` reads and KB review/reinforcement operations require
+the KB store. Personal replacement updates the local record; retirement removes it
+from active lookup. Advanced KB recall and `memory read` continue to read shared knowledge.
 
 The KB stores typed records with source, scope, confidence, freshness, and links to artifacts.
 Curation joins duplicates, records contradictions, and lets stale evidence decay. Recall mixes

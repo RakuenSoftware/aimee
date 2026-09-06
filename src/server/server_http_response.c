@@ -57,6 +57,13 @@ int server_http_declared_status(const char *json)
    int status = cJSON_IsNumber(item) && item->valueint >= 400 && item->valueint <= 599
                     ? item->valueint
                     : 200;
+   /* A missing status provider must not turn a declared failure into HTTP
+    * success (for example when the optional runtime-web module is disabled).
+    * Detailed kind mapping stays in its Go owner; this is the transport's
+    * generic failed-upstream status. */
+   cJSON *result = cJSON_GetObjectItemCaseSensitive(doc, "status");
+   if (status == 200 && cJSON_IsString(result) && strcmp(result->valuestring, "error") == 0)
+      status = 502;
    cJSON_Delete(doc);
    return status;
 }

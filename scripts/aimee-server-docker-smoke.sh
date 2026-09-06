@@ -280,13 +280,13 @@ mem_id="$(printf '%s' "$as_of_seed" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\
 if [[ -n "$mem_id" ]]; then
   check "POST /v1/memory/get --as-of -> kb echoes the timestamp" '"as_of"' \
         -X POST -H 'content-type: application/json' \
-        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+        -d "{\"store\":\"kb\",\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
   check "POST /v1/memory/get --as-of -> kb returns a verdict" '"valid_at"' \
         -X POST -H 'content-type: application/json' \
-        -d "{\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
+        -d "{\"store\":\"kb\",\"id\":${mem_id},\"as_of\":\"2020-01-01T00:00:00Z\"}" "${SERVER_URL}/v1/memory/get"
   check_absent "POST /v1/memory/get without --as-of emits no verdict" '"valid_at"' \
         -X POST -H 'content-type: application/json' \
-        -d "{\"id\":${mem_id}}" "${SERVER_URL}/v1/memory/get"
+        -d "{\"store\":\"kb\",\"id\":${mem_id}}" "${SERVER_URL}/v1/memory/get"
 else
   red "  FAIL  kb memory.store did not return an id (cannot check --as-of)"
   printf '        got: %s\n' "${as_of_seed:-<no response>}"
@@ -301,6 +301,16 @@ check_kb "GET /v1/health (kb direct)" '"status"' "${KB_URL}/v1/health"
 check_kb "GET /v1/health reports DB2 schema ready" '"db2_ok":true' "${KB_URL}/v1/health"
 check_kb "GET /v1/health reports KB tables ready" '"db2_kb_tables_ok":true' \
          "${KB_URL}/v1/health"
+
+if [[ "${AIMEE_E2E_MEMORY_PLACEMENT:-0}" == 1 ]]; then
+  [[ "$DO_UP" == 1 ]] || { echo "memory placement tests require a disposable --up stack" >&2; exit 2; }
+  mkdir -p /tmp/aimee-e2e-evidence
+  python3 tests/e2e/memory-placement-e2e.py \
+    --server "$("${DC[@]}" ps -q aimee-server)" \
+    --kb "$("${DC[@]}" ps -q aimee-kb)" \
+    --store-db "$("${DC[@]}" ps -q aimee-store-db)" \
+    --output /tmp/aimee-e2e-evidence/memory-placement.json
+fi
 
 echo
 bold "==> Summary: ${PASS} passed, ${FAIL} failed"

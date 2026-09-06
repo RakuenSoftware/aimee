@@ -39,7 +39,6 @@
     "kb.health",
     "kb.ingest.status",
     "mcp.audit",
-    "memory.stats",
     "catalog.refresh",
     "notes.list",
     "provider.get",

@@ -1,0 +1,61 @@
+{
+  "verdict": "NO_GO",
+  "candidate_commit": "6083b85e4664f06abd5275ee5e893388734a6181",
+  "image_channel": "testing-6083b85",
+  "host": "192.168.1.253",
+  "guest": 9422,
+  "guest_name": "aimee-release-042-20260906",
+  "test_window_utc": "2026-09-06 17:54\u201318:35",
+  "checks": {
+    "native_sqlite_executables": 654,
+    "native_postgres_executables": 654,
+    "shared_db_memory_providers_race_tests": 124,
+    "workflow_race_tests": 221,
+    "frontend_tests": 196,
+    "published_client_proxy_tests": 26,
+    "docker_kb_only": 9,
+    "docker_split": 10,
+    "docker_standalone": 4,
+    "learning_loop_checks_with_packaging_corrected_harness": 46,
+    "browser_exercise": 9,
+    "browser_after_restart": 4,
+    "browser_exploratory": 5,
+    "browser_module_outage": 1,
+    "browser_routes_rendered": 15,
+    "concurrent_memory_writes": 16,
+    "records_preserved_across_server_restart": 17
+  },
+  "limitations": [
+    "Native liveness harness requires placement/companion-grant corrections and an audit observer; final isolated manual run reports a WORM backlog blocker.",
+    "The two skipped PostgreSQL-dependent memory tests in the race suite were run separately with required PostgreSQL fixtures.",
+    "External model vendor replaced with the repository deterministic fixture; no live vendor subscriptions tested.",
+    "15-page browser navigation is render/API exploration, not full feature acceptance for each page.",
+    "Initial incorrectly staged source runs are excluded; candidate build and suites were rerun from a new verified checkout."
+  ],
+  "findings": [
+    {
+      "id": "R042-1",
+      "severity": "release-blocker",
+      "description": "memory.store/list/delete use user memory; get/supersede address KB IDs. Published CLI get fails or reads a different KB record with the same ID."
+    },
+    {
+      "id": "R042-2",
+      "severity": "release-blocker",
+      "description": "0.4.1 global/project memories become unreadable through get/list after upgrade and restart, although SQL rows and payloads remain."
+    },
+    {
+      "id": "R042-3",
+      "severity": "release-gate",
+      "description": "Candidate CI failed unit-tests-pg (2/3), unit-test-workspace assertion test_workspace.c:614; local complete runs pass."
+    },
+    {
+      "id": "R042-4",
+      "severity": "follow-up",
+      "description": "Store database outage returns HTTP 200 with an explicit application-error body; recovery succeeds."
+    }
+  ],
+  "raw_evidence_archive": "/tmp/aimee-release-042-20260906/release042-evidence.tar.gz",
+  "raw_evidence_sha256": "e1311394668e3baab5e6b9feaa6dc658b87684b854c79fb9e034dc9fbbeb95e2",
+  "published_linux_client_sha256": "6b23f3c717ee0d449a7007d8181fc0eea9d9d659ada34933e278fae2b22fe910",
+  "cleanup": "Original validation guest removed on 2026-09-06T18:39:15Z; a new guest later reused ID 9422 for repair verification."
+}

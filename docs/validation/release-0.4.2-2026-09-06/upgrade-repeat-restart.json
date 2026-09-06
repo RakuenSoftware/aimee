@@ -1,0 +1,24 @@
+{
+  "kb_healthy": true,
+  "server_healthy": true,
+  "probe": {
+    "get": [
+      200,
+      {
+        "status": "error",
+        "message": "memory not found",
+        "kind": "not_found"
+      },
+      0.006
+    ],
+    "list": [
+      200,
+      {
+        "status": "ok",
+        "memories": [],
+        "active_context_missing": false
+      },
+      0.0226
+    ]
+  }
+}

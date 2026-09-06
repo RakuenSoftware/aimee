@@ -1,0 +1,88 @@
+{
+  "containers": {
+    "release042-split-aimee-server-1": {
+      "Id": "5bdffe952715f401a183493415fce8cad73cb6eab83fcb4b1bcbcc95b8290aad",
+      "Image": "sha256:2d3ceffd6bf62d35cd9f4485227e455b93713d67a7f6f7f1f4c7e7037eae984f",
+      "Created": "2026-09-06T18:09:24.311596084Z",
+      "RestartCount": 0,
+      "image_tag": "ghcr.io/rakuensoftware/aimee-server:testing-6083b85",
+      "health": "healthy"
+    },
+    "release042-split-aimee-kb-1": {
+      "Id": "cd5ee1f1846091496934f92c41e0d1d106f3bdc0b69e809b1c8344b9ffdfc044",
+      "Image": "sha256:a4375e3b151da25ef100949798780109171109f5e2b0981ddf24c99e9314b521",
+      "Created": "2026-09-06T18:09:01.413655448Z",
+      "RestartCount": 0,
+      "image_tag": "ghcr.io/rakuensoftware/aimee-kb-a25m:testing-6083b85",
+      "health": "healthy"
+    },
+    "release042-split-aimee-store-db-1": {
+      "Id": "89519bea365aa9ab9a022cf9f58619b485f670ec18b54a85769fe4642ed9d859",
+      "Image": "sha256:a6638641707cdf047e5d5c2781f437e2e809323cab22c70b280be8389fbb7878",
+      "Created": "2026-09-06T18:09:01.413505522Z",
+      "RestartCount": 0,
+      "image_tag": "postgres:18",
+      "health": "healthy"
+    },
+    "release042-upgrade-aimee-server-1": {
+      "Id": "cc25b10760b4e4aa156ae9fa84d96a1a4d164de5a90a20174cd8879b04d00853",
+      "Image": "sha256:2d3ceffd6bf62d35cd9f4485227e455b93713d67a7f6f7f1f4c7e7037eae984f",
+      "Created": "2026-09-06T18:21:59.116130867Z",
+      "RestartCount": 0,
+      "image_tag": "ghcr.io/rakuensoftware/aimee-server:testing-6083b85",
+      "health": "healthy"
+    },
+    "release042-upgrade-aimee-kb-1": {
+      "Id": "1bd84cec1b2480113a19b1e6b87aa5312d8bb972e4661fa3d68ecab26bcfe96c",
+      "Image": "sha256:a4375e3b151da25ef100949798780109171109f5e2b0981ddf24c99e9314b521",
+      "Created": "2026-09-06T18:21:55.770032675Z",
+      "RestartCount": 0,
+      "image_tag": "ghcr.io/rakuensoftware/aimee-kb-a25m:testing-6083b85",
+      "health": "healthy"
+    }
+  },
+  "images": {
+    "ghcr.io/rakuensoftware/aimee-server:testing-6083b85": {
+      "id": "sha256:2d3ceffd6bf62d35cd9f4485227e455b93713d67a7f6f7f1f4c7e7037eae984f",
+      "digests": [
+        "ghcr.io/rakuensoftware/aimee-server@sha256:3f7854a12249f9d9249cd5873ace9b5cad727771662f20b7f4df96e372728076"
+      ],
+      "created": "2026-09-06T17:57:11.643096801Z"
+    },
+    "ghcr.io/rakuensoftware/aimee-kb-a25m:testing-6083b85": {
+      "id": "sha256:a4375e3b151da25ef100949798780109171109f5e2b0981ddf24c99e9314b521",
+      "digests": [
+        "ghcr.io/rakuensoftware/aimee-kb-a25m@sha256:12fe349e6a578b8c598dc1d7bd8f856edac2a134911d94dcf41fde6105693fd2"
+      ],
+      "created": "2026-09-06T17:56:57.612232326Z"
+    },
+    "ghcr.io/rakuensoftware/aimee-control-web:testing-6083b85": {
+      "id": "sha256:e2b52f1f82ccdfa9fc8b97677849ef411df746c50bc124b42d4460dd7c0beda2",
+      "digests": [
+        "ghcr.io/rakuensoftware/aimee-control-web@sha256:9ea7d35697bf2f30693ec3dfa57c99417a7d3899cd112c2491fb691fb63f5f5c"
+      ],
+      "created": "2026-09-06T17:55:56.377605739Z"
+    },
+    "postgres:18": {
+      "id": "sha256:a6638641707cdf047e5d5c2781f437e2e809323cab22c70b280be8389fbb7878",
+      "digests": [
+        "postgres@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280"
+      ],
+      "created": "2026-08-25T00:41:16.064197635Z"
+    },
+    "ghcr.io/rakuensoftware/aimee-server:0.4.1": {
+      "id": "sha256:6df4dd1ad6c6c4fbdd1afec7f5b5dc7f6cce56bd36cae91ecdabfc33b485f681",
+      "digests": [
+        "ghcr.io/rakuensoftware/aimee-server@sha256:bb3a020322abba3a8c240a5f943ba18e21a05e2217e49b8b1deadc55acb8a4d8"
+      ],
+      "created": "2026-09-01T20:32:11.710615344Z"
+    },
+    "ghcr.io/rakuensoftware/aimee-kb-a25m:0.4.1": {
+      "id": "sha256:7d72cd83047c096789b4c75fb4e0ef964e5b6f6343227a1a893bfee6af14d31a",
+      "digests": [
+        "ghcr.io/rakuensoftware/aimee-kb-a25m@sha256:13790bc5ec075cfdb25e9dc3c7719706e25da7445c8febbb988eb0aae5585f46"
+      ],
+      "created": "2026-09-01T20:32:18.570341548Z"
+    }
+  }
+}

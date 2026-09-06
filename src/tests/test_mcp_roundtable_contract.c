@@ -33,6 +33,13 @@ void mcp_add_discovery_tools(cJSON *tools)
 {
    (void)tools;
 }
+/* This fixture inspects the flat schema. Keep the unused collapsed branch
+ * linkable at every optimization level and fail if it is ever exercised. */
+void mcp_collapse_families(cJSON *tools)
+{
+   (void)tools;
+   assert(!"flat schema must not collapse tool families");
+}
 void mcp_add_extended_tools(cJSON *tools)
 {
    (void)tools;
@@ -115,6 +122,20 @@ int main(void)
    assert(cJSON_GetObjectItemCaseSensitive(props, "as_of") != NULL);
    assert(cJSON_GetObjectItemCaseSensitive(props, "id") != NULL);     /* additive */
    assert(cJSON_GetObjectItemCaseSensitive(props, "handle") != NULL); /* additive */
+
+   const char *memory_tools[] = {"memory_get", "search_memory", "mutate", "list_facts"};
+   for (size_t i = 0; i < sizeof(memory_tools) / sizeof(memory_tools[0]); ++i)
+   {
+      cJSON *ms = schema_for(memory_tools[i]);
+      assert(ms);
+      cJSON *mp = cJSON_GetObjectItemCaseSensitive(ms, "properties");
+      cJSON *store = cJSON_GetObjectItemCaseSensitive(mp, "store");
+      cJSON *choices = cJSON_GetObjectItemCaseSensitive(store, "enum");
+      assert(cJSON_GetArraySize(choices) == 2);
+      assert(strcmp(cJSON_GetArrayItem(choices, 0)->valuestring, "user") == 0);
+      assert(strcmp(cJSON_GetArrayItem(choices, 1)->valuestring, "kb") == 0);
+      cJSON_Delete(ms);
+   }
 
    cJSON_Delete(schema);
    cJSON_Delete(mg);

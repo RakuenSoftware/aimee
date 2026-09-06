@@ -126,7 +126,7 @@ type Record struct {
 }
 
 type DataResponse struct {
-	Records            []Record             `json:"records,omitempty"`
+	Records            []Record             `json:"records"`
 	Deleted            bool                 `json:"deleted,omitempty"`
 	Allowed            *bool                `json:"allowed,omitempty"`
 	Promoted           int                  `json:"promoted"`
@@ -137,7 +137,7 @@ type DataResponse struct {
 	Reason             string               `json:"reason,omitempty"`
 	Verdict            string               `json:"verdict,omitempty"`
 	Name               string               `json:"name,omitempty"`
-	SensitiveStatus    int                  `json:"sensitive_status,omitempty"`
+	SensitiveStatus    int                  `json:"sensitive_status"`
 	Redacted           string               `json:"redacted,omitempty"`
 	Ephemeral          bool                 `json:"ephemeral,omitempty"`
 	Evidence           bool                 `json:"evidence,omitempty"`
@@ -173,7 +173,7 @@ type DataResponse struct {
 	IDs                []int64              `json:"ids,omitempty"`
 	LowEffectiveness   []LowEffectiveness   `json:"low_effectiveness,omitempty"`
 	SupersededKeys     []SupersededKey      `json:"superseded_keys,omitempty"`
-	Reviews            []ReviewRecord       `json:"reviews,omitempty"`
+	Reviews            []ReviewRecord       `json:"reviews"`
 	Summaries          []MemorySummary      `json:"summaries,omitempty"`
 	Scenes             []MemoryScene        `json:"scenes,omitempty"`
 	SceneMembers       []SceneMember        `json:"scene_members,omitempty"`
@@ -407,6 +407,10 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
+	return s.get(ctx, scope, id, false)
+}
+
+func (s *postgresDataStore) get(ctx context.Context, scope Scope, id int64, historical bool) (Record, error) {
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
@@ -422,7 +426,7 @@ WHERE id = $1 AND lifecycle_state = 'active'
 	}
 	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE id = $1 AND lifecycle_state = 'active'`, id).
+WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -475,6 +479,21 @@ status='indexed',last_error='',indexed_at=pg_now_text(),updated_at=pg_now_text()
 }
 
 func (s *postgresDataStore) Supersede(ctx context.Context, scope Scope, id int64, content string, confidence float64) (Record, error) {
+	if s.placement == PlacementServer {
+		// Personal memory has one row per (kind,key). Replace atomically: a
+		// failed write must not retire the only copy or touch the KB namespace.
+		r := Record{Scope: scope}
+		err := s.db.QueryRow(ctx, `UPDATE user_memories
+SET content=$2, confidence=$3, updated_at=now()
+WHERE id=$1 AND lifecycle_state='active'
+  AND (valid_until IS NULL OR valid_until>now())
+RETURNING id,tier,kind,key,content,confidence`, id, content, confidence).
+			Scan(&r.ID, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
+		if store.IsNoRows(err) {
+			return Record{}, ErrMemoryNotFound
+		}
+		return r, err
+	}
 	old, err := s.Get(ctx, scope, id)
 	if err != nil {
 		return Record{}, err
@@ -781,7 +800,8 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if options.placement == PlacementKB && request.Scope.Type == "" && request.Scope.Value == "" {
+	explicitScope := request.Scope.Type != "" || request.Scope.Value != ""
+	if options.placement == PlacementKB && !explicitScope {
 		if request.Project != "" {
 			request.Scope = Scope{Type: ScopeProject, Value: request.Project}
 		} else if request.Workspace != "" {
@@ -1152,7 +1172,20 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		record, getErr := options.data.Get(ctx, scope, request.ID)
+		var record Record
+		var getErr error
+		if request.AsOf != "" {
+			if options.placement != PlacementKB {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.get(ctx, scope, request.ID, true)
+		} else {
+			record, getErr = options.data.Get(ctx, scope, request.ID)
+		}
 		if errors.Is(getErr, ErrMemoryNotFound) {
 			response.Records = []Record{}
 			break
@@ -1164,10 +1197,19 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if request.Operation == "briefing" || request.Operation == "list" {
 			query = ""
 		}
-		response.Records, err = options.data.Search(ctx, scope, query, request.Kind, request.Tier, request.Limit)
+		if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB && !explicitScope {
+			request.Query = query
+			response.Records, err = backend.SearchVisible(ctx, request)
+		} else {
+			response.Records, err = options.data.Search(ctx, scope, query, request.Kind, request.Tier, request.Limit)
+		}
 	case "visible-search":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest
+		}
+		if backend, ok := options.data.(*postgresDataStore); ok {
+			response.Records, err = backend.SearchVisible(ctx, request)
+			break
 		}
 		scopes := []Scope{{Type: ScopeGlobal, Value: "_global"}}
 		if request.Workspace != "" {
@@ -1228,7 +1270,12 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 		var record Record
 		record, err = advanced.Supersede(ctx, scope, request.ID, request.Content, *request.Confidence)
-		response.Records = []Record{record}
+		if errors.Is(err, ErrMemoryNotFound) {
+			err = nil
+			response.Records = []Record{}
+		} else {
+			response.Records = []Record{record}
+		}
 	case "feedback":
 		if len(request.IDs) == 0 || len(request.IDs) > 64 {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1363,7 +1410,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 	case "touch", "update-content", "reject", "link-create", "link-query", "link-delete",
 		"provenance-list", "provenance-add", "conflict-list", "conflict-record",
-		"conflict-resolve", "scope-tag", "scope-collect", "scope-primary", "scope-rank", "stats", "health",
+		"conflict-resolve", "scope-tag", "scope-collect", "scope-primary", "scope-rank", "health",
 		"lifecycle-get", "lifecycle-transition", "lifecycle-pending", "lifecycle-sweep",
 		"lifecycle-count", "episode-list", "episode-get", "relation-search", "entity-edges",
 		"entity-profile", "fact-history":
@@ -1465,10 +1512,6 @@ set_config('aimee.memory_scope_all',$5,true)`,
 				return nil, bus.ModuleStatusInvalidRequest
 			}
 			response.ScopeRanks, err = domain.ScopeRanks(ctx, ids, request.Workspace, request.Project, request.IncludeAll)
-		case "stats":
-			var stats MemoryStats
-			stats, err = domain.Stats(ctx)
-			response.Stats = &stats
 		case "health":
 			var health MemoryHealth
 			health, err = domain.Health(ctx)
@@ -1536,8 +1579,22 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		var valid bool
 		valid, err = temporal.ValidAt(ctx, request.ID, request.AsOf)
 		response.ValidAt = &valid
+	case "stats":
+		domain, ok := options.data.(domainDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		var stats MemoryStats
+		stats, err = domain.Stats(ctx)
+		response.Stats = &stats
+	case "review-list":
+		queries, ok := options.data.(queryDataStore)
+		if !ok {
+			return nil, bus.ModuleStatusCapabilityAbsent
+		}
+		response.Reviews, err = queries.ReviewList(ctx, request.State, request.Limit)
 	case "key-exists", "find-id", "query-records", "low-effectiveness", "unused-l2",
-		"superseded-keys", "review-list", "restore", "set-artifact", "summaries", "scenes",
+		"superseded-keys", "restore", "set-artifact", "summaries", "scenes",
 		"scene-members", "all-ids", "epistemic-kind", "demote-confidence", "tier-kind-counts":
 		if options.placement != PlacementKB {
 			return nil, bus.ModuleStatusInvalidRequest
@@ -1573,8 +1630,6 @@ set_config('aimee.memory_scope_all',$5,true)`,
 			response.Records, err = queries.UnusedL2(ctx, request.Days, request.Limit)
 		case "superseded-keys":
 			response.SupersededKeys, err = queries.SupersededKeys(ctx, request.MinVersions, request.Limit)
-		case "review-list":
-			response.Reviews, err = queries.ReviewList(ctx, request.State, request.Limit)
 		case "restore":
 			if request.ID <= 0 || request.Actor == "" {
 				return nil, bus.ModuleStatusInvalidRequest
@@ -1614,7 +1669,7 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		}
 	case "recall-bundle", "briefing-bundle", "alerts-bundle", "assemble-context", "context-block",
 		"diagnose", "explain", "ask":
-		if options.placement != PlacementKB {
+		if options.placement != PlacementKB && request.Operation != "recall-bundle" {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
 		retrieval, ok := options.data.(retrievalDataStore)

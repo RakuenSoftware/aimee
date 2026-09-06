@@ -1,4 +1,5 @@
 #include "aimee.h"
+#include "server.h"
 #include "agent_admission.h"
 #include "agent_config.h" /* agent_request_cancelled — server-owned turn lifecycle */
 #include "aimee_errors.h"
@@ -1597,8 +1598,9 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    size_t budget_procedures = ctx_category_budget(task_type, CTX_CAT_PROCEDURES, content_budget);
    size_t budget_recent = ctx_category_budget(task_type, CTX_CAT_RECENT, content_budget);
    const char *skip_kb_env = getenv("AIMEE_CONTEXT_NO_KB");
-   int skip_kb_client =
-       skip_kb_context || (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
+   const char *kb_mode = config_kb_mode();
+   int skip_kb_client = (kb_mode && strcmp(kb_mode, "none") == 0) || skip_kb_context ||
+                        (skip_kb_env && skip_kb_env[0] && strcmp(skip_kb_env, "0") != 0);
 
    ctx_appendf(buf, cap, &pos, "%s", agent_exec_instructions(task_type));
    ctx_appendf(buf, cap, &pos, "%s", prompt_principles_text(config_current_mode()));
@@ -1738,15 +1740,20 @@ char *agent_build_exec_context_for_role(const agent_t *agent, const agent_networ
    }
    int recall_injected = 0;
    {
-      if (!skip_kb_client && config_memory_recall_enabled())
+      if (config_memory_recall_enabled())
       {
          /* Session-start mode = no task text yet; else the turn prompt is the hint. */
          int session_start = !(custom_prompt && custom_prompt[0]);
          int limit_tokens = session_start ? config_memory_recall_limit_tokens_session()
                                           : config_memory_recall_limit_tokens_turn();
          /* Graph-code fusion is always on for recall. */
-         char *recall_envelope =
-             kb_client_memory_recall_json_ex(custom_prompt, limit_tokens, session_start, "on");
+         char *recall_envelope = skip_kb_client
+                                     ? NULL
+                                     : kb_client_memory_recall_json_ex(custom_prompt, limit_tokens,
+                                                                       session_start, "on");
+         if (!recall_envelope)
+            recall_envelope =
+                server_user_memory_recall_json(custom_prompt, limit_tokens, session_start);
          cJSON *envelope = recall_envelope ? cJSON_Parse(recall_envelope) : NULL;
          free(recall_envelope);
          cJSON *recall_node =

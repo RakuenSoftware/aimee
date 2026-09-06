@@ -146,6 +146,41 @@ configure_embedded_store_module() {
     export AIMEE_STORE_URL AIMEE_STORE_MIGRATION_URL
 }
 
+# Refresh only image-owned grants. Persisted operator policies remain intact.
+# Pre-record 0.4.1 memory grants are recognizable by their exact policy and
+# six-stage serve list; 0.4.2 adds the Go memory-data stage (5895).
+seed_kb_module_grants() {
+    _kg_src=$1
+    _kg_dst=$2
+    mkdir -p "$_kg_dst/.seeded"
+    for _kg_shipped in "$_kg_src/"*.grant; do
+        [ -f "$_kg_shipped" ] || continue
+        _kg_name=$(basename "$_kg_shipped")
+        _kg_target="$_kg_dst/$_kg_name"
+        _kg_record="$_kg_dst/.seeded/$_kg_name"
+        _kg_managed=0
+        if [ ! -e "$_kg_target" ]; then
+            _kg_managed=1
+        elif cmp -s "$_kg_target" "$_kg_shipped"; then
+            _kg_managed=1
+        elif [ -f "$_kg_record" ] && \
+             [ "$(sha256sum "$_kg_target" | cut -d' ' -f1)" = "$(cat "$_kg_record")" ]; then
+            _kg_managed=1
+        elif [ ! -f "$_kg_record" ] && [ "$_kg_name" = memory.grant ] && \
+             [ "$(grep '^serve=' "$_kg_target")" = 'serve=5889,5890,5891,5892,5893,5894' ] && \
+             [ "$(sed '/^serve=/d' "$_kg_target")" = "$(sed '/^serve=/d' "$_kg_shipped")" ]; then
+            _kg_managed=1
+        fi
+        if [ "$_kg_managed" = 1 ]; then
+            cp "$_kg_shipped" "$_kg_target"
+            sha256sum "$_kg_target" | cut -d' ' -f1 > "$_kg_record"
+            chmod 0600 "$_kg_target" "$_kg_record"
+        elif ! cmp -s "$_kg_target" "$_kg_shipped"; then
+            printf '[kb-entrypoint] preserving operator-modified module grant %s\n' "$_kg_name" >&2
+        fi
+    done
+}
+
 # Sourcing stops here: everything above is definitions, everything below starts a
 # container. tests/test_kb_entrypoint.sh uses this to exercise the embedder gate without
 # a PostgreSQL cluster, a Vault, or an image.
@@ -232,11 +267,7 @@ module_supervisor_pid=""
 
 start_modules() {
     mkdir -p "$AIMEE_HOME/modules.d/kb"
-    for module_grant in /opt/aimee/module-grants/kb/*.grant; do
-        [ -f "$module_grant" ] || continue
-        grant_target="$AIMEE_HOME/modules.d/kb/$(basename "$module_grant")"
-        [ -e "$grant_target" ] || cp "$module_grant" "$grant_target"
-    done
+    seed_kb_module_grants /opt/aimee/module-grants/kb "$AIMEE_HOME/modules.d/kb"
     chmod 0700 "$AIMEE_HOME/modules.d" "$AIMEE_HOME/modules.d/kb" 2>/dev/null || true
     chmod 0600 "$AIMEE_HOME/modules.d/kb/"*.grant 2>/dev/null || true
     # Apply the operator's AIMEE_MODULE_<ID> choices over the shipped manifest.
