@@ -6,6 +6,8 @@ study.  A PR merge checkout can legitimately contain later, unrelated source
 files from its base branch.  This validator keeps the evidence pin immutable
 while proving that every semantic-context file is byte-identical to the
 candidate and that the real-provider observations satisfy the frozen gate.
+Shared build manifests admit the exact independent integrations reviewed below
+or an unchanged compiler/linker plan for the frozen provider probe.
 """
 
 from __future__ import annotations
@@ -76,6 +78,32 @@ def build_files_match(candidate_commit: str) -> bool:
     candidate = [git_output("show", f"{candidate_commit}:{path}") for path in BUILD_PATHS]
     current = [(ROOT / path).read_text() for path in BUILD_PATHS]
     return build_plan(*candidate) == build_plan(*current)
+# The proxy adds a thin-client source and a separate test prerequisite. Neither
+# changes the LSP probe's inputs or recipe. Do not exempt entire Makefiles:
+# removing an LSP object, changing flags, or weakening a test must still fail.
+# Pairs are (reviewed release text, frozen equivalent), not regexes or globs.
+REVIEWED_BUILD_INTEGRATIONS = {
+    "src/Makefile": (
+        ("CLI_SRCS += http_content_encoding.c\nCLI_SRCS += cli_proxy.c\n",
+         "CLI_SRCS += http_content_encoding.c\n"),
+    ),
+    "src/tests/Rules.mk": (
+        ('.PHONY: proxy-tests\nproxy-tests: $(BINARY)\n'
+         '\tAIMEE_TEST_PROXY_BINARY="$(abspath $(BINARY))" python3 ../scripts/tests/test_thin_client_proxy.py -v\n\n'
+         'unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests ',
+         'unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) '),
+    ),
+}
+
+
+def reviewed_build_equivalent(path: str, frozen: str, current: str) -> bool:
+    integrations = REVIEWED_BUILD_INTEGRATIONS.get(path)
+    if not integrations:
+        return False
+    for release_text, frozen_text in integrations:
+        if current.count(release_text) == 1:
+            current = current.replace(release_text, frozen_text, 1)
+    return current.strip() == frozen.strip()
 
 
 def parse_args() -> argparse.Namespace:
@@ -138,9 +166,18 @@ def validate(
     changed = git_output(
         "diff", "--name-only", candidate_commit, "--", *PROTECTED_PATHS
     ).splitlines()
+    reviewed_build_paths = []
+    for path in changed:
+        if path in REVIEWED_BUILD_INTEGRATIONS and reviewed_build_equivalent(
+            path, git_output("show", f"{candidate_commit}:{path}"),
+            (ROOT / path).read_text(),
+        ):
+            reviewed_build_paths.append(path)
+    changed = [path for path in changed if path not in reviewed_build_paths]
     if any(path in BUILD_PATHS for path in changed):
         try:
             if build_files_match(candidate_commit):
+                reviewed_build_paths.extend(path for path in changed if path in BUILD_PATHS)
                 changed = [path for path in changed if path not in BUILD_PATHS]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(f"could not verify semantic-context build contract: {exc}")
@@ -182,6 +219,7 @@ def validate(
         "candidate_is_ancestor": ancestor,
         "protected_paths": list(PROTECTED_PATHS),
         "changed_protected_paths": changed,
+        "reviewed_build_integration_paths": reviewed_build_paths,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,

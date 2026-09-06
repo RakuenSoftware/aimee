@@ -895,7 +895,6 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    session_state_t state;
    session_state_load(&state, sid);
-   hooks_ensure_cwd_worktree(&state, sid, cwd);
 
    /* Memory interception: redirect an agent's local memory-file write into the
     * central store BEFORE the generic guardrails see it (rc==2 -> client deny). */
@@ -919,8 +918,38 @@ static int handle_hooks_pre(server_ctx_t *ctx, server_conn_t *conn, cJSON *req)
 
    /* Run guardrail check */
    char msg[1024] = "";
+   /* A hook describes the CLIENT's filesystem. Bind the same registered runner
+    * as tool execution, including the legacy run_cmd probes used by worktree,
+    * branch and verify guards. Binding only the file-tool provider leaves those
+    * probes on the server and makes every remote push unresolvable.
+    * Worktree creation/routing belongs to the thin client for detached roots. */
+   cJSON *input = cJSON_Parse(tool_input);
+   const char *target_cwd = cwd;
+   static const char *cwd_keys[] = {"workdir", "cwd", "working_dir", "working_directory", NULL};
+   for (int i = 0; cwd_keys[i]; i++)
+   {
+      const char *value =
+          cJSON_GetStringValue(cJSON_GetObjectItemCaseSensitive(input, cwd_keys[i]));
+      if (value && value[0])
+      {
+         target_cwd = value;
+         break;
+      }
+   }
+   char saved_cwd[MAX_PATH_LEN];
+   snprintf(saved_cwd, sizeof(saved_cwd), "%s", run_cmd_get_cwd() ? run_cmd_get_cwd() : "");
+   int bound = workspace_turn_bind_active(target_cwd);
+   const workspace_provider_t *provider = workspace_provider_active();
+   int detached = bound && provider->kind == WS_PROVIDER_DETACHED;
+   if (detached)
+      run_cmd_set_cwd(target_cwd);
+   else
+      hooks_ensure_cwd_worktree(&state, sid, cwd);
    int rc = pre_tool_check(tool_name, tool_input, &state, config_guardrail_mode(), cwd, msg,
                            sizeof(msg));
+   run_cmd_set_cwd(saved_cwd[0] ? saved_cwd : NULL);
+   workspace_turn_unbind_active();
+   cJSON_Delete(input);
 
    session_state_save(&state, sid);
 
