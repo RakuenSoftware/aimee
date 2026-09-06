@@ -3,8 +3,9 @@
 ## Purpose and non-goals
 
 `postgres` is the generic PostgreSQL transport and transaction boundary used by domain modules. It
-owns pools, prepared execution, migrations, and readiness without knowing DB1 business semantics.
-It does not authorize users, invent schemas, expose arbitrary SQL to HTTP clients, or own DB2 content.
+owns pools, prepared execution, migrations, and readiness without knowing domain business semantics.
+KB and server use the same caller contract in `server-go/db`; see [Database](../DB.md).
+It does not authorize users, invent schemas, expose arbitrary SQL to HTTP clients, or own knowledge policy.
 
 ## Public contracts
 
@@ -17,7 +18,7 @@ typed status and bounded rows. Raw connection strings and credentials never cros
 - `config`: supplies validated store and migration connection settings without exposing them to callers.
 - `module-runtime`: grants principal `28`, supervises the process, and publishes stage readiness.
 
-The `aimee` domain module is the primary DB1 consumer. Other registered owners may use the generic
+The `aimee` and `memory` domain modules consume the shared database contract. Registered owners use the generic
 transport only through reviewed catalogs; server routes and thin clients never call it directly.
 
 ## Providers and readiness
@@ -42,7 +43,7 @@ interactive query console, or client flag that widens the registered operation c
 ## Data and migrations
 
 `postgres` stores no domain schema of its own. It serializes owner-scoped, checksummed migrations and
-executes registered statements inside bounded transactions. DB1 tables, including workflow rows, belong
+executes registered statements inside bounded transactions. Runtime tables, including workflow rows, belong
 to `aimee`; backups and restores use PostgreSQL-native `pg_dump` and `pg_restore` procedures.
 
 ## Security and privacy
@@ -53,7 +54,7 @@ redact secrets and row content while retaining SQLSTATE, owner, operation, and t
 
 ## Supported journeys
 
-At startup `aimee` asks `postgres` to verify and apply its ordered DB1 migrations, then uses typed store
+At startup `aimee` asks `postgres` to verify and apply its ordered domain migrations, then uses typed store
 operations for sessions and workflows. During a request the transport acquires a bounded pool lease,
 executes one registered transaction, returns typed results, and releases or poisons the connection.
 

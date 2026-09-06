@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/bus"
+	database "github.com/JBailes/aimee/server-go/db"
 	"github.com/JBailes/aimee/server-go/db1"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
@@ -213,7 +214,7 @@ func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
 			}
 			return nil
 		}
-		if !errors.Is(err, aimee.ErrStoreUnavailable) {
+		if !errors.Is(err, database.ErrStoreUnavailable) {
 			return err
 		}
 		if attempt == attempts {
@@ -228,7 +229,7 @@ func applySchemaWaiting(ctx context.Context, db aimee.Store) error {
 	return fmt.Errorf("the postgres module did not answer within %ds: %w", attempts, err)
 }
 
-func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, error) {
+func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, error) {
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("store: no module bus to reach the postgres module on")
 	}
@@ -241,7 +242,7 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, err
 		busClient.Detach()
 		return nil, err
 	}
-	db, err := aimee.NewStore(caller)
+	db, err := database.NewStore(caller)
 	if err != nil {
 		caller.CloseAndWait()
 		busClient.Detach()
@@ -250,7 +251,7 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, err
 	return db, nil
 }
 
-func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (aimee.Store, error) {
+func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (database.Store, error) {
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("memory: no module bus to reach postgres")
 	}
@@ -263,7 +264,7 @@ func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (aimee.Stor
 		busClient.Detach()
 		return nil, err
 	}
-	db, err := aimee.NewStore(caller)
+	db, err := database.NewStore(caller)
 	if err != nil {
 		caller.CloseAndWait()
 		busClient.Detach()

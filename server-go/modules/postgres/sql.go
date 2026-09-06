@@ -8,7 +8,7 @@ package postgres
 // which presented as "the store is absent" on a system where every part had
 // been written.
 //
-// The frame is the one described in server-go/modules/aimee/store_wire.go, and
+// The frame is the one described in server-go/db/store_wire.go, and
 // that file is the specification. Nothing here re-derives it: the encodings are
 // mirrored deliberately rather than shared, because the two sides are separate
 // modules that must be able to version independently, and a shared struct would

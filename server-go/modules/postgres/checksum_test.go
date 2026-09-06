@@ -3,7 +3,7 @@ package postgres
 import "testing"
 
 // The store contract publishes four known answers for the migration checksum,
-// in server-go/modules/aimee/store_wire.go, precisely so that each side can be
+// in server-go/db/store_wire.go, precisely so that each side can be
 // checked against the CONTRACT rather than against the other implementation.
 //
 // Checking the two implementations against each other would agree the day both

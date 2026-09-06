@@ -68,11 +68,11 @@
     "server-go/modules/aimee/peer_capability.go",
     "server-go/modules/aimee/peerwire/wire.go",
     "server-go/modules/aimee/serve.go",
-    "server-go/modules/aimee/store_client.go",
-    "server-go/modules/aimee/store_wire.go",
+    "server-go/modules/aimee/db_contract.go",
     "server-go/modules/aimee/wire.go"
   ],
   "go_tests": [
+    "server-go/modules/aimee/db_contract_test.go",
     "server-go/modules/aimee/aimee_test.go",
     "server-go/modules/aimee/arity_test.go",
     "server-go/modules/aimee/cmd/peerprobe/main_test.go",
@@ -113,11 +113,6 @@
     "server-go/modules/aimee/peer/peer_test.go",
     "server-go/modules/aimee/peerwire/cwire_test.go",
     "server-go/modules/aimee/peerwire/wire_test.go",
-    "server-go/modules/aimee/store_bytes_test.go",
-    "server-go/modules/aimee/store_client_test.go",
-    "server-go/modules/aimee/store_contract_test.go",
-    "server-go/modules/aimee/store_opcodes_test.go",
-    "server-go/modules/aimee/store_tx_test.go",
     "server-go/modules/aimee/unavailable_test.go"
   ],
   "docs": [

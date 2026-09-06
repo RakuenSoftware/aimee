@@ -1,4 +1,4 @@
-package aimee
+package db
 
 import "testing"
 

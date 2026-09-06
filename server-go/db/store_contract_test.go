@@ -1,4 +1,4 @@
-package aimee
+package db
 
 import (
 	"errors"
@@ -8,11 +8,11 @@ import (
 // The parts of the contract that were agreed after the first implementation.
 
 func TestAnOverLargeResultIsRefusedNotTruncated(t *testing.T) {
-	// The store answers StatusTooLong rather than framing a capped set: a caller
+	// The store answers StoreStatusLimitExceeded rather than framing a capped set: a caller
 	// handed the ceiling could not tell it from a complete answer, and would
 	// record the cap as fact. That is NULL-versus-empty in another costume.
 	r := &replyBuilder{}
-	f := &fakeCaller{reply: r.u32(StatusTooLong).str("").
+	f := &fakeCaller{reply: r.u32(StoreStatusLimitExceeded).str("").
 		str("42000 rows exceeds the ceiling").b}
 	db := newStore(t, f)
 
@@ -28,10 +28,10 @@ func TestAnOverLargeResultIsRefusedNotTruncated(t *testing.T) {
 }
 
 func TestAnOverLargeResultIsNotAConstraintRefusal(t *testing.T) {
-	// StatusTooLong carries no SQLSTATE, so it must not fall through to the
+	// StoreStatusLimitExceeded carries no SQLSTATE, so it must not fall through to the
 	// classifier and read as a violation of something.
 	r := &replyBuilder{}
-	f := &fakeCaller{reply: r.u32(StatusTooLong).str("").str("too many rows").b}
+	f := &fakeCaller{reply: r.u32(StoreStatusLimitExceeded).str("").str("too many rows").b}
 	db := newStore(t, f)
 	_, err := db.Query(t.Context(), "SELECT * FROM big")
 	if IsUniqueViolation(err) || IsForeignKeyViolation(err) ||

@@ -1,4 +1,4 @@
-package aimee
+package db
 
 import (
 	"context"
@@ -35,12 +35,12 @@ type replyBuilder struct{ b []byte }
 
 func ok() *replyBuilder {
 	r := &replyBuilder{}
-	return r.u32(StatusOK).str("").str("")
+	return r.u32(StoreStatusOK).str("").str("")
 }
 
 func refusal(sqlstate, message string) []byte {
 	r := &replyBuilder{}
-	return r.u32(StatusFailed).str(sqlstate).str(message).b
+	return r.u32(StoreStatusFailed).str(sqlstate).str(message).b
 }
 
 func (r *replyBuilder) u32(v uint32) *replyBuilder {

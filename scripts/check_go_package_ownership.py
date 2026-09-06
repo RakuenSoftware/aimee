@@ -82,6 +82,11 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "Caller-side contract for the config module (ref 2). No storage; every "
         "read is a bounded bus request.",
     ),
+    "server-go/db": (
+        "contract",
+        "Shared caller-side PostgreSQL contract for KB and server: typed results, "
+        "transactions and migrations over the bus. Owns no pool or durable state.",
+    ),
     "server-go/db1": (
         "contract",
         "Caller-side mirror of the db1 module's serving wire (db1-fields-v2).",
