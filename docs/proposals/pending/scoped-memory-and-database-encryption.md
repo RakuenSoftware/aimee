@@ -14,9 +14,11 @@ separate database-module ownership.
 
 PostgreSQL will encrypt original documents, memory bodies, and selected metadata
 columns. The vault will retain scope keys and authorize record-key use.
-Whole-database storage encryption will be optional and can run alongside payload
-encryption or on its own. Existing installations keep their current behavior until
-configured and migrated.
+The default installation lets Aimee deploy PostgreSQL and provision encrypted
+storage, with automatic key custody and unlock. Linux uses LUKS-backed storage.
+Storage encryption can run alongside payload
+encryption or on its own; disabling it requires explicit configuration. Existing
+installations keep their current storage until a verified migration completes.
 
 ## Whole-database encryption covers the searchable data
 
@@ -283,15 +285,42 @@ module. Add selected metadata fields, their permitted readers, and their query
 requirements to the inventory before enabling column encryption. This option
 does not require encrypting vectors or replacing their indexes.
 
-### Docker can mount encrypted host storage
+### Installation creates encrypted storage automatically
+
+Make Aimee-managed PostgreSQL the standard setup path. Choosing it includes the
+database container, encrypted storage, key enrollment, and restart integration.
+Users need no separate disk-encryption setup or routine unlock step. Bringing an
+existing database remains an advanced option with provider-specific readiness
+checks. Define equivalent storage providers for other supported hosts before
+claiming the same automatic deployment support there.
 
 Replace the current PostgreSQL container definition with one that supports the
 column-encryption integration and optional encrypted storage. Use the same image
 for encrypted and unencrypted deployments. This requires no second PostgreSQL
 container or separate encryption sidecar.
 
-Offer an optional Linux deployment profile backed by a LUKS/dm-crypt device.
-The host unlocks and mounts its filesystem before starting the database container.
+The default managed Linux installation creates a dedicated LUKS2 encrypted disk
+image in Aimee's data directory and formats the filesystem inside it.
+[Cryptsetup supports file-backed disk images](https://man7.org/linux/man-pages/man8/cryptsetup.8.html),
+so installation can provision storage without repartitioning an existing drive.
+Operators can supply a dedicated device or an existing encrypted mount instead.
+
+| User action | Managed behavior |
+|---|---|
+| Install Aimee | Provision encrypted storage, enroll automatic key custody, and start the database |
+| Restart Aimee or reboot | Recover the storage key, unlock and verify the mount, then start PostgreSQL |
+| Use documents, memories, or search | Apply scoped access through the shared module; require no storage passphrase |
+| Upgrade an existing installation | Copy into encrypted storage, verify the migration, and switch the database mount |
+
+Setup installs the host integration with the required system privileges. The
+PostgreSQL container keeps ordinary database privileges. Allocate and grow the
+disk image within a configured storage budget; define capacity checks and
+interrupted-growth recovery before implementation. Report encryption and storage
+readiness in status, with an actionable error if provisioning or unlock fails.
+Unsupported hosts require a supported storage provider or an explicit opt-out;
+setup must never silently fall back to plaintext storage.
+
+The host unlocks and mounts the filesystem before starting the database container.
 Docker exposes the mounted directory through a bind mount or a configured
 [volume](https://docs.docker.com/engine/storage/volumes/). PostgreSQL reads normal
 pages; the host encrypts disk writes, including vector and token index files.
@@ -309,10 +338,14 @@ data in the underlying directory. Keep WAL, tablespaces, database temporary file
 and retained document files on covered storage; account separately for exports,
 host temporary files, logs, and backups written elsewhere.
 
-The storage key can use vault custody if that vault can unlock before this volume
-is mounted. Otherwise bootstrap requires an independent custody path or operator
-unlock. Keep the storage key separate from payload scope keys. Test locked boot,
-missing mounts, restart, migration, and restore before enabling this profile.
+Enroll the storage key through a vault bootstrap custody path that operates before
+this volume is mounted. Use an independently available external or hardware-backed
+custody provider for unattended recovery. Provision protected recovery material
+and a LUKS header backup as part of setup; recovery must work after host loss.
+An unprotected key file beside the disk image cannot protect a stolen copy of both.
+Selecting and integrating automatic bootstrap custody remains required work for
+the default installation. Keep the storage key separate from payload scope keys.
+Test locked boot, missing mounts, restart, migration, and restore before release.
 
 We found no whole-database encryption option in the inspected deployment paths.
 Choose supported PostgreSQL storage or managed-service encryption providers and
