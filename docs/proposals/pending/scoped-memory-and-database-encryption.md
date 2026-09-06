@@ -16,9 +16,10 @@ PostgreSQL will encrypt original documents, memory bodies, and selected metadata
 columns. The vault will retain scope keys and authorize record-key use.
 The default installation lets Aimee deploy PostgreSQL and provision encrypted
 storage, with automatic key custody and unlock. Linux uses LUKS-backed storage.
-Storage encryption can run alongside payload
-encryption or on its own; disabling it requires explicit configuration. Existing
-installations keep their current storage until a verified migration completes.
+Storage encryption can run alongside payload encryption or on its own; disabling
+it requires explicit configuration. Existing installations migrate automatically
+when first started with the updated deployment, retaining recoverable source data
+until verification and cutover complete.
 
 ## Whole-database encryption covers the searchable data
 
@@ -310,7 +311,7 @@ Operators can supply a dedicated device or an existing encrypted mount instead.
 | Install Aimee | Provision encrypted storage, enroll automatic key custody, and start the database |
 | Restart Aimee or reboot | Recover the storage key, unlock and verify the mount, then start PostgreSQL |
 | Use documents, memories, or search | Apply scoped access through the shared module; require no storage passphrase |
-| Upgrade an existing installation | Copy into encrypted storage, verify the migration, and switch the database mount |
+| Start the updated 0.4.0 deployment | Detect the existing layout, migrate automatically, verify it, and switch the database mount |
 
 Setup installs the host integration with the required system privileges. The
 PostgreSQL container keeps ordinary database privileges. Allocate and grow the
@@ -363,6 +364,37 @@ Use the existing external-custody architecture where applicable and define the
 provider-specific bootstrap integration. Storage keys remain distinct from payload
 scope keys. Enabling, disabling, rotating, and restoring encryption require
 recoverable workflows for each database; they cannot be instantaneous runtime switches.
+
+## Automatic migration preserves 0.4.0 installations
+
+Keep the product version at 0.4.0. Track schema and storage migration revisions
+independently so startup can detect completed work without relying on the product
+version. Existing users receive the migration through the normal deployment
+update, with no separate migration command or required configuration rewrite.
+
+For managed PostgreSQL, the deployment coordinator provisions encrypted storage
+and custody, pauses writers, and migrates a consistent source into the new layout.
+The shared database module converts payloads and selected metadata, preserves
+record and scope identities, and updates search representations. Verify content,
+permissions, and search behavior before switching connections and resuming writes.
+Report migration progress and any startup delay.
+
+Persist migration checkpoints and serialize competing startup attempts. Restart
+must resume safely or recognize completed work. Keep the source recoverable until
+cutover succeeds; after new writes reach the destination, recovery must preserve
+those writes. Include retained plaintext migration artifacts in the cleanup policy.
+Check storage capacity, custody availability, and required privileges before
+changing the active installation.
+
+Existing external databases use the same automatic schema migration through
+their configured connections. Physical storage encryption requires support from
+their hosting provider; preserve that deployment contract and report its coverage.
+
+The 0.4.0 release criterion is compatibility: test supported existing installations,
+fresh installs, repeat startup, interrupted migration, and recovery. A rollout that
+requires manual conversion or leaves existing installations needing repair does
+not meet this criterion. Resolve that incompatibility before shipping under 0.4.0;
+a breaking migration would require reconsidering the release as 0.5.0.
 
 ## Cipher timings leave the retrieval cost unmeasured
 
