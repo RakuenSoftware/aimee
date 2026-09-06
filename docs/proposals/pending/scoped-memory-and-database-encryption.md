@@ -14,6 +14,8 @@ separate database-module ownership.
 
 PostgreSQL will encrypt original documents, memory bodies, and selected metadata
 columns. The vault will retain scope keys and authorize record-key use.
+Vault owns all keys, including the drive keys, and unlocks the drive through its
+existing principals and protected-use operations. TPM is not required.
 The default installation lets Aimee deploy PostgreSQL and provision encrypted
 storage, with automatic key custody and unlock. Linux uses LUKS-backed storage.
 Storage encryption can run alongside payload encryption or on its own; disabling
@@ -192,9 +194,15 @@ association must not silently create another way to decrypt the record.
 
 Encrypt each body once with a fresh random data key. Scope keys protect that small
 key using [envelope encryption](https://docs.cloud.google.com/kms/docs/envelope-encryption).
-The proposed format nests authenticated wraps under project, workspace, then global
-keys. Decryption opens them in reverse. Finalize the format and cryptographic
-review before implementation, including large-document handling.
+Use the existing AES-GCM primitive for variable-length authenticated wrapping:
+encrypt the data key under the project key, that envelope under the workspace
+key, and that envelope under the global key. Omit inapplicable scope layers.
+Each layer has a fresh nonce and binds canonical record identity, owning scope,
+field purpose, payload revision, and its layer/key revision as authenticated data.
+Use length-prefixed fields and explicit format/domain tags. Decryption opens the
+layers in reverse using the expected context from the authorized operation.
+The existing fixed-size AES-KW helper accepts a 32-byte key; it cannot directly
+wrap a larger nested envelope. Keep this new envelope format versioned separately.
 
 Use independent random scope keys to enforce the all-keys condition. A parent key
 that unwraps stored child keys would let global-key possession recover descendants.
@@ -237,11 +245,82 @@ keys and unwraps record keys after authorization; the shared database module
 supplies a record key only to the permitted database operation. Use protected
 connections and prevent parameter logging from retaining keys or plaintext.
 
-Preserve the all-scope-key condition and authenticated ownership. The PGP format
-differs from the current AES-GCM envelope; finalize its format and ownership
-verification before implementation. PGP message integrity alone does not bind a
-ciphertext to its owning record. PostgreSQL's raw encryption functions lack
-integrity protection and cannot replace the authenticated envelope on their own.
+Use `pgp_sym_encrypt_bytea` and `pgp_sym_decrypt_bytea` for payload bytes. Vault
+generates a fresh random 32-byte data key for each field revision; pass its canonical
+hex encoding as the PGP password. Pin AES-256, integrity checking enabled,
+compression disabled, and `s2k-mode=3,s2k-count=65536`. PGP derives its cipher key
+from that supplied value; it does not consume the bytes as a raw AES-GCM key.
+
+The encrypted message contains a versioned, length-prefixed context followed by
+the original payload bytes. Its context records the same record identity, owning
+scope, field purpose, and payload revision authenticated by the Vault wraps.
+Vault verifies those wraps against the authorized operation before supplying the
+data key. The database read operation decrypts the message and checks its embedded
+context against that operation before exposing the body. Caller input and mutable
+row labels cannot override the expected context. A field update creates a new
+data key and envelope; a wrapping-key rotation preserves the payload revision.
+
+This combines Vault's authenticated scope wraps with PostgreSQL's PGP integrity
+checks. Test ciphertext-only and whole-envelope swaps between records, fields,
+scopes, and revisions; test each missing or wrong scope key. Keep cryptographic
+review of the serialized format in implementation acceptance. PostgreSQL's raw
+encryption functions supply no integrity check and are excluded from this path.
+
+### Search projections preserve lexical and substring results
+
+Keep the existing `tsvector` values, parser configuration, positions, and ranking
+expressions for lexical search. Convert projections generated from body columns
+into explicitly maintained values. Authorized PostgreSQL writes create the
+encrypted payload and its search projections in one transaction. The current
+[lexical queries](../../../src/modules/db2/c/memory_query.c) can rank those
+projections without decrypting bodies. Return candidate IDs through the search
+contract and resolve bodies through the authorized read operation.
+
+For substring search, persist a distinct set of overlapping three-character
+fragments for each searched field, including punctuation and whitespace. Store
+the set as `text[]` with PostgreSQL's
+[GIN array index](https://www.postgresql.org/docs/current/gin.html#GIN-BUILTIN-OPCLASSES).
+For deterministic `lower(content) LIKE pattern` comparisons, extract fragments
+from the same PostgreSQL-lowered content. Extract required query fragments from
+literal runs in the actual bound pattern, respecting its wildcard and escape
+rules. A candidate must contain every required fragment (`@>`). For example,
+`%crypt%` requires `cry`, `ryp`, and `ypt`; every exact match contains all three.
+Fragment membership may admit false positives, which the payload reader rejects.
+
+Preserve each call site's current pattern construction. The
+[PDF search](../../../src/modules/db2/c/kb_payload.c) escapes user `%`, `_`, and
+backslash; several memory queries retain wildcard semantics. Union candidates
+for OR branches such as key, content, and use cases. Ordinary word-token matching
+cannot replace substring matching. `show_trgm(query)` also cannot supply the
+required substring fragments directly because it adds word-boundary padding.
+
+PostgreSQL decrypts authorized candidates and evaluates the original `LIKE`,
+`ILIKE`, equality, and ranking expressions against their plaintext. For patterns
+with no three-character literal run, negated predicates, or collation/case rules
+without a proven conservative fragment filter, scan the metadata-filtered,
+authorized rows. Preserve the original SQL semantics in that fallback. The
+[trigram compatibility rewriter](../../../src/modules/db2/c/db_postgres.c) currently
+uses `ILIKE` and `similarity`; replace that path with explicit candidate and
+authorized-verification operations, retaining its exact scoring expression.
+
+Apply limits after exact verification. If ordering depends on decrypted content
+or similarity, evaluate every candidate needed to establish that ordering before
+selecting the result page. With metadata-only ordering, process candidates in
+that order until the page is full or the candidate set is exhausted. Batch size
+controls memory use; it must never become an undisclosed result cutoff. Preserve
+the existing tie behavior and use a consistent snapshot for a batched query.
+
+Bind projections to the payload revision and normalization version. Writes,
+deletes, and migration update them atomically; include rows with missing or stale
+projections in the authorized fallback until rebuilt. Fragment sets are readable
+search derivatives covered by the agreed storage-encryption boundary.
+
+Verify result IDs, ordering, and scores against the existing plaintext queries
+for partial words, punctuation, escaped wildcards, wildcard patterns, Unicode,
+short and empty inputs, OR branches, updates, deletion, and multi-batch results.
+These searches are feasible with encrypted payloads. Selective fragment filters
+reduce decryption work; short or broad patterns can still require a full authorized
+scan. No constant-latency claim follows from this design.
 
 ### Encrypting a vector column changes indexed search
 
@@ -339,14 +418,14 @@ data in the underlying directory. Keep WAL, tablespaces, database temporary file
 and retained document files on covered storage; account separately for exports,
 host temporary files, logs, and backups written elsewhere.
 
-Enroll the storage key through a vault bootstrap custody path that operates before
-this volume is mounted. Use an independently available external or hardware-backed
-custody provider for unattended recovery. Provision protected recovery material
-and a LUKS header backup as part of setup; recovery must work after host loss.
-An unprotected key file beside the disk image cannot protect a stolen copy of both.
-Selecting and integrating automatic bootstrap custody remains required work for
-the default installation. Keep the storage key separate from payload scope keys.
-Test locked boot, missing mounts, restart, migration, and restore before release.
+Vault owns the storage keys and unlocks the drive through its existing principals
+and key-management operations. Integrate its authorized use with libcryptsetup,
+or supply key material through a private pipe to `cryptsetup`; avoid command-line
+secret values and persistent plaintext key files. The
+[LUKS unlock interface](https://man7.org/linux/man-pages/man8/cryptsetup-open.8.html)
+accepts supplied key material without TPM. Setup and restart perform this operation
+automatically before mounting storage and starting PostgreSQL. Keep drive and
+payload keys distinct within Vault. Test this path on a host without TPM.
 
 We found no whole-database encryption option in the inspected deployment paths.
 Choose supported PostgreSQL storage or managed-service encryption providers and
@@ -358,12 +437,10 @@ or unverifiable provider must produce a configuration/readiness error. Specify
 coverage for data files, indexes, WAL, temporary files, replicas, and physical backups.
 Logical dumps and external document files need their own protected paths.
 
-The selected provider must unlock storage before PostgreSQL opens its data files.
-That boot path must work without reading vault tables inside the protected database.
-Use the existing external-custody architecture where applicable and define the
-provider-specific bootstrap integration. Storage keys remain distinct from payload
-scope keys. Enabling, disabling, rotating, and restoring encryption require
-recoverable workflows for each database; they cannot be instantaneous runtime switches.
+Deployment startup orders the existing Vault service, drive unlock and mount,
+then PostgreSQL startup. Storage provisioning and key operations use the existing
+Vault integration. Enabling, disabling, rotating, and restoring encryption use
+managed workflows; they cannot be instantaneous runtime switches.
 
 ## Automatic migration preserves 0.4.0 installations
 
@@ -419,9 +496,10 @@ commit. The figures establish no deployment performance guarantee.
 
 The [existing envelope constants](../../../src/modules/vault/vault_crypto.h) add
 68 bytes: a 40-byte wrapped key, 12-byte nonce, and 16-byte tag. Scope layers and
-identity/version metadata add further overhead. Password derivation belongs at
-unlock. Bounded vault-side caching or batches should avoid per-record remote
-custody calls while preserving each operation's authorization checks.
+identity/version metadata add further overhead. These constants describe the
+existing AES-GCM envelope. The selected PGP payload format also performs S2K
+derivation per message and has different overhead. Bounded vault-side caching or
+batches avoid repeated custody work while preserving each operation's checks.
 
 Benchmark ingestion, insert/read/recall, rotation, and recovery on each supported
 PostgreSQL deployment. Include realistic sizes and concurrency, warm/cold caches,
