@@ -285,6 +285,11 @@ does not require encrypting vectors or replacing their indexes.
 
 ### Docker can mount encrypted host storage
 
+Replace the current PostgreSQL container definition with one that supports the
+column-encryption integration and optional encrypted storage. Use the same image
+for encrypted and unencrypted deployments. This requires no second PostgreSQL
+container or separate encryption sidecar.
+
 Offer an optional Linux deployment profile backed by a LUKS/dm-crypt device.
 The host unlocks and mounts its filesystem before starting the database container.
 Docker exposes the mounted directory through a bind mount or a configured
