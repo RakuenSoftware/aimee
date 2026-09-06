@@ -31,6 +31,65 @@
 #include "platform_ipc.h"
 #include "platform_process.h"
 #include "hook_session_token.h"
+#include "modules/workspace/workspace_provider.h"
+#include "modules/workspace/workspace_turn.h"
+
+/* This dispatch fixture has no runner transport. Assert the real hook handler
+ * binds and scopes its legacy command probes before entering guardrails. */
+static int g_hook_remote, g_hook_bound, g_hook_probe_calls, g_hook_guard_result;
+static char g_hook_bound_cwd[MAX_PATH_LEN], g_hook_exec_cwd[MAX_PATH_LEN];
+const char *guardrails_canonical_tool_name(const char *tool)
+{
+   return tool;
+}
+int agent_any_delegate_available(void)
+{
+   return 0;
+}
+int server_delegate_launch_async(server_ctx_t *ctx, server_conn_t *conn, cJSON *req, char *err,
+                                 size_t err_len)
+{
+   (void)ctx;
+   (void)conn;
+   (void)req;
+   (void)err;
+   (void)err_len;
+   abort();
+}
+static char *hook_test_exec(const workspace_provider_t *p, const char *cmd, int *rc)
+{
+   assert(p->kind == WS_PROVIDER_DETACHED && g_hook_bound);
+   assert(strcmp(cmd, "git rev-parse --show-toplevel") == 0);
+   assert(strcmp(g_hook_exec_cwd, g_hook_bound_cwd) == 0);
+   g_hook_probe_calls++;
+   *rc = 0;
+   return strdup("/client/only/repo\n");
+}
+static const workspace_provider_t g_hook_provider = {.kind = WS_PROVIDER_DETACHED,
+                                                     .exec_shell = hook_test_exec};
+static const workspace_provider_t g_hook_shared = {.kind = WS_PROVIDER_SHARED};
+int workspace_turn_bind_active(const char *cwd)
+{
+   snprintf(g_hook_bound_cwd, sizeof(g_hook_bound_cwd), "%s", cwd ? cwd : "");
+   g_hook_bound = g_hook_remote;
+   return g_hook_bound;
+}
+void workspace_turn_unbind_active(void)
+{
+   g_hook_bound = 0;
+}
+const workspace_provider_t *workspace_provider_active(void)
+{
+   return g_hook_bound ? &g_hook_provider : &g_hook_shared;
+}
+const char *run_cmd_get_cwd(void)
+{
+   return g_hook_exec_cwd[0] ? g_hook_exec_cwd : NULL;
+}
+void run_cmd_set_cwd(const char *cwd)
+{
+   snprintf(g_hook_exec_cwd, sizeof(g_hook_exec_cwd), "%s", cwd ? cwd : "");
+}
 
 /* server.c exposes capture completeness in server.health.  This dispatch test
  * does not start the observability bus, so give it a deterministic health
@@ -1502,7 +1561,18 @@ int pre_tool_check(const char *tool_name, const char *tool_input, session_state_
    }
    if (msg_len > 0)
       msg[0] = '\0';
-   return 0;
+   if (g_hook_remote)
+   {
+      assert(g_hook_bound);
+      int ec = -1;
+      const workspace_provider_t *p = workspace_provider_active();
+      char *out = p->exec_shell(p, "git rev-parse --show-toplevel", &ec);
+      assert(ec == 0 && out && strcmp(out, "/client/only/repo\n") == 0);
+      free(out);
+      if (g_hook_guard_result)
+         snprintf(msg, msg_len, "verification required");
+   }
+   return g_hook_guard_result;
 }
 
 void post_tool_update(const char *tool_name, const char *tool_input, session_state_t *state)
@@ -2136,6 +2206,63 @@ static void test_hooks_pre_recovers_worktree_mapping_from_cwd(void)
    free(ctx);
 }
 
+static void test_hooks_pre_remote_workspace_scope(void)
+{
+   server_ctx_t *ctx = calloc(1, sizeof(*ctx));
+   server_conn_t *conn = calloc(1, sizeof(*conn));
+   assert(ctx && conn);
+   const char *tools[] = {"Bash", "exec_command", "functions.exec_command"};
+   const char *keys[] = {"workdir", "cwd", "working_dir", "working_directory"};
+   g_hook_remote = 1;
+   cJSON *saved_git_policy = config_client_value_copy("require_aimee_git");
+   assert(config_client_set_value("require_aimee_git", cJSON_CreateFalse()) == 0);
+   g_hook_probe_calls = 0;
+   for (size_t t = 0; t < sizeof(tools) / sizeof(tools[0]); t++)
+      for (size_t k = 0; k <= sizeof(keys) / sizeof(keys[0]); k++)
+         for (int deny = 0; deny < 2; deny++)
+         {
+            g_hook_guard_result = deny ? 2 : 0;
+            run_cmd_set_cwd("/previous/request");
+            cJSON *req = cJSON_CreateObject();
+            cJSON_AddStringToObject(req, "method", "hooks.pre");
+            cJSON_AddStringToObject(req, "session_id", "remote-hook-test");
+            cJSON_AddStringToObject(req, "cwd", k == 4 ? "/client/only/repo" : "/launcher/cwd");
+            cJSON_AddStringToObject(req, "tool_name", tools[t]);
+            cJSON *input = cJSON_CreateObject();
+            cJSON_AddStringToObject(input, t ? "cmd" : "command", "git push origin feature");
+            if (k < 4)
+               cJSON_AddStringToObject(input, keys[k], "/client/only/repo");
+            else
+               cJSON_AddStringToObject(input, "workdir", "");
+            /* Both wire encodings are accepted by the production hook. */
+            if (deny)
+            {
+               char *encoded = cJSON_PrintUnformatted(input);
+               cJSON_AddStringToObject(req, "tool_input", encoded);
+               free(encoded);
+               cJSON_Delete(input);
+            }
+            else
+               cJSON_AddItemToObject(req, "tool_input", input);
+            char *encoded = cJSON_PrintUnformatted(req);
+            cJSON *reply = dispatch_json(ctx, conn, encoded, strlen(encoded));
+            assert(cJSON_GetObjectItem(reply, "exit_code")->valueint == g_hook_guard_result);
+            assert(strcmp(g_hook_bound_cwd, "/client/only/repo") == 0);
+            assert(strcmp(run_cmd_get_cwd(), "/previous/request") == 0);
+            assert(!g_hook_bound);
+            free(encoded);
+            cJSON_Delete(reply);
+            cJSON_Delete(req);
+         }
+   assert(g_hook_probe_calls == 30);
+   g_hook_remote = g_hook_guard_result = 0;
+   assert(config_client_set_value("require_aimee_git",
+                                  saved_git_policy ? saved_git_policy : cJSON_CreateTrue()) == 0);
+   run_cmd_set_cwd(NULL);
+   free(conn);
+   free(ctx);
+}
+
 static void test_hook_identity_session_binding(void)
 {
    server_ctx_t *ctx = calloc(1, sizeof(*ctx));
@@ -2516,6 +2643,7 @@ int main(void)
    test_init_route_through_server_to_kb();
    test_launch_run_returns_provider_metadata();
    test_hooks_pre_recovers_worktree_mapping_from_cwd();
+   test_hooks_pre_remote_workspace_scope();
    test_hook_identity_session_binding();
    printf("server_dispatch: all tests passed\n");
    return 0;
