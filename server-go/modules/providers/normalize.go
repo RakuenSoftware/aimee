@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net"
 	"strings"
 )
@@ -14,6 +15,23 @@ func localEndpoint(endpoint string) bool {
 	return h == "localhost" || ip != nil && (ip.IsLoopback() || ip.IsPrivate() || ip.IsUnspecified()) || strings.HasPrefix(endpoint, "unix://") || strings.HasPrefix(endpoint, "/")
 }
 func normalizeModel(model object) error {
+	delete(model, "routing_competence")
+	if err := validateCompetence(model); err != nil {
+		return err
+	}
+	for _, field := range []string{"price_in_per_mtok", "price_out_per_mtok", "price_cached_per_mtok"} {
+		if v, present := model[field]; present {
+			switch v.(type) {
+			case float64, int, json.Number:
+			default:
+				return fmt.Errorf("%s must be a nonnegative finite number", field)
+			}
+			n := number(model, field)
+			if n < 0 || n > 1e12 || math.IsNaN(n) || math.IsInf(n, 0) {
+				return fmt.Errorf("invalid %s", field)
+			}
+		}
+	}
 	for field, limit := range map[string]int{"name": 64, "registration": 64, "provider": 16, "auth_type": 16, "model": 128, "endpoint": 512, "catalog_provider": 32, "cli_kind": 16, "cli_cmd": 256, "auth_cmd": 512} {
 		if !validText(str(model, field), limit) {
 			return fmt.Errorf("%s exceeds runtime capacity or contains a control character", field)
@@ -121,6 +139,9 @@ func expandModels(models []object) ([]object, error) {
 	for _, original := range models {
 		expanded := []object{original}
 		if values, exists := original["models"]; exists {
+			if _, declared := original["competence"]; declared {
+				return nil, errors.New("declare competence on individual models")
+			}
 			if str(original, "model") != "" {
 				return nil, errors.New("registration cannot set both model and models")
 			}
@@ -175,6 +196,7 @@ func expandModels(models []object) ([]object, error) {
 
 // Runtime defaults are derived in Go before the native ABI is hydrated.
 func (s *Store) defaults(root object) object {
+	applyRoleContracts(root)
 	catalog := newMetadata(s.home)
 	for _, model := range rows(root, "models") {
 		cap, _ := catalog.request("metadata.show", object{"provider": catalogProvider(model), "model": str(model, "model")})

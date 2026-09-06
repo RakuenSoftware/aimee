@@ -42,6 +42,9 @@ func Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.Module
 
 // Handle selects a candidate using this selector's independent cursor.
 func (s *Selector) Handle(invocation bus.ModuleInvocation, request []byte) ([]byte, bus.ModuleStatus) {
+	if invocation.StageID == StagePlan {
+		return handlePlan(invocation, request)
+	}
 	if invocation.StageID != StageSelect {
 		return nil, bus.ModuleStatusInvalidRequest
 	}

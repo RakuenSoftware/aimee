@@ -100,6 +100,27 @@ const char *agent_catalog_provider(const agent_t *agent)
    return agent->catalog_provider[0] ? agent->catalog_provider : agent->provider;
 }
 
+int agent_route_last_was_module_fault(void)
+{
+   return 0;
+}
+int agent_role_meets_competence(const agent_t *agent, const char *role)
+{
+   if (!agent || !role)
+      return 0;
+   for (int i = 0; i < agent->routing_competence_count; i++)
+      if (strcmp(agent->routing_competence[i].role, role) == 0)
+         return agent->routing_competence[i].eligible;
+   return 1;
+}
+int agent_role_competence(const agent_t *agent, const char *role)
+{
+   for (int i = 0; i < agent->routing_competence_count; i++)
+      if (strcmp(agent->routing_competence[i].role, role) == 0)
+         return agent->routing_competence[i].score;
+   return 0;
+}
+
 int agent_has_role(const agent_t *agent, const char *role)
 {
    if (!agent || !role)
@@ -963,6 +984,17 @@ static void test_via_override_rejects_role_mismatch(void)
    assert(delegate_apply_route_overrides(&cfg, "code", NULL, -1, NULL, NULL, errbuf,
                                          sizeof(errbuf)) == 0);
    assert(cfg.route_pinned == 0);
+   agent_t *coder = &cfg.agents[0];
+   strcpy(coder->model, "assessed-model");
+   coder->routing_competence_count = 1;
+   strcpy(coder->routing_competence[0].role, "code");
+   coder->routing_competence[0].minimum = 70;
+   coder->routing_competence[0].score = 80;
+   coder->routing_competence[0].eligible = 1;
+   assert(delegate_apply_route_overrides(&cfg, "code", "coder", -1, NULL, "unassessed-model",
+                                         errbuf, sizeof(errbuf)) == -1);
+   assert(strstr(errbuf, "no competence assessment") != NULL);
+   assert(strcmp(coder->model, "assessed-model") == 0);
    printf("  PASS: test_via_override_rejects_role_mismatch\n");
 }
 

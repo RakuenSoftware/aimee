@@ -126,6 +126,7 @@ void provider_catalog_init(const agent_t *agents, int count)
       snprintf(e->agent_name, sizeof(e->agent_name), "%s", agents[i].name);
       snprintf(e->endpoint, sizeof(e->endpoint), "%s", agents[i].endpoint);
       snprintf(e->provider, sizeof(e->provider), "%s", agents[i].provider);
+      snprintf(e->registration, sizeof(e->registration), "%s", agents[i].registration);
       e->locality = provider_catalog_classify_endpoint(agents[i].endpoint);
       e->health = CATALOG_HEALTH_HEALTHY;
       e->last_success = 0;
@@ -219,6 +220,22 @@ void provider_catalog_record_success(const char *agent_name)
       e->breaker_trips = 0;
       e->last_success = time(NULL);
       recompute_health(e);
+      /* A successful credential use recovers siblings blocked by that account,
+       * without erasing their independent model-specific failures. */
+      if (e->registration[0])
+         for (int i = 0; i < g_cat.count; i++)
+         {
+            provider_catalog_entry_t *peer = &g_cat.entries[i];
+            if (peer != e && strcmp(peer->registration, e->registration) == 0 &&
+                strcmp(peer->last_failure_class, "registration_error") == 0)
+            {
+               peer->failure_streak = peer->breaker_trips = 0;
+               peer->last_success = e->last_success;
+               peer->last_failure_class[0] = 0;
+               recompute_health(peer);
+            }
+         }
+      e->last_failure_class[0] = 0;
    }
 
    pthread_mutex_unlock(&g_cat.lock);
@@ -262,6 +279,19 @@ void provider_catalog_record_failure(const char *agent_name, const char *failure
       if (failure_class && failure_class[0])
          snprintf(e->last_failure_class, sizeof(e->last_failure_class), "%s", failure_class);
       recompute_health(e);
+      if (e->registration[0] && failure_class && strcmp(failure_class, "registration_error") == 0)
+         for (int i = 0; i < g_cat.count; i++)
+         {
+            provider_catalog_entry_t *peer = &g_cat.entries[i];
+            if (peer == e || strcmp(peer->registration, e->registration) != 0)
+               continue;
+            peer->failure_streak = e->failure_streak;
+            peer->breaker_trips = e->breaker_trips;
+            peer->last_failure = e->last_failure;
+            snprintf(peer->last_failure_class, sizeof(peer->last_failure_class),
+                     "registration_error");
+            recompute_health(peer);
+         }
 
       if (e->health == CATALOG_HEALTH_DOWN)
          /* DOWN excludes the agent from routing, so this is the line an operator

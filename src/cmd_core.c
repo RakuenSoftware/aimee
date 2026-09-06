@@ -444,7 +444,7 @@ void cmd_status(app_ctx_t *ctx, int argc, char **argv)
             printf("Provider:  %s (ok, %dms latency)\n", ag->name, result.latency_ms);
          else
          {
-            const provider_health_t *h = provider_health_get(ag->provider);
+            const provider_health_t *h = provider_health_get(ag->registration[0] ? ag->registration : ag->name);
             if (h && h->error[0])
                printf("Provider:  %s (%s)\n", ag->name, h->error);
             else

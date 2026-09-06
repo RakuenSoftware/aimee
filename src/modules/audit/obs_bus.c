@@ -1306,6 +1306,7 @@ static const struct
     {5895u, "memory.memory-data"},
     {6145u, "learning.learning-observation"},
     {6401u, "routing.route-selection"},
+    {6402u, "routing.cost-selection"},
     {6657u, "delegates.delegate-invocation"},
     {6658u, "delegates.delegate-capability-inference"},
     {6659u, "delegates.delegate-chain-depth"},

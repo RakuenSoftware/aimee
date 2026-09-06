@@ -164,6 +164,14 @@
           "durability": "ledger",
           "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
           "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "cost-selection",
+          "event_kind": 6402,
+          "durability": "ledger",
+          "durability_reason": "decision, access, or state-transition seam requiring one durable row per occurrence",
+          "emitter": "obs_bus_emit_durable_event"
         }
       ]
     },

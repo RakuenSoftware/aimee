@@ -1055,29 +1055,21 @@ void delegate_worker(void *arg)
          if (inferred_min_context > min_context)
             min_context = inferred_min_context;
       }
-      /* delegate_routing bandit: when the caller gave no explicit route override,
-       * sample a cost-tier preference (cheapest vs premium) from the kb DB2 bandit
-       * and translate it into tier_override. Gated by bandit_live_decision_enabled
-       * (default off); best-effort, so a kb hiccup falls back to default routing. */
+      /* Both learning arms operate on the same qualified pool. Premium means
+       * demonstrated task competence, never the most expensive configured tier. */
+      acfg.route_input_tokens =
+          (int)((strlen(prompt ? prompt : "") + strlen(system_prompt ? system_prompt : "") + 3) /
+                4);
+      acfg.route_output_tokens = max_tokens > 0 ? max_tokens : 4096;
       if (!acp_command && tier_override < 0 && !(via_name && via_name[0]) &&
-          !(provider_override && provider_override[0]) && !(model_override && model_override[0]))
+          !(provider_override && provider_override[0]) && !(model_override && model_override[0]) &&
+          !acfg.default_delegate[0] && config_bandit_live_decision_enabled())
       {
-         if (config_bandit_live_decision_enabled())
-         {
-            static const char *const dr_arms[2] = {"cheapest", "premium"};
-            if (kb_client_bandit_sample("delegate_routing", dr_arms, 2, dr_arm_id,
-                                        sizeof(dr_arm_id), dr_decision_id,
-                                        sizeof(dr_decision_id)) == 0)
-            {
-               if (strcmp(dr_arm_id, "premium") == 0)
-               {
-                  int max_tier = delegate_max_cost_tier(&acfg, role);
-                  if (max_tier >= 0)
-                     tier_override = max_tier;
-               }
-               /* "cheapest" leaves tier_override = -1 (default cheapest routing). */
-            }
-         }
+         static const char *const dr_arms[2] = {"cheapest", "premium"};
+         if (kb_client_bandit_sample("delegate_routing_v2", dr_arms, 2, dr_arm_id,
+                                     sizeof(dr_arm_id), dr_decision_id,
+                                     sizeof(dr_decision_id)) == 0)
+            acfg.route_premium = strcmp(dr_arm_id, "premium") == 0;
       }
       if (delegate_apply_route_overrides(&acfg, role, via_name, tier_override, provider_override,
                                          model_override, route_err, sizeof(route_err)) != 0 ||
@@ -1948,13 +1940,23 @@ void delegate_worker(void *arg)
    if (dr_decision_id[0] && dr_arm_id[0])
    {
       double reward = rc == 0 ? 1.0 : 0.0;
+      int have_reward = 1;
       if (rc == 0 && config_cost_reward_enabled())
       {
-         double dcost = db1_token_audit_cost_for_delegation(deleg_id);
-         reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
-                                     config_cost_reward_ref_usd_milli());
+         double dcost = 0.0;
+         if (db1_token_audit_cost_for_delegation_ex(deleg_id, &dcost) == 0)
+            reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
+                                       config_cost_reward_ref_usd_milli());
+         else
+         {
+            /* Missing settlement is not a successful zero-cost outcome. Leave
+             * this decision untrained rather than reward unknown spend as free. */
+            have_reward = 0;
+            aimee_log(LOG_INFO, "routing", "skipping cost-shaped learning: delegate spend unknown");
+         }
       }
-      kb_client_bandit_close("delegate_routing", dr_decision_id, dr_arm_id, reward);
+      if (have_reward)
+         kb_client_bandit_close("delegate_routing_v2", dr_decision_id, dr_arm_id, reward);
    }
 
    /* Reconcile delegate sibling-worktree edits via PR or supervisor review. */
