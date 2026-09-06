@@ -13,8 +13,8 @@ static int calls, clears, result;
 static kb_valid_at_t answer;
 static const char *expected_time;
 
-int workspace_repo_identity(const char *cwd, char *project, size_t project_cap,
-                            char *workspace, size_t workspace_cap)
+int workspace_repo_identity(const char *cwd, char *project, size_t project_cap, char *workspace,
+                            size_t workspace_cap)
 {
    (void)cwd;
    (void)project;
@@ -35,7 +35,7 @@ void kb_client_memory_scope_context_clear(void)
 }
 
 int kb_client_memory_get_json_as_of(int64_t id, const char *as_of, cJSON **out,
-                                   kb_valid_at_t *verdict)
+                                    kb_valid_at_t *verdict)
 {
    calls++;
    assert(id == 42);
