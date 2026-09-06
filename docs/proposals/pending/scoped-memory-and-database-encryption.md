@@ -7,8 +7,14 @@ Aimee's vault already provides encryption, key wrapping, and protected-use calls
 Document and memory writers still persist plaintext. The work is to connect those
 paths while separating the authority to search from the authority to decrypt.
 
-We will encrypt original documents and memory bodies with vault-managed scope
-keys. Whole-database encryption will be optional and can run alongside payload
+Server and KB use the same database module. Implement the storage and query
+contracts there, with caller permissions defining who can search or decrypt.
+Historical source paths cited below identify conversion work; they do not establish
+separate database-module ownership.
+
+PostgreSQL will encrypt original documents, memory bodies, and selected metadata
+columns. The vault will retain scope keys and authorize record-key use.
+Whole-database storage encryption will be optional and can run alongside payload
 encryption or on its own. Existing installations keep their current behavior until
 configured and migrated.
 
@@ -20,12 +26,14 @@ database to search them. That covers the metadata protection we need.
 | Data | Required protection |
 |---|---|
 | Original documents and memory bodies | Scoped payload encryption; database encryption when enabled |
-| Metadata, embeddings, and full-text indexes | Database encryption when enabled; queryable while running |
+| Metadata | Database encryption when enabled; selective column encryption where the query contract supports it |
+| Embeddings and full-text indexes | Database encryption when enabled; queryable while running |
 
 Search derivatives can reveal content. We accept that exposure to someone with
 full access to the running database and its unlock keys. Encrypted vector search
-is outside this proposal. With database encryption disabled, metadata and indexes
-have no encryption-at-rest guarantee from this feature.
+is outside this proposal. With database encryption disabled, metadata fields
+without column encryption and the readable indexes have no encryption-at-rest
+guarantee from this feature.
 
 Database-unlock authority remains separate from payload-key authority. Reading an
 unlocked database should leave original bodies encrypted until the vault permits
@@ -40,11 +48,15 @@ to the attacker.
 
 Give search a separate service identity and database privileges limited to
 metadata and search representations. Its results contain candidate IDs, versions,
-scores, and permitted metadata. Its credentials confer no decryption permission.
+scores, and permitted metadata. Its credentials confer no document or memory-body
+decryption permission. Access to an encrypted metadata field requires its own
+authorized operation and confers no additional access to bodies.
 
-A separate payload reader resolves selected candidates. Content-dependent ranking,
-substring verification, and snippets run there. Ingestion receives its own bounded
-authority to process plaintext and produce search derivatives.
+A separately authorized payload-read operation resolves selected candidates.
+Content-dependent ranking, substring verification, and snippets run there. The
+shared database module serves both operations under distinct caller permissions
+and database roles. Ingestion receives bounded authority to process plaintext and
+produce search derivatives.
 
 Current [memory retrieval](../../../src/kb/db2_adapters/kb_service_backend_memory.c)
 loads bodies into `memory_t` while ranking. Introduce candidate-only contracts
@@ -53,18 +65,23 @@ the distinction through direct calls and relays. Shared privileged connections
 would defeat it.
 
 **Acceptance:** normal search works with only the search identity. That identity
-cannot fetch plaintext, invoke decryption, or assume a payload-reader role. The
+cannot fetch plaintext bodies, invoke payload decryption, or assume a payload-reader role. The
 authorized recall path still returns the intended content.
 
 ### 2. The vault uses scope keys internally
 
 Callers request an operation on a record for an authenticated actor, scope, and
-purpose. The vault resolves the keys and returns the permitted result. Search,
-delegates, and payload consumers receive no scope-key export operation.
+purpose. The vault retains scope keys and authorizes the protected operation.
+Search, delegates, and payload consumers receive no scope-key export operation.
+The trusted PostgreSQL execution path receives a per-record data key for the
+authorized operation. Define its lifetime and prevent
+persistence in SQL definitions, logs, or pooled connection state.
 
 Build on the existing [protected-use calls](../../../src/kb/kb_vault_protected_use.h)
-and their plaintext cleanup. Process permissions and distinct service identities
-must supply runtime isolation; a callback alone cannot. Follow the
+and their plaintext cleanup. Process permissions and distinct caller identities
+enforce admission to the shared module and vault; a callback alone cannot supply
+process isolation. The module and PostgreSQL remain trusted during authorized
+decryption. Follow the
 [per-daemon vault bus design](vault-bus-only-access.md), preserving each daemon's
 custody profile. Relaying a request confers no additional decryption authority.
 
@@ -156,6 +173,16 @@ actually enforce.
 | Workspace | Global and the owning workspace |
 | Project | Global, the owning workspace, and the project |
 
+Key selection follows the record's scope. Values in the same PostgreSQL column
+can use different record keys for different workspaces or projects. `pgcrypto`
+uses the key supplied for each operation; vault authorization enforces which
+scope keys must participate. Assigning one project key alone would not enforce
+the global, workspace, and project requirement.
+
+Fields with different reader permissions use separate data keys and authenticated
+field purposes. A metadata-read grant must not release a key that also decrypts
+the document or memory body.
+
 Use immutable scope IDs and an explicit owning workspace for each project. Map
 existing memory scopes and workspace associations to that ownership. Adding an
 association must not silently create another way to decrypt the record.
@@ -181,26 +208,123 @@ payload re-encryption. Existing autonomous server credential wraps must provide 
 bypass around the content-key requirements. Already disclosed plaintext cannot be
 revoked.
 
-## Database encryption needs a provider and a boot path
+## The shared database module owns the PostgreSQL integration
 
-We found no whole-database encryption option in the inspected source and deployment
-paths. Choose supported providers and configuration names before implementation.
-For SQLite, evaluate SQLCipher's page encryption and driver/build compatibility.
-For PostgreSQL, use a verified encrypted-storage or managed-database facility;
-stock PostgreSQL has no equivalent application toggle. Its
-[encryption options](https://www.postgresql.org/docs/17/encryption-options.html)
-describe the available layers.
+Use one implementation for server and KB. Configure storage encryption, column
+encryption, migrations, and readiness through the shared database module. Separate
+search, payload, and migration privileges by operation and caller. Preserve
+deployment-specific connection configuration without introducing a server/KB
+implementation split.
+
+PostgreSQL offers two relevant approaches in its
+[encryption options](https://www.postgresql.org/docs/current/encryption-options.html):
+
+| Approach | Search behavior | Protection |
+|---|---|---|
+| Data partition encryption | Existing queries and indexes continue to work | Filesystem or block-device encryption covers stored data and indexes |
+| Specific-column encryption with `pgcrypto` | Queries explicitly decrypt values before using them | Selected column values persist as ciphertext; indexes need separate consideration |
+
+Here, “data partition” means a storage partition. PostgreSQL table partitioning
+does not itself encrypt data. The storage provider unlocks pages for normal
+database execution.
+
+Use [`pgcrypto`](https://www.postgresql.org/docs/current/pgcrypto.html) for column
+encryption and decryption inside PostgreSQL. The vault manages independent scope
+keys and unwraps record keys after authorization; the shared database module
+supplies a record key only to the permitted database operation. Use protected
+connections and prevent parameter logging from retaining keys or plaintext.
+
+Preserve the all-scope-key condition and authenticated ownership. The PGP format
+differs from the current AES-GCM envelope; finalize its format and ownership
+verification before implementation. PGP message integrity alone does not bind a
+ciphertext to its owning record. PostgreSQL's raw encryption functions lack
+integrity protection and cannot replace the authenticated envelope on their own.
+
+### Encrypting a vector column changes indexed search
+
+An encrypted vector can be decrypted, cast back to `vector`, and used in a distance
+calculation. Without a usable index over readable vectors, exact nearest-neighbor
+search must decrypt and compare every row remaining after metadata filters.
+`LIMIT` bounds the returned results; it does not bound that work.
+
+[pgvector's indexes](https://github.com/pgvector/pgvector#indexing) operate on vector
+representations. They cannot apply their distance operators directly to `pgcrypto`
+ciphertext. A valid [expression index](https://www.postgresql.org/docs/current/indexes-expressional.html)
+over decrypted values stores the computed values in the index. Encrypting the
+source column alone would leave that derived representation outside its protection.
+Index definitions must contain no decryption keys.
+
+The current design retains queryable vector and token indexes under optional
+storage encryption, with encrypted document and memory bodies. Encrypting the
+vector column too remains an alternative to benchmark: compare exact decryption
+scans, metadata-filtered scans, and the existing indexed retrieval. Column
+encryption alone cannot promise both encrypted persisted vector indexes and
+unchanged indexed search.
+
+### Metadata fields can use column encryption independently
+
+The vector-index limitation does not prevent encrypting other columns. Choose
+fields by the queries they serve, and measure the resulting plans.
+
+| Metadata use | Column-encryption approach | Query consequence |
+|---|---|---|
+| Display after selecting a record by ID | Decrypt the selected field during an authorized read | Existing ID lookup remains indexed |
+| Exact-match lookup | Use a separate keyed lookup digest where justified | Equality remains indexable; repeated values remain observable |
+| Range, sorting, grouping, or substring queries | Decrypt a bounded candidate set, or retain a permitted searchable representation | Decryption costs grow with candidates; retained indexes need storage protection |
+
+An ordinary index on randomized ciphertext cannot perform the original plaintext
+lookup. For keyed lookup digests, define field normalization and separate,
+purpose-specific key use; verify matches against the decrypted value. An index
+over decrypted expressions persists its computed values and therefore needs its
+own at-rest coverage.
+
+Keep metadata access separate from document and memory-body access in the shared
+module. Add selected metadata fields, their permitted readers, and their query
+requirements to the inventory before enabling column encryption. This option
+does not require encrypting vectors or replacing their indexes.
+
+### Docker can mount encrypted host storage
+
+Offer an optional Linux deployment profile backed by a LUKS/dm-crypt device.
+The host unlocks and mounts its filesystem before starting the database container.
+Docker exposes the mounted directory through a bind mount or a configured
+[volume](https://docs.docker.com/engine/storage/volumes/). PostgreSQL reads normal
+pages; the host encrypts disk writes, including vector and token index files.
+
+Use a dedicated encrypted data volume for Aimee's persistent storage. Encrypting
+the filesystem backing Docker's entire data directory is also possible. Verify
+the actual storage paths: Docker's
+[`data-root`](https://docs.docker.com/engine/daemon/#daemon-data-directory)
+does not relocate a separate containerd image store or external bind mounts.
+Creating a named volume alone supplies no encryption.
+
+Startup must verify the expected encrypted mount before initializing or opening
+the database. A missing mount must fail readiness instead of creating plaintext
+data in the underlying directory. Keep WAL, tablespaces, database temporary files,
+and retained document files on covered storage; account separately for exports,
+host temporary files, logs, and backups written elsewhere.
+
+The storage key can use vault custody if that vault can unlock before this volume
+is mounted. Otherwise bootstrap requires an independent custody path or operator
+unlock. Keep the storage key separate from payload scope keys. Test locked boot,
+missing mounts, restart, migration, and restore before enabling this profile.
+
+We found no whole-database encryption option in the inspected deployment paths.
+Choose supported PostgreSQL storage or managed-service encryption providers and
+configuration names before implementation. Stock PostgreSQL has no built-in
+whole-database encryption toggle.
 
 Report provider readiness per database. Enabling encryption with an unavailable
 or unverifiable provider must produce a configuration/readiness error. Specify
-coverage for indexes, WAL/journals, temporary files, replicas, and physical backups.
+coverage for data files, indexes, WAL, temporary files, replicas, and physical backups.
 Logical dumps and external document files need their own protected paths.
 
-The database must obtain its unlock key before opening its vault tables. Keep that
-bootstrap path outside the database, using the existing file/KMS/TPM/PKCS#11 custody
-architecture and daemon separation. Database encryption can use a distinct
-deployment key. Enabling, disabling, rotating, and restoring encryption require
-recoverable workflows; they cannot be instantaneous runtime switches.
+The selected provider must unlock storage before PostgreSQL opens its data files.
+That boot path must work without reading vault tables inside the protected database.
+Use the existing external-custody architecture where applicable and define the
+provider-specific bootstrap integration. Storage keys remain distinct from payload
+scope keys. Enabling, disabling, rotating, and restoring encryption require
+recoverable workflows for each database; they cannot be instantaneous runtime switches.
 
 ## Cipher timings leave the retrieval cost unmeasured
 
@@ -230,17 +354,17 @@ unlock. Bounded vault-side caching or batches should avoid per-record remote
 custody calls while preserving each operation's authorization checks.
 
 Benchmark ingestion, insert/read/recall, rotation, and recovery on each supported
-backend. Include realistic sizes and concurrency, warm/cold caches, and external
-custody. Compare payload encryption, database encryption, and both enabled. Report
+PostgreSQL deployment. Include realistic sizes and concurrency, warm/cold caches,
+and external custody. Compare payload encryption, database encryption, and both enabled. Report
 p50/p95/p99 latency, throughput, CPU, storage, and index-load cost. Measure search
-changes separately from cipher cost. We have no overall percentage estimate yet.
-[SQLCipher's vendor guidance](https://www.zetetic.net/sqlcipher/performance/)
-describes overhead as low as 5–15%; it does not estimate Aimee's workload.
+changes separately from cipher cost, including `pgcrypto` decryption scans and
+indexed candidate selection. The AES-GCM timings above do not measure `pgcrypto`.
+We have no overall percentage estimate yet.
 
 ## Deliver authority separation before enabling the mode
 
 1. **Settle the contracts.** Define ownership mapping, grant issuance/verification,
-   envelope format, payload inventory, runtime identities, and storage providers.
+   envelope format, payload and metadata inventory, runtime identities, and storage providers.
 2. **Establish protected use.** Add scope-key lifecycle and authenticated ownership.
    Provision service admission and database roles before granting runtime access.
 3. **Convert storage and retrieval.** Introduce candidate-only search and authorized
