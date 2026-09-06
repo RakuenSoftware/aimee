@@ -1132,7 +1132,7 @@ native_provider_http:
       }
 
       /* Update provider health cache */
-      provider_health_update(agent->provider, http_status);
+      provider_health_update(agent->registration[0] ? agent->registration : agent->name, http_status);
 
       /* --- Context overflow: truncate old messages and retry --- */
       if (http_status == 400 && response_body &&

@@ -455,6 +455,23 @@ int agent_load_config(agent_config_t *cfg)
                 cJSON_IsTrue(cJSON_GetObjectItem(a, "catalog_provider_explicit"));
          }
 
+         cJSON *assessment;
+         cJSON_ArrayForEach(assessment, cJSON_GetObjectItem(a, "routing_competence"))
+         {
+            int j = ag->routing_competence_count;
+            cJSON *r = cJSON_GetObjectItem(assessment, "role");
+            if (j >= MAX_AGENT_ROLES || !cJSON_IsString(r))
+               continue;
+            snprintf(ag->routing_competence[j].role, 32, "%s", r->valuestring);
+            cJSON *score = cJSON_GetObjectItem(assessment, "score");
+            cJSON *minimum = cJSON_GetObjectItem(assessment, "minimum");
+            ag->routing_competence[j].score = cJSON_IsNumber(score) ? score->valueint : 0;
+            ag->routing_competence[j].minimum = cJSON_IsNumber(minimum) ? minimum->valueint : 0;
+            ag->routing_competence[j].eligible =
+                cJSON_IsTrue(cJSON_GetObjectItem(assessment, "eligible"));
+            ag->routing_competence_count++;
+         }
+
          v = cJSON_GetObjectItem(a, "cost_tier");
          if (v && cJSON_IsNumber(v))
             ag->cost_tier = v->valueint;

@@ -110,6 +110,12 @@ int agent_is_available_for_routing(const agent_t *agent);
 typedef int (*agent_route_selection_fn)(int randomized, uint32_t candidate_count,
                                         uint32_t *selected_index);
 void agent_set_route_selection_provider(agent_route_selection_fn provider);
+/* Rank a qualified pool using request-size pricing; negative return fails closed. */
+typedef int (*agent_route_cost_fn)(const agent_config_t *cfg, const char *role,
+                                  agent_t *const candidates[], int count, int min_context);
+void agent_set_route_cost_provider(agent_route_cost_fn provider);
+int agent_role_competence(const agent_t *agent, const char *role);
+int agent_role_meets_competence(const agent_t *agent, const char *role);
 /* Test/bench seam: clear the provider AND the latched authority, so a suite can
  * exercise the built-in balancer after installing one. Daemons never call it. */
 void agent_reset_route_selection_authority(void);

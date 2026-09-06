@@ -394,6 +394,8 @@ jobs:
             done
           done
           GOPROXY='https://proxy.golang.org|direct' make -C src go-unit-tests
+      - name: Routing live-gate contract
+        run: python3 -I scripts/tests/test_live_routing.py
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0
       - name: Reject reachable Go vulnerabilities

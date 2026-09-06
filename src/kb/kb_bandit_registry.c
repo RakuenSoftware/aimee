@@ -28,7 +28,15 @@ static const kb_bandit_decision_point_t REGISTRY[] = {
     },
     {
         .id = "delegate_routing",
-        .description = "Delegate cost-tier preference when a sub-task is launched "
+        .description = "Historical cost-tier routing evidence; superseded by delegate_routing_v2.",
+        .arms = {"cheapest", "premium"},
+        .n_arms = 2,
+        .reward_fn = "delegate_success_v1",
+        .status = "static",
+    },
+    {
+        .id = "delegate_routing_v2",
+        .description = "Qualified delegate cost versus competence preference "
                        "with no explicit --via/--tier/--provider override.",
         .arms = {"cheapest", "premium"},
         .n_arms = 2,

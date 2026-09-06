@@ -37,7 +37,7 @@ int agent_error_is_retryable(const char *error)
  * purposes but allow an unpinned route to continue with another eligible peer.
  * Match explicit credential/subscription diagnostics, not bare 401/403 status:
  * those statuses can also come from proxies, WAFs, or route authorization. */
-static int agent_error_allows_peer_substitution(const char *error)
+int agent_error_is_registration_failure(const char *error)
 {
    if (!error || !error[0])
       return 0;
@@ -76,7 +76,7 @@ int agent_rc_should_try_another(int rc, const char *error)
     * disables every other agent before dispatch, so it has no substitutable
     * peer. agent_dispatch_one records this class as a hard health error because
     * agent_error_is_retryable deliberately remains false for it. */
-   return agent_error_allows_peer_substitution(error);
+   return agent_error_is_registration_failure(error);
 }
 
 static int agent_supports_delegate_role(const agent_t *ag, const char *role)

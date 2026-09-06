@@ -1320,13 +1320,14 @@ int message_history_repair(cJSON *messages)
  * Provider health tracking (shared across platforms)
  * ================================================================ */
 
-#define MAX_TRACKED_PROVIDERS 8
+#define MAX_TRACKED_PROVIDERS MAX_AGENTS
 static struct
 {
    char name[64];
    provider_health_t health;
 } s_provider_health[MAX_TRACKED_PROVIDERS];
 static int s_provider_health_count;
+static pthread_mutex_t s_provider_health_lock = PTHREAD_MUTEX_INITIALIZER;
 
 provider_err_class_t provider_classify_error(int http_status)
 {
@@ -1374,7 +1375,7 @@ static provider_health_t *find_or_create_health(const char *provider_name)
          return &s_provider_health[i].health;
    }
    if (s_provider_health_count >= MAX_TRACKED_PROVIDERS)
-      return &s_provider_health[0].health; /* overwrite first if full */
+      return NULL; /* Never attribute another registration's failure to the first. */
    int idx = s_provider_health_count++;
    snprintf(s_provider_health[idx].name, sizeof(s_provider_health[idx].name), "%s", provider_name);
    s_provider_health[idx].health.available = -1;
@@ -1385,7 +1386,13 @@ void provider_health_update(const char *provider_name, int http_status)
 {
    if (!provider_name || !provider_name[0])
       return;
+   pthread_mutex_lock(&s_provider_health_lock);
    provider_health_t *h = find_or_create_health(provider_name);
+   if (!h)
+   {
+      pthread_mutex_unlock(&s_provider_health_lock);
+      return;
+   }
    h->last_http_status = http_status;
    h->last_check_ms = (int64_t)time(NULL) * 1000;
 
@@ -1400,14 +1407,24 @@ void provider_health_update(const char *provider_name, int http_status)
       h->available = 0;
       snprintf(h->error, sizeof(h->error), "%s", provider_error_message(cls));
    }
+   pthread_mutex_unlock(&s_provider_health_lock);
 }
 const provider_health_t *provider_health_get(const char *provider_name)
 {
+   static _Thread_local provider_health_t snapshot;
+   if (!provider_name || !provider_name[0])
+      return NULL;
+   pthread_mutex_lock(&s_provider_health_lock);
    for (int i = 0; i < s_provider_health_count; i++)
    {
       if (strcmp(s_provider_health[i].name, provider_name) == 0)
-         return &s_provider_health[i].health;
+      {
+         snapshot = s_provider_health[i].health;
+         pthread_mutex_unlock(&s_provider_health_lock);
+         return &snapshot;
+      }
    }
+   pthread_mutex_unlock(&s_provider_health_lock);
    return NULL;
 }
 

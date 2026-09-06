@@ -156,6 +156,9 @@ func (m *Manager) Manage(ctx context.Context, req Request) (object, error) {
 				if old := find(rows(root, "models"), str(model, "name")); old != nil {
 					for key, value := range old {
 						if !nativeModelFields[key] {
+							if key == "competence" && (str(model, "model") != str(old, "model") || str(model, "registration") != str(old, "registration")) {
+								continue
+							}
 							if _, present := model[key]; !present {
 								model[key] = value
 							}
@@ -486,6 +489,17 @@ func (m *Manager) modelCommand(ctx context.Context, req Request, root object) (o
 			}
 		}
 	default:
+		if v, ok := opts["model"]; ok && v != str(model, "model") {
+			delete(model, "competence")
+		}
+		if raw, ok := opts["competence"]; ok {
+			var evidence map[string]any
+			if json.Unmarshal([]byte(raw), &evidence) != nil || evidence == nil {
+				return nil, errors.New("competence must be a JSON object of role assessments")
+			}
+			model["competence"] = evidence
+			delete(model, "competence_model")
+		}
 		for option, field := range map[string]string{"model": "model", "endpoint": "endpoint", "provider": "provider", "auth-type": "auth_type", "auth-cmd": "auth_cmd"} {
 			if v, ok := opts[option]; ok {
 				model[field] = v

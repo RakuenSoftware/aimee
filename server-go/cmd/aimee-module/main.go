@@ -423,7 +423,7 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 	case "routing":
 		config.ModuleName = name
 		config.PrincipalRef = 9
-		config.Stages = []bus.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}}
+		config.Stages = []bus.ModuleStage{{EventKind: routing.EventKind, StageID: routing.StageSelect}, {EventKind: routing.EventPlan, StageID: routing.StagePlan}}
 		config.Handler = routing.Handle
 	case "delegates":
 		config.ModuleName = name
