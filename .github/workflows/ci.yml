@@ -494,6 +494,15 @@ jobs:
       # invokes — without this step the guarantee is unenforced in CI.
       - name: Thin-client remote exclusivity
         run: python3 scripts/test-thin-client-remote-exclusive.py ./aimee
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '22'
+      - name: Install pinned Codex for proxy compatibility
+        run: npm install --global @openai/codex@0.153.4
+      - name: Thin-client proxy regression suite (including real Codex config parser)
+        env:
+          AIMEE_TEST_REQUIRE_CODEX: '1'
+        run: python3 scripts/tests/test_thin_client_proxy.py -v
 
   build-integrity:
     needs: change-scope

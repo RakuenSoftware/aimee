@@ -88,6 +88,75 @@ commands. Keep a secure backup until the first successful provider probe.
 
 ## Client integrations
 
+### Local model proxy
+
+To route Codex through Aimee's model API, launch it with:
+
+```bash
+aimee launch --gateway -- codex
+```
+
+The thin client starts an authenticated listener on an unused `127.0.0.1` port,
+selects the Aimee Responses provider in Codex, and disables the Aimee CLI/MCP
+plugin for that invocation. It selects the server's `aimee` primary-agent binding;
+use `codex -m <agent-name>` to select another binding advertised by `/v1/models`.
+Your global Codex configuration is preserved. The listener lives until the launched
+client exits; its exit status is returned by the launcher. Ordinary `aimee launch -- <client>` keeps
+the client's own provider connection.
+
+Codex 0.153.4 hook discovery ignores command-line plugin-disable overrides, so
+the launcher creates a private `aimee-proxy-*.config.toml` profile in `CODEX_HOME`
+(default `~/.codex`). It disables only `aimee@local`; other hooks and their trust
+settings remain intact. The profile is removed on child exit, launch failure,
+and handled termination. An uncatchable kill can leave this credential-free file
+behind. The installed-plugin regression includes a positive control and verifies
+that an unrelated user hook still executes.
+
+This launcher targets Codex runtime commands, such as interactive Codex and
+`codex exec`. An explicit Codex `--profile` after `--` is preserved, not consumed
+as an Aimee remote profile. In that case, the launcher warns that your selected
+profile must contain `[plugins."aimee@local"]` with `enabled = false` to suppress
+the CLI hooks; no temporary profile replaces your selection.
+
+The local credential is generated for each launch. Aimee replaces it with the
+configured remote bearer and uses its existing server certificate pin and client
+mTLS identity for the upstream connection. The remote bearer is not passed to
+the launched client. Responses, including SSE and upstream HTTP errors, are
+relayed as they arrive. Client disconnects close the upstream connection.
+
+For a persistent listener managed by a terminal or service manager:
+
+```bash
+export AIMEE_PROXY_TOKEN="$(openssl rand -hex 32)"
+aimee proxy --port 8911
+```
+
+Configure the consuming client with `http://127.0.0.1:8911/v1` and the same local
+token. For Codex, use a custom provider with `wire_api = "responses"` and
+`env_key = "AIMEE_PROXY_TOKEN"`; the variable must be available to both processes.
+Disable the Aimee plugin when using this standalone setup to avoid also invoking
+its tool integrations. The listener accepts Bearer authentication or Anthropic's
+`x-api-key` header, permits only model API routes, and supports up to eight
+concurrent requests. Requests need Content-Length framing and are limited to
+4 MiB; HTTP upgrades, chunked request bodies, and browser-origin requests are
+rejected. Streaming responses are not subject to that body-size limit. Remote
+routes still have to be supported by the selected Aimee server.
+
+A remote `401` or `403` is returned unchanged. If the server rejects the client
+certificate, `aimee remote status` distinguishes that from a bearer rejection.
+The server operator must check the enrollment/revocation state and provision a
+valid identity; the proxy does not replace credentials or weaken TLS checks.
+
+Run the regression suite with `make -C src proxy-tests`. It uses isolated local
+HTTP/mTLS peers and, when installed, real Codex against deterministic Responses
+fixtures, including failed streams. No model-provider account is needed. Set
+`AIMEE_TEST_REQUIRE_CODEX=1` to fail if the compatibility client is missing.
+The suite also runs with the native unit tests and sanitizers; CI and Linux
+release-artifact validation require pinned Codex 0.153.4. The testing-artifact
+publisher runs the transport suite before uploading its binaries.
+
+### Tool integrations
+
 Setup can register:
 
 - Claude Code hooks and MCP;

@@ -226,6 +226,11 @@ jobs:
           cp aimee "${{ matrix.asset }}"
           ./${{ matrix.asset }} version
 
+      - name: Gate testing artifact on the local proxy regression suite
+        env:
+          AIMEE_TEST_PROXY_BINARY: ${{ github.workspace }}/${{ matrix.asset }}
+        run: python3 scripts/tests/test_thin_client_proxy.py -v
+
       - name: Upload ${{ matrix.asset }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
