@@ -79,6 +79,16 @@ extern "C"
    char *aimee_client_request(const char *method, const char *path, const char *body,
                               int *status_out);
 
+   /* Model-proxy transport: relay the complete HTTP response, including headers,
+    * incrementally. Uses the resolved remote bearer and native TLS identity.
+    * Caller supplies validated model route/protocol headers, never credentials.
+    * on_socket registers the live fd for cancellation; -1 unregisters it before
+    * close. Returns -1 on transport/callback failure; never retries a request. */
+   int aimee_client_proxy_request(const char *method, const char *path, const char *headers,
+                                  const void *body, unsigned long body_len, const char *session_id,
+                                  int (*write_response)(const void *, unsigned long, void *),
+                                  void (*on_socket)(int, void *), void *context);
+
    /* Security guard: returns 1 when transmitting bearer |token| to a server at
     * (|is_https|, |host|) would expose the credential in cleartext — a non-empty
     * token over plaintext http:// to a non-loopback host. The remote-TCP request
