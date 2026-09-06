@@ -43,7 +43,9 @@ interactive query console, or client flag that widens the registered operation c
 ## Data and migrations
 
 `postgres` stores no domain schema of its own. It serializes owner-scoped, checksummed migrations and
-executes registered statements inside bounded transactions. Runtime tables, including workflow rows, belong
+executes registered statements inside bounded transactions. Ledger creation and
+migration/replay use the same transaction advisory lock as the native knowledge
+bootstrap, including on an empty database. Runtime tables, including workflow rows, belong
 to `aimee`; backups and restores use PostgreSQL-native `pg_dump` and `pg_restore` procedures.
 
 ## Security and privacy

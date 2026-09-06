@@ -627,21 +627,56 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     PRIMARY KEY (owner, version)
 )`
 
+// Shared with the native knowledge-schema bootstrap. A row lock cannot guard
+// an empty ledger, and CREATE TABLE IF NOT EXISTS is not safe against concurrent
+// catalog creation. Acquire this database-wide transaction lock before either
+// DDL or history reads. Runtime queries never acquire it.
+const schemaMigrationLockSQL = "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('aimee:db:schema'))"
+
+func rollbackSchemaTransaction(tx pgx.Tx) {
+	// The request may have expired while waiting for the schema lock. Releasing
+	// the transaction must not inherit that cancelled context or retain a lease.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = tx.Rollback(ctx)
+}
+
+func beginSchemaTransaction(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, error) {
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, schemaMigrationLockSQL); err != nil {
+		rollbackSchemaTransaction(tx)
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, versionTableDDL); err != nil {
+		rollbackSchemaTransaction(tx)
+		return nil, err
+	}
+	return tx, nil
+}
+
 func (h *sqlHandler) currentVersion(ctx context.Context, pool *pgxpool.Pool, r *reader) ([]byte, bus.ModuleStatus) {
 	owner, err := r.str()
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
-	if _, err := pool.Exec(ctx, versionTableDDL); err != nil {
+	tx, err := beginSchemaTransaction(ctx, pool)
+	if err != nil {
 		return failure(err, "current_version"), bus.ModuleStatusOK
 	}
+	defer rollbackSchemaTransaction(tx)
 	var version int64
 	var checksum string
-	err = pool.QueryRow(ctx,
+	err = tx.QueryRow(ctx,
 		`SELECT version, checksum FROM schema_migrations
 		  WHERE owner = $1 ORDER BY version DESC LIMIT 1`, owner).
 		Scan(&version, &checksum)
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return failure(err, "current_version"), bus.ModuleStatusOK
+	}
+	if err := tx.Commit(ctx); err != nil {
 		return failure(err, "current_version"), bus.ModuleStatusOK
 	}
 	// No rows is a fresh database, which answers 0 rather than failing. That is
@@ -706,15 +741,11 @@ func (h *sqlHandler) migrate(ctx context.Context, pool *pgxpool.Pool, r *reader)
 			bus.ModuleStatusOK
 	}
 
-	if _, err := pool.Exec(ctx, versionTableDDL); err != nil {
-		return failure(err, "migrate"), bus.ModuleStatusOK
-	}
-
-	tx, err := pool.Begin(ctx)
+	tx, err := beginSchemaTransaction(ctx, pool)
 	if err != nil {
 		return failure(err, "migrate"), bus.ModuleStatusOK
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer rollbackSchemaTransaction(tx)
 
 	// Ordering and replay, decided inside the transaction so two modules
 	// starting together cannot both pass the check and both apply.

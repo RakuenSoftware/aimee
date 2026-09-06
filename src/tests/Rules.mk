@@ -3216,6 +3216,7 @@ db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-r
 	$< $(abspath $(OBJDIR)/aimee-module-db2-replay)
 	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/db2 -run '^TestMemoryPostgresReplay$$'
 	cd ../server-go && AIMEE_DB2_REPLAY_URL="$$AIMEE_DB2_URL" go test -count=1 -v ./modules/memory -run '^TestMemoryRuntimeRoleReplay$$'
+	cd ../server-go && AIMEE_DB_TEST_URL="$$AIMEE_DB2_URL" AIMEE_DB_TEST_REQUIRED=1 go test -count=1 -v ./modules/postgres -run '^TestSharedDatabase'
 
 # --- Postgres-backed unit tests -------------------------------------------
 #
