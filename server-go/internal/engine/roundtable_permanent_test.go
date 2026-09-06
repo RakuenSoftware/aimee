@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/JBailes/aimee/server-go/bus"
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -37,7 +37,7 @@ func TestRoundtableFailsTheStepWhenThePanelRefusesTheRequest(t *testing.T) {
 			reviewed := wfe.Artifact{Type: "plan",
 				Content: []byte("content of the artifact under review, long enough to be reviewable")}
 			result, err := runner.roundtable(context.Background(), StepRequest{
-				WorkItem: db1.WorkItem{Repo: t.TempDir(), Worktree: t.TempDir()},
+				WorkItem: workflowstore.WorkItem{Repo: t.TempDir(), Worktree: t.TempDir()},
 				Node: wfe.Node{Params: map[string]any{"roundtable": "default",
 					"panel": map[string]any{"required": []any{"original-request", "reviewer"}}}},
 				Proposal: "request",

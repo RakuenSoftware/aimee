@@ -15,8 +15,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/JBailes/aimee/server-go/internal/db1"
 	"github.com/JBailes/aimee/server-go/internal/wfe"
+	"github.com/JBailes/aimee/server-go/internal/workflowstore"
 	roundtablecfg "github.com/JBailes/aimee/server-go/modules/roundtable/panel"
 )
 
@@ -127,7 +127,7 @@ func (v CommandVerifier) acquire(ctx context.Context) (func(), error) {
 }
 
 type NativeRunner struct {
-	db        *db1.Store
+	db        *workflowstore.Store
 	worktrees *WorktreeManager
 	agents    AgentClient
 	verifier  Verifier
@@ -355,7 +355,7 @@ func applyDelegateDeadlineCap(ctx context.Context, request *DelegateRequest) err
 	return nil
 }
 
-func NewNativeRunner(db *db1.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
+func NewNativeRunner(db *workflowstore.Store, worktrees *WorktreeManager, agents AgentClient, verifier Verifier, artifacts *wfe.ArtifactStore, workflows *wfe.Registry, forge Forge) (*NativeRunner, error) {
 	if db == nil || worktrees == nil || agents == nil || artifacts == nil || workflows == nil {
 		return nil, errors.New("DB1, worktrees, agent client, artifacts, and workflow registry are required")
 	}
@@ -434,7 +434,7 @@ type workflowPacket struct {
 // order and the per-workflow concurrency limit are scheduling policy, not a
 // dependency contract: a parked predecessor must never make the next slice
 // runnable merely because it released an execution slot.
-func (r *NativeRunner) packetDependencyGate(ctx context.Context, item db1.WorkItem) (StepResult, bool, error) {
+func (r *NativeRunner) packetDependencyGate(ctx context.Context, item workflowstore.WorkItem) (StepResult, bool, error) {
 	content, err := r.artifacts.Proposal(item.ID)
 	if err != nil {
 		return StepResult{}, false, fmt.Errorf("load slice packet: %w", err)
@@ -459,7 +459,7 @@ func (r *NativeRunner) packetDependencyGate(ctx context.Context, item db1.WorkIt
 	if err != nil {
 		return StepResult{}, false, fmt.Errorf("load slice siblings: %w", err)
 	}
-	byPacketID := make(map[string]db1.WorkItem, len(siblings))
+	byPacketID := make(map[string]workflowstore.WorkItem, len(siblings))
 	for _, sibling := range siblings {
 		if !strings.HasPrefix(sibling.ID, generationPrefix) {
 			continue
@@ -1316,7 +1316,7 @@ func (r *NativeRunner) freeze(ctx context.Context, req StepRequest) (StepResult,
 	return StepResult{Status: StepAdvanced, ArtifactType: "frozen_diff", Artifact: diff, ContentHash: wfe.Hash([]byte(diff))}, nil
 }
 
-func frozenWorktreeBase(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+func frozenWorktreeBase(ctx context.Context, item workflowstore.WorkItem, workdir string) (string, error) {
 	base := ""
 	if item.ParentID != "" {
 		// Slice PRs merge through the forge, which advances the remote feature
@@ -1338,7 +1338,7 @@ func frozenWorktreeBase(ctx context.Context, item db1.WorkItem, workdir string) 
 	return base, nil
 }
 
-func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) (string, error) {
+func frozenWorktreeDiff(ctx context.Context, item workflowstore.WorkItem, workdir string) (string, error) {
 	base, err := frozenWorktreeBase(ctx, item, workdir)
 	if err != nil {
 		return "", err
@@ -1350,7 +1350,7 @@ func frozenWorktreeDiff(ctx context.Context, item db1.WorkItem, workdir string) 
 	return diff, nil
 }
 
-func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]db1.FrozenCreate, error) {
+func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]workflowstore.FrozenCreate, error) {
 	cmd := exec.CommandContext(ctx, "git", "-C", workdir, "diff", "--name-only", "--diff-filter=A",
 		"--no-renames", "-z", base+"...HEAD")
 	output, err := cmd.CombinedOutput()
@@ -1358,7 +1358,7 @@ func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]db1.Fro
 		return nil, fmt.Errorf("list frozen created paths: %w: %s", err, strings.TrimSpace(string(output)))
 	}
 	parts := bytes.Split(output, []byte{0})
-	creates := make([]db1.FrozenCreate, 0, len(parts))
+	creates := make([]workflowstore.FrozenCreate, 0, len(parts))
 	for _, raw := range parts {
 		if len(raw) == 0 {
 			continue
@@ -1368,7 +1368,7 @@ func frozenWorktreeCreates(ctx context.Context, workdir, base string) ([]db1.Fro
 		if err != nil {
 			return nil, fmt.Errorf("resolve frozen created path %q: %w", path, err)
 		}
-		creates = append(creates, db1.FrozenCreate{Path: path, ContentHash: hash})
+		creates = append(creates, workflowstore.FrozenCreate{Path: path, ContentHash: hash})
 	}
 	return creates, nil
 }
@@ -1633,12 +1633,12 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 	if err != nil {
 		return StepResult{}, err
 	}
-	byID := make(map[string]db1.WorkItem, len(allChildren))
+	byID := make(map[string]workflowstore.WorkItem, len(allChildren))
 	for _, child := range allChildren {
 		byID[child.ID] = child
 	}
 	created := make([]string, 0, len(packetPlan.Packets))
-	children := make([]db1.WorkItem, 0, len(packetPlan.Packets))
+	children := make([]workflowstore.WorkItem, 0, len(packetPlan.Packets))
 	for i, packet := range packetPlan.Packets {
 		id := fmt.Sprintf("%s.s%s.%d", req.WorkItem.ID, generation, i)
 		if child, exists := byID[id]; exists {
@@ -1656,7 +1656,7 @@ func (r *NativeRunner) foreach(ctx context.Context, req StepRequest) (StepResult
 		// row and wedged the parent in slices. The content hash stays appended
 		// for operator diagnosis. Same-generation retries still deduplicate on
 		// the id above, before this insert is reached.
-		if err := r.db.CreateWorkItem(ctx, db1.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
+		if err := r.db.CreateWorkItem(ctx, workflowstore.CreateWorkItem{ID: id, Repo: req.WorkItem.Repo, ProposalPath: "packet:" + id + ":" + wfe.Hash(packet), WorkflowName: childName, WorkflowVersion: definition.Version, StartStage: start, Mode: "autonomous", ParentID: req.WorkItem.ID}); err != nil {
 			r.rollbackChildren(ctx, created)
 			return StepResult{}, err
 		}

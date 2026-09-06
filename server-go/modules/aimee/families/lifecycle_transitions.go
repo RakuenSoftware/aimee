@@ -131,12 +131,9 @@ const (
 	                                ` + clearReservation + `, updated_at = now()
 	                          WHERE work_item_id = $4`
 
-	// Only an active child of this parent may freeze, and the lock is what
-	// stops two claims both observing an empty set and racing their inserts.
-	//
-	// The C did this with a no-op UPDATE, to reserve SQLite's single writer
-	// before reading. FOR UPDATE says the same thing directly and locks only
-	// the row that matters.
+	// Only an active child of this parent may freeze. The family transaction
+	// lock serializes sibling claims; locking different child rows alone cannot
+	// prevent both siblings from observing an empty claim set.
 	wfeFrozenOwnerLockSQL = `SELECT 1 FROM lifecycle_work_item
 	                          WHERE work_item_id = $1 AND parent_id = $2 AND state = 'active'
 	                          FOR UPDATE`
@@ -923,7 +920,7 @@ func wfeCreateWorkItem(ctx context.Context, db store.DB, f []string) (uint32, []
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	if rootCap > 0 {
+	if rootCap > 0 && parentID == "" {
 		var activeRoots int64
 		if err := tx.QueryRow(ctx, wfeActiveRootCountSQL).Scan(&activeRoots); err != nil {
 			return 0, nil, err
@@ -950,6 +947,9 @@ func wfeCreateWorkItem(ctx context.Context, db store.DB, f []string) (uint32, []
 	if tag.RowsAffected() != 1 {
 		// For a child, the parent stopped between the caller's decision and
 		// this insert. For a root, the insert simply did not land.
+		if parentID != "" {
+			return store.StatusOK, []string{"2"}, nil
+		}
 		return store.StatusFailed, nil, nil
 	}
 	if _, err := tx.Exec(ctx, wfeEventSQL, workItemID, startStage, "create", "go-wfe",
@@ -967,6 +967,11 @@ var Lifecycle = store.Family{
 	Name:  "lifecycle",
 	Event: EventLifecycle,
 	Stage: StageLifecycle,
+	// SQLite's old single-writer transactions implicitly serialized admission,
+	// tree mutation and sibling claims. PostgreSQL READ COMMITTED does not.
+	// Scope this invariant to the lifecycle schema, across all module processes,
+	// before their first read; neither memory traffic nor other schemas wait.
+	TransactionLockSQL: "SELECT pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext(current_schema()), pg_catalog.hashtext('aimee:lifecycle'))",
 	Ops: map[uint32]store.Op{
 		opWorkItemCreate:                 {Name: "work_item_create", Args: 7, Tx: true, Run: workItemCreate},
 		opWorkItemGet:                    {Name: "work_item_get", Cells: 22, Args: 1, Run: workItemGet},

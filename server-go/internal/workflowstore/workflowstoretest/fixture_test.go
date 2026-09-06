@@ -1,10 +1,28 @@
-package db1test
+package workflowstoretest
 
 import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestChildDSNOverridesIdentityAndSchema(t *testing.T) {
+	for _, base := range []string{
+		"postgresql://old:old-password@localhost/db?search_path=public&sslmode=disable",
+		"host=localhost dbname=db user=old password=old-password search_path=public sslmode=disable",
+	} {
+		params := map[string]string{"user": "runtime", "password": `quote'and\slash`, "search_path": "isolated_fixture"}
+		config, err := pgxpool.ParseConfig(withDSNParams(base, params))
+		if err != nil {
+			t.Fatal("generated child DSN is invalid")
+		}
+		if config.ConnConfig.User != params["user"] || config.ConnConfig.Password != params["password"] || config.ConnConfig.RuntimeParams["search_path"] != params["search_path"] {
+			t.Fatal("child did not receive isolated identity and schema")
+		}
+	}
+}
 
 func TestRebindNumbersOnlyUnquotedPlaceholders(t *testing.T) {
 	t.Parallel()

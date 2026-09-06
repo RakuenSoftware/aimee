@@ -20,6 +20,7 @@
     "server-go/modules/postgres/health_test.go",
     "server-go/modules/postgres/shared_database_test.go",
     "server-go/modules/postgres/shared_migrations_test.go",
+    "server-go/modules/postgres/shared_workflow_test.go",
     "server-go/modules/postgres/sql_security_test.go"
   ],
   "public_headers": [

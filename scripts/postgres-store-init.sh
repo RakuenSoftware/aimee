@@ -79,4 +79,15 @@ ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO aimee_store_runtime;
 ALTER DEFAULT PRIVILEGES FOR ROLE aimee_store_migrator IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO aimee_store_runtime;
+
+-- The version ledger is migration authority, not an application table. Keep
+-- an existing ledger private immediately after the blanket upgrade grants;
+-- the provider applies the same rule atomically when first creating it.
+DO $ledger$
+BEGIN
+  IF to_regclass('public.schema_migrations') IS NOT NULL THEN
+    REVOKE ALL ON TABLE public.schema_migrations FROM aimee_store_runtime, PUBLIC;
+  END IF;
+END
+$ledger$;
 SQL

@@ -25,6 +25,36 @@ func TestMemoryDoesNotImportServerDomainStorage(t *testing.T) {
 	})
 }
 
+func TestRuntimeCallersDoNotReintroduceNumberedDatabasePackages(t *testing.T) {
+	err := filepath.WalkDir("..", func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() || !strings.HasSuffix(path, ".go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+		if err != nil {
+			return err
+		}
+		for _, imp := range file.Imports {
+			name, err := strconv.Unquote(imp.Path.Value)
+			if err != nil {
+				return err
+			}
+			for _, retired := range []string{"github.com/JBailes/aimee/server-go/db1", "github.com/JBailes/aimee/server-go/internal/db1"} {
+				if name == retired || strings.HasPrefix(name, retired+"/") {
+					t.Errorf("%s imports retired runtime package %s", path, name)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
 func checkImports(t *testing.T, dir string, forbidden func(string) bool) {
 	t.Helper()
 	entries, err := os.ReadDir(dir)

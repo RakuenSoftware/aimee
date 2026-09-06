@@ -1,4 +1,4 @@
-package db1
+package workflowstore
 
 import (
 	"context"

@@ -28,6 +28,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -231,7 +232,8 @@ func parseStoreConfig(dsn string) (*pgxpool.Config, error) {
 func parseStoreConfigFor(name, dsn string) (*pgxpool.Config, error) {
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
-		return nil, fmt.Errorf("postgres: %s is not a valid DSN: %w", name, err)
+		// Parse errors can contain the original DSN, including its password.
+		return nil, fmt.Errorf("postgres: %s is not a valid DSN", name)
 	}
 	return config, nil
 }
@@ -248,6 +250,24 @@ func parseMigrationConfig(migrationDSN, runtimeDSN string) (*pgxpool.Config, err
 	if config.ConnConfig.User == runtime.ConnConfig.User {
 		return nil, fmt.Errorf("postgres: migration role %q must differ from the runtime role",
 			config.ConnConfig.User)
+	}
+	// Credentials are two capabilities on ONE database. Migrating a different
+	// target succeeds deceptively while runtime keeps serving the old schema.
+	// Compare configured endpoints, including failover order, without resolving
+	// DNS (or printing credentials). Operators must use the same endpoint names.
+	mc, rc := config.ConnConfig, runtime.ConnConfig
+	if mc.Database != rc.Database || mc.Host != rc.Host || mc.Port != rc.Port || len(mc.Fallbacks) != len(rc.Fallbacks) {
+		return nil, errors.New("postgres: migration and runtime DSNs must target the same database and endpoints")
+	}
+	for i, fallback := range mc.Fallbacks {
+		if fallback.Host != rc.Fallbacks[i].Host || fallback.Port != rc.Fallbacks[i].Port {
+			return nil, errors.New("postgres: migration and runtime DSNs must use the same failover endpoints")
+		}
+	}
+	for _, key := range []string{"search_path", "options"} {
+		if mc.RuntimeParams[key] != rc.RuntimeParams[key] {
+			return nil, fmt.Errorf("postgres: migration and runtime DSNs must use the same %s", key)
+		}
 	}
 	return config, nil
 }
@@ -317,9 +337,37 @@ func MigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
 			migrationPoolErr = err
 			return
 		}
+		runtime, err := SQLPool(ctx)
+		if err == nil {
+			err = validateStoreNamespace(ctx, runtime, pool)
+		}
+		if err != nil {
+			pool.Close()
+			migrationPoolErr = err
+			return
+		}
 		migrationPool = pool
 	})
 	return migrationPool, migrationPoolErr
+}
+
+// Role defaults and the implicit $user search-path entry can resolve identical
+// DSN text into different schemas. Check the live resolution before any domain
+// migrations, without disclosing credentials or relying on DNS aliases.
+func validateStoreNamespace(ctx context.Context, runtime, migration *pgxpool.Pool) error {
+	var runtimeDB, migrationDB string
+	var runtimeSchemas, migrationSchemas []string
+	const query = "SELECT current_database(), current_schemas(false)"
+	if err := runtime.QueryRow(ctx, query).Scan(&runtimeDB, &runtimeSchemas); err != nil {
+		return errors.New("postgres: cannot verify runtime database namespace")
+	}
+	if err := migration.QueryRow(ctx, query).Scan(&migrationDB, &migrationSchemas); err != nil {
+		return errors.New("postgres: cannot verify migration database namespace")
+	}
+	if runtimeDB != migrationDB || len(runtimeSchemas) == 0 || !slices.Equal(runtimeSchemas, migrationSchemas) {
+		return errors.New("postgres: migration and runtime roles resolve different database namespaces; configure matching search paths and schema usage grants")
+	}
+	return nil
 }
 
 // ensureSearchPathSchema creates the schema the DSN's search_path names.
@@ -625,7 +673,28 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     checksum    TEXT   NOT NULL,
     applied_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (owner, version)
-)`
+);
+-- Default application-table grants must not grant authority over the ledger.
+-- Reconcile existing installations too, under the same bootstrap lock. Only
+-- the table owner retains direct privileges; all ledger operations already use
+-- the migration capability, including reads. Role membership remains a deploy
+-- responsibility: runtime must not inherit the owner role.
+DO $ledger_acl$
+DECLARE recipient record;
+BEGIN
+    FOR recipient IN
+        SELECT DISTINCT acl.grantee
+        FROM pg_catalog.pg_class AS relation,
+             LATERAL pg_catalog.aclexplode(relation.relacl) AS acl
+        WHERE relation.oid = 'schema_migrations'::regclass
+          AND acl.grantee <> relation.relowner
+    LOOP
+        EXECUTE format('REVOKE ALL ON TABLE schema_migrations FROM %s',
+            CASE WHEN recipient.grantee = 0 THEN 'PUBLIC'
+                 ELSE quote_ident(pg_catalog.pg_get_userbyid(recipient.grantee)) END);
+    END LOOP;
+END
+$ledger_acl$`
 
 // Shared with the native knowledge-schema bootstrap. A row lock cannot guard
 // an empty ledger, and CREATE TABLE IF NOT EXISTS is not safe against concurrent

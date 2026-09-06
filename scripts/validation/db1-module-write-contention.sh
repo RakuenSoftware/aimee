@@ -11,7 +11,7 @@
 # it changes what this test is looking for:
 #
 #   module (db.c):        journal_mode=WAL, busy_timeout 5000/15000ms
-#   Go (internal/db1):    journal_mode=WAL, busy_timeout 5000ms,
+#   Go (internal/workflowstore):    journal_mode=WAL, busy_timeout 5000ms,
 #                         MaxOpenConns(1), _txlock=immediate
 #
 # WAL supports multiple processes, so the expected result is that this passes.

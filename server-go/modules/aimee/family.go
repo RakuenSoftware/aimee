@@ -69,6 +69,10 @@ type Family struct {
 	Event uint32
 	Stage uint32
 	Ops   map[uint32]Op
+	// TransactionLockSQL, when set, runs before any operation's transactional
+	// reads. It also wraps RunDB transactions, so independently hosted callers
+	// obey the same domain invariant. Read-only operations remain concurrent.
+	TransactionLockSQL string
 }
 
 // Handler builds the bus handler for this family against a database.
@@ -176,6 +180,9 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 	if tagger, ok := db.(statementTagger); ok && spec.Name != "" {
 		db = tagger.WithStatementID(spec.Name)
 	}
+	if f.TransactionLockSQL != "" {
+		db = transactionLockDB{DB: db, sql: f.TransactionLockSQL}
+	}
 	if spec.RunDB != nil {
 		return spec.RunDB(ctx, db, fields)
 	}
@@ -212,6 +219,25 @@ func (f Family) run(ctx context.Context, db DB, spec Op, fields []string) (uint3
 		return 0, nil, err
 	}
 	return status, reply, nil
+}
+
+type transactionLockDB struct {
+	DB
+	sql string
+}
+
+func (d transactionLockDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := d.DB.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := tx.Exec(ctx, d.sql); err != nil {
+		cleanup, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = tx.Rollback(cleanup)
+		return nil, err
+	}
+	return tx, nil
 }
 
 // The connection is NOT aimee's. Opening a database here would make aimee a second

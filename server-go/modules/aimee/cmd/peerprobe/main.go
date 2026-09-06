@@ -348,7 +348,7 @@ const (
 // The sessions are created in db1 over the bus rather than by a CLI, so the
 // module's directory reads them from the same store this probe wrote them to --
 // which is the point. Nothing here registers a session with the peer module; it
-// learns of them entirely through db1.
+// learns of them entirely through the session family.
 func deliveryChecks(ctx context.Context, caller *bus.ConcurrentModuleCaller,
 	call func(stage, op uint32, cells []string) (peerwire.Status, []string, error)) {
 

@@ -89,9 +89,14 @@ func (c sharedStoreCaller) Call(ctx context.Context, kind, stage uint32, _ uint6
 }
 
 func sharedTestStore(t *testing.T, pool *pgxpool.Pool) db.Store {
+	return sharedTestStoreWithPools(t, pool, pool)
+}
+
+func sharedTestStoreWithPools(t *testing.T, runtime, migration *pgxpool.Pool) db.Store {
 	t.Helper()
-	getPool := func(context.Context) (*pgxpool.Pool, error) { return pool, nil }
-	handler := &sqlHandler{txs: newTxRegistry(), poolFn: getPool, migrationPoolFn: getPool}
+	handler := &sqlHandler{txs: newTxRegistry(),
+		poolFn:          func(context.Context) (*pgxpool.Pool, error) { return runtime, nil },
+		migrationPoolFn: func(context.Context) (*pgxpool.Pool, error) { return migration, nil }}
 	store, err := db.NewStore(sharedStoreCaller{handler.handle})
 	if err != nil {
 		t.Fatal(err)

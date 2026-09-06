@@ -43,3 +43,32 @@ func TestParseMigrationConfigRequiresDifferentDatabaseRole(t *testing.T) {
 		t.Fatalf("migration role = %q, want migrator", config.ConnConfig.User)
 	}
 }
+
+func TestParseMigrationConfigRequiresSameTarget(t *testing.T) {
+	runtime := "postgres://runtime:secret@localhost:5432/db?sslmode=disable&search_path=public"
+	for _, migration := range []string{
+		"postgres://migrator:secret@localhost:5432/other?sslmode=disable&search_path=public",
+		"postgres://migrator:secret@other:5432/db?sslmode=disable&search_path=public",
+		"postgres://migrator:secret@localhost:5433/db?sslmode=disable&search_path=public",
+		"postgres://migrator:secret@localhost:5432/db?sslmode=disable&search_path=other",
+		"postgres://migrator:secret@localhost:5432/db?sslmode=disable&search_path=public&options=-csearch_path%3Dother",
+		"postgres://migrator:secret@localhost:5432,backup:5432/db?sslmode=disable&search_path=public",
+	} {
+		if _, err := parseMigrationConfig(migration, runtime); err == nil {
+			t.Error("mismatched database configuration was accepted")
+		} else if strings.Contains(err.Error(), "secret") {
+			t.Fatal("configuration error disclosed credentials")
+		}
+	}
+	if _, err := parseMigrationConfig(
+		"postgres://migrator:secret@localhost:5432/db?sslmode=disable&search_path=public&application_name=migration", runtime); err != nil {
+		t.Fatalf("same target with separate credentials and application name: %v", err)
+	}
+}
+
+func TestInvalidDatabaseConfigDoesNotDiscloseCredentials(t *testing.T) {
+	_, err := parseStoreConfig("postgres://runtime:do-not-disclose@localhost:not-a-port/db")
+	if err == nil || strings.Contains(err.Error(), "do-not-disclose") {
+		t.Fatal("invalid DSN must fail without disclosing credentials")
+	}
+}

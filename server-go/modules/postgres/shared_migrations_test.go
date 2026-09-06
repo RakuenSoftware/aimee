@@ -9,7 +9,123 @@ import (
 	"time"
 
 	"github.com/JBailes/aimee/server-go/db"
+	"github.com/JBailes/aimee/server-go/modules/aimee/families"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+func TestSharedDatabaseRuntimeCannotRewriteMigrationHistory(t *testing.T) {
+	admin := sharedTestDatabase(t)
+	ctx := context.Background()
+	// Unique cluster roles, used by actual authenticated connections (not SET
+	// ROLE on an admin connection). No production role is altered or reused.
+	base := admin.Config().ConnConfig.Database
+	migratorName, runtimeName := base+"_m", base+"_r"
+	migratorID, runtimeID := pgx.Identifier{migratorName}.Sanitize(), pgx.Identifier{runtimeName}.Sanitize()
+	for _, role := range []string{migratorID, runtimeID} {
+		if _, err := admin.Exec(ctx, "CREATE ROLE "+role+" LOGIN NOINHERIT NOBYPASSRLS NOSUPERUSER NOCREATEDB NOCREATEROLE PASSWORD 'disposable-test-only'"); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			cleanup, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if _, err := admin.Exec(cleanup, "DROP OWNED BY "+role); err != nil {
+				t.Error(err)
+			}
+			if _, err := admin.Exec(cleanup, "DROP ROLE "+role); err != nil {
+				t.Error(err)
+			}
+		})
+	}
+	for _, sql := range []string{
+		"REVOKE CREATE ON SCHEMA public FROM PUBLIC",
+		"GRANT USAGE, CREATE ON SCHEMA public TO " + migratorID,
+		"GRANT USAGE ON SCHEMA public TO " + runtimeID,
+		"ALTER DEFAULT PRIVILEGES FOR ROLE " + migratorID + " IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO " + runtimeID,
+		"ALTER DEFAULT PRIVILEGES FOR ROLE " + migratorID + " IN SCHEMA public GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO " + runtimeID,
+	} {
+		if _, err := admin.Exec(ctx, sql); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openRole := func(name string) *pgxpool.Pool {
+		config := admin.Config().Copy()
+		config.ConnConfig.User, config.ConnConfig.Password = name, "disposable-test-only"
+		pool, err := pgxpool.NewWithConfig(ctx, config)
+		if err != nil {
+			t.Fatal("cannot initialize disposable role pool")
+		}
+		t.Cleanup(pool.Close)
+		if err := pool.Ping(ctx); err != nil {
+			t.Fatal(err)
+		}
+		return pool
+	}
+	migration, runtime := openRole(migratorName), openRole(runtimeName)
+	if err := validateStoreNamespace(ctx, runtime, migration); err != nil {
+		t.Fatal(err)
+	}
+	store := sharedTestStoreWithPools(t, runtime, migration)
+	if err := families.ApplySchema(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	assertProtected := func() {
+		t.Helper()
+		for _, sql := range []string{
+			"DELETE FROM schema_migrations",
+			"UPDATE schema_migrations SET checksum='forged'",
+			"INSERT INTO schema_migrations(owner,version,checksum) VALUES('forged',1,'forged')",
+			"TRUNCATE schema_migrations",
+			"DROP TABLE schema_migrations",
+			"CREATE TABLE unauthorized_ddl(id int)",
+		} {
+			_, err := runtime.Exec(ctx, sql)
+			var pgerr *pgconn.PgError
+			if !errors.As(err, &pgerr) || pgerr.Code != "42501" {
+				t.Fatalf("runtime authority check for %s: want 42501, got %v", sql, err)
+			}
+		}
+	}
+	assertProtected()
+	// Simulate the previous deploy's blanket upgrade grants. Reconciliation
+	// must protect an EXISTING ledger, not just fresh table creation.
+	if _, err := migration.Exec(ctx, "GRANT ALL ON TABLE schema_migrations TO "+runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := families.ApplySchema(ctx, store); err != nil {
+		t.Fatal(err)
+	}
+	assertProtected()
+	var version int
+	if err := migration.QueryRow(ctx, "SELECT count(*) FROM schema_migrations").Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != families.SchemaFileCount() {
+		t.Fatalf("ledger rows = %d", version)
+	}
+	// Ordinary domain traffic remains usable over the restricted wire pool.
+	if _, err := store.Exec(ctx, "INSERT INTO memory_runtime_state(state_key,state_value) VALUES('role-test','retained')"); err != nil {
+		t.Fatal(err)
+	}
+	var retained string
+	if err := store.QueryRow(ctx, "SELECT state_value FROM memory_runtime_state WHERE state_key='role-test'").Scan(&retained); err != nil || retained != "retained" {
+		t.Fatalf("restricted runtime round trip: %q: %v", retained, err)
+	}
+	// Identical DSN search_path text is insufficient: the implicit $user entry
+	// resolves differently once a role's own schema exists.
+	if _, err := admin.Exec(ctx, "CREATE SCHEMA "+migratorID+" AUTHORIZATION "+migratorID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if _, err := admin.Exec(context.Background(), "DROP SCHEMA "+migratorID); err != nil {
+			t.Error(err)
+		}
+	})
+	if err := validateStoreNamespace(ctx, runtime, migration); err == nil {
+		t.Fatal("different role-resolved namespaces were accepted")
+	}
+}
 
 func TestSharedDatabaseMigrationFailureAndReplay(t *testing.T) {
 	pool := sharedTestDatabase(t)
@@ -73,6 +189,41 @@ func TestSharedDatabaseMigrationFailureAndReplay(t *testing.T) {
 	version, checksum, err = store.CurrentSchemaVersion(ctx, first.Owner)
 	if err != nil || version != 2 || checksum != second.Checksum {
 		t.Fatalf("replay changed history: %d/%s: %v", version, checksum, err)
+	}
+}
+
+func TestSharedDatabaseStartupRejectsHistoryDrift(t *testing.T) {
+	for _, corruption := range []string{"checksum", "missing-version", "newer-binary"} {
+		t.Run(corruption, func(t *testing.T) {
+			pool := sharedTestDatabase(t)
+			store := sharedTestStore(t, pool)
+			ctx := context.Background()
+			if err := families.ApplySchema(ctx, store); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := store.Exec(ctx, "INSERT INTO memory_runtime_state(state_key,state_value) VALUES('keep','unchanged')"); err != nil {
+				t.Fatal(err)
+			}
+			var sql string
+			switch corruption {
+			case "checksum":
+				sql = "UPDATE schema_migrations SET checksum='changed' WHERE version=1"
+			case "missing-version":
+				sql = "DELETE FROM schema_migrations WHERE version=1"
+			case "newer-binary":
+				sql = "INSERT INTO schema_migrations(owner,version,checksum) SELECT owner,max(version)+1,'future' FROM schema_migrations GROUP BY owner"
+			}
+			if _, err := pool.Exec(ctx, sql); err != nil {
+				t.Fatal(err)
+			}
+			if err := families.ApplySchema(ctx, store); err == nil {
+				t.Fatal("startup accepted incompatible migration history")
+			}
+			var retained string
+			if err := store.QueryRow(ctx, "SELECT state_value FROM memory_runtime_state WHERE state_key='keep'").Scan(&retained); err != nil || retained != "unchanged" {
+				t.Fatalf("rejected startup changed domain data: %q: %v", retained, err)
+			}
+		})
 	}
 }
 

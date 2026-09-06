@@ -122,13 +122,13 @@ UNOWNED_PACKAGES: dict[str, tuple[str, str]] = {
         "debt",
         "WFE vertical slice: workflow definitions, registry and artifact store.",
     ),
-    "server-go/internal/db1": (
+    "server-go/internal/workflowstore": (
         "debt",
-        "WFE vertical slice: the engine's view of the db1 module. A second "
+        "WFE vertical slice: the engine's view of the aimee domain module. A second "
         "caller-side mapping alongside server-go/aimee, which is itself worth "
         "resolving.",
     ),
-    "server-go/internal/db1/db1test": (
+    "server-go/internal/workflowstore/workflowstoretest": (
         "debt",
         "Test support for the slice above; carried with it.",
     ),

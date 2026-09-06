@@ -40,7 +40,7 @@ server-go/
   bus/                   pure-Go event-bus client and conformance
   internal/wfe/          definitions, catalog, canonical snapshots
   internal/engine/       scheduler, runners, worktrees, forge, roundtables
-  internal/db1/          workflow view of the store-module contract
+  internal/workflowstore/          workflow view of the store-module contract
   internal/api/          workflow/control-plane routes
 
 runtime-web/             Go browser service
