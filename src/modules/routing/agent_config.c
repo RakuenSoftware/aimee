@@ -321,13 +321,19 @@ int agent_load_config(agent_config_t *cfg)
    memset(cfg, 0, sizeof(*cfg));
 
    cJSON *reply = providers_module_request("snapshot.load", NULL, "server", 0);
-   if (!reply) return -1;
-   cJSON *root = cJSON_DetachItemFromObject(reply,"config");
+   if (!reply)
+      return -1;
+   cJSON *root = cJSON_DetachItemFromObject(reply, "config");
    cJSON_Delete(reply);
-   if (!cJSON_IsObject(root)) { cJSON_Delete(root); return -1; }
+   if (!cJSON_IsObject(root))
+   {
+      cJSON_Delete(root);
+      return -1;
+   }
 
-   const char *revision=cJSON_GetStringValue(cJSON_GetObjectItem(root,"revision"));
-   if(revision)snprintf(cfg->revision,sizeof(cfg->revision),"%s",revision);
+   const char *revision = cJSON_GetStringValue(cJSON_GetObjectItem(root, "revision"));
+   if (revision)
+      snprintf(cfg->revision, sizeof(cfg->revision), "%s", revision);
    /* Default agent */
    cJSON *def = cJSON_GetObjectItem(root, "default_agent");
    if (def && cJSON_IsString(def))
@@ -445,7 +451,8 @@ int agent_load_config(agent_config_t *cfg)
          if (v && cJSON_IsString(v) && v->valuestring[0])
          {
             snprintf(ag->catalog_provider, sizeof(ag->catalog_provider), "%s", v->valuestring);
-            ag->catalog_provider_explicit = cJSON_IsTrue(cJSON_GetObjectItem(a, "catalog_provider_explicit"));
+            ag->catalog_provider_explicit =
+                cJSON_IsTrue(cJSON_GetObjectItem(a, "catalog_provider_explicit"));
          }
 
          v = cJSON_GetObjectItem(a, "cost_tier");
@@ -531,15 +538,14 @@ int agent_load_config(agent_config_t *cfg)
 
          v = cJSON_GetObjectItem(a, "timeout_ms");
          ag->timeout_ms = cJSON_IsNumber(v) ? v->valueint : 0;
-         ag->enabled = cJSON_IsTrue(cJSON_GetObjectItem(a,"enabled"));
-         ag->tools_enabled = cJSON_IsTrue(cJSON_GetObjectItem(a,"tools_enabled"));
+         ag->enabled = cJSON_IsTrue(cJSON_GetObjectItem(a, "enabled"));
+         ag->tools_enabled = cJSON_IsTrue(cJSON_GetObjectItem(a, "tools_enabled"));
 
          v = cJSON_GetObjectItem(a, "recommended_sampling");
          ag->recommended_sampling = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
 
          v = cJSON_GetObjectItem(a, "inject_respond_tool");
-         ag->inject_respond_tool =
-             (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
+         ag->inject_respond_tool = (v && cJSON_IsBool(v)) ? cJSON_IsTrue(v) : 0;
 
          /* Per-agent delegate turn cap. Declared value wins verbatim:
           *   0  = unlimited (frontier agents, e.g. MiniMax-M3),
@@ -668,7 +674,7 @@ int agent_load_config(agent_config_t *cfg)
          v = cJSON_GetObjectItem(a, "is_server_hosted");
          if (v && cJSON_IsBool(v))
             ag->is_server_hosted = cJSON_IsTrue(v);
-         ag->primary_only = cJSON_IsTrue(cJSON_GetObjectItem(a,"primary_only"));
+         ag->primary_only = cJSON_IsTrue(cJSON_GetObjectItem(a, "primary_only"));
          cfg->agent_count++;
       }
    }
@@ -1027,15 +1033,17 @@ static int agent_save_config_impl(agent_config_t *cfg, int emptied_by_removal)
    cJSON *args = cJSON_CreateObject();
    cJSON_AddItemToObject(args, "config", root);
    cJSON_AddBoolToObject(args, "allow_empty", emptied_by_removal);
-   cJSON_AddStringToObject(args,"expected_revision",cfg->revision);
+   cJSON_AddStringToObject(args, "expected_revision", cfg->revision);
    cJSON *reply = providers_module_request("snapshot.save", args, "server", 0);
    cJSON_Delete(args);
    const char *status = reply ? cJSON_GetStringValue(cJSON_GetObjectItem(reply, "status")) : NULL;
    int ok = status && strcmp(status, "ok") == 0;
-   const char *revision=cJSON_GetStringValue(cJSON_GetObjectItem(reply,"revision"));
-   if(ok && revision)snprintf(cfg->revision,sizeof(cfg->revision),"%s",revision);
+   const char *revision = cJSON_GetStringValue(cJSON_GetObjectItem(reply, "revision"));
+   if (ok && revision)
+      snprintf(cfg->revision, sizeof(cfg->revision), "%s", revision);
    cJSON_Delete(reply);
-   if (ok) agent_registry_cache_invalidate();
+   if (ok)
+      agent_registry_cache_invalidate();
    return ok ? 0 : -1;
 }
 

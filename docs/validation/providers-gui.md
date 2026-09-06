@@ -64,6 +64,15 @@ operations, not substituted browser responses.
   boundary, provider registration/seams, module placement, export generator, and
   repository lock checks passed.
 
+CI follow-up validation also ran the complete native test registry, the complete
+`make go-unit-tests` target (including the C-to-Go bus conformance matrix), and
+the client/server integration harness. The local integration run passed 94/94
+applicable checks; its unconfigured PostgreSQL/KB cases remained explicit skips.
+The provider process now participates in both harnesses. The LSP release gate
+compares effective probe compile/link commands for shared Makefiles, with tests
+that reject compiler-flag and link-input changes; its source and observation
+requirements remain pinned to the original candidate.
+
 Reproduce with `scripts/validation/providers/README.md`, `browser.cjs`, and
 `exploratory.cjs`. Local screenshots and raw reports were retained under
 `/tmp/aimee-provider-e2e-artifacts`; command logs use the

@@ -288,7 +288,8 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertEqual(
             result["candidate_changed_src_paths"], list(validator.PROTECTED_PATHS)
         )
-        self.assertEqual(result["changed_protected_paths"], [])
+        self.assertTrue(set(result["changed_protected_paths"]) <= set(validator.SHARED_BUILD_PATHS))
+        self.assertTrue(result["build_contract_matched"])
         self.assertEqual(result["release_candidate_errors"], [])
         self.assertTrue(result["release_candidate_matched"])
 
@@ -298,6 +299,30 @@ class LiveSemanticContextS1Test(unittest.TestCase):
             "gopls: cold-start denominator is incomplete",
             result["release_candidate_errors"],
         )
+
+    def test_release_build_contract_scopes_shared_makefiles(self) -> None:
+        validator = load_release_validator()
+        makefile = "C_FLAGS = -O2\ninclude tests/Rules.mk\n"
+        rules = (
+            "$(OBJDIR)/tests/unit-test-lsp: modules/lsp/lsp_context.c\n"
+            "\t$(CC) $(C_FLAGS) $< -o $@\n"
+        )
+        with tempfile.TemporaryDirectory(prefix="aimee-s1-build-test-") as temporary:
+            scratch = Path(temporary)
+            original = validator.lsp_build_plan(makefile, rules, scratch)
+            unrelated = validator.lsp_build_plan(
+                makefile + "PROVIDERS = provider.go\n",
+                rules + "providers:; go build provider.go\n", scratch,
+            )
+            self.assertEqual(original, unrelated)
+            self.assertNotEqual(original, validator.lsp_build_plan(
+                makefile.replace("-O2", "-O0"), rules, scratch,
+            ))
+            self.assertNotEqual(original, validator.lsp_build_plan(
+                makefile, rules.replace("$< -o", "$< -lm -o"), scratch,
+            ))
+            with self.assertRaises(ValueError):
+                validator.lsp_build_plan(makefile, rules.replace("$(CC) $(C_FLAGS) $< -o $@", "true"), scratch)
 
     def test_release_validator_rejects_protected_candidate_drift(self) -> None:
         validator = load_release_validator()

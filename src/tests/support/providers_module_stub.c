@@ -1,6 +1,7 @@
 /* Native tests use the Go implementation as their fixture peer. No provider
  * policy is reimplemented here. The unit runner supplies the fixture executable. */
 #include "providers_client.h"
+#include "aimee_home.h"
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,13 +66,8 @@ __attribute__((weak)) cJSON *providers_module_request(const char *operation, cJS
       return NULL;
    }
    cJSON *wire = cJSON_CreateObject();
-   char home[4096];
-   const char *base = getenv("AIMEE_HOME");
-   if (base && *base)
-      snprintf(home, sizeof(home), "%s", base);
-   else
-      snprintf(home, sizeof(home), "%s/.config/aimee", getenv("HOME") ? getenv("HOME") : "/tmp");
-   cJSON_AddStringToObject(wire, "home", home);
+   const char *home = aimee_home();
+   cJSON_AddStringToObject(wire, "home", home ? home : "");
    cJSON *env = cJSON_AddObjectToObject(wire, "env");
    const char *keys[] = {"HOME", "XDG_CACHE_HOME", "AIMEE_MODELS_DEV_SNAPSHOT",
                          "AIMEE_MODEL_CAPABILITY_OVERRIDES", NULL};

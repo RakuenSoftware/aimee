@@ -110,12 +110,18 @@ func (m *Manager) catalog(ctx context.Context, req Request) (object, error) {
 		}
 		return object{"status": "ok", "providers": out, "all": all, "available_only": available, "json": boolean(req.Arguments, "json", false)}, nil
 	case "provider.show":
+		if name == "" {
+			return nil, errors.New("provider name required")
+		}
 		if p := profile(name); p != nil {
 			view, err := m.profileView(ctx, p)
 			return object{"status": "ok", "provider": view}, err
 		}
 		return nil, errors.New("provider not found")
 	case "provider.models", "provider.test":
+		if name == "" {
+			return nil, errors.New("provider name required")
+		}
 		p := profile(name)
 		if p == nil {
 			return nil, errors.New("provider not found")

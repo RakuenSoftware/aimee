@@ -11,6 +11,7 @@
 #include <aimee/control-web/module_api.h>
 #include <aimee/delegates/module_api.h>
 #include <aimee/egress/module_api.h>
+#include <aimee/providers/module_api.h>
 #include <aimee/git/module_api.h>
 #include <aimee/governance/module_api.h>
 #include <aimee/kb-synthesis/module_api.h>
@@ -263,6 +264,15 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       served[5] = AIMEE_EGRESS_EVENT_SSE_CLOSE;
       served[6] = AIMEE_EGRESS_EVENT_CREDENTIAL_KEY;
       *serve_count = 7;
+      return 0;
+   }
+   else if (strcmp(name, "providers") == 0)
+   {
+      *kind = AIMEE_PROVIDERS_EVENT_RESOLVE, *principal_ref = 33;
+      served[0] = AIMEE_PROVIDERS_EVENT_RESOLVE;
+      served[1] = AIMEE_PROVIDERS_EVENT_VALIDATE;
+      served[2] = AIMEE_PROVIDERS_EVENT_MANAGE;
+      *serve_count = 3;
       return 0;
    }
    else if (strcmp(name, "aimee") == 0)
@@ -739,6 +749,33 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
       response[response_len] = '\0';
       assert(strstr((const char *)response, "\"allowed\"") != NULL);
    }
+   else if (strcmp(name, "providers") == 0)
+   {
+      memset(request, 0, AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN);
+      aimee_providers_put_u32(request, AIMEE_PROVIDERS_REQUEST_MAGIC);
+      aimee_providers_put_u32(request + 4, AIMEE_PROVIDERS_WIRE_VERSION);
+      uint8_t *record = request + AIMEE_PROVIDERS_OFF_DECLARED_RECORD;
+      assert(aimee_providers_put_str(record, AIMEE_PROVIDERS_NAME_MAX, "fixture") == 0);
+      assert(aimee_providers_put_str(record + 32, AIMEE_PROVIDERS_MODEL_MAX, "fixture-model") == 0);
+      aimee_providers_put_u32(record + 224, 1024);
+      aimee_providers_put_u32(record + 228, 4096);
+      aimee_providers_put_u32(record + 236, AIMEE_PROVIDERS_DECL_CONTEXT_WINDOW |
+                                                AIMEE_PROVIDERS_DECL_MAX_OUTPUT);
+      assert(aimee_module_client_call(
+                 client, AIMEE_PROVIDERS_EVENT_VALIDATE, AIMEE_PROVIDERS_STAGE_VALIDATE, 2105, 0,
+                 request, AIMEE_PROVIDERS_VALIDATE_REQUEST_LEN, response, sizeof(response),
+                 &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(aimee_providers_get_u32(response + 8) == AIMEE_PROVIDERS_ERR_INVALID_DECLARATION);
+
+      static const char body[] = "{\"operation\":\"provider.connections\",\"arguments\":{}}";
+      assert(aimee_module_client_call(client, AIMEE_PROVIDERS_EVENT_MANAGE,
+                                      AIMEE_PROVIDERS_STAGE_MANAGE, 2106, 0, body, sizeof(body) - 1,
+                                      response, sizeof(response), &response_len, NULL,
+                                      NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len > 0 && response_len < sizeof(response));
+      response[response_len] = '\0';
+      assert(strstr((const char *)response, "\"providers\":[]") != NULL);
+   }
    else if (strcmp(name, "egress") == 0)
    {
       /* Exercise the authorization stage without touching the network. An
@@ -825,6 +862,7 @@ int main(int argc, char **argv)
    uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
+   uint32_t provider_outbound[] = {12290u, 12295u, 4609u};
    bus_runtime_grant_t grants[] = {{.principal_class = 1,
                                     .principal_ref = module_ref,
                                     .uid = BUS_RUNTIME_SELF_UID,
@@ -836,7 +874,13 @@ int main(int argc, char **argv)
                                     .uid = BUS_RUNTIME_SELF_UID,
                                     .executable = executable,
                                     .request = requested,
-                                    .request_count = serve_count + 1}};
+                                    .request_count = serve_count + 1},
+                                   {.principal_class = 1,
+                                    .principal_ref = 73,
+                                    .uid = BUS_RUNTIME_SELF_UID,
+                                    .executable = module_executable,
+                                    .request = provider_outbound,
+                                    .request_count = 3}};
    bus_host_config_t host_config = {.max_slots = 8,
                                     .slot_size = 512,
                                     .inline_budget = 400,
@@ -845,12 +889,13 @@ int main(int argc, char **argv)
    bus_host_t host;
    assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
-   bus_runtime_config_t runtime_config = {.socket_path = socket_path,
-                                          .socket_mode = 0600,
-                                          .backlog = 8,
-                                          .stale_after_ns = 5000000000ULL,
-                                          .grants = grants,
-                                          .grant_count = 2};
+   bus_runtime_config_t runtime_config = {
+       .socket_path = socket_path,
+       .socket_mode = 0600,
+       .backlog = 8,
+       .stale_after_ns = 5000000000ULL,
+       .grants = grants,
+       .grant_count = argc == 3 && strcmp(argv[2], "providers") == 0 ? 3 : 2};
    bus_runtime_t *runtime = bus_runtime_start(&host, &host_lock, &runtime_config);
    assert(runtime != NULL);
 
@@ -888,7 +933,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, 2);
+   wait_for_clients(&host, &host_lock, argc == 3 && strcmp(argv[2], "providers") == 0 ? 3 : 2);
 
    pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
    atomic_init(&pump_state.stop, 0);
@@ -987,6 +1032,8 @@ finish:
    char learned_store[PATH_MAX];
    assert(snprintf(learned_store, sizeof learned_store, "%s/sandbox-learned.json", directory) > 0);
    (void)unlink(learned_store); /* absent for every other module: not an error */
+   assert(snprintf(learned_store, sizeof learned_store, "%s/.providers.lock", directory) > 0);
+   (void)unlink(learned_store);
    assert(rmdir(directory) == 0);
    if (argc == 3)
       printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);

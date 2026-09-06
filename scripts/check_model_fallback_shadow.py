@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """The hand-written capability fallback must not shadow the model catalogue.
 
-src/model_registry.c keeps a small table of models the catalogue does not carry.
+server-go/modules/providers/metadata_seed.go keeps a small table of models the catalogue does not carry.
 It is a FALLBACK, not a second source of truth: a row for a model the catalogue
 already describes is either dead weight (it agrees, and the catalogue is
 consulted first) or a latent wrong answer (it disagrees, and serves that answer
@@ -25,11 +25,11 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-REGISTRY = ROOT / "src/model_registry.c"
+REGISTRY = ROOT / "server-go/modules/providers/metadata_seed.go"
 SNAPSHOT = ROOT / "data/models_dev_snapshot.json"
-TABLE = "static const capability_entry_t g_capabilities[] = {"
+TABLE = "var fallbackCapabilities = []object{"
 
-ROW = re.compile(r'\{"([^"]+)",\s*"([^"]+)",\s*\d+,\s*\d+,', re.S)
+ROW = re.compile(r'\{"provider":\s*"([^"]+)",\s*"model":\s*"([^"]+)"', re.S)
 
 
 def fail(message: str) -> int:
@@ -41,7 +41,7 @@ def main() -> int:
     src = REGISTRY.read_text(encoding="utf-8")
     try:
         start = src.index(TABLE)
-        end = src.index("\n};", start)
+        end = src.index("\n}", start)
     except ValueError:
         return fail(f"could not find {TABLE.strip()} in {REGISTRY.relative_to(ROOT)}")
 
@@ -66,7 +66,7 @@ def main() -> int:
             "they are dead when it loads and a stale answer when it does not:\n  "
             + "\n  ".join(shadowed)
             + "\nDelete the row. The catalogue is the source for anything it lists; "
-            "to retire a model regardless of upstream, add it to g_local_deprecations."
+            "to retire a model regardless of upstream, update the Go catalog deprecation policy."
         )
 
     print(

@@ -69,7 +69,7 @@ func (m *Manager) credential(ctx context.Context, req Request, name, key string)
 		return nil
 	}
 	if !req.SecretWriteAllowed {
-		return errors.New("vault: storing a credential requires an attested TLS or local connection")
+		return errors.New("providers: storing a credential requires an attested TLS or local connection")
 	}
 	if len(key) >= 4096 || strings.ContainsAny(key, "\x00\r\n") {
 		return errors.New("invalid credential")

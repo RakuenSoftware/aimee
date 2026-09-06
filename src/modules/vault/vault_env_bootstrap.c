@@ -624,17 +624,24 @@ int vault_env_module_resource(void)
    char path[64], executable[4096];
    snprintf(path, sizeof(path), "/proc/%ld/exe", (long)getppid());
    ssize_t n = readlink(path, executable, sizeof(executable) - 1);
-   if (n <= 0 || (size_t)n >= sizeof(executable)) return -1;
+   if (n <= 0 || (size_t)n >= sizeof(executable))
+      return -1;
    executable[n] = '\0';
    int writer = strcmp(executable, "/usr/local/libexec/aimee-modules/aimee-module-providers") == 0;
    int reader = strcmp(executable, "/usr/local/libexec/aimee-modules/aimee-module-egress") == 0;
-   if ((!writer && !reader) || prctl(PR_SET_DUMPABLE, 0) != 0) return -1;
+   if ((!writer && !reader) || prctl(PR_SET_DUMPABLE, 0) != 0)
+      return -1;
    char wire[8193] = {0}, value[4096] = {0};
    size_t len = fread(wire, 1, sizeof(wire) - 1, stdin);
-   if (!feof(stdin) || len == 0) { OPENSSL_cleanse(wire, sizeof(wire)); return -1; }
+   if (!feof(stdin) || len == 0)
+   {
+      OPENSSL_cleanse(wire, sizeof(wire));
+      return -1;
+   }
    cJSON *req = cJSON_ParseWithLength(wire, len);
    OPENSSL_cleanse(wire, sizeof(wire));
-   if (!req) return -1;
+   if (!req)
+      return -1;
    const char *op = cJSON_GetStringValue(cJSON_GetObjectItem(req, "operation"));
    const char *agent = cJSON_GetStringValue(cJSON_GetObjectItem(req, "agent"));
    const char *cred = cJSON_GetStringValue(cJSON_GetObjectItem(req, "credential"));
@@ -642,8 +649,8 @@ int vault_env_module_resource(void)
    vault_status_t st = VAULT_ERR_BADARG;
    if (op && agent && agent[0] && strlen(agent) < 64 && cred &&
        (strcmp(cred, "api_key") == 0 || strcmp(cred, "codex_oauth_token") == 0 ||
-        strcmp(cred, "codex_account_id") == 0 || strcmp(cred,"oauth")==0 ||
-        (strcmp(agent,"environment")==0 && vault_env_name_is_credential(cred))))
+        strcmp(cred, "codex_account_id") == 0 || strcmp(cred, "oauth") == 0 ||
+        (strcmp(agent, "environment") == 0 && vault_env_name_is_credential(cred))))
    {
       if (strcmp(op, "get") == 0)
          st = vault_service_get_server_principal(agent, cred, value, sizeof(value));
@@ -657,19 +664,24 @@ int vault_env_module_resource(void)
          st = VAULT_OK;
       }
    }
-   if (secret) OPENSSL_cleanse(secret, strlen(secret));
+   if (secret)
+      OPENSSL_cleanse(secret, strlen(secret));
    cJSON_Delete(req);
    cJSON *reply = cJSON_CreateObject();
-   cJSON_AddStringToObject(reply, "status", st == VAULT_OK || st == VAULT_NO_ENTRY ? "ok" : "error");
+   cJSON_AddStringToObject(reply, "status",
+                           st == VAULT_OK || st == VAULT_NO_ENTRY ? "ok" : "error");
    cJSON_AddStringToObject(reply, "value", value);
    OPENSSL_cleanse(value, sizeof(value));
    char *printed = cJSON_PrintUnformatted(reply);
    cJSON *jvalue = cJSON_GetObjectItem(reply, "value");
-   if (jvalue && jvalue->valuestring) OPENSSL_cleanse(jvalue->valuestring, strlen(jvalue->valuestring));
+   if (jvalue && jvalue->valuestring)
+      OPENSSL_cleanse(jvalue->valuestring, strlen(jvalue->valuestring));
    cJSON_Delete(reply);
-   if (!printed) return -1;
+   if (!printed)
+      return -1;
    int rc = fputs(printed, stdout) >= 0 && fflush(stdout) == 0 ? 0 : -1;
-   OPENSSL_cleanse(printed, strlen(printed)); free(printed);
+   OPENSSL_cleanse(printed, strlen(printed));
+   free(printed);
    return rc;
 #else
    return -1;

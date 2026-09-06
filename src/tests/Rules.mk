@@ -5859,7 +5859,7 @@ $(TESTPREFIX)/unit-test-models-dev: $(OBJDIR)/tests/test_models_dev.o \
 $(TESTPREFIX)/unit-test-model-provider: $(OBJDIR)/tests/test_model_provider.o \
                                 $(OBJDIR)/server/model_provider.o $(OBJDIR)/tests/support/providers_module_stub.o \
                                 $(OBJDIR)/tests/support/mock_agent_http.o \
-                                $(OBJDIR)/cJSON.o
+                                $(OBJDIR)/aimee_home.o $(OBJDIR)/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(L_MINIMAL)
 
 $(TESTPREFIX)/unit-test-delegate-driver: $(OBJDIR)/tests/test_delegate_driver.o \

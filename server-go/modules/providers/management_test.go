@@ -203,3 +203,15 @@ func TestUnattestedCredentialWriteFailsClosed(t *testing.T) {
 		t.Fatal("unattested write accepted")
 	}
 }
+
+func TestProfileOperationsDistinguishMissingAndUnknownNames(t *testing.T) {
+	m, _, _ := manager(t)
+	for _, op := range []string{"provider.show", "provider.models", "provider.test"} {
+		for _, tc := range []struct{ name, kind string }{{"", "invalid_argument"}, {"unknown-fixture", "not_found"}} {
+			_, err := m.Manage(context.Background(), Request{Operation: op, Arguments: object{"name": tc.name}})
+			if err == nil || errorKind(err) != tc.kind {
+				t.Fatalf("%s name %q: %v", op, tc.name, err)
+			}
+		}
+	}
+}

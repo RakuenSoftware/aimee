@@ -5,7 +5,8 @@ The frozen S1 probe records the complete ``src`` tree used for the paired
 study.  A PR merge checkout can legitimately contain later, unrelated source
 files from its base branch.  This validator keeps the evidence pin immutable
 while proving that every semantic-context file is byte-identical to the
-candidate and that the real-provider observations satisfy the frozen gate.
+candidate, that its effective build commands are unchanged, and that the
+real-provider observations satisfy the frozen gate.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import tempfile
 from typing import Any
 
 
@@ -41,6 +43,46 @@ PROTECTED_PATHS = (
     "src/tests/test_lsp.c",
     "src/tests/test_mcp_client_registry.c",
 )
+
+
+# Shared build files also describe every other subsystem. Their LSP compile and
+# link commands are protected, rather than unrelated targets elsewhere in them.
+SHARED_BUILD_PATHS = ("src/Makefile", "src/tests/Rules.mk")
+
+
+def lsp_build_plan(makefile: str, rules: str, scratch: Path) -> str:
+    include = "include tests/Rules.mk"
+    if makefile.count(include) != 1:
+        raise ValueError("cannot locate the unique native test rules include")
+    (scratch / "Rules.mk").write_text(rules)
+    (scratch / "Makefile").write_text(
+        makefile.replace(include, "include " + str(scratch / "Rules.mk"))
+    )
+    target = str(scratch / "obj/tests/unit-test-lsp")
+    result = subprocess.run(
+        ["make", "--no-print-directory", "--dry-run", "--always-make",
+         "-f", str(scratch / "Makefile"), "OBJDIR=" + str(scratch / "obj"),
+         "GIT_VERSION=ci", "GIT_COMMIT_TIME=1700000000", target],
+        cwd=ROOT / "src", text=True, capture_output=True, check=True,
+    )
+    plan = result.stdout
+    if "lsp_context.c" not in plan or "-o " + target not in plan:
+        raise ValueError("LSP build plan lacks its context compilation or probe link")
+    return plan
+
+
+def build_contract_matches(candidate_commit: str) -> bool:
+    with tempfile.TemporaryDirectory(prefix="aimee-lsp-build-contract-") as directory:
+        scratch = Path(directory)
+        candidate = lsp_build_plan(
+            git_output("show", candidate_commit + ":src/Makefile"),
+            git_output("show", candidate_commit + ":src/tests/Rules.mk"), scratch,
+        )
+        release = lsp_build_plan(
+            (ROOT / "src/Makefile").read_text(),
+            (ROOT / "src/tests/Rules.mk").read_text(), scratch,
+        )
+        return candidate == release
 
 
 def parse_args() -> argparse.Namespace:
@@ -111,8 +153,18 @@ def validate(
         errors.append("frozen candidate commit is not an ancestor of the release checkout")
     if candidate_paths != list(PROTECTED_PATHS):
         errors.append("protected path manifest does not equal the candidate source diff")
-    if changed:
+    changed_sources = [path for path in changed if path not in SHARED_BUILD_PATHS]
+    build_matches = True
+    if any(path in SHARED_BUILD_PATHS for path in changed):
+        try:
+            build_matches = build_contract_matches(candidate_commit)
+        except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+            build_matches = False
+            errors.append("could not verify LSP build contract: " + str(exc))
+    if changed_sources:
         errors.append("protected semantic-context files differ from the frozen candidate")
+    if not build_matches:
+        errors.append("LSP compile or link commands differ from the frozen candidate")
     if untracked:
         errors.append("untracked files overlap the protected semantic-context surface")
     if report.get("schema_version") != 1:
@@ -141,6 +193,7 @@ def validate(
         "candidate_is_ancestor": ancestor,
         "protected_paths": list(PROTECTED_PATHS),
         "changed_protected_paths": changed,
+        "build_contract_matched": build_matches,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,

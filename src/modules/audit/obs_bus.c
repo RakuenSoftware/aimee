@@ -1389,6 +1389,9 @@ static const struct
     {12293u, "egress.module-egress-sse-receive"},
     {12294u, "egress.module-egress-sse-close"},
     {12295u, "egress.module-egress-credential-key"},
+    {12545u, "providers.provider-resolve"},
+    {12546u, "providers.provider-validate"},
+    {12547u, "providers.provider-management"},
 };
 
 /* Sampled declarations use integer parts-per-million so the checked contract
