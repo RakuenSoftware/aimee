@@ -98,69 +98,120 @@ VALUES($1,'global','_global',$2,$3,$4,$5,0.8)`, id, fixture.Tier, fixture.Kind, 
 			t.Fatal(err)
 		}
 	}
-	backend, err := NewPostgresDataStore(evalQueryer{tx}, PlacementKB)
+	_, err = tx.Exec(ctx, `CREATE TEMP TABLE user_memories (LIKE memories INCLUDING ALL,
+valid_until timestamptz) ON COMMIT DROP;
+INSERT INTO user_memories SELECT *, NULL::timestamptz FROM memories`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	handler := NewHandler(nil, WithDataStore(PlacementKB, backend))
-	totals := [5]float64{}
-	for _, test := range corpus.Cases {
-		relevant := make(map[int64]bool)
-		for _, fid := range test.Expected {
-			if ids[fid] == 0 {
-				t.Fatalf("%s: unknown fixture %s", test.ID, fid)
+	for _, placement := range []Placement{PlacementKB, PlacementServer} {
+		t.Run(string(placement), func(t *testing.T) {
+			backend, err := NewPostgresDataStore(evalQueryer{tx}, placement)
+			if err != nil {
+				t.Fatal(err)
 			}
-			relevant[ids[fid]] = true
+			handler := NewHandler(nil, WithDataStore(placement, backend))
+			totals := [5]float64{}
+			for _, test := range corpus.Cases {
+				relevant := make(map[int64]bool)
+				for _, fid := range test.Expected {
+					if ids[fid] == 0 {
+						t.Fatalf("%s: unknown fixture %s", test.ID, fid)
+					}
+					relevant[ids[fid]] = true
+				}
+				if len(relevant) == 0 {
+					t.Fatalf("%s: no relevance labels", test.ID)
+				}
+				raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+					Operation: "search", Query: test.Query, Limit: 10,
+				}))
+				if status != bus.ModuleStatusOK {
+					t.Fatalf("%s: status %v", test.ID, status)
+				}
+				var response DataResponse
+				if err := json.Unmarshal(raw, &response); err != nil {
+					t.Fatal(err)
+				}
+				mrr := 0.0
+				for i, record := range response.Records {
+					if relevant[record.ID] {
+						mrr = 1 / float64(i+1)
+						break
+					}
+				}
+				totals[0] += mrr
+				for index, k := range []int{5, 10} {
+					hits, dcg, ideal := 0.0, 0.0, 0.0
+					for i, record := range response.Records {
+						if i >= k {
+							break
+						}
+						if relevant[record.ID] {
+							hits++
+							dcg += 1 / math.Log2(float64(i+2))
+						}
+					}
+					for i := 0; i < k && i < len(relevant); i++ {
+						ideal += 1 / math.Log2(float64(i+2))
+					}
+					totals[1+index] += dcg / ideal
+					totals[3+index] += hits / float64(len(relevant))
+				}
+				if mrr == 0 {
+					t.Logf("miss %s: %s", test.ID, test.Query)
+				}
+			}
+			wants := []float64{baseline.MRR, baseline.NDCG5, baseline.NDCG10, baseline.Recall5, baseline.Recall10}
+			for i, name := range []string{"mrr", "ndcg_5", "ndcg_10", "recall_5", "recall_10"} {
+				got := totals[i] / float64(len(corpus.Cases))
+				minimum := wants[i] * (1 - baseline.Threshold/100)
+				t.Logf("%s=%.6f baseline=%.6f cases=%d", name, got, wants[i], len(corpus.Cases))
+				if got < minimum {
+					t.Errorf("%s regressed: %.6f < %.6f", name, got, minimum)
+				}
+			}
+		})
+	}
+
+	// Matching keywords must not widen scope or resurrect retired/expired rows.
+	_, err = tx.Exec(ctx, `INSERT INTO memories
+(id,scope_type,scope_value,tier,kind,key,content,confidence,lifecycle_state) VALUES
+(1001,'workspace','workspace-a','L2','fact','probe alpha','boundary terms',1,'active'),
+(1002,'workspace','workspace-b','L2','fact','probe beta','boundary terms',1,'active'),
+(1003,'project','project-a','L2','fact','probe gamma','boundary terms',1,'active'),
+(1004,'workspace','workspace-a','L2','fact','probe retired','boundary terms',1,'retired');
+INSERT INTO user_memories (id,key,content,kind,tier,confidence,lifecycle_state,valid_until) VALUES
+(1005,'probe active','boundary terms','fact','L2',1,'active',NULL),
+(1006,'probe expired','boundary terms','fact','L2',1,'active',now()-interval '1 second'),
+(1007,'probe retired','boundary terms','fact','L2',1,'retired',NULL)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		placement Placement
+		scope     Scope
+		id        int64
+	}{
+		{PlacementKB, Scope{Type: ScopeWorkspace, Value: "workspace-a"}, 1001},
+		{PlacementKB, Scope{Type: ScopeWorkspace, Value: "workspace-b"}, 1002},
+		{PlacementKB, Scope{Type: ScopeProject, Value: "project-a"}, 1003},
+		{PlacementServer, Scope{}, 1005},
+	} {
+		backend, err := NewPostgresDataStore(evalQueryer{tx}, test.placement)
+		if err != nil {
+			t.Fatal(err)
 		}
-		if len(relevant) == 0 {
-			t.Fatalf("%s: no relevance labels", test.ID)
-		}
+		handler := NewHandler(nil, WithDataStore(test.placement, backend))
 		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
-			Operation: "search", Scope: Scope{Type: ScopeGlobal}, Query: test.Query, Limit: 10,
+			Operation: "search", Scope: test.scope, Query: "terms boundary", Limit: 10,
 		}))
-		if status != bus.ModuleStatusOK {
-			t.Fatalf("%s: status %v", test.ID, status)
-		}
 		var response DataResponse
 		if err := json.Unmarshal(raw, &response); err != nil {
 			t.Fatal(err)
 		}
-		mrr := 0.0
-		for i, record := range response.Records {
-			if relevant[record.ID] {
-				mrr = 1 / float64(i+1)
-				break
-			}
-		}
-		totals[0] += mrr
-		for index, k := range []int{5, 10} {
-			hits, dcg, ideal := 0.0, 0.0, 0.0
-			for i, record := range response.Records {
-				if i >= k {
-					break
-				}
-				if relevant[record.ID] {
-					hits++
-					dcg += 1 / math.Log2(float64(i+2))
-				}
-			}
-			for i := 0; i < k && i < len(relevant); i++ {
-				ideal += 1 / math.Log2(float64(i+2))
-			}
-			totals[1+index] += dcg / ideal
-			totals[3+index] += hits / float64(len(relevant))
-		}
-		if mrr == 0 {
-			t.Logf("miss %s: %s", test.ID, test.Query)
-		}
-	}
-	wants := []float64{baseline.MRR, baseline.NDCG5, baseline.NDCG10, baseline.Recall5, baseline.Recall10}
-	for i, name := range []string{"mrr", "ndcg_5", "ndcg_10", "recall_5", "recall_10"} {
-		got := totals[i] / float64(len(corpus.Cases))
-		minimum := wants[i] * (1 - baseline.Threshold/100)
-		t.Logf("%s=%.6f baseline=%.6f cases=%d", name, got, wants[i], len(corpus.Cases))
-		if got < minimum {
-			t.Errorf("%s regressed: %.6f < %.6f", name, got, minimum)
+		if status != bus.ModuleStatusOK || len(response.Records) != 1 || response.Records[0].ID != test.id {
+			t.Fatalf("placement=%s scope=%+v: status=%v records=%+v", test.placement, test.scope, status, response.Records)
 		}
 	}
 }
