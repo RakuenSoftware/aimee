@@ -11,12 +11,19 @@ test measures the repository's Vault cipher primitives. Vault service calls,
 authorization, migration coordination, and the application search API remain
 outside these measurements.
 
+Managed encrypted storage requires a CPU with AES-NI exposed to the host kernel
+and a usable accelerated AES-XTS driver. The proposal requires installer
+preflight to verify both before provisioning or migration. VAES and AVX2 are
+not prerequisites; the measured host happens to support them. The diagnostic
+records the selected kernel driver as well as CPU flags.
+
 ## Provision the isolated environment
 
 Run setup as root on the benchmark host. It creates fresh disk-image files in a
 dedicated ZFS dataset and refuses existing images. The script targets this host's
-`rpool`; inspect and adapt it before using another machine. It never formats an
-existing host disk.
+`rpool` to reproduce the original SATA-backed fixtures. Those cached read rates
+cannot measure Optane performance. Use the corrected Optane procedure below for
+the storage comparison. Setup never formats an existing host disk.
 
 The host's default Docker command connects to an LXC compatibility service. These
 measurements use the official Docker Engine 28.5.2 static distribution with a
@@ -110,6 +117,61 @@ under `tools/ssl-dev` and supplied with `-I`; linking used `-l:libcrypto.so.3`.
 The direct-I/O test bypasses the inner filesystem's page cache. ZFS can still
 cache the backing image. These results describe that storage stack; they do not
 establish cold physical-device throughput. No host caches are flushed.
+
+## Reproduce the Optane correction
+
+The corrected run copied the stopped databases' disk images to a separate task
+ZFS dataset on the verified `optane` pool. Preserve the original raw results.
+Stop both named containers and the dedicated daemon, unmount both inner
+filesystems, close the mapper, and detach their verified loop devices before
+copying. On .253, the fresh destination was provisioned with:
+
+```sh
+zpool status -P optane
+zfs create -o compression=off -o dedup=off -o atime=off \
+  -o primarycache=metadata -o secondarycache=none -o direct=always \
+  -o mountpoint=/opt/aimee-encryption-bench/storage-optane \
+  optane/aimee-encryption-bench
+cp --sparse=always /opt/aimee-encryption-bench/storage/ordinary.img \
+  /opt/aimee-encryption-bench/storage-optane/ordinary.img
+cp --sparse=always /opt/aimee-encryption-bench/storage/luks.img \
+  /opt/aimee-encryption-bench/storage-optane/luks.img
+```
+
+These commands describe the already completed copy; do not overwrite retained
+images or rerun dataset creation against an existing dataset. Verify that the
+pool resolves to the Intel SSDPE21D960GA at `/dev/nvme0n1`. The scripts use that
+device's physical read counters and are specific to this host. They use
+metadata-only ARC and no secondary data cache, with aligned ZFS direct I/O
+requested through `direct=always`. The loop devices remain `DIO=0`: enabling
+loop direct I/O failed with `EINVAL` here.
+
+Copy the diagnostic sources to `/opt/aimee-encryption-bench`, then run there:
+
+```sh
+gcc -O2 -pthread -Wall -Wextra io-read.c -o io-read
+python3 luks-diagnostic.py --storage storage-optane --output optane-diagnostic
+env PYTHONPATH=/opt/aimee-encryption-bench/tools/pydep/usr/lib/python3/dist-packages \
+  LD_LIBRARY_PATH=/opt/aimee-encryption-bench/tools/pydep/usr/lib/x86_64-linux-gnu \
+  python3 optane-postgres.py
+```
+
+The first script requires stopped Docker and closed images. It creates or checks
+matching 512 MiB fixtures, compares three dm-crypt scheduling configurations
+against ordinary storage, and rejects Optane samples whose physical reads fall
+below 95% of logical reads. This checks for cached results; shared-device
+counters can include unrelated traffic. The script leaves both filesystems
+mounted for the second script, which starts the dedicated daemon and reuses the
+existing PostgreSQL containers. Each cold database sample stops its container
+and unmounts/remounts its filesystem. It hashes ciphertext to force payload reads
+without PGP decryption and verifies the returned count and aggregate.
+
+Both scripts retain intermediate results and leave resources available for
+inspection if a command fails. Inspect mounts and loop associations before
+resuming or cleaning up. Archive each run's JSON before repeating a filename.
+The second script finishes with both containers stopped. Close mounts, mapper,
+loops, and the dedicated daemon using the cleanup procedure below. The corrected
+loop associations are in `results/optane-diagnostic-loops.json`.
 
 ## Keep production keys out of the fixture
 

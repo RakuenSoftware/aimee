@@ -389,6 +389,14 @@ column-encryption integration and optional encrypted storage. Use the same image
 for encrypted and unencrypted deployments. This requires no second PostgreSQL
 container or separate encryption sidecar.
 
+The managed Linux storage provider requires a processor with AES-NI extensions
+exposed to the host kernel and an available accelerated AES-XTS driver. Document
+this hardware requirement in installation and upgrade guidance. Installer
+preflight checks the host's `aes` CPU capability and usable kernel acceleration
+before provisioning storage or starting migration. VAES and AVX2 are not required.
+If acceleration is unavailable, report the missing prerequisite before changing
+the existing database. Docker CPU quotas do not replace this host check.
+
 The default managed Linux installation creates a dedicated LUKS2 encrypted disk
 image in Aimee's data directory and formats the filesystem inside it.
 [Cryptsetup supports file-backed disk images](https://man7.org/linux/man-pages/man8/cryptsetup.8.html),
@@ -487,7 +495,8 @@ a breaking migration would require reconsidering the release as 0.5.0.
 
 The [benchmark report](../../../benchmarks/encryption/results/2026-09-06-253/report.md)
 records the 2026-09-06 runs on .253: real Docker Engine 28.5.2, PostgreSQL 18.6,
-and matched ordinary and LUKS-backed ext4 storage. Each configuration contained
+and matched ordinary and LUKS-backed ext4 storage on the SATA-backed `rpool`.
+Each configuration contained
 100,000 synthetic 4 KiB bodies. The harness used the selected PGP options and
 checked matching results across plaintext and encrypted queries.
 
@@ -510,11 +519,23 @@ The separate short-fragment prototype added 230 MiB. Compression and projection
 size depend on the corpus; combining the fragment arrays may change that cost.
 Prepared-input batch writes are recorded separately in the report.
 
-Warm selective searches changed little with LUKS. Direct sequential reads through
-the file-backed storage path fell from 5,567 to 2,701 MiB/s, and random 4 KiB reads
-rose from 8.08 to 16.57 microseconds. Those reads bypassed the inner filesystem's
-page cache while leaving ZFS caching intact. They establish no cold-device rate
-or single application-wide encryption percentage.
+**Storage measurement correction, 2026-09-06:** The original 5,567 versus
+2,701 MiB/s sequential-read figures came from cached backing images on the wrong
+pool. They cannot establish an Optane storage penalty. The report retains those
+figures and documents the corrected run on the Intel Optane pool, with data
+caching excluded and physical-device read counters recorded for every sample.
+
+On Optane, default LUKS reduced one-worker sequential throughput from 1,894 to
+1,725 MiB/s, an 8.9% reduction. Eight-worker medians were close and reversed
+order. A cold ciphertext scan in the same PostgreSQL Docker containers rose
+from 1,002 to 1,043 ms, a 4.1% increase. The mapping selected the hardware
+`xts-aes-vaes-avx2` driver. Workqueue bypass did not improve these sequential
+reads or the cold database scan, so retain default scheduling for this provider
+unless workload measurements justify a change. These three-repetition medians
+on a shared host describe the measured operations; they supply no fixed
+application-wide percentage or Optane write estimate. These measured costs are
+acceptable for default at-rest encryption. Keep LUKS enabled by default and
+proceed with implementation; further performance tuning is not a delivery gate.
 
 The existing Vault primitives took 2.37 microseconds to generate a data key and
 wrap it through three scope layers, and 1.33 microseconds to unwrap all three.

@@ -1,0 +1,4 @@
+{
+  "ordinary": "/dev/loop0",
+  "luks": "/dev/loop1"
+}

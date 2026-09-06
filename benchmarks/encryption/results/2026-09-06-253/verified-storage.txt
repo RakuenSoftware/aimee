@@ -1,0 +1,49 @@
+2026-09-06T16:29:56+00:00
+  pool: optane
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:46 with 0 errors on Sun Aug  9 00:24:47 2026
+config:
+
+	NAME                                                                                                                         STATE     READ WRITE CKSUM
+	optane                                                                                                                       ONLINE       0     0     0
+	  /dev/disk/by-id/nvme-nvme.8086-50484d32393131323030355239363043474e-494e54454c2053534450453231443936304741-00000001-part1  ONLINE       0     0     0
+
+errors: No known data errors
+
+  pool: rpool
+ state: ONLINE
+  scan: scrub repaired 0B in 00:00:41 with 0 errors on Sun Aug  9 00:24:43 2026
+config:
+
+	NAME                                                                   STATE     READ WRITE CKSUM
+	rpool                                                                  ONLINE       0     0     0
+	  mirror-0                                                             ONLINE       0     0     0
+	    /dev/disk/by-id/ata-Patriot_P220_512GB_P220HHBB231205011448-part3  ONLINE       0     0     0
+	    /dev/disk/by-id/ata-Patriot_P220_512GB_P220HHBB231205012127-part3  ONLINE       0     0     0
+
+errors: No known data errors
+NAME      SIZE MODEL
+loop0      12G 
+loop1      12G 
+sda     476.9G Patriot P220 512GB
+sdb     476.9G Patriot P220 512GB
+zd0       100G 
+zd16        8G 
+zd32        4M 
+nvme0n1 894.3G INTEL SSDPE21D960GA
+nvme1n1   3.6T WD_BLACK SN850X 4000GB
+NAME       BACK-FILE                                               DIO LOG-SEC
+/dev/loop1 /opt/aimee-encryption-bench/storage-optane/luks.img       0     512
+/dev/loop0 /opt/aimee-encryption-bench/storage-optane/ordinary.img   0     512
+/dev/mapper/aimee-bench-luks is active and is in use.
+  type:    LUKS2
+  cipher:  aes-xts-plain64
+  keysize: 512 bits
+  key location: keyring
+  device:  /dev/loop1
+  loop:    /opt/aimee-encryption-bench/storage-optane/luks.img
+  sector size:  512
+  offset:  32768 sectors
+  size:    25133056 sectors
+  mode:    read/write
+  flags:   no_read_workqueue no_write_workqueue

@@ -1,0 +1,12 @@
+{
+  "date_utc": "2026-09-06T16:30:22Z",
+  "containers_stopped": true,
+  "daemon_stopped": true,
+  "luks_closed": true,
+  "loops_detached": {
+    "ordinary": "/dev/loop0",
+    "luks": "/dev/loop1"
+  },
+  "images_retained": true,
+  "fixture_key_retained_root_only_tmpfs": true
+}

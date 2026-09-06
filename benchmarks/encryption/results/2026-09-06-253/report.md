@@ -1,5 +1,14 @@
 # Indexed candidates keep PostgreSQL payload decryption small
 
+**Correction, 2026-09-06:** The user identified that the original figures could
+not represent the intended Optane device. I placed those fixtures on `rpool`,
+a mirror of two Patriot P220 SATA SSDs. Its 5,567 MiB/s ordinary read result came
+from a cached backing-file path. Presenting the corresponding 52% throughput
+drop as an Optane storage penalty was wrong. The original results remain below;
+the corrected Optane measurements show an 8.9% single-worker sequential-read
+reduction and a 4.1% increase in a cold PostgreSQL scan's median latency with
+default LUKS settings. Neither establishes an application-wide percentage.
+
 On .253, an indexed substring search over 100,000 encrypted 4 KiB bodies returned
 20 matches in about 4.5 ms. Adding short fragments and a candidate probe reduced
 a two-character no-match lookup from 9.5 seconds to 0.07 ms. Full body-similarity
@@ -85,10 +94,10 @@ case/collation rules retain the authorized fallback. Broad content-dependent
 ranking still has to evaluate its candidates. The optimization preserves the
 measured deterministic `lower(body) LIKE pattern` contract.
 
-## LUKS costs appear when work reaches the storage path
+## The original reads measured a cached SATA-backed path
 
-The direct-I/O test used 512 MiB files, 1 MiB sequential operations, and 4,000
-random 4 KiB reads per trial. The table reports the median of three trials.
+The original test wrote 512 MiB files and immediately read them, using 1 MiB
+sequential operations and 4,000 random 4 KiB reads per trial. The table reports the median of three trials.
 
 | Operation | Ordinary | LUKS |
 |---|---:|---:|
@@ -96,9 +105,10 @@ random 4 KiB reads per trial. The table reports the median of three trials.
 | Sequential read | 5,567.41 MiB/s | 2,700.58 MiB/s |
 | Random 4 KiB read latency | 8.08 microseconds | 16.57 microseconds |
 
-The inner ext4 files use `O_DIRECT`; the ZFS backing images can still be cached.
-The sequential-read difference measures this complete file-backed storage path.
-It establishes no cold physical-device rate. Write trials varied from 43 to
+`O_DIRECT` bypassed the inner ext4 page cache. The loop devices had backing-file
+direct I/O disabled, and ZFS data caching remained enabled. The 5,567 MiB/s result
+exceeds this SATA mirror's physical throughput and exposes the cached path.
+The 52% difference is invalid as an Optane or physical-device encryption penalty. Write trials varied from 43 to
 128 MiB/s on ordinary storage and 43 to 66 MiB/s on LUKS, so these samples do not
 isolate a write penalty. [Raw I/O results](direct-io.json) retain that variation.
 
@@ -106,6 +116,83 @@ Warm selective SQL searches changed little between storage variants. The broad
 ranking query had higher medians on LUKS and wrote substantial temporary data;
 its samples also varied with the shared host. A single storage-encryption
 percentage would hide those different paths.
+
+## Optane reads reach the device with AES acceleration active
+
+The corrected images reside on `optane/aimee-encryption-bench`, backed by the
+Intel SSDPE21D960GA at `/dev/nvme0n1`. The
+[storage inventory](verified-storage.txt) records both pools and their devices.
+Only this isolated dataset has `primarycache=metadata`, `secondarycache=none`,
+and `direct=always`; compression and deduplication remain disabled. No global
+host cache was flushed. The [dataset properties](optane-storage.txt) preserve
+the configuration.
+
+Enabling `losetup --direct-io=on` failed with `EINVAL` on this backing filesystem.
+The completed test therefore retains buffered loop devices, recorded as `DIO=0`.
+ZFS's `direct=always` requests direct handling of aligned I/O, while
+`primarycache=metadata` excludes file data from ARC. See the
+[OpenZFS property definitions](https://openzfs.github.io/openzfs-docs/man/master/7/zfsprops.7.html).
+The test records physical Optane read counters around every sample and rejects
+samples with fewer device bytes than 95% of the requested bytes. Sequential
+samples read about 1.00–1.05 device bytes per requested byte. These counters
+cover the shared device, so other services can contribute traffic.
+
+Opening the LUKS mapping raised the reference count of `xts-aes-vaes-avx2` from
+one to two while the other XTS drivers' counts stayed unchanged. Its module is
+`aesni_intel`, and its self-test passed. This identifies the accelerated driver
+selected by the mapping; the [raw diagnostic](optane-diagnostic.json) records
+both states. The separate memory-only [cipher benchmark](aes-xts-benchmark.txt)
+measured 8,612 MiB/s AES-XTS decryption. That rate is not a disk measurement.
+Docker also exposes `aes` and `vaes` in the PostgreSQL containers' CPU flags.
+
+The read-only diagnostic uses identical 512 MiB fixture files, one outstanding
+request per worker, 1.5 seconds per sample, and three shuffled repetitions.
+These are medians on the shared host:
+
+| Read workload | Ordinary | LUKS default | LUKS without workqueues | LUKS same CPU |
+|---|---:|---:|---:|---:|
+| Sequential 1 MiB, one worker, MiB/s | 1,894.25 | 1,725.33 | 1,452.42 | 1,482.84 |
+| Sequential 1 MiB, eight workers, MiB/s | 2,018.53 | 2,075.47 | 1,936.34 | 1,995.12 |
+| Random 4 KiB, one worker, mean microseconds | 102.00 | 105.07 | 107.75 | 107.16 |
+| Random 4 KiB, eight workers, mean microseconds | 758.79 | 763.56 | 755.76 | 749.56 |
+
+Default LUKS reduced single-worker sequential throughput by 8.9%. Eight-worker
+medians reversed order by 2.8%; three short trials do not establish an encryption
+speedup. Workqueue bypass reduced sequential throughput further on this stack,
+so these results support retaining the default scheduling. Random reads fetched
+about 32 device bytes per requested byte, consistent with the outer 128 KiB ZFS
+records. Their latencies describe the layered image path and cannot stand in for
+raw Optane 4 KiB latency. [All samples](optane-diagnostic.json) retain the byte
+counts, load averages, driver state, and scheduling flags. The separate
+[cached rpool diagnostic](luks-diagnostic.json) is retained for comparison.
+
+## PostgreSQL's cold scan costs 4.1% more in this Optane fixture
+
+The same two Docker containers were restarted against the copied Optane images.
+Each cold run stopped its container and unmounted/remounted its inner ext4
+filesystem before restarting PostgreSQL. This discards PostgreSQL buffers and
+the inner filesystem cache; the outer dataset excludes data caching throughout.
+No VM or replacement database engine was used.
+
+The query scans 100,000 encrypted rows and hashes every ciphertext, forcing
+payload reads without adding PGP decryption. All runs returned the expected
+count and aggregate. Medians from three shuffled repetitions:
+
+| Ciphertext scan | Ordinary | LUKS default | LUKS without workqueues |
+|---|---:|---:|---:|
+| Cold, milliseconds | 1,002.22 | 1,043.05 | 1,082.10 |
+| Immediate warm repeat, milliseconds | 788.01 | 759.75 | 768.22 |
+
+Cold samples recorded 1,030–1,037 MiB of physical Optane reads; warm repeats
+recorded 0–1.31 MiB. Default LUKS added 4.1% to the cold median. Individual cold
+samples ranged from 969–1,146 ms ordinary and 1,040–1,113 ms encrypted, so the
+median difference is descriptive and does not establish a precise overhead
+bound. The [PostgreSQL results](optane-postgres.json) include SQL, plans, device
+counters, CPU flags, and the unchanged four-CPU container quotas. This scan
+isolates one storage-sensitive database operation. The original search matrix
+was not rerun on Optane, and Optane writes remain unmeasured. The measured costs
+are acceptable for the proposed default at-rest encryption; further tuning is
+not a delivery gate.
 
 ## Write and scope-wrap timings have narrower boundaries
 
@@ -132,7 +219,7 @@ associated data, and tampered ciphertext was rejected. The
 [native results](scope-wrap.json) measure cipher work; Vault service calls and
 authorization remain outside them.
 
-## The environment matches the proposed storage path
+## The original query matrix used Docker on rpool
 
 The host has an Intel Core i7-14700K, 28 logical CPUs, AES instructions, and about
 125 GiB RAM. Other services continued running. Docker Engine 28.5.2 ran through
@@ -147,7 +234,8 @@ for the controlled fixture; tables were explicitly analyzed. Exact settings and
 the image digest are in [search.json](search.json) and
 [postgres-image.txt](postgres-image.txt).
 
-The two 12 GiB disk images occupied the same ZFS dataset, with outer compression,
+The original two 12 GiB disk images occupied `rpool/aimee-encryption-bench`,
+backed by the mirrored Patriot SATA SSDs, with outer compression,
 deduplication, and encryption disabled. Both inner filesystems used ext4 with `noatime` and
 completed initialization. LUKS used AES-XTS with a 512-bit combined key and
 512-byte sectors. PostgreSQL data, WAL, and temporary files used the mounted
@@ -198,3 +286,7 @@ checked body correctly. The check used no TPM operation and excluded Vault
 service calls. Both benchmark containers were then stopped, filesystems unmounted,
 LUKS closed, and loop devices detached. The images and root-only tmpfs fixture key
 remain on .253 for reproduction; the key disappears on host reboot.
+
+The corrected Optane run also finished with its containers and dedicated daemon
+stopped, filesystems unmounted, and mapping and loops closed. Its
+[cleanup record](optane-cleanup.json) is separate from the original run.
