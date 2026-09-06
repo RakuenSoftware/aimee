@@ -528,7 +528,7 @@ static int codex_proxy_profile(char *profile, size_t profile_size, char *path, s
 int cli_proxy_launch(char *const argv[], const char *session_id)
 {
    unsigned char random[32];
-   char token[65], base[80], origin[80];
+   char token[65], origin[80], base[sizeof(origin) + sizeof("/v1") - 1];
    if (platform_random_bytes(random, sizeof(random)) != 0)
       return 1;
    for (size_t i = 0; i < sizeof(random); i++)
