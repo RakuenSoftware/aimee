@@ -616,13 +616,15 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tos.Exit(code)
 \t}
 """ if module_id == "delegates" else ""
+    if module_id == "providers":
+        watchdog = "\tif handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
-    if module_id == "config":
+    if module_id in {"config", "providers"}:
         handler = "moduleHandler"
         setup = """\tmoduleHandler, err := handler.NewDefaultHandler()
 \tif err != nil {
-\t\tfmt.Fprintf(os.Stderr, "aimee-module-config: %v\\n", err)
+\t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
 \t}
 """
@@ -671,7 +673,7 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
         path.relative_to(ROOT).as_posix()
         for path in (ROOT / "server-go/bus").glob("*.go")
         if not path.name.endswith("_test.go") and
-        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable"})
+        (path.name != "concurrent_module_caller.go" or module_id in {"delegates", "roundtable", "providers"})
     )
 
 
@@ -682,7 +684,8 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
-    "server-go/config": {"config"},
+    "server-go/config": {"config", "providers"},
+    "server-go/modules/egress": {"providers"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory"},

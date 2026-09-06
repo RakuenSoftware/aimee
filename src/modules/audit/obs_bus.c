@@ -1390,6 +1390,9 @@ static const struct
     {12293u, "egress.module-egress-sse-receive"},
     {12294u, "egress.module-egress-sse-close"},
     {12295u, "egress.module-egress-credential-key"},
+    {12545u, "providers.provider-resolve"},
+    {12546u, "providers.provider-validate"},
+    {12547u, "providers.provider-management"},
 };
 
 /* Sampled declarations use integer parts-per-million so the checked contract
@@ -1440,7 +1443,7 @@ static void governance_tap(void *ctx, const bus_frame_t *frame, const uint8_t *p
     * caller, stage, trace, lengths and status are recorded below in WORM; raw
     * payload capture is deliberately suppressed. The forge request still
     * carries its legacy token until credential-handle migration completes. */
-   int sensitive_transport = frame->event_kind == 7428u ||
+   int sensitive_transport = frame->event_kind == 7428u || frame->event_kind == 12547u ||
                              (frame->event_kind >= 12290u && frame->event_kind <= 12294u);
    if (!sensitive_transport &&
        atomic_load_explicit(&g.capture_state, memory_order_acquire) == CAPTURE_OK &&

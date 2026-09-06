@@ -132,6 +132,29 @@ stop_config_module() {
     fi
 }
 
+# Provider management is served by the migrated Go process. Install both its
+# serving and outbound grants, just as the production supervisor does.
+PROVIDERS_MODULE="$AIMEE_HOME/aimee-module-providers"
+PROVIDERS_MODULE_PID=""
+install_providers_module() {
+    cp "$DB1_MODULE_BUILT" "$PROVIDERS_MODULE"
+    chmod 0755 "$PROVIDERS_MODULE"
+    install_generated_grant providers "$PROVIDERS_MODULE"
+    install_generated_grant providers-egress "$PROVIDERS_MODULE"
+}
+start_providers_module() {
+    stop_providers_module
+    "$PROVIDERS_MODULE" "$MODULE_BUS_SOCK" >"$HOME/aimee-providers.log" 2>&1 &
+    PROVIDERS_MODULE_PID=$!
+}
+stop_providers_module() {
+    if [ -n "$PROVIDERS_MODULE_PID" ]; then
+        kill "$PROVIDERS_MODULE_PID" 2>/dev/null || true
+        wait "$PROVIDERS_MODULE_PID" 2>/dev/null || true
+        PROVIDERS_MODULE_PID=""
+    fi
+}
+
 install_db1_module() {
     # Missing module: stop, do not degrade. This used to return 0 and let the
     # run continue, from a time when the daemon still had an in-process store to
@@ -382,6 +405,7 @@ stop_workflow_module() {
 
 install_db1_module
 install_config_module
+install_providers_module
 # Grants are read by the daemon at startup, so this has to happen BEFORE the
 # server is started even though the module itself is not launched until the
 # workflow section. Installing it later produced a module that ran, attached to
@@ -706,6 +730,7 @@ start_server() {
     for i in $(seq 1 300); do
         if [ "$config_started" -eq 0 ] && [ -S "$MODULE_BUS_SOCK" ]; then
             start_config_module
+            start_providers_module
             config_started=1
         fi
         [ -S "$HTTP_SOCK" ] && { start_db1_module; return 0; }
@@ -744,6 +769,7 @@ cleanup() {
     stop_db1_module
     stop_pg_module
     stop_config_module
+    stop_providers_module
     local rc=$?
     if [ "$REACHED_SUMMARY" -ne 1 ]; then
         echo ""
@@ -1239,14 +1265,13 @@ RESP=$(http_call GET /v1/catalog/show '{}') || true
 check_output "catalog.show missing model stays typed" '"kind":"invalid_argument"' echo "$RESP"
 
 RESP=$(http_call GET /v1/agent/list '{}') || true
-check_output "agent.list absent config stays typed" '"kind":"not_found"' echo "$RESP"
+check_output "agent.list clean install has an empty roster" '"agents":[]' echo "$RESP"
 
-# The dashboard's native list reads the same local config as agent.list. A
-# clean install without agents.json is an absent resource, not a failed
-# gateway, and must preserve both the typed body and the HTTP status.
+# A clean installation starts with an empty roster so operators can add their
+# first provider and model. Both list surfaces must return a usable empty list.
 RESP=$(http_call GET /v1/agents '{}') || true
-check_output "dashboard agents absent config is not found" '404 ' echo "$RESP"
-check_output "dashboard agents absent config stays typed" '"kind":"not_found"' echo "$RESP"
+check_output "dashboard agents clean install succeeds" '200 ' echo "$RESP"
+check_output "dashboard agents clean install has an empty roster" '"agents":[]' echo "$RESP"
 
 # ============================================================
 # 4. Session management

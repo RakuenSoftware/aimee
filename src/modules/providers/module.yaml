@@ -1,0 +1,53 @@
+{
+  "descriptor_version": 1,
+  "id": "providers",
+  "dependencies": [
+    "config",
+    "egress",
+    "module-runtime",
+    "vault"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "sources": [],
+  "private_headers": [],
+  "public_headers": [
+    "src/modules/providers/include/aimee/providers/module_api.h"
+  ],
+  "go_sources": [
+    "server-go/modules/providers/auth.go",
+    "server-go/modules/providers/bootstrap.go",
+    "server-go/modules/providers/catalog.go",
+    "server-go/modules/providers/concurrency.go",
+    "server-go/modules/providers/inspect.go",
+    "server-go/modules/providers/local.go",
+    "server-go/modules/providers/management.go",
+    "server-go/modules/providers/metadata.go",
+    "server-go/modules/providers/metadata_download.go",
+    "server-go/modules/providers/metadata_seed.go",
+    "server-go/modules/providers/normalize.go",
+    "server-go/modules/providers/probe_worker_linux.go",
+    "server-go/modules/providers/probe_worker_other.go",
+    "server-go/modules/providers/process.go",
+    "server-go/modules/providers/profiles.go",
+    "server-go/modules/providers/recovery.go",
+    "server-go/modules/providers/rules.go",
+    "server-go/modules/providers/store.go",
+    "server-go/modules/providers/testdata/nativefixture/main.go",
+    "server-go/modules/providers/vaultresource/client.go"
+  ],
+  "go_tests": [
+    "server-go/modules/providers/compatibility_test.go",
+    "server-go/modules/providers/concurrency_test.go",
+    "server-go/modules/providers/inspect_test.go",
+    "server-go/modules/providers/management_test.go",
+    "server-go/modules/providers/probe_worker_linux_test.go",
+    "server-go/modules/providers/rules_test.go"
+  ],
+  "tests": [],
+  "docs": [
+    "docs/modules/providers.md"
+  ]
+}

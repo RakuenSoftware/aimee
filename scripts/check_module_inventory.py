@@ -46,11 +46,11 @@ RESERVED_BANDS = (
     # the same ref to a future module would give it kinds that grant claims.
     ("retired_principal_ref_band", "refs a removed subsystem allocated"),
 )
-REQUIRED_COUNT = 21
+REQUIRED_COUNT = 22
 # Principal references stay stable when a module changes activation class;
 # PostgreSQL is also appended while its C-to-Go migration is staged.
 OPTIONAL_COUNT = 11
-PINNED_REQUIRED = {"git"}
+PINNED_REQUIRED = {"git", "providers"}
 
 
 class InventoryError(ValueError):

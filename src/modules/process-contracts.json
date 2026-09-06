@@ -1194,6 +1194,41 @@
       ]
     },
     {
+      "id": "providers",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 33,
+      "placements": [
+        "server"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "provider-resolve",
+          "event_kind": 12545,
+          "durability": "ledger",
+          "durability_reason": "provider and model decisions have one module authority",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 2,
+          "name": "provider-validate",
+          "event_kind": 12546,
+          "durability": "ledger",
+          "durability_reason": "provider and model decisions have one module authority",
+          "emitter": "obs_bus_emit_durable_event"
+        },
+        {
+          "id": 3,
+          "name": "provider-management",
+          "event_kind": 12547,
+          "durability": "ledger",
+          "durability_reason": "provider and model decisions have one module authority",
+          "emitter": "obs_bus_emit_durable_event"
+        }
+      ]
+    },
+    {
       "id": "observability",
       "execution": "core",
       "placements": [
@@ -1319,6 +1354,19 @@
       ],
       "request": [
         11266
+      ]
+    },
+    {
+      "id": "providers-egress",
+      "principal_ref": 74,
+      "executable": "/usr/local/libexec/aimee-modules/aimee-module-providers",
+      "placements": [
+        "server"
+      ],
+      "request": [
+        12290,
+        12295,
+        4609
       ]
     }
   ]

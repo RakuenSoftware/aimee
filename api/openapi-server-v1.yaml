@@ -2841,6 +2841,28 @@ paths:
     get:
       summary: List providers
       responses: { "200": { description: Provider list, content: { application/json: { schema: { type: object } } } } }
+  /provider/connections:
+    get:
+      summary: List saved provider connections
+      responses: { "200": { description: Connections with model counts, content: { application/json: { schema: { type: object } } } } }
+  /provider/connection_models:
+    get:
+      summary: Discover models on a saved provider connection
+      parameters:
+        - { name: name, in: query, required: true, schema: { type: string } }
+      responses: { "200": { description: Discovered model IDs, content: { application/json: { schema: { type: object } } } } }
+  /provider/save_connection:
+    post:
+      summary: Create or edit a saved provider connection
+      description: Connection names are unique. Editing preserves the credential when api_key is empty and updates inherited connection settings on its models.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name, provider], properties: { name: { type: string }, provider: { type: string }, endpoint: { type: string }, api_key: { type: string, writeOnly: true }, auth_type: { type: string }, create: { type: boolean, default: false } } } } } }
+      responses: { "200": { description: Saved connection or typed error, content: { application/json: { schema: { type: object } } } } }
+  /provider/remove_connection:
+    post:
+      summary: Delete a saved provider connection and its models
+      description: Removes the connection's saved credentials and repairs model role selections.
+      requestBody: { required: true, content: { application/json: { schema: { type: object, required: [name], properties: { name: { type: string } } } } } }
+      responses: { "200": { description: Deletion result or typed error, content: { application/json: { schema: { type: object } } } } }
   /provider/models:
     get:
       summary: List provider models
