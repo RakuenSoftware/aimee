@@ -12,6 +12,7 @@
 #include <aimee/core/event_bus/module_protocol.h>
 
 #include "cJSON.h"
+#include "memory_bus_context.h"
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -20,6 +21,19 @@
 #define MEMORY_DATA_TIMEOUT_MS 5000
 
 static memory_audit_hook_fn memory_audit_hook;
+static void (*memory_context_reader)(db2_memory_scope_context_t *);
+
+void memory_bus_set_context_reader(void (*reader)(db2_memory_scope_context_t *))
+{
+   memory_context_reader = reader;
+}
+
+void memory_bus_read_context(db2_memory_scope_context_t *context)
+{
+   memset(context, 0, sizeof(*context));
+   if (memory_context_reader)
+      memory_context_reader(context);
+}
 
 void memory_set_audit_hook(memory_audit_hook_fn hook)
 {
@@ -35,6 +49,11 @@ void memory_audit_emit(const char *op, int64_t id, const char *tier, const char 
 
 static cJSON *memory_data_call(cJSON *request)
 {
+   if (memory_bus_add_context(request) != 0)
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
    return aimee_module_json_call(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
                                  AIMEE_MODULE_MESSAGE_MAX_BODY, MEMORY_DATA_TIMEOUT_MS, &result);

@@ -781,6 +781,13 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
 	}
+	if options.placement == PlacementKB && request.Scope.Type == "" && request.Scope.Value == "" {
+		if request.Project != "" {
+			request.Scope = Scope{Type: ScopeProject, Value: request.Project}
+		} else if request.Workspace != "" {
+			request.Scope = Scope{Type: ScopeWorkspace, Value: request.Workspace}
+		}
+	}
 	scope, err := normalizeScope(options.placement, request.Scope)
 	if err != nil {
 		return nil, bus.ModuleStatusInvalidRequest
@@ -929,6 +936,34 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+
+	// Request scope used to live on the C connection. Pin it to the Go store
+	// transaction now, so the non-owner runtime sees precisely this request's
+	// rows and pooled connections cannot retain another request's scope.
+	var transaction store.Tx
+	if backend, ok := options.data.(*postgresDataStore); ok && options.placement == PlacementKB {
+		if db, ok := backend.db.(store.DB); ok {
+			transaction, err = db.Begin(ctx)
+			if err != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			defer transaction.Rollback(context.Background())
+			_, err = transaction.Exec(ctx, `SELECT
+set_config('aimee.memory_scope_type',$1,true),
+set_config('aimee.memory_scope_value',$2,true),
+set_config('aimee.memory_workspace',$3,true),
+set_config('aimee.memory_project',$4,true),
+set_config('aimee.memory_scope_all',$5,true)`,
+				string(scope.Type), scope.Value, request.Workspace, request.Project,
+				map[bool]string{false: "0", true: "1"}[request.IncludeAll])
+			if err != nil {
+				return nil, bus.ModuleStatusInternal
+			}
+			bound := *backend
+			bound.db = transaction
+			options.data = &bound
+		}
+	}
 
 	response := DataResponse{}
 	switch request.Operation {
@@ -1628,6 +1663,11 @@ func handleData(options handlerOptions, invocation bus.ModuleInvocation, body []
 	encoded, err := json.Marshal(response)
 	if err != nil {
 		return nil, bus.ModuleStatusInternal
+	}
+	if transaction != nil {
+		if err := transaction.Commit(ctx); err != nil {
+			return nil, bus.ModuleStatusInternal
+		}
 	}
 	return encoded, bus.ModuleStatusOK
 }

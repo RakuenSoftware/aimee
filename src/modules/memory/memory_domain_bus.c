@@ -18,6 +18,7 @@
 #include "memory_query.h"
 #include "memory_scenes.h"
 #include "memory_scope_query.h"
+#include "memory_bus_context.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -28,6 +29,11 @@
 
 static cJSON *domain_call_with_timeout(cJSON *request, int timeout_ms)
 {
+   if (memory_bus_add_context(request) != 0)
+   {
+      cJSON_Delete(request);
+      return NULL;
+   }
    aimee_module_call_result_t result = AIMEE_MODULE_CALL_INTERNAL;
    return aimee_module_json_call(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, request,
                                  AIMEE_MODULE_MESSAGE_MAX_BODY, timeout_ms, &result);

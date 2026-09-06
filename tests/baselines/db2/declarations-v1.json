@@ -18604,7 +18604,8 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_context.c",
-        "src/kb/db2_adapters/kb_service_backend_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/kb/kb_main.c"
       ],
       "locations": [
         {
@@ -26226,7 +26227,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "fddef65b96e89c433b2ada87594d73dc623d04337713bb31a29121a08c954371",
+  "fingerprint": "e199e916fbe15fb09407385525b02bed80bb9e3be0d570c448c4637cd9a79c05",
   "module": "db2",
   "schema_version": 1,
   "summary": {

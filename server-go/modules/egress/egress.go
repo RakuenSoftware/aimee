@@ -210,7 +210,8 @@ func (p policy) decide(invocation bus.ModuleInvocation, request Request) Decisio
 		if address.IP == nil {
 			continue
 		}
-		if request.Purpose != "embedding" && !(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
+		if request.Purpose != "embedding" && request.Purpose != "embedding-health" &&
+			!(request.Purpose == "mcp_sse" && p.allowPrivateMCP) &&
 			!publicIP(address.IP) {
 			return deny("target resolved to a non-public address")
 		}
@@ -229,8 +230,10 @@ func callerPurposeAllowed(ref uint32, request Request, target *url.URL) bool {
 	host := strings.ToLower(target.Hostname())
 	switch ref {
 	case MemoryClientRef:
-		return request.Purpose == "embedding" && request.Method == "POST" &&
-			strings.HasSuffix(target.EscapedPath(), "/embed")
+		return (request.Purpose == "embedding" && request.Method == "POST" &&
+			strings.HasSuffix(target.EscapedPath(), "/embed")) ||
+			(request.Purpose == "embedding-health" && request.Method == "GET" &&
+				strings.HasSuffix(target.EscapedPath(), "/health"))
 	case GitClientRef:
 		return request.Purpose == "forge" && target.Scheme == "https" && host == "api.github.com" &&
 			forgeTargetAllowed(request.Method, target.EscapedPath())
