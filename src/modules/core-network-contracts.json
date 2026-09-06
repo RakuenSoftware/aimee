@@ -256,6 +256,19 @@
       ]
     },
     {
+      "id": "thin-client-loopback-model-proxy",
+      "owner": "thin client and core connection transport",
+      "direction": "local",
+      "purpose": "authenticated local model ingress for launched provider clients",
+      "destination_constraint": "listener binds only INADDR_LOOPBACK; no configurable bind address; upstream uses the configured Aimee remote",
+      "credential_constraint": "local per-launch bearer required before forwarding; upstream bearer and pinned mTLS identity stay in aimee_client",
+      "audit_disposition": "upstream model ingress owns request audit; proxy does not persist request bodies or credentials",
+      "review_boundary": "bind address, route allowlist, framing, authentication, credential isolation, and lifecycle changes require thin-client and Runtime Security review; covered by test_thin_client_proxy.py",
+      "matches": [
+        {"primitive": "inet_socket", "path": "src/core/connection/socket.c", "count": 1}
+      ]
+    },
+    {
       "id": "connection-resolution",
       "owner": "core connection and KB management transport",
       "direction": "transport",

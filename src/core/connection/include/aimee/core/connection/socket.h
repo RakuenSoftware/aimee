@@ -17,6 +17,14 @@ extern "C"
     * The connect timeout bounds each address attempt; <= 0 selects 10 seconds. */
    int aimee_core_socket_connect(const char *host, const char *port, int timeout_ms);
 
+   /* Nonblocking IPv4 loopback listener. Port zero selects an ephemeral port.
+    * Accepted streams are blocking and are not inherited by spawned clients. */
+   int aimee_core_socket_listen_loopback(unsigned port, unsigned *bound_port);
+   int aimee_core_socket_accept(int listener);
+   void aimee_core_socket_shutdown(int fd);
+   /* Nonblocking EOF probe for a stream whose request body is fully consumed. */
+   int aimee_core_socket_peer_closed(int fd);
+
    enum
    {
       AIMEE_CORE_CONNECT_NUMERIC_HOST = 1U << 0,

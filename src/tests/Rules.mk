@@ -1019,7 +1019,11 @@ endif
 # reporting green over a store that answered nothing. Set AIMEE_STORE_URL to
 # run them for real.
 
-unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config \
+.PHONY: proxy-tests
+proxy-tests: $(BINARY)
+	AIMEE_TEST_PROXY_BINARY="$(abspath $(BINARY))" python3 ../scripts/tests/test_thin_client_proxy.py -v
+
+unit-tests: $(UNIT_TEST_P1_PREREQ) $(BINARY) proxy-tests $(OBJDIR)/aimee-module $(OBJDIR)/aimee-module-config \
             $(UNIT_TEST_TARGETS) $(UNIT_TEST_AUX_TARGETS) $(OBJDIR)/aimee-providers-fixture
 	@if ! printf '%s:%s\n' "$(UNIT_TEST_SHARD_COUNT)" "$(UNIT_TEST_SHARD_INDEX)" | \
 	     awk -F: '$$1 ~ /^[0-9]+$$/ && $$2 ~ /^[0-9]+$$/ && $$1 > 0 && $$2 < $$1 { ok=1 } END { exit !ok }'; then \

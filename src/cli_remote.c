@@ -813,14 +813,28 @@ static int remote_status(int json_output)
     * (and exiting 0) told users their client was configured when no command would
     * work; say what is actually wrong and fail. */
    int unauthorized = (body != NULL && (st == 401 || st == 403));
+   int certificate_rejected = 0;
+   if (unauthorized)
+   {
+      cJSON *response = cJSON_Parse(body);
+      cJSON *error = cJSON_GetObjectItemCaseSensitive(response, "error");
+      cJSON *message = cJSON_GetObjectItemCaseSensitive(error, "message");
+      const char *text = cJSON_IsString(message) ? message->valuestring
+                         : cJSON_IsString(error) ? error->valuestring
+                                                 : "";
+      certificate_rejected = strstr(text, "client certificate") != NULL;
+      cJSON_Delete(response);
+   }
    int ok = (body != NULL && st >= 200 && st < 400);
    free(body);
 
    if (json_output)
    {
-      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"authorized\":%s,\"status\":%d}\n",
+      printf("{\"remote\":%s,\"target\":\"%s\",\"reachable\":%s,\"authorized\":%s,\"status\":%d,"
+             "\"certificate_rejected\":%s}\n",
              active ? "true" : "false", active ? desc : "local-uds", reachable ? "true" : "false",
-             unauthorized ? "false" : (ok ? "true" : "false"), st);
+             unauthorized ? "false" : (ok ? "true" : "false"), st,
+             certificate_rejected ? "true" : "false");
    }
    else
    {
@@ -831,7 +845,13 @@ static int remote_status(int json_output)
       if (unauthorized)
       {
          printf("Reachable: yes, but NOT authorized (GET /v1/health -> %d)\n", st);
-         printf("  The server answered but rejected the stored token. Re-run\n"
+         if (certificate_rejected)
+            printf("  The server rejected the client certificate. Have the server operator check\n"
+                   "  its enrollment/revocation state and provision a valid client identity.\n"
+                   "  The existing certificate and key have been preserved.\n");
+         else
+            printf(
+                "  The server answered but rejected the stored token or its permissions. Re-run\n"
                 "  `aimee remote set <url> <token>` with this server's current primary bearer.\n"
                 "  Then run `aimee remote enroll` to give this client an individual bearer.\n");
       }

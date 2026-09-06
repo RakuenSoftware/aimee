@@ -26,6 +26,20 @@ static char g_worktree_sid[128];
 static char g_chdir_path[512], g_exec_file[256];
 static int g_remote_active = 1;
 static int g_worktree_result = -1, g_order, g_chdir_order, g_exec_order;
+static int g_proxy_called;
+
+int aimee_client_has_remote(void)
+{
+   return g_remote_active;
+}
+int cli_proxy_launch(char *const argv[], const char *sid)
+{
+   assert(strcmp(sid, g_worktree_sid) == 0);
+   assert(g_chdir_order > 0);
+   assert(strcmp(argv[0], "example-client") == 0);
+   g_proxy_called++;
+   return 127;
+}
 
 int platform_setenv(const char *name, const char *value)
 {
@@ -266,16 +280,17 @@ static void test_launch_gateway_is_explicit_and_fail_closed(void)
    g_worktree_result = 0;
    g_env_count = 0;
    char *gateway[] = {(char *)"--gateway", (char *)"--", (char *)"example-client", NULL};
+   g_proxy_called = 0;
    assert(client_launch_exec(3, gateway) == 127);
-   assert(g_env_count == 6);
-   assert(strcmp(g_env[1].name, "AIMEE_CONVERSATION_GATEWAY") == 0);
-   assert(strcmp(g_env[1].value, "https://gateway.example:8910/v1") == 0);
+   assert(g_proxy_called == 1);
+   assert(g_env_count == 1); /* proxy owns its local endpoint and credentials */
 
    g_remote_active = 0;
    g_env_count = 0;
    g_exec_file[0] = '\0';
    assert(client_launch_exec(3, gateway) == 1);
    assert(g_exec_file[0] == '\0');
+   assert(g_proxy_called == 1);
    g_remote_active = 1;
    g_worktree_result = -1;
 }

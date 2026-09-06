@@ -363,6 +363,27 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         )
         self.assertFalse(result["release_candidate_matched"])
 
+    def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
+        validator = load_release_validator()
+        for path, integrations in validator.REVIEWED_BUILD_INTEGRATIONS.items():
+            for release_text, frozen_text in integrations:
+                with self.subTest(path=path):
+                    prefix = "C_FLAGS = -O2\n"
+                    suffix = "\nprobe: lsp_context.o\n\t$(CC) -o $@ $^\n"
+                    frozen = prefix + frozen_text + suffix
+                    current = prefix + release_text + suffix
+                    self.assertTrue(validator.reviewed_build_equivalent(path, frozen, current))
+                    for drift in (
+                        current.replace("lsp_context.o", "unreviewed.o"),
+                        current.replace("-O2", "-DNO_LSP"),
+                        current.replace("$(CC) -o $@ $^", "true"),
+                        current + release_text,
+                        current.replace("cli_proxy.c", "unreviewed.c")
+                        if path.endswith("Makefile") else current.replace(" -v", " || true"),
+                    ):
+                        self.assertFalse(validator.reviewed_build_equivalent(path, frozen, drift))
+        self.assertFalse(validator.reviewed_build_equivalent("src/tests/test_lsp.c", "same", "same"))
+
 
 if __name__ == "__main__":
     unittest.main()
