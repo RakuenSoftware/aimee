@@ -1,0 +1,14 @@
+[
+  {
+    "name": "fresh KB contains no synthetic personal email canary",
+    "passed": true,
+    "table_count": 239,
+    "matching_tables": []
+  },
+  {
+    "name": "upgrade KB contains no synthetic personal email canary",
+    "passed": true,
+    "table_count": 239,
+    "matching_tables": []
+  }
+]

@@ -21,6 +21,18 @@ static int tools_array_has_name(cJSON *tools, const char *name)
    return 0;
 }
 
+static void mcp_add_memory_store_property(cJSON *properties)
+{
+   cJSON *store = cJSON_AddObjectToObject(properties, "store");
+   cJSON_AddStringToObject(store, "type", "string");
+   cJSON_AddStringToObject(store, "description",
+                           "user (default): personal memory on the local appliance; kb: shared "
+                           "knowledge. Never inferred from a numeric ID.");
+   cJSON *values = cJSON_AddArrayToObject(store, "enum");
+   cJSON_AddItemToArray(values, cJSON_CreateString("user"));
+   cJSON_AddItemToArray(values, cJSON_CreateString("kb"));
+}
+
 static void mcp_add_memory_scope_properties(cJSON *properties)
 {
    cJSON *scope = cJSON_AddObjectToObject(properties, "scope");
@@ -119,6 +131,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_store_property(p);
       cJSON *q = cJSON_AddObjectToObject(p, "query");
       cJSON_AddStringToObject(q, "type", "string");
       cJSON_AddStringToObject(q, "description", "Search terms to find matching facts and memories");
@@ -133,10 +146,11 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddItemToArray(req, cJSON_CreateString("query"));
       cJSON_AddItemToObject(s, "required", req);
       cJSON_AddItemToArray(
-          tools, mcp_tool_new("search_memory",
-                              "Search aimee's knowledge base for stored facts and memories. "
-                              "Returns matching L2/L3 facts by keyword.",
-                              s));
+          tools,
+          mcp_tool_new("search_memory",
+                       "Search personal local memories by default. Select store=kb to search "
+                       "shared KB facts by keyword.",
+                       s));
    }
 
    /* search_graph */
@@ -243,6 +257,7 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_store_property(p);
       cJSON *id = cJSON_AddObjectToObject(p, "id");
       cJSON_AddStringToObject(id, "type", "integer");
       cJSON_AddStringToObject(id, "description", "Memory row id to fetch");
@@ -260,11 +275,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON_AddStringToObject(ao, "description",
                               "Timestamp (ISO-8601) to evaluate validity at. Answers whether the "
                               "memory was in force then, not just what it says now.");
-      cJSON_AddItemToArray(tools,
-                           mcp_tool_new("memory_get",
-                                        "Fetch a full memory by id or memory:<id> handle. Pass "
-                                        "as_of to ask whether it was in force at a past time.",
-                                        s));
+      cJSON_AddItemToArray(
+          tools, mcp_tool_new("memory_get",
+                              "Fetch local user memory by id, or select store=kb for shared "
+                              "memory. KB memory:<id> preview handles retain their scope. Pass "
+                              "as_of to ask whether it was in force at a past time.",
+                              s));
    }
 
    /* list_facts */
@@ -272,11 +288,12 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
       cJSON *s = cJSON_CreateObject();
       cJSON_AddStringToObject(s, "type", "object");
       cJSON *p = cJSON_AddObjectToObject(s, "properties");
+      mcp_add_memory_store_property(p);
       mcp_add_memory_scope_properties(p);
       cJSON_AddItemToArray(
           tools, mcp_tool_new("list_facts",
-                              "List active-project, workspace, then shared/global facts in "
-                              "aimee's long-term memory (L2 tier).",
+                              "List personal local memories by default. Select store=kb for "
+                              "active-project, workspace, and shared/global L2 facts.",
                               s));
    }
 
@@ -1915,16 +1932,14 @@ static cJSON *mcp_build_tools_list_ex(int collapse)
        tools,
        mcp_tool_new(
            "mutate",
-           "Perform a typed memory mutation. Verbs: store (write new fact), update "
-           "(replace content, keeping the previous value as a version), supersede "
-           "(replace with version lineage), forget (retire: the memory stops "
-           "answering recall but stays in fact history), affirm (positive "
-           "reinforcement), reject (reduce confidence). No verb here destroys a "
-           "stored value — update and forget both preserve the prior content, which "
-           "stays readable via fact history. Permanently erasing a memory is an "
-           "operator action outside this tool.",
+           "Mutate personal local memory by default: store creates a record, update or "
+           "supersede replaces its content, and forget retires it. Select store=kb "
+           "for shared knowledge; KB replacement preserves version history and also "
+           "supports affirm and reject. Permanent erasure is an operator action.",
            cJSON_Parse(
                "{\"type\":\"object\",\"properties\":{"
+               "\"store\":{\"type\":\"string\",\"enum\":[\"user\",\"kb\"],\"description\":"
+               "\"Personal local memory by default; explicitly select kb for shared knowledge.\"},"
                "\"verb\":{\"type\":\"string\","
                "\"description\":\"Mutation verb: store|update|supersede|forget|affirm|reject\"},"
                "\"id\":{\"type\":\"integer\","

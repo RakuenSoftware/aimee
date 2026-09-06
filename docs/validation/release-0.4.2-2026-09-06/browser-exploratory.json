@@ -1,0 +1,10 @@
+{
+  "kind": "real-stack",
+  "results": [
+    "cross-origin request cannot create a provider",
+    "unavailable discovery remains visible and manual model creation works",
+    "attached model prevents an incompatible provider type change",
+    "failed edit preserves credential and blank-key edit remains usable",
+    "delete and recreate without a key cannot reuse the deleted credential"
+  ]
+}

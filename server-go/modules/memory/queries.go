@@ -193,14 +193,21 @@ ORDER BY COUNT(*) DESC,base_key LIMIT $2`, minVersions, limit)
 }
 
 func (s *postgresDataStore) ReviewList(ctx context.Context, state string, limit int) ([]ReviewRecord, error) {
-	rows, err := s.db.Query(ctx, `SELECT id,tier,kind,key,content,confidence,lifecycle_state,
+	query := `SELECT id,tier,kind,key,content,confidence,lifecycle_state,
 COALESCE(NULLIF(archive_reason,''),(SELECT reason FROM memory_rejection_tombstones t
  WHERE t.object_kind='memory' AND t.memory_key=m.key AND t.memory_content=m.content
  ORDER BY t.id DESC LIMIT 1),''),scope_type,scope_value,created_at,updated_at
 FROM memories m WHERE ($1='' OR lifecycle_state=$1 OR ($1='rejected' AND EXISTS(
  SELECT 1 FROM memory_rejection_tombstones t WHERE t.object_kind='memory' AND t.active=1
  AND t.memory_key=m.key AND t.memory_content=m.content AND t.scope_type=m.scope_type AND t.scope_value=m.scope_value)))
-ORDER BY updated_at DESC,id DESC LIMIT $2`, state, limit)
+ORDER BY updated_at DESC,id DESC LIMIT $2`
+	if s.placement == PlacementServer {
+		query = `SELECT id,tier,kind,key,content,confidence,lifecycle_state,
+'', 'user', '_user', created_at::text, updated_at::text
+FROM user_memories WHERE ($1='' OR lifecycle_state=$1)
+ORDER BY updated_at DESC,id DESC LIMIT $2`
+	}
+	rows, err := s.db.Query(ctx, query, state, limit)
 	if err != nil {
 		return nil, err
 	}

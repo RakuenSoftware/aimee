@@ -17,6 +17,8 @@ set -euo pipefail
 PGDB="${PGDB:-aimee_test}"
 PGUSER="${PGUSER:-aimee}"
 PGPASS="${PGPASS:-aimee}"
+PGMIGRATOR="${PGMIGRATOR:-aimee_store_migrator}"
+PGMIGRATORPASS="${PGMIGRATORPASS:-aimee-store-migrator}"
 PGSTOREUSER="${PGSTOREUSER:-aimee_store_runtime}"
 PGSTOREPASS="${PGSTOREPASS:-aimee-store-runtime}"
 
@@ -41,21 +43,26 @@ su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$PGSTOREUSER
   su - postgres -c "psql -c \"CREATE ROLE $PGSTOREUSER LOGIN PASSWORD '$PGSTOREPASS' \
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS\""
 
+su - postgres -c "psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='$PGMIGRATOR'\"" | grep -q 1 || \
+  su - postgres -c "psql -c \"CREATE ROLE $PGMIGRATOR LOGIN PASSWORD '$PGMIGRATORPASS' \
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS\""
+
 su - postgres -c "dropdb --if-exists $PGDB"
 su - postgres -c "createdb -O $PGUSER $PGDB"
 su - postgres -c "psql -d $PGDB -c 'CREATE EXTENSION IF NOT EXISTS vector'"
 
-# The Go daemon store enforces separate migration and runtime identities.  Its
-# migrations are owned by PGUSER; default privileges make every newly-created
-# object usable by the non-owner runtime without giving that role DDL rights.
+# The Go daemon store enforces separate migration and runtime identities.  Only the Go migrator
+# grants its objects to the runtime. The KB owner creates Vault and WORM tables
+# too; broad default grants for that owner would expose unrelated private data.
 PGPASSWORD="$PGPASS" psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$PGUSER" -d "$PGDB" <<SQL
-GRANT CONNECT ON DATABASE $PGDB TO $PGSTOREUSER;
+GRANT CONNECT ON DATABASE $PGDB TO $PGSTOREUSER, $PGMIGRATOR;
+GRANT USAGE, CREATE ON SCHEMA public TO $PGMIGRATOR;
 GRANT USAGE ON SCHEMA public TO $PGSTOREUSER;
-ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGMIGRATOR IN SCHEMA public
   GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO $PGSTOREUSER;
-ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGMIGRATOR IN SCHEMA public
   GRANT USAGE, SELECT, UPDATE ON SEQUENCES TO $PGSTOREUSER;
-ALTER DEFAULT PRIVILEGES FOR ROLE $PGUSER IN SCHEMA public
+ALTER DEFAULT PRIVILEGES FOR ROLE $PGMIGRATOR IN SCHEMA public
   GRANT EXECUTE ON FUNCTIONS TO $PGSTOREUSER;
 SQL
 
@@ -73,4 +80,4 @@ echo "  3. run the suite:    tests/e2e/typed-facts-pg-e2e.sh"
 echo
 echo "for module-liveness-pg-e2e.sh or learning-loops-pg-e2e.sh, export:"
 echo "  AIMEE_STORE_URL=postgresql://$PGSTOREUSER:$PGSTOREPASS@127.0.0.1:5432/$PGDB"
-echo "  AIMEE_STORE_MIGRATION_URL=postgresql://$PGUSER:$PGPASS@127.0.0.1:5432/$PGDB"
+echo "  AIMEE_STORE_MIGRATION_URL=postgresql://$PGMIGRATOR:$PGMIGRATORPASS@127.0.0.1:5432/$PGDB"

@@ -389,6 +389,8 @@ int memory_insert_epistemic_ex(const char *tier, const char *kind, const char *e
                                double confidence, const char *session_id,
                                memory_authority_t authority, memory_t *out);
 int memory_get(int64_t id, memory_t *out);
+/* Same transport read with 0=found, 1=missing, -1=unavailable/malformed. */
+int memory_get_result(int64_t id, memory_t *out);
 int memory_touch(int64_t id);
 /* Batch memory_touch, for the recall path: one statement per chunk of ids
  * rather than one UPDATE per memory injected into a turn. */

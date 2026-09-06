@@ -174,15 +174,16 @@
  "\"drop\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
 
 {"memory.list",
- "{\"fields\":[{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\","
- "\"empty\":\"emit\"},{\"json\":\"kind\",\"from\":\"flag\",\"flag\":"
- "\"kind\",\"empty\":\"emit\"},{\"json\":\"limit\",\"from\":\"flag\","
- "\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20,"
- "\"empty\":\"emit\"},{\"json\":\"project\",\"from\":\"flag\",\"flag\":"
- "\"project\",\"empty\":\"emit\"},{\"json\":\"workspace\",\"from\":"
- "\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"},{\"json\":"
- "\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"},{"
- "\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "{\"fields\":["
+ "{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\",\"empty\":\"emit\"}"
+ ",{\"json\":\"kind\",\"from\":\"flag\",\"flag\":\"kind\",\"empty\":\"emit\"}"
+ ",{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":20,\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
 
 /* Generated from the marshallers once cwd and session became describable, and
    judged by the differential test rather than by inspection. */
@@ -311,13 +312,15 @@
  "\"empty\":\"emit\"}]}]}"},
 
 {"memory.search",
- "{\"fields\":[{\"json\":\"keywords\",\"from\":\"positional_array\"},{"
- "\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":"
- "\"number_lenient\",\"default\":10,\"empty\":\"emit\"},{\"json\":"
- "\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
- ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\","
- "\"empty\":\"emit\"},{\"json\":\"scope\",\"from\":\"flag\",\"flag\":"
- "\"scope\",\"empty\":\"emit\"},{\"json\":\"cwd\",\"from\":\"cwd\"}]}"},
+ "{\"fields\":["
+ "{\"json\":\"keywords\",\"from\":\"positional_array\"}"
+ ",{\"json\":\"limit\",\"from\":\"flag\",\"flag\":\"limit\",\"type\":\"number_lenient\",\"default\":10,\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
 
 {"worktree.gc",
  "{\"bool_flags\":[\"force\",\"dry-run\"],\"fields\":[{\"json\":"
@@ -476,17 +479,18 @@
    value arrives one word per positional. */
 {"memory.store",
  "{\"fields\":["
- "{\"json\":\"key\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"key\","
- "\"empty\":\"emit\"},"
- "{\"json\":\"content\",\"from\":\"first_of\",\"empty\":\"emit\","
- "\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},"
- "{\"from\":\"flag\",\"flag\":\"content\"}]},"
- "{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\",\"empty\":\"emit\"},"
- "{\"json\":\"kind\",\"from\":\"flag\",\"flag\":\"kind\",\"empty\":\"emit\"},"
- "{\"json\":\"session_id\",\"from\":\"flag\",\"flag\":\"session\","
- "\"empty\":\"emit\"},"
- "{\"json\":\"confidence\",\"from\":\"flag\",\"flag\":\"confidence\","
- "\"type\":\"number_lenient_real\",\"empty\":\"emit\"}]}"},
+ "{\"json\":\"key\",\"from\":\"positional_or_flag\",\"index\":0,\"flag\":\"key\",\"empty\":\"emit\"}"
+ ",{\"json\":\"content\",\"from\":\"first_of\",\"empty\":\"emit\",\"sources\":[{\"from\":\"positional_join\",\"from_index\":1},{\"from\":\"flag\",\"flag\":\"content\"}]}"
+ ",{\"json\":\"tier\",\"from\":\"flag\",\"flag\":\"tier\",\"empty\":\"emit\"}"
+ ",{\"json\":\"kind\",\"from\":\"flag\",\"flag\":\"kind\",\"empty\":\"emit\"}"
+ ",{\"json\":\"session_id\",\"from\":\"flag\",\"flag\":\"session\",\"empty\":\"emit\"}"
+ ",{\"json\":\"confidence\",\"from\":\"flag\",\"flag\":\"confidence\",\"type\":\"number_lenient_real\",\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
 
 {"delegate.log",
  "{\"usage\":\"usage: aimee delegate log [--json]; for a background job log, "
@@ -513,9 +517,15 @@
  "\"empty\":\"emit\"}]}"},
 
 {"memory.get",
- "{\"fields\":[{\"json\":\"id\",\"from\":\"positional\",\"index\":0,"
- "\"type\":\"number_lenient_int64\",\"empty\":\"emit\"},"
- "{\"json\":\"as_of\",\"from\":\"flag\",\"flag\":\"as-of\",\"alt_flag\":\"as_of\"}]}"},
+ "{\"fields\":["
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}"
+ ",{\"json\":\"as_of\",\"from\":\"flag\",\"flag\":\"as-of\",\"alt_flag\":\"as_of\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
 
 {"memory.embed",
  "{\"bool_flags\":[\"all\"],\"fields\":["
@@ -950,7 +960,14 @@
    headers/cli_argspec.h on argv_index. */
 
 {"memory.delete",
- "{\"fields\":[{\"json\":\"id\",\"from\":\"argv_index\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}]}"},
+ "{\"fields\":["
+ "{\"json\":\"id\",\"from\":\"positional\",\"index\":0,\"type\":\"number_lenient_int64\",\"empty\":\"emit\"}"
+ ",{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},
 
 {"provider.set",
  "{\"fields\":[{\"json\":\"name\",\"from\":\"argv_index\",\"index\":0}]}"},
@@ -984,3 +1001,12 @@
 
 {"dogfood.tag",
  "{\"bool_flags\":[\"surprise\",\"no-surprise\"],\"fields\":[{\"json\":\"record_id\",\"from\":\"positional\",\"index\":0,\"empty\":\"emit\"},{\"json\":\"outcome\",\"from\":\"flag\",\"flag\":\"outcome\",\"empty\":\"emit\"},{\"json\":\"notes\",\"from\":\"flag\",\"flag\":\"notes\",\"empty\":\"emit\"},{\"json\":\"richness\",\"from\":\"flag\",\"flag\":\"richness\",\"type\":\"number_lenient\"},{\"json\":\"surprise\",\"from\":\"flag\",\"flag\":\"surprise\",\"false_flag\":\"no-surprise\",\"type\":\"tristate_flag\"}]}"},
+
+{"memory.stats",
+ "{\"fields\":["
+ "{\"json\":\"store\",\"from\":\"flag\",\"flag\":\"store\",\"empty\":\"emit\"}"
+ ",{\"json\":\"project\",\"from\":\"flag\",\"flag\":\"project\",\"empty\":\"emit\"}"
+ ",{\"json\":\"workspace\",\"from\":\"flag\",\"flag\":\"workspace\",\"empty\":\"emit\"}"
+ ",{\"json\":\"scope\",\"from\":\"flag\",\"flag\":\"scope\",\"empty\":\"emit\"}"
+ ",{\"json\":\"cwd\",\"from\":\"cwd\"}"
+ "]}"},

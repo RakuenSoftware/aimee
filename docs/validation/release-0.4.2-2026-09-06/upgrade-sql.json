@@ -1,0 +1,20 @@
+[
+  {
+    "sql": "SELECT id,key,content,tier,lifecycle_state,scope_type,scope_value FROM memories WHERE key LIKE 'release042-upgrade-%' ORDER BY id",
+    "exit": 0,
+    "stdout": "2|release042-upgrade-global|Persist across 0.4.1 upgrade \ud83e\udd8a global|L0|active|global|_global\n3|release042-upgrade-project|Persist across 0.4.1 upgrade \ud83e\udd8a project|L0|active|project|release042-upgrade-project\n",
+    "stderr": ""
+  },
+  {
+    "sql": "SELECT current_user",
+    "exit": 0,
+    "stdout": "aimee\n",
+    "stderr": ""
+  },
+  {
+    "sql": "SELECT scope_type,scope_value,memory_id FROM memory_scopes WHERE memory_id IN (2,3)",
+    "exit": 0,
+    "stdout": "",
+    "stderr": ""
+  }
+]

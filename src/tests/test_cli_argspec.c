@@ -94,6 +94,11 @@ static const sample_t SAMPLES[] = {
     {"memory.delete", {"-2147483649", NULL}},
     {"memory.delete", {"12.9", NULL}},
 
+    {"memory.get", {"42", "--store", "kb", "--project", "repo", NULL}},
+    {"memory.store", {"fixture", "local value", "--store=user", NULL}},
+    {"memory.list", {"--store", "kb", "--scope", "all", NULL}},
+    {"memory.delete", {"--store", "user", "42", NULL}},
+    {"memory.stats", {"--store", "kb", NULL}},
     {"memory.get", {NULL}},
     {"memory.get", {"42", NULL}},
     {"memory.get", {"2147483648", NULL}},

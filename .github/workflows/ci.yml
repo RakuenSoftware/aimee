@@ -2041,6 +2041,7 @@ jobs:
           # Keep the smoke scripts' local default intact while avoiding a second
           # uncached `docker compose build` in CI.
           AIMEE_E2E_SKIP_BUILD: "1"
+          AIMEE_E2E_MEMORY_PLACEMENT: "1"
         run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
       - name: Stack logs on failure
         if: failure()

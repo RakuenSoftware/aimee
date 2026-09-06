@@ -1,0 +1,381 @@
+[
+  {
+    "name": "local store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store leaves KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get returns exact local content for colliding ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB get selects the other record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP store defaults to user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP personal content stays local",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP update uses local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP forget retires local ID",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI default get selects user",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI explicit get selects KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI store identifies local scope",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI supersede updates local record",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "CLI mutations leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local stats",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 'both'",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected ''",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid store rejected 1",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "invalid selectors leave KB unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local list",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "list returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local review",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "review returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local search",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "search returns local fixture",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'id': 14}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "MCP get preserves selected store {'handle': 'memory:14', 'scope': 'all'}",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local supersede",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local mutation leaves colliding KB record unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "get corrected local memory",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local replacement content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local memory survives restart",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "restart preserves corrected value",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency outage fails list",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails get",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails store",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails supersede",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local dependency outage fails delete",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory module unavailable",
+        "kind": "unavailable"
+      }
+    ]
+  },
+  {
+    "name": "local outage never writes KB",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local dependency recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local get works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local store works with KB offline",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit KB outage is an HTTP failure",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "KB recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process outage fails list",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "KB memory process outage fails get",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "KB memory unavailable",
+        "kind": "unavailable",
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "user store works during KB memory process outage",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB memory process recovers",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "local retirement",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "retired local ID never resolves to KB collision",
+    "passed": true,
+    "detail": [
+      502,
+      {
+        "status": "error",
+        "message": "user memory not found",
+        "kind": "not_found"
+      }
+    ]
+  },
+  {
+    "name": "local retirement leaves KB content unchanged",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB store",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "explicit long KB get",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "KB get preserves full long Unicode content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 upgrade get release042-upgrade-global",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 upgrade preserves exact content release042-upgrade-global",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 upgrade get release042-upgrade-project",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 upgrade preserves exact content release042-upgrade-project",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 upgrade list",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "0.4.1 rows remain discoverable",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "personal email canaries absent from all KB tables",
+    "passed": true,
+    "detail": {
+      "table_count": 239,
+      "matching_tables": []
+    }
+  }
+]

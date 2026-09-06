@@ -78,10 +78,21 @@ static int memory_from_json(const cJSON *object, memory_t *out)
    memset(out, 0, sizeof(*out));
    out->id = (int64_t)id->valuedouble;
    out->confidence = confidence->valuedouble;
+   const cJSON *content = cJSON_GetObjectItemCaseSensitive(object, "content");
+   if (!cJSON_IsString(content))
+      return -1;
+   size_t length = strlen(content->valuestring);
+   if (length >= sizeof(out->content))
+   {
+      length = sizeof(out->content) - 1;
+      while (length && ((unsigned char)content->valuestring[length] & 0xc0) == 0x80)
+         --length;
+   }
+   memcpy(out->content, content->valuestring, length);
+   out->content[length] = '\0';
    return copy_string(out->tier, sizeof(out->tier), object, "tier") == 0 &&
                   copy_string(out->kind, sizeof(out->kind), object, "kind") == 0 &&
-                  copy_string(out->key, sizeof(out->key), object, "key") == 0 &&
-                  copy_string(out->content, sizeof(out->content), object, "content") == 0
+                  copy_string(out->key, sizeof(out->key), object, "key") == 0
               ? 0
               : -1;
 }
@@ -181,7 +192,7 @@ int memory_list(const char *tier, const char *kind, int limit, memory_t *out, in
    return search_bus("", NULL, NULL, tier, kind, limit, out, max);
 }
 
-int memory_get(int64_t id, memory_t *out)
+int memory_get_result(int64_t id, memory_t *out)
 {
    if (id <= 0 || !out)
       return -1;
@@ -195,7 +206,12 @@ int memory_get(int64_t id, memory_t *out)
    cJSON *response = memory_data_call(request);
    int count = records_from_response(response, out, 1);
    cJSON_Delete(response);
-   return count == 1 ? 0 : -1;
+   return count == 1 ? 0 : count == 0 ? 1 : -1;
+}
+
+int memory_get(int64_t id, memory_t *out)
+{
+   return memory_get_result(id, out) == 0 ? 0 : -1;
 }
 
 int db2_memory_get(int64_t id, memory_t *out)
