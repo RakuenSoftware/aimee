@@ -29,6 +29,10 @@ extern "C"
    typedef struct parsed_response parsed_response_t;
    typedef void (*openai_sse_emit_fn)(void *ctx, const char *event, const char *data_json);
 
+   /* Bounded provider diagnostic. Only recognized JSON error text is exposed;
+    * never copy a raw HTML/proxy response or unrelated response fields. */
+   void openai_upstream_error_message(int status, const char *body, char *out, size_t cap);
+
    /* Parse an OpenAI /v1/chat/completions request body. Copies the model id into
     * model[model_n] (defaults to "aimee" if absent/empty), flattens messages[]
     * into a newline-joined "role: content" transcript heap-allocated into

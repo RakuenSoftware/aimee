@@ -925,6 +925,7 @@ set(CLI_SRCS
     ${AIMEE_SRC_DIR}/cli_argspec.c
     ${AIMEE_SRC_DIR}/cli_index_bootstrap.c
     ${AIMEE_SRC_DIR}/cli_launch.c
+    ${AIMEE_SRC_DIR}/cli_proxy.c
     ${AIMEE_SRC_DIR}/cli_mcp_serve.c
     # handle_tools_list calls mcp_tool_prose_lean/mcp_compact_tool_prose to build
     # the lean catalog. Same rule as memory_redirect.c above: the client does not
