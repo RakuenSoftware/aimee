@@ -1,0 +1,183 @@
+{
+  "date": "2026-09-06",
+  "host": "192.168.1.253",
+  "guest": "CT 104",
+  "address": "192.168.0.169",
+  "reports": {
+    "exercise": {
+      "phase": "exercise",
+      "validationKind": "real-stack",
+      "target": "https://192.168.0.169:8443",
+      "passed": [
+        "real browser login",
+        "two accounts at one endpoint, no models required; cancelled create persists nothing",
+        "duplicate provider rejected without overwriting connection",
+        "model discovery and successful model-probe responses for both connections",
+        "model limits and prices editable on Models; declared free differs from blank",
+        "endpoint edit applies to its model only; blank key preserved",
+        "rotated provider key used by existing model",
+        "delete confirmation explains attached model and Cancel preserves it",
+        "hard refresh retains both providers"
+      ],
+      "pageErrors": []
+    },
+    "after-restart": {
+      "phase": "after-restart",
+      "validationKind": "real-stack",
+      "target": "https://192.168.0.169:8443",
+      "passed": [
+        "real browser login",
+        "post-restart provider, model association, and credential checks",
+        "provider deletion removes its models only; deleting last model retains provider",
+        "empty provider can be deleted and stays deleted after refresh"
+      ],
+      "pageErrors": []
+    },
+    "exploratory": {
+      "kind": "real-stack",
+      "results": [
+        "cross-origin request cannot create a provider",
+        "unavailable discovery remains visible and manual model creation works",
+        "attached model prevents an incompatible provider type change",
+        "failed edit preserves credential and blank-key edit remains usable",
+        "delete and recreate without a key cannot reuse the deleted credential"
+      ]
+    },
+    "module-down": {
+      "kind": "real-stack",
+      "results": [
+        "lost providers process returns errors for both pages, never an empty successful roster"
+      ]
+    }
+  },
+  "deployment": {
+    "roster_mode": "0o600",
+    "literal_credentials_in_roster": false,
+    "literal_credentials_in_latest_capture": false,
+    "binaries": {
+      "/usr/local/bin/aimee-server": "4783a9c872493a3744d1f1cf43b3c9c73f7113a344d56f875bbcc72cd85de934",
+      "/usr/local/bin/aimee-runtime-web": "4100a0f98364652e22da81b2e8db7d3e7fa0d351886a66a2f1e5b04eb1a3c884",
+      "/usr/local/libexec/aimee-modules/aimee-module-providers": "8246712e45fd80d6516b46441d9e283789e9b51622e0b53e89738af95fa9e847",
+      "/usr/local/libexec/aimee-modules/aimee-module-egress": "8246712e45fd80d6516b46441d9e283789e9b51622e0b53e89738af95fa9e847",
+      "/usr/local/libexec/aimee-modules/aimee-module-config": "c6146fd316d5342fc7b35216e7341e66fcbddcca285b378168f190abfe326c41"
+    }
+  },
+  "fixture_events": [
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-b",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/shared/v1/chat/completions",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-b",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/shared/v1/chat/completions",
+      "account": "account-b",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/moved/v1/models",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/moved/v1/models",
+      "account": "account-a-rotated",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/moved/v1/chat/completions",
+      "account": "account-a-rotated",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/unavailable/v1/models",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/shared/v1/chat/completions",
+      "account": "account-a",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": null,
+      "authorized": false
+    },
+    {
+      "method": "GET",
+      "path": "/moved/v1/models",
+      "account": "account-a-rotated",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/moved/v1/chat/completions",
+      "account": "account-a-rotated",
+      "authorized": true
+    },
+    {
+      "method": "GET",
+      "path": "/shared/v1/models",
+      "account": "account-b",
+      "authorized": true
+    },
+    {
+      "method": "POST",
+      "path": "/shared/v1/chat/completions",
+      "account": "account-b",
+      "authorized": true
+    }
+  ],
+  "cleanup": {
+    "guest_destroyed": true,
+    "configuration_absent": true,
+    "storage_removed": "vm-104-disk-0",
+    "other_guests_untouched": [
+      100,
+      101,
+      102,
+      103,
+      105,
+      108,
+      111
+    ]
+  }
+}

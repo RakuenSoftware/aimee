@@ -186,11 +186,6 @@ func (s *server) registerModelRoutes(mux *http.ServeMux, prefix string) {
 	mux.HandleFunc("POST "+prefix+"/oauth/poll", s.requireAuth(s.cliOauthHandler("model.cli_oauth_poll", 15*time.Second)))
 }
 
-// emptyRoster is the never-fail body for the roster list: both the current
-// `models` key and the pre-rename `agents` one, so neither an old nor a new GUI
-// build has to special-case a failed call.
-const emptyRoster = `{"models":[],"agents":[],"count":0}`
-
 // handleModels proxies GET /api/models -> RPC model.list. The response carries
 // the roster under BOTH `models` and `agents`: `agents` is the pre-rename key
 // and is still emitted so a GUI build from before the rename keeps rendering.
@@ -198,7 +193,7 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 	resp, err := s.socketCallForRequest(r, map[string]any{"method": "model.list"})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
-		fmt.Fprint(w, emptyRoster)
+		writeJSONError(w, http.StatusBadGateway, "model service unavailable")
 		return
 	}
 	// A server older than the rename answers under `agents`; accept either.
@@ -207,7 +202,7 @@ func (s *server) handleModels(w http.ResponseWriter, r *http.Request) {
 		roster, ok = resp["agents"]
 	}
 	if !ok {
-		fmt.Fprint(w, emptyRoster)
+		writeJSONError(w, http.StatusBadGateway, "model service returned an invalid roster")
 		return
 	}
 	var arr []json.RawMessage
@@ -726,12 +721,12 @@ func (s *server) handleLSPDiagnosticsSummary(w http.ResponseWriter, r *http.Requ
 	json.NewEncoder(w).Encode(out)
 }
 
-// handleProviderList proxies GET /api/providers -> RPC provider.list, the
+// handleProviderList proxies GET /api/providers/catalog -> RPC provider.list, the
 // registry of providers aimee knows how to speak to (name, base URL, auth type,
 // whether it can list its own models). Distinct from GET /api/agents, which
 // reports what is CONFIGURED: this is the menu, that is the order.
 func (s *server) handleProviderList(w http.ResponseWriter, r *http.Request) {
-	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.list"})
+	resp, err := s.socketCallForRequest(r, map[string]any{"method": "provider.list", "all": true})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		// Never hard-fail: the page still renders configured providers from

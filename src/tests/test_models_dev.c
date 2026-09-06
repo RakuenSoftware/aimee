@@ -298,11 +298,13 @@ static void test_cache_lookup_null_guard(void)
    assert(models_dev_cache_lookup("prov", NULL, NULL) == 0);
 }
 
-static void test_stub_returns_zero(void)
+static void test_go_catalog(void)
 {
    model_capability_t caps;
    int rc = models_dev_capability_get("anthropic", "claude-opus-4-6", &caps);
-   assert(rc == 0);
+   assert(rc == 1);
+   assert(caps.context_window == 1000000);
+   assert(caps.max_output == 128000);
 }
 
 int main(void)
@@ -320,7 +322,7 @@ int main(void)
    printf("cache_miss OK, ");
    test_cache_lookup_null_guard();
    printf("null_guard OK, ");
-   test_stub_returns_zero();
-   printf("stub OK\n");
+   test_go_catalog();
+   printf("go_catalog OK\n");
    return 0;
 }

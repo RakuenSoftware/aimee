@@ -431,12 +431,13 @@ static void test_model_capability_refresh_cache_and_overrides(void)
    assert(system(cmd) == 0);
 }
 
-static void test_models_dev_stub(void)
+static void test_models_dev_go_catalog(void)
 {
    model_capability_t caps;
-   /* Stub always returns 0 (not found) */
-   assert(models_dev_capability_get("anthropic", "claude-opus-4-6", &caps) == 0);
-   assert(models_dev_capability_get("openai", "gpt-4o", &caps) == 0);
+   /* Both native catalog entrypoints now consult the same Go owner. */
+   assert(models_dev_capability_get("anthropic", "claude-opus-4-6", &caps) == 1);
+   assert(caps.context_window > 0);
+   assert(models_dev_capability_get("openai", "gpt-4o", &caps) == 1);
    assert(models_dev_capability_get(NULL, NULL, NULL) == 0);
 }
 
@@ -506,7 +507,7 @@ int main(void)
    printf("helpers OK, ");
    test_model_capability_refresh_cache_and_overrides();
    printf("refresh OK\n");
-   test_models_dev_stub();
-   printf("models_dev_stub OK\n");
+   test_models_dev_go_catalog();
+   printf("models_dev_go_catalog OK\n");
    return 0;
 }

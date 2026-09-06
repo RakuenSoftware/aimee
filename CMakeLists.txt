@@ -736,15 +736,9 @@ set(AGENT_SRCS
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_openai.c
 
     ${AIMEE_SRC_DIR}/modules/delegates/delegate_xml_fallback.c
+    ${AIMEE_SRC_DIR}/providers_client.c
     ${AIMEE_SRC_DIR}/server/model_provider.c
-    ${AIMEE_SRC_DIR}/server/openrouter_profile.c
-    ${AIMEE_SRC_DIR}/server/openai_profile.c
-    ${AIMEE_SRC_DIR}/server/anthropic_profile.c
 
-    ${AIMEE_SRC_DIR}/server/ollama_profile.c
-    ${AIMEE_SRC_DIR}/server/llama_native_profile.c
-    ${AIMEE_SRC_DIR}/server/mistral_profile.c
-    ${AIMEE_SRC_DIR}/server/minimax_profile.c
     ${AIMEE_SRC_DIR}/server/aux_router.c
     ${AIMEE_SRC_DIR}/server/otel.c
     ${AIMEE_SRC_DIR}/server/oauth_pkce.c

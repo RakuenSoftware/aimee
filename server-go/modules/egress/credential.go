@@ -1,6 +1,7 @@
 package egress
 
 import (
+	"context"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/ecdh"
@@ -12,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 	"time"
 
@@ -85,9 +87,9 @@ func (b *credentialBroker) publicReply() ([]byte, bus.ModuleStatus) {
 }
 
 func credentialAAD(envelope CredentialEnvelope) ([]byte, error) {
-	if envelope.Version != credentialVersion || envelope.Handle != credentialHandleForge ||
-		envelope.Host != credentialHostForge || envelope.PrincipalRef != GitClientRef ||
-		!forgeOperation(envelope.Operation) || !forgeResource(envelope.Resource) || envelope.ExpiresAt <= 0 {
+	forge := envelope.Handle == credentialHandleForge && envelope.Host == credentialHostForge && envelope.PrincipalRef == GitClientRef && forgeOperation(envelope.Operation) && forgeResource(envelope.Resource)
+	provider := envelope.Handle == "provider" && envelope.PrincipalRef == ProvidersClientRef && envelope.Host != "" && envelope.Resource != "" && len(envelope.Resource) < 64 && (envelope.Operation == "bearer" || envelope.Operation == "x-api-key")
+	if envelope.Version != credentialVersion || (!forge && !provider) || envelope.ExpiresAt <= 0 {
 		return nil, errors.New("invalid credential scope")
 	}
 	fields := []string{envelope.Handle, envelope.Host, envelope.Operation, envelope.Resource}
@@ -114,7 +116,7 @@ func credentialAAD(envelope CredentialEnvelope) ([]byte, error) {
 func (b *credentialBroker) decrypt(now time.Time, invocation bus.ModuleInvocation,
 	request HTTPRequest, targetHost string) ([]byte, error) {
 	if b == nil || b.private == nil || request.Credential == nil ||
-		request.CredentialHandle != credentialHandleForge || request.CredentialScope == "" ||
+		(request.CredentialHandle != credentialHandleForge && request.CredentialHandle != "provider") || request.CredentialScope == "" ||
 		request.CredentialResource == "" {
 		return nil, errors.New("credential handle is unavailable")
 	}
@@ -203,4 +205,71 @@ func validForgeName(name string) bool {
 		}
 	}
 	return true
+}
+
+// SealProviderCredential binds one provider key to the egress process, caller,
+// destination origin, account and authentication scheme. Only ciphertext crosses
+// the module transport to the network owner.
+func (a *BusAuthorizer) SealProviderCredential(ctx context.Context, trace uint64, target, account, auth string, secret []byte) (*CredentialEnvelope, error) {
+	raw, err := a.caller.Call(ctx, EventCredentialKey, StageCredentialKey, trace, 5*time.Second, nil)
+	if err != nil {
+		return nil, err
+	}
+	var key struct {
+		Version   int    `json:"version"`
+		KeyID     string `json:"key_id"`
+		PublicKey string `json:"public_key"`
+	}
+	if json.Unmarshal(raw, &key) != nil || key.Version != credentialVersion {
+		return nil, errors.New("invalid egress credential key")
+	}
+	pub, err := base64.StdEncoding.Strict().DecodeString(key.PublicKey)
+	if err != nil {
+		return nil, err
+	}
+	receiver, err := ecdh.X25519().NewPublicKey(pub)
+	if err != nil {
+		return nil, err
+	}
+	sender, err := ecdh.X25519().GenerateKey(rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+	shared, err := sender.ECDH(receiver)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(shared)
+	input := append([]byte(nil), credentialKDFDomain...)
+	input = append(input, shared...)
+	input = append(input, sender.PublicKey().Bytes()...)
+	input = append(input, pub...)
+	derived := sha256.Sum256(input)
+	clear(input)
+	defer clear(derived[:])
+	block, err := aes.NewCipher(derived[:])
+	if err != nil {
+		return nil, err
+	}
+	gcm, err := cipher.NewGCM(block)
+	if err != nil {
+		return nil, err
+	}
+	nonce := make([]byte, gcm.NonceSize())
+	if _, err = rand.Read(nonce); err != nil {
+		return nil, err
+	}
+	destination, err := url.Parse(target)
+	if err != nil {
+		return nil, err
+	}
+	envelope := CredentialEnvelope{Version: credentialVersion, KeyID: key.KeyID, ExpiresAt: time.Now().Add(30 * time.Second).Unix(), Handle: "provider", Host: destination.Scheme + "://" + destination.Host, Operation: auth, Resource: account, PrincipalRef: ProvidersClientRef}
+	aad, err := credentialAAD(envelope)
+	if err != nil {
+		return nil, err
+	}
+	envelope.EphemeralPublicKey = base64.StdEncoding.EncodeToString(sender.PublicKey().Bytes())
+	envelope.Nonce = base64.StdEncoding.EncodeToString(nonce)
+	envelope.Ciphertext = base64.StdEncoding.EncodeToString(gcm.Seal(nil, nonce, secret, aad))
+	return &envelope, nil
 }

@@ -2506,6 +2506,13 @@ int main(void)
           {"POST", "/v1/mcp/audit", "{}", "mcp.audit"},
           {"GET", "/v1/cron", NULL, "cron.list"},
           {"GET", "/v1/provider/list", NULL, "provider.list"},
+          {"GET", "/v1/provider/connections", NULL, "provider.connections"},
+          {"POST", "/v1/provider/save_connection", "{\"name\":\"work\"}",
+           "provider.save_connection"},
+          {"POST", "/v1/provider/remove_connection", "{\"name\":\"work\"}",
+           "provider.remove_connection"},
+          {"POST", "/v1/provider/connection_models", "{\"name\":\"work\"}",
+           "provider.connection_models"},
       };
       for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
       {

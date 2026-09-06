@@ -454,6 +454,7 @@ typedef struct
 
 typedef struct
 {
+   char revision[65]; /* opaque Go roster revision for compare-and-swap saves */
    agent_t agents[MAX_AGENTS];
    int agent_count;
    char default_agent[MAX_AGENT_NAME];

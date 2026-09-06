@@ -66,10 +66,10 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
   '/providers': {
     title: 'Providers',
     body: [
-      'Each provider is one endpoint and one set of credentials; its models are listed underneath.',
-      'Adding a second model to a provider reuses its endpoint and key — you do not enter them again.',
-      'Every figure is badged with where it came from: “declared” is a value you set, “resolved” came from the provider, “unknown” means nobody has supplied one.',
-      'Leave a field empty to state nothing about it. A price of 0 is different: it says the seat costs nothing per token.',
+      'Add, edit, and delete named provider connections. Each has its own endpoint and credentials.',
+      'You can connect multiple accounts for the same provider type, even at the same endpoint.',
+      'Manage model selection, limits, pricing, and routing on the Models page.',
+      'Deleting a provider asks you to confirm removal of its attached models.',
     ],
     seeAlso: '/models',
   },
@@ -77,6 +77,8 @@ export const TAB_TUTORIALS: Record<string, Tutorial> = {
     title: 'Models',
     body: [
       'Every model aimee can route to, with its run history and stats.',
+      'Add models from a saved provider connection without entering its credentials again.',
+      'Edit context and output limits and token prices here. Blank prices mean not stated; zero means free.',
       'Edit a model’s persona bindings and the roles it may serve.',
       'Roles are the routing key matched between personas and models.',
     ],

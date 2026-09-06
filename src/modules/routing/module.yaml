@@ -6,7 +6,8 @@
     "ir",
     "learning",
     "memory",
-    "module-runtime"
+    "module-runtime",
+    "providers"
   ],
   "runtime_toggle": {
     "supported": false
