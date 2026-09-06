@@ -118,7 +118,7 @@ usable.
 
 ### 4. Protect retained body copies wherever Aimee writes them
 
-The [memory writer](../../../src/modules/db2/c/memory_score_fields.c) and
+The [memory writer](../../../server-go/modules/memory/mutations.go) and
 [document writer](../../../src/modules/db2/c/kb_payload.c) bind plaintext into text
 columns. Add encrypted formats to their writes, updates, and reads. Cover originals
 in file/object storage, extracted text, chunks, memory units, quoted excerpts, and
@@ -272,7 +272,7 @@ Keep the existing `tsvector` values, parser configuration, positions, and rankin
 expressions for lexical search. Convert projections generated from body columns
 into explicitly maintained values. Authorized PostgreSQL writes create the
 encrypted payload and its search projections in one transaction. The current
-[lexical queries](../../../src/modules/db2/c/memory_query.c) can rank those
+[lexical queries](../../../server-go/modules/memory/data.go) can rank those
 projections without decrypting bodies. Return candidate IDs through the search
 contract and resolve bodies through the authorized read operation.
 
