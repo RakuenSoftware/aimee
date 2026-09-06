@@ -95,3 +95,14 @@ covers that case. Agent and guardrail suites passed with ASan/UBSan after the
 fix. The fresh-guest harness also runs the agent suite to cover this caller.
 This defensive addition is in the PR; the live hotfix above uses the actual
 detached provider, which supplies its shell callback.
+
+Final expanded fresh-guest run `Ns1Vxxgx` passed on both CT 9201 and VM 9202,
+including the agent suite and missing-shell regression. Both guests, disks,
+and temporary payload were removed and absence independently verified. The
+payload includes the bundled model catalog and `make`, and keeps test binaries
+separate from the real client so the agent suite's fake clients retain their
+intended PATH precedence. Those packaging requirements were found by running
+the full agent suite on the minimal guests, not by weakening its assertions.
+Guest agent tests retain their existing PostgreSQL/tmux availability skips;
+the PostgreSQL CI shards exercise the store-backed cases. Thin-client SHA-256:
+`f416efcea437761feb4d92b18baeb1a2a87b65435fb0170c3c9159ed81e6e05e`.
