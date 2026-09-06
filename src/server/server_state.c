@@ -413,29 +413,29 @@ cJSON *memory_get_command(cJSON *req)
       return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
                                     "memory.get requires a positive integer id", NULL);
 
-   cJSON *request = memory_data_request("get");
-   if (!request)
-      return jo_err("out of memory");
-   cJSON_AddNumberToObject(request, "id", (double)id);
-   cJSON *module_reply = server_module_memory_data(request);
-   cJSON_Delete(request);
-   if (!module_reply)
-      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "user memory module unavailable", NULL);
-   cJSON *record = memory_data_first_record(module_reply);
-   if (!record)
-   {
-      cJSON_Delete(module_reply);
+   /* Public memory ids belong to the KB, including memory:<id> handles and
+    * historical reads. The local Go user-memory store is a separate namespace. */
+   const char *as_of = jo_str(req, "as_of", "");
+   int missing = server_memory_scope_begin(req);
+   cJSON *record = NULL;
+   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
+   int rc = kb_client_memory_get_json_as_of(id, as_of, &record, &verdict);
+   kb_client_memory_scope_context_clear();
+   if (rc > 0)
       return server_error_kind_json(SERVER_ERR_NOT_FOUND, "memory not found", NULL);
-   }
+   if (rc < 0 || !record)
+      return server_error_kind_json(SERVER_ERR_UNAVAILABLE, "KB memory unavailable", NULL);
    cJSON *resp = jo_ok();
-   cJSON *child = NULL;
-   cJSON_ArrayForEach(child, record)
+   cJSON_AddItemToObject(resp, "memory", record);
+   cJSON_AddBoolToObject(resp, "active_context_missing", missing);
+   if (as_of[0])
    {
-      cJSON *copy = cJSON_Duplicate(child, 1);
-      if (copy)
-         cJSON_AddItemToObject(resp, child->string, copy);
+      cJSON_AddStringToObject(resp, "as_of", as_of);
+      if (verdict == KB_VALID_AT_UNKNOWN || verdict == KB_VALID_AT_UNASKED)
+         cJSON_AddStringToObject(resp, "valid_at", "unknown");
+      else
+         cJSON_AddBoolToObject(resp, "valid_at", verdict == KB_VALID_AT_YES);
    }
-   cJSON_Delete(module_reply);
    return resp;
 }
 

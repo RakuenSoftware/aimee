@@ -651,6 +651,7 @@ TEST_TARGETS := $(TESTPREFIX)/unit-test-util $(TESTPREFIX)/unit-test-harness-mem
                $(TESTPREFIX)/unit-test-session-start-util \
                $(TESTPREFIX)/unit-test-memory-assemble-util \
                $(TESTPREFIX)/unit-test-memory-bus-context \
+               $(TESTPREFIX)/unit-test-server-memory-get \
                $(TESTPREFIX)/unit-test-session-brief \
                $(TESTPREFIX)/unit-test-learning-eval-synthesis \
                $(TESTPREFIX)/unit-test-approach-memory \
@@ -3202,6 +3203,9 @@ $(TESTPREFIX)/unit-test-bus-db2-process: \
 .PHONY: db2-replay
 $(TESTPREFIX)/unit-test-memory-bus-context: $(OBJDIR)/tests/test_memory_bus_context.o $(OBJDIR)/vendor/cJSON.o
 	$(TESTLINK_MIN) -o $@ $^ $(EXTRA_L_FLAGS) -lm
+
+$(TESTPREFIX)/unit-test-server-memory-get: $(OBJDIR)/tests/test_server_memory_get.o $(OBJDIR)/server/server_state.o $(OBJDIR)/json_fluent.o $(OBJDIR)/vendor/cJSON.o
+	$(TESTLINK_MIN) -Wl,--gc-sections -o $@ $^ $(EXTRA_L_FLAGS) -lm
 
 db2-replay: $(TESTPREFIX)/unit-test-bus-db2-process $(OBJDIR)/aimee-module-db2-replay
 	@test -n "$$AIMEE_DB2_URL" || { echo "db2-replay requires AIMEE_DB2_URL" >&2; exit 1; }
