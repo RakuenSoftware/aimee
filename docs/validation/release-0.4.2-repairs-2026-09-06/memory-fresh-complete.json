@@ -130,12 +130,12 @@
     "detail": null
   },
   {
-    "name": "MCP get preserves selected store {'id': 9}",
+    "name": "MCP get preserves selected store {'id': 13}",
     "passed": true,
     "detail": null
   },
   {
-    "name": "MCP get preserves selected store {'handle': 'memory:9', 'scope': 'all'}",
+    "name": "MCP get preserves selected store {'handle': 'memory:13', 'scope': 'all'}",
     "passed": true,
     "detail": null
   },
@@ -346,6 +346,40 @@
   },
   {
     "name": "KB get preserves full long Unicode content",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "ordinary KB get hides retired record",
+    "passed": true,
+    "detail": [
+      404,
+      {
+        "status": "error",
+        "message": "memory not found",
+        "kind": "not_found",
+        "http_status": 404,
+        "store": "kb"
+      }
+    ]
+  },
+  {
+    "name": "historical retired KB get 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-03-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical retired KB get 2026-07-01T00:00:00Z",
+    "passed": true,
+    "detail": null
+  },
+  {
+    "name": "historical KB get preserves content and validity 2026-07-01T00:00:00Z",
     "passed": true,
     "detail": null
   },

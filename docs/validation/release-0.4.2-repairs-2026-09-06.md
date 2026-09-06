@@ -36,6 +36,22 @@ selection and the KB-only historical-read behavior.
 | Personal replacement could lose the original on a failed second write | Replace the local row with one atomic SQL update instead of retiring it before inserting a conflicting key. |
 | Stale native test deployment | Export descriptors, attach the correct placements, install every companion grant, and use separate runtime/migration identities in fresh databases. |
 
+## CI followup
+
+The first repair CI run caught an overbroad historical-read change: ordinary KB get could
+return a retired record. The correction keeps ordinary lookup active-only and passes an
+explicit `as_of` selector through both the preview and full-content reads. The unchanged
+shared-database retirement assertion and the complete DB2 process replay pass. Both live
+stacks now also prove historical content and validity before and after retirement.
+
+Both real LSP providers passed their behavior checks on Linux and macOS. The frozen-source
+validator rejected the memory schema changes in shared MCP files. An exact, literal memory
+integration manifest now preserves whole-file comparison against the frozen semantic source;
+14 validator/benchmark tests pass, including rejection of unrelated LSP or memory drift.
+The sanitizer build also exposed missing collapsed-family linkage in two flat-schema fixtures;
+they now provide an assertion that the unused branch is never executed. Updated CI remains
+required; these local corrections do not turn the first run green retroactively.
+
 ## Verification
 
 All fixtures were created in a new disposable Debian 13 guest, CT 9422
@@ -48,8 +64,8 @@ with the same numeric ID was removed before this guest was created.
 | Repository lint | All 77 checks pass, including formatting, module ownership, source boundaries, generated API parity, and schema checks. |
 | Go | Complete server-go suite and runtime-web suite pass. Memory privacy, scope ordering, wire verdicts, and retrieval corpus pass with real PostgreSQL and the race detector. |
 | Frontend | 198 tests pass; runtime and console production builds pass. |
-| Fresh split stack | Standard 10-probe bootstrap smoke passes; [56 memory checks](release-0.4.2-repairs-2026-09-06/memory-fresh-complete.json) pass with web enabled. |
-| 0.4.1 upgrade stack | [62 memory checks](release-0.4.2-repairs-2026-09-06/memory-upgrade-complete.json) pass over preserved 0.4.1 volumes, including the old global/project records and web-disabled error handling. |
+| Fresh split stack | Standard 10-probe bootstrap smoke passes; [61 memory checks](release-0.4.2-repairs-2026-09-06/memory-fresh-complete.json) pass with web enabled. |
+| 0.4.1 upgrade stack | [67 memory checks](release-0.4.2-repairs-2026-09-06/memory-upgrade-complete.json) pass over preserved 0.4.1 volumes, including the old global/project records and web-disabled error handling. |
 | Published thin client | [Six compatibility checks](release-0.4.2-repairs-2026-09-06/published-client-final.json) pass using the previously published binary against the repaired server's argument specifications. |
 | Browser | [Five checks](release-0.4.2-repairs-2026-09-06/browser-memory.json) pass using real PAM authentication, the built GUI, and real services: scope switching, local retirement, colliding KB preservation, and desktop/mobile rendering without JavaScript errors. |
 | Learning loops | 46 checks pass through the corrected disposable-database wrapper. |

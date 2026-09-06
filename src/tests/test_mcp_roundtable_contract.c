@@ -33,6 +33,13 @@ void mcp_add_discovery_tools(cJSON *tools)
 {
    (void)tools;
 }
+/* This fixture inspects the flat schema. Keep the unused collapsed branch
+ * linkable at every optimization level and fail if it is ever exercised. */
+void mcp_collapse_families(cJSON *tools)
+{
+   (void)tools;
+   assert(!"flat schema must not collapse tool families");
+}
 void mcp_add_extended_tools(cJSON *tools)
 {
    (void)tools;

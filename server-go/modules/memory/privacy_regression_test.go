@@ -149,5 +149,16 @@ INSERT INTO memories(id,scope_type,scope_value,tier,kind,key,content,confidence,
 	if _, err = tx.Exec(ctx, "UPDATE memories SET lifecycle_state='retired' WHERE id=42"); err != nil {
 		t.Fatal(err)
 	}
-	check(PlacementKB, "shared knowledge")
+	retired, retiredStatus := call(PlacementKB, DataRequest{Operation: "get", ID: 42})
+	if retiredStatus != bus.ModuleStatusOK || len(retired.Records) != 0 {
+		t.Fatalf("ordinary lookup exposed retired KB record: %+v %v", retired, retiredStatus)
+	}
+	historical, historicalStatus := call(PlacementKB, DataRequest{Operation: "get", ID: 42, AsOf: "2020-01-01T00:00:00Z"})
+	if historicalStatus != bus.ModuleStatusOK || len(historical.Records) != 1 || historical.Records[0].Content != "shared knowledge" {
+		t.Fatalf("historical lookup: %+v %v", historical, historicalStatus)
+	}
+	_, userHistoryStatus := call(PlacementServer, DataRequest{Operation: "get", ID: 42, AsOf: "2020-01-01T00:00:00Z"})
+	if userHistoryStatus != bus.ModuleStatusInvalidRequest {
+		t.Fatalf("personal history accepted: %v", userHistoryStatus)
+	}
 }

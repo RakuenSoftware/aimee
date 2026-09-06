@@ -1233,7 +1233,7 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       return NULL;
 
    memory_t m;
-   int get_rc = memory_get_result(id, &m);
+   int get_rc = memory_get_as_of_result(id, as_of, &m);
    if (get_rc != 0)
    {
       cJSON_AddStringToObject(resp, "status", "error");
@@ -1272,7 +1272,7 @@ cJSON *db2_kb_service_memory_get_json(int64_t id, const char *as_of)
       cJSON_Delete(resp);
       return NULL;
    }
-   char *full_content = memory_content_dup(m.id);
+   char *full_content = memory_content_as_of_dup(m.id, as_of);
    cJSON *content_json = full_content ? cJSON_CreateString(full_content) : NULL;
    free(full_content);
    if (!content_json || !cJSON_ReplaceItemInObjectCaseSensitive(obj, "content", content_json))

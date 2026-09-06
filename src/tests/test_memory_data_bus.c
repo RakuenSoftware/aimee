@@ -8,11 +8,14 @@
 
 static const char *content;
 static int mode;
+static const char *expected_as_of;
 cJSON *aimee_module_json_call(uint32_t event, uint32_t stage, cJSON *request, size_t max_body,
                               int timeout, aimee_module_call_result_t *result)
 {
    assert(event == AIMEE_MEMORY_EVENT_DATA && stage == AIMEE_MEMORY_STAGE_DATA);
    assert(strcmp(cJSON_GetObjectItem(request, "operation")->valuestring, "get") == 0);
+   cJSON *as_of = cJSON_GetObjectItem(request, "as_of");
+   assert(expected_as_of ? as_of && strcmp(as_of->valuestring, expected_as_of) == 0 : !as_of);
    cJSON_Delete(request);
    (void)max_body;
    (void)timeout;
@@ -45,6 +48,12 @@ int main(void)
    char *full = memory_content_dup(42);
    assert(full && strcmp(full, long_text) == 0);
    free(full);
+   expected_as_of = "2020-01-01T00:00:00Z";
+   assert(memory_get_as_of_result(42, expected_as_of, &row) == 0);
+   full = memory_content_as_of_dup(42, expected_as_of);
+   assert(full && strcmp(full, long_text) == 0);
+   free(full);
+   expected_as_of = NULL;
    mode = 1;
    assert(memory_get_result(42, &row) == 1);
    assert(memory_get(42, &row) == -1); /* Existing ABI unchanged. */

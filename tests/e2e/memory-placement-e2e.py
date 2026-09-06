@@ -192,6 +192,17 @@ class Gate:
         row = self.good('explicit long KB store', self.call('store', dict(store='kb', key=self.prefix + '-long', content=long_shared)))
         got = self.good('explicit long KB get', self.call('get', dict(store='kb', id=row['id'])))
         self.check('KB get preserves full long Unicode content', got.get('memory', {}).get('content') == long_shared)
+        # Current lookup must hide retired records; explicit historical lookup
+        # must still return their complete retained content and validity.
+        self.sql(f"UPDATE memories SET lifecycle_state='retired', valid_from='2026-01-01T00:00:00Z', valid_until='2026-06-01T00:00:00Z' WHERE id={row['id']}")
+        code, body = self.call('get', dict(store='kb', id=row['id']))
+        self.check('ordinary KB get hides retired record', code >= 400 and body.get('kind') == 'not_found', [code, body])
+        for as_of, expected_valid in [('2026-03-01T00:00:00Z', True), ('2026-07-01T00:00:00Z', False)]:
+            got = self.good('historical retired KB get ' + as_of,
+                self.call('get', dict(store='kb', id=row['id'], as_of=as_of)))
+            self.check('historical KB get preserves content and validity ' + as_of,
+                got.get('memory', {}).get('content') == long_shared and
+                got.get('as_of') == as_of and got.get('valid_at') is expected_valid)
         if self.args.upgrade_fixture:
             rows = json.loads(Path(self.args.upgrade_fixture).read_text())
             for row in rows:

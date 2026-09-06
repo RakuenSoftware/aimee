@@ -407,6 +407,10 @@ func NewPostgresDataStore(db store.Queryer, placement Placement) (DataStore, err
 }
 
 func (s *postgresDataStore) Get(ctx context.Context, scope Scope, id int64) (Record, error) {
+	return s.get(ctx, scope, id, false)
+}
+
+func (s *postgresDataStore) get(ctx context.Context, scope Scope, id int64, historical bool) (Record, error) {
 	var r Record
 	if s.placement == PlacementServer {
 		r.Scope = scope
@@ -422,7 +426,7 @@ WHERE id = $1 AND lifecycle_state = 'active'
 	}
 	err := s.db.QueryRow(ctx, `SELECT id, scope_type, scope_value, tier, kind, key, content, confidence
 FROM memories
-WHERE id = $1`, id).
+WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
 		Scan(&r.ID, &r.Scope.Type, &r.Scope.Value, &r.Tier, &r.Kind, &r.Key, &r.Content, &r.Confidence)
 	if store.IsNoRows(err) {
 		return Record{}, ErrMemoryNotFound
@@ -1168,7 +1172,20 @@ set_config('aimee.memory_scope_all',$5,true)`,
 		if request.ID <= 0 {
 			return nil, bus.ModuleStatusInvalidRequest
 		}
-		record, getErr := options.data.Get(ctx, scope, request.ID)
+		var record Record
+		var getErr error
+		if request.AsOf != "" {
+			if options.placement != PlacementKB {
+				return nil, bus.ModuleStatusInvalidRequest
+			}
+			backend, ok := options.data.(*postgresDataStore)
+			if !ok {
+				return nil, bus.ModuleStatusCapabilityAbsent
+			}
+			record, getErr = backend.get(ctx, scope, request.ID, true)
+		} else {
+			record, getErr = options.data.Get(ctx, scope, request.ID)
+		}
 		if errors.Is(getErr, ErrMemoryNotFound) {
 			response.Records = []Record{}
 			break
