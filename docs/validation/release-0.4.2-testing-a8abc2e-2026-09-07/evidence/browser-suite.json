@@ -1,0 +1,72 @@
+[
+  {
+    "name": "managed",
+    "passed": true,
+    "elapsed_seconds": 94.7
+  },
+  {
+    "name": "browser-setup",
+    "passed": true,
+    "elapsed_seconds": 30.7
+  },
+  {
+    "name": "model-lifecycle",
+    "passed": true,
+    "elapsed_seconds": 15.1
+  },
+  {
+    "name": "navigation",
+    "passed": true,
+    "elapsed_seconds": 29.4
+  },
+  {
+    "name": "live-model-browser",
+    "passed": true,
+    "elapsed_seconds": 2.3
+  },
+  {
+    "name": "providers",
+    "passed": true,
+    "elapsed_seconds": 4.2
+  },
+  {
+    "name": "providers-after-restart",
+    "passed": true,
+    "elapsed_seconds": 1.9
+  },
+  {
+    "name": "providers-exploratory",
+    "passed": true,
+    "elapsed_seconds": 1.9
+  },
+  {
+    "name": "http-cli-exploratory",
+    "passed": true,
+    "elapsed_seconds": 83.9
+  },
+  {
+    "name": "database-contention",
+    "passed": true,
+    "elapsed_seconds": 2.0
+  },
+  {
+    "name": "provider-outage",
+    "passed": true,
+    "elapsed_seconds": 43.8
+  },
+  {
+    "name": "model-probes",
+    "passed": true,
+    "elapsed_seconds": 35.5
+  },
+  {
+    "name": "container-recreation",
+    "passed": true,
+    "elapsed_seconds": 52.2
+  },
+  {
+    "name": "final-live-model-browser",
+    "passed": true,
+    "elapsed_seconds": 1.5
+  }
+]

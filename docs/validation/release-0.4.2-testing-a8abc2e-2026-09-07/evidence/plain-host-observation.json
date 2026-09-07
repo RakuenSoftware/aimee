@@ -1,0 +1,17 @@
+{
+  "drivers_loaded": {
+    "loop": false,
+    "dm_mod": false,
+    "dm_crypt": false
+  },
+  "containers": [
+    {
+      "name": "aimee-e2e-server-6053c3ee56-aimee-store-db-1",
+      "healthy": true,
+      "privileged": false,
+      "added_capabilities": null,
+      "devices": null,
+      "device_rules": null
+    }
+  ]
+}

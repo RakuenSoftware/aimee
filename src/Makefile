@@ -1068,10 +1068,10 @@ go-vulncheck:
 # Keep the phases explicit and ordered: build the authoritative `all` set, check
 # dynamic-link boundaries, inspect every shipping artifact, then run the suite.
 #
-# The repository lock is not verified here: it pins a release, binds only on
-# `main`, and verify-local runs on branches whose whole job is to move the
-# vendored source ahead of it. `make repository-lock-check` still runs it on
-# demand, and the c-repository-pins workflow runs it for `main`.
+# Independent repository pins are checked explicitly with repository-lock-check.
+# Application promotions instead freeze bundled sources with
+# scripts/check_application_source_lock.py; c-repository-pins enforces that
+# snapshot and real external dependency pins on main and PRs into main.
 # NOT the same set CI runs. build-integrity and integration-tests are the two
 # heavy ones left out, deliberately -- they build the full shipped artifact set
 # and stand up servers, which is too slow for the edit/verify loop this target
@@ -2135,12 +2135,9 @@ lint: BUS_BLAST_RADIUS_FLAGS := --allow-unbuilt
 # a recursive make, so bus-blast-radius-check would otherwise lose
 # --allow-unbuilt and start demanding the whole shipping set.
 #
-# repository-lock-check is deliberately NOT here. It verifies release pins (which
-# external repository commit each vendored mirror was cut from), which only bind
-# on `main`; on every other branch the vendored source is meant to run ahead of
-# the lock, so running it in lint just demands a lock refresh after each edit
-# under src/core|modules/**. The c-repository-pins workflow runs it for `main`
-# and for PRs into `main`.
+# repository-lock-check verifies independent repository releases, so it is not
+# part of application lint. The application source snapshot is a promotion gate
+# in c-repository-pins; integration work may run ahead of that reviewed snapshot.
 LINT_CHECKS= module-placement-check provider-seams-check provider-registration-check changeset-worm-seal-check worm-worker-boundary-check subject-corpus-check native-tool-parity-check guidance-tool-parity-check optional-tool-ownership-check module-source-ownership-check go-package-ownership-check module-bus-boundary-check memory-c-boundary-check module-egress-check cleanup-ledger-check inc-check line-check curator-sidecar-parse-check schema-sync-check charter-tables-check tier-deps-check module-boundary-check module-inventory-check db2-contract-check db2-declaration-ledger-check db2-activation-check background-skill-curator-absence-check capability-ownership-check panel-contract-boundary-check published-compose-images-check dispatch-caps-check kb-v1-coverage-check kb-target-isolation-check kb-container-packaging-check deploy-env-consumed-check sidecar-clients-check docs-check docs-gen-check api-conformance-check server-api-conformance-check v1-method-coverage-check cli-v1-routes-check manifest-emitter-linkage-check argspec-numeric-parity-check async-op-handlers-check v1-route-order-check cli-help-coverage-check kb-intelligence-surfaced-check curator-story-check aimee-home-check code-vector-graph-corpus-check proposal-links-check pending-audit-manifest-check proposal-reconcile-check dev-accept-check git-cred-centralized-check sanitizer-callsites-check lessons-isolation-check md-store-retired-check models-dev-snapshot-check test-tmpdir-check tests-are-run-check model-fallback-shadow-check p1-tenant-guard-check bus-blast-radius-check entrypoint-exit-report-check webchat-bootstrap-login-check config-encapsulation-check deployed-image-check memory-store-degradation-check
 
 lint:

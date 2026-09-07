@@ -465,22 +465,21 @@ else
     fail "verify-local can race lint against a partial shipping build"
 fi
 
-# The extracted-repository pins record which published core/module repository
-# commit each vendored mirror was cut from, which is a fact about a RELEASE. They
-# bind on `main` alone: every other branch is meant to carry vendored source
-# ahead of the lock, so running the check there only demands a lock refresh after
-# each edit under src/core|modules/**. Guard the placement in both directions --
-# absent from the every-branch gates, present in the workflow under a main-only
-# condition -- so neither half can drift back on its own.
+# Application source snapshots bind bundled sources and real external pins on
+# main. Independent repository publication is not an application prerequisite.
+# Guard both directions: integration can run ahead of the release snapshot,
+# while main must verify it. Keep the separate independent-release checker
+# available explicitly, without inserting it into application promotion.
 if ! sed -n '/^verify-local:/,/^[^[:space:]#].*:/p' Makefile |
-     grep -qF 'python3 -I scripts/check_c_repository_lock.py' &&
-   ! grep '^LINT_CHECKS = ' Makefile | grep -qF 'repository-lock-check' &&
-   grep -B2 -F 'run: python3 -I scripts/check_c_repository_lock.py' \
+     grep -qE 'check_(c_repository|application_source)_lock.py|repository-lock-check' &&
+   ! grep -E '^LINT_CHECKS[[:space:]]*[:+?]?=' Makefile | grep -qE 'repository-lock-check|application-source-lock' &&
+   ! grep -qF 'run: python3 -I scripts/check_c_repository_lock.py' ../.github/workflows/c-repositories.yml &&
+   grep -B2 -F 'run: python3 -I scripts/check_application_source_lock.py' \
         ../.github/workflows/c-repositories.yml |
      grep -qF "if: github.ref == 'refs/heads/main' || github.base_ref == 'main'"; then
-    pass "extracted-repository source pins are enforced for main alone"
+    pass "application source snapshots are enforced for main alone"
 else
-    fail "extracted-repository source pins are enforced off main, or not on it"
+    fail "application release source gate is misplaced or requires independent publication"
 fi
 
 # Verification runs inside the server image, whose deployment posture is

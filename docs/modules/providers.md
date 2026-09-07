@@ -1,11 +1,53 @@
-# Providers
+# providers module
+
+## Purpose and non-goals
 
 The required Go process in `server-go/modules/providers` owns provider
 connections, model configuration, catalog data, discovery, diagnostics, and
 recovery. Browser, HTTP, and CLI management calls all reach this owner. It builds
-both in the multicall runtime and as an independently exported Go module.
+in the multicall application runtime; local standalone exports also remain
+buildable without requiring a separate module publication.
 
-## Connection and model identity
+## Public contracts
+
+Principal 33 serves stages 1 (resolve), 2 (validate), and 3 (manage), on event
+kinds 12545–12547. The obsolete unregistered C declaration events collided with
+economizer and are retired. Principal 74 requests egress and config services.
+The binary declaration wire layout remains unchanged.
+
+
+`src/modules/providers/include/aimee/providers/module_api.h` defines the native
+contract. Management requests are forwarded through the Go owner; callers do
+not independently mutate the provider roster.
+
+## Dependencies and consumers
+
+The descriptor declares these dependencies. Native management adapters, browser
+provider/model pages, and CLI operations consume the same `providers` owner.
+
+- `config`: configuration and concurrency projections for provider/model state.
+- `egress`: authenticated outbound discovery and provider HTTP probes.
+- `module-runtime`: process identity, event grants, and bus attachment.
+- `vault`: credential storage accessed through the attested resource helper.
+
+## Providers and readiness
+
+A configured connection is not proof of reachable inference. `inspect.go` and
+catalog discovery exercise the selected endpoint through egress, while CLI
+providers use the isolated probe worker. Validate the credential scheme and
+model availability before selecting a connection for use. Owner unavailability
+is surfaced to management callers rather than replaced with a second writer.
+
+## Configuration and activation
+
+- `runtime_toggle.supported`: `false`; providers is required within its declared placement.
+
+The module reads its instance state under `AIMEE_HOME`. Operators manage
+connections and attached models through the existing provider/model APIs,
+browser pages, and CLI, keeping credentials in Vault. The deployment's generated
+process identity and grants select the management stages.
+
+## Surfaces
 
 A provider connection has an immutable name, protocol, endpoint, authentication
 method, and Vault credential. Multiple connections can use the same vendor URL
@@ -20,7 +62,8 @@ model IDs, limits, prices, and routing preferences. A blank credential during an
 edit preserves the existing key. Blank model prices withdraw a declaration;
 zero explicitly declares a free price.
 
-## Migration and persistence
+
+## Data and migrations
 
 The Go store reads `models.json`, with `agents.json` as the legacy fallback. It
 adopts legacy model registrations as saved connections without grouping by URL
@@ -44,14 +87,8 @@ Vault and roster commits remain separate resource transactions; a process kill
 between a successful key rotation and the roster rename can leave the rotated
 key on the old connection. Retrying the same edit converges.
 
-## Runtime boundaries
 
-The providers module contains no C implementation. The removed C code includes
-its declaration adapter, all seven built-in profiles, model catalog parsing and
-downloads, and provider/model management and roster persistence. Remaining native
-entrypoints marshal the existing ABI and forward management requests to Go.
-Pre-bus credential bootstrap invokes the same Go roster parser in a short-lived
-lookup mode; it does not introduce another parser or writer.
+## Security and privacy
 
 The existing core Vault resource remains the credential storage boundary.
 `server-go/modules/providers/vaultresource` communicates with its attested pipe helper; provider
@@ -68,12 +105,15 @@ Existing native inference execution, per-turn authentication, and interactive
 OAuth login workers remain separate resource/execution boundaries; this change
 does not rewrite those runtime families.
 
-Principal 33 serves stages 1 (resolve), 2 (validate), and 3 (manage), on event
-kinds 12545–12547. The obsolete unregistered C declaration events collided with
-economizer and are retired. Principal 74 requests egress and config services.
-The binary declaration wire layout remains unchanged.
+## Supported journeys
 
-## Verification
+Create a named provider connection, discover or manually add its models, and
+choose routing preferences in the Models page. Edit the connection to update
+its attached models, or remove the last model while keeping the provider for
+reuse. `docs/validation/providers-gui.md` records browser acceptance journeys;
+`scripts/validation/providers/README.md` describes their fixtures and cleanup.
+
+## Tests and failure behavior
 
 Go tests cover connection isolation, concurrent writes, malformed rosters,
 legacy adoption, stale snapshot rejection, unknown-field retention, secret
@@ -85,3 +125,30 @@ by a production module.
 
 See `docs/validation/providers-gui.md` and
 `scripts/validation/providers/README.md` for real browser acceptance and cleanup.
+
+
+## Operational diagnostics
+
+Use provider discovery and diagnostics to distinguish owner, Vault, egress,
+and upstream failures. `server-go/modules/providers/inspect.go` implements the
+inspection path and bounded probe results. Check composition logs if both
+Providers and Models pages report the management process unavailable; the
+supervisor restarts a failed module independently of the other modules.
+
+## Compatibility
+
+The `providers` module contains no C implementation. The removed C code includes
+its declaration adapter, all seven built-in profiles, model catalog parsing and
+downloads, and provider/model management and roster persistence. Remaining native
+entrypoints marshal the existing ABI and forward management requests to Go.
+Pre-bus credential bootstrap invokes the same Go roster parser in a short-lived
+lookup mode; it does not introduce another parser or writer.
+
+## Extension and removal
+
+Add provider profiles, protocols, and validation in the Go owner, with native
+ABI and management regressions. `src/modules/providers/module.yaml` records
+owned sources and tests; keep that inventory synchronized. Removing the module
+requires moving every management consumer and its event contract first, rather
+than restoring a native roster writer. Removing a saved connection follows the
+explicit confirmation and credential-cleanup behavior described above.

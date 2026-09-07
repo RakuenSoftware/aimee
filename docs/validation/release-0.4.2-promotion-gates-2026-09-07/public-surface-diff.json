@@ -1,0 +1,82 @@
+{
+  "cli-help": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      "src/kb/kb_main.c",
+      "src/server/server_main.c"
+    ]
+  },
+  "configuration": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      "docs/gen/configuration.md"
+    ]
+  },
+  "database-schemas": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      "src/modules/db2/c/schema.sql"
+    ]
+  },
+  "packages": {
+    "added": [
+      "Dockerfile.postgres"
+    ],
+    "removed": [],
+    "changed": [
+      "Dockerfile",
+      "Dockerfile.embedder",
+      "Dockerfile.llm",
+      "Dockerfile.server"
+    ]
+  },
+  "public-headers": {
+    "added": [
+      "src/headers/cli_proxy.h",
+      "src/headers/providers_client.h",
+      "src/modules/kb/include/aimee/kb/module_api.h",
+      "src/modules/memory/include/aimee/memory/pii_provider.h",
+      "src/modules/server/include/aimee/server/module_api.h"
+    ],
+    "removed": [
+      "src/headers/provider_model_parse.h"
+    ],
+    "changed": [
+      "src/headers/agent.h",
+      "src/headers/agent_config.h",
+      "src/headers/agent_exec.h",
+      "src/headers/agent_types.h",
+      "src/headers/aimee_client.h",
+      "src/headers/cli_client.h",
+      "src/headers/cli_v1_routes_internal.h",
+      "src/headers/config_client.h",
+      "src/headers/memory.h",
+      "src/headers/model_provider.h",
+      "src/headers/module_stage_adapters.h",
+      "src/headers/openai_shape.h",
+      "src/headers/provider_catalog.h",
+      "src/headers/server.h",
+      "src/headers/server_http.h",
+      "src/headers/server_http_authz.h",
+      "src/headers/server_state_internal.h",
+      "src/headers/util.h",
+      "src/modules/db2/include/aimee/db2/host_contracts.h",
+      "src/modules/memory/include/aimee/memory/module_api.h",
+      "src/modules/providers/include/aimee/providers/module_api.h",
+      "src/modules/routing/include/aimee/routing/module_api.h"
+    ]
+  },
+  "public-symbols": {
+    "changed": true
+  },
+  "routes": {
+    "added": [],
+    "removed": [],
+    "changed": [
+      "docs/gen/v1-route-descriptor.json"
+    ]
+  }
+}

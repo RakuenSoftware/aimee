@@ -1,0 +1,623 @@
+{
+  "schema_version": 1,
+  "source_repository": "https://github.com/RakuenSoftware/aimee.git",
+  "core": {
+    "source": "bundled",
+    "version": "0.3.0",
+    "source_sha256": "6de9983196170a6baa477386f919820a79e56078d812d5fc03e8153e5f0efb2c"
+  },
+  "modules": [
+    {
+      "id": "module-runtime",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "051022ec21652c6b8c1bd175a0f56b7b1e46fda18a48060b79ab7e7095884947"
+    },
+    {
+      "source": "external",
+      "id": "config",
+      "classification": "required",
+      "repository": "https://github.com/RakuenSoftware/aimee-module-config.git",
+      "ref": "v0.2.1-0.20260824205422-3d2964383b91",
+      "version": "v0.2.1-0.20260824205422-3d2964383b91",
+      "commit": "3d2964383b91",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "e92e6bf6c899734d50fdf02c30fde2bd2d5286ff881044877acf8b2cbfce0ea2",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 2,
+      "serve": [
+        4609
+      ]
+    },
+    {
+      "id": "ir",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "a62e0198dca75e7b68f16624ad70ebb83ef791cc45612946f02e089b7a952651"
+    },
+    {
+      "id": "translation",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "21bf4b6b73f421ad2f0fde9cee795add8d6e92678391c1852948e85b3e31a46b"
+    },
+    {
+      "id": "protocols",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "dcef5d94e0712eba716d60fd5b328d04560461331cdb0d31cf968005efbb7d32"
+    },
+    {
+      "id": "gateway",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "dc7f015024d4ab17b4c6bf28047d6494a3659b49467f1c46f4a9f4ffb1097330"
+    },
+    {
+      "id": "memory",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "0fdb881313e0a59c277bd85677fae9ec23454233b8076870b470fd1caf0876b0",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 7,
+      "serve": [
+        5889,
+        5890,
+        5891,
+        5892,
+        5893,
+        5894,
+        5895
+      ]
+    },
+    {
+      "id": "learning",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "f42ad05530aabc9e4b6d3940389ea86b39193fe1db72caa4d26931352200cde6",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 8,
+      "serve": [
+        6145
+      ]
+    },
+    {
+      "id": "routing",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "dc4de2836622bba9a73023642a35f75ebfb40a54621efbdeda067c3a518394d0",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 9,
+      "serve": [
+        6401,
+        6402
+      ]
+    },
+    {
+      "id": "delegates",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "d99c817eb05331d0666f8a1dd71435908f9a1b17a7df129a0ee5b5bd3471a980",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 10,
+      "serve": [
+        6657,
+        6658,
+        6659,
+        6660,
+        6661,
+        6662,
+        6663,
+        6664,
+        6665,
+        6666,
+        6667,
+        6668,
+        6669,
+        6670,
+        6671,
+        6672,
+        6673,
+        6674,
+        6675,
+        6676,
+        6677,
+        6678
+      ]
+    },
+    {
+      "id": "tools",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "7ddb9ba5d4c46d1894b2a2f86af8b7e93837925d7a5b57f297797602fa2b30fd",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 11,
+      "serve": [
+        6913
+      ]
+    },
+    {
+      "id": "workspace",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "a2561bb532a90a3f2d62da2c88a9f83d04c5cf6572cd622d12876ad8ed915d28",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 12,
+      "serve": [
+        7169,
+        7170,
+        7171
+      ]
+    },
+    {
+      "id": "git",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "dedeaea2b099881f0634c9c9a1364f9001b8eb77a2990ce276e0b41da29a8ee1",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 13,
+      "serve": [
+        7425,
+        7426,
+        7427,
+        7428,
+        7429,
+        7430
+      ]
+    },
+    {
+      "id": "skills",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "0946e53e43bdb6fc2bea88f3035180f21d2205cbb9c7f0f4db1878f6a24074eb",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 14,
+      "serve": [
+        7681,
+        7682
+      ]
+    },
+    {
+      "id": "response-composition",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "7eec1f4adf0e1f3ea6007468a8c44966329942770e164bb75437138ec78f93ce",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 15,
+      "serve": [
+        7937
+      ]
+    },
+    {
+      "id": "vault",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "e5e0463af427e008203fa1388720ae4d9ff9431af01363ef1eac503965e8d2ff"
+    },
+    {
+      "id": "execution-policy",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "e85c59cc43acd86ea0db4788472c93b9ce368f0273e51d4f197479e96c882ff8",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 17,
+      "serve": [
+        8449
+      ]
+    },
+    {
+      "id": "audit",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "867ea560c9fd55471cd68c6f79adde9d05c2ca8287914d201ceaadf918eb95fe"
+    },
+    {
+      "id": "sandbox",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "24fb75337c3f0f0c8dc5db4f055712275a3d6f97e8183f6bf12721fe110efe88",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 26,
+      "serve": [
+        10753,
+        10754,
+        10755,
+        10756
+      ]
+    },
+    {
+      "id": "aimee",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "4ef1c43128cb3bcd91a2f06c15e5a3691025f75effeacf6c6650e601ea2bdd27",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 30,
+      "serve": [
+        11777,
+        11778,
+        11779,
+        11780,
+        11781,
+        11782,
+        11783,
+        11784,
+        11785,
+        11786,
+        11787,
+        11788,
+        11789,
+        11790,
+        11791,
+        11792,
+        11793,
+        11794,
+        11795,
+        11796,
+        11797,
+        11798,
+        11799
+      ]
+    },
+    {
+      "id": "egress",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "bb9152b29cf0f773a034b021141d0fd62c3e9dccd849dfc1d79a61516366fa8e",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 32,
+      "serve": [
+        12289,
+        12290,
+        12291,
+        12292,
+        12293,
+        12294,
+        12295
+      ]
+    },
+    {
+      "id": "providers",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "bdc51dc1f0eb4478e6254c30c42507b0a575f29dd1dafe5de0606b1d3bdb7db2",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 33,
+      "serve": [
+        12545,
+        12546,
+        12547
+      ]
+    },
+    {
+      "id": "server",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "2d63f8140670b2ff4b6ad187d6462596b8d7f5a73072d3b7443fe55762fb8676",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 34,
+      "serve": [
+        12801
+      ]
+    },
+    {
+      "id": "kb",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "kb"
+      ],
+      "source_sha256": "8011dac3390da8ae6ce7faadfe8e59026ae7ef4ea23920ea1e5c30ad13db23b5",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 35,
+      "serve": [
+        13057
+      ]
+    },
+    {
+      "id": "postgres",
+      "source": "bundled",
+      "classification": "required",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "f25728cc6c6359f1fb3cc13fc9d819d553875c005e10cdda7fffbda297ed60ab",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 28,
+      "serve": [
+        11265,
+        11266
+      ]
+    },
+    {
+      "id": "governance",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "a5cd756dab9909fc1beb423e273bce01af753901b13a8223aea68448a467068f",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 19,
+      "serve": [
+        8961
+      ]
+    },
+    {
+      "id": "workflows",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "22d90b8c7d470783e6d0fae501c1e89c0a5000568f48077892105716ab558f12",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 20,
+      "serve": [
+        9217,
+        9218,
+        9219,
+        9220
+      ]
+    },
+    {
+      "id": "roundtable",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "ceeb0d8a8b135025c3bcabd7823712c1a5190f5420c3da2e37fcdc5ddb850a8d",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 21,
+      "serve": [
+        9473,
+        9474,
+        9475
+      ]
+    },
+    {
+      "id": "kb-synthesis",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "kb"
+      ],
+      "source_sha256": "d13ed077b080bc7d03520d8fc709287fc3c20d777d38da0b7e1038940eadebdc",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 22,
+      "serve": [
+        9729
+      ]
+    },
+    {
+      "id": "runtime-web",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "d8a8394d853d30495d7e900b3da347ec1c666b3b8be06c74bedebc904502f18d",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 23,
+      "serve": [
+        9985
+      ]
+    },
+    {
+      "id": "control-web",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "kb"
+      ],
+      "source_sha256": "7456d5beaf626dd919f5783111990969b552ffbf6feeca35cc3e38c0f5dc75ef",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 24,
+      "serve": [
+        10241
+      ]
+    },
+    {
+      "id": "benchmarks",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "759a38b599d248b35d554066288a6e44de8ae016ab8bd6d842212fa6a8137161",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 25,
+      "serve": [
+        10497,
+        10498
+      ]
+    },
+    {
+      "id": "economizer",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "server"
+      ],
+      "source_sha256": "fe182d5614a73052f913750cdc5628879e8576dac4e0ac535bb5ef7b403160cb",
+      "runtime": "go",
+      "principal_class": 1,
+      "principal_ref": 27,
+      "serve": [
+        11009,
+        11010,
+        11011,
+        11012,
+        11013,
+        11014,
+        11015
+      ]
+    },
+    {
+      "id": "db2",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "process",
+      "placements": [
+        "kb"
+      ],
+      "source_sha256": "5911e836e1d96c42dbf169f4602a18d2a63f5ab442522cebf75e4c6c031e23c3",
+      "runtime": "c",
+      "principal_class": 1,
+      "principal_ref": 29,
+      "serve": [
+        11521
+      ]
+    },
+    {
+      "id": "observability",
+      "source": "bundled",
+      "classification": "optional",
+      "execution": "core",
+      "placements": [
+        "server",
+        "kb"
+      ],
+      "source_sha256": "8331317256252f4b7cb0b439fdf8fbacd2b611d49dcb02250053f7e1b9093a1c"
+    }
+  ]
+}
