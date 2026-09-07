@@ -76,9 +76,11 @@ documentation, and test registration. Both previous-ref comparisons also pass
 against `origin/main`.
 
 Additional checks passed: all 77 lint checks; 71 DB2 closure tests including nine
-new migration regressions; six application-lock tests with mutation subcases;
+new migration regressions; seven application-lock tests with mutation subcases;
 13 module-doc tests; 24 documentation-contract tests; the fixture-export pin
-preservation regression; and actionlint on the changed workflow. Snapshot drift
+preservation regression; and actionlint on the changed workflow. The build-integrity assertion now verifies
+this application gate; mutation fixtures reject a missing main guard, restored
+independent-publication requirement, and integration lint/verify placement. Snapshot drift
 and external-pin mutations fail without requiring any independent publication.
 
 The unchanged runtime implementation was already exercised using published

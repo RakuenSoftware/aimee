@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import tempfile
+import subprocess
 import unittest
 from unittest import mock
 
@@ -101,9 +102,40 @@ class ApplicationLockTest(unittest.TestCase):
     def test_malformed_or_missing_lock_fails(self):
         with self.assertRaises(checker.exporter.ExportError):
             checker.check(self.lock)
+
         self.lock.write_text("{", encoding="utf-8")
         with self.assertRaises(checker.exporter.ExportError):
             checker.check(self.lock)
+
+    def test_build_integrity_requires_application_gate_only_on_main(self):
+        source = (ROOT / "src/tests/test_build_integrity.sh").read_text()
+        block = source.split("# Application source snapshots bind", 1)[1]
+        block = block.split("\nif ! ", 1)[1].split("\nfi", 1)[0]
+        script = "pass() { :; }; fail() { exit 1; };\nif ! " + block + "\nfi\n"
+        workflow = (ROOT / ".github/workflows/c-repositories.yml").read_text()
+        makefile = (ROOT / "src/Makefile").read_text()
+        guard = "if: github.ref == 'refs/heads/main' || github.base_ref == 'main'"
+        cases = [
+            ("current", workflow, makefile, 0),
+            ("missing guard", workflow.replace(guard, "if: true"), makefile, 1),
+            ("independent publication", workflow.replace(
+                "run: python3 -I scripts/check_application_source_lock.py",
+                "run: python3 -I scripts/check_c_repository_lock.py"), makefile, 1),
+            ("integration lint", workflow, makefile.replace(
+                "LINT_CHECKS=", "LINT_CHECKS= repository-lock-check"), 1),
+            ("integration verify", workflow, makefile.replace(
+                "verify-local:", "verify-local: repository-lock-check"), 1),
+        ]
+        root = Path(self.temp.name)
+        (root / "src").mkdir()
+        (root / ".github/workflows").mkdir(parents=True)
+        for name, definition, recipe, status in cases:
+            with self.subTest(name=name):
+                (root / ".github/workflows/c-repositories.yml").write_text(definition)
+                (root / "src/Makefile").write_text(recipe)
+                result = subprocess.run(["bash", "-c", script], cwd=root / "src",
+                                        capture_output=True, text=True)
+                self.assertEqual(result.returncode, status, result.stderr)
 
 
 if __name__ == "__main__":
