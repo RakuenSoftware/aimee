@@ -112,11 +112,12 @@ run_docker_topology() {
   fi
   export AIMEE_APPLICATION_IMAGE="${AIMEE_APPLICATION_IMAGE:-aimee:e2e}"
   export AIMEE_POSTGRES_IMAGE="${AIMEE_POSTGRES_IMAGE:-aimee-postgres:e2e}"
-  export AIMEE_EMBEDDER_IMAGE="${AIMEE_EMBEDDER_IMAGE:-aimee-embedder:e2e}"
+  export AIMEE_EMBEDDER_IMAGE="${AIMEE_EMBEDDER_IMAGE:-$(cat tests/e2e/embedder-image.txt)}"
   if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 && "$docker_images_built" == 0 ]]; then
     if ! docker build --build-arg WITH_VSCODE=0 -f Dockerfile.server -t "$AIMEE_APPLICATION_IMAGE" . ||
        ! docker build -f Dockerfile.postgres -t "$AIMEE_POSTGRES_IMAGE" . ||
-       ! docker build -f Dockerfile.embedder -t "$AIMEE_EMBEDDER_IMAGE" .; then
+       ! (docker image inspect "$AIMEE_EMBEDDER_IMAGE" >/dev/null 2>&1 ||
+          docker pull "$AIMEE_EMBEDDER_IMAGE"); then
       record "$id" FAIL "candidate image build failed"
       return 0
     fi

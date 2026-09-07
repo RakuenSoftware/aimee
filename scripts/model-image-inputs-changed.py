@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Gate model image builds on their inputs changing in this push or PR update.
+"""Gate model image builds on their inputs changing in an integration merge.
 
-PR path filters retain all earlier changes on the branch. Compare the previous
-head with the new head so a later application/test edit cannot rebuild models
-whose candidate tags are not published until merge.
+Compare the previous integration head with the new head so an application,
+workflow or test edit cannot rebuild unchanged models. The publishing workflows
+run this gate on pushes to testing; pull requests never build model images.
 """
 import argparse
 import subprocess

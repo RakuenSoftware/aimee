@@ -1971,7 +1971,6 @@ jobs:
     env:
       AIMEE_APPLICATION_IMAGE: aimee:e2e
       AIMEE_POSTGRES_IMAGE: aimee-postgres:e2e
-      AIMEE_EMBEDDER_IMAGE: aimee-embedder:e2e
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
@@ -2002,15 +2001,13 @@ jobs:
           load: true
           cache-from: type=gha,scope=e2e-aimee-postgres
           cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee-postgres,mode=max' || '' }}
-      - name: Build the real local embedder
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          file: Dockerfile.embedder
-          tags: aimee-embedder:e2e
-          load: true
-          cache-from: type=gha,scope=e2e-aimee-embedder
-          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee-embedder,mode=max' || '' }}
+      # Reuse the published model image. PRs validate the candidate application;
+      # the model publisher builds and tests changed model inputs after merge.
+      - name: Pull the published embedder
+        run: |
+          image=$(cat tests/e2e/embedder-image.txt)
+          docker pull "$image"
+          echo "AIMEE_EMBEDDER_IMAGE=$image" >> "$GITHUB_ENV"
       - name: Run the shipped deployment and regression gates
         run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
       - name: LUKS recovery and legacy PostgreSQL migration

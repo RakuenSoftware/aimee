@@ -1,4 +1,4 @@
-"""Unrelated updates to a PR with model changes must not rebuild its images."""
+"""Only merges changing model-image inputs may build model containers."""
 import importlib.util
 from pathlib import Path
 import subprocess
@@ -88,8 +88,9 @@ class ModelInputTests(unittest.TestCase):
             with self.subTest(kind=kind):
                 workflow = yaml.load((ROOT / f'.github/workflows/publish-{kind}.yml').read_text(),
                                      Loader=yaml.BaseLoader)
-                self.assertEqual(set(workflow['on']['pull_request']['paths']), set(paths))
-                self.assertNotIn('force', workflow['on']['workflow_dispatch'])
+                self.assertEqual(set(workflow['on']), {'push', 'workflow_call'})
+                self.assertEqual(workflow['on']['push']['branches'], ['testing'])
+                self.assertTrue(set(paths).issubset(workflow['on']['push']['paths']))
                 self.assertNotIn('concurrency', workflow)
                 changes = workflow['jobs']['changes']
                 step = changes['steps'][1]
@@ -99,8 +100,40 @@ class ModelInputTests(unittest.TestCase):
                 self.assertEqual(build['needs'], 'changes')
                 self.assertIn("needs.changes.outputs.changed == 'true'", build['if'])
                 self.assertIn("inputs.version != ''", build['if'])
-                self.assertIn("github.event_name == 'workflow_dispatch'", build['if'])
+                self.assertNotIn('workflow_dispatch', build['if'])
                 self.assertIn('matrix.name', build['concurrency']['group'])
+
+    def test_every_model_build_is_merge_only_and_requires_new_inputs(self):
+        builds = []
+        for path in (ROOT / '.github/workflows').glob('*.yml'):
+            workflow = yaml.load(path.read_text(), Loader=yaml.BaseLoader)
+            for job in workflow.get('jobs', {}).values():
+                for step in job.get('steps', []):
+                    dockerfile = step.get('with', {}).get('file')
+                    if dockerfile not in ('Dockerfile.llm', 'Dockerfile.embedder', 'Dockerfile.model'):
+                        continue
+                    builds.append(dockerfile)
+                    with self.subTest(workflow=path.name, step=step['name']):
+                        self.assertIn("needs.changes.outputs.changed == 'true'", job['if'])
+                        for required in ("github.event_name == 'push'", "github.ref == 'refs/heads/testing'",
+                                         "inputs.version == ''", "steps.have.outputs.exists != 'true'"):
+                            self.assertIn(required, step['if'])
+                        self.assertEqual(step['with']['push'], 'true')
+        self.assertCountEqual(builds, ['Dockerfile.llm', 'Dockerfile.embedder'])
+
+    def test_deployment_tests_pull_the_same_pinned_embedder(self):
+        image = (ROOT / 'tests/e2e/embedder-image.txt').read_text().strip()
+        self.assertRegex(image, r'^ghcr\.io/rakuensoftware/aimee-embedder-a25m@sha256:[a-f0-9]{64}$')
+        workflow = yaml.load((ROOT / '.github/workflows/ci.yml').read_text(), Loader=yaml.BaseLoader)
+        steps = workflow['jobs']['e2e-docker']['steps']
+        pull = next(step for step in steps if step.get('name') == 'Pull the published embedder')
+        self.assertIn('cat tests/e2e/embedder-image.txt', pull['run'])
+        self.assertIn('docker pull "$image"', pull['run'])
+        self.assertIn('AIMEE_EMBEDDER_IMAGE=$image', pull['run'])
+        local = (ROOT / 'scripts/e2e-matrix.sh').read_text()
+        self.assertIn('cat tests/e2e/embedder-image.txt', local)
+        self.assertIn('docker pull "$AIMEE_EMBEDDER_IMAGE"', local)
+        self.assertNotIn('docker build -f Dockerfile.embedder', local)
 
 
 if __name__ == '__main__':
