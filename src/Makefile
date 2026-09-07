@@ -2797,11 +2797,13 @@ coverage-check: coverage
 # --- Static analysis ---
 
 STATIC_ANALYSIS_STRICT ?= 0
+CPPCHECK_ARGS ?=
+CLANG_TIDY_ARGS ?=
 
 cppcheck:
 	@if command -v cppcheck >/dev/null 2>&1; then \
 		python3 -I -S ../scripts/run-cppcheck-ratchet.py --self-test && \
-		python3 -I -S ../scripts/run-cppcheck-ratchet.py $(ALL_SRCS); \
+		python3 -I -S ../scripts/run-cppcheck-ratchet.py $(CPPCHECK_ARGS) $(ALL_SRCS); \
 	elif [ "$(STATIC_ANALYSIS_STRICT)" = "1" ]; then \
 		echo "ERROR: cppcheck not found. Install with: apt install cppcheck  (Fedora/RHEL: dnf install cppcheck)"; exit 1; \
 	else \
@@ -2811,7 +2813,7 @@ cppcheck:
 clang-tidy:
 	@if command -v clang-tidy >/dev/null 2>&1; then \
 		python3 -I -S ../scripts/run-clang-tidy.py --self-test && \
-		python3 -I -S ../scripts/run-clang-tidy.py; \
+		python3 -I -S ../scripts/run-clang-tidy.py $(CLANG_TIDY_ARGS); \
 	elif [ "$(STATIC_ANALYSIS_STRICT)" = "1" ]; then \
 		echo "ERROR: clang-tidy not found. Install with: apt install clang-tidy  (Fedora/RHEL: dnf install clang-tools-extra)"; exit 1; \
 	else \

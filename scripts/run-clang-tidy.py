@@ -52,6 +52,15 @@ def analyze(executable, database, source):
     return result.returncode, result.stdout
 
 
+def shard_sources(sources, index, count):
+    if count < 1 or not 0 <= index < count:
+        raise ValueError('shard count must be positive and index must be in range')
+    selected = sorted(set(sources))[index::count]
+    if not selected:
+        raise ValueError('shard has no production sources')
+    return selected
+
+
 def self_test():
     with tempfile.TemporaryDirectory() as temp:
         directory = Path(temp)
@@ -80,6 +89,8 @@ def main():
     parser.add_argument('--self-test', action='store_true')
     parser.add_argument('--executable', default='clang-tidy')
     parser.add_argument('--jobs', type=int, default=min(4, os.cpu_count() or 2))
+    parser.add_argument('--shard-index', type=int, default=0)
+    parser.add_argument('--shard-count', type=int, default=1)
     parser.add_argument('--log', type=Path, default=ROOT / 'src/build/clang-tidy.log')
     args = parser.parse_args()
     if args.self_test:
@@ -87,6 +98,8 @@ def main():
         return 0
     if args.jobs < 1:
         parser.error('--jobs must be positive')
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error('shard count must be positive and index must be in range')
     generated = subprocess.run(['make', 'agent_help_data.h', 'tool_prompts_data.h',
         'schema_data.h', 'kb/http/openapi_data.h', 'server/openapi_server_data.h'],
         cwd=ROOT / 'src', text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -100,10 +113,11 @@ def main():
         return plan.returncode
     try:
         entries = compilation_database(plan.stdout, ROOT / 'src')
+        sources = shard_sources([entry['file'] for entry in entries], args.shard_index, args.shard_count)
     except ValueError as error:
         print('clang-tidy: ' + str(error), file=sys.stderr)
         return 2
-    sources = sorted({entry['file'] for entry in entries})
+    print(f'clang-tidy: shard {args.shard_index + 1}/{args.shard_count}; {len(sources)} sources', flush=True)
     args.log.parent.mkdir(parents=True, exist_ok=True)
     failures, warnings = 0, 0
     with tempfile.TemporaryDirectory(prefix='aimee-tidy-') as temp, args.log.open('w') as report:
@@ -116,7 +130,7 @@ def main():
                 if code:
                     failures += 1
                     print(f'clang-tidy: failed {sources[index - 1]} (exit {code})', flush=True)
-                if index % 100 == 0:
+                if index % 25 == 0:
                     report.flush()
                     print(f'clang-tidy: checked {index}/{len(sources)} sources', flush=True)
     print(f'clang-tidy: {len(sources)} sources; {warnings} warnings; {failures} process failures; report {args.log}')
