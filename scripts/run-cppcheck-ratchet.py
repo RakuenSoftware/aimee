@@ -82,11 +82,55 @@ def excess(
     ]
 
 
+def shard_sources(sources: list[str], index: int, count: int) -> list[str]:
+    if count < 1 or not 0 <= index < count:
+        raise ValueError("shard count must be positive and index must be in range")
+    selected = sorted(set(sources))[index::count]
+    if not selected:
+        raise ValueError("shard has no production sources")
+    return selected
+
+
+def merge_reports(directory: Path, count: int):
+    expected = {directory / f"cppcheck-{index}.xml" for index in range(count)}
+    if count < 1 or set(directory.glob("*.xml")) != expected:
+        raise ValueError("expected exactly one report from every cppcheck shard")
+    actual = Counter()
+    details = {}
+    for path in sorted(expected):
+        counts, messages = parse_report(path)
+        actual.update(counts)
+        for key, values in messages.items():
+            details.setdefault(key, []).extend(values)
+    return actual, details
+
+
+def check_diagnostics(actual, details, baseline) -> int:
+    failures = excess(actual, baseline)
+    if failures:
+        print("cppcheck-ratchet: new or increased diagnostics", file=sys.stderr)
+        for key, count, allowed in failures:
+            print(f"  {key[0]}:{key[1]} count={count} baseline={allowed}", file=sys.stderr)
+            for detail in details.get(key, [])[:5]:
+                print("    " + detail, file=sys.stderr)
+        return 1
+    known = sum(actual.values())
+    ceiling = sum(baseline.values())
+    print(f"cppcheck-ratchet: ok ({known} known diagnostics; ceiling {ceiling}; no increase)")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--self-test", action="store_true")
+    parser.add_argument("--shard-index", type=int, default=0)
+    parser.add_argument("--shard-count", type=int, default=1)
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--reports-dir", type=Path)
     parser.add_argument("sources", nargs="*")
     args = parser.parse_args()
+    if args.shard_count < 1 or not 0 <= args.shard_index < args.shard_count:
+        parser.error("shard count must be positive and index must be in range")
     try:
         expected_version, baseline = load_baseline()
     except (OSError, json.JSONDecodeError, ValueError) as exc:
@@ -100,8 +144,22 @@ def main() -> int:
             return 1
         print("cppcheck-ratchet: plant test passed")
         return 0
+    if args.reports_dir is not None:
+        if args.sources or args.report is not None or args.shard_index != 0:
+            parser.error("report aggregation cannot be combined with an analyzer invocation")
+        try:
+            actual, details = merge_reports(args.reports_dir, args.shard_count)
+        except (ET.ParseError, OSError, ValueError) as exc:
+            print(f"cppcheck-ratchet: invalid shard reports: {exc}", file=sys.stderr)
+            return 2
+        return check_diagnostics(actual, details, baseline)
     if not args.sources:
         parser.error("at least one source is required")
+    try:
+        sources = shard_sources(args.sources, args.shard_index, args.shard_count)
+    except ValueError as exc:
+        parser.error(str(exc))
+    print(f"cppcheck: shard {args.shard_index + 1}/{args.shard_count}; {len(sources)} sources", flush=True)
     version = subprocess.run(
         ["cppcheck", "--version"], capture_output=True, check=False, text=True
     )
@@ -126,7 +184,7 @@ def main() -> int:
             "--xml-version=2",
             "-Iheaders",
             "-Ivendor/headers",
-            *args.sources,
+            *sources,
         ]
         completed = subprocess.run(command, stderr=report, check=False)
         if completed.returncode != 0:
@@ -138,18 +196,10 @@ def main() -> int:
         except (ET.ParseError, OSError, ValueError) as exc:
             print(f"cppcheck-ratchet: invalid analyzer report: {exc}", file=sys.stderr)
             return 2
-    failures = excess(actual, baseline)
-    if failures:
-        print("cppcheck-ratchet: new or increased diagnostics", file=sys.stderr)
-        for key, count, allowed in failures:
-            print(f"  {key[0]}:{key[1]} count={count} baseline={allowed}", file=sys.stderr)
-            for detail in details.get(key, [])[:5]:
-                print("    " + detail, file=sys.stderr)
-        return 1
-    known = sum(actual.values())
-    ceiling = sum(baseline.values())
-    print(f"cppcheck-ratchet: ok ({known} known diagnostics; ceiling {ceiling}; no increase)")
-    return 0
+        if args.report is not None:
+            args.report.parent.mkdir(parents=True, exist_ok=True)
+            args.report.write_bytes(Path(report.name).read_bytes())
+    return check_diagnostics(actual, details, baseline)
 
 
 if __name__ == "__main__":

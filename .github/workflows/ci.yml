@@ -37,21 +37,66 @@ permissions:
   contents: read
 
 jobs:
-  secure-development-gates:
-    name: Static analysis and secret scanning
+  cppcheck-shards:
+    name: Cppcheck (${{ matrix.shard }}/8)
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install cppcheck dependencies
+        run: sudo apt-get update && sudo apt-get install -y cppcheck build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+      - name: Analyze source batch
+        working-directory: src
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: make cppcheck STATIC_ANALYSIS_STRICT=1 CPPCHECK_ARGS="--shard-index $SHARD --shard-count 8 --report build/cppcheck/cppcheck-$SHARD.xml"
+      - name: Retain diagnostics for the combined ratchet
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: cppcheck-${{ matrix.shard }}
+          path: src/build/cppcheck/cppcheck-${{ matrix.shard }}.xml
+          if-no-files-found: error
+          retention-days: 7
+
+  clang-tidy-shards:
+    name: Clang-tidy (${{ matrix.shard }}/8)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Install clang-tidy dependencies
+        run: sudo apt-get update && sudo apt-get install -y clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
+      - name: Analyze source batch
+        working-directory: src
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: make clang-tidy STATIC_ANALYSIS_STRICT=1 CLANG_TIDY_ARGS="--shard-index $SHARD --shard-count 8"
+      - name: Retain analyzer diagnostics
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: clang-tidy-${{ matrix.shard }}
+          path: src/build/clang-tidy.log
+          if-no-files-found: error
+          retention-days: 7
+
+  secret-scanning:
+    name: Secret scanning
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          # Gitleaks scans commit history, so a one-commit checkout is not enough.
           fetch-depth: 0
-      - name: Install native analyzers
-        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
-      - name: Run mandatory native static analysis
-        working-directory: src
-        run: make static-analysis STATIC_ANALYSIS_STRICT=1
       - name: Scan the complete Git history for secrets
         env:
           GITLEAKS_VERSION: 8.30.1
@@ -65,6 +110,36 @@ jobs:
           printf '%s  %s\n' "$GITLEAKS_SHA256" "$archive" | sha256sum --check --strict
           tar -xzf "$archive" -C "$RUNNER_TEMP" gitleaks
           "$RUNNER_TEMP/gitleaks" git --no-banner --redact --verbose --log-opts=HEAD .
+
+  # Keep the existing required-check name; every analyzer batch and the full
+  # history scan must pass. Apply the debt ceiling to the SUM of all cppcheck
+  # reports, never an independent allowance for each shard.
+  secure-development-gates:
+    name: Static analysis and secret scanning
+    needs: [cppcheck-shards, clang-tidy-shards, secret-scanning]
+    if: ${{ always() }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Confirm every analyzer and secret scan passed
+        env:
+          CPPCHECK_RESULT: ${{ needs.cppcheck-shards.result }}
+          CLANG_TIDY_RESULT: ${{ needs.clang-tidy-shards.result }}
+          SECRET_SCAN_RESULT: ${{ needs.secret-scanning.result }}
+        run: |
+          for result in "$CPPCHECK_RESULT" "$CLANG_TIDY_RESULT" "$SECRET_SCAN_RESULT"; do
+            [ "$result" = success ] || { echo "Security gate dependency: $result" >&2; exit 1; }
+          done
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Collect every cppcheck report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: cppcheck-*
+          path: src/build/cppcheck
+          merge-multiple: true
+      - name: Enforce the combined diagnostic baseline
+        working-directory: src
+        run: python3 -I -S ../scripts/run-cppcheck-ratchet.py --reports-dir build/cppcheck --shard-count 8
 
   script-tests:
     name: Complete script regression suite
