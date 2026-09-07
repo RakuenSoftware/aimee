@@ -26,29 +26,13 @@ int agent_request_cancelled(void) __attribute__((weak));
 
 static SSL_CTX *s_ssl_ctx;
 
-/* THE SYNTHESIS SIDECAR IS THE ONE HOP THAT NEEDS A CLIENT CERTIFICATE.
- *
- * s_ssl_ctx verifies against the system trust store and presents nothing. That is
- * right for every public provider and wrong for exactly one peer: aimee-llm, whose
- * certificate is issued by the kb's own CA and whose stunnel terminator sets
- * `verifyChain = yes` and therefore REQUIRES a client certificate.
- *
- * Without this the deploy layer's SYNTHESIS_CA_FILE / SYNTHESIS_CERT_FILE /
- * SYNTHESIS_KEY_FILE were read by nothing at all. Every synthesis call left the kb
- * with the default context, the sidecar's certificate chained to a CA the client had
- * never heard of, and the handshake died with "tlsv1 alert unknown ca" -- surfacing
- * to the operator as `provider HTTP -1` on a permanently failed curator job, and in
- * the log as "TCP connect failed", which is what a connection that connected fine
- * looks like from a caller that cannot tell a handshake from a connect.
- *
- * A SECOND CONTEXT, NOT A RELAXED FIRST ONE. Loading our CA into s_ssl_ctx would
- * make a certificate the kb issued to itself acceptable for api.anthropic.com, and
- * attaching the client certificate there would hand the kb's identity to every
- * endpoint it talks to. So the identity is bound to the one host:port that
- * SYNTHESIS_ENDPOINT names, and nothing else can reach it. */
+/* Local synthesis uses the owning instance's Vault-issued identity. Trust and
+ * client credentials are scoped to one exact origin; public providers continue
+ * to use the system trust store without this client certificate. */
 static SSL_CTX *s_synth_ssl_ctx;
 static char s_synth_host[256];
 static int s_synth_port;
+static int s_synth_local;
 static pthread_mutex_t s_synth_lock = PTHREAD_MUTEX_INITIALIZER;
 
 /* Defined below parse_url, which it needs; the signature keeps parsed_url_t out of
@@ -96,6 +80,7 @@ void agent_http_cleanup(void)
    }
    s_synth_host[0] = '\0';
    s_synth_port = 0;
+   s_synth_local = 0;
 }
 
 #define HTTP_MAX_RESPONSE_SIZE (10 * 1024 * 1024) /* 10MB */
@@ -160,33 +145,18 @@ static int parse_url(const char *url, parsed_url_t *out)
    return 0;
 }
 
-/* Build the synthesis-sidecar client context from the deploy layer's three files.
- *
- * All four inputs are required together. SYNTHESIS_ENDPOINT alone is the ordinary
- * external-provider case (the operator points synthesis at a public endpoint with a
- * public certificate), and the three files without it name no peer to trust, so both
- * partial states correctly leave the default context in charge.
- *
- * FAIL LOUD, NOT QUIET. If the files are named but unusable this logs an error and
- * leaves s_synth_ssl_ctx NULL, so the hop falls back to the default context and
- * fails the handshake -- the same outcome as before, but now with a line that says
- * which file could not be loaded instead of a bare "unknown ca" from OpenSSL.
- *
- * THE FILES DO NOT EXIST YET AT INIT, which is why the load is deferred to the
- * first request rather than done here. In the kb, agent_http_init() runs during
- * startup and kb_synthesis_identity_ensure() mints this material LATER in the same
- * startup -- 81 seconds later on a first boot of CT 302, because Postgres has to
- * come up in between. Loading eagerly read three files that did not exist, left the
- * context NULL, and disabled synthesis for the life of the process; it only looked
- * right when the container was restarted with the material already on disk.
- *
- * So init records WHERE the sidecar is, and the first request to that host:port
- * loads the material. By then the kb has issued it. */
+/* Load on first use so a temporarily unavailable identity can recover. */
 static void synth_ssl_ctx_load_locked(void)
 {
    const char *ca = getenv("SYNTHESIS_CA_FILE");
    const char *cert = getenv("SYNTHESIS_CERT_FILE");
    const char *key = getenv("SYNTHESIS_KEY_FILE");
+   if (s_synth_local)
+   {
+      ca = "/run/aimee-model-tls/synthesis/client/ca.pem";
+      cert = "/run/aimee-model-tls/synthesis/client/client.pem";
+      key = "/run/aimee-model-tls/synthesis/client/client.key";
+   }
    if (!ca || !cert || !key)
       return;
 
@@ -219,6 +189,14 @@ static void synth_ssl_ctx_load_locked(void)
  * (see synth_ssl_ctx_load_locked): at this point in startup it does not exist yet. */
 static void synth_ssl_ctx_init(void)
 {
+   const char *managed = getenv("AIMEE_MODEL_SERVICES_ENABLED");
+   if (managed && strcmp(managed, "1") == 0)
+   {
+      snprintf(s_synth_host, sizeof(s_synth_host), "%s", "aimee-llm");
+      s_synth_port = 8761;
+      s_synth_local = 1;
+      return;
+   }
    const char *endpoint = getenv("SYNTHESIS_ENDPOINT");
    const char *ca = getenv("SYNTHESIS_CA_FILE");
    const char *cert = getenv("SYNTHESIS_CERT_FILE");
@@ -261,7 +239,7 @@ static SSL_CTX *ssl_ctx_for(const parsed_url_t *url)
    /* No context means the material is unreadable, and the error above says which
     * file. Falling back to the default context here would present no certificate
     * and fail the handshake anyway, so return it and let the TLS error stand. */
-   return ctx ? ctx : s_ssl_ctx;
+   return ctx;
 }
 
 /* ---- Socket I/O with timeout ---- */

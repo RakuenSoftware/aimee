@@ -1,19 +1,10 @@
-/* Ordered wizard step definitions + small helpers. Pure data/logic (no DOM), so
- * the ordering and restart-key classification are unit-tested.
- *
- * The wizard forks on the knowledge-base choice after the account and provider:
- * aimee-kb deploys nothing locally, so the deploy-topology + shared-store (DB2)
- * steps are hidden. A step's `showWhen` predicate decides whether it appears for
- * the current kb_mode; a step with no predicate always shows. The tail is always
- * Connection (git hosts, optional) → Workspaces & projects. Each keyed step's
- * config keys reuse the plain-English copy in settingsHelp.ts (single source of
- * truth). */
+/* Single-user setup. Model services belong to Server; KB connection is optional settings. */
 
 import { FIELD_HELP, RESTART_KEYS } from '../pages/settingsHelp';
 import type { StepId } from './readiness';
 
 /** The knowledge-base mode that drives conditional step visibility. */
-export type WizardKbMode = 'local' | 'remote';
+export type WizardKbMode = 'none' | 'local' | 'remote';
 
 export interface WizardStep {
   id: StepId;
@@ -30,7 +21,7 @@ export interface WizardStep {
    * 'git_identity' = vaulted commit author, 'connection' = git-host auth,
    * 'workspace' = org enumerate + bulk clone.
    * Rendered specially by SetupWizard. */
-  kind?: 'account' | 'chooser' | 'kb' | 'deploy' | 'db2' | 'git_identity' | 'connection' | 'workspace';
+  kind?: 'account' | 'chooser' | 'deploy' | 'git_identity' | 'connection' | 'workspace';
   /** When present, the step is only shown for the kb modes it returns true for.
    * Absent ⇒ always shown. */
   showWhen?: (kbMode: WizardKbMode) => boolean;
@@ -46,16 +37,7 @@ export function ownsPrimaryAction(step: WizardStep): boolean {
 export const WIZARD_STEPS: WizardStep[] = [
   { id: 'account', title: 'Secure your account', keys: [], kind: 'account' },
   { id: 'provider', title: 'Primary provider', keys: [], kind: 'chooser' },
-  // Knowledge-base fork. Local deploys an aimee-kb here (needs the
-  // deploy-topology + DB2 steps below); remote connects to an existing one and
-  // skips all local infra.
-  { id: 'knowledge_base', title: 'Knowledge base', keys: [], kind: 'kb' },
-  // Local-only: LLM role placement for the deployed knowledge base.
-  { id: 'embedding', title: 'Deploy topology', keys: [], kind: 'deploy', showWhen: (m) => m === 'local' },
-  // Local-only: the shared Postgres (DB2) store the local KB writes to. A bespoke
-  // step: spawning your own KB deploys a bundled Postgres automatically (no URL),
-  // so db2_url is asked for only when pointing at an existing database.
-  { id: 'db2', title: 'Shared store (DB2)', keys: [], kind: 'db2', showWhen: (m) => m === 'local' },
+  { id: 'embedding', title: 'Local memory models', keys: [], kind: 'deploy' },
   { id: 'git_identity', title: 'Git commit identity', keys: [], kind: 'git_identity', skipNote: 'Without it, every commit is refused rather than attributed to an invented author.' },
   // Always: authenticate to git hosts (OAuth / token / SSH). Optional — public
   // repos clone without it.
@@ -64,23 +46,12 @@ export const WIZARD_STEPS: WizardStep[] = [
   { id: 'project', title: 'Workspaces & projects', keys: [], kind: 'workspace', skipNote: 'Without a connected repo, tools have no repository to act on.' },
 ];
 
-/** Infra steps the all-in-one appliance bakes (KB + LLM + shared store), so its
- * wizard hides them and only asks for the provider, git connection, and
- * workspaces. */
-export const APPLIANCE_HIDDEN_STEPS: ReadonlySet<StepId> = new Set<StepId>([
-  'knowledge_base',
-  'embedding',
-  'db2',
-]);
+/** Models remain configurable even on a prebuilt appliance. */
+export const APPLIANCE_HIDDEN_STEPS: ReadonlySet<StepId> = new Set<StepId>();
 
-/** The steps visible for the given kb mode, in order (drives the wizard's Step
- * N of M and next/back navigation). In `appliance` mode the baked-infra steps are
- * hidden regardless of kb mode. */
-export function visibleSteps(kbMode: WizardKbMode, appliance = false): WizardStep[] {
-  return WIZARD_STEPS.filter((s) => {
-    if (appliance && APPLIANCE_HIDDEN_STEPS.has(s.id)) return false;
-    return !s.showWhen || s.showWhen(kbMode);
-  });
+/** KB connection never changes the single-user setup path. */
+export function visibleSteps(_kbMode: WizardKbMode = 'none', _appliance = false): WizardStep[] {
+  return WIZARD_STEPS;
 }
 
 /** True when a config key only takes effect after a server restart. */

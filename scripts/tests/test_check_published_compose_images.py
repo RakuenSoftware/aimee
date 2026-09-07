@@ -26,6 +26,9 @@ class PublishedComposeImagesTests(unittest.TestCase):
             ".github/workflows/publish-testing.yml",
             ".github/workflows/publish-images.yml",
             "scripts/publish_testing_plan.py",
+            ".github/workflows/publish-llm.yml",
+            ".github/workflows/publish-embedder.yml",
+            ".github/workflows/auto-release.yml",
         ):
             source = REPO / relative
             target = root / relative
@@ -43,23 +46,29 @@ class PublishedComposeImagesTests(unittest.TestCase):
     def test_repository_passes(self) -> None:
         image_count, workflow_count = checker.validate(REPO)
         self.assertGreaterEqual(image_count, 4)
-        self.assertEqual(workflow_count, 3)
+        self.assertEqual(workflow_count, 4)
 
     def test_compose_image_missing_from_either_publisher_is_rejected(self) -> None:
         for workflow in ("publish-testing.yml", "publish-images.yml"):
             with self.subTest(workflow=workflow):
-                def remove_control_web(root: Path, name: str = workflow) -> None:
+                def remove_postgres(root: Path, name: str = workflow) -> None:
                     if name == "publish-testing.yml":
                         path = root / "scripts/publish_testing_plan.py"
-                        old = 'Image("aimee-control-web", "Dockerfile.control-web")'
-                        new = 'Image("omitted-control-web", "Dockerfile.control-web")'
+                        old = 'Image("aimee-postgres", "Dockerfile.postgres")'
+                        new = 'Image("omitted-postgres", "Dockerfile.postgres")'
                     else:
                         path = root / ".github/workflows" / name
-                        old = "{ name: aimee-control-web, dockerfile: Dockerfile.control-web }"
-                        new = "{ name: omitted-control-web, dockerfile: Dockerfile.control-web }"
+                        old = "{ name: aimee-postgres, dockerfile: Dockerfile.postgres }"
+                        new = "{ name: omitted-postgres, dockerfile: Dockerfile.postgres }"
                     path.write_text(path.read_text().replace(old, new, 1))
 
-                self.assert_rejected(remove_control_web, "does not publish aimee-control-web")
+                self.assert_rejected(remove_postgres, "does not publish aimee-postgres")
+
+    def test_manifest_merge_cannot_omit_a_built_image(self) -> None:
+        def remove_merge(root: Path) -> None:
+            path = root / ".github/workflows/publish-images.yml"
+            path.write_text(path.read_text().replace("image: [aimee, aimee-postgres,", "image: [aimee,"))
+        self.assert_rejected(remove_merge, "does not merge published image aimee-postgres")
 
     def test_testing_workflow_must_invoke_the_planner(self) -> None:
         def disconnect_planner(root: Path) -> None:
@@ -72,12 +81,17 @@ class PublishedComposeImagesTests(unittest.TestCase):
 
         self.assert_rejected(disconnect_planner, "does not invoke")
 
-    def test_weightless_image_is_rejected_for_bekko_topologies(self) -> None:
-        def select_weightless(root: Path) -> None:
-            path = root / "compose.server.yaml"
-            path.write_text(path.read_text().replace("aimee-kb-a25m:", "aimee-kb:"))
+    def test_base_must_not_install_kb(self) -> None:
+        def add_kb(root: Path) -> None:
+            path = root / "compose.yaml"
+            path.write_text(path.read_text() + "\n  aimee-kb:\n    image: forbidden\n")
+        self.assert_rejected(add_kb, "must not install a KB")
 
-        self.assert_rejected(select_weightless, "does not default to the bundled")
+    def test_embedder_release_promotion_is_required(self) -> None:
+        def remove_promotion(root: Path) -> None:
+            path = root / ".github/workflows/auto-release.yml"
+            path.write_text(path.read_text().replace("publish-embedder.yml", "disconnected.yml"))
+        self.assert_rejected(remove_promotion, "never calls publish-embedder")
 
 
 if __name__ == "__main__":

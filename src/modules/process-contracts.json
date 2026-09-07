@@ -1243,6 +1243,42 @@
         "server",
         "kb"
       ]
+    },
+    {
+      "id": "server",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 34,
+      "placements": [
+        "server"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "server-identity",
+          "event_kind": 12801,
+          "durability": "capture",
+          "durability_reason": "read-only first-boot identity; replay fidelity is sufficient"
+        }
+      ]
+    },
+    {
+      "id": "kb",
+      "execution": "process",
+      "runtime": "go",
+      "principal_ref": 35,
+      "placements": [
+        "kb"
+      ],
+      "stages": [
+        {
+          "id": 1,
+          "name": "kb-identity",
+          "event_kind": 13057,
+          "durability": "capture",
+          "durability_reason": "read-only first-boot identity; replay fidelity is sufficient"
+        }
+      ]
     }
   ],
   "clients": [
@@ -1361,7 +1397,8 @@
         "kb"
       ],
       "request": [
-        11266
+        11266,
+        4609
       ]
     },
     {

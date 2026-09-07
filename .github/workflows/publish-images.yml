@@ -1,24 +1,8 @@
 # Build the aimee container images on GitHub runners and push them to ghcr.io.
-# Covers the full image set used by the committed Compose topologies:
-#
-#   aimee-server     (Dockerfile.server)      ghcr.io/<owner>/aimee-server
-#   aimee-control-web (Dockerfile.control-web) ghcr.io/<owner>/aimee-control-web
-#   aimee-authority-bootstrap (Dockerfile.authority-bootstrap) ghcr.io/<owner>/aimee-authority-bootstrap
-#   aimee-css-render (deploy/css-render/Dockerfile) ghcr.io/<owner>/aimee-css-render
-#
-# plus the aimee-kb images, all three from the SAME Dockerfile via one build-arg.
-# The embedder is the only axis, and it is baked, so which embedder a deployment runs
-# is a property of the tag it pulled and never a first-run download:
-#
-#   aimee-kb        no embedder            EMBEDDER_URL required; ~373 MB
-#   aimee-kb-a25m   bekko-a25m (384)       ~1.95 GB
-#   aimee-kb-nomic  nomic-v2   (768)       ~3.34 GB
-#
-# SYNTHESIS IS NOT HERE. It used to be a second axis, doubling this to six tags and
-# rebuilding llama.cpp and a multi-gigabyte GGUF on every push that touched src/**.
-# It is its own image on its own trigger now (publish-llm.yml), rebuilt when the
-# model changes rather than when kb code does, and the aimee-model-* layers moved
-# there with it.
+# One application image supplies either immutable Server or KB composition.
+# PostgreSQL is standardized in its own encrypted storage image. Embedding and
+# synthesis publish separately from their model inputs and receive release tags
+# through the same approved release workflow.
 #
 # Multi-arch (linux/amd64 + linux/arm64) via the canonical build-by-digest then
 # merge-manifest pattern, on native runners (no QEMU emulation of the C build).
@@ -78,22 +62,9 @@ jobs:
       fail-fast: false
       matrix:
         image:
-          - { name: aimee-server,    dockerfile: Dockerfile.server }
+          - { name: aimee, dockerfile: Dockerfile.server }
+          - { name: aimee-postgres, dockerfile: Dockerfile.postgres }
           - { name: aimee-control-web, dockerfile: Dockerfile.control-web }
-          # The aimee-kb images, on ONE axis: the embedder. Synthesis used to be a
-          # second axis here, doubling this to six tags and rebuilding llama.cpp and
-          # a multi-gigabyte GGUF on every kb code change. It is its own image now
-          # (publish-llm.yml), rebuilt only when the model does.
-          #
-          # The embedder axis IS a one-way door per install: DB2 records the
-          # vector-column width and refuses to start on drift, so moving between
-          # these means re-embedding the corpus.
-          - { name: aimee-kb,        dockerfile: Dockerfile,
-              extra_args: "AIMEE_EMBEDDER=none" }
-          - { name: aimee-kb-a25m,   dockerfile: Dockerfile,
-              extra_args: "AIMEE_EMBEDDER=bekko-a25m" }
-          - { name: aimee-kb-nomic,  dockerfile: Dockerfile,
-              extra_args: "AIMEE_EMBEDDER=nomic-embed-text-v2-moe" }
           - { name: aimee-authority-bootstrap, dockerfile: Dockerfile.authority-bootstrap }
           # #4-full render backend (headless-Chromium sidecar). Self-contained
           # under deploy/css-render (its own build context); independent of the C
@@ -188,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        image: [aimee-server, aimee-control-web, aimee-kb, aimee-kb-a25m, aimee-kb-nomic,
+        image: [aimee, aimee-postgres, aimee-control-web,
                 aimee-authority-bootstrap, aimee-css-render]
     steps:
       - name: Normalize owner to lowercase

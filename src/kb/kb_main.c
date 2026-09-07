@@ -1,3 +1,4 @@
+#include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
 #include "aimee_home.h"
 #include "agent_exec.h"
@@ -782,7 +783,7 @@ static int kb_cmd_tenancy_init_db2(void)
    db2_set_schema_readonly(1);
    if (db2_init(db2_url) != 0)
    {
-      fprintf(stderr, "aimee-kb: DB2 not reachable at %s\n", db2_url);
+      fputs("aimee-kb: DB2 not reachable (check the Vault connection credential)\n", stderr);
       return -1;
    }
    return 0;
@@ -1655,11 +1656,6 @@ int main(int argc, char **argv)
       int n = home ? snprintf(embedded, sizeof(embedded), "postgresql:///aimee_shared?host=%s/run",
                               home)
                    : -1;
-      /* Prefix match to a parameter boundary, not string equality: the entrypoint
-       * seals the embedded DSN with an explicit &user=<cluster owner> so that
-       * containers sharing the socket connect as the right role. That trailing
-       * parameter does not make the topology external, and treating it as such
-       * would stop the KB provisioning its own cluster. */
       size_t embedded_len = n > 0 ? (size_t)n : 0;
       int matches_embedded = embedded_len > 0 && embedded_len < sizeof(embedded) &&
                              strncmp(db2_url, embedded, embedded_len) == 0 &&
@@ -1785,6 +1781,12 @@ int main(int argc, char **argv)
     * bus. Bring up that bus before the first accessor, then wait only during
     * startup for the supervisor (already running in the entrypoint) to attach. */
    audit_log_open();
+   if (bus_instance_ensure_identity(kb_default_config_dir(), BUS_INSTANCE_KB,
+                                    getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
+   {
+      fputs("aimee-kb: first-boot identity is unavailable or conflicts with kb\n", stderr);
+      return 1;
+   }
    if (kb_obs_bus_configure() != 0 ||
        obs_bus_configure_daemon_module_runtime("kb", kb_default_config_dir()) != 0 ||
        obs_bus_start() != 0)
@@ -1870,17 +1872,8 @@ int main(int argc, char **argv)
     * Without this nothing ever samples, and the registry only describes a
     * decision nobody makes. */
    kb_policy_arms_init();
-   /* Size the DB2 connection pool (leased by worker threads) before db2_init. */
    db2_set_pool_size(aimee_resolve_db2_pool_size(config_db2_connection_pool_size()));
-
-   /* AIMEE_DB2_URL is hydrated from Vault before this point. It intentionally
-    * has no public-config fallback. */
-
-   /* Auto-bootstrap on startup so kb keeps working for users who upgrade past
-    * the "DB2 required" cutover (#1151) without their config being touched.
-    * Mirrors the init RPC's fallback chain: env URL → default URL → createdb
-    * locally. Persists the resolved URL to config so subsequent starts are a
-    * fast path. */
+   /* The database credential is hydrated from Vault. */
    char db2_url[CONFIG_DB2_URL_LEN];
    if (!config_db2_url_effective(db2_url, sizeof(db2_url)))
    {
@@ -1944,13 +1937,13 @@ int main(int argc, char **argv)
       {
          if (attempt >= db2_max_attempts)
          {
-            fprintf(stderr, "aimee-kb: DB2 init failed for %s after %d attempts (%ds)\n", db2_url,
-                    attempt, attempt * db2_retry_secs);
+            fprintf(stderr, "aimee-kb: DB2 init failed after %d attempts (%ds)\n", attempt,
+                    attempt * db2_retry_secs);
             agent_http_cleanup();
             return 1;
          }
-         fprintf(stderr, "aimee-kb: DB2 not ready (%s); retry %d/%d in %ds\n", db2_url, attempt,
-                 db2_max_attempts, db2_retry_secs);
+         fprintf(stderr, "aimee-kb: DB2 not ready; retry %d/%d in %ds\n", attempt, db2_max_attempts,
+                 db2_retry_secs);
          sleep(db2_retry_secs);
          attempt++;
       }
@@ -1966,12 +1959,19 @@ int main(int argc, char **argv)
       fprintf(stderr, "aimee-kb: warning: rel_types ontology seed failed; typed-fact "
                       "commits will DEFER until the seed lands on a later start\n");
 
-   /* Bind the Postgres credential-vault backend (P10 slice 2) now that DB2 is up.
-    * The kb org vault stores ciphertext in org_vault_secret via the SECURITY DEFINER
-    * vault functions; the KEK stays behind file custody (the default provider). This
-    * is the kb bind — file custody stays default; later slices add external-anchor
-    * custody + seal/unseal before any key-holding activation on a hardened tier. */
-   vault_store_set_backend(&vault_pg_backend);
+   /* Instance custody stays local in both roles, including enrollment and
+    * pre-database keys. Only tenant credentials use the organization store. */
+   uint8_t instance_kek[VAULT_KEK_LEN];
+   int vault_bound = vault_server_kek(instance_kek) == 0 &&
+                     vault_store_bind_tenant_backend(&vault_pg_backend, instance_kek) == 0;
+   OPENSSL_cleanse(instance_kek, sizeof(instance_kek));
+   if (!vault_bound)
+   {
+      fputs("aimee-kb: instance Vault migration failed; refusing to start\n", stderr);
+      db2_shutdown();
+      agent_http_cleanup();
+      return 1;
+   }
 
    /* Every TPM2-custodied daemon takes the same NV-index singleton, including
     * deployments where D3 operator status is disabled. This closes the mixed

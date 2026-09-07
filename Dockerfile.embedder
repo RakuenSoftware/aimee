@@ -93,7 +93,8 @@ RUN chmod +x /usr/local/bin/aimee-embedder-entrypoint.sh
 # defaults inside HF_HOME and is read-only here. nomic needs it; point it at a writable
 # path or the model fails to load with "Permission denied: /opt/aimee/models/modules".
 ENV HF_MODULES_CACHE=/var/lib/aimee-embedder/.cache/huggingface/modules
-RUN useradd --system --home-dir /var/lib/aimee-embedder --create-home \
+RUN groupadd --gid 1000 aimee \
+    && useradd --uid 1000 --gid 1000 --home-dir /var/lib/aimee-embedder --create-home \
         --shell /usr/sbin/nologin aimee \
     && install -d -o aimee -g aimee -m 0700 /var/lib/aimee-embedder/tls \
     && install -d -o aimee -g aimee -m 0700 "$HF_MODULES_CACHE"

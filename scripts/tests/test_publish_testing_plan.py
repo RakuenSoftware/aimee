@@ -75,7 +75,7 @@ def main() -> None:
         kb,
         "KB runtime C source",
     )
-    failures += expect(["src/cli_argspec.c"], set(), "thin-client-only C source")
+    failures += expect(["src/cli_argspec.c"], set(planner.SERVER), "unified image includes the CLI")
     failures += expect(
         [
             "api/openapi-server-v1.yaml",

@@ -108,8 +108,8 @@ bootstrap_kb() {
     announce_project
     printf '%s\n' 'Sealing KB first-boot credentials into Vault (values are not logged or stored in container metadata).'
     env -0 | compose run --rm --no-deps -T \
-        --entrypoint /usr/local/bin/aimee-kb aimee-kb \
-        --bootstrap-vault-stdin
+        --entrypoint /usr/sbin/runuser aimee-kb \
+        -u aimee -- /usr/local/bin/aimee-kb --bootstrap-vault-stdin
 }
 
 case "$target" in

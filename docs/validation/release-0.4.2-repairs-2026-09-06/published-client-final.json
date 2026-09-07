@@ -1,0 +1,26 @@
+[
+  {
+    "name": "published CLI defaults store to user",
+    "passed": true
+  },
+  {
+    "name": "published CLI reads its local ID",
+    "passed": true
+  },
+  {
+    "name": "published CLI updates local ID",
+    "passed": true
+  },
+  {
+    "name": "published CLI deletes local ID",
+    "passed": true
+  },
+  {
+    "name": "published CLI served argspec selects historical KB record",
+    "passed": true
+  },
+  {
+    "name": "published CLI lists old KB records explicitly",
+    "passed": true
+  }
+]

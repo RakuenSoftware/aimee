@@ -12,6 +12,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 static char g_home[256];
 
@@ -90,14 +91,68 @@ static void test_bad_master_key_not_overwritten(void)
    printf("  PASS: test_bad_master_key_not_overwritten\n");
 }
 
-int main(void)
+static void test_concurrent_first_boot(const char *executable)
 {
+   pid_t children[16];
+   int pipes[16][2], start[2];
+   assert(pipe(start) == 0);
+   for (int i = 0; i < 16; i++)
+   {
+      assert(pipe(pipes[i]) == 0);
+      children[i] = fork();
+      assert(children[i] >= 0);
+      if (children[i] == 0)
+      {
+         close(start[1]);
+         char byte;
+         assert(read(start[0], &byte, 1) == 0);
+         assert(dup2(pipes[i][1], STDOUT_FILENO) == STDOUT_FILENO);
+         execl(executable, executable, "--derive-child", (char *)NULL);
+         _exit(1);
+      }
+      close(pipes[i][1]);
+   }
+   close(start[0]);
+   close(start[1]);
+   uint8_t first[VAULT_KEK_LEN], key[VAULT_KEK_LEN];
+   for (int i = 0; i < 16; i++)
+   {
+      size_t got = 0;
+      while (got < sizeof(key))
+      {
+         ssize_t n = read(pipes[i][0], key + got, sizeof(key) - got);
+         assert(n > 0);
+         got += (size_t)n;
+      }
+      close(pipes[i][0]);
+      int status;
+      assert(waitpid(children[i], &status, 0) == children[i]);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+      if (i == 0)
+         memcpy(first, key, sizeof(first));
+      else
+         assert(memcmp(first, key, sizeof(key)) == 0);
+   }
+   assert(vault_server_kek(key) == 0 && memcmp(first, key, sizeof(key)) == 0);
+   printf("  PASS: concurrent first boot retains one master key\n");
+}
+
+int main(int argc, char **argv)
+{
+   if (argc == 2 && strcmp(argv[1], "--derive-child") == 0)
+   {
+      uint8_t key[VAULT_KEK_LEN];
+      if (vault_server_kek(key) != 0)
+         return 1;
+      return write(STDOUT_FILENO, key, sizeof(key)) == sizeof(key) ? 0 : 1;
+   }
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-svrkey-test-%d", (int)getpid());
    char mk[320];
    snprintf(mk, sizeof(mk), "rm -rf %s && mkdir -p %s", g_home, g_home);
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", g_home, 1);
 
+   test_concurrent_first_boot(argv[0]);
    test_derive_nontrivial();
    test_stable_cached();
    test_survives_restart();

@@ -1,0 +1,67 @@
+{
+  "application_image": "aimee:unified042-v28",
+  "source_commit": "122cc89bf8bca55e9905c744a9d51bb7fe937a41",
+  "checks": [
+    {
+      "name": "KB-free local store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {}",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "recall returns personal text and scoped handle {'store': 'user'}",
+      "passed": true
+    },
+    {
+      "name": "KB-free session recall without hint",
+      "passed": true
+    },
+    {
+      "name": "KB-free CLI recall",
+      "passed": true
+    },
+    {
+      "name": "KB-free MCP recall",
+      "passed": true
+    },
+    {
+      "name": "recall rejects invalid store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall survives restart",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall reports unavailable local store",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall recovers",
+      "passed": true
+    },
+    {
+      "name": "KB-free local retirement",
+      "passed": true
+    },
+    {
+      "name": "KB-free recall after retirement",
+      "passed": true
+    },
+    {
+      "name": "retired personal record excluded from recall",
+      "passed": true
+    }
+  ],
+  "source_sha256": "0adea066f7741f66d29d06c03f05545709a5335abf643078eba977349381ab99"
+}

@@ -1,19 +1,7 @@
-/* Deploy topology (wizard page 2) — pure model + config mapping. No DOM, no
- * network: the whole key-translation contract is unit-tested (deployTopology.test.ts).
- *
- * The page makes two choices — which EMBEDDER turns text into vectors, and which
- * SYNTHESIS model writes curation and summaries — and picks the knowledge-base
- * mode. Everything it persists goes through /api/config/set, and
- * `aimee config deploy-env` translates it to container env.
- *
- * This used to place LLM "roles" onto a shared aimee-llm container: each role had
- * a backend (local/external/off), a tier (cpu/small/mid/large), a host and a GPU.
- * That container is retired. The aimee-kb IMAGE VARIANT now encodes what used to
- * be placement — which embedder is baked in, and whether llama.cpp ships with it —
- * so there is no tier to size and no host to choose at wizard time. What remains
- * is a model choice per role, plus an endpoint when the model is someone else's. */
+/* Local model selection for the owning Server. KB connection has its own
+ * Settings surface. Models run in separate containers or at external endpoints. */
 
-export type KbMode = 'local' | 'remote';
+export type KbMode = 'none' | 'local' | 'remote';
 
 /** One selectable embedder, as GET /api/embedders reports it. Every field here changes
  * the vectors, which is why the picker shows them rather than just a name. */
@@ -196,19 +184,10 @@ export interface DeploySelection {
   synthesis: SynthesisSelection;
 }
 
-/** Build the complete {key: value} config map a selection would persist. A remote
- * KB deploys nothing locally, so ONLY the kb_* keys are written, mirroring
- * `deploy-env`'s early return. Pure — the component saves only what changed. */
+/** Model configuration is independent of optional shared knowledge. Model setup
+ * never changes the KB connection or its credentials. */
 export function buildDesiredConfig(sel: DeploySelection): Record<string, string> {
-  const out: Record<string, string> = { kb_mode: sel.kbMode };
-  if (sel.kbMode === 'remote') {
-    out.kb_client_url = sel.kbUrl.trim();
-    out.kb_client_bearer_token = sel.kbBearer.trim();
-    return out;
-  }
-  Object.assign(out, embedderToConfig(sel.embedder));
-  Object.assign(out, synthesisToConfig(sel.synthesis));
-  return out;
+  return { ...embedderToConfig(sel.embedder), ...synthesisToConfig(sel.synthesis) };
 }
 
 function str(cfg: Record<string, unknown>, key: string): string {
@@ -226,7 +205,7 @@ export function configToEmbedder(cfg: Record<string, unknown>): EmbedderSelectio
     return {
       kind: 'external',
       endpoint: url,
-      apiKey: str(cfg, 'embedder_api_key'),
+      apiKey: typeof cfg.embedder_api_key === 'string' ? cfg.embedder_api_key : '',
       dims: str(cfg, 'embedder_dims'),
     };
   }
@@ -238,7 +217,7 @@ export function configToEmbedder(cfg: Record<string, unknown>): EmbedderSelectio
 export function configToSynthesis(cfg: Record<string, unknown>): SynthesisSelection {
   const endpoint = str(cfg, 'synthesis_endpoint').trim();
   if (endpoint) {
-    return { kind: 'external', endpoint, apiKey: str(cfg, 'synthesis_api_key') };
+    return { kind: 'external', endpoint, apiKey: typeof cfg.synthesis_api_key === 'string' ? cfg.synthesis_api_key : '' };
   }
   const model = str(cfg, 'synthesis_model').trim();
   if (model) return { kind: 'bundled', model };

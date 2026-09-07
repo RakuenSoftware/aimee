@@ -591,6 +591,9 @@ char *kb_client_memory_lint_json(void);
  * "alerts" or "recall".  Mirror memory_alerts / memory_recall. */
 char *kb_client_memory_alerts_json(const char *since);
 char *kb_client_memory_recall_json(const char *task_hint, int limit_tokens, int session_start);
+/* Shared-store recall without the legacy personal-memory merge. */
+char *kb_client_memory_recall_shared_json(const char *task_hint, int limit_tokens,
+                                          int session_start);
 /* As above, with an explicit graph-code fusion state ("off"/"shadow"/"on", NULL
  * = off). Production recall always forwards "on" (via kb_client_memory_recall_json);
  * this _ex form lets the eval/benchmark harness force a different state. */
@@ -1213,14 +1216,14 @@ char *kb_client_memory_scene_show_json(int64_t scene_id);
 
 typedef struct
 {
-   int skipped;       /* 1 if the scan was not run (busy / cooldown / kb down / kb error) */
-   int projects;      /* number of projects scanned (0 when skipped) */
-   int files;         /* number of files (re)indexed (0 when skipped) */
-   int inspected;     /* number of files visited (>= files); 0 if older kb */
-   int retracted;     /* files removed by a sealed complete manifest */
+   int skipped;   /* 1 if the scan was not run (busy / cooldown / kb down / kb error) */
+   int projects;  /* number of projects scanned (0 when skipped) */
+   int files;     /* number of files (re)indexed (0 when skipped) */
+   int inspected; /* number of files visited (>= files); 0 if older kb */
+   int retracted; /* files removed by a sealed complete manifest */
    long long index_revision;
-   long retry_after;  /* seconds until cooldown ends (0 when not in cooldown) */
-   char reason[32];   /* "busy" | "cooldown" | "no_kb" | "error" | "" */
+   long retry_after; /* seconds until cooldown ends (0 when not in cooldown) */
+   char reason[32];  /* "busy" | "cooldown" | "no_kb" | "error" | "" */
    char index_state[16];
    char workspace_state[16];
    char verification[16];
@@ -1331,6 +1334,9 @@ int kb_client_index_list(project_info_t *out, int max);
  * enrichment and degrade gracefully instead of blocking on a 15s autostart when
  * the service is down. */
 int kb_client_is_live(void);
+
+/* Configuration presence, independent of reachability or the circuit breaker. */
+int kb_client_connection_configured(void);
 
 /* Compute blast radius for a file. Returns 0 on success (out is
  * filled), -1 if kb is unreachable or the canonical lookup failed. */

@@ -32,35 +32,49 @@ on:
       - "scripts/embedder-server.py"
       - "scripts/embedders.json"
       - ".github/workflows/publish-embedder.yml"
-  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here. A PR build never
-  # pushes, so the skip check cannot engage on one -- the tag it looks for only appears
-  # at merge -- and every triggered PR therefore pays a full build. Editing this workflow
-  # is not a change to the image, so it must not cost two of them.
-  pull_request:
-    paths:
-      - "Dockerfile.embedder"
-      - "deploy/container/aimee-embedder-entrypoint.sh"
-      - "scripts/bake-embedder.py"
-      - "scripts/embedder-server.py"
-      - "scripts/embedders.json"
-  workflow_dispatch:
+  # Image builds belong to integration merges. Release calls only promote
+  # or validate existing manifests; they never rebuild model containers.
+  workflow_call:
     inputs:
-      force:
-        description: 'Rebuild even when the tag already exists'
+      version:
+        description: 'Approved release version; promotes the pinned build to :<version> + :latest'
+        required: true
+        type: string
+      publish:
+        description: 'Promote the pinned manifests; false validates that the exact promotion sources exist'
         required: false
         type: boolean
-        default: false
-
-concurrency:
-  group: publish-embedder-${{ github.ref }}
-  cancel-in-progress: true
+        default: true
 
 permissions:
   contents: read
   packages: write
 
 jobs:
+  changes:
+    if: inputs.version == '' && github.event_name == 'push' && github.ref == 'refs/heads/testing'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.inputs.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - name: Compare image inputs for this update
+        id: inputs
+        env:
+          BASE_SHA: ${{ github.event.before }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          python3 scripts/model-image-inputs-changed.py embedder "$BASE_SHA" HEAD >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: ${{ !cancelled() && (inputs.version != '' || needs.changes.outputs.changed == 'true') }}
+    # A no-op update must not cancel an earlier build of changed image inputs.
+    concurrency:
+      group: publish-embedder-${{ github.ref }}-${{ matrix.name }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -97,8 +111,6 @@ jobs:
       # make detectable.
       - name: Has this exact build already been published?
         id: have
-        env:
-          FORCE: ${{ inputs.force }}
         run: |
           rev=$(cat Dockerfile.embedder \
                     deploy/container/aimee-embedder-entrypoint.sh \
@@ -108,11 +120,6 @@ jobs:
           pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${rev}"
           echo "embedder sources hash to $rev"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
-          if [ "${FORCE:-false}" = "true" ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "forced rebuild requested; ignoring any published $pinned"
-            exit 0
-          fi
           if docker manifest inspect "$pinned" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "$pinned already published; nothing to build"
@@ -121,21 +128,17 @@ jobs:
           fi
 
       - name: Set up Docker Buildx
-        if: steps.have.outputs.exists != 'true'
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
 
-      # A PULL REQUEST BUILDS BUT NEVER PUSHES: publishing is a merge-time act. The PR
-      # still proves the image builds AND that its model loads offline at the declared
-      # width, because Dockerfile.embedder asserts both in its final stage -- so a
-      # weightless or mis-sized image fails here rather than at first search.
+      # Build only changed image inputs merged to testing.
       - name: Build ${{ matrix.name }}
-        if: steps.have.outputs.exists != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/testing' && inputs.version == '' && steps.have.outputs.exists != 'true'
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
           file: Dockerfile.embedder
           platforms: linux/amd64
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true
           provenance: mode=max
           sbom: true
           cache-from: type=gha,scope=${{ matrix.name }}-amd64
@@ -150,45 +153,48 @@ jobs:
       # no kb: it proves the sidecar refuses to start without an identity, requires a
       # client certificate, and actually embeds at the width the registry declares.
       #
-      # On a pull request the image is loaded locally rather than pushed, so this runs
-      # against the local tag; on a push the same digest has just been published.
-      - name: Load ${{ matrix.name }} locally for the hop test
-        if: steps.have.outputs.exists != 'true' && github.event_name == 'pull_request'
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
-        with:
-          context: .
-          file: Dockerfile.embedder
-          platforms: linux/amd64
-          load: true
-          # Docker's local image store cannot load the manifest list BuildKit
-          # creates for attestations. The preceding publish/cache build proves
-          # provenance and SBOM generation; this second output exists only for
-          # the local mTLS hop test.
-          provenance: false
-          sbom: false
-          cache-from: type=gha,scope=${{ matrix.name }}-amd64
-          build-args: |
-            AIMEE_EMBEDDER=${{ matrix.model }}
-          tags: ${{ matrix.name }}:cihop
-
       - name: mTLS hop test
-        if: steps.have.outputs.exists != 'true'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/testing' && inputs.version == '' && steps.have.outputs.exists != 'true'
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            img="${{ matrix.name }}:cihop"
-          else
-            img="${{ steps.have.outputs.pinned }}"
-            docker pull -q "$img"
-          fi
+          img="${{ steps.have.outputs.pinned }}"
+          docker pull -q "$img"
           dim=$(python3 -c "import json;print(json.load(open('scripts/embedders.json'))['embedders']['${{ matrix.model }}']['dim'])")
           bash scripts/test-embedder-mtls-hop.sh "$img" "$dim"
+
+      # Registry-side promotion of the pinned build. This intentionally does not
+      # pull or rebuild the multi-gigabyte synthesis images during a release.
+      - name: Promote to :${{ inputs.version }} and :latest
+        if: ${{ inputs.version != '' && inputs.publish }}
+        run: |
+          set -euo pipefail
+          pinned='${{ steps.have.outputs.pinned }}'
+          image="ghcr.io/${OWNER}/${{ matrix.name }}"
+          if ! docker manifest inspect "$pinned" >/dev/null 2>&1; then
+            echo "::error::$pinned is not published; cannot promote ${{ matrix.name }} to a release"
+            exit 1
+          fi
+          docker buildx imagetools create \
+            --tag "${image}:${{ inputs.version }}" \
+            --tag "${image}:latest" \
+            "$pinned"
+
+      # A promotion PR must prove the immutable source manifest exists. The
+      # real release runs the adjacent promotion command against this exact
+      # value; validation suppresses only the registry tag mutation.
+      - name: Validate release promotion source
+        if: ${{ inputs.version != '' && !inputs.publish }}
+        run: |
+          pinned='${{ steps.have.outputs.pinned }}'
+          docker manifest inspect "$pinned" >/dev/null || {
+            echo "::error::$pinned is not published; release promotion would fail"
+            exit 1
+          }
+          echo "validated release source $pinned"
 
       - name: Report
         run: |
           if [ "${{ steps.have.outputs.exists }}" = "true" ]; then
             echo "skipped: ${{ steps.have.outputs.pinned }} already published"
-          elif [ "${{ github.event_name }}" = "pull_request" ]; then
-            echo "built ${{ matrix.name }} (pull request: not pushed)"
           else
             echo "published ${{ steps.have.outputs.pinned }} and :testing"
           fi

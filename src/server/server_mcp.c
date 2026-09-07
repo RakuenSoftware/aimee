@@ -1,6 +1,8 @@
 /* server_mcp.c: handle mcp.call -- dispatches MCP tool calls within the server */
 #include "server_mcp_internal.h"
 #include "server.h"
+#include "server_state_internal.h"
+#include "module_stage_adapters.h"
 #include "aimee.h"
 #include "json_fluent.h" /* jo_ok */
 #include "dstr.h"
@@ -340,6 +342,23 @@ cJSON *tool_search_memory(cJSON *args)
    if (!cJSON_IsString(jq))
       return text_content("error: missing 'query' parameter");
 
+   int selection = server_memory_store_selection(args);
+   if (selection < 0)
+      return text_content("error: memory store must be user or kb");
+   if (!selection)
+   {
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "operation", "search");
+      cJSON_AddStringToObject(request, "query", jq->valuestring);
+      cJSON_AddNumberToObject(request, "limit", 20);
+      cJSON *reply = server_module_memory_data(request);
+      cJSON_Delete(request);
+      if (!reply)
+         return text_content("error: user memory unavailable");
+      cJSON_AddStringToObject(reply, "store", "user");
+      return json_result_content(reply);
+   }
+
    const char *scope_type = NULL;
    const char *scope_value = NULL;
    cJSON *jf = cJSON_GetObjectItemCaseSensitive(args, "filter");
@@ -385,6 +404,40 @@ cJSON *tool_memory_mutate(cJSON *args)
    if (!cJSON_IsString(jv))
       return text_content("error: missing 'verb' parameter");
    const char *verb = jv->valuestring;
+
+   int selection = server_memory_store_selection(args);
+   if (selection < 0)
+      return text_content("error: memory store must be user or kb");
+   if (!selection)
+   {
+      if (strcmp(verb, "store") == 0)
+         return json_result_content(memory_store_command(args, MEMORY_AUTHORITY_MODEL));
+      if (strcmp(verb, "forget") == 0)
+         return json_result_content(memory_delete_command(args, ""));
+      if (strcmp(verb, "update") != 0 && strcmp(verb, "supersede") != 0)
+         return text_content("error: this mutation requires store=kb");
+      int64_t id;
+      const char *content = jo_str(args, "content", "");
+      if (memory_request_positive_id(args, "id", &id) != 0 || !content[0])
+         return text_content("error: update requires a positive id and content");
+      cJSON *request = cJSON_CreateObject();
+      cJSON_AddStringToObject(request, "operation", "supersede");
+      cJSON_AddNumberToObject(request, "id", (double)id);
+      cJSON_AddStringToObject(request, "content", content);
+      cJSON_AddNumberToObject(request, "confidence", jo_num(args, "confidence", 1));
+      cJSON *reply = server_module_memory_data(request);
+      cJSON_Delete(request);
+      if (!reply)
+         return text_content("error: user memory unavailable");
+      cJSON *records = cJSON_GetObjectItemCaseSensitive(reply, "records");
+      if (!cJSON_IsArray(records) || cJSON_GetArraySize(records) == 0)
+      {
+         cJSON_Delete(reply);
+         return text_content("error: user memory not found");
+      }
+      cJSON_AddStringToObject(reply, "store", "user");
+      return json_result_content(reply);
+   }
 
    cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
    cJSON *jky = cJSON_GetObjectItemCaseSensitive(args, "key");
@@ -741,63 +794,44 @@ cJSON *tool_get_context_block(cJSON *args)
 
 cJSON *tool_memory_get(cJSON *args)
 {
-   cJSON *jid = cJSON_GetObjectItemCaseSensitive(args, "id");
-   cJSON *jh = cJSON_GetObjectItemCaseSensitive(args, "handle");
-   int64_t id = 0;
-   if (cJSON_IsNumber(jid))
-      id = (int64_t)jid->valuedouble;
-   else if (cJSON_IsString(jh))
+   if (server_memory_store_selection(args) < 0)
+      return text_content("error: memory store must be user or kb");
+   cJSON *request = cJSON_Duplicate(args, 1);
+   const char *handle = jo_str(args, "handle", "");
+   if (handle[0])
    {
-      const char *s = jh->valuestring;
-      if (strncmp(s, "memory:", 7) == 0)
-         s += 7;
-      id = (int64_t)strtoll(s, NULL, 10);
+      const char *store = NULL;
+      const char *number = NULL;
+      if (strncmp(handle, "memory:", 7) == 0)
+         store = "kb", number = handle + 7; /* existing KB preview handles */
+      else if (strncmp(handle, "kb:memory:", 10) == 0)
+         store = "kb", number = handle + 10;
+      else if (strncmp(handle, "user:memory:", 12) == 0)
+         store = "user", number = handle + 12;
+      char *end = NULL;
+      long long id = number ? strtoll(number, &end, 10) : 0;
+      const char *explicit_store = jo_str(args, "store", store);
+      cJSON *explicit_id = cJSON_GetObjectItemCaseSensitive(args, "id");
+      if (!store || !end || *end || id <= 0 || strcmp(explicit_store, store) != 0 ||
+          (explicit_id && (!cJSON_IsNumber(explicit_id) || explicit_id->valuedouble != (double)id)))
+      {
+         cJSON_Delete(request);
+         return text_content("error: invalid or conflicting memory handle");
+      }
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "id");
+      cJSON_AddNumberToObject(request, "id", (double)id);
+      cJSON_DeleteItemFromObjectCaseSensitive(request, "store");
+      cJSON_AddStringToObject(request, "store", store);
    }
-   if (id <= 0)
-      return text_content("error: missing memory id or memory:<id> handle");
-
-   /* The EVENT-time question. This used to call kb_client_memory_get, which only
-    * answers what the memory says NOW, and ignored as_of entirely -- the parameter
-    * was not even in the schema, so an agent could not ask. A memory superseded
-    * last week therefore read exactly like a current one: no error, no verdict,
-    * maximum confidence, wrong. The CLI has answered this since --as-of shipped;
-    * the agent surface silently did not. */
-   const cJSON *jas_of = cJSON_GetObjectItemCaseSensitive(args, "as_of");
-   const char *as_of = cJSON_IsString(jas_of) ? jas_of->valuestring : NULL;
-
-   memory_t m;
-   kb_valid_at_t verdict = KB_VALID_AT_UNASKED;
-   int memory_rc = kb_client_memory_get_as_of(id, as_of, &m, &verdict);
-   if (memory_rc > 0)
-      return kb_empty_result_content("memory not found");
-   if (memory_rc < 0)
-      return kb_last_result_content("memory lookup returned no result");
-
-   dstr_t d;
-   dstr_init(&d);
-   dstr_appendf(&d, "Memory: memory:%lld\nTier: %s\nKind: %s\nKey: %s\nConfidence: %.3f\n",
-                (long long)m.id, m.tier, m.kind, m.key, m.confidence);
-   /* Answer beside the question: a verdict with no timestamp is unreadable, and
-    * "unknown" is kept distinct from "no" -- could not tell and was not in force
-    * are different answers, and collapsing them is how a hedge becomes a denial. */
-   if (verdict != KB_VALID_AT_UNASKED && as_of)
-      dstr_appendf(&d, "Valid at %s: %s\n", as_of,
-                   verdict == KB_VALID_AT_UNKNOWN ? "unknown"
-                                                  : (verdict == KB_VALID_AT_YES ? "yes" : "no"));
-   if (m.headline[0])
-      dstr_appendf(&d, "Headline: %s\n", m.headline);
-   if (m.updated_at[0])
-      dstr_appendf(&d, "Updated: %s\n", m.updated_at);
-   dstr_append_str(&d, "\n");
-   dstr_append_str(&d, m.content);
-   char *rendered = dstr_steal(&d);
-   cJSON *result = text_content(rendered ? rendered : "");
-   free(rendered);
-   return result;
+   cJSON *reply = memory_get_command(request);
+   cJSON_Delete(request);
+   return json_result_content(reply);
 }
 
 cJSON *tool_list_facts(cJSON *args)
 {
+   if (server_memory_store_selection(args) != 1)
+      return json_result_content(memory_list_command(args));
    memory_t facts[64];
    int active_context_missing = 0;
    mcp_memory_scope_begin(args, &active_context_missing);

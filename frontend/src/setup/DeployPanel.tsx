@@ -4,14 +4,14 @@ import { Button } from '@rakuensoftware/smoothgui';
 /* Setup-wizard summary panel — server-orchestrated deploy.
  *
  * When aimee-server runs with the Docker socket mounted (AIMEE_DEPLOY_ENABLED), it
- * can bring up the managed sibling service (aimee-kb) from
+ * can bring up the local model services from
  * the wizard config via `docker compose up -d`. This panel drives that from the
  * finish screen: it checks whether orchestration is available (GET
  * /api/deploy/status → 503 when disabled), shows the current service states, and
  * offers a "Deploy" button (POST /api/deploy/apply) that runs on a server
  * background thread while the panel polls status until it settles.
  *
- * Only meaningful for a LOCAL knowledge base — a remote KB deploys nothing, so the
+ * Independent of the optional KB connection; the
  * wizard renders nothing here. When orchestration is disabled the panel falls back
  * to the copy-paste compose command, so the operator is never left without a path. */
 
@@ -62,7 +62,7 @@ export function serviceFailed(s: Svc): boolean {
 //
 // This used to match ONLY aimee-llm, because that container was the slow one. It
 // is retired, which would have left the predicate permanently false and stopped
-// the panel polling while aimee-kb was still starting. Match any service in a
+// the panel polling while a model was still starting. Match any service in a
 // starting state instead. "restarting" is excluded by serviceFailed, and the
 // word boundary keeps it from matching here in the first place.
 export function servicePending(s: Svc): boolean {
@@ -107,7 +107,7 @@ export function remoteSetCommand(hostname: string, port: number, bearer: string)
   return `aimee remote set https://${host}:${port} ${bearer}`;
 }
 
-export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) {
+export default function DeployPanel() {
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<DeployStatus | null>(null);
   const [applying, setApplying] = useState(false);
@@ -158,10 +158,6 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   }, [loadStatus]);
 
   useEffect(() => {
-    if (kbMode !== 'local') {
-      setLoading(false);
-      return;
-    }
     (async () => {
       const current = await loadStatus();
       setLoading(false);
@@ -173,7 +169,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
     return () => {
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [kbMode, loadStatus, poll]);
+  }, [loadStatus, poll]);
 
   async function deploy() {
     if (timer.current) {
@@ -217,16 +213,16 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
     }
   }
 
-  if (kbMode !== 'local' || loading || !status) return null;
+  if (loading || !status) return null;
 
   // Orchestration off: hand the operator the one compose command instead.
   if (!status.enabled) {
     return (
       <div style={box}>
-        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Bring up the stack</div>
+        <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 4 }}>Local model services</div>
         <div style={{ fontSize: 12, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
-          This server can’t launch containers itself. Start the knowledge base + LLM alongside it with:
-          <pre style={pre}>docker compose -f compose.server.yaml up -d</pre>
+          The default embedder is managed by Compose. To start optional local synthesis, run on the deployment host:
+          <pre style={pre}>scripts/compose-local.sh -f compose.yaml --profile synthesis up -d aimee-llm</pre>
         </div>
       </div>
     );
@@ -234,7 +230,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
 
   const svcs = parsePs(status.ps);
   const failedSvcs = svcs.filter(serviceFailed);
-  const settledOk = !status.running && status.last_exit === 0 && failedSvcs.length === 0;
+  const settledOk = !status.running && status.last_exit === 0 && failedSvcs.length === 0 && !svcs.some(servicePending);
   const settledErr = !status.running && status.last_exit !== null && status.last_exit !== 0;
   const enrollmentCommand = enrollment?.bearer_token
     ? remoteSetCommand(window.location.hostname, enrollment.tls_port, enrollment.bearer_token)
@@ -243,7 +239,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
   return (
     <div style={box}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-        <div style={{ fontWeight: 700, fontSize: 13 }}>Deploy the knowledge base + LLM</div>
+        <div style={{ fontWeight: 700, fontSize: 13 }}>Deploy local model services</div>
         <Button variant="primary"
           style={applying || status.running ? { background: 'var(--sg-text-hint)', borderColor: 'var(--sg-text-hint)', cursor: 'default' } : undefined}
           disabled={applying || status.running}
@@ -252,7 +248,7 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </Button>
       </div>
       <div style={{ fontSize: 12, color: 'var(--sg-text-muted)', lineHeight: 1.5, marginBottom: svcs.length ? 8 : 0 }}>
-        aimee-server brings up aimee-kb, including its database, for you via Docker. No extra commands.
+        Deploy the selected local embedding and optional synthesis services.
       </div>
 
       {svcs.length > 0 && (
@@ -267,9 +263,9 @@ export default function DeployPanel({ kbMode }: { kbMode: 'local' | 'remote' }) 
         </div>
       )}
 
-      {status.running && <div style={{ fontSize: 12, color: 'var(--sg-warning-dark)' }}>⏳ Starting KB, then LLM (image pulls can take a few minutes)…</div>}
+      {status.running && <div style={{ fontSize: 12, color: 'var(--sg-warning-dark)' }}>⏳ Starting model services (image pulls can take a few minutes)…</div>}
       {settledOk && <div style={{ fontSize: 12, color: 'var(--sg-success-dark)' }}>
-        ✅ Stack containers are up. LLM model downloads may continue in the background.
+        ✅ Local model configuration applied.
       </div>}
       {settledErr && <div style={{ fontSize: 12, color: 'var(--sg-danger-dark)' }}>⛔ Deploy exited with code {status.last_exit}. See the log below.</div>}
       {!settledErr && failedSvcs.length > 0 && <div style={{ fontSize: 12, color: 'var(--sg-danger-dark)' }}>

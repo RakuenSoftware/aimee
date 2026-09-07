@@ -38,6 +38,84 @@ static int crash_client(const char *socket_path)
       pause();
 }
 
+/* Role admission is stricter than the grant file. Both role grants deliberately
+ * exist here so placement generation cannot accidentally make this test pass. */
+static void test_role_admission(const char *path, const char *executable)
+{
+   bus_runtime_grant_t grants[2] = {{.principal_class = 1,
+                                     .principal_ref = BUS_SERVER_ROLE_REF,
+                                     .uid = BUS_RUNTIME_SELF_UID,
+                                     .executable = executable},
+                                    {.principal_class = 1,
+                                     .principal_ref = BUS_KB_ROLE_REF,
+                                     .uid = BUS_RUNTIME_SELF_UID,
+                                     .executable = executable}};
+   for (bus_instance_role_t role = BUS_INSTANCE_UNSET; role <= BUS_INSTANCE_KB; role++)
+   {
+      bus_host_config_t hc = {.max_slots = 8,
+                              .slot_size = 512,
+                              .inline_budget = 400,
+                              .queue_capacity = 8,
+                              .arena_size = 16384};
+      bus_host_t host;
+      assert(bus_host_create(&host, &hc, NULL, NULL) == BUS_HOST_OK);
+      pthread_mutex_t lock = PTHREAD_MUTEX_INITIALIZER;
+      bus_runtime_config_t cfg = {.socket_path = path,
+                                  .socket_mode = 0600,
+                                  .backlog = 8,
+                                  .grants = grants,
+                                  .grant_count = 2,
+                                  .instance_role = role};
+      bus_runtime_t *runtime = bus_runtime_start(&host, &lock, &cfg);
+      assert(runtime);
+      bus_client_t allowed, denied;
+      if (role == BUS_INSTANCE_UNSET)
+      {
+         assert(attach(path, BUS_SERVER_ROLE_REF, &denied) == BUS_CLIENT_DENIED);
+         assert(attach(path, BUS_KB_ROLE_REF, &denied) == BUS_CLIENT_DENIED);
+      }
+      else
+      {
+         uint32_t ref = role == BUS_INSTANCE_SERVER ? BUS_SERVER_ROLE_REF : BUS_KB_ROLE_REF;
+         uint32_t other = role == BUS_INSTANCE_SERVER ? BUS_KB_ROLE_REF : BUS_SERVER_ROLE_REF;
+         assert(attach(path, ref, &allowed) == BUS_CLIENT_OK);
+         assert(attach(path, other, &denied) == BUS_CLIENT_DENIED);
+         assert(attach(path, ref, &denied) == BUS_CLIENT_DENIED);
+         bus_client_detach(&allowed);
+      }
+      bus_runtime_stop(&runtime);
+      bus_host_destroy(&host);
+      pthread_mutex_destroy(&lock);
+   }
+}
+
+static void test_identity_latch(const char *directory)
+{
+   char path[PATH_MAX];
+   snprintf(path, sizeof path, "%s/instance-identity.json", directory);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_SERVER, "/nonexistent") != 0);
+   FILE *f = fopen(path, "w");
+   assert(f);
+   const char *record =
+       "{\"version\":1,\"role\":\"server\",\"id\":\"dff6b808-0888-41db-b6fc-fc4077dbe3a2\"}\n";
+   assert(fputs(record, f) >= 0);
+   assert(fclose(f) == 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_SERVER, "/nonexistent") != 0);
+   assert(chmod(path, 0444) == 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_SERVER, "/nonexistent") == 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_KB, "/nonexistent") != 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_UNSET, NULL) != 0);
+   assert(chmod(path, 0644) == 0);
+   f = fopen(path, "a");
+   assert(f && fputs("trailing", f) >= 0 && fclose(f) == 0);
+   assert(chmod(path, 0444) == 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_SERVER, NULL) != 0);
+   assert(unlink(path) == 0);
+   assert(symlink("/nonexistent", path) == 0);
+   assert(bus_instance_ensure_identity(directory, BUS_INSTANCE_SERVER, NULL) != 0);
+   assert(unlink(path) == 0);
+}
+
 int main(int argc, char **argv)
 {
    if (argc == 3 && strcmp(argv[1], "--crash-client") == 0)
@@ -181,6 +259,8 @@ int main(int argc, char **argv)
    bus_runtime_stop(&runtime);
    bus_host_destroy(&host);
    pthread_mutex_destroy(&host_lock);
+   test_role_admission(socket_path, executable);
+   test_identity_latch(directory);
    assert(unlink(grant_path) == 0);
    assert(rmdir(policy_path) == 0);
    assert(rmdir(directory) == 0);

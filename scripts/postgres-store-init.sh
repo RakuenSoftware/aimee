@@ -16,6 +16,10 @@ psql --set=ON_ERROR_STOP=1 --username "$admin_user" --dbname "$POSTGRES_DB" \
   --set=admin_password="$POSTGRES_PASSWORD" \
   --set=migrator_password="$AIMEE_STORE_MIGRATOR_PASSWORD" \
   --set=runtime_password="$AIMEE_STORE_RUNTIME_PASSWORD" <<'SQL'
+-- Extensions are owned by the PostgreSQL module, before restricted domain migrations.
+SELECT format('CREATE EXTENSION IF NOT EXISTS %I', name)
+FROM pg_available_extensions WHERE name IN ('vector','vectorscale','pg_trgm')
+ORDER BY CASE name WHEN 'vector' THEN 1 WHEN 'vectorscale' THEN 2 ELSE 3 END \gexec
 SELECT format('CREATE ROLE postgres LOGIN SUPERUSER PASSWORD %L', :'admin_password')
 WHERE NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') \gexec
 SELECT format('ALTER ROLE postgres WITH LOGIN SUPERUSER PASSWORD %L', :'admin_password') \gexec

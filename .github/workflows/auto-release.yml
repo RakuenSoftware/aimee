@@ -134,6 +134,16 @@ jobs:
       version: ${{ needs.version.outputs.version }}
       publish: true
 
+  embedder-images:
+    needs: [version, tag, thin-clients]
+    uses: ./.github/workflows/publish-embedder.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: true
+
   images:
     # The thin-client reusable job includes signed artifact publication. Keeping
     # image publication behind it prevents the partial-release state where GHCR
@@ -167,8 +177,8 @@ jobs:
   # same number instead of silently skipping it. Every step is `|| true` so this
   # cleanup can never mask the original failure, and the run still reports it.
   rollback-tag:
-    needs: [version, tag, thin-clients, images, llm-images]
-    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled' || needs.llm-images.result == 'failure' || needs.llm-images.result == 'cancelled')
+    needs: [version, tag, thin-clients, images, llm-images, embedder-images]
+    if: always() && needs.tag.result == 'success' && (needs.images.result == 'failure' || needs.images.result == 'cancelled' || needs.thin-clients.result == 'failure' || needs.thin-clients.result == 'cancelled' || needs.llm-images.result == 'failure' || needs.llm-images.result == 'cancelled' || needs.embedder-images.result == 'failure' || needs.embedder-images.result == 'cancelled')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -179,7 +189,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           tag="v${{ needs.version.outputs.version }}"
-          echo "::warning::release $tag did not complete (images=${{ needs.images.result }}, thin-clients=${{ needs.thin-clients.result }}, llm-images=${{ needs.llm-images.result }}); removing the tag so the version is not claimed"
+          echo "::warning::release $tag did not complete (images=${{ needs.images.result }}, thin-clients=${{ needs.thin-clients.result }}, llm-images=${{ needs.llm-images.result }}, embedder-images=${{ needs.embedder-images.result }}); removing the tag so the version is not claimed"
           gh release delete "$tag" --yes --cleanup-tag 2>/dev/null || true
           git push origin --delete "$tag" 2>/dev/null || true
           if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then

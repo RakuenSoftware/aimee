@@ -499,6 +499,7 @@ extern "C"
    typedef struct
    {
       int retrieval_ok; /* 1 usable, 0 failed, -1 unknown */
+      int kb_disabled;  /* no optional KB connection; shared retrieval is disabled */
       int modules_ok;   /* required local process modules attached */
       const char *failed_boundary;
       const char *missing_module;

@@ -62,6 +62,7 @@ fi
 # `make all` does not build the module, so build it here.
 # The multicall binary; the store and postgres are two names for it.
 DB1_MODULE_BUILT="$REPO/src/build/obj/aimee-module"
+export AIMEE_TEST_MODULE_BIN="$DB1_MODULE_BUILT"
 CONFIG_MODULE_BUILT="$REPO/src/build/obj/aimee-module-config"
 if [[ ! -x "$DB1_MODULE_BUILT" || ! -x "$CONFIG_MODULE_BUILT" ]]; then
   bold "==> Building the store and config modules"

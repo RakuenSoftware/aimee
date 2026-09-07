@@ -36,9 +36,10 @@ See the [technical reference](../../src/README.md) for the process and source ma
 ## Turning optional modules on and off
 
 The canonical inventory splits modules into **required** and **optional**
-(`tests/baselines/modules/canonical-inventory.yaml`). Required modules always
-run: a deployment without `memory` or `routing` is not a smaller deployment, it
-is a broken one, so only the optional set is operator-controlled.
+(`tests/baselines/modules/canonical-inventory.yaml`). Required modules run within their declared
+placement. The immutable identity selects Server or KB; the two role modules
+never run together. A deployment needs common modules such as `memory`,
+`routing` and `postgres`, so only the optional set is operator-controlled.
 
 Classification is independent of a module's **principal ref**. The ref is
 declared per module in the same file (`principal_refs`) rather than derived from
@@ -69,10 +70,12 @@ AIMEE_MODULE_KB_SYNTHESIS=1   # kb-placed module
 Optional modules by placement:
 
 - **server**: `governance`, `roundtable`, `benchmarks`, `runtime-web`, `economizer`
-- **kb**: `kb-synthesis`, `control-web`, `benchmarks`, `postgres`
+- **kb**: `kb-synthesis`, `control-web`, `benchmarks`
 
 Required modules are not part of this control surface. In particular, `sandbox`
 is always active and there is no supported `AIMEE_MODULE_SANDBOX` setting.
+PostgreSQL is required by both Server and KB; `AIMEE_MODULE_POSTGRES` cannot
+disable the common store.
 
 The setting is read at container start by `deploy/container/optional-modules-lib.sh`,
 which rewrites a copy of the shipped module manifest before

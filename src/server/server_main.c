@@ -1,4 +1,5 @@
 /* server_main.c: aimee-server entry point -- socket lifecycle, signal handling */
+#include <aimee/core/event_bus/bus_runtime.h>
 #include "aimee.h"
 #include <aimee/tools/agent_tools.h>
 #include "cli_client.h"
@@ -207,6 +208,12 @@ static int run_server(const char *socket_path, log_level_t log_level)
    }
    if (server_obs_bus_configure() != 0)
       LOG_WARN("obs_bus", "shared event bus was already started before server sink configuration");
+   if (bus_instance_ensure_identity(config_default_dir(), BUS_INSTANCE_SERVER,
+                                    getenv("AIMEE_MODULE_RUNTIME_BIN")) != 0)
+   {
+      fprintf(stderr, "aimee: first-boot identity is unavailable or conflicts with server\n");
+      return 1;
+   }
    if (obs_bus_configure_daemon_module_runtime("server", config_default_dir()) != 0)
    {
       startup_notify(notify_fd, "error: invalid server module-bus path configuration\n");
@@ -340,19 +347,6 @@ static int run_server(const char *socket_path, log_level_t log_level)
    {
       if (config_kb_client_url()[0])
          platform_setenv("AIMEE_KB_API_URL", config_kb_client_url());
-      else
-      {
-         /* Co-located default: with no remote kb_client_url and no explicit
-          * AIMEE_KB_API_URL, point at the local aimee-kb sidecar. The systemd
-          * unit, the launchd plist, and the fork-and-exec fallback all serve it
-          * on 127.0.0.1:8741 (kb_api_http_port if the operator overrode it).
-          * Without this a source install's server has no kb URL at all and every
-          * DB2-backed feature (memory/kb/rules) silently reports "unavailable". */
-         char local_kb[64];
-         int kb_port = config_kb_api_http_port() > 0 ? config_kb_api_http_port() : 8741;
-         snprintf(local_kb, sizeof(local_kb), "http://127.0.0.1:%d", kb_port);
-         platform_setenv("AIMEE_KB_API_URL", local_kb);
-      }
    }
    /* The workflow engine is deliberately config-free (it links and tests in isolation),
     * so it reads the PR base policy from the environment. Export the configured value
@@ -514,6 +508,8 @@ int main(int argc, char **argv)
    if (argc >= 2 && strcmp(argv[1], "--list-credential-env-names") == 0)
       return vault_env_print_credential_names() == 0 ? 0 : 1;
 
+   if (argc == 2 && strcmp(argv[1], "--postgres-vault-resource") == 0)
+      return vault_env_postgres_resource() == 0 ? 0 : 1;
    if (argc == 2 && strcmp(argv[1], "--module-vault-resource") == 0)
       return vault_env_module_resource() == 0 ? 0 : 1;
 

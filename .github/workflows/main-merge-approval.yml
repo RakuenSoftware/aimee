@@ -47,6 +47,16 @@ jobs:
       version: ${{ needs.version.outputs.version }}
       publish: false
 
+  embedder-images:
+    needs: [version, thin-clients]
+    uses: ./.github/workflows/publish-embedder.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+      publish: false
+
   images:
     needs: [version, thin-clients]
     uses: ./.github/workflows/publish-images.yml
@@ -59,7 +69,7 @@ jobs:
       publish: false
 
   approval:
-    needs: [thin-clients, llm-images, images]
+    needs: [thin-clients, llm-images, embedder-images, images]
     environment: main-merge-approval
     runs-on: ubuntu-latest
     steps:

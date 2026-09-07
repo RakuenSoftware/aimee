@@ -1,3 +1,5 @@
+# One application image: an immutable Server or KB composition.
+# PostgreSQL and local models are standardized sibling services.
 # aimee-server: the agent/memory broker. Owns DB1 through the PostgreSQL-backed
 # aimee/postgres module pair and
 # fronts the /v1 HTTP API; it reaches aimee-kb (DB2 + pgvector) over HTTP via
@@ -30,11 +32,21 @@ RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-module ./cmd/aimee-module \
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS build
 
+# Both protocol hosts use current libpq headers; PostgreSQL itself is a sibling.
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && curl -fsSL --retry 5 --retry-all-errors --connect-timeout 30 --max-time 180 \
+         https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+    && echo 'deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main' > /etc/apt/sources.list.d/pgdg.list
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         build-essential \
         ca-certificates \
         libpq-dev \
+        libp11-kit-dev \
+        git \
         libsqlite3-dev \
         libssl-dev \
         libzstd-dev \
@@ -56,8 +68,9 @@ ARG AIMEE_VERSION=""
 # own credentials, which is the opposite of the intent.
 RUN build_version="$AIMEE_VERSION" \
     && if [ -z "$build_version" ]; then build_version=$(cat src/core/VERSION); fi \
-    && make -C src ../aimee-server ../aimee ../aimee-forwarder -j"$(nproc)" \
-         GIT_VERSION="v$build_version"
+    && sh scripts/fetch-treesitter.sh \
+    && make -C src ../aimee-server ../aimee-kb ../aimee-kb-worm ../aimee ../aimee-forwarder -j"$(nproc)" \
+         AIMEE_TREESITTER=1 GIT_VERSION="v$build_version"
 
 # Build the independently supervised same-container module adapters from the
 # canonical contract. C processes link only the extracted event-bus client;
@@ -65,7 +78,7 @@ RUN build_version="$AIMEE_VERSION" \
 RUN python3 scripts/export_c_repositories.py --runtime-bundle /module-runtime \
     && mkdir -p /module-runtime/bin \
     && python3 scripts/build_c_module_runtime_bundle.py \
-         --bundle /module-runtime --output /module-runtime/bin --placement server \
+         --bundle /module-runtime --output /module-runtime/bin \
     && while IFS= read -r module_id; do \
          [ -n "$module_id" ] || continue; \
          if [ "$module_id" = config ]; then module_bin=/tmp/aimee-module-config-go; \
@@ -402,9 +415,11 @@ RUN useradd --uid 1000 --user-group --home-dir /var/lib/aimee --create-home --sh
 # when no named volume is mounted; operators can bind/name it for backups.
 VOLUME /var/lib/aimee-workspaces /mnt/media/cores
 COPY --from=build /src/aimee-server /usr/local/bin/aimee-server
+COPY --from=build /src/aimee-kb /usr/local/bin/aimee-kb
+COPY --from=build /src/aimee-kb-worm /usr/local/bin/aimee-kb-worm
 COPY --from=build /module-runtime/bin/ /usr/local/libexec/aimee-modules/
-COPY --from=build /module-runtime/grants/server/ /opt/aimee/module-grants/server/
-COPY --from=build /module-runtime/server.modules /opt/aimee/module-grants/server.modules
+COPY --from=build /module-runtime/grants/ /opt/aimee/module-grants/
+COPY --from=build /module-runtime/server.modules /module-runtime/kb.modules /opt/aimee/module-grants/
 COPY --from=wfe-build /out/aimee-wfe /usr/local/bin/aimee-wfe
 COPY --from=wfe-build /out/aimee-delegate-egress /usr/local/bin/aimee-delegate-egress
 # Static TCP<->UDS bridge; aimee-server docker-cp's it into a proxy-mode delegate sandbox.
@@ -441,6 +456,7 @@ COPY deploy/container/plane-supervisor.sh /usr/local/bin/plane-supervisor.sh
 COPY deploy/container/module-supervisor.sh /usr/local/bin/module-supervisor.sh
 COPY deploy/container/core-storage.sh /usr/local/bin/core-storage.sh
 COPY deploy/container/server-entrypoint.sh /usr/local/bin/aimee-server-entrypoint
+COPY --chmod=0755 deploy/container/kb-role-runtime.sh /usr/local/bin/aimee-kb-role-runtime
 RUN chmod +x /usr/local/bin/aimee-server-entrypoint \
     /usr/local/bin/core-storage.sh /usr/local/bin/plane-supervisor.sh \
     /usr/local/bin/module-supervisor.sh

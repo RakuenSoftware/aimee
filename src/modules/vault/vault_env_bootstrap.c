@@ -3,6 +3,14 @@
 #include "runtime_secret.h"
 #include "vault_service.h"
 #include "vault_store.h"
+#include "vault_crypto.h"
+#include "config.h"
+#include "platform_path.h"
+#include <errno.h>
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "log.h"
 #include "cJSON.h"
 
@@ -14,6 +22,8 @@
 #include <strings.h>
 #if defined(__linux__)
 #include <sys/prctl.h>
+#include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/types.h>
 #include <unistd.h>
 #endif
@@ -55,7 +65,10 @@ static int name_span_is_credential(const char *name, size_t len, int include_del
    /* Delegate keys have an agent-aware canonical bootstrap of their own. */
    if (len >= 19 && memcmp(name, "AIMEE_DELEGATE_KEY_", 19) == 0)
       return include_delegate;
-   if ((len == strlen("AIMEE_DB2_URL") && memcmp(name, "AIMEE_DB2_URL", len) == 0) ||
+   if ((len == strlen("AIMEE_STORE_URL") && memcmp(name, "AIMEE_STORE_URL", len) == 0) ||
+       (len == strlen("AIMEE_STORE_MIGRATION_URL") &&
+        memcmp(name, "AIMEE_STORE_MIGRATION_URL", len) == 0) ||
+       (len == strlen("AIMEE_DB2_URL") && memcmp(name, "AIMEE_DB2_URL", len) == 0) ||
        (len == strlen("AIMEE_VAULT_PKCS11_PIN") &&
         memcmp(name, "AIMEE_VAULT_PKCS11_PIN", len) == 0) ||
        (len == strlen("AIMEE_WEBCHAT_USER") && memcmp(name, "AIMEE_WEBCHAT_USER", len) == 0) ||
@@ -682,6 +695,151 @@ int vault_env_module_resource(void)
    int rc = fputs(printed, stdout) >= 0 && fflush(stdout) == 0 ? 0 : -1;
    OPENSSL_cleanse(printed, strlen(printed));
    free(printed);
+   return rc;
+#else
+   return -1;
+#endif
+}
+
+/* The PostgreSQL owner can retrieve only its one volume-bound LUKS credential.
+ * It cannot enumerate Vault, choose a credential name or rotate an existing key.
+ * The normal local Vault backend is available before PostgreSQL startup. */
+static int postgres_volume_id_valid(const char *id)
+{
+   if (!id || strlen(id) != 36)
+      return 0;
+   for (size_t i = 0; i < 36; i++)
+   {
+      if (i == 8 || i == 13 || i == 18 || i == 23)
+      {
+         if (id[i] != '-')
+            return 0;
+      }
+      else if (!((id[i] >= '0' && id[i] <= '9') || (id[i] >= 'a' && id[i] <= 'f')))
+         return 0;
+   }
+   return 1;
+}
+
+int vault_postgres_key(const char *volume, int initialize, unsigned char out[32])
+{
+   if (!out)
+      return -1;
+   OPENSSL_cleanse(out, 32);
+   if (!postgres_volume_id_valid(volume) || (initialize != 0 && initialize != 1))
+      return -1;
+   char dir[1024], path[1280], record[102] = {0};
+   const char *home = config_default_dir();
+   if (!home || (size_t)snprintf(dir, sizeof(dir), "%s/.vault", home) >= sizeof(dir) ||
+       platform_mkdir_p(dir, 0700) != 0 ||
+       (size_t)snprintf(path, sizeof(path), "%s/.postgres-luks.lock", dir) >= sizeof(path))
+      return -1;
+   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+   struct stat st;
+   if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+       (st.st_mode & 0077) != 0 || flock(fd, LOCK_EX) != 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      return -1;
+   }
+   int rc = -1;
+   vault_status_t status =
+       vault_service_get_server_principal("postgres", "luks", record, sizeof(record));
+   if (status == VAULT_NO_ENTRY && initialize)
+   {
+      if (vault_crypto_random(out, 32) != 0)
+         goto done;
+      memcpy(record, volume, 36);
+      record[36] = ':';
+      for (size_t i = 0; i < 32; i++)
+         snprintf(record + 37 + i * 2, 3, "%02x", out[i]);
+      if (vault_service_set_server("postgres", "luks", record) != VAULT_OK)
+         goto done;
+      status = VAULT_OK;
+   }
+   if (status != VAULT_OK || strlen(record) != 101 || record[36] != ':' ||
+       memcmp(volume, record, 36) != 0)
+      goto done;
+   for (size_t i = 0; i < 32; i++)
+   {
+      unsigned byte = 0;
+      for (size_t j = 0; j < 2; j++)
+      {
+         char c = record[37 + i * 2 + j];
+         if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+            goto done;
+         byte = byte * 16 + (unsigned)(c <= '9' ? c - '0' : c - 'a' + 10);
+      }
+      out[i] = (unsigned char)byte;
+   }
+   rc = 0;
+done:
+   OPENSSL_cleanse(record, sizeof(record));
+   if (rc != 0)
+      OPENSSL_cleanse(out, 32);
+   close(fd);
+   return rc;
+}
+
+int vault_env_postgres_resource(void)
+{
+#if defined(__linux__)
+   char path[64], executable[4096];
+   snprintf(path, sizeof(path), "/proc/%ld/exe", (long)getppid());
+   ssize_t n = readlink(path, executable, sizeof(executable) - 1);
+   if (n <= 0 || (size_t)n >= sizeof(executable))
+      return -1;
+   executable[n] = '\0';
+   struct rlimit no_core = {0, 0};
+   if (strcmp(executable, "/usr/local/libexec/aimee-modules/aimee-module-postgres") != 0)
+   {
+      fprintf(stderr, "postgres Vault: unauthorized resource caller\n");
+      return -1;
+   }
+   if (setrlimit(RLIMIT_CORE, &no_core) != 0 || prctl(PR_SET_DUMPABLE, 0) != 0 ||
+       /* The core host has large sparse static arenas unrelated to Vault. Lock
+        * pages on fault so this one-shot protects every secret allocation
+        * without materializing those unused arenas. */
+       mlockall(MCL_CURRENT | MCL_FUTURE | MCL_ONFAULT) != 0)
+   {
+      fprintf(stderr, "postgres Vault: protected memory unavailable (%s)\n", strerror(errno));
+      return -1;
+   }
+   /* Fixed binary request: initialize byte + canonical UUID, followed by EOF.
+    * Fixed binary response: exactly 32 bytes. No JSON/stdio secret copies. */
+   unsigned char request[38] = {0}, key[32] = {0};
+   size_t len = fread(request, 1, sizeof(request), stdin);
+   int rc = -1;
+   if (len == 37 && feof(stdin) && request[0] <= 1 &&
+       vault_postgres_key((char *)request + 1, request[0], key) == 0)
+   {
+      ssize_t written;
+      do
+         written = write(STDOUT_FILENO, key, sizeof(key));
+      while (written < 0 && errno == EINTR);
+      rc = written == sizeof(key) ? 0 : -1;
+   }
+   /* Separate fixed read-only operations for SQL pools. These cannot read the
+    * LUKS slot or arbitrary credentials and retain the same parent attestation. */
+   if (len == 1 && feof(stdin) && (request[0] == 2 || request[0] == 3))
+   {
+      char dsn[ENV_SECRET_VALUE_MAX] = {0};
+      const char *name = request[0] == 2 ? "AIMEE_STORE_URL" : "AIMEE_STORE_MIGRATION_URL";
+      if (vault_service_get_server_principal(ENV_AGENT, name, dsn, sizeof(dsn)) == VAULT_OK &&
+          dsn[0])
+      {
+         size_t count = strlen(dsn);
+         ssize_t written;
+         do
+            written = write(STDOUT_FILENO, dsn, count);
+         while (written < 0 && errno == EINTR);
+         rc = written == (ssize_t)count ? 0 : -1;
+      }
+      OPENSSL_cleanse(dsn, sizeof(dsn));
+   }
+   OPENSSL_cleanse(key, sizeof(key));
+   OPENSSL_cleanse(request, sizeof(request));
    return rc;
 #else
    return -1;

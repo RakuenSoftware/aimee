@@ -1,25 +1,9 @@
 #!/bin/sh
 # The managed compose `.env` is derived from config at every container start.
 #
-# WHY THIS EXISTS. A managed deployment's identity -- which kb image variant,
-# which embedder -- lived only in the running container's Config.Env, put there
-# by whichever shell first ran compose. Rebooting is safe: restart=unless-stopped
-# restarts the SAME container object with its environment intact. Recreating is
-# not, and recreating is what every image upgrade does. `docker compose up -d`
-# from a caller whose environment lacks the variables reinterpolates them:
-#
-#   EMBEDDER_MODEL   unset -> the kb refuses to serve. Loud, recoverable.
-#   AIMEE_KB_VARIANT unset -> ${AIMEE_KB_VARIANT:+-${AIMEE_KB_VARIANT}} resolves
-#                             to the EMBEDDERLESS aimee-kb image. Silent.
-#
-# The second is the one worth a test. Nothing fails, nothing logs; the deployment
-# simply stops having an embedder. This was hit for real recreating aimee-kb on a
-# live host, and the resulting image swap from aimee-kb-a25m to aimee-kb went
-# unnoticed until the container's own refusal message named a DIFFERENT cause.
-#
-# The invariant asserted here is the one that makes recreate equal reboot: after
-# a start, the compose project directory carries a .env from which compose can
-# rebuild the same topology with no help from the caller's environment.
+# The owning composition must recreate the selected model images after an
+# upgrade, even if the calling shell has no model settings. Assert the live
+# emitter's variant and model values as well as private atomic file delivery.
 set -eu
 
 root=$(CDPATH= cd -- "$(dirname "$0")/../.." && pwd)
@@ -147,11 +131,11 @@ if [ -x "$server_bin" ] && [ -x "$client_bin" ] && [ -x "$config_bin" ]; then
         "$client_bin" config deploy-env 2>/dev/null || true)
 
     case "$env_out" in
-    *AIMEE_KB_VARIANT=a25m*) r=a25m ;;
-    *AIMEE_KB_VARIANT=*)     r=other ;;
+    *AIMEE_EMBEDDER_VARIANT=a25m*) r=a25m ;;
+    *AIMEE_EMBEDDER_VARIANT=*)     r=other ;;
     *)                       r=absent ;;
     esac
-    check "emitted env pins the kb image variant" "a25m" "$r"
+    check "emitted env pins the local embedder image variant" "a25m" "$r"
 
     case "$env_out" in
     *EMBEDDER_MODEL=bekko-a25m*) r=set ;;
@@ -162,7 +146,7 @@ if [ -x "$server_bin" ] && [ -x "$client_bin" ] && [ -x "$config_bin" ]; then
     # An empty variant would resolve the image to the embedderless aimee-kb, so
     # "present but blank" is a failure, not a pass.
     case "$env_out" in
-    *"AIMEE_KB_VARIANT="[!a-z]*|*"AIMEE_KB_VARIANT=") r=blank ;;
+    *"AIMEE_EMBEDDER_VARIANT="[!a-z]*|*"AIMEE_EMBEDDER_VARIANT=") r=blank ;;
     *) r=nonblank ;;
     esac
     check "the variant is never emitted blank for a bundled model" "nonblank" "$r"

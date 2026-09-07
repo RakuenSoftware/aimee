@@ -1,0 +1,69 @@
+{
+  "user_row_before": {
+    "id": 1,
+    "scope": {
+      "type": "user",
+      "value": "_user"
+    },
+    "tier": "L2",
+    "kind": "fact",
+    "key": "release042-first",
+    "content": "release042-probe",
+    "confidence": 1
+  },
+  "get_same_id": [
+    200,
+    {
+      "status": "ok",
+      "memory": {
+        "id": 1,
+        "tier": "L0",
+        "kind": "fact",
+        "key": "e2e-as-of",
+        "headline": "",
+        "content": "as-of smoke value",
+        "use_cases": "",
+        "confidence": 0.8,
+        "use_count": 0,
+        "last_used_at": "",
+        "created_at": "",
+        "updated_at": "",
+        "source_session": "",
+        "provenance_category": "",
+        "retrieval_score": 0,
+        "hybrid_rank": 0
+      },
+      "active_context_missing": true
+    }
+  ],
+  "get_cli_created_id": [
+    404,
+    {
+      "status": "error",
+      "message": "memory not found",
+      "kind": "not_found",
+      "http_status": 404
+    }
+  ],
+  "supersede_same_id": [
+    404,
+    {
+      "status": "error",
+      "message": "no such memory, or the knowledge service refused",
+      "kind": "not_found",
+      "http_status": 404
+    }
+  ],
+  "user_row_after": {
+    "id": 1,
+    "scope": {
+      "type": "user",
+      "value": "_user"
+    },
+    "tier": "L2",
+    "kind": "fact",
+    "key": "release042-first",
+    "content": "release042-probe",
+    "confidence": 1
+  }
+}

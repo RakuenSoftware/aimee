@@ -106,6 +106,25 @@ def reviewed_build_equivalent(path: str, frozen: str, current: str) -> bool:
     return current.strip() == frozen.strip()
 
 
+# Exact memory-only integrations in shared MCP files. Reverse these literal
+# blocks before comparing the entire file to the frozen S1 source. No function,
+# schema, golden assertion, or path is exempted from the remaining comparison.
+REVIEWED_MEMORY_INTEGRATIONS = json.loads(
+    Path(__file__).with_name("s1-memory-integration.json").read_text()
+)
+
+
+def reviewed_memory_equivalent(path: str, frozen: str, current: str) -> bool:
+    integrations = REVIEWED_MEMORY_INTEGRATIONS.get(path)
+    if not integrations:
+        return False
+    for block in integrations:
+        if current.count(block["release_text"]) != 1:
+            return False
+        current = current.replace(block["release_text"], block["frozen_text"], 1)
+    return current.strip() == frozen.strip()
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
     parser.add_argument("--probe-report", type=Path, required=True)
@@ -181,6 +200,13 @@ def validate(
                 changed = [path for path in changed if path not in BUILD_PATHS]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             errors.append(f"could not verify semantic-context build contract: {exc}")
+    reviewed_memory_paths = [
+        path for path in changed if reviewed_memory_equivalent(
+            path, git_output("show", f"{candidate_commit}:{path}"),
+            (ROOT / path).read_text(),
+        )
+    ]
+    changed = [path for path in changed if path not in reviewed_memory_paths]
     untracked = git_output(
         "ls-files", "--others", "--exclude-standard", "--", *PROTECTED_PATHS
     ).splitlines()
@@ -220,6 +246,7 @@ def validate(
         "protected_paths": list(PROTECTED_PATHS),
         "changed_protected_paths": changed,
         "reviewed_build_integration_paths": reviewed_build_paths,
+        "reviewed_memory_integration_paths": reviewed_memory_paths,
         "untracked_protected_paths": untracked,
         "cold_starts_per_provider": cold_starts,
         "release_candidate_matched": not errors,

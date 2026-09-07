@@ -542,6 +542,93 @@ static void test_custody_facade_dispatches_through_provider(void)
    printf("  PASS: test_custody_facade_dispatches_through_provider\n");
 }
 
+/* Model a previously deployed tenant backend, with the instance secret that
+ * older KB versions misplaced there. Reads/deletes must use the supplied KEK. */
+static int legacy_present, legacy_fail_delete, legacy_fail_list;
+static const char *legacy_secret = "synthetic-instance-value";
+static int legacy_list(void *ctx, const char *principal, vault_store_entry_t *out, int max)
+{
+   (void)ctx;
+   assert(strcmp(principal, "server") == 0 && max > 0);
+   if (legacy_fail_list)
+      return -1;
+   if (!legacy_present)
+      return 0;
+   snprintf(out[0].agent, sizeof(out[0].agent), "migration-test");
+   snprintf(out[0].cred, sizeof(out[0].cred), "api_key");
+   return 1;
+}
+static int legacy_get(void *ctx, const char *principal, const uint8_t *kek, const char *agent,
+                      const char *cred, char *out, size_t cap)
+{
+   (void)ctx;
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   uint8_t expected[VAULT_KEK_LEN];
+   make_kek(expected, 93);
+   if (memcmp(kek, expected, sizeof(expected)) != 0)
+      return -1;
+   snprintf(out, cap, "%s", legacy_secret);
+   return 0;
+}
+static int legacy_delete(void *ctx, const char *principal, const char *agent, const char *cred)
+{
+   (void)ctx;
+   (void)principal;
+   (void)agent;
+   (void)cred;
+   if (legacy_fail_delete)
+      return -1;
+   legacy_present = 0;
+   return 0;
+}
+static void test_instance_custody_survives_tenant_backend(void)
+{
+   vault_store_backend_t tenant = {.list = legacy_list,
+                                   .get = legacy_get,
+                                   .delete = legacy_delete,
+                                   .set = mock_set,
+                                   .list_principals = mock_list_principals};
+   uint8_t kek[VAULT_KEK_LEN], salt[VAULT_SALT_LEN];
+   make_kek(kek, 93);
+   vault_store_set_backend(NULL);
+   assert(vault_store_get_or_create_salt("server", salt) == 0);
+   assert(vault_store_set("server", kek, "enrollment-test", "api_key", "before-bind") == 0);
+   legacy_present = 1;
+   legacy_fail_list = 1;
+   assert(vault_store_bind_tenant_backend(&tenant, kek) == -1);
+   legacy_fail_list = 0;
+   legacy_fail_delete = 1;
+   assert(vault_store_bind_tenant_backend(&tenant, kek) == -1);
+   assert(legacy_present == 1); /* local durable copy, source retained on failure */
+   legacy_fail_delete = 0;
+   assert(vault_store_bind_tenant_backend(&tenant, kek) == 0);
+   assert(legacy_present == 0);
+   char out[128];
+   assert(vault_store_get("server", kek, "migration-test", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, legacy_secret) == 0);
+   assert(vault_store_get("server", kek, "enrollment-test", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "before-bind") == 0);
+   assert(vault_store_set("server", kek, "enrollment-test", "api_key", "after-bind") == 0);
+   int before = g_mock.set_calls;
+   assert(vault_store_set("team:9", kek, "agent", "key", "tenant-only") == 0);
+   assert(g_mock.set_calls == before + 1);
+   char principals[8][VAULT_PRINCIPAL_MAX];
+   assert(vault_store_list_principals(principals, 8) == 1);
+   assert(strcmp(principals[0], "server") == 0);
+   vault_store_set_backend(NULL); /* next CLI invocation uses the same file */
+   assert(vault_store_get("server", kek, "enrollment-test", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "after-bind") == 0);
+   legacy_present = 1;
+   legacy_secret = "conflicting-value";
+   assert(vault_store_bind_tenant_backend(&tenant, kek) == -1);
+   assert(legacy_present == 1);
+   assert(vault_store_get("server", kek, "migration-test", "api_key", out, sizeof(out)) == 0);
+   assert(strcmp(out, "synthetic-instance-value") == 0);
+   printf("  PASS: instance custody, tenant isolation, resumable migration and conflict refusal\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-seam-test-%d", (int)getpid());
@@ -555,6 +642,7 @@ int main(void)
    test_facade_dispatches_to_real_backend();
    test_facade_swaps_to_mock_backend();
    test_custody_facade_dispatches_through_provider();
+   test_instance_custody_survives_tenant_backend();
 
    char rm[320];
    snprintf(rm, sizeof(rm), "rm -rf %s", g_home);

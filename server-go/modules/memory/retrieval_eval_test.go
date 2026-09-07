@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"os"
 	"testing"
@@ -23,7 +24,18 @@ func (q evalQueryer) Query(ctx context.Context, sql string, args ...any) (store.
 	return q.Tx.Query(ctx, sql, args...)
 }
 func (q evalQueryer) QueryRow(ctx context.Context, sql string, args ...any) store.Row {
-	return q.Tx.QueryRow(ctx, sql, args...)
+	return evalRow{q.Tx.QueryRow(ctx, sql, args...)}
+}
+
+// Adapt the driver's missing-row sentinel to the production store contract.
+type evalRow struct{ pgx.Row }
+
+func (r evalRow) Scan(dest ...any) error {
+	err := r.Row.Scan(dest...)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return store.ErrNoRows
+	}
+	return err
 }
 
 func TestRetrievalCorpus(t *testing.T) {

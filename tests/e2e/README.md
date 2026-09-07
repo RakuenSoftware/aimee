@@ -1,5 +1,11 @@
 # Postgres end-to-end suite
 
+The Docker deployment matrix uses candidate application and PostgreSQL images
+with the published embedder pinned in `embedder-image.txt`. CI and
+`scripts/e2e-matrix.sh` pull that image; they do not build model containers.
+Update the digest after qualifying a new embedder published by a merge to
+`testing`. The model publishers build only when their image inputs change.
+
 Three suites live here, each with its own section below:
 `typed-facts-pg-e2e.sh`, `module-liveness-pg-e2e.sh`, and
 `learning-loops-pg-e2e.sh`. All three need a throwaway box with real Postgres;

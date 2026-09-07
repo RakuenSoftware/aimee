@@ -60,8 +60,8 @@ const API_SPECS: ApiSpec[] = [
   },
   {
     kind: 'openai',
-    label: 'OpenAI API',
-    blurb: 'GPT (or any OpenAI-compatible endpoint) via an API key.',
+    label: 'OpenAI-compatible or local',
+    blurb: 'OpenAI or a local model endpoint. API key only when the provider requires one.',
     provider: 'openai',
     endpoint: 'https://api.openai.com/v1',
     model: 'gpt-5.5',
@@ -186,8 +186,8 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
   // --- API-key agent: agent.add (primary mode adds --default) -------------
   const submitApi = async () => {
     if (!apiSpec) return;
-    if (!endpoint.trim() || !model.trim() || !apiKey.trim()) {
-      setError('Endpoint, model, and API key are all required.');
+    if (!endpoint.trim() || !model.trim() || (apiSpec.kind === 'anthropic' && !apiKey.trim())) {
+      setError(apiSpec.kind === 'anthropic' ? 'Endpoint, model, and API key are all required.' : 'Endpoint and model are required.');
       return;
     }
     if (delegate && !name.trim()) {
@@ -200,8 +200,8 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
       const args = [
         delegate ? name.trim() : apiSpec.provider, endpoint.trim(), model.trim(),
         '--provider', apiSpec.provider,
-        '--key', apiKey.trim(),
       ];
+      if (apiKey.trim()) args.push('--key', apiKey.trim());
       if (delegate) {
         if (roles.trim()) args.push('--roles', roles.trim());
       } else {
@@ -341,7 +341,7 @@ export default function PrimaryChooser({ onConfigured, mode = 'primary' }: Prima
           <Field label="Model">
             <input style={input} value={model} onChange={(e) => setModel(e.target.value)} placeholder={apiSpec.model} />
           </Field>
-          <Field label="API key">
+          <Field label={apiSpec.kind === 'openai' ? 'API key (optional)' : 'API key'}>
             <input style={input} type="password" autoComplete="off" value={apiKey}
               onChange={(e) => setApiKey(e.target.value)} placeholder={apiSpec.keyHint} />
           </Field>

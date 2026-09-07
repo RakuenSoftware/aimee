@@ -134,6 +134,7 @@ func (s *server) registerRoutes(mux *http.ServeMux) {
 	// Memory Center uses the canonical /v1 spellings. These are browser-session
 	// routes, not the public bearer API: forward the authenticated webuser over
 	// the kernel-attested UDS boundary for scoping and audit attribution.
+	mux.HandleFunc("/v1/memory/delete", s.requireAuth(s.memoryProxyHandler("/v1/memory/delete")))
 	mux.HandleFunc("/v1/memory/review", s.requireAuth(s.memoryProxyHandler("/v1/memory/review")))
 	mux.HandleFunc("/v1/memory/reject", s.requireAuth(s.memoryProxyHandler("/v1/memory/reject")))
 	mux.HandleFunc("/v1/memory/restore", s.requireAuth(s.memoryProxyHandler("/v1/memory/restore")))

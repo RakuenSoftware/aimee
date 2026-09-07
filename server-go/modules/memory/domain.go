@@ -379,10 +379,11 @@ FROM memories WHERE id=ANY($1)`, ids, workspace, project, includeAll)
 
 func (s *postgresDataStore) Stats(ctx context.Context) (MemoryStats, error) {
 	result := MemoryStats{TierCounts: map[string]int{}, KindCounts: map[string]int{}}
-	if err := s.requireKBDomain(); err != nil {
-		return result, err
+	table := "memories"
+	if s.placement == PlacementServer {
+		table = "user_memories"
 	}
-	rows, err := s.db.Query(ctx, `SELECT tier,COUNT(*) FROM memories GROUP BY tier`)
+	rows, err := s.db.Query(ctx, `SELECT tier,COUNT(*) FROM `+table+` GROUP BY tier`)
 	if err != nil {
 		return result, err
 	}
@@ -401,7 +402,7 @@ func (s *postgresDataStore) Stats(ctx context.Context) (MemoryStats, error) {
 		return result, err
 	}
 	rows.Close()
-	rows, err = s.db.Query(ctx, `SELECT kind,COUNT(*) FROM memories GROUP BY kind`)
+	rows, err = s.db.Query(ctx, `SELECT kind,COUNT(*) FROM `+table+` GROUP BY kind`)
 	if err != nil {
 		return result, err
 	}
@@ -416,6 +417,9 @@ func (s *postgresDataStore) Stats(ctx context.Context) (MemoryStats, error) {
 	}
 	if err := rows.Err(); err != nil {
 		return result, err
+	}
+	if s.placement == PlacementServer {
+		return result, nil
 	}
 	err = s.db.QueryRow(ctx, `SELECT COUNT(*) FROM memory_conflicts WHERE resolved=0`).Scan(&result.Conflicts)
 	return result, err

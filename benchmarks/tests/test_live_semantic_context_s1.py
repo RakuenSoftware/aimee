@@ -350,6 +350,26 @@ class LiveSemanticContextS1Test(unittest.TestCase):
         self.assertNotEqual(expected, validator.build_plan(makefile, rules.replace(
             "$(OBJDIR)/modules/lsp/lsp_context.o \\\n", "", 1)))
 
+    def test_release_validator_only_allows_exact_memory_integration(self) -> None:
+        validator = load_release_validator()
+        candidate = "474bd69954237fca249eb44e942caeab4270ad5e"
+        for path, blocks in validator.REVIEWED_MEMORY_INTEGRATIONS.items():
+            frozen = validator.git_output("show", f"{candidate}:{path}")
+            current = (ROOT / path).read_text()
+            with self.subTest(path=path):
+                self.assertTrue(validator.reviewed_memory_equivalent(path, frozen, current))
+                # Both unrelated semantic drift and changes within the reviewed
+                # memory blocks must require a new explicit integration review.
+                self.assertIn("lsp", current)
+                for drift in (
+                    current.replace("lsp", "unreviewed_lsp", 1),
+                    current.replace("store", "unreviewed_store", 1),
+                    current + blocks[0]["release_text"],
+                    current.replace(blocks[0]["release_text"], "", 1),
+                ):
+                    self.assertFalse(validator.reviewed_memory_equivalent(path, frozen, drift))
+        self.assertFalse(validator.reviewed_memory_equivalent("src/tests/test_lsp.c", "same", "same"))
+
     def test_release_validator_only_allows_exact_reviewed_build_additions(self) -> None:
         validator = load_release_validator()
         for path, integrations in validator.REVIEWED_BUILD_INTEGRATIONS.items():

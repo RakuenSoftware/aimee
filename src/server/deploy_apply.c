@@ -93,19 +93,6 @@ static int deploy_env_has_profile(const char *env, const char *profile)
    return 0;
 }
 
-static int deploy_managed_member(char out[33])
-{
-   appliance_admin_webuser(out, 33);
-   size_t n = strnlen(out, 33);
-   if (!n || n > 32 || out[0] < 'a' || out[0] > 'z')
-      return -1;
-   for (size_t i = 1; i < n; i++)
-      if (!((out[i] >= 'a' && out[i] <= 'z') || (out[i] >= '0' && out[i] <= '9') || out[i] == '-' ||
-            out[i] == '_'))
-         return -1;
-   return 0;
-}
-
 static int deploy_llm_token_valid(const char *token)
 {
    if (!token)
@@ -122,69 +109,6 @@ static int deploy_llm_token_valid(const char *token)
             token[i] == '='))
          return 0;
    return 1;
-}
-
-static int deploy_kb_scoped_token_valid(const char *token)
-{
-   size_t prefix_len = sizeof(DEPLOY_KB_SERVICE_SCOPE) - 1;
-   return token && strncmp(token, DEPLOY_KB_SERVICE_SCOPE, prefix_len) == 0 &&
-          deploy_llm_token_valid(token + prefix_len);
-}
-
-/* Resolve or mint one certificate-bound service credential. Older managed
- * installs stored the KB connection bearer as an unscoped owner token. Scope
- * that same secret during upgrade so the enrolled service certificate and the
- * independently rotating bearer name exactly the same identity, without
- * silently granting aimee-server KB-administrator authority. */
-static int deploy_kb_scoped_token(const char *name, char *out, size_t cap)
-{
-   if (!name || !out || cap < DEPLOY_KB_TOKEN_MAX + 1)
-      return -1;
-
-   char configured[513] = "";
-   if (runtime_secret_get(name, configured, sizeof(configured)))
-   {
-      if (deploy_kb_scoped_token_valid(configured))
-      {
-         snprintf(out, cap, "%s", configured);
-         runtime_secret_wipe(configured, sizeof(configured));
-         return 0;
-      }
-      int n = deploy_llm_token_valid(configured)
-                  ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, configured)
-                  : -1;
-      if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
-      {
-         runtime_secret_wipe(configured, sizeof(configured));
-         runtime_secret_wipe(out, cap);
-         return -1;
-      }
-      runtime_secret_wipe(configured, sizeof(configured));
-      return 0;
-   }
-
-   char proposed[DEPLOY_KB_TOKEN_HEX + 1];
-   int n = platform_random_hex(proposed, DEPLOY_KB_TOKEN_HEX) == 0
-               ? snprintf(out, cap, "%s%s", DEPLOY_KB_SERVICE_SCOPE, proposed)
-               : -1;
-   if (n <= 0 || (size_t)n >= cap || vault_runtime_secret_set(name, out) != 0)
-   {
-      runtime_secret_wipe(proposed, sizeof(proposed));
-      runtime_secret_wipe(out, cap);
-      return -1;
-   }
-   runtime_secret_wipe(proposed, sizeof(proposed));
-   return 0;
-}
-
-static int deploy_kb_token(char *out, size_t cap)
-{
-   return deploy_kb_scoped_token("AIMEE_KB_API_BEARER_TOKEN", out, cap);
-}
-
-static int deploy_kb_service_identity_token(char *out, size_t cap)
-{
-   return deploy_kb_scoped_token("AIMEE_KB_SERVICE_IDENTITY_TOKEN", out, cap);
 }
 
 static void deploy_remove_legacy_token_file(const char *path, off_t size)
@@ -384,16 +308,14 @@ static void deploy_write_compose_env_file(const char *env)
 }
 
 static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
-                                int *managed_kb_out, int *managed_identity_out)
+                                int *managed_embedding_out)
 {
    if (err && err_cap)
       err[0] = '\0';
    if (managed_llm_out)
       *managed_llm_out = 0;
-   if (managed_kb_out)
-      *managed_kb_out = 0;
-   if (managed_identity_out)
-      *managed_identity_out = 0;
+   if (managed_embedding_out)
+      *managed_embedding_out = 0;
    if (!config_present())
    {
       if (err && err_cap)
@@ -417,63 +339,25 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
    deploy_write_compose_env_file(env);
 
    char llm_token[513] = "";
-   /* Currently always 0: config_emit_deploy_env stopped emitting the "llm" profile when
-    * the aimee-llm container was retired, so no managed inference service is deployed and
-    * no KB-to-LLM credential is minted. The mechanism is kept (and still covered by
-    * test_deploy_apply against a stub profile) because synthesis has not been resolved
-    * yet — whatever serves it may well be a managed service again. */
    const int managed_llm = deploy_env_has_profile(env, "llm");
-   const int managed_kb = deploy_env_has_profile(env, "kb");
-   char explicit_conn[4096];
-   int have_explicit_conn =
-       runtime_secret_get("AIMEE_KB_CONN", explicit_conn, sizeof(explicit_conn));
-   const char *explicit_id = getenv("AIMEE_SERVER_ID");
-   const char *explicit_team = getenv("AIMEE_SERVER_TEAM_ID");
-   const int explicit_parts = (have_explicit_conn ? 1 : 0) +
-                              (explicit_id && explicit_id[0] ? 1 : 0) +
-                              (explicit_team && explicit_team[0] ? 1 : 0);
-   runtime_secret_wipe(explicit_conn, sizeof(explicit_conn));
-   /* A managed kb with no embedder will start, print why it cannot serve retrieval, and
-    * exit — leaving a failed deploy whose reason is a line in a container log. There is
-    * no fallback to come up with instead, so refuse here, where the wizard shows it. */
-   if (managed_kb && !deploy_env_value_set(env, "EMBEDDER_MODEL") &&
-       !deploy_env_value_set(env, "EMBEDDER_URL"))
+   const int managed_embedding = deploy_env_has_profile(env, "embedding");
+   if (!deploy_env_value_set(env, "EMBEDDER_MODEL") && !deploy_env_value_set(env, "EMBEDDER_URL"))
    {
       if (err && err_cap)
          snprintf(err, err_cap,
-                  "no embedder selected: the knowledge base cannot serve retrieval without "
-                  "one, and there is no fallback. Choose a bundled model on the wizard's "
-                  "topology step (or `aimee config set embedder_model bekko-a25m`), or point "
-                  "EMBEDDER_URL at an external endpoint, then deploy again");
-      return NULL;
-   }
-   if (managed_kb && explicit_parts != 0 && explicit_parts != 3)
-   {
-      if (err && err_cap)
-         snprintf(err, err_cap,
-                  "partial explicit server identity: AIMEE_KB_CONN, AIMEE_SERVER_ID, and "
-                  "AIMEE_SERVER_TEAM_ID must be set together");
+                  "no embedder selected: choose embedder_model in local model setup or configure "
+                  "EMBEDDER_URL");
       return NULL;
    }
    if (managed_llm_out)
       *managed_llm_out = managed_llm;
-   if (managed_kb_out)
-      *managed_kb_out = managed_kb;
-   if (managed_identity_out)
-      *managed_identity_out = managed_kb && explicit_parts == 0;
-   char managed_member[33] = "";
-   if (managed_kb && explicit_parts == 0 && deploy_managed_member(managed_member) != 0)
-   {
-      if (err && err_cap)
-         snprintf(err, err_cap,
-                  "could not resolve a valid appliance operator for managed KB membership");
-      return NULL;
-   }
+   if (managed_embedding_out)
+      *managed_embedding_out = managed_embedding;
    if (managed_llm && deploy_llm_token(llm_token, sizeof(llm_token)) != 0)
    {
       if (err && err_cap)
          snprintf(err, err_cap,
-                  "could not load or create the managed KB-to-LLM credential in Vault "
+                  "could not load or create the local synthesis credential in Vault "
                   "(a legacy private file is accepted only for one-shot migration)");
       return NULL; /* fail closed: never launch a keyless managed LLM */
    }
@@ -488,8 +372,7 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
       if (*p == '\n')
          extra++;
 
-   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + (managed_member[0] ? 1 : 0) + 1,
-                        sizeof(char *));
+   char **envp = calloc(base + extra + (managed_llm ? 2 : 0) + 1, sizeof(char *));
    if (!envp)
    {
       if (err && err_cap)
@@ -507,10 +390,7 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
            * OLD names, and a rename silently stopped the filter matching. */
           (managed_llm &&
            (strncmp(*e, "SYNTHESIS_API_KEY=", sizeof("SYNTHESIS_API_KEY=") - 1) == 0 ||
-            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) ==
-                0)) ||
-          (managed_member[0] &&
-           strncmp(*e, DEPLOY_MANAGED_MEMBER_ENV, sizeof(DEPLOY_MANAGED_MEMBER_ENV) - 1) == 0))
+            strncmp(*e, "SYNTHESIS_AUTH_REQUIRED=", sizeof("SYNTHESIS_AUTH_REQUIRED=") - 1) == 0)))
          continue;
       envp[n] = strdup(*e);
       if (!envp[n])
@@ -560,17 +440,6 @@ static char **build_deploy_envp(char *err, size_t err_cap, int *managed_llm_out,
          return NULL;
       }
       n++;
-   }
-   if (managed_member[0])
-   {
-      size_t len = strlen(DEPLOY_MANAGED_MEMBER_ENV) + strlen(managed_member);
-      envp[n] = malloc(len + 1);
-      if (!envp[n])
-      {
-         free_envp(envp);
-         return NULL;
-      }
-      snprintf(envp[n++], len + 1, "%s%s", DEPLOY_MANAGED_MEMBER_ENV, managed_member);
    }
    envp[n] = NULL;
    return envp;
@@ -753,83 +622,9 @@ static int run_capture_append(const char *const argv[], char **envp, char *out, 
    return run_capture_append_input(argv, envp, NULL, 0, out, out_cap, exit_code);
 }
 
-/* Retire the pre-baked aimee-llm-cpu container left over from an older install.
- *
- * There is now ONE LLM service (aimee-llm, model-less, downloads the selected
- * tier). The retired aimee-llm-cpu carried the network alias `aimee-llm`, so a
- * leftover container would make that name resolve to two containers and the kb
- * could reach the stale one. It is no longer a service of the managed compose
- * file, so `up` will never touch it — it has to be removed by name.
- *
- * This cannot be done with --remove-orphans. The managed compose runs under the
- * SAME COMPOSE_PROJECT_NAME as compose.server-managed.yaml, so an orphan sweep
- * classifies aimee-server — not a service of the managed file — as an orphan and
- * stops and removes the very container running the deploy. (docker compose
- * --dry-run reports "Container aimee-aimee-server-1 Stopping/Removing".)
- *
- * Removing a container that was never up is non-fatal. Docker's daemon error for
- * that expected case is deliberately not appended to the wizard output: it used
- * to put "retired legacy ... No such container" above the real compose failure,
- * making operators diagnose harmless cleanup instead of the actionable error. */
-
-/* The container the retirement targets. Named, not derived, because it is no
- * longer a compose service — nothing can regenerate this string for us. */
-#define DEPLOY_LEGACY_LLM_CPU_CONTAINER "aimee-aimee-llm-cpu-1"
-
-/* Fill argv with the retirement command and NULL-terminate it. Separated out for
- * the same reason as deploy_up_argv: the command is then assertable in a test
- * without shelling out to a docker that may or may not exist on the machine
- * running the suite. Returns the argument count, or -1 when cap is too small. */
-static int deploy_retire_argv(const char **argv, size_t cap)
-{
-   const char *cmd[] = {"docker", "rm", "-f", DEPLOY_LEGACY_LLM_CPU_CONTAINER};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || cap < n + 1)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      argv[i] = cmd[i];
-   argv[n] = NULL;
-   return (int)n;
-}
-
-static void deploy_retire_stale_llm(char **envp, const char *file, char *out, size_t out_cap)
-{
-   (void)file; /* the service is gone from the compose file; address it directly */
-   const char *argv[8];
-   if (deploy_retire_argv(argv, sizeof(argv) / sizeof(argv[0])) < 0)
-      return;
-   char buf[512];
-   int code = -1;
-   if (run_capture(argv, envp, buf, sizeof(buf), &code) == 0 && code == 0)
-      capture_tail_printf(out, out_cap, "retired obsolete aimee-llm-cpu container\n");
-}
-
-/* Background worker: ordered `docker compose -f <file> up -d --no-deps SERVICE`.
- *
- * NO --remove-orphans, and this is not a style preference: it made the deploy
- * STOP THE SERVER RUNNING IT. aimee-server is started by compose.server-managed.yaml
- * under COMPOSE_PROJECT_NAME=aimee, and the managed file this command targets
- * defines only postgres/aimee-kb/aimee-llm. So compose finds a container in
- * project "aimee" that its file does not define, calls it an orphan, and removes
- * it — the orchestrator deleting itself mid-deploy. Observed on a clean install:
- * the wizard's Deploy step ran, and 47 seconds later the server logged
- * "server: shut down" and the container exited, leaving a new user with a dead
- * install and no obvious cause.
- *
- * The shared project name is deliberate (the managed services join the server's
- * network), so the fix is to drop the orphan sweep rather than the project. What
- * that gives up is small and recoverable: a service removed from the managed file
- * leaves its container behind until an operator prunes it. What it buys is that
- * deploying cannot destroy the thing doing the deploying.
- *
- * It also retires the LLM variant this deploy did NOT select (see
- * deploy_retire_stale_llm) — the one orphan the managed stack really can leave
- * behind, since the GPU and CPU services are mutually exclusive and both answer
- * to the network name `aimee-llm`. */
-/* Fill argv with one ordered managed-service `up` command and NULL-terminate it.
- * --no-deps is deliberate: the orchestrator starts aimee-kb first so its CPU-only
- * initialization/indexing can run while aimee-llm downloads models. Deliberately
- * omits --remove-orphans, for the reason above. */
+/* Address only explicitly selected services in the owning Compose project.
+ * The application and PostgreSQL share that project; an orphan sweep would
+ * remove them because the model-only file does not declare them. */
 static int deploy_up_service_argv(const char *file, const char *service, int force_recreate,
                                   const char **argv, size_t cap)
 {
@@ -845,77 +640,13 @@ static int deploy_up_service_argv(const char *file, const char *service, int for
    return (int)n;
 }
 
-/* Bootstrap managed credentials over stdin before creating the long-lived KB
- * container. The one-shot is --rm and its Config.Env contains only a public
- * overwrite-control flag; only the pipe carries credential values. Overwrite is
- * required for rotation and for upgrading the old unscoped owner bearer. */
-static int deploy_kb_vault_bootstrap_argv(const char *file, const char **argv, size_t cap)
+/* Retire unselected local models without deleting volumes or other services.
+ * Explicit service operands also activate their profiles when currently off. */
+static int deploy_stop_service(const char *file, const char *service, char **envp, char *out,
+                               size_t cap, int *code)
 {
-   const char *cmd[] = {"docker",       "compose",
-                        "-f",           file,
-                        "run",          "--rm",
-                        "-T",           "--no-deps",
-                        "-e",           "AIMEE_VAULT_ENV_OVERWRITE=1",
-                        "--entrypoint", "/usr/local/bin/aimee-kb",
-                        "aimee-kb",     "--bootstrap-vault-stdin"};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || !file || !file[0] || cap < n + 1)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      argv[i] = cmd[i];
-   argv[n] = NULL;
-   return (int)n;
-}
-
-static const char *deploy_env_value(char **envp, const char *name)
-{
-   size_t len = name ? strlen(name) : 0;
-   for (size_t i = 0; envp && envp[i]; i++)
-      if (strncmp(envp[i], name, len) == 0 && envp[i][len] == '=')
-         return envp[i] + len + 1;
-   return NULL;
-}
-
-/* Run the one-shot managed identity installer after the KB is healthy. The
- * service mounts both private named volumes and writes the server identity
- * directly, so no enrollment token or private key crosses host argv/stdout. */
-static int deploy_identity_bootstrap_argv(const char *file, const char **argv, size_t cap)
-{
-   const char *cmd[] = {"docker", "compose", "-f", file,
-                        "run",    "--rm",    "-T", "aimee-server-identity"};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || !file || !file[0] || cap < n + 1)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      argv[i] = cmd[i];
-   argv[n] = NULL;
-   return (int)n;
-}
-
-/* The server stays alive while its managed identity is installed into the shared
- * home volume. Drop any pre-install TLS objects and outage backoff immediately;
- * otherwise the first project cloned after the wizard can report the healthy KB
- * unavailable until a process restart or the circuit's longest retry window. */
-static void deploy_managed_identity_activated(void)
-{
-   kb_client_mtls_pool_reset();
-   kb_client_dependency_reset();
-}
-
-/* Run the isolated offline root/JWKS bootstrap. The service receives only named
- * volumes and the KB's private Unix socket; no custody key or trust bundle
- * crosses the server process, host argv, or captured output. */
-static int deploy_authority_bootstrap_argv(const char *file, const char **argv, size_t cap)
-{
-   const char *cmd[] = {"docker", "compose", "-f", file,
-                        "run",    "--rm",    "-T", "aimee-authority-bootstrap"};
-   size_t n = sizeof(cmd) / sizeof(cmd[0]);
-   if (!argv || !file || !file[0] || cap < n + 1)
-      return -1;
-   for (size_t i = 0; i < n; i++)
-      argv[i] = cmd[i];
-   argv[n] = NULL;
-   return (int)n;
+   const char *argv[] = {"docker", "compose", "-f", file, "rm", "--stop", "--force", service, NULL};
+   return run_capture_append(argv, envp, out, cap, code);
 }
 
 static void *deploy_worker(void *arg)
@@ -925,10 +656,8 @@ static void *deploy_worker(void *arg)
    deploy_apply_compose_file(file, sizeof(file));
    char env_err[256];
    int managed_llm = 0;
-   int managed_kb = 0;
-   int managed_identity = 0;
-   char **envp =
-       build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_kb, &managed_identity);
+   int managed_embedding = 0;
+   char **envp = build_deploy_envp(env_err, sizeof(env_err), &managed_llm, &managed_embedding);
 
    char out[DEPLOY_OUT_CAP];
    int code = -1;
@@ -938,85 +667,23 @@ static void *deploy_worker(void *arg)
    else
    {
       out[0] = '\0';
-      deploy_retire_stale_llm(envp, file, out, sizeof(out));
       code = 0;
 
-      /* Bootstrap the managed KB's own bearer before its long-lived container
-       * exists. The token crosses only stdin to a disposable one-shot and is
-       * sealed into the KB Vault; it never enters Compose metadata or .env. */
-      if (managed_kb)
-      {
-         char token[DEPLOY_KB_TOKEN_MAX + 1] = "";
-         char service_token[DEPLOY_KB_TOKEN_MAX + 1] = "";
-         char record[sizeof("AIMEE_KB_API_BEARER_TOKEN=") + DEPLOY_KB_TOKEN_MAX +
-                     sizeof("AIMEE_KB_SERVICE_IDENTITY_TOKEN=") + DEPLOY_KB_TOKEN_MAX];
-         int first_len =
-             deploy_kb_token(token, sizeof(token)) == 0
-                 ? snprintf(record, sizeof(record), "AIMEE_KB_API_BEARER_TOKEN=%s", token)
-                 : -1;
-         int second_len =
-             first_len > 0 && (size_t)first_len + 1 < sizeof(record) &&
-                     deploy_kb_service_identity_token(service_token, sizeof(service_token)) == 0
-                 ? snprintf(record + first_len + 1, sizeof(record) - (size_t)first_len - 1,
-                            "AIMEE_KB_SERVICE_IDENTITY_TOKEN=%s", service_token)
-                 : -1;
-         size_t record_len = second_len > 0 ? (size_t)first_len + 1 + (size_t)second_len + 1 : 0;
-         const char *bootstrap_argv[16];
-         int bootstrap_code = -1;
-         if (!record_len || record_len > sizeof(record) ||
-             deploy_kb_vault_bootstrap_argv(
-                 file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_append_input(bootstrap_argv, envp, record, record_len, out, sizeof(out),
-                                      &bootstrap_code) != 0 ||
-             bootstrap_code != 0)
-         {
-            code = bootstrap_code == 0 ? -1 : bootstrap_code;
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: failed to seal the managed KB bearer into its Vault\n");
-         }
-         runtime_secret_wipe(token, sizeof(token));
-         runtime_secret_wipe(service_token, sizeof(service_token));
-         memset(record, 0, sizeof(record));
-      }
+      if ((!managed_embedding &&
+           deploy_stop_service(file, "aimee-embedder", envp, out, sizeof(out), &code) != 0) ||
+          (code == 0 && !managed_llm &&
+           deploy_stop_service(file, "aimee-llm", envp, out, sizeof(out), &code) != 0))
+         code = -1;
 
-      /* The server is already running this worker. Start KB next and LLM last.
-       * Model downloads continue inside the LLM container after this deploy
-       * finishes; KB initialization and CPU indexing do not wait for them. */
-      if (code == 0 && managed_kb && managed_llm)
+      if (code == 0 && managed_embedding)
       {
-         const char *token = deploy_env_value(envp, "SYNTHESIS_API_KEY");
-         char record[sizeof("SYNTHESIS_API_KEY=") + 512];
-         int record_len =
-             token ? snprintf(record, sizeof(record), "SYNTHESIS_API_KEY=%s", token) : -1;
-         const char *bootstrap_argv[16];
-         int bootstrap_code = -1;
-         if (record_len <= 0 || (size_t)record_len >= sizeof(record) ||
-             deploy_kb_vault_bootstrap_argv(
-                 file, bootstrap_argv, sizeof(bootstrap_argv) / sizeof(bootstrap_argv[0])) < 0 ||
-             run_capture_append_input(bootstrap_argv, envp, record, (size_t)record_len + 1, out,
-                                      sizeof(out), &bootstrap_code) != 0 ||
-             bootstrap_code != 0)
-         {
-            code = bootstrap_code == 0 ? -1 : bootstrap_code;
-            capture_tail_printf(
-                out, sizeof(out),
-                "deploy: failed to seal the managed LLM credential into the KB Vault\n");
-         }
-         memset(record, 0, sizeof(record));
-      }
-      if (code == 0 && managed_kb)
-      {
-         const char *kb_argv[10];
-         /* Recreate even when Compose sees no configuration change: the
-          * immediately preceding one-shot may have added or rotated Vault
-          * credentials which the live process can only load at startup. */
-         if (deploy_up_service_argv(file, "aimee-kb", 1, kb_argv,
-                                    sizeof(kb_argv) / sizeof(kb_argv[0])) < 0 ||
-             run_capture_append(kb_argv, envp, out, sizeof(out), &code) != 0)
+         const char *argv[10];
+         if (deploy_up_service_argv(file, "aimee-embedder", 0, argv,
+                                    sizeof(argv) / sizeof(argv[0])) < 0 ||
+             run_capture_append(argv, envp, out, sizeof(out), &code) != 0)
          {
             code = -1;
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: failed to start aimee-kb with `docker compose`\n");
+            capture_tail_printf(out, sizeof(out), "deploy: failed to start local embedder\n");
          }
       }
       if (code == 0 && managed_llm)
@@ -1031,52 +698,8 @@ static void *deploy_worker(void *arg)
                                 "deploy: failed to start aimee-llm with `docker compose`\n");
          }
       }
-      if (code == 0 && !managed_kb && !managed_llm)
+      if (code == 0 && !managed_embedding && !managed_llm)
          capture_tail_printf(out, sizeof(out), "deploy: no managed sibling services selected\n");
-
-      if (code == 0 && managed_identity)
-      {
-         const char *authority_argv[12];
-         int authority_code = -1;
-         char authority_out[1024] = "";
-         if (deploy_authority_bootstrap_argv(
-                 file, authority_argv, sizeof(authority_argv) / sizeof(authority_argv[0])) < 0 ||
-             run_capture(authority_argv, envp, authority_out, sizeof(authority_out),
-                         &authority_code) != 0 ||
-             authority_code != 0)
-         {
-            code = authority_code == 0 ? -1 : authority_code;
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: managed authority/JWKS bootstrap failed%s%s\n",
-                                authority_out[0] ? ": " : "", authority_out);
-         }
-         else
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: managed authority roots and signed JWKS verified\n");
-      }
-      if (code == 0 && managed_identity)
-      {
-         const char *identity_argv[12];
-         int identity_code = -1;
-         char identity_out[1024] = "";
-         if (deploy_identity_bootstrap_argv(file, identity_argv,
-                                            sizeof(identity_argv) / sizeof(identity_argv[0])) < 0 ||
-             run_capture(identity_argv, envp, identity_out, sizeof(identity_out), &identity_code) !=
-                 0 ||
-             identity_code != 0)
-         {
-            code = identity_code == 0 ? -1 : identity_code;
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: managed server identity enrollment failed%s%s\n",
-                                identity_out[0] ? ": " : "", identity_out);
-         }
-         else
-         {
-            deploy_managed_identity_activated();
-            capture_tail_printf(out, sizeof(out),
-                                "deploy: managed server identity enrolled and verified\n");
-         }
-      }
    }
    free_envp(envp);
 
@@ -1125,26 +748,17 @@ void deploy_apply_state(int *running, int *last_exit, char *out, size_t out_cap)
    pthread_mutex_unlock(&g_lock);
 }
 
-/* Keep only the containers the MANAGED compose file defines.
- *
- * `docker compose -f <managed file> ps` does NOT scope to the services in that
- * file — it scopes to COMPOSE_PROJECT_NAME. aimee-server is started from
- * compose.server-managed.yaml under the same project "aimee", so an unfiltered
- * `ps` reports the orchestrator alongside the services it manages. This is the
- * same project-vs-file blind spot documented for --remove-orphans above; there it
- * deleted the server, here it merely made a never-deployed install look deployed:
- * the wizard counts the returned services to label its button, so a clean box
- * offered "Re-deploy" for a knowledge base that did not exist yet.
- *
- * Filtering by the compose `project.config_files` label — rather than by passing
- * service names to `ps` — is what keeps this correct: every managed service sits
- * behind a profile (kb, identity-bootstrap, authority-bootstrap), so enumerating
- * them with `config --services` returns nothing unless the matching profiles are
- * active, and a profile-gated name passed to `ps` is an error rather than an
- * empty result. The label is present on every container regardless of profile.
- *
- * Emits a JSON array (a shape parse_ps already accepts). On any parse failure the
- * input is left untouched: a wrong service list is worse than an unfiltered one. */
+/* Compose ps is scoped to the project, which also contains the application
+ * and store. Match exact model service names regardless of which Compose file
+ * first created them: the default embedder starts from the base composition. */
+static int deploy_is_model_service(const cJSON *row)
+{
+   const cJSON *service = cJSON_GetObjectItemCaseSensitive(row, "Service");
+   return cJSON_IsString(service) && service->valuestring &&
+          (strcmp(service->valuestring, "aimee-embedder") == 0 ||
+           strcmp(service->valuestring, "aimee-llm") == 0);
+}
+
 static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
 {
    const char *trimmed = ps;
@@ -1153,8 +767,7 @@ static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
    if (!*trimmed)
       return;
 
-   char want[600];
-   snprintf(want, sizeof(want), "com.docker.compose.project.config_files=%s", file);
+   (void)file;
 
    cJSON *keep = cJSON_CreateArray();
    if (!keep)
@@ -1169,8 +782,7 @@ static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
       cJSON *it = NULL;
       cJSON_ArrayForEach(it, arr)
       {
-         const cJSON *l = cJSON_GetObjectItemCaseSensitive(it, "Labels");
-         if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+         if (deploy_is_model_service(it))
             cJSON_AddItemToArray(keep, cJSON_Duplicate(it, 1));
       }
    }
@@ -1193,8 +805,7 @@ static void deploy_filter_managed_ps(char *ps, size_t ps_cap, const char *file)
                if (o)
                {
                   recognized = 1;
-                  const cJSON *l = cJSON_GetObjectItemCaseSensitive(o, "Labels");
-                  if (cJSON_IsString(l) && l->valuestring && strstr(l->valuestring, want))
+                  if (deploy_is_model_service(o))
                      cJSON_AddItemToArray(keep, cJSON_Duplicate(o, 1));
                   cJSON_Delete(o);
                }
@@ -1224,7 +835,7 @@ int deploy_apply_status(char *out, size_t out_cap, int *exit_code)
    const char *argv[] = {"docker", "compose", "-f", file, "ps", "-a", "--format", "json", NULL};
    /* Pass the deploy env (COMPOSE_PROFILES + COMPOSE_PROJECT_NAME) so `ps` scopes
     * to the same project/profiles the apply used; fall back to environ on OOM. */
-   char **envp = build_deploy_envp(NULL, 0, NULL, NULL, NULL);
+   char **envp = build_deploy_envp(NULL, 0, NULL, NULL);
    int rc = run_capture(argv, envp, out, out_cap, exit_code);
    free_envp(envp);
    if (rc == 0 && exit_code && *exit_code == 0)

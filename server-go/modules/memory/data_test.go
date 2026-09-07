@@ -94,6 +94,27 @@ func TestContentGateDoesNotRequireADataStore(t *testing.T) {
 	}
 }
 
+// C requires an explicit verdict; omitting a successful zero makes every
+// ordinary KB write look like an unavailable privacy classifier.
+func TestContentGateEmitsCleanVerdict(t *testing.T) {
+	for _, placement := range []Placement{PlacementServer, PlacementKB} {
+		handler := NewHandler(nil, WithDataStore(placement, nil))
+		raw, status := handler(bus.ModuleInvocation{StageID: StageData}, dataRequest(t, DataRequest{
+			Operation: "content-gate", Content: "shared release fixture", ContentCapacity: 128,
+		}))
+		if status != bus.ModuleStatusOK {
+			t.Fatalf("status = %v", status)
+		}
+		var wire map[string]json.RawMessage
+		if err := json.Unmarshal(raw, &wire); err != nil {
+			t.Fatal(err)
+		}
+		if string(wire["sensitive_status"]) != "0" || string(wire["classification"]) != `"normal"` {
+			t.Fatalf("clean verdict missing from wire: %s", raw)
+		}
+	}
+}
+
 type recordingDataStore struct {
 	scope  Scope
 	scopes []Scope

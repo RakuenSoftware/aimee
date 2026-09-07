@@ -13,22 +13,8 @@ import {
   type SynthesisSelection,
 } from './deployTopology';
 
-/* Wizard — Deploy topology (local knowledge base only). Two choices: which
- * EMBEDDER turns text into vectors, and which SYNTHESIS model writes curation and
- * summaries. Every write goes through the existing /api/config/set allowlist (no
- * new backend).
- *
- * There is no host or GPU picker any more. Those placed the retired aimee-llm
- * container; the aimee-kb image variant now decides which embedder is baked in and
- * whether llama.cpp ships alongside, so placement is a deployment-time fact rather
- * than a wizard question.
- *
- * The knowledge-base local/remote choice lives in the preceding KnowledgeBase step;
- * this step is only shown for kb_mode='local'.
- *
- * Self-contained like PrimaryChooser: it loads config, guards every save (Toast +
- * stay put on failure), and reports the restart-class keys it changed so the
- * wizard can list them on its summary. */
+/* Configure the Server's embedding and optional synthesis services independently
+ * of any shared KB connection. */
 
 function csrf(): string {
   try {
@@ -186,17 +172,16 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     }
     if (embedRoute === 'external' && embedDims.trim() === '') {
       setError(
-        'An external embedder needs its dimension: the kb sizes the vector columns from it and cannot derive the width of an endpoint it does not serve.',
+        'An external embedder needs its dimension: the memory module sizes the vector columns from it and cannot derive the width of an endpoint it does not serve.',
       );
       return;
     }
     setSaving(true);
     setError('');
 
-    // This step is local-only, so kb_mode is fixed to 'local' (the KnowledgeBase step
-    // already recorded the choice; re-asserting it is idempotent).
+    // Saving local models must preserve any optional KB connection.
     const desired = buildDesiredConfig({
-      kbMode: 'local',
+      kbMode: 'none',
       kbUrl: '',
       kbBearer: '',
       embedder,
@@ -208,6 +193,12 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
     const savedCfg: ConfigMap = { ...cfg };
     const restart = new Set<string>();
     for (const [key, value] of Object.entries(desired)) {
+      // Presence booleans represent Vault values, never editable credentials.
+      // A blank external credential field preserves the stored value; selecting
+      // a local/off service deliberately clears its unused external credential.
+      if (value === '' && cfg[key] === true &&
+          ((key === 'embedder_api_key' && embedder.kind === 'external') ||
+           (key === 'synthesis_api_key' && synthesis.kind === 'external'))) continue;
       const original = cfg[key] == null ? '' : String(cfg[key]);
       if (value === original) continue;
       const coerced: unknown = key === 'embedder_dims' ? (value === '' ? '' : Number(value)) : value;
@@ -242,7 +233,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
         <div style={sectionTitle}>Embedder</div>
         <div style={roleCard}>
           <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4 }}>
-            Turns text into vectors. Runs inside the knowledge base unless you point it elsewhere.
+            Turns personal memory into vectors. Runs locally beside Server by default.
           </div>
           <select
             style={input}
@@ -283,14 +274,14 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
               <input style={input} value={embedDims} onChange={(e) => setEmbedDims(e.target.value)}
                 placeholder="embedding dimension (required)" inputMode="numeric" aria-label="embedder dimension" />
               <div style={{ fontSize: 11, color: 'var(--sg-text-faint)' }}>
-                Required: the kb cannot derive the width of an endpoint it does not serve, and it
+                Required: the memory module cannot derive the width of an endpoint it does not serve, and it
                 sizes the vector columns from this. Up to 4000.
               </div>
             </div>
           )}
           {embedRoute === 'bundled' && (
             <div style={{ fontSize: 11, color: 'var(--sg-text-faint)', marginTop: 6 }}>
-              Dimension comes from the selected model; the kb derives it at runtime.
+              Dimension comes from the selected model; the memory module derives it at runtime.
             </div>
           )}
         </div>
@@ -300,7 +291,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
         <div style={sectionTitle}>Synthesis</div>
         <div style={roleCard}>
           <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', marginBottom: 4 }}>
-            Writes the knowledge base’s curation and summaries. Search, recall and indexing work
+            Optional model for local generation and summarization. Search, recall and indexing work
             without it.
           </div>
           <select style={input} aria-label="synthesis" value={synthRoute}
@@ -313,7 +304,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
                 gated on what the kb image baked. */}
             {SYNTHESIS_MODELS.map((m) => (
               <option key={m.id} value={m.id}>
-                {m.label} — runs beside the kb
+                {m.label} — runs beside Server
               </option>
             ))}
           </select>
@@ -327,7 +318,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
           {synthRoute !== 'off' && synthRoute !== 'external' && (
             <div style={{ fontSize: 11, color: 'var(--sg-text-faint)', marginTop: 6 }}>
               {SYNTHESIS_MODELS.find((m) => m.id === synthRoute)?.blurb}{' '}
-              Deployed as a sidecar beside the kb and reached over mutual TLS. Its weights are
+              Deployed as a container beside Server and reached over mutual TLS. Its weights are
               baked into that image, so nothing is downloaded at deploy or at run time. Switching
               between the two models later is a container swap; the corpus is untouched.
             </div>
@@ -354,7 +345,7 @@ export default function DeployTopology({ onSaved, fetchImpl }: DeployTopologyPro
             {impact === 'reembed+schema'
               ? 'The widths differ, so the vector columns are rebuilt and everything is re-embedded.'
               : 'Pooling and prefixes define the vector space, so everything is re-embedded.'}{' '}
-            The kb refuses to start until that is done.
+            Existing vectors must be rebuilt before using the new model.
           </div>
           <input style={input} value={confirmText} onChange={(e) => setConfirmText(e.target.value)}
             placeholder="type RE-EMBED to confirm" aria-label="confirm re-embed" />

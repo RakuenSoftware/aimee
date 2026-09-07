@@ -1,0 +1,135 @@
+[
+  {
+    "route": "chat",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [
+      {
+        "url": "/api/plugins",
+        "status": 404
+      },
+      {
+        "url": "/api/sessions/workflows/channel/Session%201",
+        "status": 404
+      },
+      {
+        "url": "/api/sessions/workflows/channel/Chat",
+        "status": 404
+      }
+    ],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nChat\n×\n\nThis is where a turn runs — your conversation with aimee for the active session.\n\nAttach files, use slash-commands and channels, and turn a reply into a proposal.\n\nThe session’s bound project is what every tool here acts on.\n\nSee also: Projects →\nGot it\nProject\n— none —\n+ Clone repo\nClear\nBranch\nNo branches — branch to explore alternatives\nCHANNELS\nNo channels yet\n+\nWorkflow\nRefresh\nNo workflow session is currently bound to this channel.\nNo .aimee-rules file found\nNo stack detected.\nGenerate .aimee-rules\nDismiss\nPrompt:\nMinimal\nStandard\nExtended\n|\nPersona:\nsecurity\nnovel\narchitect\nengineer\nreviewer-constructive\nchairman\ntechnical-writer\nsongwriter\nqa\noriginal-request\nreviewer\nSend\nContext\nRules",
+    "rendered": true
+  },
+  {
+    "route": "dashboard",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nDashboard\n×\n\nLive health of the instance: Readiness, LSP health, per-agent success and tokens,\n\nlatency by role, provider mix, cache efficiency, guardrail actions, and traces.\n\nStart here when something feels wrong. Cards can be reordered.\n\nSee also: Logs →\nGot it\nDashboard\nRefresh\n⚙ Customize\nReadiness\n(0)\nReady:\nno\n0 ms\ndatabase\twarn\nagents\terror\ndelegations\twarn\nlsp\tok\nNext actions\nConfigure at least one delegate agent\nModels\n(0)\nNo models configured\nActive Sessions\n(1)\nTITLE\tWORKING DIR\tLAST ACTIVE\nSession 1\t\n\t2026-09-06 18:27\nDelegations\n(0)\nAGENT\tROLE\tSTATUS\tTURNS\tTOOLS\tLATENCY\nMetrics\nROLE\tTOTAL\tOK\tAVG LAT\tTOKENS\nCost / Tokens\n(0)\nNo realized spend recorded\nGuardrail Actions\n(95)\nallow\n55\nblock\n0\nrewrite\n0\napproval_required\n0\nExecution Plans\nID\tAGENT\tSTATUS\tSTEPS\tTASK\nTraces\nTURN\tTOOL\tDIR",
+    "rendered": true
+  },
+  {
+    "route": "logs",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nLogs\n×\n\nThe audit trail: every recorded action, newest first.\n\nClick a row to expand the full-field detail modal.\n\nAnswers “what did aimee do, when, and under whose identity”.\n\nSee also: Dashboard →\nGot it\nLogs\ntool-action audit\nloaded 0 of 0\nallow: 0\nblock: 0\nrewrite: 0\napproval_required: 0\nall\nallow\nblock\nrewrite\napproval_required\nall\nprimary\ndelegate\nRefresh\nLoading…\nLoading…",
+    "rendered": true
+  },
+  {
+    "route": "edit-workflows",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nEdit Workflows\n×\n\nDefine multi-step workflows — the design surface.\n\nEach step sets a task, a persona, a delegate, and a role.\n\nThis is where the steps come from; you approve their runs next door.\n\nSee also: Workflows →\nGot it\nProject\n— none —\n+ Clone repo\nWorkflows\n(6)\n+ New\nbuild\nok\nbuild-triggered\nok\nhotfix\nok\nmanaged-change\nok\nmanual-review\nok\nslice\nok\nBlocks\n(19)\n+ New\nAdministrator access is required to save workflows or custom blocks. You can still inspect and validate definitions.\nauthor.plan\nplan\nauthor.proposal\nproposal\nbranch.open\nbranch\ncheck.mergeable\nverdict\ndocument\nbranch\nforeach.workflow\nbranch\nfreeze\nfrozen_diff\ngate.ci\nverdict\ngate.deliver\nnone\ngate.human\napproval\ngate.roundtable\nverdict\nimplement\nbranch\nmerge\nnone\npr.open\npr\nreview\nverdict\nsource.archive\nbranch\nsplit\nplan\ntrigger.watch-dir\nproposal\nunderstand\nintent\nno workflow open\nValidate\nSave\nInspector\nSelect a node, or click a block to add one.",
+    "rendered": true
+  },
+  {
+    "route": "workflow-actions",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nWorkflows\n×\n\nThe runtime queue: workflow items waiting on you to approve or reject.\n\nThis is the human-in-the-loop gate.\n\nEdit Workflows is where these steps were defined.\n\nSee also: Edit Workflows →\nGot it\nWorkflows\n0\nRefresh\n+ New proposal\n▾\n⚡ Triggers\n0\nautomatic starts\nWatch a Git repository folder for committed Markdown files and start a saved workflow for each new proposal.\nOnly the appliance administrator can change automatic triggers. You can still inspect what is active.\nNo triggers configured — runs start from a manual submit (+ New proposal).\n▸\n⚙ Run policy\nadmission + autonomy caps\nNo proposals yet.\nSelect a proposal to see its status and history, or start a new one.",
+    "rendered": true
+  },
+  {
+    "route": "providers",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nProviders\n×\n\nAdd, edit, and delete named provider connections. Each has its own endpoint and credentials.\n\nYou can connect multiple accounts for the same provider type, even at the same endpoint.\n\nManage model selection, limits, pricing, and routing on the Models page.\n\nDeleting a provider asks you to confirm removal of its attached models.\n\nSee also: Models →\nGot it\nProviders\n0\n+ Add provider\nRefresh\nNo providers configured. Add a provider to get started.",
+    "rendered": true
+  },
+  {
+    "route": "models",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nModels\n×\n\nEvery model aimee can route to, with its run history and stats.\n\nAdd models from a saved provider connection without entering its credentials again.\n\nEdit context and output limits and token prices here. Blank prices mean not stated; zero means free.\n\nEdit a model’s persona bindings and the roles it may serve.\n\nRoles are the routing key matched between personas and models.\n\nSee also: Personas →\nGot it\nModels\n0\nRefresh\nProbe all\n+ Add model\nNo models configured. Add one to get started.",
+    "rendered": true
+  },
+  {
+    "route": "personas",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nPersonas\n×\n\nThe shared ROLE vocabulary plus the PERSONA definitions.\n\nEdit who aimee can be (identity + allowed roles) and what each role means.\n\nModels binds these personas and roles to actual work.\n\nSee also: Models →\nGot it\nPersonas\nPersonas\n(11)\n\nA persona is a delegate identity plus the roles it may use. Roles (and their per-role turn caps) are edited on the Roles tab.\n\nsecurity ·\nnovel ·\narchitect ·\nengineer ·\nreviewer-constructive ·\nchairman ·\ntechnical-writer ·\nsongwriter ·\nqa ·\noriginal-request ·\nreviewer ·\n+ New",
+    "rendered": true
+  },
+  {
+    "route": "roles",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nRoles\n×\n\nThe shared ROLE vocabulary — each role’s name, its delegate system-prompt template,\n\nand its per-role turn cap (max_turns, -1 = infinite).\n\nRoles are the routing key matched between personas and agents.\n\nSee also: Personas →\nGot it\nRoles\nRoles\n(14)\n\nThe shared vocabulary. A role’s body describes what it does; personas and agents are matched on these names (plus the all wildcard). The turn cap is a role setting — personas never carry one.\n\nbeat-check\ncode\ncontinuity\ndiagnose\ndraft\nexecute\nexplain\nformat\nreason\nrefactor\nreview\nsearch\nsummarize\nvalidate\n+ New",
+    "rendered": true
+  },
+  {
+    "route": "roundtable",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nRoundtable\n×\n\nConfigure the multi-model review panels — the “roundtables” aimee convenes.\n\nEach preset sets the seats (a model + a persona per seat), the aggregator, and the\n\nloop knobs (rounds, convergence, deadline, turns) plus authoring-pipeline caps.\n\nSave several named presets and pick one as the active default.\n\nSee also: Models →\nGot it\nRoundtable\nactive: default\nRoundtable behaviour\n\nThese apply to every panel, whichever preset is active. (Seats, limits, and the pipeline caps are per preset — set those below.)\n\nRequire evidence roundtable.require_evidence\nPanelists must cite evidence for their findings; unevidenced items are dropped when the panel is verified.\nReplay-verify findings roundtable.replay_verify_enabled\nAfter a panel completes, replay its findings to verify them before they are reported.\nChair synthesis roundtable.chair_synthesis\nThe chair writes a synthesis pass over the panel's output instead of returning the raw per-seat results.\nPresets\n(1)\n\nA roundtable is a panel of models, each playing a persona, that review or draft together. Configure several named presets and pick one as the active default — the active preset drives what aimee delegate roundtable convenes.\n\nRoundtable policy is read-only to agents and automation. Creating, editing, deleting, or selecting the default requires an authenticated appliance-administrator action from this UI.\n\n★\ndefault\n+ New",
+    "rendered": true
+  },
+  {
+    "route": "projects",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nProjects\n×\n\nConnect the git repositories aimee works on.\n\nStore per-host credentials (sealed vault) and run read + remote git ops.\n\nCredentials never reach the browser — they stay server-side.\n\nSee also: Editor →\nGot it\nConnect a repository\nClone\nGit accounts\n(0)\n+ Connect git account\nOAuth sign-in, an access token, or an SSH key — stored server-side, never shown again.\nProjects\n(0)\nNo projects yet — connect a repository above.",
+    "rendered": true
+  },
+  {
+    "route": "graph",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nGraph\n×\n\nA read-only explorer of the code-projection graph for the session’s project.\n\nRank hubs, expand callers/callees/neighbours with provenance, spot “surprising links”.\n\nFor understanding the codebase’s shape — off the agent’s hot path.\n\nSee also: Editor →\nGot it\nProject\n— none —\n+ Clone repo\nSelect a project above to explore its code graph.",
+    "rendered": true
+  },
+  {
+    "route": "editor",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nEditor\n×\n\nIn-app VS Code, bound to the session’s isolated worktree.\n\nIt’s the same tree the agent edits, so you see and hand-edit exactly what it sees.\n\nThe editor’s port and git credentials stay server-side.\n\nSee also: Projects →\nGot it\nProject\n— none —\n+ Clone repo\nSelect or clone a project for this session to open it in the editor.",
+    "rendered": true
+  },
+  {
+    "route": "memory",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nMemory Center\n×\n\nInspect the memories visible to the active project, including retained review history.\n\nReject marks a value wrong and creates a tombstone that blocks automatic re-extraction.\n\nRestore is the explicit human decision that removes that refusal and makes the row recallable again.\n\nSee also: Logs →\nGot it\nMemory Center\n\nReview memories visible to the active project. Rejecting keeps a durable tombstone so the same value cannot return through extraction; restoring is an explicit human decision.\n\nNo project is bound to the active session; only global memories are shown.\n\nNeeds attention\nActive\nPending\nRejected\nArchived\nAll history\nRefresh\n0 shown\n\nNo memories match this view.",
+    "rendered": true
+  },
+  {
+    "route": "settings",
+    "status": 200,
+    "pageErrors": [],
+    "apiErrors": [],
+    "body": "aimee\nSession 1\n×\n+\n⚙️\nSetup — 4 left\n☾\nLogout\n💬\nChat\n📊\nDashboard\n📜\nLogs\n🔀\nEdit Workflows\n📝\nWorkflows\n🔌\nProviders\n🤝\nModels\n🎭\nPersonas\n🎬\nRoles\n⚖️\nRoundtable\n📁\nProjects\n🕸️\nGraph\n🖥️\nEditor\n🧠\nMemory\n⚙️\nSettings\nSettings\n×\n\nEvery typed config option with plain-English help.\n\nBooleans are toggles, numbers are fields, strings are text; restart-sensitive keys are badged.\n\nThis is the full control plane the setup wizard walks you through a slice of.\n\nSee also: Dashboard →\nGot it\nSettings\n471\nReload\nReplay tab tutorials\nRe-run setup\n\nChanges persist to aimee.yaml and take effect on the next turn, unless a row is marked restart. The everyday runtime options are shown by default; deploy-time, advanced-tuning, and dev-only options are hidden behind Show advanced (still settable, and any of them surfaces when you search). Each option is described below.\n\nOptions owned by another tab are configured there, not here: Chat tab / Personas tab · Models tab · Pipeline page (kb console) · Settings page (kb console). Each option has one owner, so a value set in its own tab is never silently overwritten by an edit made here.\n\nAgent behavior\n(15)\n\nHow autonomously aimee runs, per-turn limits, and fix verification.\n\nAutonomous\nautonomous\nLaunch the agent CLI with its full autonomous flags, relying on aimee's guardrails for safety. Off by default.\nCross verify\ncross_verify\nHave delegates check the primary's fixes and the primary check delegates' fixes. Off by default.\nMax iterations\nmax_iterations\nMax tool-call rounds in one interactive turn. 0 uses the default (15).\nMax iterations delegate\nmax_iterations_delegate\nMax tool-call rounds in one delegate turn. 0 uses the default (25).\nReasoning cap enabled\nreasoning_cap_enabled\nLower the reasoning effort on simple turns automatically. Only ever lowers, never raises. Off by default.\nReasoning datalog command\nreasoning_datalog_command\nReasoning row budget\nreasoning_row_budget\nReasoning time limit ms\nreasoning_time_limit_ms\nTrigger max concurrent\ntrigger_max_concurrent\nTrigger rule count\ntrigger_rule_count\nVerify cmd\nverify_cmd\nVerify cross project\nverify_cross_project\nLet verify run and enforce across other repositories, not just the session's own. Off by default.\nVerify enabled\nverify_enabled\nAutomatically gate pushes and PRs and generate an enforcing project.yaml. Off by default — only repos with an explicit enforcing project.yaml are gated. Manual 'aimee git verify' still works either way.\nVerify prompt\nverify_prompt\nVerif",
+    "rendered": true
+  }
+]

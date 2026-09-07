@@ -166,23 +166,19 @@ describe('buildDesiredConfig', () => {
     ...over,
   });
 
-  it('a remote kb writes ONLY the kb_* keys', () => {
-    const out = buildDesiredConfig({
-      ...local(), kbMode: 'remote', kbUrl: 'https://kb.x', kbBearer: 't',
-    });
-    expect(out).toEqual({
-      kb_mode: 'remote', kb_client_url: 'https://kb.x', kb_client_bearer_token: 't',
-    });
-    // Mirrors deploy-env's early return: a remote kb deploys nothing locally.
-    expect('embedder_model' in out).toBe(false);
-    expect('synthesis_endpoint' in out).toBe(false);
+  it('local models are independent of KB connection and never write its keys', () => {
+    const expected = buildDesiredConfig(local({ kbMode: 'none' }));
+    const connected = buildDesiredConfig(local({ kbMode: 'remote', kbUrl: 'https://kb.x', kbBearer: 't' }));
+    expect(connected).toEqual(expected);
+    expect(connected.embedder_model).toBe('bekko-a25m');
+    expect(Object.keys(connected).some(k => k.startsWith('kb_'))).toBe(false);
   });
 
   it('a local kb writes both roles', () => {
     const out = buildDesiredConfig(local({
       synthesis: { kind: 'bundled', model: 'gemma-4-E4B-it' },
     }));
-    expect(out.kb_mode).toBe('local');
+    expect(out).not.toHaveProperty('kb_mode');
     expect(out.embedder_model).toBe('bekko-a25m');
     expect(out.synthesis_model).toBe('gemma-4-E4B-it');
   });
@@ -241,5 +237,15 @@ describe('the choices the wizard may offer', () => {
     const off = synthesisToConfig({ kind: 'off' });
     expect(off.synthesis_endpoint).toBe('');
     expect(off.synthesis_model).toBe('');
+  });
+});
+
+
+describe('Vault credential presence', () => {
+  it('never fills model API-key inputs with serialized booleans', () => {
+    expect(configToEmbedder({embedder_url:'https://model.example', embedder_api_key:true, embedder_dims:384}))
+      .toMatchObject({kind:'external', apiKey:''});
+    expect(configToSynthesis({synthesis_endpoint:'https://model.example', synthesis_api_key:true}))
+      .toMatchObject({kind:'external', apiKey:''});
   });
 });

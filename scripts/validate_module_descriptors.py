@@ -39,7 +39,7 @@ OWNERSHIP_FIELDS = (
     "sources", "private_headers", "public_headers", "contracts", "tests", "docs", "go_sources",
     "go_tests",
 )
-DEFAULT_ON = {"runtime-web", "control-web", "sandbox", "postgres"}
+DEFAULT_ON = {"runtime-web", "control-web", "sandbox"}
 ROLE_EXTENSIONS = {
     "sources": {".c", ".cpp", ".S", ".s"},
     "private_headers": {".h", ".hpp"},

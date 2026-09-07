@@ -1,0 +1,17 @@
+{
+  "phase": "exercise",
+  "validationKind": "real-stack",
+  "target": "https://127.0.0.1:8443",
+  "passed": [
+    "real browser login",
+    "two accounts at one endpoint, no models required; cancelled create persists nothing",
+    "duplicate provider rejected without overwriting connection",
+    "model discovery and successful model-probe responses for both connections",
+    "model limits and prices editable on Models; declared free differs from blank",
+    "endpoint edit applies to its model only; blank key preserved",
+    "rotated provider key used by existing model",
+    "delete confirmation explains attached model and Cancel preserves it",
+    "hard refresh retains both providers"
+  ],
+  "pageErrors": []
+}

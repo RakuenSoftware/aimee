@@ -23,7 +23,7 @@
     "src/modules/memory/memory_scope_connection.c"
   ],
   "go_sources": [
-    "server-go/cmd/aimee-memory-bus-probe/main.go",
+    "server-go/modules/memory/cmd/aimee-memory-bus-probe/main.go",
     "server-go/modules/memory/commands.go",
     "server-go/modules/memory/content_gate.go",
     "server-go/modules/memory/data.go",
@@ -50,21 +50,28 @@
     "server-go/modules/memory/redirect.go",
     "server-go/modules/memory/scope.go",
     "server-go/modules/memory/session.go",
-    "server-go/modules/memory/trace.go"
+    "server-go/modules/memory/trace.go",
+    "server-go/modules/memory/visibility_search.go",
+    "server-go/modules/memory/personal_vectors.go"
   ],
   "go_tests": [
     "server-go/modules/memory/commands_test.go",
     "server-go/modules/memory/content_gate_test.go",
     "server-go/modules/memory/data_test.go",
+    "server-go/modules/memory/embed_egress_test.go",
     "server-go/modules/memory/embed_test.go",
     "server-go/modules/memory/extract_conformance_test.go",
     "server-go/modules/memory/fact_recall_test.go",
     "server-go/modules/memory/gate_conformance_test.go",
-    "server-go/modules/memory/memory_test.go",
     "server-go/modules/memory/memory_facts_test.go",
+    "server-go/modules/memory/memory_test.go",
     "server-go/modules/memory/ontology_test.go",
+    "server-go/modules/memory/personal_vectors_test.go",
     "server-go/modules/memory/pii_conformance_test.go",
-    "server-go/modules/memory/redirect_test.go"
+    "server-go/modules/memory/privacy_regression_test.go",
+    "server-go/modules/memory/redirect_test.go",
+    "server-go/modules/memory/retrieval_eval_test.go",
+    "server-go/modules/memory/runtime_role_test.go"
   ],
   "public_headers": [
     "src/modules/memory/include/aimee/memory/module_api.h",
@@ -74,6 +81,7 @@
     "src/modules/memory/gw_stage_memory.h",
     "src/modules/memory/memory_activation.h",
     "src/modules/memory/memory_assemble_util.h",
+    "src/modules/memory/memory_bus_context.h",
     "src/modules/memory/memory_core_internal.h",
     "src/modules/memory/memory_extract_patterns.h",
     "src/modules/memory/memory_fact_gate.h",

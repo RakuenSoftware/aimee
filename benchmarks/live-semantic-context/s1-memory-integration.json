@@ -1,0 +1,56 @@
+{
+  "src/modules/protocols/mcp/mcp_tools.c": [
+    {
+      "release_text": "   }\n   return 0;\n}\n\nstatic void mcp_add_memory_store_property(cJSON *properties)\n{\n   cJSON *store = cJSON_AddObjectToObject(properties, \"store\");\n   cJSON_AddStringToObject(store, \"type\", \"string\");\n   cJSON_AddStringToObject(store, \"description\",\n                           \"user (default): personal memory on the local appliance; kb: shared \"\n                           \"knowledge. Never inferred from a numeric ID.\");\n   cJSON *values = cJSON_AddArrayToObject(store, \"enum\");\n   cJSON_AddItemToArray(values, cJSON_CreateString(\"user\"));\n   cJSON_AddItemToArray(values, cJSON_CreateString(\"kb\"));\n}\n\n",
+      "frozen_text": "   }\n   return 0;\n}\n\n"
+    },
+    {
+      "release_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      mcp_add_memory_store_property(p);\n      cJSON *q = cJSON_AddObjectToObject(p, \"query\");\n      cJSON_AddStringToObject(q, \"type\", \"string\");\n",
+      "frozen_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      cJSON *q = cJSON_AddObjectToObject(p, \"query\");\n      cJSON_AddStringToObject(q, \"type\", \"string\");\n"
+    },
+    {
+      "release_text": "      cJSON_AddItemToObject(s, \"required\", req);\n      cJSON_AddItemToArray(\n          tools,\n          mcp_tool_new(\"search_memory\",\n                       \"Search personal local memories by default. Select store=kb to search \"\n                       \"shared KB facts by keyword.\",\n                       s));\n   }\n\n",
+      "frozen_text": "      cJSON_AddItemToObject(s, \"required\", req);\n      cJSON_AddItemToArray(\n          tools, mcp_tool_new(\"search_memory\",\n                              \"Search aimee's knowledge base for stored facts and memories. \"\n                              \"Returns matching L2/L3 facts by keyword.\",\n                              s));\n   }\n\n"
+    },
+    {
+      "release_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      mcp_add_memory_store_property(p);\n      cJSON *id = cJSON_AddObjectToObject(p, \"id\");\n      cJSON_AddStringToObject(id, \"type\", \"integer\");\n",
+      "frozen_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      cJSON *id = cJSON_AddObjectToObject(p, \"id\");\n      cJSON_AddStringToObject(id, \"type\", \"integer\");\n"
+    },
+    {
+      "release_text": "                              \"Timestamp (ISO-8601) to evaluate validity at. Answers whether the \"\n                              \"memory was in force then, not just what it says now.\");\n      cJSON_AddItemToArray(\n          tools, mcp_tool_new(\"memory_get\",\n                              \"Fetch local user memory by id, or select store=kb for shared \"\n                              \"memory. KB memory:<id> preview handles retain their scope. Pass \"\n                              \"as_of to ask whether it was in force at a past time.\",\n                              s));\n   }\n\n",
+      "frozen_text": "                              \"Timestamp (ISO-8601) to evaluate validity at. Answers whether the \"\n                              \"memory was in force then, not just what it says now.\");\n      cJSON_AddItemToArray(tools,\n                           mcp_tool_new(\"memory_get\",\n                                        \"Fetch a full memory by id or memory:<id> handle. Pass \"\n                                        \"as_of to ask whether it was in force at a past time.\",\n                                        s));\n   }\n\n"
+    },
+    {
+      "release_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      mcp_add_memory_store_property(p);\n      mcp_add_memory_scope_properties(p);\n      cJSON_AddItemToArray(\n          tools, mcp_tool_new(\"list_facts\",\n                              \"List personal local memories by default. Select store=kb for \"\n                              \"active-project, workspace, and shared/global L2 facts.\",\n                              s));\n   }\n",
+      "frozen_text": "      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      mcp_add_memory_scope_properties(p);\n      cJSON_AddItemToArray(\n          tools, mcp_tool_new(\"list_facts\",\n                              \"List active-project, workspace, then shared/global facts in \"\n                              \"aimee's long-term memory (L2 tier).\",\n                              s));\n   }\n"
+    },
+    {
+      "release_text": "       mcp_tool_new(\n           \"mutate\",\n           \"Mutate personal local memory by default: store creates a record, update or \"\n           \"supersede replaces its content, and forget retires it. Select store=kb \"\n           \"for shared knowledge; KB replacement preserves version history and also \"\n           \"supports affirm and reject. Permanent erasure is an operator action.\",\n           cJSON_Parse(\n               \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\"\n               \"\\\"store\\\":{\\\"type\\\":\\\"string\\\",\\\"enum\\\":[\\\"user\\\",\\\"kb\\\"],\\\"description\\\":\"\n               \"\\\"Personal local memory by default; explicitly select kb for shared knowledge.\\\"},\"\n               \"\\\"verb\\\":{\\\"type\\\":\\\"string\\\",\"\n               \"\\\"description\\\":\\\"Mutation verb: store|update|supersede|forget|affirm|reject\\\"},\"\n",
+      "frozen_text": "       mcp_tool_new(\n           \"mutate\",\n           \"Perform a typed memory mutation. Verbs: store (write new fact), update \"\n           \"(replace content, keeping the previous value as a version), supersede \"\n           \"(replace with version lineage), forget (retire: the memory stops \"\n           \"answering recall but stays in fact history), affirm (positive \"\n           \"reinforcement), reject (reduce confidence). No verb here destroys a \"\n           \"stored value \u2014 update and forget both preserve the prior content, which \"\n           \"stays readable via fact history. Permanently erasing a memory is an \"\n           \"operator action outside this tool.\",\n           cJSON_Parse(\n               \"{\\\"type\\\":\\\"object\\\",\\\"properties\\\":{\"\n               \"\\\"verb\\\":{\\\"type\\\":\\\"string\\\",\"\n               \"\\\"description\\\":\\\"Mutation verb: store|update|supersede|forget|affirm|reject\\\"},\"\n"
+    },
+    {
+      "release_text": "   /* memory_recall */\n   {\n      cJSON *s = cJSON_CreateObject();\n      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n      mcp_add_memory_store_property(p);\n",
+      "frozen_text": "   /* memory_recall */\n   {\n      cJSON *s = cJSON_CreateObject();\n      cJSON_AddStringToObject(s, \"type\", \"object\");\n      cJSON *p = cJSON_AddObjectToObject(s, \"properties\");\n"
+    }
+  ],
+  "src/tests/test_mcp_client_registry.c": [
+    {
+      "release_text": "   \"list_curiosity_items {limit,state} req:\\n\" MCP_LSP_GOLDEN \"memory \"                            \\\n   \"{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,\"       \\\n   \"project,query,reason,scope,store,tier,verb,workspace} req:command\\n\"                           \\\n   \"memory_recall {cwd,limit_tokens,project,scope,session_start,store,task_hint,workspace} req:\\n\" \\\n   \"note {command,content,limit,query,tag,tags,title} req:command\\n\"                               \\\n",
+      "frozen_text": "   \"list_curiosity_items {limit,state} req:\\n\" MCP_LSP_GOLDEN \"memory \"                            \\\n   \"{as_of,command,confidence,content,cwd,dry_run,force,handle,id,key,kind,memory_id,modes,\"       \\\n   \"project,query,reason,scope,tier,verb,workspace} req:command\\n\"                                 \\\n   \"memory_recall {cwd,limit_tokens,project,scope,session_start,task_hint,workspace} req:\\n\"       \\\n   \"note {command,content,limit,query,tag,tags,title} req:command\\n\"                               \\\n"
+    },
+    {
+      "release_text": "   \"rules {command,reason,text} req:command\\n\"                                                     \\\n   \"search_docs {cwd,max_results,project,query,scope} req:query\\n\"                                 \\\n   \"search_memory {cwd,filter,project,query,scope,store,workspace} req:query\\n\"                    \\\n   \"send_message {target,text} req:target,text\\n\"                                                  \\\n   \"session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} \"   \\\n",
+      "frozen_text": "   \"rules {command,reason,text} req:command\\n\"                                                     \\\n   \"search_docs {cwd,max_results,project,query,scope} req:query\\n\"                                 \\\n   \"search_memory {cwd,filter,project,query,scope,workspace} req:query\\n\"                          \\\n   \"send_message {target,text} req:target,text\\n\"                                                  \\\n   \"session {around_message_id,chain_id,command,include_sources,limit,query,session_id,window} \"   \\\n"
+    }
+  ],
+  "src/server/server_mcp_call_table.c": [
+    {
+      "release_text": "   /* Graph-code fusion is always on for recall. */\n   int active_context_missing = 0;\n   int store_selection = server_memory_store_selection(jargs);\n   if (store_selection < 0)\n      return text_content(\"{\\\"status\\\":\\\"error\\\",\\\"message\\\":\\\"memory store must be user or kb\\\"}\");\n   char *envelope;\n   if (store_selection)\n   {\n      mcp_memory_scope_begin(jargs, &active_context_missing);\n      envelope = kb_client_memory_recall_shared_json(task_hint, limit_tokens, session_start);\n      mcp_memory_scope_end();\n   }\n   else\n      envelope = server_user_memory_recall_json(task_hint, limit_tokens, session_start);\n",
+      "frozen_text": "   /* Graph-code fusion is always on for recall. */\n   int active_context_missing = 0;\n   mcp_memory_scope_begin(jargs, &active_context_missing);\n   char *envelope = kb_client_memory_recall_json_ex(task_hint, limit_tokens, session_start, \"on\");\n   mcp_memory_scope_end();\n"
+    },
+    {
+      "release_text": "   if (!rendered)\n      content = store_selection\n                    ? mcph_kb_last_result(\"memory recall returned no result\")\n                    : text_content(\n                          \"{\\\"status\\\":\\\"error\\\",\\\"message\\\":\\\"user memory module unavailable\\\"}\");\n",
+      "frozen_text": "   if (!rendered)\n      content = mcph_kb_last_result(\"memory recall returned no result\");\n"
+    }
+  ]
+}

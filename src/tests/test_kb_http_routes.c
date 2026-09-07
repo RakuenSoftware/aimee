@@ -168,6 +168,12 @@ int db2_subject_erasure_complete(const char *request_id, const char *actor, int6
    return 0;
 }
 
+static const char *g_stub_kb_mode = "";
+const char *config_kb_mode(void)
+{
+   return g_stub_kb_mode;
+}
+
 int config_kb_pdf_blob_orphan_alarm_mb(void)
 {
    return 64;
@@ -3863,6 +3869,12 @@ static void test_mtls_listener(void)
       assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
+      /* A malformed durable record must never dereference absent endpoint
+       * metadata while an explicit enrollment connection is configured. */
+      FILE *malformed_identity = fopen(identity_file, "w");
+      assert(malformed_identity && fputs("{\"version\":2}", malformed_identity) >= 0 &&
+             fclose(malformed_identity) == 0);
+      assert(chmod(identity_file, 0600) == 0);
       int st2 = -1;
       char *r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
       assert(st2 == 200);
@@ -4263,6 +4275,24 @@ static void test_mtls_listener(void)
       assert(cJSON_IsString(rotated_marker) &&
              strcmp(rotated_marker->valuestring, "preserve-across-renewal") == 0);
       cJSON_Delete(rotated_managed);
+
+      /* Selecting No KB disables a previously enrolled v2 identity even while
+       * its certificate and the cached live transport still exist. */
+      g_stub_kb_mode = "none";
+      assert(kb_client_mtls_configured() == 0);
+      assert(kb_client_mtls_managed_metadata(managed_server, sizeof(managed_server),
+                                             &managed_team) == 0);
+      assert(managed_server[0] == '\0' && managed_team == 0);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(r == NULL && st2 != 200);
+      kb_client_mtls_reset_for_test();
+      assert(kb_client_mtls_configured() == 0);
+      g_stub_kb_mode = "remote";
+      assert(kb_client_mtls_configured() == 1);
+      r = kb_client_mtls_request("GET", "/v1/health", NULL, &st2);
+      assert(st2 == 200 && r);
+      free(r);
+      g_stub_kb_mode = "";
 
       kb_client_mtls_set_identity_path_for_test(NULL);
       kb_client_mtls_set_server_identity_path_for_test(NULL);

@@ -129,16 +129,22 @@ static void pump(bus_host_t *host, pthread_mutex_t *lock)
    pthread_mutex_unlock(lock);
 }
 
-static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t count)
+static void wait_for_clients(bus_host_t *host, pthread_mutex_t *lock, uint32_t count, pid_t child)
 {
    const struct timespec pause = {.tv_sec = 0, .tv_nsec = 1000000};
-   for (int i = 0; i < 2000; ++i)
+   for (int i = 0; i < 10000; ++i)
    {
       pthread_mutex_lock(lock);
       uint32_t admitted = host->admitted;
       pthread_mutex_unlock(lock);
       if (admitted >= count)
          return;
+      int status = 0;
+      if (child > 0 && waitpid(child, &status, WNOHANG) == child)
+      {
+         fprintf(stderr, "module exited before bus admission (status %d)\n", status);
+         assert(!"module exited before bus admission");
+      }
       nanosleep(&pause, NULL);
    }
    assert(!"timed out waiting for module clients");
@@ -283,6 +289,11 @@ static int production_contract(const char *name, uint32_t *kind, uint32_t *princ
       *serve_count = 3;
       return 0;
    }
+   else if (strcmp(name, "server") == 0 || strcmp(name, "kb") == 0)
+   {
+      *principal_ref = strcmp(name, "server") == 0 ? BUS_SERVER_ROLE_REF : BUS_KB_ROLE_REF;
+      *kind = 4096u + *principal_ref * 256u + 1u;
+   }
    else if (strcmp(name, "aimee") == 0)
    {
       /* Twenty-three stages, carved from ref 30 by the canonical rule
@@ -411,6 +422,19 @@ static void smoke_production_module(aimee_module_client_t *client, const char *n
    uint8_t request[AIMEE_KB_SYNTHESIS_REQUEST_LEN] = {0};
    uint8_t response[1024] = {0};
    uint32_t request_len = 0, response_len = 0;
+   if (strcmp(name, "server") == 0 || strcmp(name, "kb") == 0)
+   {
+      const char identity_request[] = "{\"operation\":\"identity\"}";
+      assert(aimee_module_client_call(client, kind, 1, 2110, 0, identity_request,
+                                      sizeof(identity_request) - 1, response, sizeof(response),
+                                      &response_len, NULL, NULL) == AIMEE_MODULE_CALL_OK);
+      assert(response_len < sizeof(response));
+      response[response_len] = 0;
+      char expected[64];
+      snprintf(expected, sizeof(expected), "\"role\":\"%s\"", name);
+      assert(strstr((char *)response, expected) != NULL);
+      return;
+   }
    if (strcmp(name, "memory") == 0)
    {
       aimee_memory_confidence_t confidence = AIMEE_MEMORY_CONFIDENCE_LOW;
@@ -881,6 +905,12 @@ int main(int argc, char **argv)
    else
       assert(snprintf(module_executable, sizeof module_executable, "%s", executable) > 0);
 
+   bus_instance_role_t role = argc == 3 && strcmp(argv[2], "server") == 0 ? BUS_INSTANCE_SERVER
+                              : argc == 3 && strcmp(argv[2], "kb") == 0   ? BUS_INSTANCE_KB
+                                                                          : BUS_INSTANCE_UNSET;
+   if (role != BUS_INSTANCE_UNSET)
+      assert(bus_instance_ensure_identity(directory, role, module_executable) == 0);
+
    uint32_t requested[PRODUCTION_STAGE_MAX + 1] = {0};
    memcpy(requested, served, serve_count * sizeof(*requested));
    requested[serve_count] = EMPTY_KIND;
@@ -918,7 +948,8 @@ int main(int argc, char **argv)
    bus_host_t host;
    assert(bus_host_create(&host, &host_config, NULL, NULL) == BUS_HOST_OK);
    pthread_mutex_t host_lock = PTHREAD_MUTEX_INITIALIZER;
-   bus_runtime_config_t runtime_config = {.socket_path = socket_path,
+   bus_runtime_config_t runtime_config = {.instance_role = role,
+                                          .socket_path = socket_path,
                                           .socket_mode = 0600,
                                           .backlog = 8,
                                           .stale_after_ns = 5000000000ULL,
@@ -962,7 +993,7 @@ int main(int argc, char **argv)
    assert(bus_endpoint_connect(socket_path, &caller_fd) == 0);
    assert(bus_client_attach_as(caller_fd, &caller, 1, CALLER_REF) == BUS_CLIENT_OK);
    assert(bus_endpoint_close(&caller_fd) == 0);
-   wait_for_clients(&host, &host_lock, (memory_process || provider_process) ? 3 : 2);
+   wait_for_clients(&host, &host_lock, (memory_process || provider_process) ? 3 : 2, module_pid);
 
    pump_thread_t pump_state = {.host = &host, .lock = &host_lock};
    atomic_init(&pump_state.stop, 0);
@@ -1063,6 +1094,11 @@ finish:
    (void)unlink(learned_store); /* absent for every other module: not an error */
    assert(snprintf(learned_store, sizeof learned_store, "%s/.providers.lock", directory) > 0);
    (void)unlink(learned_store);
+   if (role != BUS_INSTANCE_UNSET)
+   {
+      snprintf(learned_store, sizeof(learned_store), "%s/instance-identity.json", directory);
+      assert(unlink(learned_store) == 0);
+   }
    assert(rmdir(directory) == 0);
    if (argc == 3)
       printf("module runtime (%s): C caller/Go handler wire parity passed\n", argv[2]);

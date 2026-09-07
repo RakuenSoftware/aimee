@@ -585,6 +585,16 @@ add_executable({binary}
 {source_lines}
 )
 target_compile_features({binary} PRIVATE c_std_11)
+# Match the runtime bundle: only the declared process stages enter this binary.
+# Unused legacy surface cannot import another module's retired implementation.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options({binary} PRIVATE -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options({binary} PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options({binary} PRIVATE -Wl,--gc-sections)
+    endif()
+endif()
 target_include_directories({binary} PRIVATE
 {generated_include_line}\
 {include_lines}
@@ -612,12 +622,13 @@ def go_module_main(module_id: str, principal_ref: int,
         for stage in stages
     )
     handler = "handler.NewDefaultHandler()" if module_id == "delegates" else "handler.Handle"
+    extra_imports = ""
     watchdog = """\tif handled, code := handler.RunWatchdog(os.Args); handled {
 \t\tos.Exit(code)
 \t}
 """ if module_id == "delegates" else ""
     if module_id == "providers":
-        watchdog = "\tif handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
+        watchdog = "\tif handled, code := handler.ModelServicesBootstrap(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunBootstrapLookup(os.Args); handled { os.Exit(code) }\n    if handled, code := handler.RunProbeWorker(os.Args); handled { os.Exit(code) }\n"
     cleanup = "\tdefer handler.Close()\n" if module_id == "postgres" else ""
     setup = ""
     if module_id in {"config", "providers"}:
@@ -627,6 +638,26 @@ def go_module_main(module_id: str, principal_ref: int,
 \t\tfmt.Fprintf(os.Stderr, "module initialization: %v\\n", err)
 \t\tos.Exit(1)
 \t}
+"""
+    if module_id == "postgres":
+        extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/postgres/storage"\n'
+        watchdog = "\tif handled, code := storage.Bootstrap(os.Args); handled { os.Exit(code) }\n"
+    if module_id in {"server", "kb"}:
+        extra_imports = '\t"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"\n'
+        handler = "moduleHandler"
+        watchdog = """\tif handled, code := identity.Bootstrap(os.Args); handled { os.Exit(code) }
+\tif len(os.Args) > 1 && os.Args[1] == "__aimee_supervise_modules" {
+\t\tif len(os.Args) != 5 { os.Exit(2) }
+\t\tctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+\t\tdefer stop()
+\t\tif err := handler.Supervise(ctx, os.Args[2], os.Args[3], os.Args[4]); err != nil {
+\t\t\tfmt.Fprintln(os.Stderr, err); os.Exit(1)
+\t\t}
+\t\treturn
+\t}
+"""
+        setup = """\tmoduleHandler, err := handler.NewHandler(os.Getenv("AIMEE_HOME"))
+\tif err != nil { fmt.Fprintln(os.Stderr, err); os.Exit(1) }
 """
     return f"""package main
 
@@ -639,7 +670,7 @@ import (
 
 \t"github.com/JBailes/aimee/server-go/bus"
 \thandler "github.com/JBailes/aimee/server-go/modules/{module_id}"
-)
+{extra_imports})
 
 func main() {{
 {watchdog}\
@@ -684,8 +715,10 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/modules/module-runtime/identity": {"server", "kb"},
+    "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers"},
-    "server-go/modules/egress": {"providers"},
+    "server-go/modules/egress": {"providers", "memory"},
     "server-go/delegate": {"delegates", "roundtable"},
     "server-go/aimee": {"aimee", "economizer"},
     "server-go/db": {"aimee", "memory"},

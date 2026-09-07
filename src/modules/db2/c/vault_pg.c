@@ -595,7 +595,8 @@ static int vault_pg_list(void *ctx, const char *principal, vault_store_entry_t *
       return -1;
    aimee_pg_bind_text(st, "?1", principal);
    int n = 0;
-   while (n < max && aimee_pg_step(st, err, sizeof(err)) == AIMEE_PG_ROW)
+   int step = AIMEE_PG_DONE;
+   while (n < max && (step = aimee_pg_step(st, err, sizeof(err))) == AIMEE_PG_ROW)
    {
       const char *a = aimee_pg_column_text(st, 0);
       const char *c = aimee_pg_column_text(st, 1);
@@ -604,7 +605,7 @@ static int vault_pg_list(void *ctx, const char *principal, vault_store_entry_t *
       n++;
    }
    aimee_pg_finalize(st);
-   return n;
+   return step == AIMEE_PG_DONE || step == AIMEE_PG_ROW ? n : -1;
 }
 
 static int vault_pg_delete(void *ctx, const char *principal, const char *agent, const char *cred)

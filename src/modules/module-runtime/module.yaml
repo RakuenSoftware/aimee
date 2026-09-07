@@ -17,5 +17,15 @@
   ],
   "docs": [
     "docs/modules/module-runtime.md"
+  ],
+  "go_sources": [
+    "server-go/modules/module-runtime/identity/identity.go",
+    "server-go/modules/module-runtime/supervisor/supervisor.go",
+    "server-go/modules/module-runtime/supervisor/child_unix.go",
+    "server-go/modules/module-runtime/supervisor/child_windows.go"
+  ],
+  "go_tests": [
+    "server-go/modules/module-runtime/identity/identity_test.go",
+    "server-go/modules/module-runtime/supervisor/supervisor_test.go"
   ]
 }

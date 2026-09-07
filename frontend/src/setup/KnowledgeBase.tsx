@@ -2,24 +2,9 @@ import { useEffect, useState } from 'react';
 import { Button, useToast } from '@rakuensoftware/smoothgui';
 import { loadConfig, saveConfigValue, type ConfigMap } from './configApi';
 import { isRestartKey } from './wizardSteps';
-import { buildDesiredConfig, type KbMode } from './deployTopology';
+import { type KbMode } from './deployTopology';
 
-/* Wizard step 2 — Knowledge base. The fork that shapes the rest of the wizard:
- *
- *  • Local  — deploy an aimee-kb on this instance. The following Deploy-topology
- *             + Shared-store (DB2) steps configure it.
- *  • Cloud  — redeem a setup code from a hosted provider. The code is exchanged
- *             for a URL and a key, which is what Remote asks an operator to
- *             paste by hand, so this is Remote with the typing removed and it
- *             saves identical config.
- *  • Remote — connect to an existing aimee-kb (kb_client_url + bearer token).
- *             Nothing is deployed here, so the wizard skips deploy topology + DB2.
- *
- * It writes only the kb_* keys (via buildDesiredConfig's remote branch, or a bare
- * kb_mode='local' write), guards every save (Toast + stay put on failure), and
- * reports both the chosen mode and the restart-class keys it changed so the wizard
- * can update its visible steps + restart summary. Self-contained like
- * PrimaryChooser / DeployTopology. */
+/* Optional connection to an existing shared KB, configured from Settings. */
 
 /* Where a setup code is redeemed. A default rather than a constant: a hosted
  * aimee is not required to be ours, and someone running their own should not
@@ -28,7 +13,7 @@ export const DEFAULT_CLOUD_ENDPOINT = 'https://api.aimee.rakuensoftware.com';
 
 /** Which source the operator picked. Cloud and Remote both persist
  *  kb_mode='remote'; they differ only in how the URL and key are obtained. */
-type KbSource = 'local' | 'cloud' | 'remote';
+type KbSource = 'none' | 'cloud' | 'remote';
 
 export interface KnowledgeBaseProps {
   /** Called after the KB choice is persisted, with the restart-class keys changed
@@ -51,7 +36,7 @@ export default function KnowledgeBase({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const [source, setSource] = useState<KbSource>('local');
+  const [source, setSource] = useState<KbSource>('none');
 
   const [code, setCode] = useState('');
   const [redeeming, setRedeeming] = useState(false);
@@ -62,9 +47,10 @@ export default function KnowledgeBase({
   const cloudEndpoint = cloudEndpointProp ?? DEFAULT_CLOUD_ENDPOINT;
 
   /* Cloud and Remote are the same persisted mode; only the UI differs. */
-  const kbMode: KbMode = source === 'local' ? 'local' : 'remote';
+  const kbMode: KbMode = source === 'none' ? 'none' : 'remote';
   const [kbUrl, setKbUrl] = useState('');
   const [kbBearer, setKbBearer] = useState('');
+  const [serviceIdentity, setServiceIdentity] = useState('');
 
   useEffect(() => {
     let alive = true;
@@ -72,9 +58,9 @@ export default function KnowledgeBase({
       const c = await loadConfig({ fetchImpl });
       if (!alive) return;
       setCfg(c);
-      setSource(String(c.kb_mode ?? 'local') === 'remote' ? 'remote' : 'local');
+      setSource(String(c.kb_mode) !== 'none' && (String(c.kb_client_url ?? '').trim() || c.kb_connection_string === true) ? 'remote' : 'none');
       setKbUrl(String(c.kb_client_url ?? ''));
-      setKbBearer(String(c.kb_client_bearer_token ?? ''));
+      setKbBearer(''); // Secrets are presence flags; never echo or save those flags as credentials.
       setLoaded(true);
     })();
     return () => {
@@ -124,21 +110,24 @@ export default function KnowledgeBase({
     setSaving(true);
     setError('');
 
-    // Remote writes kb_mode + the client url/token; local writes just kb_mode
-    // (the deploy-topology + DB2 steps handle the rest). Reuse buildDesiredConfig's
-    // remote branch so the key mapping stays single-sourced. The embedder and
-    // synthesis selections are irrelevant to the kb_* keys — the remote branch
-    // returns before reading them — so they are passed at their inert defaults.
-    const desired: Record<string, string> =
-      kbMode === 'remote'
-        ? buildDesiredConfig({
-            kbMode: 'remote',
-            kbUrl,
-            kbBearer,
-            embedder: { kind: 'bundled', model: '' },
-            synthesis: { kind: 'off' },
-          })
-        : { kb_mode: 'local' };
+    const endpoint = kbUrl.trim();
+    const enrollment = endpoint.startsWith('aimee://') || (!endpoint && cfg.kb_connection_string === true);
+    const desired: Record<string, string> = {};
+    if (kbMode === 'none') {
+      Object.assign(desired, { kb_client_url: '', kb_connection_string: '', kb_client_bearer_token: '', kb_service_identity_token: '' });
+    } else {
+      if (enrollment) {
+        if (endpoint) desired.kb_connection_string = endpoint;
+        desired.kb_client_url = '';
+      } else {
+        desired.kb_client_url = endpoint;
+        desired.kb_connection_string = '';
+      }
+      if (kbBearer.trim()) desired.kb_client_bearer_token = kbBearer.trim();
+      if (serviceIdentity.trim()) desired.kb_service_identity_token = serviceIdentity.trim();
+    }
+    // Activate the connection only after its credentials have been accepted.
+    desired.kb_mode = kbMode;
 
     // Persist only what changed (mirrors DeployTopology.save); abort + Toast on
     // the first failure, keeping the operator on the step with input intact.
@@ -147,7 +136,7 @@ export default function KnowledgeBase({
     for (const [key, value] of Object.entries(desired)) {
       const original = cfg[key] == null ? '' : String(cfg[key]);
       if (value === original) continue;
-      const res = await saveConfigValue(key, value);
+      const res = await saveConfigValue(key, value, { fetchImpl });
       if (!res.ok) {
         setError(`Couldn’t save ${key}: ${res.error ?? 'unknown error'}`);
         toast.error(`Couldn’t save ${key}: ${res.error ?? 'unknown error'}`);
@@ -160,6 +149,9 @@ export default function KnowledgeBase({
     }
 
     setCfg(savedCfg);
+    setKbBearer('');
+    setServiceIdentity('');
+    if (enrollment) setKbUrl('');
     setSaving(false);
     toast.success('Knowledge base saved');
     await onSaved(Array.from(restart), kbMode);
@@ -177,13 +169,13 @@ export default function KnowledgeBase({
   return (
     <div style={{ display: 'grid', gap: 14, marginBottom: 8 }}>
       <div style={{ fontSize: 12.5, color: 'var(--sg-text-muted)', lineHeight: 1.5 }}>
-        aimee needs a knowledge base for memory + search. Deploy one here, or point at an existing one.
+        Personal memory runs on this Server. You can also connect to a shared knowledge base.
       </div>
 
       <section style={{ display: 'grid', gap: 8 }}>
         <label style={radioRow}>
-          <input type="radio" checked={source === 'local'} onChange={() => setSource('local')} />
-          <span>Deploy a local knowledge base (recommended)</span>
+          <input type="radio" checked={source === 'none'} onChange={() => setSource('none')} />
+          <span>Personal memory only</span>
         </label>
         <label style={radioRow}>
           <input type="radio" checked={source === 'cloud'} onChange={() => setSource('cloud')} />
@@ -198,7 +190,7 @@ export default function KnowledgeBase({
           <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
             <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
               Paste the code from your welcome email. It is exchanged for the address and key of
-              your knowledge base, so nothing is deployed here and the next two steps are skipped.
+              your shared knowledge base. Personal memory and its models stay on this Server.
             </div>
             <Field label="Setup code">
               <input style={input} value={code} onChange={(e) => setCode(e.target.value)}
@@ -218,21 +210,25 @@ export default function KnowledgeBase({
         ) : remote ? (
           <div style={{ display: 'grid', gap: 8, paddingLeft: 24 }}>
             <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)' }}>
-              A remote KB deploys nothing here — aimee-server just connects to it. The deploy-topology
-              and shared-store steps are skipped.
+              Connect to a KB deployed separately. This does not change your local models.
             </div>
-            <Field label="aimee-kb URL">
+            <Field label="KB address or enrollment connection string">
               <input style={input} value={kbUrl} onChange={(e) => setKbUrl(e.target.value)}
-                placeholder="https://kb.example:8760" />
+                autoComplete="off" placeholder={cfg.kb_connection_string === true ? "Enrollment saved; leave blank to keep" : "aimee://kb.example:8745?… or https://kb.example"} />
             </Field>
             <Field label="Bearer token">
               <input style={input} type="password" autoComplete="off" value={kbBearer}
-                onChange={(e) => setKbBearer(e.target.value)} placeholder="token" />
+                onChange={(e) => setKbBearer(e.target.value)} placeholder={cfg.kb_client_bearer_token === true ? "Configured; leave blank to keep" : "Bearer from the KB administrator"} />
+            </Field>
+            <Field label="Service identity token (for enrollment connections)">
+              <input style={input} type="password" autoComplete="off" value={serviceIdentity}
+                onChange={(e) => setServiceIdentity(e.target.value)}
+                placeholder={cfg.kb_service_identity_token === true ? "Configured; leave blank to keep" : "Matching service identity from the KB administrator"} />
             </Field>
           </div>
         ) : (
           <div style={{ fontSize: 11.5, color: 'var(--sg-text-faint)', paddingLeft: 24 }}>
-            The next steps place the embedder + synthesizer and set the shared store.
+            No shared knowledge connection. Your personal memory remains available locally.
           </div>
         )}
       </section>
@@ -244,8 +240,8 @@ export default function KnowledgeBase({
       )}
 
       <div>
-        <Button variant="primary" disabled={saving || cloudIncomplete} onClick={save}>
-          {saving ? 'Saving…' : 'Save & continue'}
+        <Button variant="primary" disabled={saving || cloudIncomplete || (remote && !kbUrl.trim() && cfg.kb_connection_string !== true)} onClick={save}>
+          {saving ? 'Saving…' : 'Save connection'}
         </Button>
       </div>
     </div>

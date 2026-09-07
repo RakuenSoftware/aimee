@@ -8,7 +8,7 @@ set -euo pipefail
 : "${PGDATA:?PGDATA is required}"
 : "${AIMEE_STORE_MIGRATOR_PASSWORD:?AIMEE_STORE_MIGRATOR_PASSWORD is required}"
 : "${AIMEE_STORE_RUNTIME_PASSWORD:?AIMEE_STORE_RUNTIME_PASSWORD is required}"
-secure_dir=/var/lib/postgresql/secure
+secure_dir=${AIMEE_STORE_SECURE_DIR:-/var/lib/postgresql/secure}
 # The server mounts this volume read-only and must traverse the directory to
 # read server.crt as its TLS trust root.  The certificate is public (0644);
 # the private key and pg_hba.conf remain postgres-only (0600), so traversal
@@ -29,6 +29,13 @@ if [[ ! -s "$secure_dir/server.key" || ! -s "$secure_dir/server.crt" ]]; then
   mv "$tmp_dir/server.crt" "$secure_dir/server.crt"
   rmdir "$tmp_dir"
   trap - EXIT
+fi
+
+# Encrypted deployments publish only the public trust certificate outside the
+# mounted filesystem. The private key and reconciliation logs remain inside it.
+if [[ -n "${AIMEE_STORE_PUBLIC_TLS_DIR:-}" ]]; then
+  install -d -m 0755 "$AIMEE_STORE_PUBLIC_TLS_DIR"
+  install -m 0644 "$secure_dir/server.crt" "$AIMEE_STORE_PUBLIC_TLS_DIR/server.crt"
 fi
 
 cat >"$secure_dir/pg_hba.conf" <<'EOF'

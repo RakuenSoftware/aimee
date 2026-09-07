@@ -50,6 +50,10 @@ export AIMEE_STORE_MIGRATION_URL="${AIMEE_STORE_MIGRATION_URL:-}"
 }
 PGDB="${PGDB:-$AIMEE_DB2_URL}"
 OBJ="$AIMEE_SRC/build/obj"
+[ -r "$OBJ/module-bundle/grants/kb/config.grant" ] || {
+    python3 "$AIMEE_ROOT/scripts/export_c_repositories.py" --runtime-bundle "$OBJ/module-bundle" >/dev/null || exit 1
+}
+
 KBHOME="$WORKDIR/kbhome"
 SRVHOME="$WORKDIR/srvhome"
 
@@ -86,15 +90,24 @@ deploy() { # deploy <placement> <name> <home>
     [ -x "$bin" ] || { bad "granted '$name' has no binary to serve it"; return 1; }
     cp "$bin" "$home/.config/aimee/aimee-module-$name"
     chmod 0755 "$home/.config/aimee/aimee-module-$name"
-    sed "s|^executable=.*|executable=$home/.config/aimee/aimee-module-$name|" "$grant" \
-        > "$home/.config/aimee/modules.d/$placement/$name.grant"
+    # Deploy every identity owned by this executable, including outbound
+    # postgres/egress grants. Companions share its process and are not launched.
+    local companion declared
+    for companion in "$OBJ/module-bundle/grants/$placement/"*.grant; do
+        declared=$(sed -n 's/^executable=//p' "$companion")
+        [ "${declared##*/}" = "aimee-module-$name" ] || continue
+        sed "s|^executable=.*|executable=$home/.config/aimee/aimee-module-$name|" "$companion" \
+            > "$home/.config/aimee/modules.d/$placement/$(basename "$companion")"
+    done
     return 0
 }
 
 attach() { # attach <name> <home> <bus> <tag>
     local name="$1" home="$2" bus="$3" tag="$4"
     [ -x "$home/.config/aimee/aimee-module-$name" ] || return 1
-    env HOME="$home" AIMEE_HOME="$home/.config/aimee" \
+    local placement="$tag"
+    [ "$placement" != srv ] || placement=server
+    env HOME="$home" AIMEE_HOME="$home/.config/aimee" AIMEE_MODULE_PLACEMENT="$placement" \
         AIMEE_DB1_PATH="$home/.config/aimee/aimee.db" AIMEE_DB2_URL="$AIMEE_DB2_URL" \
         AIMEE_STORE_URL="$AIMEE_STORE_URL" \
         AIMEE_STORE_MIGRATION_URL="$AIMEE_STORE_MIGRATION_URL" \
@@ -175,25 +188,6 @@ SRV_MODULES="$SRV_MODULES egress"
 SRV_DEPLOYED=""
 for m in $SRV_MODULES; do
     deploy server "$m" "$SRVHOME" && SRV_DEPLOYED="$SRV_DEPLOYED $m"
-done
-# Several Go modules serve under one identity and make outbound calls under
-# narrower companion identities.  Every companion grant must point at the same
-# launched executable; launching companions would duplicate serving processes.
-deploy_companion() { # deploy_companion <grant> <serving-module>
-    local companion="$1" module="$2"
-    grant="$OBJ/module-bundle/grants/server/$companion.grant"
-    if [ -r "$grant" ] && [ -x "$SRVHOME/.config/aimee/aimee-module-$module" ]; then
-        sed "s|^executable=.*|executable=$SRVHOME/.config/aimee/aimee-module-$module|" "$grant" \
-            > "$SRVHOME/.config/aimee/modules.d/server/$companion.grant"
-    else
-        bad "companion grant '$companion' is not deployable"
-    fi
-}
-for spec in \
-    aimee-db1:aimee aimee-postgres:aimee economizer-db1:economizer \
-    git-egress:git memory-egress:memory roundtable-delegates:roundtable \
-    roundtable-egress:roundtable; do
-    deploy_companion "${spec%%:*}" "${spec#*:}"
 done
 printf '        deployed:%s\n' "$SRV_DEPLOYED"
 

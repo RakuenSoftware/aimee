@@ -83,3 +83,22 @@ contract, `AIMEE_DB1_PATH`, and direct domain SQL access have no 0.4.0 compatibi
 Extend `postgres` by adding a versioned generic operation and cross-language fixtures, then register a
 domain-owned catalog and tests. Do not add domain conditions to this module. Removal requires migrating
 every declared consumer and preserving recorded owner/version/checksum history for audit and restore.
+
+## Encrypted container storage (0.4.2 implementation)
+
+The module's `storage` package owns LUKS2 mount lifecycle for the standardized
+PostgreSQL container. Core's existing Vault is the only persistent key custodian;
+its database-independent bootstrap must be available before PostgreSQL starts.
+`AIMEE_POSTGRES_STORAGE_SOCKET` identifies the local control socket, not a key
+source. The owner requests only its fixed, volume-bound Vault credential.
+
+Storage bootstrap requires a Linux Docker host with device-mapper and loop
+support. The deployment must supply the actual device-mapper block major and
+allow the required storage administration operations; it must never fall back to
+an unencrypted data directory. Key transport uses protected transient memory and
+pipes. `AIMEE_POSTGRES_VOLUME_MIB` sizes a new encrypted volume; changing it on an
+existing volume is refused until an explicit storage migration handles resizing.
+
+The real-container regression harness is `tests/e2e/postgres-luks-e2e.py`.
+Implementation and release evidence are tracked in
+[the storage validation report](../validation/release-0.4.2-postgres-luks-2026-09-06.md).

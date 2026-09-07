@@ -882,6 +882,10 @@
     },
     {
       "classification": "private-implementation-test",
+      "path": "src/tests/test_kb_memory_list.c"
+    },
+    {
+      "classification": "private-implementation-test",
       "path": "src/tests/test_kb_mgmt_status_custody.c"
     },
     {
@@ -12663,7 +12667,8 @@
     {
       "consumers": [
         "src/kb/db2_adapters/kb_service_backend_memory.c",
-        "src/kb/kb_service_memory.c"
+        "src/kb/kb_service_memory.c",
+        "src/tests/test_kb_memory_list.c"
       ],
       "locations": [
         {
@@ -18984,7 +18989,8 @@
     },
     {
       "consumers": [
-        "src/kb/db2_adapters/kb_service_backend_memory.c"
+        "src/kb/db2_adapters/kb_service_backend_memory.c",
+        "src/tests/test_kb_memory_list.c"
       ],
       "locations": [
         {
@@ -26227,7 +26233,7 @@
     }
   ],
   "declarations_complete": false,
-  "fingerprint": "e199e916fbe15fb09407385525b02bed80bb9e3be0d570c448c4637cd9a79c05",
+  "fingerprint": "d8a6614e6047521fc815a94cd564e0e0b5ef5227221cd963f4b95f4b2850c039",
   "module": "db2",
   "schema_version": 1,
   "summary": {

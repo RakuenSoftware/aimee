@@ -1,0 +1,74 @@
+{
+  "checks": [
+    {
+      "id": 2,
+      "passed": true
+    },
+    {
+      "id": 6,
+      "passed": true
+    },
+    {
+      "id": 7,
+      "passed": true
+    },
+    {
+      "id": 10,
+      "passed": true
+    },
+    {
+      "id": 3,
+      "passed": true
+    },
+    {
+      "id": 4,
+      "passed": true
+    },
+    {
+      "id": 8,
+      "passed": true
+    },
+    {
+      "id": 9,
+      "passed": true
+    },
+    {
+      "id": 5,
+      "passed": true
+    },
+    {
+      "id": 18,
+      "passed": true
+    },
+    {
+      "id": 17,
+      "passed": true
+    },
+    {
+      "id": 12,
+      "passed": true
+    },
+    {
+      "id": 14,
+      "passed": true
+    },
+    {
+      "id": 16,
+      "passed": true
+    },
+    {
+      "id": 13,
+      "passed": true
+    },
+    {
+      "id": 11,
+      "passed": true
+    },
+    {
+      "id": 15,
+      "passed": true
+    }
+  ],
+  "passed": 17,
+  "http_status": 200
+}

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Panel, Badge, InlineStatus, Button } from "@rakuensoftware/smoothgui";
+import KnowledgeBase from "../setup/KnowledgeBase";
 import { FIELD_HELP, SECTION_HELP, RESTART_KEYS, OWNED_ELSEWHERE } from "./settingsHelp";
 import { resetAll as resetTutorials } from "../help/tutorialState";
 import { setDismissed as setSetupDismissed, requestOpenWizard } from "../setup/setupState";
@@ -240,6 +241,9 @@ export default function Settings() {
         </Button>
         <InlineStatus status={status} />
       </div>
+      <Panel title="Shared knowledge (optional)">
+        <KnowledgeBase onSaved={() => { refresh(); }} />
+      </Panel>
       <p style={{ fontSize: 12, color: "var(--sg-text-secondary)", margin: "0 0 12px" }}>
         Changes persist to <code>aimee.yaml</code> and take effect on the next turn, unless a row is
         marked <em>restart</em>. The everyday runtime options are shown by default; deploy-time,

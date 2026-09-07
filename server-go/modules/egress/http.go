@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
-	"crypto/tls"
 	"encoding/binary"
 	"encoding/json"
 	"errors"
@@ -215,12 +214,16 @@ func (p policy) executeHTTP(invocation bus.ModuleInvocation, request HTTPRequest
 			port = "80"
 		}
 	}
+	tlsConfig, err := modelTLSConfig(parsed, request.Purpose, "/run/aimee-model-tls")
+	if err != nil {
+		return HTTPResponse{Error: "egress: " + err.Error()}
+	}
 	dialer := &net.Dialer{Timeout: time.Duration(request.TimeoutMS) * time.Millisecond}
 	transport := &http.Transport{
 		Proxy:                  nil,
 		ResponseHeaderTimeout:  time.Duration(request.TimeoutMS) * time.Millisecond,
 		MaxResponseHeaderBytes: maxHTTPHeaders,
-		TLSClientConfig:        &tls.Config{MinVersion: tls.VersionTLS12, ServerName: parsed.Hostname()},
+		TLSClientConfig:        tlsConfig,
 	}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		requestedHost, _, splitErr := net.SplitHostPort(address)

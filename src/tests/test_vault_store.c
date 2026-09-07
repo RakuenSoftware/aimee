@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/wait.h>
 
 static char g_home[256];
 
@@ -483,6 +484,73 @@ static void test_dual_wrap_at_rest_ciphertext_only(void)
    printf("  PASS: test_dual_wrap_at_rest_ciphertext_only\n");
 }
 
+static void test_corrupt_vault_is_not_missing(void)
+{
+   const char *principal = "uid:corrupt";
+   uint8_t salt[VAULT_SALT_LEN], kek[VAULT_KEK_LEN];
+   assert(vault_store_get_or_create_salt(principal, salt) == 0);
+   char path[640], out[32];
+   assert(find_vault_file(principal, path, sizeof(path)));
+   FILE *f = fopen(path, "wb");
+   assert(f && fputs("{broken", f) >= 0);
+   assert(fclose(f) == 0);
+   make_kek(kek, 9);
+   assert(vault_store_get(principal, kek, "postgres", "luks", out, sizeof(out)) == -1);
+   assert(vault_store_get_server(principal, kek, "postgres", "luks", out, sizeof(out)) == -1);
+   assert(vault_store_get_or_create_salt(principal, salt) == -1);
+   f = fopen(path, "rb");
+   assert(f && fread(out, 1, sizeof(out), f) == 7);
+   assert(memcmp(out, "{broken", 7) == 0);
+   fclose(f);
+   printf("  PASS: corrupt Vault is not missing and is never replaced\n");
+}
+
+static void test_concurrent_process_updates(void)
+{
+   const char *principal = "uid:concurrent";
+   uint8_t salt[VAULT_SALT_LEN], kek[VAULT_KEK_LEN];
+   make_kek(kek, 17);
+   assert(vault_store_get_or_create_salt(principal, salt) == 0);
+   int barrier[2];
+   assert(pipe(barrier) == 0);
+   pid_t children[8];
+   for (int i = 0; i < 8; i++)
+   {
+      children[i] = fork();
+      assert(children[i] >= 0);
+      if (children[i] == 0)
+      {
+         close(barrier[1]);
+         char start;
+         assert(read(barrier[0], &start, 1) == 0);
+         close(barrier[0]);
+         for (int j = 0; j < 16; j++)
+         {
+            char cred[32];
+            snprintf(cred, sizeof(cred), "writer-%d-%d", i, j);
+            assert(vault_store_set(principal, kek, "fixture", cred, cred) == 0);
+         }
+         _exit(0);
+      }
+   }
+   close(barrier[0]);
+   close(barrier[1]);
+   for (int i = 0; i < 8; i++)
+   {
+      int status;
+      assert(waitpid(children[i], &status, 0) == children[i]);
+      assert(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+      for (int j = 0; j < 16; j++)
+      {
+         char cred[32], out[32];
+         snprintf(cred, sizeof(cred), "writer-%d-%d", i, j);
+         assert(vault_store_get(principal, kek, "fixture", cred, out, sizeof(out)) == 0);
+         assert(strcmp(cred, out) == 0);
+      }
+   }
+   printf("  PASS: concurrent Vault writers retain all 128 credentials\n");
+}
+
 int main(void)
 {
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-vault-test-%d", (int)getpid());
@@ -491,6 +559,8 @@ int main(void)
    assert(system(mk) == 0);
    setenv("AIMEE_HOME", g_home, 1);
 
+   test_corrupt_vault_is_not_missing();
+   test_concurrent_process_updates();
    test_set_get_roundtrip();
    test_structured_credential_roundtrip();
    test_at_rest_is_ciphertext_only();
