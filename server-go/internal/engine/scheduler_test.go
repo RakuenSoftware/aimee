@@ -14,6 +14,13 @@ import (
 	"github.com/JBailes/aimee/server-go/internal/workflowstore/workflowstoretest"
 )
 
+// The fixture uses real daemon/module processes and PostgreSQL. A scheduling
+// pass performs several bus-backed maintenance calls before dispatching work, so
+// allow headroom for race instrumentation and shared CI runners. Tests that
+// require immediate slot refill set pollEvery to an hour; this bound still
+// catches a missing notification without imposing an in-process latency budget.
+const schedulerTestTimeout = 30 * time.Second
+
 type blockingRunner struct {
 	started chan string
 	release chan struct{}
@@ -294,7 +301,7 @@ func waitStarted(t *testing.T, started <-chan string) string {
 	select {
 	case id := <-started:
 		return id
-	case <-time.After(2 * time.Second):
+	case <-time.After(schedulerTestTimeout):
 		t.Fatal("workflow did not start")
 		return ""
 	}
@@ -360,7 +367,7 @@ func TestSchedulerRecoversRoundtableTransientPausesWithNewExecutionVersion(t *te
 	defer cancel()
 	go scheduler.Run(ctx)
 
-	deadline := time.Now().Add(4 * time.Second)
+	deadline := time.Now().Add(schedulerTestTimeout)
 	for time.Now().Before(deadline) {
 		accepted := 0
 		for id := range reasons {
@@ -512,7 +519,7 @@ func TestSchedulerReconciliationStopsAnActuallyRunningOrphan(t *testing.T) {
 	if err := store.Finish(t.Context(), "wi_live_root", "work", "stopped", "operator_stop", "", 0); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(2 * time.Second)
+	deadline := time.Now().Add(schedulerTestTimeout)
 	for time.Now().Before(deadline) {
 		item, err := store.WorkItem(t.Context(), "wi_live_orphan")
 		if err != nil {

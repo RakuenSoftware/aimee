@@ -1946,7 +1946,7 @@ void delegate_worker(void *arg)
          double dcost = 0.0;
          if (db1_token_audit_cost_for_delegation_ex(deleg_id, &dcost) == 0)
             reward = cost_shaped_reward(1, dcost, config_cost_reward_lambda_pct(),
-                                       config_cost_reward_ref_usd_milli());
+                                        config_cost_reward_ref_usd_milli());
          else
          {
             /* Missing settlement is not a successful zero-cost outcome. Leave
