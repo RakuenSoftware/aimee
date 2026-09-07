@@ -1936,3 +1936,109 @@ void test_agent_default_primary_skips_disabled(void)
 
    printf("  PASS: test_agent_default_primary_skips_disabled\n");
 }
+
+/* Real Go-owned provider snapshot -> native role predicate -> every selector.
+ * A wildcard, explicit tier and an escalation must not bypass the same floor. */
+void test_competence_contract_roundtrip_and_routing(void)
+{
+   FILE *f = fopen(agent_config_path(), "w");
+   assert(f);
+   fputs(
+       "{\"role_contracts\":{\"code\":{\"min_competence\":70}},\"models\":["
+       "{\"name\":\"free\",\"model\":\"test-free\",\"provider\":\"openai\",\"auth_type\":\"none\","
+       "\"roles\":[\"all\"],\"price_in_per_mtok\":0,\"price_out_per_mtok\":0,\"cost_tier\":0,"
+       "\"competence\":{\"code\":{\"score\":50,\"source\":\"operator: fixture\"}}},"
+       "{\"name\":\"qualified\",\"model\":\"test-qualified\",\"provider\":\"openai\",\"auth_type\":"
+       "\"none\","
+       "\"roles\":[\"code\"],\"cost_tier\":1,"
+       "\"competence\":{\"code\":{\"score\":80,\"source\":\"benchmark: fixture\"}}}]}\n",
+       f);
+   fclose(f);
+   agent_config_t cfg;
+   assert(agent_load_config(&cfg) == 0);
+   assert(cfg.agent_count == 2);
+   agent_t *free_model = agent_find(&cfg, "free");
+   agent_t *qualified = agent_find(&cfg, "qualified");
+   assert(free_model && qualified);
+   assert(agent_role_competence(free_model, "code") == 50);
+   assert(!agent_has_role(free_model, "code"));
+   assert(agent_has_role(free_model, "summarize")); /* no contract: legacy role */
+   assert(agent_has_role(qualified, "code"));
+   assert(agent_route(&cfg, "code") == qualified);
+   assert(agent_route_at_tier(&cfg, "code", 0) == NULL);
+   assert(delegate_pick_for_role(&cfg, "code", NULL, 0) == qualified - cfg.agents);
+   assert(agent_save_config(&cfg) == 0);
+   assert(agent_load_config(&cfg) == 0);
+   free_model = agent_find(&cfg, "free");
+   qualified = agent_find(&cfg, "qualified");
+   assert(!agent_has_role(free_model, "code"));
+   assert(agent_role_competence(qualified, "code") == 80);
+   assert(free_model->declared & AGENT_DECL_PRICE_IN);
+   assert(free_model->price_in_per_mtok == 0);
+   qualified->enabled = 0;
+   agent_route_policy_t policy = {.capability_routing = 1};
+   assert(agent_route_with_caps(&cfg, "code", &policy, 0, 0) == NULL);
+   assert(agent_route_escalation_target(&cfg, "code", -1, 0, AGENT_SCOPE_UNSET) == NULL);
+   unlink(agent_config_path());
+}
+
+static int qualified_cost_calls;
+static int qualified_cost_fixture(const agent_config_t *cfg, const char *role,
+                                  agent_t *const candidates[], int count, int min_context)
+{
+   (void)cfg;
+   (void)min_context;
+   qualified_cost_calls++;
+   assert(strcmp(role, "code") == 0);
+   assert(count == 1);
+   assert(strcmp(candidates[0]->name, "qualified") == 0);
+   return 0;
+}
+static int broken_cost_fixture(const agent_config_t *cfg, const char *role,
+                               agent_t *const candidates[], int count, int min_context)
+{
+   (void)cfg;
+   (void)role;
+   (void)candidates;
+   (void)count;
+   (void)min_context;
+   return -1;
+}
+void test_cost_selection_filters_before_learning(void)
+{
+   agent_config_t cfg = {0};
+   cfg.agent_count = 2;
+   for (int i = 0; i < 2; i++)
+   {
+      agent_t *a = &cfg.agents[i];
+      strcpy(a->name, i ? "qualified" : "weak");
+      strcpy(a->roles[0], "code");
+      a->role_count = 1;
+      strcpy(a->auth_type, "none");
+      strcpy(a->provider, "openai");
+      a->enabled = a->tools_enabled = 1;
+      a->middleware.context_window = 10000;
+      a->routing_competence_count = 1;
+      strcpy(a->routing_competence[0].role, "code");
+      a->routing_competence[0].eligible = i;
+   }
+   agent_route_policy_t policy = {.capability_routing = 1};
+   agent_set_route_cost_provider(qualified_cost_fixture);
+   qualified_cost_calls = 0;
+   for (int premium = 0; premium < 2; premium++)
+   {
+      cfg.route_premium = premium;
+      assert(agent_route_with_caps(&cfg, "code", &policy, MODEL_CAP_TOOLS, 1000) == &cfg.agents[1]);
+   }
+   assert(qualified_cost_calls == 2);
+   agent_set_route_cost_provider(broken_cost_fixture);
+   assert(agent_route_with_caps(&cfg, "code", &policy, MODEL_CAP_TOOLS, 1000) == NULL);
+   assert(agent_route_last_was_module_fault());
+   agent_set_route_cost_provider(NULL);
+   agent_reset_route_selection_authority();
+   /* Legacy transport diagnostics use registration keys too. */
+   provider_health_update("routing-account-east", 401);
+   provider_health_update("routing-account-west", 200);
+   assert(provider_health_get("routing-account-east")->available == 0);
+   assert(provider_health_get("routing-account-west")->available == 1);
+}

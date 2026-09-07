@@ -333,22 +333,10 @@ typedef struct
     * the check applies. A REASON is required rather than a bare boolean so an
     * exemption cannot silently hide a genuinely mis-tiered agent. */
    char tier_price_exempt[128];
-   /* Operator price override, US dollars per million tokens. 0 = unset, meaning
-    * "resolve from the model catalog". Set when the catalog price is not what
-    * this deployment actually pays: a flat-rate or subscription seat whose
-    * marginal token cost differs from the published API rate, negotiated or
-    * committed-use pricing, a self-hosted model whose real cost is compute, or a
-    * gateway that resells at its own margin. Both axes are independent, so a
-    * deployment may override only one.
-    *
-    * KNOWN LIMITS:
-    *  - 0 always means "unset, fall back to the catalog", so a genuinely FREE
-    *    model cannot be expressed as 0. Such an agent is simply skipped by the
-    *    price lint (no finding), which is the safe direction.
-    *  - These fields are NOT round-trip safe across binary versions: an older
-    *    binary loads agents.json, ignores these members, and drops them on its
-    *    next save. Mixed-version operation against one config will silently lose
-    *    pricing overrides. */
+   /* Operator marginal prices, USD per million tokens. Each axis is independent.
+    * AGENT_DECL_PRICE_* records presence: declared zero means free/subscription
+    * capacity; an absent declaration resolves through model metadata. A missing
+    * price is never evidence of free execution. */
    double price_in_per_mtok;
    double price_out_per_mtok;
    double price_cached_per_mtok;
@@ -389,6 +377,15 @@ typedef struct
    char registration[MAX_AGENT_NAME];
    char roles[MAX_AGENT_ROLES][32];
    int role_count;
+   /* Go-owned competence verdicts for configured task contracts; runtime only. */
+   struct
+   {
+      char role[32];
+      int score;
+      int minimum;
+      int eligible;
+   } routing_competence[MAX_AGENT_ROLES];
+   int routing_competence_count;
    /* Personas this agent may be dispatched AS (delegate identities: engineer,
     * architect, reviewer, ...). The wildcard "all" (or an empty/absent list, for
     * backward compatibility) means the agent may serve every persona. */
@@ -468,6 +465,10 @@ typedef struct
    /* Transient per-request routing contract: an explicit agent/provider pin
     * must surface that agent's result and may never substitute a peer. */
    int route_pinned;
+   /* Initial dispatch cost estimate and qualified learning preference. Runtime only. */
+   int route_input_tokens;
+   int route_output_tokens;
+   int route_premium;
    /* One absolute per-request budget shared by the primary route, credential
     * retries, configured fallbacks, and same-tier fallbacks. Runtime-only: the
     * deadline is CLOCK_MONOTONIC milliseconds and is never serialized. */

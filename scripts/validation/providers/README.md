@@ -85,3 +85,78 @@ has its own executable: never replace it with the multicall binary.
 Build all artifacts from the explicit feature worktree. Retain deployed binary
 SHA-256 values with the reports. Remove the disposable guest when validation
 is complete; do not repurpose or stop unrelated guests on the hypervisor.
+
+## Live routing acceptance
+
+`live-routing.py` submits delegates through `/v1/delegate/run` and checks the
+actual selected agent or a specific preflight refusal. It uses real delegate execution;
+use a prepared validation project and roster. It does not alter the roster, disable
+models, install credentials, or simulate live success.
+
+Prepare competence evidence and role thresholds using `docs/modules/routing.md`.
+Include these cases in a local JSON file, adapting session/project context to the
+server's requirements:
+
+```json
+[
+  {
+    "name": "qualified-free-summary",
+    "request": {"role": "summarize", "persona": "reviewer", "cwd": "/registered/validation/workspace", "prompt": "Summarize: Water freezes when sufficiently cold.", "tools": false, "max_tokens": 64, "scope": "bounded"},
+    "expected_agent": "local-worker"
+  },
+  {
+    "name": "no-qualified-model",
+    "request": {"role": "code", "persona": "engineer", "cwd": "/registered/validation/workspace", "prompt": "Explain the intended change without editing files.", "tools": false, "max_tokens": 64, "scope": "bounded"},
+    "expected_error": "competence contract"
+  }
+]
+```
+
+Use a role whose entire validation fleet is below threshold for the second case.
+Also run a case expecting the next qualified model with the preferred registration
+unavailable in the test environment; verify a second registration on the same vendor
+remains usable. Successful cases must be automatic (no via/provider/model/tier pin).
+The deterministic native suite covers that failure isolation without taking a live
+account offline.
+
+```sh
+AIMEE_API=https://your-validation-server \
+AIMEE_CA=/path/to/ca.pem \
+AIMEE_CLIENT_CERT=/path/to/client.pem \
+AIMEE_CLIENT_KEY=/path/to/client-key.pem \
+python3 scripts/validation/providers/live-routing.py /path/to/routing-cases.json
+```
+
+Bearer deployments can supply `AIMEE_TOKEN`. TLS verification remains enabled.
+Authentication failures, missing responses, and wrong selections fail the gate;
+they never count as threshold evidence. The script prints case names and actual
+agent selections, excluding credentials and generated content. Its parser/assertion
+checks run in the CI Go unit job via `scripts/tests/test_live_routing.py`.
+
+### Disposable full-stack routing exploration
+
+`routing-stack-probe.py` runs twelve assertions inside a scratch installation.
+It replaces that installation's roster, creates/registers a small Git workspace,
+executes real Docker-sandboxed delegates, and suspends/resumes only its routing
+process. Use only an owned disposable VM or CT. The external model endpoint is a
+local deterministic fixture; the server, module bus, provider store, TLS enrollment,
+PostgreSQL and sandbox are real.
+
+With the binaries built (including `aimee-delegate-egress`), Docker running with
+`ubuntu:22.04` available, and distinct store runtime/migration credentials targeting
+the same disposable UTF8 database and schema:
+
+```sh
+AIMEE_E2E_SKIP_BUILD=1 AIMEE_E2E_KEEP_RUN_ROOT=1 AIMEE_E2E_PROBE_ONLY=1 \
+  AIMEE_E2E_PROBE_SCRIPT="$PWD/scripts/validation/providers/routing-stack-probe.py" \
+  bash scripts/aimee-local-stack-e2e.sh
+```
+
+Set `AIMEE_DB2_URL`, `AIMEE_STORE_URL` and `AIMEE_STORE_MIGRATION_URL` first.
+Use an explicit matching `search_path` on both store URLs to retain schema parity;
+libpq's DB2 URL should omit that pgx-specific query parameter. Provision vector and
+pg_trgm extensions before starting. Migration-owned objects must grant the runtime
+role their required DML privileges. The probe emits `routing-results.json` under the
+printed run root. Use `TMPDIR=/var/tmp` on guests whose `/tmp` is a small tmpfs.
+
+[Recorded VM and CT acceptance on .253](../../../docs/validation/intelligent-routing-on-253.md).

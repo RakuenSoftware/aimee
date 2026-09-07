@@ -315,10 +315,11 @@ nodes:
 	go func() { scheduler.Run(ctx); close(done) }()
 	shutdown := func() { cancel(); <-done }
 	defer shutdown()
-	// The production scheduler intentionally gives transient fan-in recovery a
-	// five-second backoff. This end-to-end path needs two such recovery passes
-	// (child completion, then parent continuation), so leave deterministic headroom.
-	deadline := time.Now().Add(20 * time.Second)
+	// This path includes real module/PostgreSQL calls, Git worktrees, transient
+	// gate retries and the production five-second fan-in recovery backoff. Leave
+	// headroom for race instrumentation and shared CI runners through the final
+	// PR handoff; the assertions below still require every stage to complete.
+	deadline := time.Now().Add(2 * time.Minute)
 	for time.Now().Before(deadline) {
 		item, err := store.WorkItem(context.Background(), rootID)
 		if err != nil {

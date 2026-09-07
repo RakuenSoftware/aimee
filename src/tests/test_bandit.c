@@ -232,8 +232,10 @@ static void test_bandit_registry(void)
    assert(strcmp(fm->arms[0], "rrf") == 0);
    assert(strcmp(fm->status, "live") == 0);
 
-   /* delegate_routing (server-side decision point reached via the kb bandit). */
-   const kb_bandit_decision_point_t *dr = kb_bandit_registry_get("delegate_routing");
+   /* Preserve historical tier evidence without applying it to the new policy. */
+   const kb_bandit_decision_point_t *old_dr = kb_bandit_registry_get("delegate_routing");
+   assert(old_dr && strcmp(old_dr->status, "static") == 0);
+   const kb_bandit_decision_point_t *dr = kb_bandit_registry_get("delegate_routing_v2");
    assert(dr != NULL);
    assert(dr->n_arms == 2);
    assert(strcmp(dr->arms[0], "cheapest") == 0);

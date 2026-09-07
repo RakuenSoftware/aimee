@@ -794,7 +794,7 @@ Beyond the config store, aimee reads a few standalone JSON/policy files (paths u
 | `tunnels` | Tunnel definitions. |
 | `user` | Remote user (ssh backend). |
 
-> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `catalog_provider_explicit`, `max_output`, `revision`, `status`
+> **Undocumented agent fields** (add to `AGENT_FIELD_DESC`): `catalog_provider_explicit`, `eligible`, `max_output`, `minimum`, `revision`, `role`, `routing_competence`, `score`, `status`
 
 ### Toolsets: `AIMEE_TOOLSETS_CONFIG` (or the config `toolsets` map)
 

@@ -366,6 +366,29 @@ static void test_labels(void)
    printf("  labels: OK\n");
 }
 
+static void test_registration_health_isolation(void)
+{
+   agent_t fleet[3];
+   fleet[0] = make_agent("unrelated-name", "https://same-provider.example/v1");
+   fleet[1] = make_agent("another-model", "https://same-provider.example/v1");
+   fleet[2] = make_agent("account:east:other", "https://same-provider.example/v1");
+   strcpy(fleet[0].registration, "account:east");
+   strcpy(fleet[1].registration, "account:east");
+   strcpy(fleet[2].registration, "account:west");
+   provider_catalog_init(fleet, 3);
+   for (int i = 0; i < 3; i++)
+      provider_catalog_record_failure(fleet[0].name, "registration_error");
+   assert(provider_catalog_get_health(fleet[0].name) == CATALOG_HEALTH_DOWN);
+   assert(provider_catalog_get_health(fleet[1].name) == CATALOG_HEALTH_DOWN);
+   assert(provider_catalog_get_health(fleet[2].name) == CATALOG_HEALTH_HEALTHY);
+   provider_catalog_record_success(fleet[1].name);
+   assert(provider_catalog_get_health(fleet[0].name) == CATALOG_HEALTH_HEALTHY);
+   for (int i = 0; i < 3; i++)
+      provider_catalog_record_failure(fleet[0].name, "model_error");
+   assert(provider_catalog_get_health(fleet[1].name) == CATALOG_HEALTH_HEALTHY);
+   assert(provider_catalog_get_health(fleet[2].name) == CATALOG_HEALTH_HEALTHY);
+}
+
 int main(void)
 {
    printf("test_provider_catalog:\n");
@@ -395,6 +418,7 @@ int main(void)
    test_dump_json_overflow();
 
    test_labels();
+   test_registration_health_isolation();
 
    printf("All provider_catalog tests passed.\n");
    return 0;

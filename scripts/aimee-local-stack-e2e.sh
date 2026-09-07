@@ -37,6 +37,8 @@
 #                 its environment.                         (optional)
 #   AIMEE_E2E_TURN_INTEGRITY_MCP=1 configures the repository's deterministic
 #                 timeout MCP fixture as a server-owned client. (default 0)
+#   AIMEE_E2E_PROBE_ONLY=1 run core health + the external probe, skipping
+#                 unrelated memory/embedding contracts. Requires a probe.
 #   AIMEE_E2E_RESTART_COMPONENTS=1 restart both daemons after all probes and
 #                 prove enrolled/persisted service recovery.       (default 0)
 #   AIMEE_E2E_KEEP_RUN_ROOT=1 retain the scratch tree after cleanup for failed
@@ -91,12 +93,13 @@ check() {
 # --- build ----------------------------------------------------------------
 if [[ "${AIMEE_E2E_SKIP_BUILD:-0}" != 1 ]]; then
   bold "==> Building aimee client + server + kb + required modules"
-  make -C src ../aimee ../aimee-server ../aimee-kb \
+  make -C src ../aimee ../aimee-server ../aimee-kb ../aimee-delegate-egress \
     build/obj/aimee-module build/obj/aimee-module-config \
     build/obj/aimee-module >/dev/null
 else
   bold "==> Reusing already-built binaries for exploratory rerun"
 fi
+export AIMEE_DELEGATE_EGRESS_BIN="$REPO/aimee-delegate-egress"
 cp src/build/obj/aimee-module src/build/obj/aimee-module-postgres
 RUN_ROOT="$(mktemp -d)"
 BUNDLE="$RUN_ROOT/module-bundle"
@@ -232,12 +235,12 @@ for module_id in "${feature_module_ids[@]}"; do
   [[ -r "$grant" ]] || { red "missing generated server grant: $grant"; exit 1; }
   sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
     "$grant" > "$SERVER_POLICY/$module_id.grant"
+  for client_grant in "$BUNDLE/grants/server/$module_id-"*.grant; do
+    [[ -r "$client_grant" ]] || continue
+    sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
+      "$client_grant" > "$SERVER_POLICY/$(basename "$client_grant")"
+  done
 done
-if [[ " ${feature_module_ids[*]} " == *" roundtable "* ]]; then
-  sed "s|^executable=/usr/local/libexec/aimee-modules/|executable=$MODULE_BIN_DIR/|" \
-    "$BUNDLE/grants/server/roundtable-delegates.grant" \
-    > "$SERVER_POLICY/roundtable-delegates.grant"
-fi
 chmod 0600 "$SERVER_POLICY"/*.grant "$KB_POLICY"/*.grant
 
 kb_pid=""; server_pid=""
@@ -310,7 +313,7 @@ start_server_modules() {
     feature_pid=""
     arm_module "$MODULE_BIN_DIR/aimee-module-$module_id" \
       "$AIMEE_HOME/server-module-bus.sock" "$SERVER_POLICY" \
-      "$AIMEE_HOME/server-$module_id-module.log" feature_pid
+      "$AIMEE_HOME/server-$module_id-module.log" feature_pid "AIMEE_MODULE_PLACEMENT=server"
     feature_module_pids+=("$feature_pid")
   done
 }
@@ -540,11 +543,13 @@ bold "==> Core contract"
 check "GET /v1/health"  '"service":"aimee-server"' "${SERVER_URL}/v1/health"
 check "GET /v1/version" 'version'                  "${SERVER_URL}/v1/version"
 
-bold "==> kb-backed contract (server -> kb)"
-check "GET /v1/kb/status -> vector" '"vector"' "${SERVER_URL}/v1/kb/status"
-check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: application/json' \
-                                               -d '{"query":"local e2e","scope":"all","max_results":3}' \
-                                               "${SERVER_URL}/v1/kb/search"
+if [[ "${AIMEE_E2E_PROBE_ONLY:-0}" != 1 ]]; then
+  bold "==> kb-backed contract (server -> kb)"
+  check "GET /v1/kb/status -> vector" '"vector"' "${SERVER_URL}/v1/kb/status"
+  check "POST /v1/kb/search -> hits"  '"hits"'   -X POST -H 'content-type: application/json' \
+                                                 -d '{"query":"local e2e","scope":"all","max_results":3}' \
+                                                 "${SERVER_URL}/v1/kb/search"
+fi
 
 # Run corpus-sensitive contract probes before the outer harness stores its
 # round-trip and semantic facts. The probe's typed empty-retrieval assertion is
@@ -573,6 +578,13 @@ if [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]]; then
       exit 1
     fi
   fi
+fi
+
+if [[ "${AIMEE_E2E_PROBE_ONLY:-0}" == 1 ]]; then
+  [[ -n "${AIMEE_E2E_PROBE_SCRIPT:-}" ]] || { red "probe-only requires AIMEE_E2E_PROBE_SCRIPT"; exit 2; }
+  bold "==> Probe summary: $PASS passed, $FAIL failed"
+  [[ "$FAIL" == 0 ]]
+  exit
 fi
 
 bold "==> Write→read round-trip (store a memory, read it back)"

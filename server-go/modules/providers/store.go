@@ -203,6 +203,9 @@ func normalizeRoot(root object) (object, error) {
 	root["models"] = models
 	delete(root, "agents")
 	root["providers"] = connections
+	if err := validateRoleContracts(root); err != nil {
+		return nil, err
+	}
 	return root, nil
 }
 

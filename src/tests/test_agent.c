@@ -3759,6 +3759,9 @@ static void test_agent_save_config_does_not_cache_underived_agents(void)
    printf("  PASS: test_agent_save_config_does_not_cache_underived_agents\n");
 }
 
+void test_competence_contract_roundtrip_and_routing(void);
+void test_cost_selection_filters_before_learning(void);
+
 int main(void)
 {
    /* BEFORE ANYTHING ELSE, because the fixture configures the module runtime and
@@ -3843,6 +3846,8 @@ int main(void)
    test_escalation_target_selection();
    test_prefer_local_orders_but_never_bypasses();
    test_prefer_healthy_over_degraded();
+   test_competence_contract_roundtrip_and_routing();
+   test_cost_selection_filters_before_learning();
    test_provider_general_registration_expands();
    test_provider_general_preserves_explicit_catalog_provider();
    test_provider_general_overflow_rejects_config();

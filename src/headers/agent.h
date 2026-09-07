@@ -1,6 +1,9 @@
 #ifndef DEC_AGENT_H
 #define DEC_AGENT_H 1
 
+/* Credential/subscription failure shared by one provider registration. */
+int agent_error_is_registration_failure(const char *error);
+
 /*
  * Umbrella header: includes all agent subsystem headers.
  * Prefer including the specific narrow header you need:
