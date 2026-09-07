@@ -32,10 +32,8 @@ on:
       - "scripts/embedder-server.py"
       - "scripts/embedders.json"
       - ".github/workflows/publish-embedder.yml"
-  # DELIBERATELY NARROWER THAN THE PUSH TRIGGER: no workflow file here. A PR build never
-  # pushes, so the skip check cannot engage on one -- the tag it looks for only appears
-  # at merge -- and every triggered PR therefore pays a full build. Editing this workflow
-  # is not a change to the image, so it must not cost two of them.
+  # PR path filters cover the whole branch. The changes job below compares
+  # this update with its previous head before allocating image builders.
   pull_request:
     paths:
       - "Dockerfile.embedder"
@@ -44,12 +42,6 @@ on:
       - "scripts/embedder-server.py"
       - "scripts/embedders.json"
   workflow_dispatch:
-    inputs:
-      force:
-        description: 'Rebuild even when the tag already exists'
-        required: false
-        type: boolean
-        default: false
 
   workflow_call:
     inputs:
@@ -63,16 +55,37 @@ on:
         type: boolean
         default: true
 
-concurrency:
-  group: publish-embedder-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   contents: read
   packages: write
 
 jobs:
+  changes:
+    if: inputs.version == '' && (github.event_name == 'pull_request' || github.event_name == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      changed: ${{ steps.inputs.outputs.changed }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Compare image inputs for this update
+        id: inputs
+        env:
+          BASE_SHA: ${{ github.event.before || github.event.pull_request.base.sha }}
+        run: |
+          git fetch --no-tags --depth=1 origin "$BASE_SHA"
+          python3 scripts/model-image-inputs-changed.py embedder "$BASE_SHA" HEAD >> "$GITHUB_OUTPUT"
+
   build:
+    needs: changes
+    if: ${{ !cancelled() && (inputs.version != '' || github.event_name == 'workflow_dispatch' || needs.changes.outputs.changed == 'true') }}
+    # A no-op update must not cancel an earlier build of changed image inputs.
+    concurrency:
+      group: publish-embedder-${{ github.ref }}-${{ matrix.name }}
+      cancel-in-progress: true
     runs-on: ubuntu-latest
     timeout-minutes: 90
     strategy:
@@ -109,8 +122,6 @@ jobs:
       # make detectable.
       - name: Has this exact build already been published?
         id: have
-        env:
-          FORCE: ${{ inputs.force }}
         run: |
           rev=$(cat Dockerfile.embedder \
                     deploy/container/aimee-embedder-entrypoint.sh \
@@ -120,11 +131,6 @@ jobs:
           pinned="ghcr.io/${OWNER}/${{ matrix.name }}:${rev}"
           echo "embedder sources hash to $rev"
           echo "pinned=$pinned" >> "$GITHUB_OUTPUT"
-          if [ "${FORCE:-false}" = "true" ]; then
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "forced rebuild requested; ignoring any published $pinned"
-            exit 0
-          fi
           if docker manifest inspect "$pinned" >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "$pinned already published; nothing to build"
