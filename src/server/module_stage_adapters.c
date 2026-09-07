@@ -48,6 +48,8 @@
 #include <time.h>
 
 #define MODULE_STAGE_DEADLINE_NS (500ULL * 1000000ULL)
+/* Match KB and the shared memory adapter: data stages perform database I/O. */
+#define MODULE_MEMORY_DATA_DEADLINE_NS (5ULL * 1000000000ULL)
 
 static atomic_uint_fast64_t next_trace = 1;
 
@@ -59,19 +61,27 @@ static uint64_t monotonic_ns(void)
    return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
 }
 
-static int call_module(uint32_t event_kind, uint32_t stage_id, const void *request,
-                       uint32_t request_len, void *response, uint32_t response_capacity,
-                       uint32_t *response_len)
+static int call_module_with_budget(uint32_t event_kind, uint32_t stage_id, const void *request,
+                                   uint32_t request_len, void *response, uint32_t response_capacity,
+                                   uint32_t *response_len, uint64_t budget_ns)
 {
    uint64_t now = monotonic_ns();
-   if (!now)
+   if (!now || budget_ns > UINT64_MAX - now)
       return -1;
    uint64_t trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
    if (trace == 0)
       trace = atomic_fetch_add_explicit(&next_trace, 1, memory_order_relaxed);
-   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + MODULE_STAGE_DEADLINE_NS,
-                                   request, request_len, response, response_capacity, response_len,
-                                   NULL, NULL);
+   return (int)obs_bus_module_call(event_kind, stage_id, trace, now + budget_ns, request,
+                                   request_len, response, response_capacity, response_len, NULL,
+                                   NULL);
+}
+
+static int call_module(uint32_t event_kind, uint32_t stage_id, const void *request,
+                       uint32_t request_len, void *response, uint32_t response_capacity,
+                       uint32_t *response_len)
+{
+   return call_module_with_budget(event_kind, stage_id, request, request_len, response,
+                                  response_capacity, response_len, MODULE_STAGE_DEADLINE_NS);
 }
 
 cJSON *server_module_memory_data(const cJSON *request)
@@ -106,9 +116,9 @@ cJSON *server_module_memory_data(const cJSON *request)
       free(encoded);
       return NULL;
    }
-   int rc =
-       call_module(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded, (uint32_t)request_len,
-                   response, AIMEE_MODULE_MESSAGE_MAX_BODY, &response_len);
+   int rc = call_module_with_budget(AIMEE_MEMORY_EVENT_DATA, AIMEE_MEMORY_STAGE_DATA, encoded,
+                                    (uint32_t)request_len, response, AIMEE_MODULE_MESSAGE_MAX_BODY,
+                                    &response_len, MODULE_MEMORY_DATA_DEADLINE_NS);
    free(encoded);
    cJSON *decoded = NULL;
    if (rc == 0 && response_len > 0)

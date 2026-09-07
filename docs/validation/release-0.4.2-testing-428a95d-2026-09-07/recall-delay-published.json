@@ -1,0 +1,6 @@
+{
+  "http": 502,
+  "message": "user memory module unavailable",
+  "elapsed_seconds": 0.579,
+  "canary_returned": false
+}

@@ -117,6 +117,38 @@ class Gate:
                            code == 200 and body.get('memory', {}).get('confidence') == confidence,
                            [code, body])
 
+    def recall_with_database_contention(self, content, mid):
+        """Brief database contention must fit the data stage's bounded budget."""
+        lock = subprocess.Popen(['docker', 'exec', self.args.store_db,
+            'psql', '-U', 'postgres', '-d', 'aimee_store', '-X', '-At',
+            '-v', 'ON_ERROR_STOP=1', '-c',
+            'BEGIN; LOCK TABLE user_memories IN ACCESS EXCLUSIVE MODE; '
+            'SELECT pg_sleep(1.5); COMMIT;'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        try:
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                held = self.docker('exec', self.args.store_db, 'psql', '-U', 'postgres',
+                    '-d', 'aimee_store', '-X', '-At', '-c',
+                    "SELECT count(*) FROM pg_locks WHERE relation='user_memories'::regclass "
+                    "AND mode='AccessExclusiveLock' AND granted")
+                if held == '1':
+                    break
+                if lock.poll() is not None:
+                    raise RuntimeError('database contention fixture ended before recall')
+                time.sleep(0.01)
+            else:
+                raise RuntimeError('database contention fixture never acquired its lock')
+            bundle = self.good('personal recall tolerates brief database contention',
+                self.call('recall', dict(query=self.prefix, store='user')))
+            self.check('delayed recall preserves personal text and scoped handle', any(
+                r.get('text') == content and r.get('handle') == 'user:memory:' + str(mid)
+                for r in bundle.get('recall', {}).get('active_context', [])))
+        finally:
+            lock.communicate(timeout=10)
+        if lock.returncode:
+            raise RuntimeError('database contention fixture failed')
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -128,6 +160,7 @@ class Gate:
             self.check('recall returns personal text and scoped handle ' + str(explicit), any(
                 r.get('text') == content and r.get('handle') == 'user:memory:' + str(mid)
                 for r in bundle.get('recall', {}).get('active_context', [])))
+        self.recall_with_database_contention(content, mid)
         self.good('KB-free session recall without hint', self.call('recall', dict(session_start=True)))
         cli = self.cli('recall', '--query', self.prefix, '--store', 'user')
         self.check('KB-free CLI recall', cli.get('store') == 'user' and any(

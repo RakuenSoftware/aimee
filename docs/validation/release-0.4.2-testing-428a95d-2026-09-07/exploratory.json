@@ -1,0 +1,320 @@
+{
+  "checks": [
+    {
+      "name": "published CLI stores a Unicode multiline memory",
+      "passed": true
+    },
+    {
+      "name": "published CLI reads exact content by returned ID",
+      "passed": true
+    },
+    {
+      "name": "published CLI supersedes its own returned ID",
+      "passed": true
+    },
+    {
+      "name": "published CLI reads exact superseding content by replacement ID",
+      "passed": true
+    },
+    {
+      "name": "24 concurrent writes all succeed with distinct IDs",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 0 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 1 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 2 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 3 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 4 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 5 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 6 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 7 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 8 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 9 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 10 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 11 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 12 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 13 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 14 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 15 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 16 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 17 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 18 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 19 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 20 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 21 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 22 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 23 preserves Unicode and confidence",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence -1",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence 2",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence False",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence True",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence None",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence '0.25'",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence 'NaN'",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence []",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence {}",
+      "passed": true
+    },
+    {
+      "name": "browser-enabled server rejects confidence 1e+300",
+      "passed": true
+    },
+    {
+      "name": "memory store rejects missing content",
+      "passed": true
+    },
+    {
+      "name": "memory store rejects object content",
+      "passed": true
+    },
+    {
+      "name": "memory store rejects array content",
+      "passed": true
+    },
+    {
+      "name": "memory store rejects null content",
+      "passed": true
+    },
+    {
+      "name": "missing/invalid ID cannot read a different record -1",
+      "passed": true
+    },
+    {
+      "name": "missing/invalid ID cannot read a different record 0",
+      "passed": true
+    },
+    {
+      "name": "missing/invalid ID cannot read a different record 4294967297",
+      "passed": true
+    },
+    {
+      "name": "missing/invalid ID cannot read a different record 9007199254740991",
+      "passed": true
+    },
+    {
+      "name": "explicit unavailable store does not return personal success {'store': 'invalid'}",
+      "passed": true
+    },
+    {
+      "name": "explicit unavailable store does not return personal success {'store': 'kb'}",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 0 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 1 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 2 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 3 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 4 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 5 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 6 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 7 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 8 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 9 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 10 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 11 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 12 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 13 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 14 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 15 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 16 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 17 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 18 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 19 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 20 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 21 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 22 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "concurrent fixture 23 survives application restart",
+      "passed": true
+    },
+    {
+      "name": "database outage produces explicit failure for store",
+      "passed": true
+    },
+    {
+      "name": "database outage produces explicit failure for list",
+      "passed": true
+    },
+    {
+      "name": "database outage produces explicit failure for get",
+      "passed": true
+    },
+    {
+      "name": "database outage produces explicit failure for recall",
+      "passed": true
+    },
+    {
+      "name": "database outage recovers exact persisted content",
+      "passed": true
+    },
+    {
+      "name": "retired concurrency fixture is no longer readable",
+      "passed": true
+    }
+  ]
+}

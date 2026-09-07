@@ -10,6 +10,7 @@
  * The bus is stubbed: what is under test is the plumbing, not the transport.
  */
 #include "headers/module_json_call.h"
+#include "module_stage_adapters.h"
 
 #include <assert.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 
 static int g_available = 1;
 static int g_calls;
+static int g_required_budget_ms;
 static uint64_t g_deadline;
 static char g_body[8192];
 static const char *g_reply = "{\"ok\":true}";
@@ -40,6 +42,8 @@ obs_bus_module_call(uint32_t event_kind, uint32_t stage_id, uint64_t trace_id, u
    assert(request_len < sizeof g_body);
    memcpy(g_body, request_body, request_len);
    g_body[request_len] = '\0';
+   if (g_required_budget_ms && deadline_ns < aimee_module_call_deadline_ns(g_required_budget_ms))
+      return AIMEE_MODULE_CALL_DEADLINE_EXCEEDED;
    if (g_result != AIMEE_MODULE_CALL_OK)
       return g_result;
    size_t n = strlen(g_reply);
@@ -136,6 +140,36 @@ int main(void)
    assert(strcmp(body, "{\"a\":1}") == 0); /* still ours, untouched */
    cJSON_Delete(reply);
    printf("  ok    raw variant borrows the caller's body\n");
+
+   /* A database-backed personal recall can take longer than a CPU-only stage.
+    * Model 1.5 seconds of database work: the production caller must grant that
+    * budget, preserve user placement, and keep the caller's request borrowed. */
+   cJSON *memory_request = cJSON_CreateObject();
+   cJSON_AddStringToObject(memory_request, "operation", "recall-bundle");
+   cJSON_AddStringToObject(memory_request, "scope", "caller-supplied");
+   g_required_budget_ms = 1500;
+   g_calls = 0;
+   g_reply = "{\"payload\":{\"active_context\":[]}}";
+   uint64_t maximum_deadline = aimee_module_call_deadline_ns(6000);
+   reply = server_module_memory_data(memory_request);
+   assert(reply && g_calls == 1);
+   assert(g_deadline < maximum_deadline);
+   assert(strstr(g_body, "\"scope\":{\"type\":\"user\"}"));
+   assert(strcmp(cJSON_GetObjectItemCaseSensitive(memory_request, "scope")->valuestring,
+                 "caller-supplied") == 0);
+   cJSON_Delete(reply);
+   printf("  ok    personal recall receives a bounded database budget and user scope\n");
+
+   /* Work that exceeds the database budget remains an explicit failure. */
+   g_required_budget_ms = 6000;
+   reply = server_module_memory_data(memory_request);
+   assert(!reply);
+   g_required_budget_ms = 0;
+   g_result = AIMEE_MODULE_CALL_CAPABILITY_ABSENT;
+   reply = server_module_memory_data(memory_request);
+   assert(!reply);
+   cJSON_Delete(memory_request);
+   printf("  ok    expired or unavailable memory does not fabricate success\n");
 
    printf("module_json_call: all tests passed\n");
    return 0;
