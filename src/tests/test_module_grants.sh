@@ -187,4 +187,20 @@ if grep -q 'treated as operator policy' "$tmp/err$caseno"; then ok "nearby edit 
 else bad "nearby edit produced no policy warning"; fi
 
 [ "$fail" -eq 0 ] && echo "test_module_grants: ok"
+echo "9. request-only capability changes refresh only untouched defaults"
+setup
+write_grant "$AIMEE_MODULE_GRANT_SRC/memory-postgres.grant" "$real_exe" ""
+run_seeding
+target="$AIMEE_HOME/modules.d/server/memory-postgres.grant"
+sed 's/^request=$/request=4609,11266/' "$AIMEE_MODULE_GRANT_SRC/memory-postgres.grant" > "$tmp/new-grant"
+cp "$tmp/new-grant" "$AIMEE_MODULE_GRANT_SRC/memory-postgres.grant"
+run_seeding
+if grep -q '^request=4609,11266$' "$target"; then ok "request-only grant refreshed"
+else bad "request-only grant stayed stale"; fi
+sed 's/^request=.*/request=11266/' "$target" > "$tmp/operator-grant"
+cp "$tmp/operator-grant" "$target"
+run_seeding
+if grep -q '^request=11266$' "$target"; then ok "operator restriction preserved"
+else bad "request capability expanded over operator policy"; fi
+
 exit "$fail"

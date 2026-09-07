@@ -1,4 +1,48 @@
-# Upgrading from v0.2.192
+# Upgrading
+
+## Moving to 0.4.2's unified deployment
+
+Back up the application home, Vault, PostgreSQL, workspaces, and audit material before changing
+Compose projects or volume mappings. The new image establishes a permanent Server or KB identity
+on first boot. An existing Vault with no identity latch requires an explicit migration role;
+image-only upgrades cannot silently default an old KB to Server. Preserve the correct role and home; changing `AIMEE_INSTANCE_ROLE` later fails.
+Server and KB share one application image but must have separate instances, Vaults, and stores.
+
+The default `compose.yaml` now installs Server, encrypted PostgreSQL, and local embedding. It does
+not install a KB. An existing shared KB remains optional and connects through Settings; host a new
+KB explicitly with `compose.kb.yaml`. Preserve its existing enrollment material and authority.
+The browser wizard no longer provisions a KB or selects its database.
+
+Both roles now use the standard `aimee-postgres` container. Do not mount an old plaintext PostgreSQL
+volume at `/var/lib/aimee-postgres` and expect it to be adopted: that path contains the encrypted
+volume and its manifest. For an offline PostgreSQL 18 cluster, mount the old cluster directory
+**read-only** at `/mnt/aimee-postgres-legacy` in the new PostgreSQL container. Stop the old database
+first. The module validates its version and files, copies into encrypted staging, verifies content
+and metadata, and only then promotes the copy. Interrupted copies resume safely. Live clusters,
+symlinks, unknown formats, and unsupported major versions are refused. For older PostgreSQL major
+versions, use a database-native logical dump and restore into the new cluster.
+
+Retain the old plaintext volume as rollback until the encrypted copy passes restore and data
+checks. Migration does not erase that source. Once retention is no longer required, the operator
+must remove or sanitize it according to the storage medium; encryption of the new copy does not
+encrypt old backups, snapshots, or discarded storage blocks.
+
+The local Vault must survive with the encrypted database: it is the sole persistent store of the
+LUKS passphrase. There is no TPM or external-key recovery path. Preserve database-role passwords
+when reusing the old cluster. Avoid starting old and new applications against the same writable
+store. Check the new application, database, model health, personal recall, and optional KB connection
+before retiring the old deployment.
+
+Instance-level KB credentials previously stored under the reserved `server` principal in the KB
+PostgreSQL Vault migrate into the local instance Vault before the tenant backend binds. Migration
+verifies an existing local value, writes durably before deleting the old current record, and refuses
+conflicting or corrupt data. Tenant credentials retain their existing backend and scope.
+
+Historical upgrade instructions below describe the earlier 0.4.0 transition, including its former
+embedded-KB topology. For a current installation, use the topology and storage procedure above.
+
+## Historical upgrade from v0.2.192 to 0.4.0
+
 
 There is no route back. 0.4.0 rewrites storage, credentials, and remote identity, and a 0.2 server
 will not read what it leaves behind. Your backup is the rollback plan; there is no downgrade

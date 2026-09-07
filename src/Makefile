@@ -2516,6 +2516,8 @@ config-module-boundary-check:
 	@python3 ../scripts/check-config-module-boundary.py
 
 kb-container-packaging-check:
+	@python3 ../scripts/check-vault-only-container-env.py
+	@python3 -m unittest discover -s ../scripts/tests -p test_compose_vault_init.py
 	@python3 ../scripts/check-kb-container-packaging.py --root ..
 	@python3 ../scripts/check-kb-container-packaging.py --plant-test
 
@@ -2808,11 +2810,8 @@ cppcheck:
 
 clang-tidy:
 	@if command -v clang-tidy >/dev/null 2>&1; then \
-		cd . && find . -maxdepth 1 -name '*.c' -print0 \
-			| xargs -0 -P "$$(nproc 2>/dev/null || echo 2)" -n 4 \
-			  clang-tidy -- -Iheaders -Ivendor/headers -DWITH_PAM \
-			2>&1 | tee /tmp/tidy.log; \
-		echo "clang-tidy warnings: $$(grep -c 'warning:' /tmp/tidy.log 2>/dev/null || echo 0)"; \
+		python3 -I -S ../scripts/run-clang-tidy.py --self-test && \
+		python3 -I -S ../scripts/run-clang-tidy.py; \
 	elif [ "$(STATIC_ANALYSIS_STRICT)" = "1" ]; then \
 		echo "ERROR: clang-tidy not found. Install with: apt install clang-tidy  (Fedora/RHEL: dnf install clang-tools-extra)"; exit 1; \
 	else \

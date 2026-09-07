@@ -18,6 +18,12 @@
 
 /* --- stubs for the sampler's dependency closure (link-only) --- */
 static int g_db1_probe_calls;
+static int g_kb_probe_calls;
+static int g_kb_configured;
+int kb_client_connection_configured(void)
+{
+   return g_kb_configured;
+}
 
 int db1_store_probe(void)
 {
@@ -27,6 +33,7 @@ int db1_store_probe(void)
 
 int kb_client_health(kb_health_t *out)
 {
+   g_kb_probe_calls++;
    if (out)
       memset(out, 0, sizeof(*out));
    return -1;
@@ -68,6 +75,11 @@ int main(void)
    unsetenv("AIMEE_MODULE_RUNTIME_WEB");
    server_ready_sample_now();
    assert(g_db1_probe_calls == 1);
+   assert(g_kb_probe_calls == 0);
+   g_kb_configured = 1;
+   server_ready_sample_now();
+   assert(g_kb_probe_calls == 1);
+   g_kb_configured = 0;
    assert(g_runtime_web_checked == 1);
    assert(g_skills_trigger_checked == 1);
    assert(g_git_ref_checked == 1);
@@ -109,6 +121,19 @@ int main(void)
                                         .retry_after_ms = 1200,
                                         .last_success_query_ms = 998000,
                                         .last_ingest_at = "2026-07-30T00:00:00Z"};
+
+   /* A standalone Server is ready with its local store and required modules.
+    * Shared KB retrieval is explicitly disabled, not fabricated as successful. */
+   {
+      server_ready_diagnostics_t local = ok;
+      local.kb_disabled = 1;
+      local.retrieval_ok = 0;
+      assert(server_ready_render(1, 0, &local, NOW - 5, NOW, 60, resp, sizeof(resp)) == 200);
+      assert(strstr(resp, "\"kb\":\"disabled\""));
+      assert(strstr(resp, "\"retrieval\":\"disabled\""));
+      assert(server_ready_render(0, 0, &local, NOW - 5, NOW, 60, resp, sizeof(resp)) == 503);
+      assert(server_ready_render(1, 0, &local, NOW - 61, NOW, 60, resp, sizeof(resp)) == 503);
+   }
 
    /* Never sampled ⇒ unknown, not ready, and a null age rather than a
     * fabricated one. An unsampled server must never read as ready. */

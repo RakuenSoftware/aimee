@@ -917,6 +917,11 @@ int handle_curator_invalidated(server_ctx_t *ctx, server_conn_t *conn, cJSON *re
  * The health-verdict tests below drive it instead: set g_kb_health_rc and the
  * fields they care about, so server_health_add_kb's aggregation can be exercised
  * without a kb. */
+static int g_kb_configured = 1;
+int kb_client_connection_configured(void)
+{
+   return g_kb_configured;
+}
 static int g_kb_health_rc = -1;
 static kb_health_t g_kb_health;
 
@@ -1511,7 +1516,9 @@ char *shell_quote(const char *raw)
 
 static int test_config_secret_store(const char *name, const char *value)
 {
-   assert(name && strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0);
+   assert(name &&
+          (strcmp(name, "AIMEE_KB_API_BEARER_TOKEN") == 0 || strcmp(name, "AIMEE_KB_CONN") == 0 ||
+           strcmp(name, "AIMEE_KB_SERVICE_IDENTITY_TOKEN") == 0));
    g_config_secret_store_calls++;
    g_config_secret_store_configured = value && value[0] ? 1 : 0;
    return value && value[0] ? vault_runtime_secret_set(name, value)
@@ -2423,6 +2430,31 @@ static void test_config_secret_redaction_and_vault_write(void)
    assert(serialized && strstr(serialized, "never-echo-new-secret") == NULL);
    free(serialized);
    cJSON_Delete(set);
+   const char *extra[] = {"kb_connection_string", "kb_service_identity_token"};
+   for (size_t i = 0; i < 2; i++)
+   {
+      char request[256];
+      snprintf(request, sizeof(request),
+               "{\"method\":\"config.set\",\"key\":\"%s\",\"value\":\"synthetic-private-value\"}",
+               extra[i]);
+      cJSON *reply = dispatch_json(ctx, conn, request, strlen(request));
+      assert(cJSON_IsTrue(cJSON_GetObjectItem(reply, "secret")));
+      assert(cJSON_IsTrue(cJSON_GetObjectItem(reply, "value")));
+      if (i == 0)
+         assert(strcmp(cJSON_GetObjectItem(reply, "reload")->valuestring, "restart") == 0);
+      serialized = cJSON_PrintUnformatted(reply);
+      assert(serialized && !strstr(serialized, "synthetic-private-value"));
+      free(serialized);
+      cJSON_Delete(reply);
+      int count = g_config_secret_store_calls;
+      snprintf(request, sizeof(request),
+               "{\"method\":\"config.set\",\"key\":\"%s\",\"value\":true}", extra[i]);
+      reply = dispatch_json(ctx, conn, request, strlen(request));
+      assert(g_config_secret_store_calls == count);
+      cJSON_Delete(reply);
+   }
+   assert(vault_runtime_secret_delete("AIMEE_KB_CONN") == 0);
+   assert(vault_runtime_secret_delete("AIMEE_KB_SERVICE_IDENTITY_TOKEN") == 0);
    assert(vault_runtime_secret_delete("AIMEE_KB_API_BEARER_TOKEN") == 0);
    config_secret_writer_set(NULL);
    free(conn);
@@ -2546,6 +2578,13 @@ static const char *kb_status_of(cJSON *resp)
 
 static void test_health_kb_verdict_states(void)
 {
+   /* An optional, unconfigured KB must not be reported as an outage. */
+   g_kb_configured = 0;
+   cJSON *standalone = cJSON_CreateObject();
+   server_health_add_kb(standalone);
+   assert(strcmp(kb_status_of(standalone), "disabled") == 0);
+   cJSON_Delete(standalone);
+   g_kb_configured = 1;
    /* 1. Nothing answered — the only case that may say unreachable. */
    kb_health_stub_reset();
    cJSON *resp = cJSON_CreateObject();

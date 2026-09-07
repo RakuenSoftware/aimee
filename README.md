@@ -6,14 +6,16 @@ routes cheap work to cheap models, and enforces guardrails the model cannot writ
 
 Point any tool at it. Your context follows you between them.
 
-Two services:
+One application image, with one identity established on first boot:
 
 - **aimee-server** assists one human. Sessions, tools, credentials, delegates, workflows.
 - **aimee-kb** serves a corpus, team, or company. Durable knowledge, code indexes, retrieval,
   curation.
 
-The `aimee` CLI is a thin client for Linux, macOS, and Windows. Core services are C, the workflow
-control plane and browser are Go, and nothing phones home.
+Server works without a KB. Both identities compose the same Go PostgreSQL and memory modules,
+with their own local Vault and encrypted PostgreSQL container. The role cannot be changed on an
+existing instance. The `aimee` CLI is a thin client for Linux, macOS, and Windows; Go composition
+modules supervise the standard modules around the existing C resource and event-bus hosts.
 
 ## What you get
 
@@ -33,23 +35,14 @@ control plane and browser are Go, and nothing phones home.
 
 ## Start
 
-```bash
-git clone https://github.com/RakuenSoftware/aimee.git
-cd aimee
-docker compose -f compose.server-managed.yaml up -d
-docker compose -f compose.server-managed.yaml logs aimee-server
-```
+Follow the [Quickstart](docs/QUICKSTART.md) to generate private database credentials and start
+`compose.yaml` on a Linux Docker host. It starts Server, encrypted PostgreSQL, and local embedding.
+Synthesis is optional; no KB is installed.
 
-The log prints a generated, one-time dashboard login. Open <https://localhost:8443>, sign in, and
-the setup wizard covers the account, provider, knowledge base, deployment, and workspaces. After the
-numbered steps, the summary can start `aimee-kb` with PostgreSQL 18, pgvector, and pgvectorscale
-inside the container.
-
-The managed compose file mounts the Docker socket, which gives aimee-server control of the host
-Docker daemon. Use the split stack if you do not want that.
-
-The [Quickstart](docs/QUICKSTART.md) has the rest: choosing your own login, the split stack, thin
-client enrollment, and what to check when it does not work.
+Open <https://localhost:8443> and use the generated first-boot login from the application log.
+The wizard configures your account, provider, local memory models, Git identity, and workspaces.
+Connect an existing shared KB later in Settings. `compose.server-managed.yaml` additionally lets
+the wizard manage local model containers through the Docker socket.
 
 ## Docs
 
@@ -59,10 +52,10 @@ Start at the [documentation index](docs/README.md).
 |----------|------------|
 | [Quickstart](docs/QUICKSTART.md) | Install, enroll, verify. |
 | [What's new](docs/WHATS_NEW.md) | Everything 0.4.0 changed, and what it removed. |
-| [Upgrading](docs/UPGRADING.md) | Move from v0.2.192. One-way, so read it first. |
+| [Upgrading](docs/UPGRADING.md) | Migrate storage and preserve instance identity. |
 | [Manual](MANUAL.md) | Day-to-day use and operations. |
 | [Architecture](docs/ARCHITECTURE.md) | Processes, storage, trust, request flow. |
-| [Deployment](docs/DEPLOYMENT.md) | Managed, split, external DB2, backup, hardening. |
+| [Deployment](docs/DEPLOYMENT.md) | Standalone Server, optional KB, encrypted storage, backup. |
 | [Command reference](docs/gen/cli-commands.md) | Every CLI command. Generated from source. |
 | [Configuration reference](docs/gen/configuration.md) | Every config key and variable. Generated from source. |
 | [Server API](docs/PUBLIC_API.md) | `/v1` transport, auth, compatibility. |

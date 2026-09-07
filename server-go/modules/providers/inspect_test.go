@@ -2,6 +2,7 @@ package providers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"github.com/JBailes/aimee/server-go/modules/egress"
 	"strings"
@@ -73,5 +74,33 @@ func TestProbeNoRunAndExecutionFailure(t *testing.T) {
 	out = call(t, m, "model.probe", object{"args": []string{"model"}})
 	if boolean(out, "execution_ok", true) || !boolean(out, "execution_tested", false) {
 		t.Fatal(out)
+	}
+}
+
+func TestBundledSynthesisProbeRequiresFinalText(t *testing.T) {
+	for _, final := range []bool{false, true} {
+		m, _, _ := manager(t)
+		call(t, m, "model.add", object{"args": []string{"local", "https://aimee-llm:8761/v1", "m", "--auth-type", "none"}})
+		body := `{"choices":[{"message":{"content":"","reasoning_content":"thinking"},"finish_reason":"length"}]}`
+		if final {
+			body = `{"choices":[{"message":{"content":"ok"},"finish_reason":"stop"}]}`
+		}
+		network := &fixtureNetwork{replies: []egress.HTTPResponse{response(200, `{"data":[{"id":"m"}]}`), response(200, `[]`), response(200, body)}}
+		m.SetEgress(network)
+		out := call(t, m, "model.probe", object{"args": []string{"local"}})
+		if boolean(out, "execution_ok", false) != final {
+			t.Fatal(out)
+		}
+		if !final && str(out, "execution_error") == "" {
+			t.Fatal("empty final text has no failure explanation")
+		}
+		var request object
+		if json.Unmarshal(network.requests[len(network.requests)-1].Body, &request) != nil {
+			t.Fatal("invalid request")
+		}
+		kwargs, _ := request["chat_template_kwargs"].(map[string]any)
+		if boolean(kwargs, "enable_thinking", true) || number(request, "max_tokens") < 128 {
+			t.Fatal("probe can exhaust its budget before producing final text")
+		}
 	}
 }

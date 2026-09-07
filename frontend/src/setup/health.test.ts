@@ -2,6 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { healthBanner } from './health';
 
 describe('healthBanner', () => {
+  it('accepts a healthy KB-free local composition', () => {
+    expect(healthBanner({ready:true, dependencies:{db1:'ok', modules:'ok', kb:'disabled', retrieval:'disabled'}})).toBeNull();
+  });
   it('says nothing when every dependency is ok', () => {
     expect(healthBanner({ ready: true, status: 'ok', dependencies: { kb: 'ok', db1: 'ok', retrieval: 'ok' } })).toBeNull();
   });
@@ -22,8 +25,7 @@ describe('healthBanner', () => {
     expect(b!.title).toContain('knowledge service');
     // The misreading this exists to prevent.
     expect(b!.detail).toContain('does not mean');
-    // And the reassurance that stops the user re-cloning by hand.
-    expect(b!.detail).toContain('indexed automatically');
+    expect(b!.detail).toContain('Personal memory remains');
   });
 
   it('reports retrieval separately from the kb', () => {
@@ -31,11 +33,11 @@ describe('healthBanner', () => {
     expect(b!.title).toContain('retrieval is unavailable');
   });
 
-  it('names the kb when several things are down at once', () => {
+  it('prioritizes the local store when several things are down at once', () => {
     // retrieval failing is usually a symptom of the kb being down; two alarms
     // for one cause is noise.
     const b = healthBanner({ dependencies: { kb: 'fail', db1: 'fail', retrieval: 'fail' } });
-    expect(b!.title).toContain('knowledge service');
+    expect(b!.title).toContain('local database');
   });
 
   it('reports a database outage when only it is down', () => {

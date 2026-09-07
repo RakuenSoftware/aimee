@@ -29,7 +29,7 @@ PROCESS_REQUIRED = {
     # enabled_by_default false is declared and never spawned, which is how peer
     # messaging came to be green in every test and absent from server.modules.
     "aimee", "egress", "providers",
-    "execution-policy",
+    "execution-policy", "server", "kb",
 }
 GO_PROCESSES = {
     "config", "memory", "learning", "routing", "delegates", "tools", "workspace", "git",
@@ -47,7 +47,7 @@ GO_PROCESSES = {
     # messaging renumbered instead -- it had no C callers to break, which is why
     # its stages are 20..23 rather than 1..4.
     "aimee", "egress", "providers",
-    "execution-policy",
+    "execution-policy", "server", "kb",
 }
 # Executables that host a process other than the module runtime's multicall binary.
 HOSTED_BY = {"wfe": "/usr/local/bin/aimee-wfe"}

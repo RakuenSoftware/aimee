@@ -585,6 +585,16 @@ add_executable({binary}
 {source_lines}
 )
 target_compile_features({binary} PRIVATE c_std_11)
+# Match the runtime bundle: only the declared process stages enter this binary.
+# Unused legacy surface cannot import another module's retired implementation.
+if(CMAKE_C_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options({binary} PRIVATE -ffunction-sections -fdata-sections)
+    if(APPLE)
+        target_link_options({binary} PRIVATE -Wl,-dead_strip)
+    else()
+        target_link_options({binary} PRIVATE -Wl,--gc-sections)
+    endif()
+endif()
 target_include_directories({binary} PRIVATE
 {generated_include_line}\
 {include_lines}
@@ -684,6 +694,8 @@ def go_bus_sources(module_id: str | None = None) -> list[str]:
 # the serving module. Add entries here in lockstep with the caller's process
 # contract and runtime-bundle coverage.
 GO_SHARED_CONTRACTS = {
+    "server-go/modules/module-runtime/identity": {"server", "kb"},
+    "server-go/modules/module-runtime/supervisor": {"server", "kb"},
     "server-go/config": {"config", "providers"},
     "server-go/modules/egress": {"providers"},
     "server-go/delegate": {"delegates", "roundtable"},

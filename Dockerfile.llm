@@ -235,4 +235,6 @@ EXPOSE 8761
 HEALTHCHECK --interval=15s --timeout=5s --start-period=180s --retries=3 \
     CMD curl -fsS -m 4 "http://127.0.0.1:${AIMEE_LLM_LOOPBACK_PORT}/health" || exit 1
 
+RUN groupadd --gid 1000 aimee && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin aimee
+USER aimee
 ENTRYPOINT ["/usr/local/bin/aimee-llm-entrypoint.sh"]

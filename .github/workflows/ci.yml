@@ -48,7 +48,7 @@ jobs:
           # Gitleaks scans commit history, so a one-commit checkout is not enough.
           fetch-depth: 0
       - name: Install native analyzers
-        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy
+        run: sudo apt-get update && sudo apt-get install -y cppcheck clang-tidy build-essential pkg-config libpq-dev libssl-dev libpam0g-dev zlib1g-dev libzstd-dev libp11-kit-dev python3-yaml
       - name: Run mandatory native static analysis
         working-directory: src
         run: make static-analysis STATIC_ANALYSIS_STRICT=1
@@ -427,7 +427,10 @@ jobs:
             libsqlite3-dev libcurl4-openssl-dev libpam0g-dev libssl-dev libp11-kit-dev \
             libpq-dev curl
       - name: Build
-        run: cd src && make -j$(nproc) all server build/obj/aimee-module-config
+        run: |
+          cd src && make -j$(nproc) all server build/obj/aimee-module-config
+          # First boot binds identity through the shared Go composition runtime.
+          cd ../server-go && CGO_ENABLED=0 go build -o ../src/build/obj/aimee-module ./cmd/aimee-module
       - name: Verify binary hardening
         run: cd src && make hardening-check
       - name: Skill lint
@@ -440,7 +443,7 @@ jobs:
           sed "s|^executable=.*|executable=$PWD/src/build/obj/aimee-module-config|" \
             src/build/obj/module-bundle/grants/server/config.grant \
             >"$app_home/modules.d/server/config.grant"
-          AIMEE_HOME="$app_home" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
+          AIMEE_HOME="$app_home" AIMEE_MODULE_RUNTIME_BIN="$PWD/src/build/obj/aimee-module" AIMEE_BUNDLED_SKILLS_DIR="$PWD/skills" \
             ./aimee-server --socket="$sock" &
           pid=$!
           module_pid=
@@ -1935,120 +1938,81 @@ jobs:
       - name: Memory retrieval eval (corpus + regression check)
         run: cd src && make -j$(nproc) memory-retrieval-eval-check
 
-  # End-to-end deploy matrix: build the images and prove every Docker topology
-  # (kb-only, server+kb split, server standalone) boots and serves a usable /v1
-  # surface. See
-  # docs/proposals/pending/aimee-e2e-deploy-matrix.md. GitHub's ubuntu runners
-  # ship Docker + compose, so no port offset is needed (8740/8741 are free).
+  # Every role uses the candidate application and standardized encrypted store.
   e2e-docker:
     needs: change-scope
     if: ${{ !cancelled() && (needs.change-scope.result != 'success' || needs.change-scope.outputs.docs_only != 'true') }}
-    # One runner per topology so the deploy matrix runs in PARALLEL instead of
-    # serially on one runner (T1+T2+T3 back-to-back was the long pole of CI).
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: read
-    env:
-      # Test-only credentials required while Compose is parsed by Bake, before
-      # the topology smoke scripts have a chance to establish their environment.
-      AIMEE_STORE_ADMIN_PASSWORD: ci-e2e-admin-password-2878
-      AIMEE_STORE_MIGRATOR_PASSWORD: ci-e2e-migrator-password-2878
-      AIMEE_STORE_RUNTIME_PASSWORD: ci-e2e-runtime-password-2878
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Bake targets built by each compose file. The cache scope is keyed by
-          # IMAGE, not by topology: T1 and T2 build aimee-kb from the same
-          # Dockerfile, and T2 and T3 build aimee-server from the same
-          # Dockerfile.server. Per-topology scopes stored those identical layers
-          # twice and denied each shard the other's work.
-          - topology: T1
-            compose_file: compose.yaml
-            images: aimee-kb aimee-control-web
-          - topology: T2
-            compose_file: compose.server.yaml
-            images: aimee-kb aimee-server
-          - topology: T3
-            compose_file: compose.server-standalone.yaml
-            images: aimee-server
+        topology: [T1, T2, T3]
     name: e2e-docker (${{ matrix.topology }})
+    env:
+      AIMEE_APPLICATION_IMAGE: aimee:e2e
+      AIMEE_POSTGRES_IMAGE: aimee-postgres:e2e
+      AIMEE_EMBEDDER_IMAGE: aimee-embedder:e2e
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
-      - name: Runner diagnostics
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e
+      - name: Prepare Linux encrypted storage
         run: |
-          docker version --format '{{.Server.Version}}'
-          docker compose version
-          docker buildx version
-          df -h / | tail -1
-      # A GitHub Actions cache is readable only by the ref that wrote it and by
-      # that ref's base branch. Cache written from a PR run therefore lands under
-      # refs/pull/N/merge, where NO other run can ever read it — while still
-      # counting against the repo's 10 GB quota and evicting the shared
-      # refs/heads/testing entries by LRU. That is what happened here: 9.5 GB of
-      # unreadable PR blobs pushed the repo to 14 GB, every e2e image build
-      # missed cache completely, and each shard rebuilt postgres, rust, the
-      # python venv and the C tree from scratch (12-18 min a shard).
-      #
-      # So: every run READS the shared per-image scope, only pushes to the
-      # default branch WRITE it. That also drops the mode=max export (~7 min a
-      # shard) from the PR path entirely.
-      - name: Resolve bake cache flags
-        id: cache_flags
-        env:
-          IMAGES: ${{ matrix.images }}
-          WRITE_CACHE: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' }}
-        run: |
-          {
-            echo 'set<<CACHE_FLAGS_EOF'
-            for img in $IMAGES; do
-              echo "${img}.cache-from=type=gha,scope=e2e-${img}"
-              if [ "$WRITE_CACHE" = "true" ]; then
-                echo "${img}.cache-to=type=gha,scope=e2e-${img},mode=max"
-              fi
-            done
-            echo CACHE_FLAGS_EOF
-          } >> "$GITHUB_OUTPUT"
-      - name: Build topology images with persistent cache
-        uses: docker/bake-action@d3418bd7d0e9324001bca92fa8ba175ea7e6dc9b
+          sudo modprobe loop
+          sudo modprobe dm_mod
+          sudo apt-get update
+          sudo apt-get install -y cryptsetup-bin
+          test -c /dev/mapper/control
+          test -c /dev/loop-control
+      - name: Build the unified application
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
-          source: .
-          files: ${{ matrix.compose_file }}
+          context: .
+          file: Dockerfile.server
+          tags: aimee:e2e
+          build-args: WITH_VSCODE=0
           load: true
-          set: ${{ steps.cache_flags.outputs.set }}
-      # The server topologies stand up a stock PostgreSQL for the store. Bake
-      # only loads the images the compose file BUILDS, so this one is pulled --
-      # and `up -d --no-build` would pull it inline with no retry, which is the
-      # transient-Docker-Hub failure every other pull in this file guards
-      # against. T1 is kb-only and runs no server, so it needs no store.
-      - name: Pre-pull the store database image with retry
-        if: matrix.topology != 'T1'
+          cache-from: type=gha,scope=e2e-aimee
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee,mode=max' || '' }}
+      - name: Build standardized PostgreSQL
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: Dockerfile.postgres
+          tags: aimee-postgres:e2e
+          load: true
+          cache-from: type=gha,scope=e2e-aimee-postgres
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee-postgres,mode=max' || '' }}
+      - name: Build the real local embedder
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          file: Dockerfile.embedder
+          tags: aimee-embedder:e2e
+          load: true
+          cache-from: type=gha,scope=e2e-aimee-embedder
+          cache-to: ${{ github.event_name == 'push' && github.ref == 'refs/heads/testing' && 'type=gha,scope=e2e-aimee-embedder,mode=max' || '' }}
+      - name: Run the shipped deployment and regression gates
+        run: python3 tests/e2e/deployment-matrix.py --topology ${{ matrix.topology }} --output /tmp/aimee-e2e-evidence
+      - name: LUKS recovery and legacy PostgreSQL migration
+        if: matrix.topology == 'T3'
         run: |
-          img=postgres:18
-          for attempt in 1 2 3 4 5; do
-            docker pull "$img" && break
-            echo "docker pull $img failed (attempt $attempt/5); backing off"
-            sleep $((attempt * 10))
+          for mode in fresh upgrade; do
+            extra=()
+            if [ "$mode" = upgrade ]; then extra+=(--legacy-upgrade); fi
+            sudo python3 tests/e2e/postgres-luks-e2e.py \
+              --server-image aimee:e2e --postgres-image aimee-postgres:e2e \
+              --evidence "/tmp/aimee-e2e-evidence/luks-${mode}.json" "${extra[@]}"
           done
-      - name: Run Docker deploy topology ${{ matrix.topology }}
-        # The aimee-server image builds webchat's SPA from its vendored
-        # @rakuensoftware/smoothgui dependency — no npm token needed.
-        env:
-          # The Bake step loaded exactly the images named by the compose file.
-          # Keep the smoke scripts' local default intact while avoiding a second
-          # uncached `docker compose build` in CI.
-          AIMEE_E2E_SKIP_BUILD: "1"
-          AIMEE_E2E_MEMORY_PLACEMENT: "1"
-        run: scripts/e2e-matrix.sh --only ${{ matrix.topology }}
-      - name: Stack logs on failure
-        if: failure()
-        run: |
-          for f in compose.yaml compose.server.yaml compose.server-standalone.yaml; do
-            echo "::group::$f"; docker compose -f "$f" logs --tail=80 2>/dev/null || true; echo "::endgroup::"
-          done
+      - name: Upload regression verdicts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: deploy-${{ matrix.topology }}-verdicts
+          path: /tmp/aimee-e2e-evidence/*.json
+          if-no-files-found: error
 
   e2e-adoption:
     needs: change-scope

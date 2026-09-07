@@ -41,6 +41,9 @@ class Gate:
             self.args.server, 'aimee', '--json', 'memory', *map(str, args)))
 
     def sql(self, query):
+        if getattr(self.args, 'kb_store_db', None):
+            return self.docker('exec', self.args.kb_store_db, 'psql', '-U', 'postgres',
+                '-d', 'aimee_store', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', query)
         return self.docker('exec', self.args.kb, 'psql', '-h', '/var/lib/aimee/run',
                            '-d', 'aimee_shared', '-X', '-At', '-v', 'ON_ERROR_STOP=1', '-c', query)
 
@@ -267,6 +270,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ('server', 'store-db', 'output'):
         parser.add_argument('--' + name, required=True)
+    parser.add_argument('--kb-store-db', help='Standardized PostgreSQL container owned by KB')
     parser.add_argument('--kb', help='Shared container; omit to test a KB-free local composition')
     parser.add_argument('--upgrade-fixture')
     args = parser.parse_args()

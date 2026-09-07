@@ -1592,6 +1592,11 @@ char *kb_client_memory_scene_show_json(int64_t scene_id)
  * a hung sidecar doesn't wedge the CLI indefinitely. */
 #define KB_CLIENT_SEARCH_TIMEOUT_MS (2 * 60 * 1000)
 
+int kb_client_connection_configured(void)
+{
+   return kb_client_mtls_configured() || kb_client_v1_base_url() != NULL;
+}
+
 const char *kb_client_v1_base_url(void)
 {
    const char *url = getenv("AIMEE_KB_API_URL");

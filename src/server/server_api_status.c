@@ -120,6 +120,16 @@ void server_health_add_kb(cJSON *resp)
 {
    if (!resp)
       return;
+   if (!kb_client_connection_configured())
+   {
+      cJSON *disabled = cJSON_AddObjectToObject(resp, "kb");
+      if (disabled)
+      {
+         cJSON_AddStringToObject(disabled, "status", "disabled");
+         cJSON_AddBoolToObject(disabled, "configured", 0);
+      }
+      return;
+   }
    kb_health_t kb;
    memset(&kb, 0, sizeof(kb));
    int kb_rc = kb_client_health(&kb);

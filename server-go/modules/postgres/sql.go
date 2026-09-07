@@ -27,7 +27,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -275,8 +274,8 @@ func parseMigrationConfig(migrationDSN, runtimeDSN string) (*pgxpool.Config, err
 // SQLPool opens (once) the pool this stage serves from.
 func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 	sqlPoolOnce.Do(func() {
-		dsn := os.Getenv("AIMEE_STORE_URL")
-		if dsn == "" {
+		dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
+		if credentialErr != nil || dsn == "" {
 			sqlPoolErr = errors.New("postgres: AIMEE_STORE_URL is unset, so the SQL " +
 				"stage has no database to serve")
 			return
@@ -310,13 +309,13 @@ func SQLPool(ctx context.Context) (*pgxpool.Pool, error) {
 // a distinct owner DSN and may remove it after startup migration completes.
 func MigrationPool(ctx context.Context) (*pgxpool.Pool, error) {
 	migrationPoolOnce.Do(func() {
-		dsn := os.Getenv("AIMEE_STORE_MIGRATION_URL")
-		if dsn == "" {
+		dsn, credentialErr := storeDSN(ctx, "AIMEE_STORE_MIGRATION_URL")
+		if credentialErr != nil || dsn == "" {
 			migrationPoolErr = errors.New("postgres: AIMEE_STORE_MIGRATION_URL is unset")
 			return
 		}
-		runtimeDSN := os.Getenv("AIMEE_STORE_URL")
-		if runtimeDSN == "" {
+		runtimeDSN, credentialErr := storeDSN(ctx, "AIMEE_STORE_URL")
+		if credentialErr != nil || runtimeDSN == "" {
 			migrationPoolErr = errors.New("postgres: AIMEE_STORE_URL is unset")
 			return
 		}

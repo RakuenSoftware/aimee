@@ -31,7 +31,7 @@ check() { # check <label> <expected> <actual>
 # Managed onboarding exposes roundtable as enabled in the shipped config. The
 # image manifest keeps optional modules out until the entrypoint applies an
 # operator intent, so Compose must supply the clean-install intent explicitly.
-managed_compose="$root/compose.server-managed.yaml"
+managed_compose="$root/compose.yaml"
 if grep -q 'AIMEE_MODULE_ROUNDTABLE: ${AIMEE_MODULE_ROUNDTABLE:-1}' "$managed_compose"; then
     printf '  ok    managed clean install starts roundtable by default\n'
 else

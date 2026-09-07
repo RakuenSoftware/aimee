@@ -19,7 +19,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"log"
-	"os"
 	"sync"
 	"time"
 
@@ -86,8 +85,8 @@ func (state *defaultProbeState) getPool() (*pgxpool.Pool, error) {
 	if state.pool != nil {
 		return state.pool, nil
 	}
-	dsn := os.Getenv("AIMEE_STORE_URL")
-	if dsn == "" {
+	dsn, credentialErr := storeDSN(context.Background(), "AIMEE_STORE_URL")
+	if credentialErr != nil || dsn == "" {
 		return nil, errors.New("postgres: AIMEE_STORE_URL is unset")
 	}
 	config, err := pgxpool.ParseConfig(dsn)

@@ -22,7 +22,9 @@
     "sandbox",
     "aimee",
     "egress",
-    "providers"
+    "providers",
+    "server",
+    "kb"
   ],
   "optional": [
     "governance",
@@ -70,7 +72,9 @@
     "aimee": 30,
     "observability": 31,
     "egress": 32,
-    "providers": 33
+    "providers": 33,
+    "server": 34,
+    "kb": 35
   },
   "retired_principal_refs": [],
   "plugin_principal_ref_band": {

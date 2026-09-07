@@ -392,6 +392,7 @@ type DataStore interface {
 var ErrMemoryNotFound = errors.New("memory: record not found")
 
 type postgresDataStore struct {
+	personal  *personalVectors
 	db        store.Queryer
 	placement Placement
 }
@@ -435,6 +436,9 @@ WHERE id = $1 AND ($2 OR lifecycle_state='active')`, id, historical).
 }
 
 func (s *postgresDataStore) UpsertEmbedding(ctx context.Context, record Record, vector []float32) error {
+	if s.placement == PlacementServer {
+		return errors.New("personal vectors require the owner-selected serving identity")
+	}
 	if record.ID <= 0 || len(vector) == 0 {
 		return errors.New("memory: invalid embedding record")
 	}
@@ -620,6 +624,21 @@ ORDER BY (lower(key)=lower($7)) DESC,
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
+	}
+	rows.Close()
+	if s.personal != nil && query != "" {
+		// Leave time to return the local lexical result when DNS or the model
+		// stalls. Consuming the bus deadline would discard that valid result.
+		budget := 1500 * time.Millisecond
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline)/2 < budget {
+			budget = time.Until(deadline) / 2
+		}
+		semanticCtx, cancel := context.WithTimeout(ctx, budget)
+		semantic, err := s.personal.search(semanticCtx, query, kind, tier, limit)
+		cancel()
+		if err == nil {
+			records = fusePersonal(records, semantic, limit)
+		}
 	}
 	return records, nil
 }

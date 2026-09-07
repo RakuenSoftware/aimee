@@ -176,8 +176,13 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 	}
 	result["execution_tested"] = true
 	result["execution_ok"] = false
-	payload := object{"model": str(model, "model"), "messages": []object{{"role": "user", "content": "Reply with exactly: ok"}}, "max_tokens": 16}
+	payload := object{"model": str(model, "model"), "messages": []object{{"role": "user", "content": "Reply with exactly: ok"}}, "max_tokens": 256}
 	suffix := "/chat/completions"
+	// The bundled reasoning model can spend a tiny probe budget entirely on
+	// hidden reasoning. Request a short final answer from this known runtime.
+	if target, err := url.Parse(str(provider, "endpoint")); err == nil && target.Scheme == "https" && target.Host == "aimee-llm:8761" {
+		payload["chat_template_kwargs"] = object{"enable_thinking": false}
+	}
 	if str(provider, "provider") == "anthropic" {
 		suffix = "/messages"
 	}
@@ -202,6 +207,9 @@ func (m *Manager) inspect(ctx context.Context, req Request) (object, error) {
 				}
 			}
 			result["execution_ok"] = valid
+			if !valid {
+				result["execution_error"] = "provider returned no final text"
+			}
 		}
 	}
 	return result, nil

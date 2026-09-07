@@ -1,0 +1,10 @@
+services:
+  aimee-server:
+    environment:
+      AIMEE_DEPLOY_ENABLED: '1'
+      COMPOSE_PROJECT_NAME: ${COMPOSE_PROJECT_NAME:-aimee}
+      AIMEE_IMAGE_TAG: ${AIMEE_IMAGE_TAG:-latest}
+      AIMEE_EMBEDDER_IMAGE: ${AIMEE_EMBEDDER_IMAGE:-}
+      AIMEE_LLM_IMAGE: ${AIMEE_LLM_IMAGE:-}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock

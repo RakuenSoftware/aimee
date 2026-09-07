@@ -17,6 +17,7 @@ import (
 
 	aimeecontract "github.com/JBailes/aimee/server-go/aimee"
 	"github.com/JBailes/aimee/server-go/bus"
+	configclient "github.com/JBailes/aimee/server-go/config"
 	database "github.com/JBailes/aimee/server-go/db"
 	delegatecontract "github.com/JBailes/aimee/server-go/delegate"
 	"github.com/JBailes/aimee/server-go/modules/aimee"
@@ -31,11 +32,14 @@ import (
 	executionpolicy "github.com/JBailes/aimee/server-go/modules/execution-policy"
 	modulegit "github.com/JBailes/aimee/server-go/modules/git"
 	"github.com/JBailes/aimee/server-go/modules/governance"
+	kbrole "github.com/JBailes/aimee/server-go/modules/kb"
 	kbsynthesis "github.com/JBailes/aimee/server-go/modules/kb-synthesis"
 	"github.com/JBailes/aimee/server-go/modules/learning"
 	mcpmodule "github.com/JBailes/aimee/server-go/modules/mcp"
 	"github.com/JBailes/aimee/server-go/modules/memory"
+	"github.com/JBailes/aimee/server-go/modules/module-runtime/identity"
 	"github.com/JBailes/aimee/server-go/modules/postgres"
+	"github.com/JBailes/aimee/server-go/modules/postgres/storage"
 	"github.com/JBailes/aimee/server-go/modules/providers"
 	responsecomposition "github.com/JBailes/aimee/server-go/modules/response-composition"
 	"github.com/JBailes/aimee/server-go/modules/roundtable"
@@ -43,6 +47,7 @@ import (
 	"github.com/JBailes/aimee/server-go/modules/routing"
 	runtimeweb "github.com/JBailes/aimee/server-go/modules/runtime-web"
 	"github.com/JBailes/aimee/server-go/modules/sandbox"
+	serverrole "github.com/JBailes/aimee/server-go/modules/server"
 	"github.com/JBailes/aimee/server-go/modules/skills"
 	moduletools "github.com/JBailes/aimee/server-go/modules/tools"
 	"github.com/JBailes/aimee/server-go/modules/workspace"
@@ -252,6 +257,25 @@ func storeBackend(ctx context.Context, moduleBusSocket string) (database.Store, 
 	return db, nil
 }
 
+type memoryResources struct {
+	database.Store
+	config *configclient.Client
+}
+
+func (r memoryResources) EmbeddingEndpoint() (string, error) {
+	values, err := r.config.Snapshot()
+	if err != nil {
+		return "", err
+	}
+	if endpoint, ok := values["embedder_url"].(string); ok && endpoint != "" {
+		return endpoint, nil
+	}
+	if model, ok := values["embedder_model"].(string); ok && model != "" {
+		return "https://aimee-embedder:8762", nil
+	}
+	return os.Getenv("EMBEDDER_URL"), nil
+}
+
 func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (database.Store, error) {
 	if ctx == nil || moduleBusSocket == "" {
 		return nil, errors.New("memory: no module bus to reach postgres")
@@ -271,7 +295,13 @@ func memoryStoreBackend(ctx context.Context, moduleBusSocket string) (database.S
 		busClient.Detach()
 		return nil, err
 	}
-	return db, nil
+	config, err := configclient.NewClient(caller, 5*time.Second)
+	if err != nil {
+		caller.CloseAndWait()
+		busClient.Detach()
+		return nil, err
+	}
+	return memoryResources{Store: db, config: config}, nil
 }
 
 // moduleEgress attaches a second, request-only identity for outbound transport.
@@ -401,9 +431,9 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 			}
 			log.Printf("memory module: placement=%s storage=postgres", placement)
 		}
-		config.Handler = memory.NewHandler(
-			moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef),
-			memory.WithDataStore(placement, data))
+		executor := moduleEgress(ctx, moduleBusSocket, egress.MemoryClientRef)
+		memory.StartPersonalIndex(ctx, data, executor, os.Getenv("EMBEDDER_URL"))
+		config.Handler = memory.NewHandler(executor, memory.WithDataStore(placement, data))
 	case "learning":
 		config.ModuleName = name
 		config.PrincipalRef = 8
@@ -597,6 +627,22 @@ func moduleConfigRuntime(ctx context.Context, executable, moduleBusSocket string
 		// the module reduces without warming up.
 		config.Handler = economizer.NewHandlerWithStore(
 			economizerStore(ctx, moduleBusSocket))
+	case "server", "kb":
+		config.ModuleName = name
+		var err error
+		if name == "server" {
+			config.PrincipalRef = serverrole.PrincipalRef
+			config.Stages = []bus.ModuleStage{{EventKind: serverrole.EventIdentity, StageID: serverrole.StageIdentity}}
+			config.Handler, err = serverrole.NewHandler(os.Getenv("AIMEE_HOME"))
+		} else {
+			config.PrincipalRef = kbrole.PrincipalRef
+			config.Stages = []bus.ModuleStage{{EventKind: kbrole.EventIdentity, StageID: kbrole.StageIdentity}}
+			config.Handler, err = kbrole.NewHandler(os.Getenv("AIMEE_HOME"))
+		}
+		if err != nil {
+			log.Printf("%s composition unavailable: %v", name, err)
+			return config, false
+		}
 	case "postgres":
 		config.ModuleName = name
 		config.PrincipalRef = 28
@@ -884,6 +930,9 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("unknown Go module executable %q", filepath.Base(args[0]))
 	}
 	if config.ModuleName == "postgres" {
+		if socket := os.Getenv("AIMEE_POSTGRES_STORAGE_SOCKET"); socket != "" {
+			go storage.MaintainUnlock(ctx, socket, os.Getenv("AIMEE_HOME"))
+		}
 		defer postgres.Close()
 	}
 	if config.ModuleName == "egress" {
@@ -905,6 +954,15 @@ func run(ctx context.Context, args []string) error {
 }
 
 func main() {
+	if handled, code := providers.ModelServicesBootstrap(os.Args); handled {
+		os.Exit(code)
+	}
+	if handled, code := identity.Bootstrap(os.Args); handled {
+		os.Exit(code)
+	}
+	if handled, code := storage.Bootstrap(os.Args); handled {
+		os.Exit(code)
+	}
 	if handled, code := providers.RunBootstrapLookup(os.Args); handled {
 		os.Exit(code)
 	}
@@ -916,6 +974,26 @@ func main() {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	if len(os.Args) > 1 && os.Args[1] == "__aimee_supervise_modules" {
+		if len(os.Args) != 5 {
+			fmt.Fprintln(os.Stderr, "invalid role composition arguments")
+			os.Exit(2)
+		}
+		var err error
+		switch filepath.Base(os.Args[0]) {
+		case "aimee-module-server":
+			err = serverrole.Supervise(ctx, os.Args[2], os.Args[3], os.Args[4])
+		case "aimee-module-kb":
+			err = kbrole.Supervise(ctx, os.Args[2], os.Args[3], os.Args[4])
+		default:
+			err = errors.New("composition requires an installed Server or KB module")
+		}
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "aimee composition: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if err := run(ctx, os.Args); err != nil {
 		fmt.Fprintf(os.Stderr, "aimee-module: %v\n", err)
 		os.Exit(1)

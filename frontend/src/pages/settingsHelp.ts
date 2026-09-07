@@ -9,6 +9,7 @@
 // Postgres pool + the kb API listener bind at startup); every other exposed key
 // applies on the next turn. Keep in sync if a field's reload_class changes.
 export const RESTART_KEYS = new Set<string>([
+  "kb_connection_string",
   "db2_url", "kb_api_http_port", "kb_api_bearer_token",
   // Deploy-topology (page-2) record: the deploy layer reads these and the
   // topology (which containers run) only changes on a restart — RELOAD_RESTART
@@ -201,8 +202,10 @@ export const FIELD_HELP: Record<string, string> = {
   // Deploy topology (setup wizard page 2). The deploy layer reads these; the
   // topology only changes on a restart. Set them from the wizard's Deploy page.
   kb_mode:
-    "Where the knowledge base runs: 'local' deploys an aimee-kb here; 'remote' connects to an existing one (see kb_client_url).",
-  kb_client_url: "URL of an existing aimee-kb to connect to when kb_mode is 'remote'. Nothing is deployed locally.",
+    "Optional shared knowledge: 'none' keeps the deployment personal; 'remote' connects to an existing KB (see kb_client_url). KB installation is separate.",
+  kb_connection_string: "Enrollment connection string from the KB administrator. Stored only in Vault; restart to activate.",
+  kb_service_identity_token: "The separate service identity for the enrolled KB connection. Stored only in Vault.",
+  kb_client_url: "URL of an existing shared KB. Connecting leaves personal memory and local models on this Server.",
   kb_client_bearer_token: "Bearer token for the remote aimee-kb (kb_mode='remote'). Needs a restart.",
   synthesis_endpoint: "The one synthesis endpoint. Blank means synthesis is off, which is supported — search, recall and indexing never use it. On an image that bundles llama.cpp the container sets this to loopback itself.",
   synthesis_model: "Synthesis model. On an image with llama.cpp bundled this picks the local model to run (gemma-4-E2B-it or gemma-4-E4B-it); otherwise it is the model name sent to the endpoint.",

@@ -30,5 +30,7 @@ int config_client_operation(const char *operation, cJSON *value);
 const char *config_client_last_error(void);
 int config_client_key_is_secret(const char *key);
 const char *config_client_secret_name(const char *key);
+/* Enumerate Vault-only config fields, including those outside the public schema. */
+const char *config_client_secret_key(size_t index);
 
 #endif

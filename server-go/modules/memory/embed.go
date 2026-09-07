@@ -342,6 +342,9 @@ func EmbedRecord(ctx context.Context, traceID uint64, executor egress.Executor, 
 	if err != nil {
 		return EmbedResponse{Error: "embed: memory record unavailable"}
 	}
+	if personal, ok := data.(*postgresDataStore); ok && personal.placement == PlacementServer {
+		return personal.embedPersonalRecord(ctx, record)
+	}
 	text := record.Content
 	if record.Key != "" {
 		text = record.Key + "\n" + record.Content

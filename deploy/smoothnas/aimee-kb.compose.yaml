@@ -1,37 +1,5 @@
-# aimee-kb — SmoothNAS compose-native plugin (split topology): the shared/vector
-# KB (DB2 + pgvector) with PostgreSQL inside the KB image. The LLM is EXTERNAL —
-# set SYNTHESIS_ENDPOINT to the host
-# running the aimee-llm plugin (its published :8742). (A compose plugin has its own
-# project network, so cross-plugin comms use host-published ports, not the runtime
-# bridge the manifest used.) Migrated from aimee-kb.plugin.yaml.
+# SmoothNAS uses the standard shared KB composition.
+# Set the aimee-data tier to a pool on this host. Encryption keys stay in Vault.
 name: aimee-kb
-services:
-  aimee-kb:
-    restart: unless-stopped
-    image: ${AIMEE_KB_IMAGE:-ghcr.io/rakuensoftware/aimee-kb:${AIMEE_IMAGE_TAG:-latest}}
-    ulimits:
-      stack: 67108864
-    environment:
-      AIMEE_HOME: /var/lib/aimee
-      # External DB2 credentials are streamed into Vault before `up`.
-      # EXTERNAL aimee-llm plugin — set to the host running it, e.g. http://192.168.0.254:8742
-      SYNTHESIS_ENDPOINT: ${SYNTHESIS_ENDPOINT:-}
-      # The bundled synthesis model, on a *-llm image variant: the entrypoint
-      # starts llama-server for it and points SYNTHESIS_ENDPOINT at loopback.
-      # Empty on a non-llm image, or when synthesis is remote/off.
-      SYNTHESIS_MODEL: ${SYNTHESIS_MODEL:-}
-      EMBEDDER_DIMS: ${EMBEDDER_DIMS:-2560}
-      AIMEE_KB_HTTP_BIND: "1"
-    command: ["--http-port=8741"]
-    ports:
-      - "8741:8741"
-    healthcheck:
-      test: ["CMD-SHELL", "body=$$(curl -fsS http://127.0.0.1:8741/v1/health) && printf '%s' \"$$body\" | grep -q '\"status\":\"ok\"' && printf '%s' \"$$body\" | grep -q '\"db2_ok\":true' && printf '%s' \"$$body\" | grep -q '\"db2_kb_tables_ok\":true'"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    volumes:
-      - aimee-kb-home:/var/lib/aimee
-volumes:
-  aimee-kb-home:
-    x-smoothnas: { tier: aimee-data }
+include:
+  - path: [../../compose.kb.yaml, ./storage.override.yaml]

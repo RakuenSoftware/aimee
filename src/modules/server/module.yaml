@@ -1,0 +1,27 @@
+{
+  "descriptor_version": 1,
+  "id": "server",
+  "dependencies": [
+    "module-runtime",
+    "config",
+    "vault",
+    "postgres",
+    "memory"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/server/role.go"
+  ],
+  "go_tests": [
+    "server-go/modules/server/role_test.go"
+  ],
+  "public_headers": [
+    "src/modules/server/include/aimee/server/module_api.h"
+  ],
+  "docs": [
+    "docs/modules/server.md"
+  ]
+}

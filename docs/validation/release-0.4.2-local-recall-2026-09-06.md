@@ -35,12 +35,9 @@ as the combined checks in T2.
 Evidence: [local checks](release-0.4.2-local-recall-2026-09-06/memory-local-recall.json) and
 [combined checks](release-0.4.2-local-recall-2026-09-06/memory-recall-shared.json).
 
-Remaining release work includes personal vector persistence, embedding/synthesis service
-provisioning and credentials owned by either composition, setup/readiness with KB optional,
-and full qualification of those changes. Structured reminders and directives still require
-the shared schema. Recall's existing approximate token packing also needs qualification for
-large records. The previous hosted CI run 34059119430 passed sanitizers and all Docker
-stacks but failed three workflow scheduler tests; those failures remain unresolved.
+The subsequent [unified deployment validation](release-0.4.2-unified-2026-09-07.md)
+covers personal vector persistence, independent model services and KB-free setup.
+This report preserves the evidence for the earlier local recall repair.
 
 An additional direct descriptor-validator invocation reports an existing ownership-boundary
 error for `server-go/cmd/aimee-memory-bus-probe/main.go` in the memory manifest. That source

@@ -61,29 +61,38 @@ int config_client_key_is_secret(const char *key)
    return config_client_secret_name(key) != NULL;
 }
 
+static const struct
+{
+   const char *key;
+   const char *name;
+} config_secrets[] = {{"db2_url", "AIMEE_DB2_URL"},
+                      {"search_tavily_api_key", "AIMEE_SEARCH_TAVILY_API_KEY"},
+                      {"proxy_token", "AIMEE_PROXY_TOKEN"},
+                      {"ingress_trusted_proxy_secret", "AIMEE_INGRESS_PROXY_SECRET"},
+                      {"kb_api_bearer_token", "AIMEE_KB_API_BEARER_TOKEN"},
+                      {"telemetry_metrics_token", "AIMEE_TELEMETRY_METRICS_TOKEN"},
+                      {"kb_client_bearer_token", "AIMEE_KB_CLIENT_BEARER_TOKEN"},
+                      {"kb_connection_string", "AIMEE_KB_CONN"},
+                      {"kb_service_identity_token", "AIMEE_KB_SERVICE_IDENTITY_TOKEN"},
+                      {"server_api_bearer_token", "AIMEE_API_BEARER_TOKEN"},
+                      {"trigger_auth_token", "AIMEE_TRIGGER_AUTH_TOKEN"},
+                      {"kb_curator_provider_api_key", "AIMEE_KB_CURATOR_PROVIDER_API_KEY"},
+                      {"embedder_api_key", "EMBEDDER_API_KEY"},
+                      {"synthesis_api_key", "SYNTHESIS_API_KEY"}};
+
+const char *config_client_secret_key(size_t index)
+{
+   return index < sizeof(config_secrets) / sizeof(config_secrets[0]) ? config_secrets[index].key
+                                                                     : NULL;
+}
+
 const char *config_client_secret_name(const char *key)
 {
-   static const struct
-   {
-      const char *key;
-      const char *name;
-   } secrets[] = {{"db2_url", "AIMEE_DB2_URL"},
-                  {"search_tavily_api_key", "AIMEE_SEARCH_TAVILY_API_KEY"},
-                  {"proxy_token", "AIMEE_PROXY_TOKEN"},
-                  {"ingress_trusted_proxy_secret", "AIMEE_INGRESS_PROXY_SECRET"},
-                  {"kb_api_bearer_token", "AIMEE_KB_API_BEARER_TOKEN"},
-                  {"telemetry_metrics_token", "AIMEE_TELEMETRY_METRICS_TOKEN"},
-                  {"kb_client_bearer_token", "AIMEE_KB_CLIENT_BEARER_TOKEN"},
-                  {"server_api_bearer_token", "AIMEE_API_BEARER_TOKEN"},
-                  {"trigger_auth_token", "AIMEE_TRIGGER_AUTH_TOKEN"},
-                  {"kb_curator_provider_api_key", "AIMEE_KB_CURATOR_PROVIDER_API_KEY"},
-                  {"embedder_api_key", "EMBEDDER_API_KEY"},
-                  {"synthesis_api_key", "SYNTHESIS_API_KEY"}};
    if (!key)
       return NULL;
-   for (size_t i = 0; i < sizeof(secrets) / sizeof(secrets[0]); i++)
-      if (!strcmp(key, secrets[i].key))
-         return secrets[i].name;
+   for (size_t i = 0; i < sizeof(config_secrets) / sizeof(config_secrets[0]); i++)
+      if (!strcmp(key, config_secrets[i].key))
+         return config_secrets[i].name;
    return NULL;
 }
 

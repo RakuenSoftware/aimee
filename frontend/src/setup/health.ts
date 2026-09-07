@@ -37,19 +37,18 @@ export function healthBanner(snap: HealthSnapshot | null | undefined): HealthBan
 
   if (!kbDown && !retrievalDown && !db1Down) return null;
 
+  if (db1Down) {
+    return {
+      title: 'aimee is not fully functional — the local database is unreachable',
+      detail: 'Personal memory, sessions, and history may be unavailable while this lasts.',
+    };
+  }
   if (kbDown) {
     return {
       title: 'aimee is not fully functional — the knowledge service is unreachable',
       detail:
-        'Search and memory return no results while this lasts, so an empty result does not mean ' +
-        'the content is missing. Repositories you clone now are queued and indexed automatically ' +
-        'once the service is back — you do not need to clone them again.',
-    };
-  }
-  if (db1Down) {
-    return {
-      title: 'aimee is not fully functional — the local database is unreachable',
-      detail: 'Sessions and history may not be saved while this lasts.',
+        'Shared knowledge and KB search are unavailable while this lasts. Personal memory remains ' +
+        'local and available. An empty KB result does not mean the content is missing.',
     };
   }
   return {

@@ -6,6 +6,9 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <poll.h>
+#include <spawn.h>
+#include <signal.h>
+#include <sys/wait.h>
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,6 +41,7 @@ struct bus_runtime
    const bus_runtime_grant_t *grants;
    size_t grant_count;
    int pending_peer_pid;
+   bus_instance_role_t instance_role;
    int slot_pidfd[BUS_ARENA_MAX_SLOTS];
 };
 
@@ -110,6 +114,11 @@ static bus_attach_status_t runtime_admit(void *ctx, int fd, const bus_attach_req
 {
    bus_runtime_t *runtime = ctx;
    runtime->pending_peer_pid = 0;
+   if (request->principal_class == 1 &&
+       ((request->principal_ref == BUS_SERVER_ROLE_REF &&
+         runtime->instance_role != BUS_INSTANCE_SERVER) ||
+        (request->principal_ref == BUS_KB_ROLE_REF && runtime->instance_role != BUS_INSTANCE_KB)))
+      return BUS_ATTACH_DENIED_POLICY;
    const bus_runtime_grant_t *grant = grant_find(runtime, request);
    if (!grant || !grant->executable || grant->executable[0] != '/')
       return BUS_ATTACH_DENIED_POLICY;
@@ -265,7 +274,8 @@ bus_runtime_t *bus_runtime_start(bus_host_t *host, pthread_mutex_t *host_lock,
 {
    if (!host || !host_lock || !config || !config->socket_path || config->socket_path[0] != '/' ||
        config->socket_mode > 0777U || config->backlog <= 0 ||
-       (config->grant_count > 0 && !config->grants))
+       (config->grant_count > 0 && !config->grants) || config->instance_role > BUS_INSTANCE_KB ||
+       config->instance_role < BUS_INSTANCE_UNSET)
    {
       errno = EINVAL;
       return NULL;
@@ -281,6 +291,7 @@ bus_runtime_t *bus_runtime_start(bus_host_t *host, pthread_mutex_t *host_lock,
    runtime->stale_after_ns = config->stale_after_ns;
    runtime->grants = config->grants;
    runtime->grant_count = config->grant_count;
+   runtime->instance_role = config->instance_role;
    if (snprintf(runtime->socket_path, sizeof(runtime->socket_path), "%s", config->socket_path) <=
            0 ||
        strlen(config->socket_path) >= sizeof(runtime->socket_path))
@@ -556,4 +567,94 @@ const bus_runtime_grant_t *bus_runtime_policy_grants(const bus_runtime_policy_t 
    if (count_out)
       *count_out = policy ? policy->count : 0;
    return policy ? policy->public : NULL;
+}
+
+/* The latch is canonical JSON emitted by the Go identity package. Parse this
+ * small fixed record without introducing a JSON/storage dependency into core.
+ * Anything except the exact versioned encoding is rejected, never rewritten. */
+static int instance_latch_read(const char *path, const char *role)
+{
+   int fd = open(path, O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+   if (fd < 0)
+      return errno == ENOENT ? 1 : -1;
+   struct stat st;
+   char wire[128] = {0}, prefix[64];
+   ssize_t n = read(fd, wire, sizeof(wire));
+   int ok = fstat(fd, &st) == 0 && S_ISREG(st.st_mode) && (st.st_mode & 0777) == 0444 &&
+            st.st_uid == geteuid();
+   close(fd);
+   int prefix_len =
+       snprintf(prefix, sizeof(prefix), "{\"version\":1,\"role\":\"%s\",\"id\":\"", role);
+   if (!ok || prefix_len <= 0 || n != prefix_len + 39 ||
+       memcmp(wire, prefix, (size_t)prefix_len) != 0 ||
+       memcmp(wire + prefix_len + 36, "\"}\n", 3) != 0)
+      return -1;
+   for (int i = 0; i < 36; i++)
+   {
+      char c = wire[prefix_len + i];
+      if (i == 8 || i == 13 || i == 18 || i == 23)
+      {
+         if (c != '-')
+            return -1;
+      }
+      else if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')))
+         return -1;
+   }
+   return 0;
+}
+
+int bus_instance_ensure_identity(const char *home, bus_instance_role_t role,
+                                 const char *runtime_binary)
+{
+   const char *name = role == BUS_INSTANCE_SERVER ? "server"
+                      : role == BUS_INSTANCE_KB   ? "kb"
+                                                  : NULL;
+   char path[PATH_MAX], installed[PATH_MAX], argv0[64];
+   if (!name || !home || home[0] != '/' ||
+       (size_t)snprintf(path, sizeof(path), "%s/instance-identity.json", home) >= sizeof(path))
+      return -1;
+   int status = instance_latch_read(path, name);
+   if (status != 1)
+      return status;
+   snprintf(argv0, sizeof(argv0), "aimee-module-%s", name);
+   snprintf(installed, sizeof(installed), "/usr/local/libexec/aimee-modules/%s", argv0);
+   if (!runtime_binary || !runtime_binary[0])
+      runtime_binary = getenv("AIMEE_TEST_MODULE_BIN");
+   const char *binary = runtime_binary && runtime_binary[0] ? runtime_binary : installed;
+   if (binary[0] != '/')
+      return -1;
+   char *args[] = {argv0, "__aimee_instance_bootstrap", (char *)home, NULL};
+   posix_spawn_file_actions_t actions;
+   if (posix_spawn_file_actions_init(&actions) != 0)
+      return -1;
+   if (posix_spawn_file_actions_addopen(&actions, STDOUT_FILENO, "/dev/null", O_WRONLY, 0) != 0)
+   {
+      posix_spawn_file_actions_destroy(&actions);
+      return -1;
+   }
+   extern char **environ;
+   pid_t child;
+   int rc = posix_spawn(&child, binary, &actions, NULL, args, environ);
+   posix_spawn_file_actions_destroy(&actions);
+   if (rc != 0)
+      return -1;
+   uint64_t until = bus_runtime_monotonic_ns() + 10ULL * 1000000000ULL;
+   for (;;)
+   {
+      pid_t waited = waitpid(child, &status, WNOHANG);
+      if (waited == child)
+         break;
+      if ((waited < 0 && errno != EINTR) || bus_runtime_monotonic_ns() >= until)
+      {
+         kill(child, SIGKILL);
+         while (waitpid(child, &status, 0) < 0 && errno == EINTR)
+         {
+         }
+         return -1;
+      }
+      usleep(10000);
+   }
+   if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+      return -1;
+   return instance_latch_read(path, name);
 }

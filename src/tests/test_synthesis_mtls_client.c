@@ -23,6 +23,7 @@
  *      the sidecar, and is not offered to every host the kb talks to)
  */
 #include "agent_exec.h"
+#include "cJSON.h"
 #include "kb_sidecar_identity.h"
 
 #include <arpa/inet.h>
@@ -157,8 +158,57 @@ static int post_once(void)
    return status;
 }
 
-int main(void)
+/* Optional real-model gate in a disposable unified application container.
+ * Uses the production fixed TLS profile, not curl or custom certificate envs.
+ * The normal unit suite remains independent of model weights and root mounts. */
+static int managed_live_probe(void)
 {
+   assert(getenv("AIMEE_MODEL_SERVICES_ENABLED") &&
+          strcmp(getenv("AIMEE_MODEL_SERVICES_ENABLED"), "1") == 0);
+   agent_http_init();
+   char *body = NULL;
+   int status = agent_http_get("https://aimee-llm:8761/v1/models", NULL, &body, 30000);
+   assert(status == 200 && body);
+   cJSON *models = cJSON_Parse(body);
+   free(body);
+   const cJSON *first = cJSON_GetArrayItem(cJSON_GetObjectItem(models, "data"), 0);
+   const cJSON *model = cJSON_GetObjectItem(first, "id");
+   assert(cJSON_IsString(model));
+   cJSON *request = cJSON_CreateObject();
+   cJSON_AddStringToObject(request, "model", model->valuestring);
+   cJSON_AddNumberToObject(request, "max_tokens", 256);
+   cJSON *messages = cJSON_AddArrayToObject(request, "messages");
+   cJSON *message = cJSON_CreateObject();
+   cJSON_AddStringToObject(message, "role", "user");
+   cJSON_AddStringToObject(message, "content", "Reply with the word OK.");
+   cJSON_AddItemToArray(messages, message);
+   cJSON *options = cJSON_AddObjectToObject(request, "chat_template_kwargs");
+   cJSON_AddBoolToObject(options, "enable_thinking", 0);
+   char *wire = cJSON_PrintUnformatted(request);
+   body = NULL;
+   status = agent_http_post("https://aimee-llm:8761/v1/chat/completions", NULL, wire, &body, 120000,
+                            NULL);
+   assert(status == 200 && body);
+   cJSON *reply = cJSON_Parse(body);
+   const cJSON *choice = cJSON_GetArrayItem(cJSON_GetObjectItem(reply, "choices"), 0);
+   const cJSON *content = cJSON_GetObjectItem(cJSON_GetObjectItem(choice, "message"), "content");
+   assert(cJSON_IsString(content) && content->valuestring[0]);
+   cJSON_Delete(reply);
+   cJSON_Delete(request);
+   cJSON_Delete(models);
+   free(wire);
+   free(body);
+   agent_http_cleanup();
+   puts("PASS: native client discovers and generates with the real local synthesis model over "
+        "managed mTLS");
+   return 0;
+}
+
+int main(int argc, char **argv)
+{
+   if (argc == 2 && strcmp(argv[1], "--managed-live") == 0)
+      return managed_live_probe();
+   assert(argc == 1);
    snprintf(g_home, sizeof(g_home), "/tmp/aimee-synth-mtls-%d", (int)getpid());
    assert(mkdir(g_home, 0700) == 0);
 

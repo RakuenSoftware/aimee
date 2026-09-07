@@ -1,0 +1,27 @@
+{
+  "descriptor_version": 1,
+  "id": "kb",
+  "dependencies": [
+    "module-runtime",
+    "config",
+    "vault",
+    "postgres",
+    "memory"
+  ],
+  "runtime_toggle": {
+    "supported": false
+  },
+  "ownership_complete": true,
+  "go_sources": [
+    "server-go/modules/kb/role.go"
+  ],
+  "go_tests": [
+    "server-go/modules/kb/role_test.go"
+  ],
+  "public_headers": [
+    "src/modules/kb/include/aimee/kb/module_api.h"
+  ],
+  "docs": [
+    "docs/modules/kb.md"
+  ]
+}

@@ -3863,6 +3863,12 @@ static void test_mtls_listener(void)
       assert(runtime_secret_store("AIMEE_KB_CLIENT_PAM_PASSWORD", "server-password") == 0);
       setenv("AIMEE_TRANSPORT_KB_POOL_ENABLED", "0", 1);
       assert(kb_client_mtls_configured() == 1);
+      /* A malformed durable record must never dereference absent endpoint
+       * metadata while an explicit enrollment connection is configured. */
+      FILE *malformed_identity = fopen(identity_file, "w");
+      assert(malformed_identity && fputs("{\"version\":2}", malformed_identity) >= 0 &&
+             fclose(malformed_identity) == 0);
+      assert(chmod(identity_file, 0600) == 0);
       int st2 = -1;
       char *r = kb_client_mtls_request_timeout("GET", "/v1/health", NULL, 600000, &st2);
       assert(st2 == 200);

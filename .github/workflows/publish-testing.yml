@@ -4,11 +4,9 @@
 # rebuilt only when one of its declared inputs changed.  Otherwise its existing
 # manifest is promoted registry-side to the new immutable `testing-<sha>` tag.
 #
-# The published set covers the split images, the control console, ALL THREE kb
-# embedder variants, and the isolated one-shot authority bootstrap, so every committed
-# Compose topology has a coherent immutable channel revision whichever embedder the
-# wizard selected. Synthesis is NOT here: it is its own image on its own trigger
-# (publish-llm.yml), rebuilt when the model changes rather than when kb code does.
+# The published set includes the unified application, encrypted PostgreSQL, the
+# pinned local embedder and auxiliary services. Server and KB use the same
+# application manifest. Synthesis retains its independent model-image workflow.
 # Versioned + `:latest` publishing of the full image set
 # stays owned by main (auto-release.yml -> publish-images.yml). Keeping testing on
 # a `:testing` tag — never a version number — avoids confusing a tested-but-
@@ -35,6 +33,7 @@ on:
       - "frontend/**"
       - "Dockerfile"
       - "Dockerfile.server"
+      - "Dockerfile.postgres"
       - "Dockerfile.control-web"
       - "Dockerfile.authority-bootstrap"
       - ".github/workflows/publish-testing.yml"

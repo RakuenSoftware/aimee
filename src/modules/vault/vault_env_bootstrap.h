@@ -35,6 +35,11 @@ int vault_env_print_credential_names(void);
 int vault_env_print_webchat_bootstrap(void);
 int vault_env_module_resource(void);
 
+/* Core-only PostgreSQL bootstrap resource; production entry validates its
+ * installed module parent and keeps secret memory locked and non-dumpable. */
+int vault_env_postgres_resource(void);
+int vault_postgres_key(const char *volume, int initialize, unsigned char out[32]);
+
 /* Validate that the fixed Vault records contain a complete usable first login.
  * Emits no secret and is used to fail container startup before services launch. */
 int vault_env_check_webchat_bootstrap(void);

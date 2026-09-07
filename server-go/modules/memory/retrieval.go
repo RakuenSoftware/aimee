@@ -150,6 +150,12 @@ func (s *postgresDataStore) RecallBundle(ctx context.Context, query string, toke
 	if err != nil {
 		return nil, err
 	}
+	if s.personal != nil && query != "" {
+		active, err = s.Search(ctx, Scope{Type: ScopeUser, Value: "_user"}, query, "", "", limit/2+1)
+		if err != nil {
+			return nil, err
+		}
+	}
 	rows, err := s.db.Query(ctx, `SELECT id,scope_type,scope_value,tier,kind,key,content,confidence
 FROM `+s.recallSource()+` WHERE lifecycle_state='pending' ORDER BY updated_at DESC,id DESC LIMIT $1`, limit/4+1)
 	if err != nil {

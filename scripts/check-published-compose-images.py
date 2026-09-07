@@ -18,10 +18,9 @@ WORKFLOWS = (
     ROOT / ".github/workflows/publish-testing.yml",
     ROOT / ".github/workflows/publish-images.yml",
 )
-LLM_WORKFLOW = ROOT / ".github/workflows/publish-llm.yml"
+MODEL_WORKFLOWS = ("publish-llm.yml", "publish-embedder.yml")
 TESTING_PLANNER = ROOT / "scripts/publish_testing_plan.py"
-BUNDLED_KB_COMPOSE = (ROOT / "compose.yaml", ROOT / "compose.server.yaml")
-BUNDLED_KB_IMAGE = "ghcr.io/rakuensoftware/aimee-kb-a25m:"
+
 
 
 class PublisherError(RuntimeError):
@@ -70,6 +69,7 @@ def compose_files(root: Path) -> list[Path]:
         path = root / extra
         if path.exists():
             files.append(path)
+    files.extend(sorted((root / "deploy/smoothnas").glob("*.compose.yaml")))
     return files
 
 
@@ -85,7 +85,7 @@ def resolve(text: str) -> str:
 def validate(root: Path = ROOT) -> tuple[int, int]:
     errors: list[str] = []
     images: set[str] = set()
-    llm_images: set[str] = set()
+    model_images = {name: set() for name in MODEL_WORKFLOWS}
     for path in compose_files(root):
         raw = path.read_text(encoding="utf-8")
         relative = path.relative_to(root)
@@ -93,7 +93,12 @@ def validate(root: Path = ROOT) -> tuple[int, int]:
             if "ghcr.io/rakuensoftware/" not in line:
                 continue
             for name in COMPOSE_IMAGE.findall(resolve(line)):
-                (llm_images if name.startswith("aimee-llm-") else images).add(name)
+                if name.startswith("aimee-llm-"):
+                    model_images["publish-llm.yml"].add(name)
+                elif name.startswith("aimee-embedder-"):
+                    model_images["publish-embedder.yml"].add(name)
+                else:
+                    images.add(name)
             if "AIMEE_IMAGE_TAG" not in line:
                 errors.append(
                     f"{relative} pins {line.strip()} without "
@@ -101,13 +106,11 @@ def validate(root: Path = ROOT) -> tuple[int, int]:
                     "in the topology together"
                 )
 
-    for relative in (Path("compose.yaml"), Path("compose.server.yaml")):
-        compose = root / relative
-        if BUNDLED_KB_IMAGE not in compose.read_text(encoding="utf-8"):
-            errors.append(
-                f"{relative} selects bekko-a25m but does not default "
-                "to the bundled aimee-kb-a25m image"
-            )
+    base = (root / "compose.yaml").read_text(encoding="utf-8")
+    if re.search(r"^  aimee-kb:", base, re.MULTILINE):
+        errors.append("compose.yaml must not install a KB")
+    if "ghcr.io/rakuensoftware/aimee:" not in base or "Dockerfile.postgres" not in base:
+        errors.append("compose.yaml must use the unified application and standardized PostgreSQL images")
     workflows = tuple(root / path.relative_to(ROOT) for path in WORKFLOWS)
     for workflow in workflows:
         text = workflow.read_text(encoding="utf-8")
@@ -127,28 +130,29 @@ def validate(root: Path = ROOT) -> tuple[int, int]:
         for image in sorted(images):
             if image not in published:
                 errors.append(f"{workflow.relative_to(root)} does not publish {image}")
+        if workflow.name == "publish-images.yml":
+            match = re.search(r"^  merge:\n(.*?)(?=^  [a-z_-]+:|\Z)", text, re.MULTILINE | re.DOTALL)
+            names = re.search(r"image:\s*\[([^\]]+)\]", match.group(1)) if match else None
+            merged = {name.strip() for name in names.group(1).split(',')} if names else set()
+            for image in sorted(images):
+                if image not in merged:
+                    errors.append(f"{workflow.relative_to(root)} does not merge published image {image}")
 
-    if llm_images:
-        text = (root / LLM_WORKFLOW.relative_to(ROOT)).read_text(encoding="utf-8")
-        for image in sorted(llm_images):
+    release = (root / ".github/workflows/auto-release.yml").read_text(encoding="utf-8")
+    for workflow, models in model_images.items():
+        path = root / ".github/workflows" / workflow
+        text = path.read_text(encoding="utf-8")
+        for image in sorted(models):
             if not re.search(MATRIX_ENTRY % re.escape(image), text):
-                errors.append(f"{LLM_WORKFLOW.relative_to(ROOT)} does not publish {image}")
-        if "workflow_call" not in text:
-            errors.append(
-                f"{LLM_WORKFLOW.relative_to(ROOT)} is not callable from a release; "
-                "synthesis sidecars would never receive release tags"
-            )
-        release = (root / ".github/workflows/auto-release.yml").read_text(encoding="utf-8")
-        if not re.search(
-            r"^\s*uses:\s*\./\.github/workflows/publish-llm\.yml\s*$",
-            release,
-            re.MULTILINE,
-        ):
-            errors.append("auto-release.yml never calls publish-llm.yml")
+                errors.append(f"{workflow} does not publish {image}")
+        if "workflow_call" not in text or "--tag \"${image}:latest\"" not in text:
+            errors.append(f"{workflow} does not provide release model tags")
+        if f"uses: ./.github/workflows/{workflow}" not in release:
+            errors.append(f"auto-release.yml never calls {workflow}")
 
     if errors:
         raise PublisherError("\n".join(errors))
-    return len(images) + len(llm_images), len(workflows) + 1
+    return len(images) + sum(map(len, model_images.values())), len(workflows) + len(MODEL_WORKFLOWS)
 
 
 def main() -> int:

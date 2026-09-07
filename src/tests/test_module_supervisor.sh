@@ -16,7 +16,21 @@ socket=$tmp/bus.sock
 count=$tmp/count
 module_pid_file=$tmp/module.pid
 manifest=$tmp/server.modules
-printf 'memory\t%s\n' "$root/src/tests/support/fake_module_process.sh" > "$manifest"
+# Exercise the production Go role entry, including its immutable identity and
+# required composition, without writing into the host's installed libexec path.
+(cd "$root/server-go" && CGO_ENABLED=0 go build -o "$tmp/aimee-module-server" ./cmd/aimee-module)
+mkdir -p "$tmp/home"
+"$tmp/aimee-module-server" __aimee_instance_bootstrap "$tmp/home" >/dev/null
+cat >"$tmp/idle" <<'SH'
+#!/bin/sh
+trap 'exit 0' TERM INT
+while :; do sleep 1; done
+SH
+chmod 0700 "$tmp/idle"
+for module in server config postgres; do
+    printf '%s\t%s\n' "$module" "$tmp/idle" >>"$manifest"
+done
+printf 'memory\t%s\n' "$root/src/tests/support/fake_module_process.sh" >> "$manifest"
 
 python3 -c 'import socket,sys,time
 s=socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET)
@@ -31,7 +45,7 @@ while [ ! -S "$socket" ]; do
 done
 
 AIMEE_TEST_MODULE_COUNT="$count" AIMEE_TEST_MODULE_PID="$module_pid_file" \
-    sh "$root/deploy/container/module-supervisor.sh" server "$socket" "$manifest" &
+    "$tmp/aimee-module-server" __aimee_supervise_modules "$tmp/home" "$socket" "$manifest" &
 supervisor_pid=$!
 
 ticks=0

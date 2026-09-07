@@ -13,7 +13,7 @@ typedef struct
 {
    uint32_t principal_class;
    uint32_t principal_ref;
-   uint32_t uid; /* BUS_RUNTIME_SELF_UID means the daemon's effective uid */
+   uint32_t uid;           /* BUS_RUNTIME_SELF_UID means the daemon's effective uid */
    const char *executable; /* canonical absolute /proc/<pid>/exe target */
    const uint32_t *publish;
    size_t publish_count;
@@ -28,6 +28,23 @@ typedef struct
 typedef struct bus_runtime bus_runtime_t;
 typedef struct bus_runtime_policy bus_runtime_policy_t;
 
+/* Reserved first-party composition identities. Admission, not a mutable
+ * module setting, decides which role may attach to this instance. */
+#define BUS_SERVER_ROLE_REF 34U
+#define BUS_KB_ROLE_REF     35U
+typedef enum
+{
+   BUS_INSTANCE_UNSET = 0,
+   BUS_INSTANCE_SERVER = 1,
+   BUS_INSTANCE_KB = 2
+} bus_instance_role_t;
+
+/* Validate the Go-owned first-boot latch, invoking the installed role's Go
+ * bootstrap only when it is absent. runtime_binary is an optional native-build
+ * path to the same module runtime; NULL uses the installed role executable. */
+int bus_instance_ensure_identity(const char *home, bus_instance_role_t role,
+                                 const char *runtime_binary);
+
 typedef struct
 {
    const char *socket_path;
@@ -36,6 +53,7 @@ typedef struct
    uint64_t stale_after_ns;
    const bus_runtime_grant_t *grants;
    size_t grant_count;
+   bus_instance_role_t instance_role;
 } bus_runtime_config_t;
 
 /* Start the authenticated local module endpoint. host_lock must guard every

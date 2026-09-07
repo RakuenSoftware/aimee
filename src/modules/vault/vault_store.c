@@ -7,11 +7,14 @@
 #include "vault_internal.h" /* vault_store_backend_t seam */
 #include "vault_crypto.h"
 #include "vault_kek_check.h"
+#include "vault_service.h" /* reserved instance principal */
 #include "config.h"        /* config_default_dir */
 #include "platform_path.h" /* platform_mkdir_p */
 #include "cJSON.h"
 #include <openssl/crypto.h> /* OPENSSL_cleanse */
 #include <dirent.h>
+#include <errno.h>
+#include <sys/file.h>
 #include <fcntl.h>
 #include <pthread.h>
 #include <stdatomic.h>
@@ -147,6 +150,46 @@ static int vault_file_path(const char *principal, char *out, size_t cap)
    return rc;
 }
 
+/* Serialize mutations across independently executing core resource helpers as
+ * well as threads. Atomic rename alone prevents torn reads, not lost updates. */
+static int vault_write_lock(void)
+{
+   pthread_mutex_lock(&g_vault_write_mu);
+   char dir[1024], path[1280];
+   if (vault_dir(dir, sizeof(dir)) != 0 || platform_mkdir_p(dir, 0700) != 0 ||
+       (size_t)snprintf(path, sizeof(path), "%s/.write.lock", dir) >= sizeof(path))
+   {
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return -1;
+   }
+   int fd = open(path, O_CREAT | O_RDWR | O_CLOEXEC | O_NOFOLLOW, 0600);
+   struct stat st;
+   if (fd < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode) || st.st_uid != geteuid() ||
+       (st.st_mode & 0077) != 0 || flock(fd, LOCK_EX) != 0)
+   {
+      if (fd >= 0)
+         close(fd);
+      pthread_mutex_unlock(&g_vault_write_mu);
+      return -1;
+   }
+   return fd;
+}
+
+static void vault_write_unlock(int fd)
+{
+   close(fd);
+   pthread_mutex_unlock(&g_vault_write_mu);
+}
+
+/* A corrupt, unreadable or non-regular file is never an absent credential. */
+static int vault_file_missing(const char *principal)
+{
+   char path[1280];
+   struct stat st;
+   return vault_file_path(principal, path, sizeof(path)) == 0 && lstat(path, &st) != 0 &&
+          errno == ENOENT;
+}
+
 /* ── File I/O ─────────────────────────────────────────────────────────────── */
 static char *read_whole_file(const char *path)
 {
@@ -198,7 +241,7 @@ static int write_vault_file(const char *principal, cJSON *root)
       return -1;
 
    int rc = -1;
-   int fd = open(tmp, O_CREAT | O_WRONLY | O_TRUNC, 0600);
+   int fd = open(tmp, O_CREAT | O_WRONLY | O_EXCL | O_CLOEXEC | O_NOFOLLOW, 0600);
    if (fd >= 0)
    {
       size_t len = strlen(txt);
@@ -208,6 +251,14 @@ static int write_vault_file(const char *principal, cJSON *root)
       close(fd);
       if (rc == 0 && rename(tmp, path) != 0)
          rc = -1;
+      if (rc == 0)
+      {
+         int dir_fd = open(dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+         if (dir_fd < 0 || fsync(dir_fd) != 0)
+            rc = -1;
+         if (dir_fd >= 0)
+            close(dir_fd);
+      }
       if (rc != 0)
          unlink(tmp);
    }
@@ -288,7 +339,9 @@ static int jsonfile_get_or_create_salt(void *ctx, const char *principal,
    /* Held across the load->(maybe create+write) so two concurrent unlocks of the
     * same new principal cannot each create a file with a different salt (the
     * second would orphan the first's cached KEK). */
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    int rc = -1;
    cJSON *root = load_vault(principal);
    if (root)
@@ -300,6 +353,9 @@ static int jsonfile_get_or_create_salt(void *ctx, const char *principal,
                : -1;
       goto done;
    }
+
+   if (!vault_file_missing(principal))
+      goto done;
 
    /* No file yet: create one with a fresh random salt + empty creds list. */
    if (vault_crypto_random(salt, VAULT_SALT_LEN) != 0)
@@ -326,7 +382,7 @@ static int jsonfile_get_or_create_salt(void *ctx, const char *principal,
 
 done:
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    if (rc != 0)
       OPENSSL_cleanse(salt, VAULT_SALT_LEN);
    return rc;
@@ -349,7 +405,7 @@ static int add_b64_field(cJSON *obj, const char *name, const uint8_t *bin, size_
  * = _set_server (a server-readable cred set with no user KEK / unlock). */
 static int vault_store_set_impl(const char *principal, const uint8_t *kek,
                                 const uint8_t *server_kek, const char *agent, const char *cred,
-                                const char *secret)
+                                const char *secret, int only_if_absent)
 {
    if (!principal || (!kek && !server_kek) || !agent || !agent[0] || !cred || !cred[0] || !secret)
       return -1;
@@ -357,11 +413,20 @@ static int vault_store_set_impl(const char *principal, const uint8_t *kek,
    if (pt_len > VAULT_SECRET_MAX)
       return -1;
 
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root) /* must be unlocked/created first */
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
+      return -1;
+   }
+
+   if (only_if_absent && find_cred(root, agent, cred))
+   {
+      cJSON_Delete(root);
+      vault_write_unlock(lock_fd);
       return -1;
    }
 
@@ -424,14 +489,14 @@ out:
       free(ct);
    }
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc;
 }
 
 static int jsonfile_set(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
                         const char *agent, const char *cred, const char *secret)
 {
-   return vault_store_set_impl(principal, kek, NULL, agent, cred, secret);
+   return vault_store_set_impl(principal, kek, NULL, agent, cred, secret, 0);
 }
 
 static int jsonfile_set_dual(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
@@ -440,7 +505,7 @@ static int jsonfile_set_dual(void *ctx, const char *principal, const uint8_t kek
 {
    if (!server_kek)
       return -1;
-   return vault_store_set_impl(principal, kek, server_kek, agent, cred, secret);
+   return vault_store_set_impl(principal, kek, server_kek, agent, cred, secret, 0);
 }
 
 static int jsonfile_set_server(void *ctx, const char *principal,
@@ -451,7 +516,7 @@ static int jsonfile_set_server(void *ctx, const char *principal,
       return -1;
    /* No user KEK: the entry carries only a server wrap, so it can be set without
     * an unlocked user vault and read back via vault_store_get_server. */
-   return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret);
+   return vault_store_set_impl(principal, NULL, server_kek, agent, cred, secret, 0);
 }
 
 static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAULT_KEK_LEN],
@@ -464,7 +529,7 @@ static int jsonfile_get(void *ctx, const char *principal, const uint8_t kek[VAUL
 
    cJSON *root = load_vault(principal);
    if (!root)
-      return VAULT_STORE_NO_ENTRY; /* no file -> no entry, fall back */
+      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
 
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
@@ -545,7 +610,7 @@ static int jsonfile_get_server(void *ctx, const char *principal,
 
    cJSON *root = load_vault(principal);
    if (!root)
-      return VAULT_STORE_NO_ENTRY; /* no file -> no entry, fall back */
+      return vault_file_missing(principal) ? VAULT_STORE_NO_ENTRY : -1;
 
    int rc = -1;
    uint8_t dek[VAULT_DEK_LEN] = {0};
@@ -627,11 +692,13 @@ static int jsonfile_add_server_wraps(void *ctx, const char *principal,
 {
    if (!principal || !user_kek || !server_kek)
       return -1;
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root)
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return 0; /* no vault -> nothing to backfill */
    }
 
@@ -669,7 +736,7 @@ static int jsonfile_add_server_wraps(void *ctx, const char *principal,
    if (rc == 0 && changed)
       rc = write_vault_file(principal, root);
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc;
 }
 
@@ -679,11 +746,13 @@ static int jsonfile_rekey_field(void *ctx, const char *principal, const char *fi
 {
    if (!principal || !field || !field[0] || !old_kek || !new_kek)
       return -1;
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root)
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return 0; /* no vault for this principal -> nothing to re-wrap */
    }
 
@@ -723,7 +792,7 @@ static int jsonfile_rekey_field(void *ctx, const char *principal, const char *fi
    if (rc == 0 && rewrapped_count > 0)
       rc = write_vault_file(principal, root);
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc == 0 ? rewrapped_count : -1;
 }
 
@@ -815,11 +884,13 @@ static int jsonfile_unlock_check(void *ctx, const char *principal, const uint8_t
 {
    if (!principal || !kek)
       return -1;
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root)
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return -1;
    }
    int rc;
@@ -834,7 +905,7 @@ static int jsonfile_unlock_check(void *ctx, const char *principal, const uint8_t
       rc = (kek_check_set(root, kek) == 0 && write_vault_file(principal, root) == 0) ? 0 : -1;
    }
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc;
 }
 
@@ -843,11 +914,13 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
 {
    if (!principal || !old_kek || !new_kek)
       return -1;
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root)
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return -1; /* no vault to rekey */
    }
 
@@ -858,7 +931,7 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
        !kek_check_matches(root, old_kek))
    {
       cJSON_Delete(root);
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return -1;
    }
 
@@ -895,7 +968,7 @@ static int jsonfile_rekey(void *ctx, const char *principal, const uint8_t old_ke
    if (rc == 0)
       rc = write_vault_file(principal, root);
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc;
 }
 
@@ -945,11 +1018,13 @@ static int jsonfile_delete(void *ctx, const char *principal, const char *agent, 
 {
    if (!principal || !agent || !cred)
       return -1;
-   pthread_mutex_lock(&g_vault_write_mu);
+   int lock_fd = vault_write_lock();
+   if (lock_fd < 0)
+      return -1;
    cJSON *root = load_vault(principal);
    if (!root)
    {
-      pthread_mutex_unlock(&g_vault_write_mu);
+      vault_write_unlock(lock_fd);
       return 0; /* nothing to delete */
    }
    cJSON *creds = creds_array(root);
@@ -964,7 +1039,7 @@ static int jsonfile_delete(void *ctx, const char *principal, const char *agent, 
       }
    }
    cJSON_Delete(root);
-   pthread_mutex_unlock(&g_vault_write_mu);
+   vault_write_unlock(lock_fd);
    return rc;
 }
 
@@ -996,98 +1071,189 @@ static const vault_store_backend_t jsonfile_backend = {
 };
 
 static const vault_store_backend_t *g_store_backend = &jsonfile_backend;
+static int g_instance_local;
+
+static const vault_store_backend_t *store_for(const char *principal)
+{
+   return g_instance_local && principal && strcmp(principal, VAULT_SERVER_PRINCIPAL) == 0
+              ? &jsonfile_backend
+              : g_store_backend;
+}
+
+/* Construction-time migration: each old instance credential is decrypted,
+ * durably sealed into local Vault, then removed from the tenant backend. Partial
+ * migration is resumable. Conflicting values fail closed without overwriting
+ * either copy. No listener may run until this function succeeds. */
+int vault_store_bind_tenant_backend(const vault_store_backend_t *backend,
+                                    const uint8_t instance_kek[VAULT_KEK_LEN])
+{
+   if (!backend || !instance_kek || !backend->list || !backend->get || !backend->delete)
+      return -1;
+   enum
+   {
+      MAX_ENTRIES = 4096
+   };
+   vault_store_entry_t *entries = calloc(MAX_ENTRIES + 1, sizeof(*entries));
+   char *old = calloc(1, VAULT_SECRET_MAX + 1), *local = calloc(1, VAULT_SECRET_MAX + 1);
+   int rc = -1;
+   if (!entries || !old || !local)
+      goto done;
+   int n = backend->list(backend->ctx, VAULT_SERVER_PRINCIPAL, entries, MAX_ENTRIES + 1);
+   if (n < 0 || n > MAX_ENTRIES)
+      goto done;
+   for (int i = 0; i < n; i++)
+   {
+      if (backend->get(backend->ctx, VAULT_SERVER_PRINCIPAL, instance_kek, entries[i].agent,
+                       entries[i].cred, old, VAULT_SECRET_MAX + 1) != 0)
+         goto done;
+      int found = jsonfile_get(NULL, VAULT_SERVER_PRINCIPAL, instance_kek, entries[i].agent,
+                               entries[i].cred, local, VAULT_SECRET_MAX + 1);
+      if (found == VAULT_STORE_NO_ENTRY)
+      {
+         uint8_t salt[VAULT_SALT_LEN];
+         if (jsonfile_get_or_create_salt(NULL, VAULT_SERVER_PRINCIPAL, salt) != 0 ||
+             vault_store_set_impl(VAULT_SERVER_PRINCIPAL, instance_kek, NULL, entries[i].agent,
+                                  entries[i].cred, old, 1) != 0)
+            goto done;
+      }
+      else if (found != 0 || strlen(old) != strlen(local) ||
+               CRYPTO_memcmp(old, local, strlen(old)) != 0)
+         goto done;
+      if (backend->delete(backend->ctx, VAULT_SERVER_PRINCIPAL, entries[i].agent,
+                          entries[i].cred) != 0)
+         goto done;
+      OPENSSL_cleanse(old, VAULT_SECRET_MAX + 1);
+      OPENSSL_cleanse(local, VAULT_SECRET_MAX + 1);
+   }
+   g_store_backend = backend;
+   g_instance_local = 1;
+   rc = 0;
+done:
+   if (old)
+      OPENSSL_cleanse(old, VAULT_SECRET_MAX + 1);
+   if (local)
+      OPENSSL_cleanse(local, VAULT_SECRET_MAX + 1);
+   free(old);
+   free(local);
+   free(entries);
+   return rc;
+}
 
 /* Rebind the active storage backend (P7 profile composition / tests). NULL
  * restores the built-in jsonfile backend. See vault_internal.h. */
 void vault_store_set_backend(const vault_store_backend_t *backend)
 {
    g_store_backend = backend ? backend : &jsonfile_backend;
+   g_instance_local = 0;
 }
 
 int vault_store_get_or_create_salt(const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
-   return g_store_backend->get_or_create_salt(g_store_backend->ctx, principal, salt);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->get_or_create_salt(backend->ctx, principal, salt);
 }
 
 int vault_store_salt_readonly(const char *principal, uint8_t salt[VAULT_SALT_LEN])
 {
-   return g_store_backend->salt_readonly(g_store_backend->ctx, principal, salt);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->salt_readonly(backend->ctx, principal, salt);
 }
 
 int vault_store_unlock_check(const char *principal, const uint8_t kek[VAULT_KEK_LEN])
 {
-   return g_store_backend->unlock_check(g_store_backend->ctx, principal, kek);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->unlock_check(backend->ctx, principal, kek);
 }
 
 int vault_store_set(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
                     const char *cred, const char *secret)
 {
-   return g_store_backend->set(g_store_backend->ctx, principal, kek, agent, cred, secret);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->set(backend->ctx, principal, kek, agent, cred, secret);
 }
 
 int vault_store_set_dual(const char *principal, const uint8_t kek[VAULT_KEK_LEN],
                          const uint8_t server_kek[VAULT_KEK_LEN], const char *agent,
                          const char *cred, const char *secret)
 {
-   return g_store_backend->set_dual(g_store_backend->ctx, principal, kek, server_kek, agent, cred,
-                                    secret);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->set_dual(backend->ctx, principal, kek, server_kek, agent, cred, secret);
 }
 
 int vault_store_set_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
                            const char *agent, const char *cred, const char *secret)
 {
-   return g_store_backend->set_server(g_store_backend->ctx, principal, server_kek, agent, cred,
-                                      secret);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->set_server(backend->ctx, principal, server_kek, agent, cred, secret);
 }
 
 int vault_store_get_server(const char *principal, const uint8_t server_kek[VAULT_KEK_LEN],
                            const char *agent, const char *cred, char *out, size_t out_len)
 {
-   return g_store_backend->get_server(g_store_backend->ctx, principal, server_kek, agent, cred, out,
-                                      out_len);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->get_server(backend->ctx, principal, server_kek, agent, cred, out, out_len);
 }
 
 int vault_store_add_server_wraps(const char *principal, const uint8_t user_kek[VAULT_KEK_LEN],
                                  const uint8_t server_kek[VAULT_KEK_LEN])
 {
-   return g_store_backend->add_server_wraps(g_store_backend->ctx, principal, user_kek, server_kek);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->add_server_wraps(backend->ctx, principal, user_kek, server_kek);
 }
 
 int vault_store_get(const char *principal, const uint8_t kek[VAULT_KEK_LEN], const char *agent,
                     const char *cred, char *out, size_t out_len)
 {
-   return g_store_backend->get(g_store_backend->ctx, principal, kek, agent, cred, out, out_len);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->get(backend->ctx, principal, kek, agent, cred, out, out_len);
 }
 
 int vault_store_has_entry(const char *principal, const char *agent, const char *cred)
 {
-   return g_store_backend->has_entry(g_store_backend->ctx, principal, agent, cred);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->has_entry(backend->ctx, principal, agent, cred);
 }
 
 int vault_store_list(const char *principal, vault_store_entry_t *out, int max)
 {
-   return g_store_backend->list(g_store_backend->ctx, principal, out, max);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->list(backend->ctx, principal, out, max);
 }
 
 int vault_store_delete(const char *principal, const char *agent, const char *cred)
 {
-   return g_store_backend->delete(g_store_backend->ctx, principal, agent, cred);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->delete(backend->ctx, principal, agent, cred);
 }
 
 int vault_store_rekey(const char *principal, const uint8_t old_kek[VAULT_KEK_LEN],
                       const uint8_t new_kek[VAULT_KEK_LEN])
 {
-   return g_store_backend->rekey(g_store_backend->ctx, principal, old_kek, new_kek);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->rekey(backend->ctx, principal, old_kek, new_kek);
 }
 
 int vault_store_rekey_field(const char *principal, const char *field,
                             const uint8_t old_kek[VAULT_KEK_LEN],
                             const uint8_t new_kek[VAULT_KEK_LEN])
 {
-   return g_store_backend->rekey_field(g_store_backend->ctx, principal, field, old_kek, new_kek);
+   const vault_store_backend_t *backend = store_for(principal);
+   return backend->rekey_field(backend->ctx, principal, field, old_kek, new_kek);
 }
 
 int vault_store_list_principals(char (*out)[VAULT_PRINCIPAL_MAX], int max)
 {
-   return g_store_backend->list_principals(g_store_backend->ctx, out, max);
+   if (!g_instance_local)
+      return g_store_backend->list_principals(g_store_backend->ctx, out, max);
+   if (!out || max < 1)
+      return -1;
+   snprintf(out[0], VAULT_PRINCIPAL_MAX, "%s", VAULT_SERVER_PRINCIPAL);
+   int n = g_store_backend->list_principals(g_store_backend->ctx, out + 1, max - 1);
+   if (n < 0 || n >= max)
+      return -1;
+   int used = 1;
+   for (int i = 1; i <= n; i++)
+      if (strcmp(out[i], VAULT_SERVER_PRINCIPAL) != 0)
+         memmove(out[used++], out[i], VAULT_PRINCIPAL_MAX);
+   return used;
 }

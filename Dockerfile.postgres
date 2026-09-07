@@ -1,0 +1,63 @@
+# Standard PostgreSQL storage for either immutable application identity.
+# Vault stays in the application composition; this image never mounts it.
+FROM golang:1.26.7-bookworm@sha256:e8c859f5632dcfde7b32d2012b4351728f6437930887c2f6a91ea242459e5514 AS storage-build
+WORKDIR /src/server-go
+COPY server-go/go.mod server-go/go.sum ./
+RUN go mod download
+COPY server-go/modules/postgres/storage ./modules/postgres/storage
+RUN CGO_ENABLED=0 go build -trimpath -o /out/aimee-postgres-storage ./modules/postgres/storage/cmd/aimee-postgres-storage
+
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS pgvectorscale-build
+ARG PG_MAJOR=18
+ARG PGVECTORSCALE_VERSION=0.9.0
+# TARGETARCH is supplied by buildx and is exactly the token upstream uses in the
+# asset name (amd64 / arm64).
+ARG TARGETARCH
+# Digests are per-arch and must move with PGVECTORSCALE_VERSION above. A release
+# asset is mutable in a way a git tag build was not, so it is pinned by content.
+ARG PGVECTORSCALE_SHA256_amd64=7a5450b81a7403ca20ff5e5a2f81aa13c81795ddd1fdfe9b986c42c48b12ed67
+ARG PGVECTORSCALE_SHA256_arm64=8d0916df999f082ceb3d019bdfa72f5df395c31b152f7906de59e429ee11edc7
+# Same retry as everywhere else in this file: an unretried fetch is a coin flip
+# wherever it sits.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates curl unzip \
+    && rm -rf /var/lib/apt/lists/* \
+    && zip="pgvectorscale-${PGVECTORSCALE_VERSION}-pg${PG_MAJOR}-${TARGETARCH}.zip" \
+    && case "$TARGETARCH" in \
+         amd64) want="$PGVECTORSCALE_SHA256_amd64" ;; \
+         arm64) want="$PGVECTORSCALE_SHA256_arm64" ;; \
+         *) echo "pgvectorscale: no pinned digest for arch '$TARGETARCH'" >&2; exit 1 ;; \
+       esac \
+    && for a in 1 2 3 4 5; do \
+         curl -fsSL --connect-timeout 10 --max-time 300 -o "/tmp/$zip" \
+           "https://github.com/timescale/pgvectorscale/releases/download/${PGVECTORSCALE_VERSION}/${zip}" \
+           && break; \
+         echo "pgvectorscale asset fetch failed (attempt $a/5); backing off"; \
+         rm -f "/tmp/$zip"; sleep $((a * 5)); \
+       done \
+    && echo "${want}  /tmp/${zip}" | sha256sum -c - \
+    && unzip -j "/tmp/$zip" -d /tmp/pgvs \
+    && deb="$(find /tmp/pgvs -name '*.deb' ! -name '*dbgsym*' -print -quit)" \
+    && test -n "$deb" \
+    && echo "installing pgvectorscale ${PGVECTORSCALE_VERSION} (pg${PG_MAJOR}/${TARGETARCH}) from ${deb##*/}" \
+    && dpkg-deb -x "$deb" /pgvectorscale \
+    && rm -rf /pgvectorscale/usr/share/doc "/tmp/$zip" /tmp/pgvs
+# Fail here rather than shipping a kb that silently falls back to HNSW: the .deb
+# lays the files down at the paths the runtime reads, so assert they arrived.
+RUN test -n "$(find "/pgvectorscale/usr/lib/postgresql/${PG_MAJOR}/lib" -name 'vectorscale*.so' -print -quit)" \
+    && test -s "/pgvectorscale/usr/share/postgresql/${PG_MAJOR}/extension/vectorscale.control"
+
+# Runtime must match the build stage: libpq5 here has to provide at least the
+# PostgreSQL 17 symbols the kb was linked against (PGDG's libpq 18 does).
+FROM postgres:18-trixie@sha256:4ef4dbc939d61acea57712655ddb4b4ab27419c913f94cca0cd57cb3ea3c2280
+RUN apt-get update && apt-get install -y --no-install-recommends cryptsetup-bin e2fsprogs util-linux postgresql-18-pgvector \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=pgvectorscale-build /pgvectorscale/ /
+COPY --from=storage-build /out/aimee-postgres-storage /usr/local/bin/aimee-postgres-storage
+COPY --chmod=0755 scripts/postgres-secure-entrypoint.sh /opt/aimee/postgres-secure-entrypoint.sh
+COPY --chmod=0755 scripts/postgres-store-init.sh /docker-entrypoint-initdb.d/10-aimee-store-roles.sh
+ENV PGDATA=/var/lib/postgresql/data/pgdata \
+    AIMEE_STORE_SECURE_DIR=/var/lib/postgresql/data/secure \
+    AIMEE_STORE_PUBLIC_TLS_DIR=/run/aimee-store-tls \
+    POSTGRES_INITDB_ARGS="--encoding=UTF8 --locale=C.UTF-8"
+ENTRYPOINT ["/usr/local/bin/aimee-postgres-storage"]

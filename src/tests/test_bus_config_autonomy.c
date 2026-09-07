@@ -118,8 +118,9 @@ int main(void)
         "snapshot is cached for accessors");
    char deploy_env[2048];
    config_emit_deploy_env_current(deploy_env, sizeof(deploy_env));
-   must(strstr(deploy_env, "COMPOSE_PROFILES=kb\n") != NULL, "local KB compose profile");
-   must(strstr(deploy_env, "AIMEE_KB_VARIANT=a25m\n") != NULL, "bundled KB variant");
+   must(strstr(deploy_env, "COMPOSE_PROFILES=embedding\n") != NULL,
+        "local embedding compose profile");
+   must(strstr(deploy_env, "AIMEE_EMBEDDER_VARIANT=a25m\n") != NULL, "local embedding variant");
    must(strstr(deploy_env, "EMBEDDER_MODEL=bekko-a25m\n") != NULL, "bundled embedder selection");
    must(strstr(deploy_env, "TOKEN=") == NULL && strstr(deploy_env, "API_KEY=") == NULL,
         "deploy environment excludes credentials");
@@ -171,6 +172,11 @@ int main(void)
    must(
        !strcmp(config_client_secret_name("kb_client_bearer_token"), "AIMEE_KB_CLIENT_BEARER_TOKEN"),
        "KB client credential maps to runtime secret");
+   must(!strcmp(config_client_secret_name("kb_connection_string"), "AIMEE_KB_CONN"),
+        "enrollment stays in Vault");
+   must(!strcmp(config_client_secret_name("kb_service_identity_token"),
+                "AIMEE_KB_SERVICE_IDENTITY_TOKEN"),
+        "service identity stays in Vault");
    must(!config_client_key_is_secret("max_iterations"), "ordinary key is public");
 
    cJSON_Delete(last_request);
