@@ -27,8 +27,10 @@ ARG AIMEE_MODEL_MIRROR=""
 #
 # BUMPING THIS IS A SECURITY ACT. Building from a pinned tag makes this project the
 # vendor: upstream's CVE fixes do not arrive on their own.
-ARG LLAMACPP_VERSION=b10218
+ARG LLAMACPP_VERSION=b10219
 
+# Portable CPU dispatch: never bake the CI runner's ISA into the common binary.
+# CPU-specific backends are selected at runtime after detecting host features.
 # ---- llama.cpp, built from source ----------------------------------------------
 # LLAMA_CURL=ON, and the container still never downloads. Those are not in tension:
 # curl is what compiles in the -hf/-hfd RESOLUTION path, and MTP requires it. llama.cpp
@@ -75,6 +77,7 @@ RUN set -eux; \
     test -d /tmp/llamacpp-src/.git; \
     cmake -S /tmp/llamacpp-src -B /tmp/llamacpp-src/build \
         -DCMAKE_BUILD_TYPE=Release -DLLAMA_CURL=ON \
+        -DGGML_NATIVE=OFF -DGGML_BACKEND_DL=ON -DGGML_CPU_ALL_VARIANTS=ON \
         -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF \
         -DLLAMA_BUILD_TOOLS=ON -DLLAMA_BUILD_SERVER=ON; \
     cmake --build /tmp/llamacpp-src/build --target llama-server -j"$(nproc)"; \
@@ -161,7 +164,7 @@ ARG LLAMACPP_VERSION
 # the same vendoring burden the LLAMACPP_VERSION comment above describes. stunnel
 # from apt inherits Debian's CVE fixes.
 #
-# llama-server itself cannot do this. The pinned b10218 offers --api-key and
+# llama-server itself cannot do this. The pinned b10219 offers --api-key and
 # --ssl-cert-file but has no client-certificate or CA verification flag at all,
 # which is unremarkable: terminating mTLS is not an inference server's job.
 # libgomp1 is llama-server's OpenMP runtime. It is NOT optional and it is easy to

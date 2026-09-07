@@ -99,16 +99,19 @@ else
     printf '  skip  on-adds-governance (module binary not installed on this host)\n'
 fi
 
-# 7. runtime-web follows the browser-UI switch when not named explicitly.
+# 7. Browser visibility does not disable the module that classifies HTTP errors.
 rw="$tmp/rw.modules"
 printf 'runtime-web\t/usr/local/libexec/aimee-modules/aimee-module-runtime-web\n' > "$rw"
 AIMEE_RUNTIME_WEB_ENABLED=0; export AIMEE_RUNTIME_WEB_ENABLED
 out=$(apply_optional_modules server "$rw" "$tmp")
-check "runtime-web module follows AIMEE_RUNTIME_WEB_ENABLED=0" "" "$(ids "$out")"
+check "headless server retains HTTP error classification" "runtime-web" "$(ids "$out")"
 # An explicit module setting wins over the UI switch.
 AIMEE_MODULE_RUNTIME_WEB=1; export AIMEE_MODULE_RUNTIME_WEB
 out=$(apply_optional_modules server "$rw" "$tmp")
 check "explicit AIMEE_MODULE_RUNTIME_WEB=1 overrides the UI switch" "runtime-web" "$(ids "$out")"
+AIMEE_MODULE_RUNTIME_WEB=0; export AIMEE_MODULE_RUNTIME_WEB
+out=$(apply_optional_modules server "$rw" "$tmp")
+check "explicit module disable remains supported" "" "$(ids "$out")"
 unset AIMEE_RUNTIME_WEB_ENABLED AIMEE_MODULE_RUNTIME_WEB
 
 # 8. kb placement gates its own set, and does not accept a server-only module.

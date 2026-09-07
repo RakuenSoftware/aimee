@@ -6,16 +6,9 @@
 # pgvectorscale and torch on every push touching src/**, and pushed ~10 GB twice,
 # for artefacts whose real inputs change on the order of never.
 #
-# The guarantee is enforced TWICE, because a path filter is one careless edit away
-# from being wrong:
-#
-#   1. A narrow trigger. Only the files that actually determine these images.
-#   2. A skip-if-already-published check keyed on the inputs -- model, quant and
-#      llama.cpp version, all encoded in the tag. Even a broad or accidental
-#      trigger then costs one `docker manifest inspect` and stops.
-#
-# (2) is what makes this robust rather than aspirational: correctness does not
-# depend on the path list staying right.
+# Only a newer pinned upstream llama.cpp release authorizes an image build.
+# Wrapper/weight edits wait for that release. Exact content tags permit retries;
+# a runtime tag prevents publishing different images for the same runtime release.
 name: Publish synthesis images (E2B and E4B)
 
 on:
@@ -26,6 +19,8 @@ on:
       - "deploy/container/aimee-llm-entrypoint.sh"
       - "scripts/synthesis-model-table.sh"
       - ".github/workflows/publish-llm.yml"
+      - "scripts/model-image-inputs-changed.py"
+      - "scripts/check-synthesis-runtime-release.sh"
   # Image builds belong to integration merges. Release calls only promote
   # or validate existing manifests; they never rebuild model containers.
   workflow_call:
@@ -98,9 +93,8 @@ jobs:
       # the run reported success. That is precisely how the mTLS fix in this image
       # would have failed to ship.
       #
-      # So the sidecar's own sources are hashed into the tag. Content-addressed: a
-      # rebuild happens exactly when something that lands in the image changed, and
-      # never otherwise.
+      # The content tag also protects release promotion: wrapper changes waiting
+      # for an upstream release cannot silently promote an older implementation.
       - name: Has this exact build already been published?
         id: have
         run: |
@@ -120,6 +114,12 @@ jobs:
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Require a new published upstream runtime release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/testing' && inputs.version == '' && steps.have.outputs.exists != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bash scripts/check-synthesis-runtime-release.sh "ghcr.io/${OWNER}/${{ matrix.name }}" "${{ steps.have.outputs.llamacpp_version }}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
@@ -142,7 +142,16 @@ jobs:
             LLAMACPP_VERSION=${{ steps.have.outputs.llamacpp_version }}
           tags: |
             ${{ steps.have.outputs.pinned }}
+            ghcr.io/${{ env.OWNER }}/${{ matrix.name }}:runtime-${{ steps.have.outputs.llamacpp_version }}
             ghcr.io/${{ env.OWNER }}/${{ matrix.name }}:testing
+
+      - name: Test published synthesis CPU portability
+        if: github.event_name == 'push' && github.ref == 'refs/heads/testing' && inputs.version == ''
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y qemu-user-static
+          docker pull "${{ steps.have.outputs.pinned }}"
+          bash scripts/test-synthesis-portability.sh "${{ steps.have.outputs.pinned }}"
 
       # Registry-side promotion of the pinned build. This intentionally does not
       # pull or rebuild the multi-gigabyte synthesis images during a release.

@@ -2065,6 +2065,9 @@ int kb_handle_memory_store(int fd, cJSON *req)
    cJSON *tier_j = cJSON_GetObjectItemCaseSensitive(req, "tier");
    cJSON *kind_j = cJSON_GetObjectItemCaseSensitive(req, "kind");
    cJSON *conf_j = cJSON_GetObjectItemCaseSensitive(req, "confidence");
+   if (conf_j &&
+       (!cJSON_IsNumber(conf_j) || !(conf_j->valuedouble >= 0.0 && conf_j->valuedouble <= 1.0)))
+      return kb_send_error(fd, "memory.store confidence must be between 0 and 1");
    cJSON *sid_j = cJSON_GetObjectItemCaseSensitive(req, "session_id");
    cJSON *use_cases_j = cJSON_GetObjectItemCaseSensitive(req, "use_cases");
    cJSON *epistemic_j = cJSON_GetObjectItemCaseSensitive(req, "epistemic_kind");

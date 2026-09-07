@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Gate model image builds on their inputs changing in an integration merge.
+"""Gate synthesis on a newer upstream runtime release, embedders on changed inputs.
 
-Compare the previous integration head with the new head so an application,
-workflow or test edit cannot rebuild unchanged models. The publishing workflows
-run this gate on pushes to testing; pull requests never build model images.
+Wrapper and weight edits wait for the next synthesis runtime release. Publication
+also checks upstream release existence and the per-runtime registry marker.
 """
 import argparse
+import re
 import subprocess
 
 
@@ -25,12 +25,25 @@ INPUTS = {
 }
 
 
+def runtime_release(revision):
+    source = subprocess.check_output(
+        ['git', 'show', revision + ':Dockerfile.llm'], text=True)
+    pins = re.findall(r'^ARG LLAMACPP_VERSION=(.*)$', source, re.MULTILINE)
+    if len(pins) != 1 or not re.fullmatch(r'b[0-9]+', pins[0]):
+        raise ValueError('Dockerfile.llm must pin one upstream llama.cpp build release')
+    return int(pins[0][1:])
+
+
 def changed(kind, before, after):
     # Resolve revisions before diff: a missing commit must fail the gate rather
     # than be interpreted as changed inputs and trigger an expensive build.
     revisions = [subprocess.check_output(
         ['git', 'rev-parse', '--verify', '--end-of-options', ref + '^{commit}'],
         text=True).strip() for ref in (before, after)]
+    if kind == 'llm':
+        # Wrapper, model table and application edits wait for the next runtime
+        # release. Downgrades and reverts must never authorize a fresh build.
+        return runtime_release(revisions[1]) > runtime_release(revisions[0])
     result = subprocess.run(['git', 'diff', '--quiet', *revisions, '--', *INPUTS[kind]])
     if result.returncode not in (0, 1):
         raise subprocess.CalledProcessError(result.returncode, result.args)

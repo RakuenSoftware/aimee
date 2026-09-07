@@ -93,6 +93,30 @@ class Gate:
         # The transport wraps the MCP content blocks in its result envelope.
         return code, json.dumps(body, ensure_ascii=False)
 
+    def confidence_contract(self, stores):
+        """Malformed confidence never becomes certainty or a storage outage."""
+        for store in stores:
+            for confidence in (-1, 1.01, False, None, 'invalid', [], {}):
+                payload = dict(store=store, key=self.prefix+'-confidence',
+                               content='Synthetic confidence fixture', confidence=confidence)
+                code, body = self.call('store', payload)
+                self.check(f'{store} HTTP rejects confidence {confidence!r}',
+                           code == 400 and body.get('kind') == 'invalid_argument', [code, body])
+                for verb in ('store', 'update', 'supersede'):
+                    code, body = self.mcp('mutate', dict(payload, verb=verb, id=1))
+                    self.check(f'{store} MCP {verb} rejects confidence {confidence!r}',
+                               'confidence must be between 0 and 1' in body, [code, body])
+            for confidence in (0, 0.25, 1):
+                row = self.good(f'{store} stores confidence {confidence}', self.call('store',
+                    dict(store=store, key=self.prefix+'-confidence-'+str(confidence),
+                         content='Synthetic confidence boundary fixture', confidence=confidence)))
+                if 'id' not in row:
+                    continue
+                code, body = self.call('get', dict(store=store, id=row['id']))
+                self.check(f'{store} preserves confidence {confidence}',
+                           code == 200 and body.get('memory', {}).get('confidence') == confidence,
+                           [code, body])
+
     def run_local(self):
         """First-boot regression on a composition containing only Server and its store."""
         content = 'Personal local-only fixture person@local.invalid 🦊'
@@ -125,6 +149,7 @@ class Gate:
         self.good('KB-free local retirement', self.call('delete', dict(id=mid)))
         bundle = self.good('KB-free recall after retirement', self.call('recall', dict(query=self.prefix)))
         self.check('retired personal record excluded from recall', bundle.get('recall', {}).get('active_context') == [])
+        self.confidence_contract(('user',))
         return all(c['passed'] for c in self.checks)
 
     def run(self):
@@ -266,6 +291,7 @@ class Gate:
             listing = self.good('0.4.1 upgrade list', self.call('list', dict(store='kb', scope='all', limit=64)))
             self.check('0.4.1 rows remain discoverable', all(any(r['id'] == old['id'] for r in listing.get('memories', [])) for old in rows))
         self.assert_no_personal_canary()
+        self.confidence_contract(('user', 'kb'))
         return all(c['passed'] for c in self.checks)
 
 if __name__ == '__main__':

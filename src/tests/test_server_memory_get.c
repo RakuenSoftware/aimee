@@ -8,6 +8,7 @@
 #include <string.h>
 
 extern cJSON *memory_get_command(cJSON *request);
+extern cJSON *memory_store_command(const cJSON *request, memory_authority_t authority);
 
 static int calls, clears, result;
 static kb_valid_at_t answer;
@@ -55,10 +56,18 @@ cJSON *server_error_kind_json(const char *kind, const char *message, const char 
    return response;
 }
 
-static int user_calls, user_result;
+static int user_calls, user_result, store_calls;
+static double expected_confidence;
 
 cJSON *server_module_memory_data(const cJSON *request)
 {
+   const char *operation = cJSON_GetObjectItem(request, "operation")->valuestring;
+   if (strcmp(operation, "store") == 0)
+   {
+      store_calls++;
+      assert(cJSON_GetObjectItem(request, "confidence")->valuedouble == expected_confidence);
+      return cJSON_Parse("{\"records\":[{\"id\":42}]}");
+   }
    user_calls++;
    assert(strcmp(cJSON_GetObjectItem(request, "operation")->valuestring, "get") == 0);
    assert(cJSON_GetObjectItem(request, "id")->valuedouble == 42);
@@ -112,6 +121,62 @@ static void test_user_namespace(void)
    cJSON_Delete(request);
 }
 
+int kb_client_memory_insert_as(const char *tier, const char *kind, const char *key,
+                               const char *content, const char *use_cases, double confidence,
+                               const char *session_id, memory_authority_t authority, memory_t *out)
+{
+   (void)tier;
+   (void)kind;
+   (void)key;
+   (void)content;
+   (void)use_cases;
+   (void)session_id;
+   (void)authority;
+   store_calls++;
+   assert(confidence == expected_confidence);
+   out->id = 42;
+   return 0;
+}
+
+static void test_store_confidence(void)
+{
+   const char *invalid[] = {"-1", "1.01", "false", "null", "\"invalid\"", "[]", "{}", "1e999"};
+   const char *valid[] = {"0", "0.25", "1"};
+   for (int shared = 0; shared < 2; shared++)
+   {
+      for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++)
+      {
+         cJSON *request = cJSON_Parse("{\"key\":\"fixture\",\"content\":\"synthetic\"}");
+         cJSON_AddStringToObject(request, "store", shared ? "kb" : "user");
+         cJSON_AddItemToObject(request, "confidence", cJSON_Parse(invalid[i]));
+         int before = store_calls;
+         cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_MODEL);
+         cJSON *kind = cJSON_GetObjectItem(reply, "kind");
+         assert(cJSON_IsString(kind) &&
+                strcmp(kind->valuestring, SERVER_ERR_INVALID_ARGUMENT) == 0);
+         assert(store_calls == before);
+         cJSON_Delete(reply);
+         cJSON_Delete(request);
+      }
+      for (unsigned i = 0; i <= sizeof(valid) / sizeof(valid[0]); i++)
+      {
+         cJSON *request = cJSON_Parse("{\"key\":\"fixture\",\"content\":\"synthetic\"}");
+         cJSON_AddStringToObject(request, "store", shared ? "kb" : "user");
+         expected_confidence = 1.0;
+         if (i < sizeof(valid) / sizeof(valid[0]))
+         {
+            cJSON *value = cJSON_Parse(valid[i]);
+            expected_confidence = value->valuedouble;
+            cJSON_AddItemToObject(request, "confidence", value);
+         }
+         cJSON *reply = memory_store_command(request, MEMORY_AUTHORITY_MODEL);
+         assert(cJSON_GetObjectItem(reply, "id")->valuedouble == 42);
+         cJSON_Delete(reply);
+         cJSON_Delete(request);
+      }
+   }
+}
+
 int main(void)
 {
    test_user_namespace();
@@ -146,6 +211,7 @@ int main(void)
    }
    assert(calls == 6 && clears == calls);
    cJSON_Delete(request);
+   test_store_confidence();
    puts("server memory get: local privacy, explicit KB routing, temporal verdicts, and failures "
         "passed");
    return 0;

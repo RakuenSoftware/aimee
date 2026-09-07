@@ -333,6 +333,11 @@ cJSON *memory_store_command(const cJSON *req, memory_authority_t authority)
    int selection = server_memory_store_selection(req);
    if (selection < 0)
       return memory_bad_store();
+   const cJSON *jconfidence = cJSON_GetObjectItemCaseSensitive(req, "confidence");
+   if (jconfidence && (!cJSON_IsNumber(jconfidence) ||
+                       !(jconfidence->valuedouble >= 0.0 && jconfidence->valuedouble <= 1.0)))
+      return server_error_kind_json(SERVER_ERR_INVALID_ARGUMENT,
+                                    "memory.store confidence must be between 0 and 1", NULL);
    if (selection)
       return memory_with_store(kb_memory_store_command(req, authority), "kb");
 
